@@ -67,7 +67,7 @@ jobs:
 
       - name: Upload artifacts (Linux)
         if: matrix.os == 'linux'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: app-linux-${{ matrix.target }}
           path: |
@@ -76,7 +76,7 @@ jobs:
 
       - name: Upload artifacts (Windows)
         if: matrix.os == 'windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: app-windows-${{ matrix.target }}
           path: |
@@ -85,7 +85,7 @@ jobs:
 
       - name: Upload artifacts (macOS)
         if: matrix.os == 'macos'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: app-macos-${{ matrix.target }}
           path: |
