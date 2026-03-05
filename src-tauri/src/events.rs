@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 use crate::tts::TtsProviderType;
+use std::sync::mpsc::Sender;
+
+/// Type alias for the event sender channel
+pub type EventSender = Sender<AppEvent>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AppEvent {
@@ -9,6 +13,8 @@ pub enum AppEvent {
     LayoutChanged(InputLayout),
     /// Текст готов для отправки в TTS
     TextReady(String),
+    /// Текст отправлен в TTS (для WebView Source)
+    TextSentToTts(String),
     /// Изменение статуса TTS
     TtsStatusChanged(TtsStatus),
     /// Ошибка TTS
@@ -60,6 +66,7 @@ impl AppEvent {
             AppEvent::InterceptionChanged(_) => "interception-changed",
             AppEvent::LayoutChanged(_) => "layout-changed",
             AppEvent::TextReady(_) => "text-ready",
+            AppEvent::TextSentToTts(_) => "text-sent-to-tts",
             AppEvent::TtsStatusChanged(_) => "tts-status-changed",
             AppEvent::TtsError(_) => "tts-error",
             AppEvent::ShowFloatingWindow => "show-floating-window",

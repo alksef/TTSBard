@@ -8,9 +8,10 @@ import SoundPanelTab from './components/SoundPanelTab.vue'
 import AudioPanel from './components/AudioPanel.vue'
 import PreprocessorPanel from './components/PreprocessorPanel.vue'
 import InfoPanel from './components/InfoPanel.vue'
+import WebViewPanel from './components/WebViewPanel.vue'
 import { useTelegramAuth, TELEGRAM_AUTH_KEY } from './composables/useTelegramAuth'
 
-type Panel = 'info' | 'input' | 'tts' | 'floating' | 'soundpanel' | 'audio' | 'preprocessor'
+type Panel = 'info' | 'input' | 'tts' | 'floating' | 'soundpanel' | 'audio' | 'preprocessor' | 'webview'
 
 const currentPanel = ref<Panel>('info')
 
@@ -46,6 +47,7 @@ onMounted(async () => {
       <SoundPanelTab v-show="currentPanel === 'soundpanel'" />
       <AudioPanel v-show="currentPanel === 'audio'" />
       <PreprocessorPanel v-show="currentPanel === 'preprocessor'" />
+      <WebViewPanel v-show="currentPanel === 'webview'" />
     </main>
   </div>
 </template>

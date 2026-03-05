@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { APP_VERSION } from '../version'
 
-type Panel = 'info' | 'input' | 'tts' | 'floating' | 'soundpanel' | 'audio' | 'preprocessor'
+type Panel = 'info' | 'input' | 'tts' | 'floating' | 'soundpanel' | 'audio' | 'preprocessor' | 'webview'
 
 const props = defineProps<{
   currentPanel: Panel
@@ -79,6 +79,12 @@ async function quitApp() {
         @click="setPanel('soundpanel')"
       >
         🎵 Звуковая панель
+      </button>
+      <button
+        :class="buttonClass('webview')"
+        @click="setPanel('webview')"
+      >
+        🌐 WebView Source
       </button>
     </nav>
 
