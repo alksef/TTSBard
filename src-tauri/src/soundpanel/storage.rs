@@ -19,9 +19,13 @@ pub struct SoundPanelAppearance {
     /// Пропускает ли плавающее окно клики
     #[serde(default = "default_clickthrough")]
     pub clickthrough: bool,
+    /// Исключить ли окно из записи экрана
+    #[serde(default = "default_exclude_from_recording")]
+    pub exclude_from_recording: bool,
 }
 
 fn default_clickthrough() -> bool { false }
+fn default_exclude_from_recording() -> bool { false }
 
 impl Default for SoundPanelAppearance {
     fn default() -> Self {
@@ -29,6 +33,7 @@ impl Default for SoundPanelAppearance {
             opacity: 90,
             bg_color: "#2a2a2a".to_string(),
             clickthrough: false,
+            exclude_from_recording: false,
         }
     }
 }
@@ -185,6 +190,7 @@ pub fn load_appearance(state: &SoundPanelState) -> Result<SoundPanelAppearance, 
     state.set_floating_opacity(appearance.opacity);
     state.set_floating_bg_color(appearance.bg_color.clone());
     state.set_floating_clickthrough(appearance.clickthrough);
+    state.set_exclude_from_recording(appearance.exclude_from_recording);
 
     Ok(appearance)
 }
@@ -195,6 +201,7 @@ pub fn save_appearance(state: &SoundPanelState) -> Result<(), String> {
         opacity: state.get_floating_opacity(),
         bg_color: state.get_floating_bg_color(),
         clickthrough: state.is_floating_clickthrough_enabled(),
+        exclude_from_recording: state.is_exclude_from_recording(),
     };
 
     let appdata_path = state.appdata_path.lock().unwrap().clone();

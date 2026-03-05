@@ -22,6 +22,7 @@ const isSaving = ref(false)
 const opacity = ref(90)
 const bgColor = ref('#2a2a2a')
 const clickthroughEnabled = ref(false)
+const excludeFromRecording = ref(false)
 const previewStyle = computed(() => ({
   backgroundColor: hexToRgba(bgColor.value, opacity.value / 100),
 }))
@@ -169,6 +170,11 @@ async function loadAppearanceSettings() {
   } catch (e) {
     console.error('Failed to load clickthrough setting:', e)
   }
+  try {
+    excludeFromRecording.value = await invoke<boolean>('sp_is_exclude_from_recording')
+  } catch (e) {
+    console.error('Failed to load exclude from recording setting:', e)
+  }
 }
 
 async function saveOpacity() {
@@ -192,6 +198,16 @@ async function saveClickthrough() {
     await invoke('sp_set_floating_clickthrough', { enabled: clickthroughEnabled.value })
   } catch (e) {
     showError('Ошибка сохранения clickthrough: ' + (e as Error).message)
+  }
+}
+
+async function saveExcludeFromRecording() {
+  try {
+    await invoke('sp_set_exclude_from_recording', { enabled: excludeFromRecording.value })
+    // Apply to existing window if visible
+    await invoke('sp_apply_exclude_recording')
+  } catch (e) {
+    showError('Ошибка сохранения: ' + (e as Error).message)
   }
 }
 
@@ -337,6 +353,19 @@ onMounted(async () => {
           <span>Пропускать нажатия (click-through)</span>
         </label>
         <span class="setting-hint">Окно не будет перехватывать клики мыши</span>
+      </div>
+
+      <div class="setting-row">
+        <label class="setting-label checkbox-label">
+          <input
+            v-model="excludeFromRecording"
+            type="checkbox"
+            class="checkbox-input"
+            @change="saveExcludeFromRecording"
+          />
+          <span>Исключить из записи экрана</span>
+        </label>
+        <span class="setting-hint">Скрывает окно от OBS, Game Bar и других средств записи (Windows 8+)</span>
       </div>
 
       <div class="preview-box" :style="previewStyle">

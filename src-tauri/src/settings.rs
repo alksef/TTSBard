@@ -47,6 +47,9 @@ pub struct AppSettings {
     /// Разрешить вызов по горячей клавише
     #[serde(default = "default_hotkey_enabled")]
     pub hotkey_enabled: bool,
+    /// Исключить плавающее окно из записи экрана
+    #[serde(default = "default_floating_exclude_from_recording")]
+    pub floating_exclude_from_recording: bool,
 }
 
 fn default_floating_opacity() -> u8 { 90 }
@@ -58,6 +61,7 @@ fn default_floating_y() -> Option<i32> { None }
 fn default_main_x() -> Option<i32> { None }
 fn default_main_y() -> Option<i32> { None }
 fn default_hotkey_enabled() -> bool { true }
+fn default_floating_exclude_from_recording() -> bool { false }
 
 
 impl Default for AppSettings {
@@ -79,6 +83,7 @@ impl Default for AppSettings {
             main_x: None,
             main_y: None,
             hotkey_enabled: true,
+            floating_exclude_from_recording: false,
         }
     }
 }
@@ -286,6 +291,9 @@ impl SettingsManager {
         // Вызов по горячей клавише
         *state.hotkey_enabled.lock().unwrap() = settings.hotkey_enabled;
 
+        // Плавающее окно - исключение из записи экрана
+        *state.floating_exclude_from_recording.lock().unwrap() = settings.floating_exclude_from_recording;
+
         eprintln!("[SETTINGS] Settings applied successfully");
     }
 
@@ -307,6 +315,7 @@ impl SettingsManager {
             main_x: None, // Позиция не хранится в состоянии, только на диске
             main_y: None,
             hotkey_enabled: true,
+            floating_exclude_from_recording: false,
         }
     }
 
