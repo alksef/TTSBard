@@ -1,0 +1,60 @@
+[package]
+name = "ttsbard"
+version = "0.1.0"
+description = "A TTS application with Tauri"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "ttsbard_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1.0"
+async-trait = "0.1"
+reqwest = { version = "0.12", features = ["json"] }
+base64 = "0.22"
+dirs = "5"
+rodio = { version = "0.19", features = ["symphonia-mp3"] }
+cpal = "0.15"
+image = "0.25"
+regex = "1"
+lazy_static = "1.4"
+
+# Telegram client
+grammers-client = "0.8.0"
+grammers-session = "0.8.0"
+grammers-mtsender = "0.8.0"
+grammers-tl-types = "0.8.0"
+
+# Time utilities
+chrono = "0.4"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+    "Win32_UI_TextServices",
+    "Win32_UI_Shell"
+] }
+
