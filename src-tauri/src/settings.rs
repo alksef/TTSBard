@@ -1,5 +1,6 @@
 use crate::state::AppState;
 use crate::tts::TtsProviderType;
+use crate::webview::WebViewSettings;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -85,6 +86,109 @@ impl Default for AppSettings {
             hotkey_enabled: true,
             floating_exclude_from_recording: false,
         }
+    }
+}
+
+impl AppSettings {
+    /// Get the webview directory path (config_dir/webview)
+    pub fn webview_dir(&self) -> PathBuf {
+        // Note: This is called on AppSettings instances, not on SettingsManager
+        // We need to get the config dir from dirs::config_dir directly
+        dirs::config_dir()
+            .expect("Failed to get config dir")
+            .join("ttsbard")
+            .join("webview")
+    }
+
+    /// Get the template.html file path
+    pub fn template_html_path(&self) -> PathBuf {
+        self.webview_dir().join("template.html")
+    }
+
+    /// Get the style.css file path
+    pub fn style_css_path(&self) -> PathBuf {
+        self.webview_dir().join("style.css")
+    }
+
+    /// Load webview settings from files
+    pub fn load_webview_settings() -> Result<WebViewSettings> {
+        use crate::webview::templates::{default_css, default_html};
+
+        let config_dir = dirs::config_dir()
+            .context("Failed to get config dir")?
+            .join("ttsbard")
+            .join("webview");
+
+        let html_path = config_dir.join("template.html");
+        let css_path = config_dir.join("style.css");
+
+        eprintln!("[SETTINGS] WebView dir: {:?}", config_dir);
+        eprintln!("[SETTINGS] HTML path: {:?}, exists: {}", html_path, html_path.exists());
+        eprintln!("[SETTINGS] CSS path: {:?}, exists: {}", css_path, css_path.exists());
+
+        // Load HTML template or use default
+        let html = if html_path.exists() {
+            fs::read_to_string(&html_path)
+                .with_context(|| format!("Failed to read HTML template from {:?}", html_path))?
+        } else {
+            eprintln!("[SETTINGS] HTML template not found, using default");
+            default_html()
+        };
+
+        // Load CSS style or use default
+        let css = if css_path.exists() {
+            fs::read_to_string(&css_path)
+                .with_context(|| format!("Failed to read CSS style from {:?}", css_path))?
+        } else {
+            eprintln!("[SETTINGS] CSS style not found, using default");
+            default_css()
+        };
+
+        // Create webview directory if it doesn't exist
+        fs::create_dir_all(&config_dir)
+            .context("Failed to create webview directory")?;
+
+        eprintln!("[SETTINGS] WebView settings loaded successfully");
+
+        Ok(WebViewSettings {
+            enabled: false, // by default, webview is disabled
+            port: 10100,
+            bind_address: "0.0.0.0".to_string(),
+            html_template: html,
+            css_style: css,
+            animation_speed: 30,
+        })
+    }
+
+    /// Save webview settings to files
+    pub fn save_webview_settings(settings: &WebViewSettings) -> Result<()> {
+        let config_dir = dirs::config_dir()
+            .context("Failed to get config dir")?
+            .join("ttsbard")
+            .join("webview");
+
+        let html_path = config_dir.join("template.html");
+        let css_path = config_dir.join("style.css");
+
+        eprintln!("[SETTINGS] Saving WebView settings...");
+        eprintln!("[SETTINGS] HTML path: {:?}", html_path);
+        eprintln!("[SETTINGS] CSS path: {:?}", css_path);
+
+        // Create webview directory if it doesn't exist
+        fs::create_dir_all(&config_dir)
+            .context("Failed to create webview directory")?;
+
+        // Write HTML template
+        fs::write(&html_path, &settings.html_template)
+            .with_context(|| format!("Failed to write HTML template to {:?}", html_path))?;
+
+        // Write CSS style
+        fs::write(&css_path, &settings.css_style)
+            .with_context(|| format!("Failed to write CSS style to {:?}", css_path))?;
+
+        eprintln!("[SETTINGS] WebView settings saved successfully");
+
+        Ok(())
     }
 }
 

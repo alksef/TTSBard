@@ -4,7 +4,26 @@ use crate::events::{AppEvent, InputLayout};
 use crate::tts::{TtsProvider, TtsProviderType, openai::OpenAiTts, local::LocalTts, silero::SileroTts};
 use crate::preprocessor::TextPreprocessor;
 use crate::telegram::TelegramClient;
+use crate::webview::WebViewSettings;
 use tauri::{AppHandle, Manager};
+
+/// Load webview settings from files, falling back to defaults on error
+fn load_initial_webview_settings() -> WebViewSettings {
+    use crate::settings::AppSettings;
+
+    eprintln!("[STATE] Loading WebView settings from files...");
+
+    match AppSettings::load_webview_settings() {
+        Ok(settings) => {
+            eprintln!("[STATE] WebView settings loaded successfully");
+            settings
+        }
+        Err(e) => {
+            eprintln!("[STATE] Failed to load WebView settings: {}, using defaults", e);
+            WebViewSettings::default()
+        }
+    }
+}
 
 /// Активное плавающее окно
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -76,10 +95,15 @@ pub struct AppState {
 
     /// Активное плавающее окно (для взаимного исключения хоткеев)
     pub active_window: Arc<Mutex<ActiveWindow>>,
+
+    /// WebView settings
+    pub webview_settings: Arc<tokio::sync::RwLock<WebViewSettings>>,
 }
 
 impl AppState {
     pub fn new() -> Self {
+        let webview_settings = load_initial_webview_settings();
+
         Self {
             event_sender: Arc::new(Mutex::new(None)),
             interception_enabled: Arc::new(Mutex::new(false)),
@@ -100,6 +124,7 @@ impl AppState {
             preprocessor: Arc::new(Mutex::new(None)),
             enter_closes_disabled: Arc::new(Mutex::new(false)),
             active_window: Arc::new(Mutex::new(ActiveWindow::None)),
+            webview_settings: Arc::new(tokio::sync::RwLock::new(webview_settings)),
         }
     }
 
@@ -115,6 +140,10 @@ impl AppState {
                 let _ = sender.send(event);
             }
         }
+    }
+
+    pub fn get_event_sender(&self) -> Option<Sender<AppEvent>> {
+        self.event_sender.lock().ok().and_then(|es| es.clone())
     }
 
     pub fn is_interception_enabled(&self) -> bool {
@@ -194,6 +223,11 @@ impl AppState {
         tts.set_voice(voice.clone());
         tts.set_proxy(self.get_openai_proxy_host(), self.get_openai_proxy_port());
 
+        // Add event sender if available
+        if let Some(event_tx) = self.get_event_sender() {
+            tts = tts.with_event_tx(event_tx);
+        }
+
         eprintln!("[STATE] Created OpenAiTts: voice={}, proxy={:?}", voice, tts.get_proxy_host());
 
         if let Ok(mut providers) = self.tts_providers.lock() {
@@ -205,7 +239,13 @@ impl AppState {
     }
 
     pub fn init_local_tts(&self) {
-        let tts = LocalTts::new();
+        let mut tts = LocalTts::new();
+
+        // Add event sender if available
+        if let Some(event_tx) = self.get_event_sender() {
+            tts = tts.with_event_tx(event_tx);
+        }
+
         if let Ok(mut providers) = self.tts_providers.lock() {
             *providers = Some(TtsProvider::Local(tts));
         }
@@ -214,7 +254,13 @@ impl AppState {
     pub fn init_silero_tts(&self, telegram_client_arc: Arc<tokio::sync::Mutex<Option<TelegramClient>>>) {
         // Создаём SileroTts с Arc на Telegram клиент
         // SileroTts будет извлекать клиент при необходимости
-        let tts = SileroTts::with_telegram_client(telegram_client_arc);
+        let mut tts = SileroTts::with_telegram_client(telegram_client_arc);
+
+        // Add event sender if available
+        if let Some(event_tx) = self.get_event_sender() {
+            tts = tts.with_event_tx(event_tx);
+        }
+
         eprintln!("[STATE] Created SileroTts with Telegram client Arc");
         if let Ok(mut providers) = self.tts_providers.lock() {
             *providers = Some(TtsProvider::Silero(tts));
@@ -238,6 +284,12 @@ impl AppState {
                 let mut tts = OpenAiTts::new(key.clone());
                 tts.set_voice(voice.clone());
                 tts.set_proxy(self.get_openai_proxy_host(), self.get_openai_proxy_port());
+
+                // Add event sender if available
+                if let Some(event_tx) = self.get_event_sender() {
+                    tts = tts.with_event_tx(event_tx);
+                }
+
                 if let Ok(mut providers) = self.tts_providers.lock() {
                     if matches!(providers.as_ref(), Some(TtsProvider::OpenAi(_))) {
                         *providers = Some(TtsProvider::OpenAi(tts));
@@ -268,6 +320,12 @@ impl AppState {
                 let mut tts = OpenAiTts::new(key.clone());
                 tts.set_voice(self.get_openai_voice());
                 tts.set_proxy(host, port);
+
+                // Add event sender if available
+                if let Some(event_tx) = self.get_event_sender() {
+                    tts = tts.with_event_tx(event_tx);
+                }
+
                 if let Ok(mut providers) = self.tts_providers.lock() {
                     if matches!(providers.as_ref(), Some(TtsProvider::OpenAi(_))) {
                         *providers = Some(TtsProvider::OpenAi(tts));

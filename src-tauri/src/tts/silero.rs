@@ -1,5 +1,6 @@
 use crate::tts::engine::TtsEngine;
 use crate::telegram::{TelegramClient, TtsResult};
+use crate::events::{AppEvent, EventSender};
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -10,6 +11,7 @@ pub struct SileroTts {
     // Arc на Option<TelegramClient> - клиент может быть None если не подключен
     client: Option<Arc<Mutex<Option<TelegramClient>>>>,
     configured: bool,
+    event_tx: Option<EventSender>,
 }
 
 impl SileroTts {
@@ -17,7 +19,13 @@ impl SileroTts {
         Self {
             client: None,
             configured: false,
+            event_tx: None,
         }
+    }
+
+    pub fn with_event_tx(mut self, event_tx: EventSender) -> Self {
+        self.event_tx = Some(event_tx);
+        self
     }
 
     #[allow(dead_code)]
@@ -33,6 +41,7 @@ impl SileroTts {
         Self {
             client: Some(client_arc),
             configured: true,  // Отмечаем как configured, даже если клиент None (проверим при использовании)
+            event_tx: None,
         }
     }
 }
@@ -46,6 +55,11 @@ impl Default for SileroTts {
 #[async_trait]
 impl TtsEngine for SileroTts {
     async fn synthesize(&self, text: &str) -> Result<Vec<u8>, String> {
+        // Send event before synthesizing
+        if let Some(tx) = &self.event_tx {
+            let _ = tx.send(AppEvent::TextSentToTts(text.to_string()));
+        }
+
         // Для Silero TTS через Telegram мы возвращаем путь к файлу,
         // а не байты, так как файлы могут быть большими
         if !self.configured {

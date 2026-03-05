@@ -11,6 +11,7 @@ mod soundpanel;
 mod audio;
 mod preprocessor;
 mod telegram;
+mod webview;
 
 use std::sync::mpsc;
 use std::thread;
@@ -23,6 +24,7 @@ use commands::telegram::{telegram_init, telegram_request_code, telegram_sign_in,
 use soundpanel::{SoundPanelState, sp_get_bindings, sp_add_binding, sp_remove_binding, sp_test_sound, sp_is_supported_format, sp_get_floating_appearance, sp_set_floating_opacity, sp_set_floating_bg_color, sp_set_floating_clickthrough, sp_is_floating_clickthrough_enabled, sp_is_exclude_from_recording, sp_set_exclude_from_recording, sp_apply_exclude_recording, load_bindings, load_appearance, initialize_soundpanel_hook};
 use floating::{show_floating_window, hide_floating_window, update_floating_text, update_floating_title, show_soundpanel_window, hide_soundpanel_window, emit_soundpanel_no_binding, update_soundpanel_appearance};
 use settings::SettingsManager;
+use webview::WebViewServer;
 use tauri::{Manager, Emitter};
 use tauri::image::Image;
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
@@ -132,6 +134,10 @@ pub fn run() {
             commands::telegram::speak_text_silero,
             commands::telegram::telegram_get_current_voice,
             commands::telegram::telegram_get_limits,
+            // WebView commands
+            commands::webview::get_webview_settings,
+            commands::webview::save_webview_settings,
+            commands::webview::get_local_ip,
         ])
         .setup(|app| {
             eprintln!("[APP] === Application setup started ===");
@@ -375,6 +381,52 @@ pub fn run() {
                 }
             });
 
+            // Setup WebView server event channel
+            let app_state_for_webview = app.state::<AppState>();
+            let webview_settings = app_state_for_webview.webview_settings.clone();
+            let (_webview_tx, webview_rx) = mpsc::channel::<AppEvent>();
+
+            // Start WebView server in background thread
+            thread::spawn(move || {
+                let rt = tokio::runtime::Runtime::new()
+                    .expect("Failed to create tokio runtime for webview");
+
+                rt.block_on(async move {
+                    // Check if enabled first
+                    let settings = webview_settings.read().await;
+                    let enabled = settings.enabled;
+                    let bind_address = settings.bind_address.clone();
+                    let port = settings.port;
+                    drop(settings);
+
+                    if enabled {
+                        eprintln!("[WEBVIEW] Starting WebView server on {}:{}", bind_address, port);
+                        let server = WebViewServer::new(webview_settings.clone());
+
+                        // Spawn server task
+                        let server_clone = server.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = server_clone.start().await {
+                                eprintln!("[WEBVIEW] Server error: {}", e);
+                            }
+                        });
+
+                        // Handle events and broadcast text
+                        for event in webview_rx {
+                            match event {
+                                AppEvent::TextSentToTts(text) => {
+                                    eprintln!("[WEBVIEW] Broadcasting text: '{}'", text);
+                                    server.broadcast_text(text).await;
+                                }
+                                _ => {}
+                            }
+                        }
+                    } else {
+                        eprintln!("[WEBVIEW] WebView server disabled in settings");
+                    }
+                });
+            });
+
             // Hotkeys will be initialized after window is fully shown (in on_window_event)
             eprintln!("Setup complete - hotkeys will be registered when window gains focus");
 
@@ -538,6 +590,11 @@ fn handle_event(event: AppEvent, state: &AppState, app_handle: &tauri::AppHandle
                     }
                 });
             }
+        }
+        AppEvent::TextSentToTts(text) => {
+            eprintln!("[EVENT] Text sent to TTS: '{}'", text);
+            // This event can be used by WebView Source plugin to receive text
+            // The event is already sent to the frontend via Tauri event system
         }
         AppEvent::TtsStatusChanged(status) => {
             eprintln!("TTS status changed: {:?}", status);
