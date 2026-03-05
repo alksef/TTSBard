@@ -25,4 +25,7 @@ pub use bindings::{
     sp_set_floating_bg_color,
     sp_set_floating_clickthrough,
     sp_is_floating_clickthrough_enabled,
+    sp_set_exclude_from_recording,
+    sp_is_exclude_from_recording,
+    sp_apply_exclude_recording,
 };

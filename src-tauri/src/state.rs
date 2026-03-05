@@ -65,6 +65,9 @@ pub struct AppState {
     /// Разрешить вызов по горячей клавише
     pub hotkey_enabled: Arc<Mutex<bool>>,
 
+    /// Исключить ли плавающее окно из записи экрана
+    pub floating_exclude_from_recording: Arc<Mutex<bool>>,
+
     /// Cached preprocessor for live replacement
     pub preprocessor: Arc<Mutex<Option<TextPreprocessor>>>,
 
@@ -93,6 +96,7 @@ impl AppState {
             floating_bg_color: Arc::new(Mutex::new("#1e1e1e".to_string())),
             floating_clickthrough: Arc::new(Mutex::new(false)),
             hotkey_enabled: Arc::new(Mutex::new(true)),
+            floating_exclude_from_recording: Arc::new(Mutex::new(false)),
             preprocessor: Arc::new(Mutex::new(None)),
             enter_closes_disabled: Arc::new(Mutex::new(false)),
             active_window: Arc::new(Mutex::new(ActiveWindow::None)),
@@ -322,6 +326,16 @@ impl AppState {
     pub fn set_hotkey_enabled(&self, enabled: bool) {
         if let Ok(mut v) = self.hotkey_enabled.lock() {
             *v = enabled;
+        }
+    }
+
+    pub fn is_floating_exclude_from_recording(&self) -> bool {
+        *self.floating_exclude_from_recording.lock().unwrap()
+    }
+
+    pub fn set_floating_exclude_from_recording(&self, value: bool) {
+        if let Ok(mut val) = self.floating_exclude_from_recording.lock() {
+            *val = value;
         }
     }
 

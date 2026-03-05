@@ -5,7 +5,7 @@
 use crate::soundpanel::state::{SoundPanelState, SoundBinding};
 use crate::soundpanel::storage::{save_bindings, copy_sound_file, delete_sound_file, save_appearance};
 use crate::soundpanel::audio::play_audio_file;
-use tauri::State;
+use tauri::{State, AppHandle, Manager};
 
 /// Получить все привязки звуковой панели
 #[tauri::command]
@@ -159,4 +159,32 @@ pub fn sp_set_floating_clickthrough(enabled: bool, state: State<'_, SoundPanelSt
 #[tauri::command]
 pub fn sp_is_floating_clickthrough_enabled(state: State<'_, SoundPanelState>) -> Result<bool, String> {
     Ok(state.is_floating_clickthrough_enabled())
+}
+
+/// Установить исключение из записи экрана для звуковой панели
+#[tauri::command]
+pub fn sp_set_exclude_from_recording(enabled: bool, state: State<'_, SoundPanelState>) -> Result<(), String> {
+    eprintln!("[SOUNDPANEL] Setting exclude_from_recording to {}", enabled);
+    state.set_exclude_from_recording(enabled);
+    // Сохраняем в файл
+    save_appearance(&state)?;
+    Ok(())
+}
+
+/// Проверить, исключено ли окно из записи экрана
+#[tauri::command]
+pub fn sp_is_exclude_from_recording(state: State<'_, SoundPanelState>) -> Result<bool, String> {
+    Ok(state.is_exclude_from_recording())
+}
+
+/// Применить исключение из записи к существующему окну звуковой панели
+#[tauri::command]
+pub fn sp_apply_exclude_recording(app_handle: AppHandle, state: State<'_, SoundPanelState>) -> Result<(), String> {
+    if app_handle.get_webview_window("soundpanel").is_some() {
+        // Настройка будет применена при следующем показе окна
+        let exclude = state.is_exclude_from_recording();
+        eprintln!("[SOUNDPANEL] Apply exclude recording called, exclude={}", exclude);
+        return Ok(());
+    }
+    Err("Window not available".to_string())
 }

@@ -638,3 +638,61 @@ pub fn set_virtual_mic_volume(volume: u8) -> Result<(), String> {
         .and_then(|mgr| mgr.set_virtual_mic_volume(volume))
         .map_err(|e| e.to_string())
 }
+
+// ============================================================================
+// Exclude from recording commands
+// ============================================================================
+
+/// Set floating window exclude from recording
+#[tauri::command]
+pub fn set_floating_exclude_from_recording(
+    value: bool,
+    state: State<'_, AppState>,
+    settings_manager: State<'_, SettingsManager>
+) -> Result<(), String> {
+    state.set_floating_exclude_from_recording(value);
+
+    // Auto-save
+    let settings = SettingsManager::load_from_state(&state);
+    settings_manager.save(&settings)
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+/// Get floating window exclude from recording setting
+#[tauri::command]
+pub fn get_floating_exclude_from_recording(
+    state: State<'_, AppState>
+) -> bool {
+    state.is_floating_exclude_from_recording()
+}
+
+/// Apply exclude from recording to existing floating window
+#[tauri::command]
+pub fn apply_floating_exclude_recording(
+    app_handle: AppHandle,
+    state: State<'_, AppState>
+) -> Result<(), String> {
+    if let Some(window) = app_handle.get_webview_window("floating") {
+        #[cfg(windows)]
+        {
+            use crate::window::set_window_exclude_from_capture;
+
+            if let Ok(hwnd) = window.hwnd() {
+                let exclude = state.is_floating_exclude_from_recording();
+                set_window_exclude_from_capture(hwnd.0 as isize, exclude)
+                    .map_err(|e| e.to_string())?;
+
+                eprintln!("[FLOATING] Applied exclude from recording: {}", exclude);
+                return Ok(());
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            // No-op on other platforms
+            return Ok(());
+        }
+    }
+    Err("Window not available".to_string())
+}

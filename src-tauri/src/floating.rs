@@ -80,10 +80,16 @@ pub fn show_floating_window(app_handle: &AppHandle) -> tauri::Result<()> {
     // Применяем Win32 стили
     #[cfg(windows)]
     {
-        use crate::window::set_floating_window_styles;
+        use crate::window::{set_floating_window_styles, set_window_exclude_from_capture};
 
         if let Ok(hwnd) = window.hwnd() {
             let _ = set_floating_window_styles(hwnd.0 as isize);
+
+            // Защита от записи экрана
+            if app_state.is_floating_exclude_from_recording() {
+                eprintln!("[FLOATING] Applying exclude from recording");
+                let _ = set_window_exclude_from_capture(hwnd.0 as isize, true);
+            }
         }
     }
 
@@ -169,14 +175,15 @@ pub fn show_soundpanel_window(app_handle: &AppHandle) -> tauri::Result<()> {
 
     // Получить настройки внешнего вида
     let sp_state = app_handle.try_state::<SoundPanelState>();
-    let (opacity, bg_color, clickthrough) = if let Some(state) = &sp_state {
+    let (opacity, bg_color, clickthrough, exclude_from_recording) = if let Some(state) = &sp_state {
         (
             state.get_floating_opacity(),
             state.get_floating_bg_color(),
             state.is_floating_clickthrough_enabled(),
+            state.is_exclude_from_recording(),
         )
     } else {
-        (90, "#2a2a2a".to_string(), false)
+        (90, "#2a2a2a".to_string(), false, false)
     };
 
     eprintln!("[SOUNDPANEL] Window settings: opacity={}%, color={}, clickthrough={}", opacity, bg_color, clickthrough);
@@ -208,12 +215,18 @@ pub fn show_soundpanel_window(app_handle: &AppHandle) -> tauri::Result<()> {
     // Применяем Win32 стили для удаления фокуса
     #[cfg(windows)]
     {
-        use crate::window::{set_floating_window_styles, show_window_no_focus};
+        use crate::window::{set_floating_window_styles, show_window_no_focus, set_window_exclude_from_capture};
 
         if let Ok(hwnd) = window.hwnd() {
             let _ = set_floating_window_styles(hwnd.0 as isize);
             // Показываем окно БЕЗ фокуса (без активации)
             let _ = show_window_no_focus(hwnd.0 as isize);
+
+            // Защита от записи экрана
+            if exclude_from_recording {
+                eprintln!("[SOUNDPANEL] Applying exclude from recording");
+                let _ = set_window_exclude_from_capture(hwnd.0 as isize, true);
+            }
         }
     }
 
