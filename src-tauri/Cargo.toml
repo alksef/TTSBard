@@ -31,7 +31,7 @@ reqwest = { version = "0.12", features = ["json"] }
 base64 = "0.22"
 dirs = "5"
 rodio = { version = "0.19", features = ["symphonia-mp3"] }
-cpal = "0.15"
+cpal = "0.17"
 image = "0.25"
 regex = "1"
 lazy_static = "1.4"
