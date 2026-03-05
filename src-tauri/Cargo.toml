@@ -40,7 +40,7 @@ lazy_static = "1.4"
 grammers-client = "0.8.0"
 grammers-session = "0.8.0"
 grammers-mtsender = "0.8.0"
-grammers-tl-types = "0.8.0"
+grammers-tl-types = "0.9.0"
 
 # Time utilities
 chrono = "0.4"
