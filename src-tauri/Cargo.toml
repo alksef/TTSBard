@@ -30,7 +30,7 @@ async-trait = "0.1"
 reqwest = { version = "0.12", features = ["json"] }
 base64 = "0.22"
 dirs = "5"
-rodio = { version = "0.19", features = ["symphonia-mp3"] }
+rodio = { version = "0.22", features = ["symphonia-mp3"] }
 cpal = "0.15"
 image = "0.25"
 regex = "1"
