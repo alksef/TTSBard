@@ -72,6 +72,59 @@ async function stopServer() {
   await save()
 }
 
+async function saveStartOnBoot() {
+  try {
+    console.log('[WebView] Saving start_on_boot:', settings.value.start_on_boot)
+    await invoke('save_webview_settings', { settings: settings.value })
+  } catch (e) {
+    console.error('[WebView] Failed to save start_on_boot:', e)
+  }
+}
+
+async function saveServerSettings() {
+  try {
+    console.log('[WebView] Saving server settings')
+    const result = await invoke<string>('save_webview_settings', { settings: settings.value })
+    showError(result)
+  } catch (e) {
+    console.error('[WebView] Failed to save server settings:', e)
+    showError('Failed to save server settings: ' + (e as Error).message)
+  }
+}
+
+async function saveHtmlTemplate() {
+  try {
+    console.log('[WebView] Saving HTML template')
+    await invoke('save_webview_settings', { settings: settings.value })
+    showError('HTML template saved')
+  } catch (e) {
+    console.error('[WebView] Failed to save HTML template:', e)
+    showError('Failed to save HTML template: ' + (e as Error).message)
+  }
+}
+
+async function saveCssStyle() {
+  try {
+    console.log('[WebView] Saving CSS style')
+    await invoke('save_webview_settings', { settings: settings.value })
+    showError('CSS style saved')
+  } catch (e) {
+    console.error('[WebView] Failed to save CSS style:', e)
+    showError('Failed to save CSS style: ' + (e as Error).message)
+  }
+}
+
+async function saveAnimationSettings() {
+  try {
+    console.log('[WebView] Saving animation settings')
+    await invoke('save_webview_settings', { settings: settings.value })
+    showError('Animation settings saved')
+  } catch (e) {
+    console.error('[WebView] Failed to save animation settings:', e)
+    showError('Failed to save animation settings: ' + (e as Error).message)
+  }
+}
+
 async function refreshIp() {
   try {
     localIp.value = await invoke<string>('get_local_ip')
@@ -217,7 +270,7 @@ onUnmounted(() => {
 
       <div class="setting-row">
         <label class="checkbox-label">
-          <input type="checkbox" v-model="settings.start_on_boot" />
+          <input type="checkbox" v-model="settings.start_on_boot" @change="saveStartOnBoot" />
           <span>Запускать при старте приложения</span>
         </label>
       </div>
@@ -252,9 +305,8 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div class="setting-row">
-        <label>Test Connection:</label>
-        <button @click="testConnection" class="test-button" :disabled="!isPortValid">Test Connection</button>
+      <div class="setting-row save-row">
+        <button @click="saveServerSettings" class="save-button-inline">💾 Сохранить настройки сервера</button>
       </div>
     </section>
 
@@ -273,6 +325,9 @@ onUnmounted(() => {
       <p class="setting-hint" v-pre>
         Use {{CSS}} for CSS injection and {{JS}} for JavaScript injection
       </p>
+      <div class="setting-row save-row">
+        <button @click="saveHtmlTemplate" class="save-button-inline">💾 Сохранить HTML шаблон</button>
+      </div>
     </section>
 
     <section class="settings-section">
@@ -287,6 +342,9 @@ onUnmounted(() => {
         class="code-editor"
         placeholder="CSS style code..."
       ></textarea>
+      <div class="setting-row save-row">
+        <button @click="saveCssStyle" class="save-button-inline">💾 Сохранить CSS стиль</button>
+      </div>
     </section>
 
     <section class="settings-section">
@@ -305,6 +363,9 @@ onUnmounted(() => {
       <p class="setting-hint">
         Lower values = faster animation. Recommended: 20-50ms
       </p>
+      <div class="setting-row save-row">
+        <button @click="saveAnimationSettings" class="save-button-inline">💾 Сохранить настройки анимации</button>
+      </div>
     </section>
   </div>
 </template>
@@ -606,5 +667,34 @@ h2 {
   background: #ccc;
   transform: none;
   box-shadow: none;
+}
+
+.save-row {
+  justify-content: flex-end;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e0e0e0;
+}
+
+.save-button-inline {
+  padding: 0.6rem 1.2rem;
+  background: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.save-button-inline:hover {
+  background: #45a049;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(76, 175, 80, 0.3);
+}
+
+.save-button-inline:active {
+  transform: translateY(0);
 }
 </style>
