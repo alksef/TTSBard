@@ -568,78 +568,113 @@ pub fn run() {
 
                 rt.block_on(async move {
                     let mut twitch_client: Option<TwitchClient> = None;
+                    let mut status_check_interval = tokio::time::interval(tokio::time::Duration::from_secs(2));
 
                     loop {
-                        match twitch_rx.recv().await {
-                            Ok(event) => {
-                                match event {
-                                    TwitchEvent::Restart => {
-                                        eprintln!("[TWITCH] Restart event received");
-
-                                        // Получаем настройки для создания нового клиента
-                                        let settings = app_state_for_twitch_arc.twitch_settings.read().await;
-                                        let is_enabled = settings.enabled;
-                                        let is_valid = settings.is_valid().is_ok();
-                                        let settings_clone = settings.clone();
-                                        drop(settings);
-
-                                        // Остановить текущий клиент ПОСЛЕ создания нового
-                                        if let Some(client) = twitch_client.take() {
-                                            eprintln!("[TWITCH] Stopping previous client...");
-                                            client.stop().await;
-                                        }
-
-                                        // Запустить новый если включен
-                                        if is_enabled {
-                                            if is_valid {
-                                                eprintln!("[TWITCH] Settings valid, creating new client...");
-                                                let client = TwitchClient::new(settings_clone);
-                                                match client.start().await {
-                                                    Ok(_) => {
-                                                        eprintln!("[TWITCH] Client started successfully");
-                                                        twitch_client = Some(client);
-                                                    }
-                                                    Err(e) => {
-                                                        eprintln!("[TWITCH] Failed to start client: {}", e);
-                                                    }
-                                                }
-                                            } else {
-                                                eprintln!("[TWITCH] Settings invalid, not starting client");
-                                            }
-                                        } else {
-                                            eprintln!("[TWITCH] Twitch disabled, not starting client");
+                        tokio::select! {
+                            // Периодическая проверка статуса подключения
+                            _ = status_check_interval.tick() => {
+                                if let Some(client) = &twitch_client {
+                                    let status = client.status().await;
+                                    let is_connected = matches!(status, crate::twitch::TwitchStatus::Connected);
+                                    if let Ok(mut connected) = app_state_for_twitch_arc.twitch_connected.lock() {
+                                        if *connected != is_connected {
+                                            eprintln!("[TWITCH] Status changed: {} -> {}", *connected, is_connected);
+                                            *connected = is_connected;
                                         }
                                     }
-                                    TwitchEvent::Stop => {
-                                        eprintln!("[TWITCH] Stop event received");
-                                        if let Some(client) = twitch_client.take() {
-                                            client.stop().await;
-                                        }
-                                    }
-                                    TwitchEvent::SendMessage(text) => {
-                                        eprintln!("[TWITCH] SendMessage event received: '{}'", text);
-                                        if let Some(client) = &twitch_client {
-                                            // Показать текущий статус перед отправкой
-                                            let status = client.status().await;
-                                            eprintln!("[TWITCH] Current client status: {:?}", status);
-
-                                            match client.send_message(&text).await {
-                                                Ok(_) => eprintln!("[TWITCH] Message sent successfully"),
-                                                Err(e) => {
-                                                    eprintln!("[TWITCH] Failed to send message: {}", e);
-                                                    eprintln!("[TWITCH] Hint: Make sure Twitch is connected (green status) before sending");
-                                                }
-                                            }
-                                        } else {
-                                            eprintln!("[TWITCH] Cannot send message - no active client");
-                                            eprintln!("[TWITCH] Hint: Press Start button to connect first");
+                                } else {
+                                    // Нет клиента - не подключены
+                                    if let Ok(mut connected) = app_state_for_twitch_arc.twitch_connected.lock() {
+                                        if *connected {
+                                            *connected = false;
                                         }
                                     }
                                 }
                             }
-                            Err(e) => {
-                                eprintln!("[TWITCH] Event channel error: {}", e);
-                                break;
+                            // Обработка событий Twitch
+                            event = twitch_rx.recv() => {
+                                match event {
+                                    Ok(event) => {
+                                        match event {
+                                            TwitchEvent::Restart => {
+                                                eprintln!("[TWITCH] Restart event received");
+
+                                                // Получаем настройки для создания нового клиента
+                                                let settings = app_state_for_twitch_arc.twitch_settings.read().await;
+                                                let is_enabled = settings.enabled;
+                                                let is_valid = settings.is_valid().is_ok();
+                                                let settings_clone = settings.clone();
+                                                drop(settings);
+
+                                                // Остановить текущий клиент
+                                                if let Some(client) = twitch_client.take() {
+                                                    eprintln!("[TWITCH] Stopping previous client...");
+                                                    client.stop().await;
+                                                }
+
+                                                // Сбросить статус
+                                                if let Ok(mut connected) = app_state_for_twitch_arc.twitch_connected.lock() {
+                                                    *connected = false;
+                                                }
+
+                                                // Запустить новый если включен
+                                                if is_enabled {
+                                                    if is_valid {
+                                                        eprintln!("[TWITCH] Settings valid, creating new client...");
+                                                        let client = TwitchClient::new(settings_clone);
+                                                        match client.start().await {
+                                                            Ok(_) => {
+                                                                eprintln!("[TWITCH] Client started, waiting for connection...");
+                                                                twitch_client = Some(client);
+                                                            }
+                                                            Err(e) => {
+                                                                eprintln!("[TWITCH] Failed to start client: {}", e);
+                                                            }
+                                                        }
+                                                    } else {
+                                                        eprintln!("[TWITCH] Settings invalid, not starting client");
+                                                    }
+                                                } else {
+                                                    eprintln!("[TWITCH] Twitch disabled, not starting client");
+                                                }
+                                            }
+                                            TwitchEvent::Stop => {
+                                                eprintln!("[TWITCH] Stop event received");
+                                                // Обновляем статус подключения
+                                                if let Ok(mut connected) = app_state_for_twitch_arc.twitch_connected.lock() {
+                                                    *connected = false;
+                                                }
+                                                if let Some(client) = twitch_client.take() {
+                                                    client.stop().await;
+                                                }
+                                            }
+                                            TwitchEvent::SendMessage(text) => {
+                                                eprintln!("[TWITCH] SendMessage event received: '{}'", text);
+                                                if let Some(client) = &twitch_client {
+                                                    // Показать текущий статус перед отправкой
+                                                    let status = client.status().await;
+                                                    eprintln!("[TWITCH] Current client status: {:?}", status);
+
+                                                    match client.send_message(&text).await {
+                                                        Ok(_) => eprintln!("[TWITCH] Message sent successfully"),
+                                                        Err(e) => {
+                                                            eprintln!("[TWITCH] Failed to send message: {}", e);
+                                                            eprintln!("[TWITCH] Hint: Make sure Twitch is connected (green status) before sending");
+                                                        }
+                                                    }
+                                                } else {
+                                                    eprintln!("[TWITCH] Cannot send message - no active client");
+                                                    eprintln!("[TWITCH] Hint: Press Start button to connect first");
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[TWITCH] Event channel error: {}", e);
+                                        break;
+                                    }
+                                }
                             }
                         }
                     }
