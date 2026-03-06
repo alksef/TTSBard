@@ -712,8 +712,10 @@ pub fn run() {
                     if settings.start_on_boot && settings.enabled {
                         if let Ok(()) = settings.is_valid() {
                             eprintln!("[TWITCH] Auto-starting on boot");
-                            let client = TwitchClient::new(settings.clone());
-                            let _ = client.start().await;
+                            // Отправляем событие Restart в основной event loop
+                            // вместо создания клиента напрямую
+                            app_state_autostart_arc.send_twitch_event(crate::events::TwitchEvent::Restart);
+                            eprintln!("[TWITCH] Restart event sent for auto-start");
                         }
                     }
                 });
