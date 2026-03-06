@@ -17,6 +17,9 @@ pub mod telegram;
 // WebView commands
 pub mod webview;
 
+// Twitch commands
+pub mod twitch;
+
 /// Quit the application
 #[tauri::command]
 pub fn quit_app(app_handle: AppHandle) -> Result<(), String> {

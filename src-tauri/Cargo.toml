@@ -50,6 +50,10 @@ grammers-tl-types = "0.8.0"
 # Time utilities
 chrono = "0.4"
 
+# Twitch IRC TLS
+tokio-native-tls = "0.3"
+native-tls = "0.2"
+
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
     "Win32_UI_Input_KeyboardAndMouse",

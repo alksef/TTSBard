@@ -1,6 +1,7 @@
 use crate::state::AppState;
 use crate::tts::TtsProviderType;
 use crate::webview::WebViewSettings;
+use crate::twitch::TwitchSettings;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -232,6 +233,70 @@ impl AppSettings {
         eprintln!("[SETTINGS] WebView settings saved successfully");
 
         Ok(())
+    }
+
+    /// Получить директорию для Twitch настроек
+    #[allow(dead_code)]
+    pub fn twitch_dir(&self) -> PathBuf {
+        dirs::config_dir()
+            .expect("Failed to get config dir")
+            .join("ttsbard")
+            .join("twitch")
+    }
+
+    /// Получить путь к файлу настроек Twitch JSON
+    #[allow(dead_code)]
+    pub fn twitch_settings_path(&self) -> PathBuf {
+        self.twitch_dir().join("settings.json")
+    }
+
+    /// Загрузить настройки Twitch из файла
+    pub fn load_twitch_settings() -> Result<TwitchSettings, String> {
+        let settings_path = Self::twitch_settings_path_static();
+
+        if settings_path.exists() {
+            let content = fs::read_to_string(&settings_path)
+                .map_err(|e| format!("Failed to read Twitch settings: {}", e))?;
+
+            let settings: TwitchSettings = serde_json::from_str(&content)
+                .map_err(|e| format!("Failed to parse Twitch settings: {}", e))?;
+
+            eprintln!("[SETTINGS] Twitch settings loaded: enabled={}", settings.enabled);
+            Ok(settings)
+        } else {
+            eprintln!("[SETTINGS] Twitch settings not found, using defaults");
+            Ok(TwitchSettings::default())
+        }
+    }
+
+    /// Сохранить настройки Twitch в файл
+    pub fn save_twitch_settings(settings: &TwitchSettings) -> Result<(), String> {
+        let twitch_dir = Self::twitch_settings_path_static()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+
+        fs::create_dir_all(&twitch_dir)
+            .map_err(|e| format!("Failed to create Twitch directory: {}", e))?;
+
+        let settings_path = Self::twitch_settings_path_static();
+        let json = serde_json::to_string_pretty(settings)
+            .map_err(|e| format!("Failed to serialize Twitch settings: {}", e))?;
+
+        fs::write(&settings_path, json)
+            .map_err(|e| format!("Failed to write Twitch settings: {}", e))?;
+
+        eprintln!("[SETTINGS] Twitch settings saved");
+        Ok(())
+    }
+
+    /// Статический метод для получения пути (для использования в статических контекстах)
+    fn twitch_settings_path_static() -> PathBuf {
+        dirs::config_dir()
+            .expect("Failed to get config dir")
+            .join("ttsbard")
+            .join("twitch")
+            .join("settings.json")
     }
 }
 

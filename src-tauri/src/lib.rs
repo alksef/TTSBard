@@ -12,19 +12,21 @@ mod audio;
 mod preprocessor;
 mod telegram;
 mod webview;
+mod twitch;
 
 use std::sync::mpsc;
 use std::thread;
 use state::AppState;
-use events::{AppEvent, InputLayout};
+use events::{AppEvent, InputLayout, TwitchEvent};
 use hotkeys::initialize_hotkeys;
 use hook::initialize_text_interception_hook;
 use commands::{speak_text, get_tts_provider, set_tts_provider, get_local_tts_url, set_local_tts_url, get_openai_api_key, set_openai_api_key, get_openai_voice, set_openai_voice, get_openai_proxy, set_openai_proxy, get_interception, set_interception, check_api_key, get_floating_appearance, set_floating_opacity, set_floating_bg_color, set_clickthrough, is_clickthrough_enabled, is_enter_closes_disabled, toggle_interception, toggle_floating_window, show_floating_window_cmd, hide_floating_window_cmd, is_floating_window_visible, quit_app, get_hotkey_enabled, set_hotkey_enabled, get_floating_exclude_from_recording, set_floating_exclude_from_recording, apply_floating_exclude_recording, open_file_dialog, get_output_devices, get_virtual_mic_devices, get_audio_settings, set_speaker_device, set_speaker_enabled, set_speaker_volume, set_virtual_mic_device, enable_virtual_mic, disable_virtual_mic, set_virtual_mic_volume};
 use commands::telegram::{telegram_init, telegram_request_code, telegram_sign_in, telegram_sign_out, telegram_get_status, telegram_get_user, telegram_auto_restore, TelegramState};
 use soundpanel::{SoundPanelState, sp_get_bindings, sp_add_binding, sp_remove_binding, sp_test_sound, sp_is_supported_format, sp_get_floating_appearance, sp_set_floating_opacity, sp_set_floating_bg_color, sp_set_floating_clickthrough, sp_is_floating_clickthrough_enabled, sp_is_exclude_from_recording, sp_set_exclude_from_recording, sp_apply_exclude_recording, load_bindings, load_appearance, initialize_soundpanel_hook};
 use floating::{show_floating_window, hide_floating_window, update_floating_text, update_floating_title, show_soundpanel_window, hide_soundpanel_window, emit_soundpanel_no_binding, update_soundpanel_appearance};
-use settings::SettingsManager;
+use settings::{SettingsManager, AppSettings};
 use webview::WebViewServer;
+use twitch::TwitchClient;
 use tauri::{Manager, Emitter};
 use tauri::image::Image;
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
@@ -134,6 +136,10 @@ pub fn run() {
             commands::webview::get_webview_settings,
             commands::webview::save_webview_settings,
             commands::webview::get_local_ip,
+            // Twitch commands
+            commands::twitch::get_twitch_settings,
+            commands::twitch::save_twitch_settings,
+            commands::twitch::test_twitch_connection,
         ])
         .setup(|app| {
             eprintln!("[APP] === Application setup started ===");
@@ -155,6 +161,14 @@ pub fn run() {
 
             let app_state = app.state::<AppState>();
             let telegram_state = app.state::<TelegramState>();
+
+            // Load Twitch settings on startup
+            eprintln!("[APP] Loading Twitch settings...");
+            let twitch_settings = AppSettings::load_twitch_settings()
+                .unwrap_or_default();
+            *app_state.twitch_settings.blocking_write() = twitch_settings.clone();
+            eprintln!("[APP] Twitch settings loaded: enabled={}, start_on_boot={}",
+                twitch_settings.enabled, twitch_settings.start_on_boot);
 
             // IMPORTANT: Setup event forwarding BEFORE apply_to_state
             // so TTS providers can get valid event_sender during initialization
@@ -539,6 +553,80 @@ pub fn run() {
                 });
             });
 
+            // Setup Twitch client event loop in dedicated thread
+            let app_state_for_twitch = app.state::<AppState>();
+            let app_state_for_twitch_arc = app_state_for_twitch.inner().clone();
+            let mut twitch_rx = app_state_for_twitch.twitch_event_tx.subscribe();
+
+            thread::spawn(move || {
+                // Create tokio runtime for this thread
+                let rt = tokio::runtime::Runtime::new().expect("Failed to create Twitch tokio runtime");
+
+                rt.block_on(async move {
+                    let mut twitch_client: Option<TwitchClient> = None;
+
+                    loop {
+                        match twitch_rx.recv().await {
+                            Ok(event) => {
+                                match event {
+                                    TwitchEvent::Restart => {
+                                        eprintln!("[TWITCH] Restart event received");
+                                        // Остановить текущий клиент
+                                        if let Some(client) = twitch_client.take() {
+                                            client.stop().await;
+                                        }
+
+                                        // Запустить новый если включен
+                                        let settings = app_state_for_twitch_arc.twitch_settings.read().await;
+                                        if settings.enabled {
+                                            if let Ok(()) = settings.is_valid() {
+                                                let client = TwitchClient::new(settings.clone());
+                                                let _ = client.start().await;
+                                                twitch_client = Some(client);
+                                            }
+                                        }
+                                    }
+                                    TwitchEvent::Stop => {
+                                        eprintln!("[TWITCH] Stop event received");
+                                        if let Some(client) = twitch_client.take() {
+                                            client.stop().await;
+                                        }
+                                    }
+                                    TwitchEvent::SendMessage(text) => {
+                                        if let Some(client) = &twitch_client {
+                                            let _ = client.send_message(&text).await;
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("[TWITCH] Event channel error: {}", e);
+                                break;
+                            }
+                        }
+                    }
+                });
+            });
+
+            // Auto-start Twitch if configured
+            let app_state_for_autostart = app.state::<AppState>();
+            let app_state_autostart_arc = app_state_for_autostart.inner().clone();
+
+            thread::spawn(move || {
+                let rt = tokio::runtime::Runtime::new().expect("Failed to create Twitch autostart runtime");
+
+                rt.block_on(async move {
+                    let settings = app_state_autostart_arc.twitch_settings.read().await;
+                    if settings.start_on_boot && settings.enabled {
+                        if let Ok(()) = settings.is_valid() {
+                            eprintln!("[TWITCH] Auto-starting on boot");
+                            let client = TwitchClient::new(settings.clone());
+                            let _ = client.start().await;
+                        }
+                    }
+                });
+            });
+
             // Hotkeys will be initialized after window is fully shown (in on_window_event)
             eprintln!("Setup complete - hotkeys will be registered when window gains focus");
 
@@ -561,14 +649,7 @@ pub fn run() {
             // Обрабатываем события главного окна
             if window.label() == "main" {
                 match event {
-                    // Сохраняем позицию при перемещении
-                    tauri::WindowEvent::Moved(position) => {
-                        if let Some(settings_manager) = window.app_handle().try_state::<SettingsManager>() {
-                            let x = position.x as i32;
-                            let y = position.y as i32;
-                            let _ = settings_manager.set_main_window_position(Some(x), Some(y));
-                        }
-                    }
+                    // Позиция сохраняется только при закрытии (событие Destroyed)
                     // Предотвращаем закрытие - скрываем окно вместо этого
                     tauri::WindowEvent::CloseRequested { api, .. } => {
                         eprintln!("[APP] Main window close requested - hiding to tray");
@@ -743,11 +824,12 @@ fn handle_event(event: AppEvent, state: &AppState, app_handle: &tauri::AppHandle
         }
         AppEvent::TextSentToTts(text) => {
             eprintln!("[EVENT] Text sent to TTS: '{}'", text);
-            // Forward to WebView server for OBS integration
+
+            // WebView broadcast (существует)
             if let Ok(wes) = state.webview_event_sender.lock() {
                 if let Some(ref sender) = *wes {
                     eprintln!("[EVENT] Forwarding TextSentToTts to WebView server");
-                    match sender.send(AppEvent::TextSentToTts(text)) {
+                    match sender.send(AppEvent::TextSentToTts(text.clone())) {
                         Ok(_) => eprintln!("[EVENT] TextSentToTts sent to WebView successfully"),
                         Err(e) => eprintln!("[EVENT] Failed to send to WebView: {}", e),
                     }
@@ -756,6 +838,13 @@ fn handle_event(event: AppEvent, state: &AppState, app_handle: &tauri::AppHandle
                 }
             } else {
                 eprintln!("[EVENT] Failed to lock webview_event_sender");
+            }
+
+            // Twitch send (новое)
+            let settings = state.twitch_settings.blocking_read();
+            if settings.enabled {
+                drop(settings);
+                let _ = state.send_twitch_event(TwitchEvent::SendMessage(text));
             }
         }
         AppEvent::TtsStatusChanged(status) => {

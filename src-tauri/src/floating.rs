@@ -93,21 +93,10 @@ pub fn show_floating_window(app_handle: &AppHandle) -> tauri::Result<()> {
         }
     }
 
-    // Настраиваем отслеживание событий окна для сохранения позиции
-    let app_handle_clone = app_handle.clone();
+    // Настраиваем отслеживание событий окна
     window.on_window_event(move |event| {
         match event {
-            tauri::WindowEvent::Moved(position) => {
-                eprintln!("[FLOATING] Window moved to: x={}, y={}", position.x, position.y);
-                if let Some(manager) = app_handle_clone.try_state::<SettingsManager>() {
-                    let x = position.x as i32;
-                    let y = position.y as i32;
-                    match manager.set_floating_window_position(Some(x), Some(y)) {
-                        Ok(_) => eprintln!("[FLOATING] Position saved: {}, {}", x, y),
-                        Err(e) => eprintln!("[FLOATING] Failed to save position: {}", e),
-                    }
-                }
-            }
+            // Позиция сохраняется только при закрытии (события Destroyed/Hide)
             tauri::WindowEvent::Destroyed => {
                 eprintln!("[FLOATING] Window destroyed");
             }

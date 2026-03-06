@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { APP_VERSION } from '../version'
 
-type Panel = 'info' | 'input' | 'tts' | 'floating' | 'soundpanel' | 'audio' | 'preprocessor' | 'webview'
+type Panel = 'info' | 'input' | 'tts' | 'floating' | 'soundpanel' | 'audio' | 'preprocessor' | 'webview' | 'twitch'
 
 const props = defineProps<{
   currentPanel: Panel
@@ -85,6 +85,12 @@ async function quitApp() {
         @click="setPanel('webview')"
       >
         🌐 WebView Source
+      </button>
+      <button
+        :class="buttonClass('twitch')"
+        @click="setPanel('twitch')"
+      >
+        📺 Twitch Chat
       </button>
     </nav>
 
