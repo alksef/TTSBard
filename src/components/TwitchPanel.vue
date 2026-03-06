@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 
 interface TwitchSettings {
   enabled: boolean
@@ -9,6 +10,8 @@ interface TwitchSettings {
   channel: string
   start_on_boot: boolean
 }
+
+type TwitchStatus = 'Disconnected' | 'Connecting' | 'Connected' | 'Error'
 
 const settings = ref<TwitchSettings>({
   enabled: false,
@@ -20,37 +23,20 @@ const settings = ref<TwitchSettings>({
 
 const errorMessage = ref<string | null>(null)
 let errorTimeout: number | null = null
+const currentStatus = ref<TwitchStatus>('Disconnected')
+let unlisten: (() => void) | null = null
+
+// Вычисляемое свойство - подключен ли Twitch
 const isConnected = ref(false)
-let statusCheckInterval: number | null = null
 
-// Периодическая проверка статуса подключения
-async function checkStatus() {
-  try {
-    const status = await invoke<string>('get_twitch_status')
-    const newConnected = status === 'connected'
-    if (isConnected.value !== newConnected) {
-      console.log('[Twitch] Status changed:', isConnected.value, '->', newConnected)
-      isConnected.value = newConnected
-    }
-  } catch (e) {
-    console.error('[Twitch] Failed to check status:', e)
-  }
-}
+// Обработка изменения статуса
+function handleStatusChange(status: TwitchStatus) {
+  console.log('[Twitch] Status changed:', currentStatus.value, '->', status)
+  currentStatus.value = status
+  isConnected.value = status === 'Connected'
 
-// Запуск периодической проверки статуса
-function startStatusCheck() {
-  if (statusCheckInterval !== null) return
-  // Проверяем статус каждую секунду
-  statusCheckInterval = window.setInterval(() => {
-    checkStatus()
-  }, 1000)
-}
-
-// Остановка периодической проверки статуса
-function stopStatusCheck() {
-  if (statusCheckInterval !== null) {
-    clearInterval(statusCheckInterval)
-    statusCheckInterval = null
+  if (status === 'Error') {
+    showError('Ошибка подключения к Twitch')
   }
 }
 
@@ -58,7 +44,6 @@ async function loadSettings() {
   try {
     const loaded = await invoke<TwitchSettings>('get_twitch_settings')
     settings.value = loaded
-    // Статус будет проверен автоматически через checkStatus()
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : String(e)
     showError('Failed to load settings: ' + errorMsg)
@@ -83,7 +68,7 @@ async function startTwitch() {
     console.log('[Twitch] Starting...')
     const result = await invoke<string>('connect_twitch')
     showError(result)
-    // Статус обновится автоматически через периодическую проверку
+    // Статус обновится через событие от backend
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : String(e)
     showError('Failed to connect: ' + errorMsg)
@@ -95,7 +80,7 @@ async function stopTwitch() {
     console.log('[Twitch] Stopping...')
     const result = await invoke<string>('disconnect_twitch')
     showError(result)
-    // Статус обновится автоматически через периодическую проверку
+    // Статус обновится через событие от backend
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : String(e)
     showError('Failed to disconnect: ' + errorMsg)
@@ -125,12 +110,31 @@ function showError(message: string) {
 
 onMounted(async () => {
   await loadSettings()
-  startStatusCheck()  // Запускаем периодическую проверку статуса
+
+  // Слушаем события о статусе Twitch
+  unlisten = await listen<any>('twitch-status-changed', (event) => {
+    const status = event.payload
+    // Сервер отправляет enum в виде { Connected: null } или { Error: "message" }
+    if (status.Connected !== undefined) {
+      handleStatusChange('Connected')
+    } else if (status.Connecting !== undefined) {
+      handleStatusChange('Connecting')
+    } else if (status.Disconnected !== undefined) {
+      handleStatusChange('Disconnected')
+    } else if (status.Error !== undefined) {
+      handleStatusChange('Error')
+    }
+  })
+
+  console.log('[Twitch] Listening for status changes')
 })
 
 // Cleanup
 onUnmounted(() => {
-  stopStatusCheck()  // Останавливаем периодическую проверку статуса
+  if (unlisten !== null) {
+    unlisten()
+    console.log('[Twitch] Stopped listening for status changes')
+  }
   if (errorTimeout !== null) {
     clearTimeout(errorTimeout)
   }
@@ -143,10 +147,26 @@ onUnmounted(() => {
 
     <!-- Error/Info Message Display -->
     <div v-if="errorMessage" class="message-box" :class="{
-      error: errorMessage.includes('Failed') || errorMessage.includes('failed') || errorMessage.includes('Error'),
-      success: errorMessage.includes('saved') || errorMessage.includes('сохранен') || errorMessage.includes('валид')
+      error: errorMessage.includes('Failed') || errorMessage.includes('failed') || errorMessage.includes('Error') || errorMessage.includes('Ошибка'),
+      success: errorMessage.includes('saved') || errorMessage.includes('сохранен') || errorMessage.includes('валид') || errorMessage.includes('Подключение')
     }">
       {{ errorMessage }}
+    </div>
+
+    <!-- Status Indicator -->
+    <div class="status-indicator" :class="{
+      connected: currentStatus === 'Connected',
+      connecting: currentStatus === 'Connecting',
+      error: currentStatus === 'Error',
+      disconnected: currentStatus === 'Disconnected'
+    }">
+      <span class="status-dot"></span>
+      <span class="status-text">
+        {{ currentStatus === 'Connected' ? 'Подключено' :
+           currentStatus === 'Connecting' ? 'Подключение...' :
+           currentStatus === 'Error' ? 'Ошибка' :
+           'Отключено' }}
+      </span>
     </div>
 
     <section class="settings-section">
@@ -156,16 +176,16 @@ onUnmounted(() => {
         <button
           @click="startTwitch"
           class="start-button"
-          :disabled="isConnected"
-          :class="{ disabled: isConnected }"
+          :disabled="isConnected || currentStatus === 'Connecting'"
+          :class="{ disabled: isConnected || currentStatus === 'Connecting' }"
         >
           ▶ Start
         </button>
         <button
           @click="stopTwitch"
           class="stop-button"
-          :disabled="!isConnected"
-          :class="{ disabled: !isConnected }"
+          :disabled="!isConnected && currentStatus !== 'Connecting'"
+          :class="{ disabled: !isConnected && currentStatus !== 'Connecting' }"
         >
           ■ Stop
         </button>
@@ -251,6 +271,67 @@ h2 {
   font-size: 1.1rem;
   color: #333;
   font-weight: 600;
+}
+
+/* Status Indicator */
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  font-weight: 500;
+  background: #f5f5f5;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+.status-indicator.connected .status-dot {
+  background: #4CAF50;
+}
+
+.status-indicator.connecting .status-dot {
+  background: #FF9800;
+}
+
+.status-indicator.error .status-dot {
+  background: #f44;
+}
+
+.status-indicator.disconnected .status-dot {
+  background: #ccc;
+  animation: none;
+}
+
+.status-indicator.connected {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.status-indicator.connecting {
+  background: #fff3e0;
+  color: #f57c00;
+}
+
+.status-indicator.error {
+  background: #fee;
+  color: #c33;
+}
+
+.status-indicator.disconnected {
+  background: #f5f5f5;
+  color: #666;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 .message-box {

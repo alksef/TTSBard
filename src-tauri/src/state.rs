@@ -107,9 +107,6 @@ pub struct AppState {
     /// Настройки Twitch чата
     pub twitch_settings: Arc<tokio::sync::RwLock<TwitchSettings>>,
 
-    /// Реальный статус подключения к Twitch (отличается от enabled)
-    pub twitch_connected: Arc<Mutex<bool>>,
-
     /// Sender для Twitch событий
     pub twitch_event_tx: TwitchEventSender,
 }
@@ -142,7 +139,6 @@ impl AppState {
             active_window: Arc::new(Mutex::new(ActiveWindow::None)),
             webview_settings: Arc::new(tokio::sync::RwLock::new(webview_settings)),
             twitch_settings: Arc::new(tokio::sync::RwLock::new(TwitchSettings::default())),
-            twitch_connected: Arc::new(Mutex::new(false)),
             twitch_event_tx,
         }
     }

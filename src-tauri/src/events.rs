@@ -53,6 +53,8 @@ pub enum AppEvent {
     WebViewServerError(String),
     /// Перезапустить WebView сервер (изменились настройки)
     RestartWebViewServer,
+    /// Изменение статуса подключения Twitch
+    TwitchStatusChanged(TwitchConnectionStatus),
 }
 
 /// События для управления Twitch клиентом
@@ -65,6 +67,15 @@ pub enum TwitchEvent {
     Stop,
     /// Отправить сообщение
     SendMessage(String),
+}
+
+/// Статус подключения к Twitch
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TwitchConnectionStatus {
+    Disconnected,
+    Connecting,
+    Connected,
+    Error(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq)]
@@ -104,6 +115,7 @@ impl AppEvent {
             AppEvent::EnterClosesDisabled(_) => "enter-closes-disabled",
             AppEvent::WebViewServerError(_) => "webview-server-error",
             AppEvent::RestartWebViewServer => "restart-webview-server",
+            AppEvent::TwitchStatusChanged(_) => "twitch-status-changed",
         }
     }
 }

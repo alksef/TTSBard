@@ -110,20 +110,6 @@ pub async fn disconnect_twitch(
     Ok("Отключено от Twitch".to_string())
 }
 
-/// Получить текущий статус подключения Twitch
-#[tauri::command]
-pub async fn get_twitch_status(
-    state: State<'_, AppState>,
-) -> Result<String, String> {
-    // Проверяем реальный статус подключения
-    let connected = state.twitch_connected.lock().map(|v| *v).unwrap_or(false);
-    if connected {
-        Ok("connected".to_string())
-    } else {
-        Ok("disconnected".to_string())
-    }
-}
-
 /// Проверить подключение к Twitch
 #[tauri::command]
 pub async fn test_twitch_connection(
