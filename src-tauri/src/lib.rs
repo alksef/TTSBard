@@ -384,6 +384,7 @@ pub fn run() {
             // Setup WebView server event channel
             let app_state_for_webview = app.state::<AppState>();
             let webview_settings = app_state_for_webview.webview_settings.clone();
+            let app_handle_for_webview = app.handle().clone();
             let (_webview_tx, webview_rx) = mpsc::channel::<AppEvent>();
 
             // Start WebView server in background thread
@@ -403,11 +404,27 @@ pub fn run() {
                         eprintln!("[WEBVIEW] Starting WebView server on {}:{}", bind_address, port);
                         let server = WebViewServer::new(webview_settings.clone());
 
-                        // Spawn server task
+                        // Spawn server task with improved error handling
                         let server_clone = server.clone();
+                        let app_handle_clone = app_handle_for_webview.clone();
                         tokio::spawn(async move {
                             if let Err(e) = server_clone.start().await {
-                                eprintln!("[WEBVIEW] Server error: {}", e);
+                                // Extract error details for user-friendly message
+                                let error_msg = format!("{}", e);
+                                let (user_friendly_msg, log_context) = parse_webview_server_error(&error_msg, bind_address, port);
+
+                                // Log with full context
+                                eprintln!("[WEBVIEW] Server startup failed:");
+                                eprintln!("[WEBVIEW]   Context: {}", log_context);
+                                eprintln!("[WEBVIEW]   Error: {}", error_msg);
+
+                                // Emit user-friendly error to frontend
+                                let _ = app_handle_clone.emit("webview-server-error", &user_friendly_msg);
+
+                                // Also emit via AppEvent system for consistency
+                                if let Some(state) = app_handle_clone.try_state::<AppState>() {
+                                    state.emit_event(AppEvent::WebViewServerError(user_friendly_msg));
+                                }
                             }
                         });
 
@@ -537,6 +554,43 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Parse WebView server startup errors and provide user-friendly messages
+fn parse_webview_server_error(error_msg: &str, bind_address: String, port: u16) -> (String, String) {
+    let log_context = format!("Failed to start WebView server on {}:{}", bind_address, port);
+
+    // Check for common error patterns
+    let user_friendly_msg = if error_msg.contains("addr in use") || error_msg.contains("port in use") {
+        format!(
+            "Порт {} уже занят. Пожалуйста, выберите другой порт в настройках WebView.",
+            port
+        )
+    } else if error_msg.contains("permission denied") {
+        format!(
+            "Нет прав для запуска сервера на порту {}. Попробуйте использовать порт выше 1024.",
+            port
+        )
+    } else if error_msg.contains("invalid input") || error_msg.contains("invalid address") {
+        format!(
+            "Некорректный адрес {}:{}. Пожалуйста, проверьте настройки WebView.",
+            bind_address, port
+        )
+    } else if error_msg.contains("access denied") {
+        "Доступ запрещен. Возможно, брандмауэр блокирует соединение.".to_string()
+    } else {
+        // Generic error with technical details
+        format!(
+            "Не удалось запустить WebView сервер: {}",
+            if error_msg.len() > 100 {
+                format!("{}...", &error_msg[..97])
+            } else {
+                error_msg.to_string()
+            }
+        )
+    };
+
+    (user_friendly_msg, log_context)
 }
 
 fn handle_event(event: AppEvent, state: &AppState, app_handle: &tauri::AppHandle) {
@@ -678,6 +732,10 @@ fn handle_event(event: AppEvent, state: &AppState, app_handle: &tauri::AppHandle
         }
         AppEvent::EnterClosesDisabled(disabled) => {
             eprintln!("[EVENT] Enter closes disabled: {}", disabled);
+        }
+        AppEvent::WebViewServerError(error) => {
+            eprintln!("[EVENT] WebView server error: {}", error);
+            // Event is already emitted to frontend via Tauri event system
         }
     }
 }

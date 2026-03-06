@@ -36,8 +36,21 @@ impl WebViewServer {
             .route("/ws", get(websocket::websocket_handler))
             .with_state((self.broadcast_tx.clone(), self.settings.clone()));
 
-        let socket_addr: SocketAddr = addr.parse()?;
-        let listener = tokio::net::TcpListener::bind(socket_addr).await?;
+        let socket_addr: SocketAddr = addr.parse()
+            .map_err(|e| format!("Invalid address {}: {}", addr, e))?;
+
+        let listener = tokio::net::TcpListener::bind(socket_addr)
+            .await
+            .map_err(|e| {
+                // Provide more context about common errors
+                if e.kind() == std::io::ErrorKind::AddrInUse {
+                    format!("Address {} is already in use. Port {} may be occupied by another application.", addr, socket_addr.port())
+                } else if e.kind() == std::io::ErrorKind::PermissionDenied {
+                    format!("Permission denied to bind to {}. Try using a port above 1024.", addr)
+                } else {
+                    format!("Failed to bind to {}: {}", addr, e)
+                }
+            })?;
 
         tracing::info!("WebView server started on {}", addr);
 
