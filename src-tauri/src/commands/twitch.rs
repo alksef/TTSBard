@@ -126,7 +126,6 @@ pub async fn get_twitch_status(
         crate::events::TwitchConnectionStatus::Error(_) => "Error",
     };
 
-    eprintln!("[TWITCH] get_twitch_status called, returning: {}", status_str);
     Ok(status_str.to_string())
 }
 
