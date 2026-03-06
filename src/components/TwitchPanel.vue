@@ -95,6 +95,14 @@ async function stopTwitch() {
   }
 }
 
+async function saveStartOnBoot() {
+  try {
+    await invoke('save_twitch_settings', { settings: settings.value })
+  } catch (e) {
+    console.error('[Twitch] Failed to save start_on_boot:', e)
+  }
+}
+
 async function sendTestMessage() {
   try {
     const result = await invoke<string>('send_twitch_test_message')
@@ -203,8 +211,8 @@ onUnmounted(() => {
 
       <div class="setting-row">
         <label class="checkbox-label">
-          <input type="checkbox" v-model="settings.start_on_boot" />
-          <span>Start on boot</span>
+          <input type="checkbox" v-model="settings.start_on_boot" @change="saveStartOnBoot" />
+          <span>Запускать при старте приложения</span>
         </label>
       </div>
 

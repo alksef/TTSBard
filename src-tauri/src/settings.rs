@@ -134,7 +134,8 @@ impl AppSettings {
         eprintln!("[SETTINGS] CSS path: {:?}, exists: {}", css_path, css_path.exists());
 
         // Load server settings from JSON or use defaults
-        let (enabled, start_on_boot, port, bind_addr, anim_speed) = if json_path.exists() {
+        // NOTE: enabled is always false on load (runtime-only), controlled by start_on_boot
+        let (start_on_boot, port, bind_addr, anim_speed) = if json_path.exists() {
             let json_content = fs::read_to_string(&json_path)
                 .context("Failed to read WebView settings JSON")?;
             let json: serde_json::Value = serde_json::from_str(&json_content)
@@ -142,7 +143,6 @@ impl AppSettings {
 
             eprintln!("[SETTINGS] Loaded WebView settings from JSON");
             (
-                json.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false),
                 json.get("start_on_boot").and_then(|v| v.as_bool()).unwrap_or(false),
                 json.get("port").and_then(|v| v.as_u64()).unwrap_or(10100) as u16,
                 json.get("bind_address").and_then(|v| v.as_str()).unwrap_or("0.0.0.0").to_string(),
@@ -150,8 +150,11 @@ impl AppSettings {
             )
         } else {
             eprintln!("[SETTINGS] WebView settings JSON not found, using defaults");
-            (false, false, 10100, "0.0.0.0".to_string(), 30)
+            (false, 10100, "0.0.0.0".to_string(), 30)
         };
+
+        // enabled is always false on load - will be set by start_on_boot logic on boot
+        let enabled = false;
 
         // Load HTML template or use default
         let html = if html_path.exists() {
@@ -212,8 +215,8 @@ impl AppSettings {
             .context("Failed to create webview directory")?;
 
         // Save server settings to JSON
+        // NOTE: enabled is NOT saved (runtime-only), only start_on_boot controls auto-start
         let server_settings = serde_json::json!({
-            "enabled": settings.enabled,
             "start_on_boot": settings.start_on_boot,
             "port": settings.port,
             "bind_address": settings.bind_address,
