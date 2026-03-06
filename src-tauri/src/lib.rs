@@ -602,10 +602,7 @@ pub fn run() {
                                     };
 
                                     if last_status != new_status {
-                                        eprintln!("[TWITCH] Status changed: {:?} -> {:?}", last_status, new_status);
                                         last_status = new_status.clone();
-
-                                        // Update status in AppState and emit event
                                         update_status(new_status.clone());
                                     }
                                 } else if last_status != crate::events::TwitchConnectionStatus::Disconnected {

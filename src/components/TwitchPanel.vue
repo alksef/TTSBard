@@ -31,13 +31,8 @@ const isConnected = ref(false)
 
 // Обработка изменения статуса
 function handleStatusChange(status: TwitchStatus) {
-  console.log('[Twitch] handleStatusChange called:', status)
-  console.log('[Twitch] Before: currentStatus =', currentStatus.value, ', isConnected =', isConnected.value)
-
   currentStatus.value = status
   isConnected.value = status === 'Connected'
-
-  console.log('[Twitch] After: currentStatus =', currentStatus.value, ', isConnected =', isConnected.value)
 
   if (status === 'Error') {
     showError('Ошибка подключения к Twitch')
@@ -47,14 +42,11 @@ function handleStatusChange(status: TwitchStatus) {
 // Обновить статус вручную
 async function refreshStatus() {
   try {
-    console.log('[Twitch] Refreshing status...')
     const status = await invoke<string>('get_twitch_status')
-    console.log('[Twitch] Refreshed status:', status)
     handleStatusChange(status as TwitchStatus)
     showError('Статус обновлён')
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : String(e)
-    console.error('[Twitch] Failed to refresh status:', e)
     showError('Failed to refresh status: ' + errorMsg)
   }
 }
@@ -66,7 +58,6 @@ async function loadSettings() {
 
     // Запрашиваем текущий статус при загрузке
     const status = await invoke<string>('get_twitch_status')
-    console.log('[Twitch] Initial status from backend:', status)
     handleStatusChange(status as TwitchStatus)
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : String(e)
@@ -76,12 +67,9 @@ async function loadSettings() {
 
 async function save() {
   try {
-    console.log('[Twitch] Saving settings:', settings.value)
     const result = await invoke<string>('save_twitch_settings', { settings: settings.value })
-    console.log('[Twitch] Save result:', result)
     showError(result)
   } catch (e) {
-    console.error('[Twitch] Save failed:', e)
     const errorMsg = e instanceof Error ? e.message : String(e)
     showError('Failed to save settings: ' + errorMsg)
   }
@@ -89,10 +77,8 @@ async function save() {
 
 async function startTwitch() {
   try {
-    console.log('[Twitch] Starting...')
     const result = await invoke<string>('connect_twitch')
     showError(result)
-    // Статус обновится через событие от backend
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : String(e)
     showError('Failed to connect: ' + errorMsg)
@@ -101,10 +87,8 @@ async function startTwitch() {
 
 async function stopTwitch() {
   try {
-    console.log('[Twitch] Stopping...')
     const result = await invoke<string>('disconnect_twitch')
     showError(result)
-    // Статус обновится через событие от backend
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : String(e)
     showError('Failed to disconnect: ' + errorMsg)
@@ -137,44 +121,26 @@ onMounted(async () => {
 
   // Слушаем события о статусе Twitch
   unlisten = await listen<any>('twitch-status-changed', (event) => {
-    console.log('[Twitch] === STATUS EVENT RECEIVED ===')
-    console.log('[Twitch] Event:', event)
-    console.log('[Twitch] Payload type:', typeof event.payload)
-    console.log('[Twitch] Payload:', event.payload)
-    console.log('[Twitch] Payload keys:', event.payload ? Object.keys(event.payload) : 'null')
-
     const status = event.payload
 
-    // Сервер отправляет enum в виде { Connected: null } или { Error: "message" }
-    // Также может приходить как строка "Connected"
     if (typeof status === 'string') {
-      console.log('[Twitch] Status is string:', status)
       handleStatusChange(status as TwitchStatus)
     } else if (status.Connected !== undefined) {
-      console.log('[Twitch] Status is Connected enum variant')
       handleStatusChange('Connected')
     } else if (status.Connecting !== undefined) {
-      console.log('[Twitch] Status is Connecting enum variant')
       handleStatusChange('Connecting')
     } else if (status.Disconnected !== undefined) {
-      console.log('[Twitch] Status is Disconnected enum variant')
       handleStatusChange('Disconnected')
     } else if (status.Error !== undefined) {
-      console.log('[Twitch] Status is Error enum variant:', status.Error)
       handleStatusChange('Error')
-    } else {
-      console.warn('[Twitch] Unknown status format:', status)
     }
   })
-
-  console.log('[Twitch] Listening for status changes')
 })
 
 // Cleanup
 onUnmounted(() => {
   if (unlisten !== null) {
     unlisten()
-    console.log('[Twitch] Stopped listening for status changes')
   }
   if (errorTimeout !== null) {
     clearTimeout(errorTimeout)
