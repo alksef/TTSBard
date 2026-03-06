@@ -6,32 +6,15 @@ use axum::{
     response::IntoResponse,
 };
 use futures::{sink::SinkExt, stream::StreamExt};
-use serde::Serialize;
+use lazy_static::lazy_static;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 
 use super::WebViewSettings;
 
-/// Сообщение для отправки клиентам
-#[derive(Debug, Clone, Serialize)]
-struct TextMessage {
-    #[serde(rename = "type")]
-    msg_type: String,
-    text: String,
-    timestamp: u64,
-}
-
-impl TextMessage {
-    fn new(text: String) -> Self {
-        Self {
-            msg_type: "text".to_string(),
-            text,
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as u64,
-        }
-    }
+// Cached JSON format string for text messages (lazy_static for efficiency)
+lazy_static! {
+    static ref TEXT_MESSAGE_FORMAT: String = r#"{{"type":"text","data":"{}"}}"#.to_string();
 }
 
 /// Канал для broadcasting сообщений всем WebSocket клиентам
@@ -84,9 +67,18 @@ pub fn create_broadcast_channel() -> WsBroadcast {
 }
 
 /// Отправляет текст всем подключённым клиентам
+/// Uses cached format string for efficiency
 pub fn broadcast_text(broadcast_tx: &WsBroadcast, text: String) {
-    let msg = TextMessage::new(text);
-    if let Ok(json) = serde_json::to_string(&msg) {
-        let _ = broadcast_tx.send(json);
-    }
+    // Use cached format string instead of creating new one each time
+    let json_text = TEXT_MESSAGE_FORMAT.replace("{}", &json_escape(&text));
+    let _ = broadcast_tx.send(json_text);
+}
+
+/// Escape JSON string special characters
+fn json_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
 }

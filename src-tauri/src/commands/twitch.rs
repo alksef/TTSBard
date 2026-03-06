@@ -115,9 +115,7 @@ pub async fn disconnect_twitch(
 pub async fn get_twitch_status(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let status = state.twitch_connection_status.lock()
-        .map_err(|e| format!("Failed to get status: {}", e))?
-        .clone();
+    let status = state.twitch_connection_status.lock().clone();
 
     let status_str = match status {
         crate::events::TwitchConnectionStatus::Connected => "Connected",

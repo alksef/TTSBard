@@ -89,8 +89,7 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
 
     // Get the current TTS provider
     let provider = {
-        let providers = state.tts_providers.lock()
-            .map_err(|e| format!("Failed to acquire lock: {}", e))?;
+        let providers = state.tts_providers.lock();
 
         providers.as_ref()
             .ok_or_else(|| {
@@ -175,7 +174,7 @@ pub async fn set_tts_provider(
         TtsProviderType::OpenAi => {
             eprintln!("[SET_PROVIDER] Initializing OpenAI TTS");
             // Get saved API key and initialize if available
-            let api_key = state.openai_api_key.lock().map(|k| k.clone()).unwrap_or(None);
+            let api_key = state.openai_api_key.lock().clone();
             if let Some(key) = api_key {
                 state.init_openai_tts(key);
                 eprintln!("[SET_PROVIDER] OpenAI TTS initialized");
@@ -271,7 +270,7 @@ pub fn set_local_tts_url(
 /// Get OpenAI API key
 #[tauri::command]
 pub fn get_openai_api_key(state: State<'_, AppState>) -> Option<String> {
-    state.openai_api_key.lock().ok().and_then(|k| k.clone())
+    state.openai_api_key.lock().clone()
 }
 
 /// Set OpenAI API key
@@ -286,8 +285,7 @@ pub fn set_openai_api_key(
         return Err("Неверный формат API ключа OpenAI".into());
     }
 
-    state.openai_api_key.lock().map(|mut k| *k = Some(key.clone()))
-        .map_err(|e| format!("Failed to acquire lock: {}", e))?;
+    *state.openai_api_key.lock() = Some(key.clone());
     state.init_openai_tts(key);
 
     // Auto-save settings

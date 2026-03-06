@@ -1,6 +1,9 @@
 use crate::state::AppState;
 use crate::events::{AppEvent, InputLayout};
 use std::thread::JoinHandle;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::cell::UnsafeCell;
 
 #[cfg(target_os = "windows")]
 use windows::{
@@ -19,22 +22,37 @@ const VK_SPACE: u32 = 0x20;   // Space
 const VK_F6: u32 = 0x75;      // F6
 const VK_F8: u32 = 0x77;      // F8
 
-// Keyboard layout handles for EN/RU
+/// Thread-safe hook state container
 #[cfg(target_os = "windows")]
-static mut ENGLISH_LAYOUT: HKL = HKL(std::ptr::null_mut());
-#[cfg(target_os = "windows")]
-static mut RUSSIAN_LAYOUT: HKL = HKL(std::ptr::null_mut());
-
-// Modifier key tracking for Shift+character handling
-#[cfg(target_os = "windows")]
-static mut MODIFIER_SHIFT: bool = false;
-#[cfg(target_os = "windows")]
-static mut MODIFIER_CTRL: bool = false;
-#[cfg(target_os = "windows")]
-static mut MODIFIER_ALT: bool = false;
+pub struct HookState {
+    pub english_layout: UnsafeCell<HKL>,
+    pub russian_layout: UnsafeCell<HKL>,
+    pub modifier_shift: AtomicBool,
+    pub modifier_ctrl: AtomicBool,
+    pub modifier_alt: AtomicBool,
+    pub app_state: Option<AppState>,
+}
 
 #[cfg(target_os = "windows")]
-static mut HOOK_STATE: Option<AppState> = None;
+unsafe impl Send for HookState {}
+
+#[cfg(target_os = "windows")]
+use lazy_static::lazy_static;
+#[cfg(target_os = "windows")]
+use parking_lot::Mutex;
+
+#[cfg(target_os = "windows")]
+lazy_static! {
+    /// Global thread-safe hook state
+    static ref HOOK_STATE: Arc<Mutex<HookState>> = Arc::new(Mutex::new(HookState {
+        english_layout: UnsafeCell::new(HKL(std::ptr::null_mut())),
+        russian_layout: UnsafeCell::new(HKL(std::ptr::null_mut())),
+        modifier_shift: AtomicBool::new(false),
+        modifier_ctrl: AtomicBool::new(false),
+        modifier_alt: AtomicBool::new(false),
+        app_state: None,
+    }));
+}
 
 /// Low-level keyboard hook procedure
 #[cfg(target_os = "windows")]
@@ -51,113 +69,122 @@ unsafe extern "system" fn low_level_keyboard_proc(
         match vk_code {
             0x10 | 0xA0 | 0xA1 => { // VK_SHIFT, VK_LSHIFT, VK_RSHIFT
                 let is_key_down = (kb_struct.flags.0 & 0x80) == 0; // LLKHF_UP bit
-                unsafe { MODIFIER_SHIFT = is_key_down; }
+                if let Some(state) = HOOK_STATE.try_lock() {
+                    state.modifier_shift.store(is_key_down, Ordering::Release);
+                }
             }
             0x11 | 0xA2 | 0xA3 => { // VK_CONTROL, VK_LCONTROL, VK_RCONTROL
                 let is_key_down = (kb_struct.flags.0 & 0x80) == 0;
-                unsafe { MODIFIER_CTRL = is_key_down; }
+                if let Some(state) = HOOK_STATE.try_lock() {
+                    state.modifier_ctrl.store(is_key_down, Ordering::Release);
+                }
             }
             0x12 => { // VK_MENU (Alt)
                 let is_key_down = (kb_struct.flags.0 & 0x80) == 0;
-                unsafe { MODIFIER_ALT = is_key_down; }
+                if let Some(state) = HOOK_STATE.try_lock() {
+                    state.modifier_alt.store(is_key_down, Ordering::Release);
+                }
             }
             _ => {}
         }
 
         match w_param.0 as u32 {
             WM_KEYDOWN | WM_SYSKEYDOWN => {
-                if let Some(ref state) = HOOK_STATE {
-                    // Only work when interception mode is enabled
-                    if !state.is_interception_enabled() {
-                        return CallNextHookEx(HHOOK::default(), n_code, w_param, l_param);
-                    }
+                // Try to acquire lock without blocking
+                if let Some(state) = HOOK_STATE.try_lock() {
+                    if let Some(ref app_state) = state.app_state {
+                        // Only work when interception mode is enabled
+                        if !app_state.is_interception_enabled() {
+                            return CallNextHookEx(HHOOK::default(), n_code, w_param, l_param);
+                        }
 
-                    match vk_code {
-                        VK_RETURN => {
-                            // Enter - send text to TTS
-                            let text = state.get_current_text();
-                            if !text.is_empty() {
-                                state.emit_event(AppEvent::TextReady(text.trim().to_string()));
-                                state.clear_text();
-                                state.emit_event(AppEvent::UpdateFloatingText(String::new()));
+                        match vk_code {
+                            VK_RETURN => {
+                                // Enter - send text to TTS
+                                let text = app_state.get_current_text();
+                                if !text.is_empty() {
+                                    app_state.emit_event(AppEvent::TextReady(text.trim().to_string()));
+                                    app_state.clear_text();
+                                    app_state.emit_event(AppEvent::UpdateFloatingText(String::new()));
 
-                                // Only close window and disable interception if F6 mode is NOT active
-                                if !state.is_enter_closes_disabled() {
-                                    state.set_interception_enabled(false);
-                                    state.emit_event(AppEvent::HideFloatingWindow);
-                                }
-                            }
-                            return LRESULT(1); // Block the key
-                        }
-                        VK_ESCAPE => {
-                            // Escape - clear text, disable interception, hide window
-                            state.clear_text();
-                            state.emit_event(AppEvent::UpdateFloatingText(String::new()));
-                            state.set_interception_enabled(false);
-                            state.emit_event(AppEvent::HideFloatingWindow);
-                            return LRESULT(1); // Block the key
-                        }
-                        VK_BACK => {
-                            // Backspace - remove last character
-                            state.remove_last_char();
-                            let text = state.get_current_text();
-                            state.emit_event(AppEvent::UpdateFloatingText(text));
-                            return LRESULT(1); // Block the key
-                        }
-                        VK_F8 => {
-                            // F8 - toggle layout (EN ↔ RU)
-                            let new_layout = state.toggle_layout();
-                            eprintln!("Layout switched to: {:?}", new_layout);
-                            return LRESULT(1); // Block the key
-                        }
-                        VK_F6 => {
-                            // F6 - toggle Enter closes disabled mode
-                            let new_state = state.toggle_enter_closes_disabled();
-                            eprintln!("[F6] Enter closes disabled: {}", new_state);
-                            return LRESULT(1); // Block the key
-                        }
-                        VK_SPACE => {
-                            // Space - check for live replacement first
-                            let current = state.get_current_text();
-
-                            // Check if we need to replace
-                            let should_replace = if let Some(preprocessor) = state.get_preprocessor() {
-                                preprocessor.check_and_replace_end(&current).is_some()
-                            } else {
-                                false
-                            };
-
-                            if should_replace {
-                                // Perform replacement
-                                if let Some(preprocessor) = state.get_preprocessor() {
-                                    if let Some((_pattern, replaced)) = preprocessor.check_and_replace_end(&current) {
-                                        // Update the text with replacement, then add space
-                                        state.set_current_text(replaced.clone());
-                                        state.append_text(' ');
-                                        let text = state.get_current_text();
-                                        // Emit update to floating window
-                                        state.emit_event(AppEvent::UpdateFloatingText(text));
-                                        eprintln!("[PREPROCESSOR] Live replacement performed");
+                                    // Only close window and disable interception if F6 mode is NOT active
+                                    if !app_state.is_enter_closes_disabled() {
+                                        app_state.set_interception_enabled(false);
+                                        app_state.emit_event(AppEvent::HideFloatingWindow);
                                     }
                                 }
-                            } else {
-                                // No replacement - add space character as usual
-                                state.append_text(' ');
-                                let text = state.get_current_text();
-                                state.emit_event(AppEvent::UpdateFloatingText(text));
-                            }
-                            return LRESULT(1); // Block the key
-                        }
-                        _ => {
-                            // Printable characters - use ToUnicodeEx with current layout
-                            if let Some(ch) = vk_code_to_char(vk_code, kb_struct, state) {
-                                state.append_text(ch);
-                                let text = state.get_current_text();
-                                state.emit_event(AppEvent::UpdateFloatingText(text));
                                 return LRESULT(1); // Block the key
                             }
-                            // Failed to convert - pass the key through
-                            return CallNextHookEx(HHOOK::default(), n_code, w_param, l_param);
+                            VK_ESCAPE => {
+                                // Escape - clear text, disable interception, hide window
+                                app_state.clear_text();
+                                app_state.emit_event(AppEvent::UpdateFloatingText(String::new()));
+                                app_state.set_interception_enabled(false);
+                                app_state.emit_event(AppEvent::HideFloatingWindow);
+                                return LRESULT(1); // Block the key
+                            }
+                            VK_BACK => {
+                                // Backspace - remove last character
+                                app_state.remove_last_char();
+                                let text = app_state.get_current_text();
+                                app_state.emit_event(AppEvent::UpdateFloatingText(text));
+                                return LRESULT(1); // Block the key
+                            }
+                            VK_F8 => {
+                                // F8 - toggle layout (EN ↔ RU)
+                                let new_layout = app_state.toggle_layout();
+                                eprintln!("Layout switched to: {:?}", new_layout);
+                                return LRESULT(1); // Block the key
+                            }
+                            VK_F6 => {
+                                // F6 - toggle Enter closes disabled mode
+                                let new_state = app_state.toggle_enter_closes_disabled();
+                                eprintln!("[F6] Enter closes disabled: {}", new_state);
+                                return LRESULT(1); // Block the key
+                            }
+                            VK_SPACE => {
+                                // Space - check for live replacement first
+                                let current = app_state.get_current_text();
+
+                                // Check if we need to replace
+                                let should_replace = if let Some(preprocessor) = app_state.get_preprocessor() {
+                                    preprocessor.check_and_replace_end(&current).is_some()
+                                } else {
+                                    false
+                                };
+
+                                if should_replace {
+                                    // Perform replacement
+                                    if let Some(preprocessor) = app_state.get_preprocessor() {
+                                        if let Some((_pattern, replaced)) = preprocessor.check_and_replace_end(&current) {
+                                            // Update the text with replacement, then add space
+                                            app_state.set_current_text(replaced.clone());
+                                            app_state.append_text(' ');
+                                            let text = app_state.get_current_text();
+                                            // Emit update to floating window
+                                            app_state.emit_event(AppEvent::UpdateFloatingText(text));
+                                            eprintln!("[PREPROCESSOR] Live replacement performed");
+                                        }
+                                    }
+                                } else {
+                                    // No replacement - add space character as usual
+                                    app_state.append_text(' ');
+                                    let text = app_state.get_current_text();
+                                    app_state.emit_event(AppEvent::UpdateFloatingText(text));
+                                }
+                                return LRESULT(1); // Block the key
+                            }
+                            _ => {
+                                // Printable characters - use ToUnicodeEx with current layout
+                                if let Some(ch) = vk_code_to_char(vk_code, kb_struct, app_state, &state) {
+                                    app_state.append_text(ch);
+                                    let text = app_state.get_current_text();
+                                    app_state.emit_event(AppEvent::UpdateFloatingText(text));
+                                    return LRESULT(1); // Block the key
+                                }
+                                // Failed to convert - pass the key through
+                                return CallNextHookEx(HHOOK::default(), n_code, w_param, l_param);
+                            }
                         }
                     }
                 }
@@ -172,13 +199,18 @@ unsafe extern "system" fn low_level_keyboard_proc(
 /// Converts VK code to character using ToUnicodeEx with current layout
 /// Supports English and Russian keyboard layouts
 #[cfg(target_os = "windows")]
-fn vk_code_to_char(vk_code: u32, kb_struct: KBDLLHOOKSTRUCT, state: &AppState) -> Option<char> {
+fn vk_code_to_char(
+    vk_code: u32,
+    kb_struct: KBDLLHOOKSTRUCT,
+    app_state: &AppState,
+    hook_state: &HookState,
+) -> Option<char> {
     unsafe {
         // Get current layout
-        let current_layout = state.get_current_layout();
+        let current_layout = app_state.get_current_layout();
         let hkl = match current_layout {
-            InputLayout::English => ENGLISH_LAYOUT,
-            InputLayout::Russian => RUSSIAN_LAYOUT,
+            InputLayout::English => *hook_state.english_layout.get(),
+            InputLayout::Russian => *hook_state.russian_layout.get(),
         };
 
         eprintln!("[DEBUG] vk_code_to_char called - VK code: 0x{:02X} ({})", vk_code, vk_code);
@@ -211,11 +243,15 @@ fn vk_code_to_char(vk_code: u32, kb_struct: KBDLLHOOKSTRUCT, state: &AppState) -
 
         // Get current keyboard state for shift/ctrl handling
         let get_state_result = GetKeyboardState(keyboard_state.as_mut_ptr());
+        if get_state_result == 0 {
+            eprintln!("[HOOK] GetKeyboardState failed!");
+            return None;
+        }
         eprintln!("[DEBUG] GetKeyboardState result: {}", get_state_result);
 
         // Update keyboard state with manually tracked modifiers
         // (Low-level hooks fire before system state updates)
-        if MODIFIER_SHIFT {
+        if hook_state.modifier_shift.load(Ordering::Acquire) {
             keyboard_state[0x10] = 0x80; // VK_SHIFT
             keyboard_state[0xA0] = 0x80; // VK_LSHIFT
             keyboard_state[0xA1] = 0x80; // VK_RSHIFT
@@ -224,12 +260,12 @@ fn vk_code_to_char(vk_code: u32, kb_struct: KBDLLHOOKSTRUCT, state: &AppState) -
             keyboard_state[0xA0] = 0x00;
             keyboard_state[0xA1] = 0x00;
         }
-        if MODIFIER_CTRL {
+        if hook_state.modifier_ctrl.load(Ordering::Acquire) {
             keyboard_state[0x11] = 0x80; // VK_CONTROL
             keyboard_state[0xA2] = 0x80; // VK_LCONTROL
             keyboard_state[0xA3] = 0x80; // VK_RCONTROL
         }
-        if MODIFIER_ALT {
+        if hook_state.modifier_alt.load(Ordering::Acquire) {
             keyboard_state[0x12] = 0x80; // VK_MENU
         }
 
@@ -267,7 +303,7 @@ fn vk_code_to_char(vk_code: u32, kb_struct: KBDLLHOOKSTRUCT, state: &AppState) -
             buffer.as_mut_ptr(),
             buffer.len() as i32,
             0, // flags
-            hkl.0 as isize,
+            hkl.0 as usize as isize,
         );
 
         eprintln!("[DEBUG] ToUnicodeEx result: {}", result);
@@ -315,29 +351,51 @@ pub fn initialize_text_interception_hook(state: AppState) -> JoinHandle<()> {
                 ) -> HKL;
             }
 
-            // Load keyboard layouts at initialization
+            // Load keyboard layouts at initialization with error checking
             // English (United States) - 0x0409
             let en_layout_name = [0x30, 0x30, 0x30, 0x30, 0x30, 0x34, 0x30, 0x39, 0x00]; // "00000409"
-            ENGLISH_LAYOUT = LoadKeyboardLayoutW(
+            let en_layout = LoadKeyboardLayoutW(
                 PCWSTR(en_layout_name.as_ptr()),
                 0x00000001, // KLF_ACTIVATE
             );
+            if en_layout.0.is_null() {
+                eprintln!("[HOOK] Failed to load English keyboard layout");
+                return;
+            }
 
             // Russian - 0x0419
             let ru_layout_name = [0x30, 0x30, 0x30, 0x30, 0x30, 0x34, 0x31, 0x39, 0x00]; // "00000419"
-            RUSSIAN_LAYOUT = LoadKeyboardLayoutW(
+            let ru_layout = LoadKeyboardLayoutW(
                 PCWSTR(ru_layout_name.as_ptr()),
                 0x00000001, // KLF_ACTIVATE
             );
+            if ru_layout.0.is_null() {
+                eprintln!("[HOOK] Failed to load Russian keyboard layout");
+                return;
+            }
 
             // Log layout handles (avoid direct reference to mutable static)
-            let en_hkl = ENGLISH_LAYOUT.0 as usize;
-            let ru_hkl = RUSSIAN_LAYOUT.0 as usize;
+            let en_hkl = en_layout.0 as usize;
+            let ru_hkl = ru_layout.0 as usize;
             eprintln!("Keyboard layouts loaded: EN={:#x}, RU={:#x}", en_hkl, ru_hkl);
 
-            HOOK_STATE = Some(state.clone());
+            // Store layouts and state in thread-safe global
+            if let Some(mut hook_state) = HOOK_STATE.try_lock() {
+                *hook_state.english_layout.get() = en_layout;
+                *hook_state.russian_layout.get() = ru_layout;
+                hook_state.app_state = Some(state);
+            } else {
+                eprintln!("[HOOK] Failed to acquire lock for hook state initialization");
+                return;
+            }
 
-            let module_handle = GetModuleHandleW(PCWSTR::null()).unwrap();
+            let module_handle = match GetModuleHandleW(PCWSTR::null()) {
+                Ok(h) => h,
+                Err(e) => {
+                    eprintln!("Failed to get module handle: {}", e);
+                    return;
+                }
+            };
 
             let hook_result = SetWindowsHookExW(
                 WH_KEYBOARD_LL,
