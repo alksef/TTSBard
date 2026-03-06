@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebViewSettings {
     pub enabled: bool,
+    pub start_on_boot: bool,
     pub port: u16,
     pub bind_address: String,
     pub html_template: String,
@@ -22,6 +23,7 @@ impl Default for WebViewSettings {
     fn default() -> Self {
         Self {
             enabled: false,
+            start_on_boot: false,
             port: 10100,
             bind_address: "0.0.0.0".to_string(),
             html_template: default_html(),

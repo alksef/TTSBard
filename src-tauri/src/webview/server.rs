@@ -5,6 +5,8 @@ use super::{
 };
 use axum::{
     extract::State,
+    http::header,
+    response::IntoResponse,
     routing::get,
     Router,
 };
@@ -84,7 +86,12 @@ fn render_html(settings: &WebViewSettings) -> String {
 
 async fn index(
     State((_broadcast_tx, settings)): State<(WsBroadcast, Arc<RwLock<WebViewSettings>>)>,
-) -> String {
+) -> impl IntoResponse {
     let s = settings.read().await;
-    render_html(&s)
+    let html = render_html(&s);
+
+    (
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        html,
+    ).into_response()
 }

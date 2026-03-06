@@ -42,6 +42,9 @@ pub struct AppState {
     /// Отправитель событий для MPSC канала
     pub event_sender: Arc<Mutex<Option<Sender<AppEvent>>>>,
 
+    /// Отправитель событий для WebView сервера
+    pub webview_event_sender: Arc<Mutex<Option<Sender<AppEvent>>>>,
+
     /// Включен ли режим перехвата
     pub interception_enabled: Arc<Mutex<bool>>,
 
@@ -106,6 +109,7 @@ impl AppState {
 
         Self {
             event_sender: Arc::new(Mutex::new(None)),
+            webview_event_sender: Arc::new(Mutex::new(None)),
             interception_enabled: Arc::new(Mutex::new(false)),
             current_text: Arc::new(Mutex::new(String::new())),
             current_layout: Arc::new(Mutex::new(InputLayout::Russian)),
@@ -135,15 +139,52 @@ impl AppState {
     }
 
     pub fn emit_event(&self, event: AppEvent) {
+        eprintln!("[STATE_EMIT] Called with: {:?}", std::mem::discriminant(&event));
+        // Send to main event channel
         if let Ok(es) = self.event_sender.lock() {
             if let Some(ref sender) = *es {
-                let _ = sender.send(event);
+                let _ = sender.send(event.clone());
+            }
+        }
+
+        // Also send to WebView channel if it's a TextSentToTts event
+        if matches!(event, AppEvent::TextSentToTts(_)) {
+            if let Ok(wes) = self.webview_event_sender.lock() {
+                if let Some(ref sender) = *wes {
+                    eprintln!("[STATE] [OK] Forwarding TextSentToTts to WebView channel");
+                    match sender.send(event) {
+                        Ok(_) => eprintln!("[STATE] [OK] TextSentToTts sent to WebView successfully"),
+                        Err(e) => eprintln!("[STATE] [X] Failed to send to WebView: {:?}", e),
+                    }
+                } else {
+                    eprintln!("[STATE] [X] WebView sender is None");
+                }
+            } else {
+                eprintln!("[STATE] [X] Failed to lock webview_event_sender");
             }
         }
     }
 
     pub fn get_event_sender(&self) -> Option<Sender<AppEvent>> {
         self.event_sender.lock().ok().and_then(|es| es.clone())
+    }
+
+    pub fn set_webview_event_sender(&self, sender: Sender<AppEvent>) {
+        eprintln!("[STATE] Storing WebView event sender");
+        if let Ok(mut wes) = self.webview_event_sender.lock() {
+            *wes = Some(sender);
+        }
+    }
+
+    pub fn send_webview_event(&self, event: AppEvent) {
+        if let Ok(wes) = self.webview_event_sender.lock() {
+            if let Some(ref sender) = *wes {
+                eprintln!("[STATE] Sending event to WebView: {:?}", event);
+                let _ = sender.send(event);
+            } else {
+                eprintln!("[STATE] WARNING: WebView event sender not set!");
+            }
+        }
     }
 
     pub fn is_interception_enabled(&self) -> bool {
@@ -232,7 +273,7 @@ impl AppState {
 
         if let Ok(mut providers) = self.tts_providers.lock() {
             *providers = Some(TtsProvider::OpenAi(tts));
-            eprintln!("[STATE] TTS provider set to OpenAI");
+            eprintln!("[STATE] TTS provider set to OpenAi");
         } else {
             eprintln!("[STATE] ERROR: Failed to acquire providers lock");
         }
@@ -252,13 +293,18 @@ impl AppState {
     }
 
     pub fn init_silero_tts(&self, telegram_client_arc: Arc<tokio::sync::Mutex<Option<TelegramClient>>>) {
+        eprintln!("[STATE] Initializing Silero TTS...");
+
         // Создаём SileroTts с Arc на Telegram клиент
         // SileroTts будет извлекать клиент при необходимости
         let mut tts = SileroTts::with_telegram_client(telegram_client_arc);
 
         // Add event sender if available
         if let Some(event_tx) = self.get_event_sender() {
+            eprintln!("[STATE] [OK] Adding event_tx to SileroTts");
             tts = tts.with_event_tx(event_tx);
+        } else {
+            eprintln!("[STATE] [X] No event_tx available, SileroTts will not send events");
         }
 
         eprintln!("[STATE] Created SileroTts with Telegram client Arc");
