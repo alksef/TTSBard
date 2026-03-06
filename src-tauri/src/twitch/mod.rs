@@ -35,12 +35,18 @@ impl TwitchSettings {
         if self.token.is_empty() {
             return Err("Token cannot be empty".to_string());
         }
-        if !self.token.starts_with("oauth:") {
-            return Err("Token must start with 'oauth:'".to_string());
-        }
         if self.channel.is_empty() {
             return Err("Channel cannot be empty".to_string());
         }
         Ok(())
+    }
+
+    /// Возвращает токен с префиксом oauth: для IRC
+    pub fn irc_token(&self) -> String {
+        if self.token.starts_with("oauth:") {
+            self.token.clone()
+        } else {
+            format!("oauth:{}", self.token)
+        }
     }
 }
