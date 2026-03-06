@@ -1,5 +1,6 @@
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use tokio::sync::broadcast;
 use crate::events::{AppEvent, InputLayout, TwitchEvent, TwitchEventSender};
 use crate::tts::{TtsProvider, TtsProviderType, openai::OpenAiTts, local::LocalTts, silero::SileroTts};
@@ -26,6 +27,15 @@ fn load_initial_webview_settings() -> WebViewSettings {
         }
     }
 }
+
+/// Lock ordering hierarchy (to prevent deadlocks):
+/// 1. tts_providers
+/// 2. openai_api_key
+/// 3. event_sender
+/// 4. webview_event_sender
+/// 5. All other individual setting locks
+///
+/// IMPORTANT: Always acquire locks in this order to prevent deadlocks!
 
 /// Активное плавающее окно
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -148,102 +158,80 @@ impl AppState {
     }
 
     pub fn set_event_sender(&self, sender: Sender<AppEvent>) {
-        if let Ok(mut es) = self.event_sender.lock() {
-            *es = Some(sender);
-        }
+        *self.event_sender.lock() = Some(sender);
     }
 
     pub fn emit_event(&self, event: AppEvent) {
         eprintln!("[STATE_EMIT] Called with: {:?}", std::mem::discriminant(&event));
         // Send to main event channel
-        if let Ok(es) = self.event_sender.lock() {
-            if let Some(ref sender) = *es {
-                let _ = sender.send(event.clone());
-            }
+        if let Some(ref sender) = *self.event_sender.lock() {
+            let _ = sender.send(event.clone());
         }
 
         // Also send to WebView channel if it's a TextSentToTts event
         if matches!(event, AppEvent::TextSentToTts(_)) {
-            if let Ok(wes) = self.webview_event_sender.lock() {
-                if let Some(ref sender) = *wes {
-                    eprintln!("[STATE] [OK] Forwarding TextSentToTts to WebView channel");
-                    match sender.send(event) {
-                        Ok(_) => eprintln!("[STATE] [OK] TextSentToTts sent to WebView successfully"),
-                        Err(e) => eprintln!("[STATE] [X] Failed to send to WebView: {:?}", e),
-                    }
-                } else {
-                    eprintln!("[STATE] [X] WebView sender is None");
+            if let Some(ref sender) = *self.webview_event_sender.lock() {
+                eprintln!("[STATE] [OK] Forwarding TextSentToTts to WebView channel");
+                match sender.send(event) {
+                    Ok(_) => eprintln!("[STATE] [OK] TextSentToTts sent to WebView successfully"),
+                    Err(e) => eprintln!("[STATE] [X] Failed to send to WebView: {:?}", e),
                 }
             } else {
-                eprintln!("[STATE] [X] Failed to lock webview_event_sender");
+                eprintln!("[STATE] [X] WebView sender is None");
             }
         }
     }
 
     pub fn get_event_sender(&self) -> Option<Sender<AppEvent>> {
-        self.event_sender.lock().ok().and_then(|es| es.clone())
+        self.event_sender.lock().clone()
     }
 
     pub fn set_webview_event_sender(&self, sender: Sender<AppEvent>) {
         eprintln!("[STATE] Storing WebView event sender");
-        if let Ok(mut wes) = self.webview_event_sender.lock() {
-            *wes = Some(sender);
-        }
+        *self.webview_event_sender.lock() = Some(sender);
     }
 
     pub fn send_webview_event(&self, event: AppEvent) {
-        if let Ok(wes) = self.webview_event_sender.lock() {
-            if let Some(ref sender) = *wes {
-                eprintln!("[STATE] Sending event to WebView: {:?}", event);
-                let _ = sender.send(event);
-            } else {
-                eprintln!("[STATE] WARNING: WebView event sender not set!");
-            }
+        if let Some(ref sender) = *self.webview_event_sender.lock() {
+            eprintln!("[STATE] Sending event to WebView: {:?}", event);
+            let _ = sender.send(event);
+        } else {
+            eprintln!("[STATE] WARNING: WebView event sender not set!");
         }
     }
 
     pub fn is_interception_enabled(&self) -> bool {
-        self.interception_enabled.lock().map(|v| *v).unwrap_or(false)
+        *self.interception_enabled.lock()
     }
 
     pub fn set_interception_enabled(&self, enabled: bool) {
-        if let Ok(mut val) = self.interception_enabled.lock() {
-            *val = enabled;
-        }
+        *self.interception_enabled.lock() = enabled;
         self.emit_event(AppEvent::InterceptionChanged(enabled));
     }
 
     pub fn get_current_text(&self) -> String {
-        self.current_text.lock().map(|v| v.clone()).unwrap_or_default()
+        self.current_text.lock().clone()
     }
 
     #[allow(dead_code)]
     pub fn set_current_text(&self, text: String) {
-        if let Ok(mut val) = self.current_text.lock() {
-            *val = text;
-        }
+        *self.current_text.lock() = text;
     }
 
     pub fn append_text(&self, ch: char) {
-        if let Ok(mut text) = self.current_text.lock() {
-            text.push(ch);
-        }
+        self.current_text.lock().push(ch);
     }
 
     pub fn remove_last_char(&self) {
-        if let Ok(mut text) = self.current_text.lock() {
-            text.pop();
-        }
+        self.current_text.lock().pop();
     }
 
     pub fn clear_text(&self) {
-        if let Ok(mut text) = self.current_text.lock() {
-            text.clear();
-        }
+        self.current_text.lock().clear();
     }
 
     pub fn get_current_layout(&self) -> InputLayout {
-        *self.current_layout.lock().unwrap()
+        *self.current_layout.lock()
     }
 
     pub fn toggle_layout(&self) -> InputLayout {
@@ -253,22 +241,18 @@ impl AppState {
             InputLayout::Russian => InputLayout::English,
         };
 
-        if let Ok(mut layout) = self.current_layout.lock() {
-            *layout = new_layout;
-        }
+        *self.current_layout.lock() = new_layout;
 
         self.emit_event(AppEvent::LayoutChanged(new_layout));
         new_layout
     }
 
     pub fn get_tts_provider_type(&self) -> TtsProviderType {
-        *self.tts_provider_type.lock().unwrap()
+        *self.tts_provider_type.lock()
     }
 
     pub fn set_tts_provider_type(&self, provider: TtsProviderType) {
-        if let Ok(mut p) = self.tts_provider_type.lock() {
-            *p = provider;
-        }
+        *self.tts_provider_type.lock() = provider;
         self.emit_event(AppEvent::TtsProviderChanged(provider));
     }
 
@@ -286,12 +270,8 @@ impl AppState {
 
         eprintln!("[STATE] Created OpenAiTts: voice={}, proxy={:?}", voice, tts.get_proxy_host());
 
-        if let Ok(mut providers) = self.tts_providers.lock() {
-            *providers = Some(TtsProvider::OpenAi(tts));
-            eprintln!("[STATE] TTS provider set to OpenAi");
-        } else {
-            eprintln!("[STATE] ERROR: Failed to acquire providers lock");
-        }
+        *self.tts_providers.lock() = Some(TtsProvider::OpenAi(tts));
+        eprintln!("[STATE] TTS provider set to OpenAi");
     }
 
     pub fn init_local_tts(&self) {
@@ -302,9 +282,7 @@ impl AppState {
             tts = tts.with_event_tx(event_tx);
         }
 
-        if let Ok(mut providers) = self.tts_providers.lock() {
-            *providers = Some(TtsProvider::Local(tts));
-        }
+        *self.tts_providers.lock() = Some(TtsProvider::Local(tts));
     }
 
     pub fn init_silero_tts(&self, telegram_client_arc: Arc<tokio::sync::Mutex<Option<TelegramClient>>>) {
@@ -323,144 +301,135 @@ impl AppState {
         }
 
         eprintln!("[STATE] Created SileroTts with Telegram client Arc");
-        if let Ok(mut providers) = self.tts_providers.lock() {
-            *providers = Some(TtsProvider::Silero(tts));
-            eprintln!("[STATE] TTS provider set to Silero");
-        } else {
-            eprintln!("[STATE] ERROR: Failed to acquire providers lock");
-        }
+        *self.tts_providers.lock() = Some(TtsProvider::Silero(tts));
+        eprintln!("[STATE] TTS provider set to Silero");
     }
 
     pub fn get_openai_voice(&self) -> String {
-        self.openai_voice.lock().unwrap().clone()
+        self.openai_voice.lock().clone()
     }
 
+    /// Set OpenAI voice with deadlock prevention using phased locking
     pub fn set_openai_voice(&self, voice: String) {
-        if let Ok(mut v) = self.openai_voice.lock() {
-            *v = voice.clone();
-        }
-        // Reinitialize if OpenAI is current
-        if let Ok(api_key) = self.openai_api_key.lock() {
-            if let Some(key) = api_key.as_ref() {
-                let mut tts = OpenAiTts::new(key.clone());
-                tts.set_voice(voice.clone());
-                tts.set_proxy(self.get_openai_proxy_host(), self.get_openai_proxy_port());
+        // Phase 1: Collect all needed data with minimal locks (in hierarchy order)
+        let (api_key, event_tx, current_provider) = {
+            let api_key = self.openai_api_key.lock().clone();
+            let event_tx = self.get_event_sender();
+            let provider = self.tts_providers.lock().clone();
+            (api_key, event_tx, provider)
+        };
 
-                // Add event sender if available
-                if let Some(event_tx) = self.get_event_sender() {
-                    tts = tts.with_event_tx(event_tx);
-                }
+        // Phase 2: Reinitialize if needed
+        if let Some(key) = api_key {
+            let mut tts = OpenAiTts::new(key);
+            tts.set_voice(voice.clone());
+            tts.set_proxy(self.get_openai_proxy_host(), self.get_openai_proxy_port());
 
-                if let Ok(mut providers) = self.tts_providers.lock() {
-                    if matches!(providers.as_ref(), Some(TtsProvider::OpenAi(_))) {
-                        *providers = Some(TtsProvider::OpenAi(tts));
-                    }
-                }
+            if let Some(tx) = event_tx {
+                tts = tts.with_event_tx(tx);
+            }
+
+            if matches!(current_provider.as_ref(), Some(TtsProvider::OpenAi(_))) {
+                *self.tts_providers.lock() = Some(TtsProvider::OpenAi(tts));
             }
         }
+
+        // Phase 3: Update voice setting (move instead of clone)
+        *self.openai_voice.lock() = voice;
     }
 
     pub fn get_openai_proxy_host(&self) -> Option<String> {
-        self.openai_proxy_host.lock().unwrap().clone()
+        self.openai_proxy_host.lock().clone()
     }
 
     pub fn get_openai_proxy_port(&self) -> Option<u16> {
-        *self.openai_proxy_port.lock().unwrap()
+        *self.openai_proxy_port.lock()
     }
 
+    /// Set OpenAI proxy with deadlock prevention using phased locking
     pub fn set_openai_proxy(&self, host: Option<String>, port: Option<u16>) {
-        if let Ok(mut h) = self.openai_proxy_host.lock() {
-            *h = host.clone();
-        }
-        if let Ok(mut p) = self.openai_proxy_port.lock() {
-            *p = port;
-        }
-        // Reinitialize if OpenAI is current
-        if let Ok(api_key) = self.openai_api_key.lock() {
-            if let Some(key) = api_key.as_ref() {
-                let mut tts = OpenAiTts::new(key.clone());
-                tts.set_voice(self.get_openai_voice());
-                tts.set_proxy(host, port);
+        // Phase 1: Collect all needed data with minimal locks (in hierarchy order)
+        let (api_key, voice, event_tx, current_provider) = {
+            let api_key = self.openai_api_key.lock().clone();
+            let voice = self.openai_voice.lock().clone();
+            let event_tx = self.get_event_sender();
+            let provider = self.tts_providers.lock().clone();
+            (api_key, voice, event_tx, provider)
+        };
 
-                // Add event sender if available
-                if let Some(event_tx) = self.get_event_sender() {
-                    tts = tts.with_event_tx(event_tx);
-                }
+        // Phase 2: Reinitialize if needed
+        if let Some(key) = api_key {
+            let mut tts = OpenAiTts::new(key);
+            tts.set_voice(voice.clone());
+            tts.set_proxy(host.clone(), port);
 
-                if let Ok(mut providers) = self.tts_providers.lock() {
-                    if matches!(providers.as_ref(), Some(TtsProvider::OpenAi(_))) {
-                        *providers = Some(TtsProvider::OpenAi(tts));
-                    }
-                }
+            if let Some(tx) = event_tx {
+                tts = tts.with_event_tx(tx);
+            }
+
+            if matches!(current_provider.as_ref(), Some(TtsProvider::OpenAi(_))) {
+                *self.tts_providers.lock() = Some(TtsProvider::OpenAi(tts));
             }
         }
+
+        // Phase 3: Update proxy settings
+        *self.openai_proxy_host.lock() = host;
+        *self.openai_proxy_port.lock() = port;
     }
 
     pub fn get_local_tts_url(&self) -> String {
-        self.local_tts_url.lock().unwrap().clone()
+        self.local_tts_url.lock().clone()
     }
 
     pub fn set_local_tts_url(&self, url: String) {
-        if let Ok(mut u) = self.local_tts_url.lock() {
-            *u = url;
-        }
+        *self.local_tts_url.lock() = url;
     }
 
     pub fn get_floating_opacity(&self) -> u8 {
-        *self.floating_opacity.lock().unwrap()
+        *self.floating_opacity.lock()
     }
 
     pub fn set_floating_opacity(&self, value: u8) {
-        if let Ok(mut val) = self.floating_opacity.lock() {
-            *val = value.clamp(10, 100);
-        }
+        *self.floating_opacity.lock() = value.clamp(10, 100);
         self.emit_event(AppEvent::FloatingAppearanceChanged);
     }
 
     pub fn get_floating_bg_color(&self) -> String {
-        self.floating_bg_color.lock().unwrap().clone()
+        self.floating_bg_color.lock().clone()
     }
 
     pub fn set_floating_bg_color(&self, color: String) {
-        if let Ok(mut val) = self.floating_bg_color.lock() {
-            *val = color;
-        }
+        *self.floating_bg_color.lock() = color;
         self.emit_event(AppEvent::FloatingAppearanceChanged);
     }
 
     pub fn is_clickthrough_enabled(&self) -> bool {
-        *self.floating_clickthrough.lock().unwrap()
+        *self.floating_clickthrough.lock()
     }
 
     pub fn set_clickthrough(&self, enabled: bool) {
-        if let Ok(mut val) = self.floating_clickthrough.lock() {
-            *val = enabled;
-        }
+        *self.floating_clickthrough.lock() = enabled;
     }
 
     pub fn is_hotkey_enabled(&self) -> bool {
-        *self.hotkey_enabled.lock().unwrap()
+        *self.hotkey_enabled.lock()
     }
 
     pub fn set_hotkey_enabled(&self, enabled: bool) {
-        if let Ok(mut v) = self.hotkey_enabled.lock() {
-            *v = enabled;
-        }
+        *self.hotkey_enabled.lock() = enabled;
     }
 
     pub fn is_floating_exclude_from_recording(&self) -> bool {
-        *self.floating_exclude_from_recording.lock().unwrap()
+        *self.floating_exclude_from_recording.lock()
     }
 
     pub fn set_floating_exclude_from_recording(&self, value: bool) {
-        if let Ok(mut val) = self.floating_exclude_from_recording.lock() {
-            *val = value;
-        }
+        *self.floating_exclude_from_recording.lock() = value;
     }
 
     /// Get or create preprocessor instance
     pub fn get_preprocessor(&self) -> Option<TextPreprocessor> {
-        let mut prep = self.preprocessor.lock().ok()?;
+        let mut prep = self.preprocessor.lock();
         if prep.is_none() {
             *prep = TextPreprocessor::load_from_files().ok();
         }
@@ -469,32 +438,26 @@ impl AppState {
 
     /// Reload preprocessor (call when settings change)
     pub fn reload_preprocessor(&self) {
-        if let Ok(mut prep) = self.preprocessor.lock() {
-            *prep = TextPreprocessor::load_from_files().ok();
-        }
+        *self.preprocessor.lock() = TextPreprocessor::load_from_files().ok();
     }
 
     /// Check if Enter key closes is disabled (F6 mode)
     pub fn is_enter_closes_disabled(&self) -> bool {
-        self.enter_closes_disabled.lock().map(|v| *v).unwrap_or(false)
+        *self.enter_closes_disabled.lock()
     }
 
     /// Set Enter closes disabled mode (F6 mode)
     pub fn set_enter_closes_disabled(&self, disabled: bool) {
-        if let Ok(mut val) = self.enter_closes_disabled.lock() {
-            *val = disabled;
-        }
+        *self.enter_closes_disabled.lock() = disabled;
         self.emit_event(AppEvent::EnterClosesDisabled(disabled));
     }
 
     /// Toggle Enter closes disabled mode (F6 mode) - returns new state
     pub fn toggle_enter_closes_disabled(&self) -> bool {
-        let new_state = if let Ok(mut val) = self.enter_closes_disabled.lock() {
-            *val = !*val;
-            *val
-        } else {
-            false
-        };
+        let mut val = self.enter_closes_disabled.lock();
+        *val = !*val;
+        let new_state = *val;
+        drop(val);
         self.emit_event(AppEvent::EnterClosesDisabled(new_state));
         new_state
     }
@@ -503,14 +466,12 @@ impl AppState {
 
     /// Получить текущее активное окно
     pub fn get_active_window(&self) -> ActiveWindow {
-        *self.active_window.lock().unwrap()
+        *self.active_window.lock()
     }
 
     /// Установить активное окно
     pub fn set_active_window(&self, window: ActiveWindow) {
-        if let Ok(mut val) = self.active_window.lock() {
-            *val = window;
-        }
+        *self.active_window.lock() = window;
     }
 
     /// Проверить, активен ли floating (видим + interception_enabled)

@@ -13,6 +13,8 @@ mod preprocessor;
 mod telegram;
 mod webview;
 mod twitch;
+mod rate_limiter;
+mod thread_manager;
 
 use std::sync::mpsc;
 use std::thread;
@@ -574,9 +576,7 @@ pub fn run() {
 
                     // Helper function to update status in AppState and emit events
                     let update_status = |status: crate::events::TwitchConnectionStatus| {
-                        if let Ok(mut s) = app_state_for_twitch_arc.twitch_connection_status.lock() {
-                            *s = status.clone();
-                        }
+                        *app_state_for_twitch_arc.twitch_connection_status.lock() = status.clone();
                         let _ = app_handle_for_twitch.emit("twitch-status-changed", &status);
                     };
 
@@ -917,18 +917,14 @@ fn handle_event(event: AppEvent, state: &AppState, app_handle: &tauri::AppHandle
             eprintln!("[EVENT] Text sent to TTS: '{}'", text);
 
             // WebView broadcast (существует)
-            if let Ok(wes) = state.webview_event_sender.lock() {
-                if let Some(ref sender) = *wes {
-                    eprintln!("[EVENT] Forwarding TextSentToTts to WebView server");
-                    match sender.send(AppEvent::TextSentToTts(text.clone())) {
-                        Ok(_) => eprintln!("[EVENT] TextSentToTts sent to WebView successfully"),
-                        Err(e) => eprintln!("[EVENT] Failed to send to WebView: {}", e),
-                    }
-                } else {
-                    eprintln!("[EVENT] WebView sender is None, not forwarding");
+            if let Some(ref sender) = *state.webview_event_sender.lock() {
+                eprintln!("[EVENT] Forwarding TextSentToTts to WebView server");
+                match sender.send(AppEvent::TextSentToTts(text.clone())) {
+                    Ok(_) => eprintln!("[EVENT] TextSentToTts sent to WebView successfully"),
+                    Err(e) => eprintln!("[EVENT] Failed to send to WebView: {}", e),
                 }
             } else {
-                eprintln!("[EVENT] Failed to lock webview_event_sender");
+                eprintln!("[EVENT] WebView sender is None, not forwarding");
             }
 
             // Twitch send (новое)

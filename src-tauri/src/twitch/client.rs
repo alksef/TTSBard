@@ -15,6 +15,64 @@ pub enum TwitchStatus {
     Error(String),
 }
 
+/// Sanitize text for IRC to prevent injection attacks
+fn sanitize_irc_text(text: &str) -> String {
+    // Remove ALL CRLF characters first
+    let clean = text
+        .replace('\r', "")
+        .replace('\n', " ");
+
+    // Remove null bytes and other control characters except space
+    let clean: String = clean
+        .chars()
+        .filter(|c| c.is_ascii_graphic() || *c == ' ')
+        .collect();
+
+    // Trim and limit to 500 chars BEFORE trimming
+    let clean = clean.trim();
+    if clean.len() > 500 {
+        clean[..500].trim().to_string()
+    } else {
+        clean.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_irc_crlf_injection_prevention() {
+        // CRLF injection
+        let result = sanitize_irc_text("Hello\r\nPRIVMSG #test :injected");
+        assert_eq!(result, "Hello PRIVMSG #test :injected");
+        assert!(!result.contains('\r'));
+        assert!(!result.contains('\n'));
+    }
+
+    #[test]
+    fn test_irc_null_byte_prevention() {
+        // Null byte
+        let result = sanitize_irc_text("Test\0Null");
+        assert_eq!(result, "TestNull");
+    }
+
+    #[test]
+    fn test_irc_length_limit() {
+        // Length limit
+        let long = "a".repeat(600);
+        let result = sanitize_irc_text(&long);
+        assert!(result.len() <= 500);
+    }
+
+    #[test]
+    fn test_irc_control_characters_removed() {
+        // Control characters
+        let result = sanitize_irc_text("Test\x01\x02Text");
+        assert_eq!(result, "TestText");
+    }
+}
+
 /// Twitch IRC клиент
 pub struct TwitchClient {
     settings: TwitchSettings,
@@ -47,7 +105,14 @@ impl TwitchClient {
         let tcp_stream = TcpStream::connect("irc.chat.twitch.tv:6697").await?;
         eprintln!("[TWITCH] TCP connected");
 
-        let connector = TlsConnector::from(native_tls::TlsConnector::builder().build().unwrap());
+        // Explicit TLS configuration with certificate validation
+        let connector = TlsConnector::from(
+            native_tls::TlsConnector::builder()
+                .danger_accept_invalid_certs(false)
+                .danger_accept_invalid_hostnames(false)
+                .build()
+                .map_err(|e| format!("Failed to build TLS connector: {}", e))?
+        );
         let tls_stream = connector.connect("irc.chat.twitch.tv", tcp_stream).await?;
         eprintln!("[TWITCH] TLS connected");
 
@@ -169,19 +234,10 @@ impl TwitchClient {
         }
         drop(status);
 
-        // Очистка текста для IRC
-        let clean_text = text
-            .replace('\n', " ")
-            .replace('\r', " ")
-            .trim()
-            .to_string();
+        // Sanitize text for IRC to prevent injection
+        let clean_text = sanitize_irc_text(text);
 
-        // Ограничение 500 символов
-        let clean_text = if clean_text.len() > 500 {
-            &clean_text[..500]
-        } else {
-            &clean_text
-        };
+        eprintln!("[TWITCH] Sanitized message: '{}'", clean_text);
 
         let message = format!("PRIVMSG #{} :{}\r\n", self.settings.channel, clean_text);
 

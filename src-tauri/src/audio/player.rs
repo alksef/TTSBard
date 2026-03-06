@@ -1,6 +1,7 @@
 //! Audio Player
 //!
 //! Плеер с поддержкой воспроизведения на два устройства одновременно
+//! Uses Arc for efficient data sharing between multiple outputs
 
 use cpal::traits::{DeviceTrait, HostTrait};
 use std::io::Cursor;
@@ -29,6 +30,7 @@ impl AudioPlayer {
     }
 
     /// Воспроизвести MP3 данные асинхронно на одно или два устройства
+    /// Uses Arc to share audio data efficiently between multiple outputs
     pub fn play_mp3_async_dual(
         &mut self,
         mp3_data: Vec<u8>,
@@ -51,14 +53,17 @@ impl AudioPlayer {
         eprintln!("[AUDIO_PLAYER] Speaker volume: {:.0}%, Virtual mic volume: {:.0}%",
             speaker_vol * 100.0, mic_vol * 100.0);
 
+        // Use Arc to share audio data efficiently (cheap Arc clone instead of expensive Vec clone)
+        let shared_data = Arc::new(mp3_data);
+
         // Запускаем воспроизведение на динамике
         if let Some(config) = speaker_config {
             let stop_flag = self.stop_flag.clone();
-            let mp3_data_clone = mp3_data.clone();
+            let data = Arc::clone(&shared_data);  // Cheap Arc clone, not Vec clone
 
             thread::spawn(move || {
                 eprintln!("[AUDIO_PLAYER] Speaker thread started");
-                if let Err(e) = Self::play_to_device(stop_flag, mp3_data_clone, config, "Speaker") {
+                if let Err(e) = Self::play_to_device(stop_flag, data, config, "Speaker") {
                     eprintln!("[AUDIO_PLAYER] Speaker playback error: {}", e);
                 }
                 eprintln!("[AUDIO_PLAYER] Speaker thread finished");
@@ -68,10 +73,11 @@ impl AudioPlayer {
         // Запускаем воспроизведение на виртуальном микрофоне
         if let Some(config) = virtual_mic_config {
             let stop_flag = self.stop_flag.clone();
+            let data = Arc::clone(&shared_data);  // Cheap Arc clone, not Vec clone
 
             thread::spawn(move || {
                 eprintln!("[AUDIO_PLAYER] Virtual mic thread started");
-                if let Err(e) = Self::play_to_device(stop_flag, mp3_data, config, "Virtual Mic") {
+                if let Err(e) = Self::play_to_device(stop_flag, data, config, "Virtual Mic") {
                     eprintln!("[AUDIO_PLAYER] Virtual mic playback error: {}", e);
                 }
                 eprintln!("[AUDIO_PLAYER] Virtual mic thread finished");
@@ -84,7 +90,7 @@ impl AudioPlayer {
     /// Воспроизвести на конкретном устройстве (в отдельном потоке)
     fn play_to_device(
         stop_flag: Arc<AtomicBool>,
-        mp3_data: Vec<u8>,
+        mp3_data: Arc<Vec<u8>>,  // Use Arc instead of Vec for efficiency
         config: OutputConfig,
         device_label: &str,
     ) -> Result<(), String> {
@@ -115,8 +121,8 @@ impl AudioPlayer {
         let (_stream, stream_handle) = rodio::OutputStream::try_from_device(&device)
             .map_err(|e| format!("Failed to create output stream: {}", e))?;
 
-        // Декодируем MP3 из байтов
-        let cursor = Cursor::new(mp3_data);
+        // Декодируем MP3 из байтов (Arc::into_inner is not needed here as Cursor can take Arc<Vec<u8>>)
+        let cursor = Cursor::new((*mp3_data).clone());  // Dereference Arc to get &Vec<u8>
         let source = rodio::Decoder::new(cursor)
             .map_err(|e| format!("Failed to decode audio: {}", e))?;
 

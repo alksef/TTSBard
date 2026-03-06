@@ -417,7 +417,7 @@ impl SettingsManager {
 
         // API ключ OpenAI
         eprintln!("[SETTINGS] OpenAI API Key: {}", settings.openai_api_key.as_ref().map(|k| format!("{}...", &k[..7])).unwrap_or("None".to_string()));
-        *state.openai_api_key.lock().unwrap() = settings.openai_api_key.clone();
+        *state.openai_api_key.lock() = settings.openai_api_key.clone();
 
         // Голос OpenAI
         eprintln!("[SETTINGS] OpenAI Voice: {}", settings.openai_voice);
@@ -492,19 +492,19 @@ impl SettingsManager {
         // state.set_interception_enabled(settings.interception_enabled);
 
         // Плавающее окно - прозрачность
-        *state.floating_opacity.lock().unwrap() = settings.floating_opacity;
+        *state.floating_opacity.lock() = settings.floating_opacity;
 
         // Плавающее окно - цвет фона
-        *state.floating_bg_color.lock().unwrap() = settings.floating_bg_color.clone();
+        *state.floating_bg_color.lock() = settings.floating_bg_color.clone();
 
         // Плавающее окно - clickthrough
-        *state.floating_clickthrough.lock().unwrap() = settings.floating_clickthrough;
+        *state.floating_clickthrough.lock() = settings.floating_clickthrough;
 
         // Вызов по горячей клавише
-        *state.hotkey_enabled.lock().unwrap() = settings.hotkey_enabled;
+        *state.hotkey_enabled.lock() = settings.hotkey_enabled;
 
         // Плавающее окно - исключение из записи экрана
-        *state.floating_exclude_from_recording.lock().unwrap() = settings.floating_exclude_from_recording;
+        *state.floating_exclude_from_recording.lock() = settings.floating_exclude_from_recording;
 
         eprintln!("[SETTINGS] Settings applied successfully");
     }
@@ -512,7 +512,7 @@ impl SettingsManager {
     pub fn load_from_state(state: &AppState) -> AppSettings {
         AppSettings {
             tts_provider: state.get_tts_provider_type(),
-            openai_api_key: state.openai_api_key.lock().unwrap().clone(),
+            openai_api_key: state.openai_api_key.lock().clone(),
             openai_voice: state.get_openai_voice(),
             openai_proxy_host: state.get_openai_proxy_host(),
             openai_proxy_port: state.get_openai_proxy_port(),

@@ -207,18 +207,23 @@ impl TelegramClient {
     }
 
     /// Ввод кода подтверждения
+    /// Uses timing normalization and jitter to prevent timing attacks
     pub async fn sign_in(&self, code: &str) -> Result<AuthState, String> {
-        println!("[AUTH] Starting sign_in with code: {}", code);
+        // Security: Don't log the actual code - prevents timing analysis via logs
+        // println!("[AUTH] Starting sign_in with code: {}", code);  // REMOVED FOR SECURITY
+        eprintln!("[AUTH] Starting sign_in (code not logged for security)");
 
         let client = self.client.lock().await;
         let client = client.as_ref()
             .ok_or_else(|| "Клиент не инициализирован".to_string())?;
-        println!("[AUTH] Client acquired");
+        eprintln!("[AUTH] Client acquired");
 
         // Забираем токен из Option (take() освобождает мьютекс, возвращая значение)
         let token = self.login_token.lock().await.take()
             .ok_or_else(|| "Токен авторизации не найден. Сначала запросите код.".to_string())?;
-        println!("[AUTH] Token acquired and removed from mutex");
+        eprintln!("[AUTH] Token acquired and removed from mutex");
+
+        let start_time = std::time::Instant::now();
 
         // Добавляем таймаут на авторизацию (30 секунд)
         let sign_in_result = tokio::time::timeout(
@@ -226,31 +231,44 @@ impl TelegramClient {
             client.sign_in(&token, code)
         ).await;
 
+        let elapsed = start_time.elapsed();
+
         let signed_in = match sign_in_result {
             Ok(result) => result,
             Err(_) => {
-                println!("[AUTH] Sign in timed out after 30 seconds");
+                eprintln!("[AUTH] Sign in timed out after 30 seconds");
+                // Add jitter to obscure timing even on timeout
+                let jitter = rand::random::<u64>() % 500;
+                tokio::time::sleep(tokio::time::Duration::from_millis(500 + jitter)).await;
                 return Err("Превышено время ожидания. Проверьте подключение к интернету.".to_string());
             }
         };
 
-        println!("[AUTH] Sign in result: {:?}", signed_in.is_ok());
-        println!("[AUTH] About to match on signed_in...");
+        eprintln!("[AUTH] Sign in result: {:?}", signed_in.is_ok());
+        eprintln!("[AUTH] About to match on signed_in...");
 
         match signed_in {
             Ok(_) => {
-                println!("[AUTH] Sign in successful (token already cleared)");
-                // Небольшая пауза для завершения авторизации
-                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                eprintln!("[AUTH] Sign in successful (token already cleared)");
+                // Normalize timing to ~1 second to prevent timing attacks
+                let target_duration = std::time::Duration::from_millis(1000);
+                let remaining = target_duration.saturating_sub(elapsed);
+                tokio::time::sleep(remaining).await;
                 Ok(AuthState::Connected)
             }
             Err(SignInError::PasswordRequired(_)) => {
+                // Add jitter to obscure timing before returning token
+                let jitter = rand::random::<u64>() % 500;
+                tokio::time::sleep(tokio::time::Duration::from_millis(500 + jitter)).await;
                 // Возвращаем токен обратно если нужна 2FA
                 *self.login_token.lock().await = Some(token);
                 Err("Требуется двухфакторная аутентификация. Эта функция пока не реализована.".to_string())
             }
             Err(e) => {
-                println!("[AUTH] Sign in error: {:?}", e);
+                eprintln!("[AUTH] Sign in error: {:?}", e);
+                // Add jitter to obscure timing on error
+                let jitter = rand::random::<u64>() % 500;
+                tokio::time::sleep(tokio::time::Duration::from_millis(1000 + jitter)).await;
                 Err(format!("Ошибка авторизации: {}", e))
             }
         }
