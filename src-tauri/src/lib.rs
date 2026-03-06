@@ -597,6 +597,8 @@ pub fn run() {
                                         last_status = new_status.clone();
 
                                         // Emit via Tauri
+                                        let json = serde_json::to_string(&new_status).unwrap_or_else(|_| "FAILED TO SERIALIZE".to_string());
+                                        eprintln!("[TWITCH] Emitting event with payload: {}", json);
                                         let _ = app_handle_for_twitch.emit("twitch-status-changed", &new_status);
 
                                         // Emit via AppEvent
