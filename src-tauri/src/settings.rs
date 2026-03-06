@@ -91,6 +91,7 @@ impl Default for AppSettings {
 
 impl AppSettings {
     /// Get the webview directory path (config_dir/webview)
+    #[allow(dead_code)]
     pub fn webview_dir(&self) -> PathBuf {
         // Note: This is called on AppSettings instances, not on SettingsManager
         // We need to get the config dir from dirs::config_dir directly
@@ -101,11 +102,13 @@ impl AppSettings {
     }
 
     /// Get the template.html file path
+    #[allow(dead_code)]
     pub fn template_html_path(&self) -> PathBuf {
         self.webview_dir().join("template.html")
     }
 
     /// Get the style.css file path
+    #[allow(dead_code)]
     pub fn style_css_path(&self) -> PathBuf {
         self.webview_dir().join("style.css")
     }
