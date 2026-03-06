@@ -31,9 +31,13 @@ const isConnected = ref(false)
 
 // Обработка изменения статуса
 function handleStatusChange(status: TwitchStatus) {
-  console.log('[Twitch] Status changed:', currentStatus.value, '->', status)
+  console.log('[Twitch] handleStatusChange called:', status)
+  console.log('[Twitch] Before: currentStatus =', currentStatus.value, ', isConnected =', isConnected.value)
+
   currentStatus.value = status
   isConnected.value = status === 'Connected'
+
+  console.log('[Twitch] After: currentStatus =', currentStatus.value, ', isConnected =', isConnected.value)
 
   if (status === 'Error') {
     showError('Ошибка подключения к Twitch')
@@ -113,16 +117,33 @@ onMounted(async () => {
 
   // Слушаем события о статусе Twitch
   unlisten = await listen<any>('twitch-status-changed', (event) => {
+    console.log('[Twitch] === STATUS EVENT RECEIVED ===')
+    console.log('[Twitch] Event:', event)
+    console.log('[Twitch] Payload type:', typeof event.payload)
+    console.log('[Twitch] Payload:', event.payload)
+    console.log('[Twitch] Payload keys:', event.payload ? Object.keys(event.payload) : 'null')
+
     const status = event.payload
+
     // Сервер отправляет enum в виде { Connected: null } или { Error: "message" }
-    if (status.Connected !== undefined) {
+    // Также может приходить как строка "Connected"
+    if (typeof status === 'string') {
+      console.log('[Twitch] Status is string:', status)
+      handleStatusChange(status as TwitchStatus)
+    } else if (status.Connected !== undefined) {
+      console.log('[Twitch] Status is Connected enum variant')
       handleStatusChange('Connected')
     } else if (status.Connecting !== undefined) {
+      console.log('[Twitch] Status is Connecting enum variant')
       handleStatusChange('Connecting')
     } else if (status.Disconnected !== undefined) {
+      console.log('[Twitch] Status is Disconnected enum variant')
       handleStatusChange('Disconnected')
     } else if (status.Error !== undefined) {
+      console.log('[Twitch] Status is Error enum variant:', status.Error)
       handleStatusChange('Error')
+    } else {
+      console.warn('[Twitch] Unknown status format:', status)
     }
   })
 
