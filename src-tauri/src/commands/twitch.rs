@@ -115,10 +115,9 @@ pub async fn disconnect_twitch(
 pub async fn get_twitch_status(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    // Проверяем есть ли активный клиент в event loop
-    // Простой способ - проверяем enabled и временной метки (если добавим)
-    let settings = state.twitch_settings.read().await;
-    if settings.enabled {
+    // Проверяем реальный статус подключения
+    let connected = state.twitch_connected.lock().map(|v| *v).unwrap_or(false);
+    if connected {
         Ok("connected".to_string())
     } else {
         Ok("disconnected".to_string())

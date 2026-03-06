@@ -26,9 +26,11 @@ async function loadSettings() {
   try {
     const loaded = await invoke<TwitchSettings>('get_twitch_settings')
     settings.value = loaded
-    // НЕ устанавливаем isConnected из enabled - это не реальный статус
-    // Всегда начинаем с disconnected, пользователь нажимает Start для подключения
-    isConnected.value = false
+
+    // Проверяем реальный статус подключения
+    const status = await invoke<string>('get_twitch_status')
+    console.log('[Twitch] Initial status:', status)
+    isConnected.value = status === 'connected'
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : String(e)
     showError('Failed to load settings: ' + errorMsg)
@@ -55,19 +57,7 @@ async function startTwitch() {
     const result = await invoke<string>('connect_twitch')
     showError(result)
 
-    // Проверяем статус после небольшой задержки (время на подключение)
-    setTimeout(async () => {
-      try {
-        const status = await invoke<string>('get_twitch_status')
-        console.log('[Twitch] Status after connection:', status)
-        if (status === 'connected') {
-          isConnected.value = true
-          console.log('[Twitch] Connection confirmed, button states updated')
-        }
-      } catch (e) {
-        console.error('[Twitch] Failed to check status:', e)
-      }
-    }, 2000) // 2 секунды на подключение
+    // Статус будет обновлен автоматически через периодическую проверку
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : String(e)
     showError('Failed to connect: ' + errorMsg)

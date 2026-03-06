@@ -1,6 +1,6 @@
 mod client;
 
-pub use client::TwitchClient;
+pub use client::{TwitchClient, TwitchStatus};
 
 use serde::{Deserialize, Serialize};
 
