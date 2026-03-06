@@ -235,8 +235,8 @@ onUnmounted(() => {
         class="code-editor"
         placeholder="HTML template code..."
       ></textarea>
-      <p class="setting-hint">
-        Use {{ '{{' }}CSS{{ '}}' }} for CSS injection and {{ '{{' }}JS{{ '}}' }} for JavaScript injection
+      <p class="setting-hint" v-pre>
+        Use {{CSS}} for CSS injection and {{JS}} for JavaScript injection
       </p>
     </section>
 
