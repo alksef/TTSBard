@@ -110,6 +110,26 @@ pub async fn disconnect_twitch(
     Ok("Отключено от Twitch".to_string())
 }
 
+/// Получить текущий статус подключения Twitch
+#[tauri::command]
+pub async fn get_twitch_status(
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let status = state.twitch_connection_status.lock()
+        .map_err(|e| format!("Failed to get status: {}", e))?
+        .clone();
+
+    let status_str = match status {
+        crate::events::TwitchConnectionStatus::Connected => "Connected",
+        crate::events::TwitchConnectionStatus::Connecting => "Connecting",
+        crate::events::TwitchConnectionStatus::Disconnected => "Disconnected",
+        crate::events::TwitchConnectionStatus::Error(_) => "Error",
+    };
+
+    eprintln!("[TWITCH] get_twitch_status called, returning: {}", status_str);
+    Ok(status_str.to_string())
+}
+
 /// Проверить подключение к Twitch
 #[tauri::command]
 pub async fn test_twitch_connection(
