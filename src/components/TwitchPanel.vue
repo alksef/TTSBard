@@ -20,13 +20,18 @@ const settings = ref<TwitchSettings>({
 
 const errorMessage = ref<string | null>(null)
 let errorTimeout: number | null = null
+const isConnected = ref(false)
 
 async function loadSettings() {
   try {
     const loaded = await invoke<TwitchSettings>('get_twitch_settings')
     settings.value = loaded
+    // НЕ устанавливаем isConnected из enabled - это не реальный статус
+    // Всегда начинаем с disconnected, пользователь нажимает Start для подключения
+    isConnected.value = false
   } catch (e) {
-    showError('Failed to load settings: ' + (e as Error).message)
+    const errorMsg = e instanceof Error ? e.message : String(e)
+    showError('Failed to load settings: ' + errorMsg)
   }
 }
 
@@ -38,28 +43,58 @@ async function save() {
     showError(result)
   } catch (e) {
     console.error('[Twitch] Save failed:', e)
-    showError('Failed to save settings: ' + (e as Error).message)
+    const errorMsg = e instanceof Error ? e.message : String(e)
+    showError('Failed to save settings: ' + errorMsg)
   }
 }
 
 async function startTwitch() {
-  console.log('[Twitch] Starting...')
-  settings.value.enabled = true
-  await save()
+  try {
+    console.log('[Twitch] Starting...')
+    isConnected.value = false  // Сброс перед подключением
+    const result = await invoke<string>('connect_twitch')
+    showError(result)
+
+    // Проверяем статус после небольшой задержки (время на подключение)
+    setTimeout(async () => {
+      try {
+        const status = await invoke<string>('get_twitch_status')
+        console.log('[Twitch] Status after connection:', status)
+        if (status === 'connected') {
+          isConnected.value = true
+          console.log('[Twitch] Connection confirmed, button states updated')
+        }
+      } catch (e) {
+        console.error('[Twitch] Failed to check status:', e)
+      }
+    }, 2000) // 2 секунды на подключение
+  } catch (e) {
+    const errorMsg = e instanceof Error ? e.message : String(e)
+    showError('Failed to connect: ' + errorMsg)
+  }
 }
 
 async function stopTwitch() {
-  console.log('[Twitch] Stopping...')
-  settings.value.enabled = false
-  await save()
-}
-
-async function testConnection() {
   try {
-    const result = await invoke<string>('test_twitch_connection', { settings: settings.value })
+    console.log('[Twitch] Stopping...')
+    const result = await invoke<string>('disconnect_twitch')
+    isConnected.value = false
     showError(result)
   } catch (e) {
-    showError('Test failed: ' + (e as Error).message)
+    const errorMsg = e instanceof Error ? e.message : String(e)
+    showError('Failed to disconnect: ' + errorMsg)
+  }
+}
+
+async function sendTestMessage() {
+  try {
+    const result = await invoke<string>('send_twitch_test_message')
+    isConnected.value = true  // Успешная отправка = подключено
+    showError(result)
+  } catch (e) {
+    isConnected.value = false  // Ошибка = не подключено
+    const errorMsg = e instanceof Error ? e.message : String(e)
+    showError('Failed to send test message: ' + errorMsg)
   }
 }
 
@@ -93,8 +128,8 @@ onUnmounted(() => {
 
     <!-- Error/Info Message Display -->
     <div v-if="errorMessage" class="message-box" :class="{
-      error: errorMessage.includes('Failed') || errorMessage.includes('failed'),
-      success: errorMessage.includes('saved') || errorMessage.includes('валид')
+      error: errorMessage.includes('Failed') || errorMessage.includes('failed') || errorMessage.includes('Error'),
+      success: errorMessage.includes('saved') || errorMessage.includes('сохранен') || errorMessage.includes('валид')
     }">
       {{ errorMessage }}
     </div>
@@ -106,16 +141,16 @@ onUnmounted(() => {
         <button
           @click="startTwitch"
           class="start-button"
-          :disabled="settings.enabled"
-          :class="{ disabled: settings.enabled }"
+          :disabled="isConnected"
+          :class="{ disabled: isConnected }"
         >
           ▶ Start
         </button>
         <button
           @click="stopTwitch"
           class="stop-button"
-          :disabled="!settings.enabled"
-          :class="{ disabled: !settings.enabled }"
+          :disabled="!isConnected"
+          :class="{ disabled: !isConnected }"
         >
           ■ Stop
         </button>
@@ -144,7 +179,7 @@ onUnmounted(() => {
           type="password"
           v-model="settings.token"
           class="text-input"
-          placeholder="oauth:xxxxxxxxxxxxxx"
+          placeholder="xxxxxxxxxxxxxx"
         />
       </div>
 
@@ -159,8 +194,13 @@ onUnmounted(() => {
       </div>
 
       <div class="setting-row button-row">
+        <button
+          @click="sendTestMessage"
+          class="test-message-button"
+          :disabled="!isConnected"
+          :class="{ disabled: !isConnected }"
+        >📨 Test Message</button>
         <button @click="save" class="save-button-inline">💾 Save</button>
-        <button @click="testConnection" class="test-button-inline">🧪 Test</button>
       </div>
     </section>
 
@@ -173,7 +213,7 @@ onUnmounted(() => {
         https://twitchtokengenerator.com
       </a>
       <p class="help-text">
-        Token format: <code>oauth:xxxxxxxxxxxxxxx</code> (include "oauth:" prefix)
+        Token format: <code>xxxxxxxxxxxxxxx</code> (paste token only, "oauth:" prefix added automatically)
       </p>
     </section>
   </div>
@@ -306,7 +346,7 @@ h2 {
 }
 
 .save-button-inline,
-.test-button-inline {
+.test-message-button {
   padding: 0.75rem 1.5rem;
   border: none;
   border-radius: 6px;
@@ -346,14 +386,25 @@ h2 {
   transform: translateY(-1px);
 }
 
-.test-button-inline {
-  background: #FF9800;
+.test-message-button {
+  background: #9C27B0;
   color: white;
 }
 
-.test-button-inline:hover {
-  background: #F57C00;
+.test-message-button:hover {
+  background: #7B1FA2;
   transform: translateY(-1px);
+}
+
+.test-message-button.disabled {
+  background: #ccc;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.test-message-button.disabled:hover {
+  background: #ccc;
+  transform: none;
 }
 
 .start-button.disabled,
