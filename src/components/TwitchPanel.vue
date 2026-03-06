@@ -44,6 +44,21 @@ function handleStatusChange(status: TwitchStatus) {
   }
 }
 
+// Обновить статус вручную
+async function refreshStatus() {
+  try {
+    console.log('[Twitch] Refreshing status...')
+    const status = await invoke<string>('get_twitch_status')
+    console.log('[Twitch] Refreshed status:', status)
+    handleStatusChange(status as TwitchStatus)
+    showError('Статус обновлён')
+  } catch (e) {
+    const errorMsg = e instanceof Error ? e.message : String(e)
+    console.error('[Twitch] Failed to refresh status:', e)
+    showError('Failed to refresh status: ' + errorMsg)
+  }
+}
+
 async function loadSettings() {
   try {
     const loaded = await invoke<TwitchSettings>('get_twitch_settings')
@@ -193,6 +208,9 @@ onUnmounted(() => {
            currentStatus === 'Error' ? 'Ошибка' :
            'Отключено' }}
       </span>
+      <button @click="refreshStatus" class="refresh-button" title="Обновить статус">
+        ↻
+      </button>
     </div>
 
     <section class="settings-section">
@@ -353,6 +371,29 @@ h2 {
 .status-indicator.disconnected {
   background: #f5f5f5;
   color: #666;
+}
+
+.refresh-button {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  transition: all 0.2s;
+  opacity: 0.6;
+}
+
+.refresh-button:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.05);
+  transform: rotate(180deg);
+}
+
+.refresh-button:active {
+  transform: rotate(180deg) scale(0.95);
 }
 
 @keyframes pulse {
