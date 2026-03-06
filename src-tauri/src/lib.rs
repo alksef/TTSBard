@@ -45,12 +45,8 @@ fn update_tray_icon(_app_handle: &tauri::AppHandle, is_intercepting: bool) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Создаем MPSC канал для событий
-    let (event_tx, _event_rx) = mpsc::channel::<AppEvent>();
-
-    // Инициализируем состояние
+    // Инициализируем состояние (event_sender будет установлен позже в setup)
     let app_state = AppState::new();
-    app_state.set_event_sender(event_tx);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -159,6 +155,33 @@ pub fn run() {
 
             let app_state = app.state::<AppState>();
             let telegram_state = app.state::<TelegramState>();
+
+            // IMPORTANT: Setup event forwarding BEFORE apply_to_state
+            // so TTS providers can get valid event_sender during initialization
+            let app_handle = app.handle().clone();
+            let app_state_for_events = app_state.inner().clone();
+            let (event_tx, event_rx) = std::sync::mpsc::channel::<AppEvent>();
+
+            // Set event_sender in AppState FIRST
+            app_state_for_events.set_event_sender(event_tx.clone());
+            eprintln!("[APP] Event sender configured in AppState");
+
+            // Spawn event forwarding thread
+            thread::spawn(move || {
+                eprintln!("[EVENT_LOOP] Event thread started, waiting for events...");
+
+                for event in event_rx {
+                    eprintln!("[EVENT_LOOP] Received from channel: {:?}", std::mem::discriminant(&event));
+                    // Emit event to frontend
+                    let event_name = event.to_tauri_event();
+                    let _ = app_handle.emit(event_name, &event);
+
+                    // Handle internally
+                    handle_event(event, &app_state_for_events, &app_handle);
+                }
+            });
+
+            // NOW apply settings - TTS providers will get valid event_sender
             settings_manager.apply_to_state(&settings, &app_state, Some(telegram_state));
 
             // Store settings manager for later use
@@ -360,32 +383,14 @@ pub fn run() {
                 .build(&app_handle);
             eprintln!("[TRAY] Tray icon created successfully");
 
-            // Set up event forwarding to frontend
-            let app_handle = app.handle().clone();
-            let app_state = app.state::<AppState>();
-            let app_state_for_events = app_state.inner().clone();
-
-            // Spawn event forwarding thread
-            thread::spawn(move || {
-                // Create a new channel for event forwarding
-                let (event_tx, event_rx) = mpsc::channel::<AppEvent>();
-                app_state_for_events.set_event_sender(event_tx);
-
-                for event in event_rx {
-                    // Emit event to frontend
-                    let event_name = event.to_tauri_event();
-                    let _ = app_handle.emit(event_name, &event);
-
-                    // Handle internally
-                    handle_event(event, &app_state_for_events, &app_handle);
-                }
-            });
-
-            // Setup WebView server event channel
+            // Setup WebView server
             let app_state_for_webview = app.state::<AppState>();
             let webview_settings = app_state_for_webview.webview_settings.clone();
             let app_handle_for_webview = app.handle().clone();
-            let (_webview_tx, webview_rx) = mpsc::channel::<AppEvent>();
+            let (webview_tx, webview_rx) = std::sync::mpsc::channel::<AppEvent>();
+
+            // Store webview_tx for sending restart events
+            app_state_for_webview.set_webview_event_sender(webview_tx);
 
             // Start WebView server in background thread
             thread::spawn(move || {
@@ -393,53 +398,143 @@ pub fn run() {
                     .expect("Failed to create tokio runtime for webview");
 
                 rt.block_on(async move {
-                    // Check if enabled first
-                    let settings = webview_settings.read().await;
-                    let enabled = settings.enabled;
-                    let bind_address = settings.bind_address.clone();
-                    let port = settings.port;
-                    drop(settings);
+                    loop {
+                        // Check current settings
+                        let settings = webview_settings.read().await;
+                        let mut enabled = settings.enabled;
+                        let start_on_boot = settings.start_on_boot;
+                        let bind_address = settings.bind_address.clone();
+                        let port = settings.port;
+                        drop(settings);
 
-                    if enabled {
-                        eprintln!("[WEBVIEW] Starting WebView server on {}:{}", bind_address, port);
-                        let server = WebViewServer::new(webview_settings.clone());
+                        // Auto-start on boot if configured
+                        if start_on_boot && !enabled {
+                            eprintln!("[WEBVIEW] Auto-starting server on boot (start_on_boot=true)");
+                            let mut s = webview_settings.write().await;
+                            s.enabled = true;
+                            enabled = true;
+                            drop(s);
+                        }
 
-                        // Spawn server task with improved error handling
-                        let server_clone = server.clone();
-                        let app_handle_clone = app_handle_for_webview.clone();
-                        tokio::spawn(async move {
-                            if let Err(e) = server_clone.start().await {
-                                // Extract error details for user-friendly message
-                                let error_msg = format!("{}", e);
-                                let (user_friendly_msg, log_context) = parse_webview_server_error(&error_msg, bind_address, port);
+                        if enabled {
+                            eprintln!("[WEBVIEW] ========================================");
+                            eprintln!("[WEBVIEW] STARTING SERVER");
+                            eprintln!("[WEBVIEW]   Address: {}:{}", bind_address, port);
+                            eprintln!("[WEBVIEW] ========================================");
+                            let server = WebViewServer::new(webview_settings.clone());
 
-                                // Log with full context
-                                eprintln!("[WEBVIEW] Server startup failed:");
-                                eprintln!("[WEBVIEW]   Context: {}", log_context);
-                                eprintln!("[WEBVIEW]   Error: {}", error_msg);
+                            // Spawn server task with improved error handling
+                            let server_clone = server.clone();
+                            let app_handle_clone = app_handle_for_webview.clone();
+                            let bind_address_clone = bind_address.clone();
+                            let server_handle = tokio::spawn(async move {
+                                eprintln!("[WEBVIEW] Server task started, waiting for connections...");
 
-                                // Emit user-friendly error to frontend
-                                let _ = app_handle_clone.emit("webview-server-error", &user_friendly_msg);
+                                if let Err(e) = server_clone.start().await {
+                                    // Extract error details for user-friendly message
+                                    let error_msg = format!("{}", e);
+                                    let (user_friendly_msg, log_context) = parse_webview_server_error(&error_msg, bind_address_clone, port);
 
-                                // Also emit via AppEvent system for consistency
-                                if let Some(state) = app_handle_clone.try_state::<AppState>() {
-                                    state.emit_event(AppEvent::WebViewServerError(user_friendly_msg));
+                                    // Log with full context
+                                    eprintln!("[WEBVIEW] ❌ Server startup failed:");
+                                    eprintln!("[WEBVIEW]   Context: {}", log_context);
+                                    eprintln!("[WEBVIEW]   Error: {}", error_msg);
+
+                                    // Emit user-friendly error to frontend
+                                    let _ = app_handle_clone.emit("webview-server-error", &user_friendly_msg);
+
+                                    // Also emit via AppEvent system for consistency
+                                    if let Some(state) = app_handle_clone.try_state::<AppState>() {
+                                        state.emit_event(AppEvent::WebViewServerError(user_friendly_msg));
+                                    }
+                                }
+                                // Server task completed
+                                eprintln!("[WEBVIEW] Server task stopped");
+                            });
+
+                            // Handle events and broadcast text
+                            let mut server_running = true;
+                            while server_running {
+                                // Check if settings changed
+                                let current_settings = webview_settings.read().await;
+                                let still_enabled = current_settings.enabled;
+                                let same_port = current_settings.port == port && current_settings.bind_address == bind_address;
+                                drop(current_settings);
+
+                                if !still_enabled || !same_port {
+                                    eprintln!("[WEBVIEW] ========================================");
+                                    eprintln!("[WEBVIEW] STOPPING SERVER (settings changed)");
+                                    eprintln!("[WEBVIEW]   Still enabled: {}", still_enabled);
+                                    eprintln!("[WEBVIEW]   Same port: {}", same_port);
+                                    eprintln!("[WEBVIEW] ========================================");
+                                    server_handle.abort();
+                                    server_running = false;
+                                } else {
+                                    // Process events with timeout (synchronous)
+                                    match webview_rx.recv_timeout(std::time::Duration::from_secs(1)) {
+                                        Ok(event) => {
+                                            eprintln!("[WEBVIEW] 📨 Event received: {:?}", std::mem::discriminant(&event));
+                                            match event {
+                                                AppEvent::TextSentToTts(text) => {
+                                                    eprintln!("[WEBVIEW] 📤 Broadcasting to WebSocket clients: '{}...'", text.chars().take(50).collect::<String>());
+                                                    server.broadcast_text(text).await;
+                                                }
+                                                AppEvent::RestartWebViewServer => {
+                                                    eprintln!("[WEBVIEW] ⚠ Restart event received, stopping server...");
+                                                    server_running = false;
+                                                }
+                                                _ => {
+                                                    eprintln!("[WEBVIEW] ℹ️  Ignoring event: {:?}", std::mem::discriminant(&event));
+                                                }
+                                            }
+                                        }
+                                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                                            // Timeout - continue loop to check settings
+                                        }
+                                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                                            // Channel closed
+                                            eprintln!("[WEBVIEW] Event channel disconnected");
+                                            return;
+                                        }
+                                    }
                                 }
                             }
-                        });
-
-                        // Handle events and broadcast text
-                        for event in webview_rx {
-                            match event {
-                                AppEvent::TextSentToTts(text) => {
-                                    eprintln!("[WEBVIEW] Broadcasting text: '{}'", text);
-                                    server.broadcast_text(text).await;
+                        } else {
+                            eprintln!("[WEBVIEW] ========================================");
+                            eprintln!("[WEBVIEW] SERVER DISABLED");
+                            eprintln!("[WEBVIEW] Waiting for enable signal...");
+                            eprintln!("[WEBVIEW] ========================================");
+                            // Wait for enable or restart event
+                            loop {
+                                match webview_rx.recv_timeout(std::time::Duration::from_secs(2)) {
+                                    Ok(AppEvent::RestartWebViewServer) => {
+                                        eprintln!("[WEBVIEW] ⚠ Restart event received, exiting disabled state");
+                                        break;
+                                    }
+                                    Ok(AppEvent::TextSentToTts(text)) => {
+                                        // Ignore TTS events while disabled but log them
+                                        eprintln!("[WEBVIEW] Ignoring TTS text (server disabled): '{}...'", text.chars().take(30).collect::<String>());
+                                    }
+                                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                                        // Timeout - check if enabled now
+                                        let settings = webview_settings.read().await;
+                                        if settings.enabled {
+                                            drop(settings);
+                                            eprintln!("[WEBVIEW] ✓ Enabled detected via timeout!");
+                                            break;
+                                        }
+                                        drop(settings);
+                                    }
+                                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                                        eprintln!("[WEBVIEW] Event channel disconnected");
+                                        return;
+                                    }
+                                    Ok(other) => {
+                                        eprintln!("[WEBVIEW] Received unexpected event while disabled: {:?}", other);
+                                    }
                                 }
-                                _ => {}
                             }
                         }
-                    } else {
-                        eprintln!("[WEBVIEW] WebView server disabled in settings");
                     }
                 });
             });
@@ -557,7 +652,7 @@ pub fn run() {
 }
 
 /// Parse WebView server startup errors and provide user-friendly messages
-fn parse_webview_server_error(error_msg: &str, bind_address: String, port: u16) -> (String, String) {
+pub(crate) fn parse_webview_server_error(error_msg: &str, bind_address: String, port: u16) -> (String, String) {
     let log_context = format!("Failed to start WebView server on {}:{}", bind_address, port);
 
     // Check for common error patterns
@@ -594,6 +689,7 @@ fn parse_webview_server_error(error_msg: &str, bind_address: String, port: u16) 
 }
 
 fn handle_event(event: AppEvent, state: &AppState, app_handle: &tauri::AppHandle) {
+    eprintln!("[HANDLE_EVENT] Received event: {:?}", std::mem::discriminant(&event));
     match event {
         AppEvent::InterceptionChanged(enabled) => {
             eprintln!("Interception changed: {}", enabled);
@@ -647,8 +743,20 @@ fn handle_event(event: AppEvent, state: &AppState, app_handle: &tauri::AppHandle
         }
         AppEvent::TextSentToTts(text) => {
             eprintln!("[EVENT] Text sent to TTS: '{}'", text);
-            // This event can be used by WebView Source plugin to receive text
-            // The event is already sent to the frontend via Tauri event system
+            // Forward to WebView server for OBS integration
+            if let Ok(wes) = state.webview_event_sender.lock() {
+                if let Some(ref sender) = *wes {
+                    eprintln!("[EVENT] Forwarding TextSentToTts to WebView server");
+                    match sender.send(AppEvent::TextSentToTts(text)) {
+                        Ok(_) => eprintln!("[EVENT] TextSentToTts sent to WebView successfully"),
+                        Err(e) => eprintln!("[EVENT] Failed to send to WebView: {}", e),
+                    }
+                } else {
+                    eprintln!("[EVENT] WebView sender is None, not forwarding");
+                }
+            } else {
+                eprintln!("[EVENT] Failed to lock webview_event_sender");
+            }
         }
         AppEvent::TtsStatusChanged(status) => {
             eprintln!("TTS status changed: {:?}", status);
@@ -736,6 +844,10 @@ fn handle_event(event: AppEvent, state: &AppState, app_handle: &tauri::AppHandle
         AppEvent::WebViewServerError(error) => {
             eprintln!("[EVENT] WebView server error: {}", error);
             // Event is already emitted to frontend via Tauri event system
+        }
+        AppEvent::RestartWebViewServer => {
+            eprintln!("[EVENT] Restart WebView server requested");
+            // This event is handled by the WebView server thread
         }
     }
 }

@@ -55,9 +55,17 @@ impl Default for SileroTts {
 #[async_trait]
 impl TtsEngine for SileroTts {
     async fn synthesize(&self, text: &str) -> Result<Vec<u8>, String> {
+        eprintln!("[SILERO] TTS synthesize requested, text: '{}...'", text.chars().take(30).collect::<String>());
+
         // Send event before synthesizing
         if let Some(tx) = &self.event_tx {
-            let _ = tx.send(AppEvent::TextSentToTts(text.to_string()));
+            eprintln!("[SILERO] Sending TextSentToTts event");
+            match tx.send(AppEvent::TextSentToTts(text.to_string())) {
+                Ok(_) => eprintln!("[SILERO] TextSentToTts event sent successfully"),
+                Err(e) => eprintln!("[SILERO] Failed to send TextSentToTts event: {}", e),
+            }
+        } else {
+            eprintln!("[SILERO] No event_tx, skipping TextSentToTts event");
         }
 
         // Для Silero TTS через Telegram мы возвращаем путь к файлу,

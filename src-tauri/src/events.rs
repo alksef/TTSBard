@@ -47,6 +47,8 @@ pub enum AppEvent {
     EnterClosesDisabled(bool),
     /// Ошибка запуска WebView сервера
     WebViewServerError(String),
+    /// Перезапустить WebView сервер (изменились настройки)
+    RestartWebViewServer,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq)]
@@ -85,6 +87,7 @@ impl AppEvent {
             AppEvent::TtsProviderChanged(_) => "tts-provider-changed",
             AppEvent::EnterClosesDisabled(_) => "enter-closes-disabled",
             AppEvent::WebViewServerError(_) => "webview-server-error",
+            AppEvent::RestartWebViewServer => "restart-webview-server",
         }
     }
 }

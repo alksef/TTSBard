@@ -5,6 +5,7 @@ import { listen } from '@tauri-apps/api/event'
 
 interface WebViewSettings {
   enabled: boolean
+  start_on_boot: boolean
   port: number
   bind_address: string
   html_template: string
@@ -14,6 +15,7 @@ interface WebViewSettings {
 
 const settings = ref<WebViewSettings>({
   enabled: false,
+  start_on_boot: false,
   port: 10100,
   bind_address: '0.0.0.0',
   html_template: '',
@@ -46,11 +48,28 @@ async function loadSettings() {
 
 async function save() {
   try {
-    await invoke('save_webview_settings', { settings: settings.value })
-    showError('Settings saved successfully!')
+    console.log('[WebView] Saving settings:', settings.value)
+    const result = await invoke<string>('save_webview_settings', { settings: settings.value })
+    console.log('[WebView] Save result:', result)
+
+    // Show the result message from backend
+    showError(result)
   } catch (e) {
+    console.error('[WebView] Save failed:', e)
     showError('Failed to save settings: ' + (e as Error).message)
   }
+}
+
+async function startServer() {
+  console.log('[WebView] Starting server...')
+  settings.value.enabled = true
+  await save()
+}
+
+async function stopServer() {
+  console.log('[WebView] Stopping server...')
+  settings.value.enabled = false
+  await save()
 }
 
 async function refreshIp() {
@@ -177,14 +196,30 @@ onUnmounted(() => {
     <section class="settings-section">
       <h2>Server Settings</h2>
 
+      <div class="setting-row server-actions">
+        <button
+          @click="startServer"
+          class="start-button"
+          :disabled="settings.enabled || !isPortValid"
+          :class="{ disabled: settings.enabled || !isPortValid }"
+        >
+          ▶ Запустить сервер
+        </button>
+        <button
+          @click="stopServer"
+          class="stop-button"
+          :disabled="!settings.enabled"
+          :class="{ disabled: !settings.enabled }"
+        >
+          ■ Остановить сервер
+        </button>
+      </div>
+
       <div class="setting-row">
         <label class="checkbox-label">
-          <input type="checkbox" v-model="settings.enabled" />
-          <span>Enabled</span>
+          <input type="checkbox" v-model="settings.start_on_boot" />
+          <span>Запускать при старте приложения</span>
         </label>
-        <p class="setting-hint">
-          Enable the HTTP server for OBS Browser Source
-        </p>
       </div>
 
       <div class="setting-row">
@@ -271,10 +306,6 @@ onUnmounted(() => {
         Lower values = faster animation. Recommended: 20-50ms
       </p>
     </section>
-
-    <div class="actions">
-      <button @click="save" class="save-button primary-button" :disabled="!isPortValid">Save Settings</button>
-    </div>
   </div>
 </template>
 
@@ -354,6 +385,15 @@ h2 {
   gap: 0.75rem;
   margin-bottom: 1rem;
   flex-wrap: wrap;
+}
+
+.setting-row.server-actions {
+  gap: 1rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
 }
 
 .setting-row label {
@@ -521,15 +561,8 @@ h2 {
   font-weight: 500;
 }
 
-.actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 1rem;
-  margin-top: 2rem;
-}
-
-.save-button,
-.primary-button {
+.start-button,
+.stop-button {
   padding: 0.75rem 1.5rem;
   border: none;
   border-radius: 6px;
@@ -539,30 +572,39 @@ h2 {
   transition: all 0.2s;
 }
 
-.save-button {
+.start-button {
   background: #4CAF50;
   color: white;
 }
 
-.save-button:disabled {
-  background: #ccc;
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.save-button:disabled:hover {
-  background: #ccc;
-  transform: none;
-  box-shadow: none;
-}
-
-.save-button:hover:not(:disabled) {
+.start-button:hover:not(.disabled) {
   background: #45a049;
   transform: translateY(-1px);
   box-shadow: 0 2px 8px rgba(76, 175, 80, 0.3);
 }
 
-.primary-button:active {
-  transform: translateY(0);
+.stop-button {
+  background: #2196F3;
+  color: white;
+}
+
+.stop-button:hover:not(.disabled) {
+  background: #1976D2;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(33, 150, 243, 0.3);
+}
+
+.start-button.disabled,
+.stop-button.disabled {
+  background: #ccc;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.start-button.disabled:hover,
+.stop-button.disabled:hover {
+  background: #ccc;
+  transform: none;
+  box-shadow: none;
 }
 </style>
