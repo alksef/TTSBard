@@ -143,7 +143,6 @@ pub fn run() {
             commands::twitch::send_twitch_test_message,
             commands::twitch::connect_twitch,
             commands::twitch::disconnect_twitch,
-            commands::twitch::get_twitch_status,
         ])
         .setup(|app| {
             eprintln!("[APP] === Application setup started ===");
@@ -560,6 +559,7 @@ pub fn run() {
             // Setup Twitch client event loop in dedicated thread
             let app_state_for_twitch = app.state::<AppState>();
             let app_state_for_twitch_arc = app_state_for_twitch.inner().clone();
+            let app_handle_for_twitch = app.handle().clone();
             let mut twitch_rx = app_state_for_twitch.twitch_event_tx.subscribe();
 
             thread::spawn(move || {
@@ -568,28 +568,45 @@ pub fn run() {
 
                 rt.block_on(async move {
                     let mut twitch_client: Option<TwitchClient> = None;
-                    let mut status_check_interval = tokio::time::interval(tokio::time::Duration::from_secs(2));
+                    let mut last_status = crate::events::TwitchConnectionStatus::Disconnected;
+                    let mut status_check_interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
 
                     loop {
                         tokio::select! {
-                            // Периодическая проверка статуса подключения
+                            // Периодическая проверка статуса
                             _ = status_check_interval.tick() => {
                                 if let Some(client) = &twitch_client {
-                                    let status = client.status().await;
-                                    let is_connected = matches!(status, crate::twitch::TwitchStatus::Connected);
-                                    if let Ok(mut connected) = app_state_for_twitch_arc.twitch_connected.lock() {
-                                        if *connected != is_connected {
-                                            eprintln!("[TWITCH] Status changed: {} -> {}", *connected, is_connected);
-                                            *connected = is_connected;
+                                    let twitch_status = client.status().await;
+                                    let new_status = match &twitch_status {
+                                        crate::twitch::TwitchStatus::Connected => {
+                                            crate::events::TwitchConnectionStatus::Connected
+                                        }
+                                        crate::twitch::TwitchStatus::Connecting => {
+                                            crate::events::TwitchConnectionStatus::Connecting
+                                        }
+                                        crate::twitch::TwitchStatus::Disconnected => {
+                                            crate::events::TwitchConnectionStatus::Disconnected
+                                        }
+                                        crate::twitch::TwitchStatus::Error(e) => {
+                                            crate::events::TwitchConnectionStatus::Error(e.clone())
+                                        }
+                                    };
+
+                                    if last_status != new_status {
+                                        eprintln!("[TWITCH] Status changed: {:?} -> {:?}", last_status, new_status);
+                                        last_status = new_status.clone();
+
+                                        // Emit via Tauri
+                                        let _ = app_handle_for_twitch.emit("twitch-status-changed", &new_status);
+
+                                        // Emit via AppEvent
+                                        if let Some(state) = app_handle_for_twitch.try_state::<AppState>() {
+                                            state.emit_event(crate::events::AppEvent::TwitchStatusChanged(new_status));
                                         }
                                     }
-                                } else {
-                                    // Нет клиента - не подключены
-                                    if let Ok(mut connected) = app_state_for_twitch_arc.twitch_connected.lock() {
-                                        if *connected {
-                                            *connected = false;
-                                        }
-                                    }
+                                } else if last_status != crate::events::TwitchConnectionStatus::Disconnected {
+                                    last_status = crate::events::TwitchConnectionStatus::Disconnected;
+                                    let _ = app_handle_for_twitch.emit("twitch-status-changed", &last_status);
                                 }
                             }
                             // Обработка событий Twitch
@@ -614,14 +631,16 @@ pub fn run() {
                                                 }
 
                                                 // Сбросить статус
-                                                if let Ok(mut connected) = app_state_for_twitch_arc.twitch_connected.lock() {
-                                                    *connected = false;
-                                                }
+                                                last_status = crate::events::TwitchConnectionStatus::Disconnected;
+                                                let _ = app_handle_for_twitch.emit("twitch-status-changed", &last_status);
 
                                                 // Запустить новый если включен
                                                 if is_enabled {
                                                     if is_valid {
                                                         eprintln!("[TWITCH] Settings valid, creating new client...");
+                                                        last_status = crate::events::TwitchConnectionStatus::Connecting;
+                                                        let _ = app_handle_for_twitch.emit("twitch-status-changed", &last_status);
+
                                                         let client = TwitchClient::new(settings_clone);
                                                         match client.start().await {
                                                             Ok(_) => {
@@ -630,6 +649,8 @@ pub fn run() {
                                                             }
                                                             Err(e) => {
                                                                 eprintln!("[TWITCH] Failed to start client: {}", e);
+                                                                last_status = crate::events::TwitchConnectionStatus::Error(e.to_string());
+                                                                let _ = app_handle_for_twitch.emit("twitch-status-changed", &last_status);
                                                             }
                                                         }
                                                     } else {
@@ -641,31 +662,25 @@ pub fn run() {
                                             }
                                             TwitchEvent::Stop => {
                                                 eprintln!("[TWITCH] Stop event received");
-                                                // Обновляем статус подключения
-                                                if let Ok(mut connected) = app_state_for_twitch_arc.twitch_connected.lock() {
-                                                    *connected = false;
-                                                }
                                                 if let Some(client) = twitch_client.take() {
                                                     client.stop().await;
                                                 }
+                                                last_status = crate::events::TwitchConnectionStatus::Disconnected;
+                                                let _ = app_handle_for_twitch.emit("twitch-status-changed", &last_status);
                                             }
                                             TwitchEvent::SendMessage(text) => {
                                                 eprintln!("[TWITCH] SendMessage event received: '{}'", text);
                                                 if let Some(client) = &twitch_client {
-                                                    // Показать текущий статус перед отправкой
-                                                    let status = client.status().await;
-                                                    eprintln!("[TWITCH] Current client status: {:?}", status);
-
                                                     match client.send_message(&text).await {
                                                         Ok(_) => eprintln!("[TWITCH] Message sent successfully"),
                                                         Err(e) => {
                                                             eprintln!("[TWITCH] Failed to send message: {}", e);
-                                                            eprintln!("[TWITCH] Hint: Make sure Twitch is connected (green status) before sending");
+                                                            last_status = crate::events::TwitchConnectionStatus::Error(e.to_string());
+                                                            let _ = app_handle_for_twitch.emit("twitch-status-changed", &last_status);
                                                         }
                                                     }
                                                 } else {
                                                     eprintln!("[TWITCH] Cannot send message - no active client");
-                                                    eprintln!("[TWITCH] Hint: Press Start button to connect first");
                                                 }
                                             }
                                         }
@@ -1010,6 +1025,10 @@ fn handle_event(event: AppEvent, state: &AppState, app_handle: &tauri::AppHandle
         AppEvent::RestartWebViewServer => {
             eprintln!("[EVENT] Restart WebView server requested");
             // This event is handled by the WebView server thread
+        }
+        AppEvent::TwitchStatusChanged(status) => {
+            eprintln!("[EVENT] Twitch status changed: {:?}", status);
+            // Event is already emitted to frontend via Tauri event system
         }
     }
 }
