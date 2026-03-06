@@ -1,9 +1,13 @@
 use serde::{Deserialize, Serialize};
 use crate::tts::TtsProviderType;
 use std::sync::mpsc::Sender;
+use tokio::sync::broadcast;
 
 /// Type alias for the event sender channel
 pub type EventSender = Sender<AppEvent>;
+
+/// Type alias for Twitch event sender
+pub type TwitchEventSender = broadcast::Sender<TwitchEvent>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AppEvent {
@@ -49,6 +53,18 @@ pub enum AppEvent {
     WebViewServerError(String),
     /// Перезапустить WebView сервер (изменились настройки)
     RestartWebViewServer,
+}
+
+/// События для управления Twitch клиентом
+#[derive(Debug, Clone)]
+pub enum TwitchEvent {
+    /// Перезапустить клиент (изменены настройки)
+    Restart,
+    /// Остановить клиент
+    #[allow(dead_code)]
+    Stop,
+    /// Отправить сообщение
+    SendMessage(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq)]

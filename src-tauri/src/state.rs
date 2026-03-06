@@ -1,10 +1,12 @@
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
-use crate::events::{AppEvent, InputLayout};
+use tokio::sync::broadcast;
+use crate::events::{AppEvent, InputLayout, TwitchEvent, TwitchEventSender};
 use crate::tts::{TtsProvider, TtsProviderType, openai::OpenAiTts, local::LocalTts, silero::SileroTts};
 use crate::preprocessor::TextPreprocessor;
 use crate::telegram::TelegramClient;
 use crate::webview::WebViewSettings;
+use crate::twitch::TwitchSettings;
 use tauri::{AppHandle, Manager};
 
 /// Load webview settings from files, falling back to defaults on error
@@ -101,11 +103,18 @@ pub struct AppState {
 
     /// WebView settings
     pub webview_settings: Arc<tokio::sync::RwLock<WebViewSettings>>,
+
+    /// Настройки Twitch чата
+    pub twitch_settings: Arc<tokio::sync::RwLock<TwitchSettings>>,
+
+    /// Sender для Twitch событий
+    pub twitch_event_tx: TwitchEventSender,
 }
 
 impl AppState {
     pub fn new() -> Self {
         let webview_settings = load_initial_webview_settings();
+        let (twitch_event_tx, _) = broadcast::channel::<TwitchEvent>(100);
 
         Self {
             event_sender: Arc::new(Mutex::new(None)),
@@ -129,6 +138,8 @@ impl AppState {
             enter_closes_disabled: Arc::new(Mutex::new(false)),
             active_window: Arc::new(Mutex::new(ActiveWindow::None)),
             webview_settings: Arc::new(tokio::sync::RwLock::new(webview_settings)),
+            twitch_settings: Arc::new(tokio::sync::RwLock::new(TwitchSettings::default())),
+            twitch_event_tx,
         }
     }
 
@@ -526,6 +537,13 @@ impl AppState {
     /// Проверить, может ли soundpanel быть активирован (floating не активен)
     pub fn can_activate_soundpanel(&self) -> bool {
         !self.is_floating_active()
+    }
+
+    // ========== Twitch Event Management ==========
+
+    /// Отправить событие Twitch
+    pub fn send_twitch_event(&self, event: TwitchEvent) {
+        let _ = self.twitch_event_tx.send(event);
     }
 }
 
