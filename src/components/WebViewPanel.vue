@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 
 interface WebViewSettings {
   enabled: boolean
@@ -23,9 +24,15 @@ const settings = ref<WebViewSettings>({
 const localIp = ref('192.168.1.100')
 const errorMessage = ref<string | null>(null)
 let errorTimeout: number | null = null
+let unlisten: (() => void) | null = null
 
 const url = computed(() => {
   return `http://${localIp.value}:${settings.value.port}`
+})
+
+const isPortValid = computed(() => {
+  const port = settings.value.port
+  return port >= 1024 && port <= 65535
 })
 
 async function loadSettings() {
@@ -71,6 +78,35 @@ async function resetCss() {
   }
 }
 
+async function testConnection() {
+  const testUrl = `http://localhost:${settings.value.port}/`
+  showError('Testing connection...')
+
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 5000)
+
+    const response = await fetch(testUrl, {
+      method: 'GET',
+      signal: controller.signal
+    })
+
+    clearTimeout(timeoutId)
+
+    if (response.ok) {
+      showError('Connection successful! Server is responding.')
+    } else {
+      showError(`Connection failed: HTTP ${response.status}`)
+    }
+  } catch (error) {
+    if ((error as Error).name === 'AbortError') {
+      showError('Connection timeout: Server not responding')
+    } else {
+      showError('Connection failed: ' + (error as Error).message)
+    }
+  }
+}
+
 function getDefaultHtml() {
   const parts = [
     '<!DOCTYPE html>',
@@ -110,6 +146,11 @@ function showError(message: string) {
 onMounted(async () => {
   await loadSettings()
   await refreshIp()
+
+  // Listen for webview server errors
+  unlisten = await listen<string>('webview-server-error', (event) => {
+    showError(event.payload)
+  })
 })
 
 // Cleanup
@@ -117,6 +158,9 @@ import { onUnmounted } from 'vue'
 onUnmounted(() => {
   if (errorTimeout !== null) {
     clearTimeout(errorTimeout)
+  }
+  if (unlisten !== null) {
+    unlisten()
   }
 })
 </script>
@@ -126,7 +170,7 @@ onUnmounted(() => {
     <h1>WebView Source</h1>
 
     <!-- Error/Info Message Display -->
-    <div v-if="errorMessage" class="message-box" :class="{ error: errorMessage.includes('Failed'), success: !errorMessage.includes('Failed') }">
+    <div v-if="errorMessage" class="message-box" :class="{ error: errorMessage.includes('Failed') || errorMessage.includes('timeout'), success: errorMessage.includes('successful'), info: errorMessage.includes('Testing') }">
       {{ errorMessage }}
     </div>
 
@@ -151,7 +195,9 @@ onUnmounted(() => {
           min="1024"
           max="65535"
           class="number-input"
+          :class="{ 'input-error': !isPortValid }"
         />
+        <span v-if="!isPortValid" class="error-text">Порт должен быть от 1024 до 65535</span>
       </div>
 
       <div class="setting-row">
@@ -169,6 +215,11 @@ onUnmounted(() => {
           <button @click="copyUrl" class="icon-button" title="Copy URL">📋</button>
           <button @click="refreshIp" class="icon-button" title="Refresh IP">🔄</button>
         </div>
+      </div>
+
+      <div class="setting-row">
+        <label>Test Connection:</label>
+        <button @click="testConnection" class="test-button" :disabled="!isPortValid">Test Connection</button>
       </div>
     </section>
 
@@ -222,7 +273,7 @@ onUnmounted(() => {
     </section>
 
     <div class="actions">
-      <button @click="save" class="save-button primary-button">Save Settings</button>
+      <button @click="save" class="save-button primary-button" :disabled="!isPortValid">Save Settings</button>
     </div>
   </div>
 </template>
@@ -257,6 +308,12 @@ h2 {
   background: #e8f5e9;
   border: 1px solid #c8e6c9;
   color: #2e7d32;
+}
+
+.message-box.info {
+  background: #e3f2fd;
+  border: 1px solid #bbdefb;
+  color: #1976D2;
 }
 
 .message-box.error {
@@ -338,6 +395,22 @@ h2 {
   background: #fff;
 }
 
+.number-input.input-error {
+  border-color: #f44;
+  background: #fee;
+}
+
+.number-input.input-error:focus {
+  border-color: #f44;
+  outline: none;
+}
+
+.error-text {
+  color: #f44;
+  font-size: 13px;
+  font-weight: 500;
+}
+
 .number-input:focus,
 .select-input:focus,
 .code-editor:focus {
@@ -399,6 +472,34 @@ h2 {
   color: #333;
 }
 
+.test-button {
+  padding: 0.5rem 1rem;
+  background: #2196F3;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.test-button:hover:not(:disabled) {
+  background: #1976D2;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(33, 150, 243, 0.3);
+}
+
+.test-button:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.test-button:active {
+  transform: translateY(0);
+}
+
 .code-editor {
   width: 100%;
   font-family: 'Courier New', monospace;
@@ -443,7 +544,19 @@ h2 {
   color: white;
 }
 
-.save-button:hover {
+.save-button:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.save-button:disabled:hover {
+  background: #ccc;
+  transform: none;
+  box-shadow: none;
+}
+
+.save-button:hover:not(:disabled) {
   background: #45a049;
   transform: translateY(-1px);
   box-shadow: 0 2px 8px rgba(76, 175, 80, 0.3);

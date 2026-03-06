@@ -45,6 +45,8 @@ pub enum AppEvent {
     TtsProviderChanged(TtsProviderType),
     /// Изменение режима закрытия по Enter (F6 mode)
     EnterClosesDisabled(bool),
+    /// Ошибка запуска WebView сервера
+    WebViewServerError(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq)]
@@ -82,6 +84,7 @@ impl AppEvent {
             AppEvent::SoundPanelAppearanceChanged => "soundpanel-appearance-changed",
             AppEvent::TtsProviderChanged(_) => "tts-provider-changed",
             AppEvent::EnterClosesDisabled(_) => "enter-closes-disabled",
+            AppEvent::WebViewServerError(_) => "webview-server-error",
         }
     }
 }
