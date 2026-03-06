@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 
 interface TwitchSettings {
@@ -21,16 +21,44 @@ const settings = ref<TwitchSettings>({
 const errorMessage = ref<string | null>(null)
 let errorTimeout: number | null = null
 const isConnected = ref(false)
+let statusCheckInterval: number | null = null
+
+// Периодическая проверка статуса подключения
+async function checkStatus() {
+  try {
+    const status = await invoke<string>('get_twitch_status')
+    const newConnected = status === 'connected'
+    if (isConnected.value !== newConnected) {
+      console.log('[Twitch] Status changed:', isConnected.value, '->', newConnected)
+      isConnected.value = newConnected
+    }
+  } catch (e) {
+    console.error('[Twitch] Failed to check status:', e)
+  }
+}
+
+// Запуск периодической проверки статуса
+function startStatusCheck() {
+  if (statusCheckInterval !== null) return
+  // Проверяем статус каждую секунду
+  statusCheckInterval = window.setInterval(() => {
+    checkStatus()
+  }, 1000)
+}
+
+// Остановка периодической проверки статуса
+function stopStatusCheck() {
+  if (statusCheckInterval !== null) {
+    clearInterval(statusCheckInterval)
+    statusCheckInterval = null
+  }
+}
 
 async function loadSettings() {
   try {
     const loaded = await invoke<TwitchSettings>('get_twitch_settings')
     settings.value = loaded
-
-    // Проверяем реальный статус подключения
-    const status = await invoke<string>('get_twitch_status')
-    console.log('[Twitch] Initial status:', status)
-    isConnected.value = status === 'connected'
+    // Статус будет проверен автоматически через checkStatus()
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : String(e)
     showError('Failed to load settings: ' + errorMsg)
@@ -53,11 +81,9 @@ async function save() {
 async function startTwitch() {
   try {
     console.log('[Twitch] Starting...')
-    isConnected.value = false  // Сброс перед подключением
     const result = await invoke<string>('connect_twitch')
     showError(result)
-
-    // Статус будет обновлен автоматически через периодическую проверку
+    // Статус обновится автоматически через периодическую проверку
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : String(e)
     showError('Failed to connect: ' + errorMsg)
@@ -68,8 +94,8 @@ async function stopTwitch() {
   try {
     console.log('[Twitch] Stopping...')
     const result = await invoke<string>('disconnect_twitch')
-    isConnected.value = false
     showError(result)
+    // Статус обновится автоматически через периодическую проверку
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : String(e)
     showError('Failed to disconnect: ' + errorMsg)
@@ -79,10 +105,8 @@ async function stopTwitch() {
 async function sendTestMessage() {
   try {
     const result = await invoke<string>('send_twitch_test_message')
-    isConnected.value = true  // Успешная отправка = подключено
     showError(result)
   } catch (e) {
-    isConnected.value = false  // Ошибка = не подключено
     const errorMsg = e instanceof Error ? e.message : String(e)
     showError('Failed to send test message: ' + errorMsg)
   }
@@ -101,11 +125,12 @@ function showError(message: string) {
 
 onMounted(async () => {
   await loadSettings()
+  startStatusCheck()  // Запускаем периодическую проверку статуса
 })
 
 // Cleanup
-import { onUnmounted } from 'vue'
 onUnmounted(() => {
+  stopStatusCheck()  // Останавливаем периодическую проверку статуса
   if (errorTimeout !== null) {
     clearTimeout(errorTimeout)
   }
