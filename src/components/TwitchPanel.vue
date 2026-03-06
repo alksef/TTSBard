@@ -48,6 +48,11 @@ async function loadSettings() {
   try {
     const loaded = await invoke<TwitchSettings>('get_twitch_settings')
     settings.value = loaded
+
+    // Запрашиваем текущий статус при загрузке
+    const status = await invoke<string>('get_twitch_status')
+    console.log('[Twitch] Initial status from backend:', status)
+    handleStatusChange(status as TwitchStatus)
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : String(e)
     showError('Failed to load settings: ' + errorMsg)

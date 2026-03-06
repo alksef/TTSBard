@@ -143,6 +143,7 @@ pub fn run() {
             commands::twitch::send_twitch_test_message,
             commands::twitch::connect_twitch,
             commands::twitch::disconnect_twitch,
+            commands::twitch::get_twitch_status,
         ])
         .setup(|app| {
             eprintln!("[APP] === Application setup started ===");
@@ -571,6 +572,14 @@ pub fn run() {
                     let mut last_status = crate::events::TwitchConnectionStatus::Disconnected;
                     let mut status_check_interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
 
+                    // Helper function to update status in AppState and emit events
+                    let update_status = |status: crate::events::TwitchConnectionStatus| {
+                        if let Ok(mut s) = app_state_for_twitch_arc.twitch_connection_status.lock() {
+                            *s = status.clone();
+                        }
+                        let _ = app_handle_for_twitch.emit("twitch-status-changed", &status);
+                    };
+
                     loop {
                         tokio::select! {
                             // Периодическая проверка статуса
@@ -596,19 +605,12 @@ pub fn run() {
                                         eprintln!("[TWITCH] Status changed: {:?} -> {:?}", last_status, new_status);
                                         last_status = new_status.clone();
 
-                                        // Emit via Tauri
-                                        let json = serde_json::to_string(&new_status).unwrap_or_else(|_| "FAILED TO SERIALIZE".to_string());
-                                        eprintln!("[TWITCH] Emitting event with payload: {}", json);
-                                        let _ = app_handle_for_twitch.emit("twitch-status-changed", &new_status);
-
-                                        // Emit via AppEvent
-                                        if let Some(state) = app_handle_for_twitch.try_state::<AppState>() {
-                                            state.emit_event(crate::events::AppEvent::TwitchStatusChanged(new_status));
-                                        }
+                                        // Update status in AppState and emit event
+                                        update_status(new_status.clone());
                                     }
                                 } else if last_status != crate::events::TwitchConnectionStatus::Disconnected {
                                     last_status = crate::events::TwitchConnectionStatus::Disconnected;
-                                    let _ = app_handle_for_twitch.emit("twitch-status-changed", &last_status);
+                                    update_status(last_status.clone());
                                 }
                             }
                             // Обработка событий Twitch
@@ -634,14 +636,14 @@ pub fn run() {
 
                                                 // Сбросить статус
                                                 last_status = crate::events::TwitchConnectionStatus::Disconnected;
-                                                let _ = app_handle_for_twitch.emit("twitch-status-changed", &last_status);
+                                                update_status(last_status.clone());
 
                                                 // Запустить новый если включен
                                                 if is_enabled {
                                                     if is_valid {
                                                         eprintln!("[TWITCH] Settings valid, creating new client...");
                                                         last_status = crate::events::TwitchConnectionStatus::Connecting;
-                                                        let _ = app_handle_for_twitch.emit("twitch-status-changed", &last_status);
+                                                        update_status(last_status.clone());
 
                                                         let client = TwitchClient::new(settings_clone);
                                                         match client.start().await {
@@ -652,7 +654,7 @@ pub fn run() {
                                                             Err(e) => {
                                                                 eprintln!("[TWITCH] Failed to start client: {}", e);
                                                                 last_status = crate::events::TwitchConnectionStatus::Error(e.to_string());
-                                                                let _ = app_handle_for_twitch.emit("twitch-status-changed", &last_status);
+                                                                update_status(last_status.clone());
                                                             }
                                                         }
                                                     } else {
@@ -668,7 +670,7 @@ pub fn run() {
                                                     client.stop().await;
                                                 }
                                                 last_status = crate::events::TwitchConnectionStatus::Disconnected;
-                                                let _ = app_handle_for_twitch.emit("twitch-status-changed", &last_status);
+                                                update_status(last_status.clone());
                                             }
                                             TwitchEvent::SendMessage(text) => {
                                                 eprintln!("[TWITCH] SendMessage event received: '{}'", text);
@@ -678,7 +680,7 @@ pub fn run() {
                                                         Err(e) => {
                                                             eprintln!("[TWITCH] Failed to send message: {}", e);
                                                             last_status = crate::events::TwitchConnectionStatus::Error(e.to_string());
-                                                            let _ = app_handle_for_twitch.emit("twitch-status-changed", &last_status);
+                                                            update_status(last_status.clone());
                                                         }
                                                     }
                                                 } else {
