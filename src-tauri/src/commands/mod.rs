@@ -2,7 +2,7 @@ use crate::state::AppState;
 use crate::events::AppEvent;
 use crate::config::{SettingsManager, WindowsManager, is_valid_hex_color};
 use crate::floating::{show_floating_window, hide_floating_window};
-use crate::tts::TtsProviderType;
+use crate::tts::{TtsProviderType, TtsProvider};
 use crate::audio::{AudioPlayer, OutputConfig};
 use crate::commands::telegram::TelegramState;
 use tauri::{State, AppHandle, Manager, Emitter};
@@ -203,7 +203,8 @@ pub async fn set_tts_provider(
         }
         TtsProviderType::Local => {
             eprintln!("[SET_PROVIDER] Initializing Local TTS");
-            state.init_local_tts();
+            let url = state.get_local_tts_url();
+            state.init_local_tts(url);
             eprintln!("[SET_PROVIDER] Local TTS initialized");
         }
     }
@@ -229,10 +230,12 @@ pub fn get_local_tts_url(
 /// Set Local TTS URL
 #[tauri::command]
 pub fn set_local_tts_url(
-    _state: State<'_, AppState>,
+    state: State<'_, AppState>,
     settings_manager: State<'_, SettingsManager>,
     url: String,
 ) -> Result<(), String> {
+    eprintln!("[LOCAL_TTS] Setting URL to: {}", url);
+
     // Validate URL
     if url.is_empty() {
         return Err("URL не может быть пустым".into());
@@ -241,10 +244,33 @@ pub fn set_local_tts_url(
         return Err("URL должен начинаться с http:// или https://".into());
     }
 
-    // Save to settings
-    settings_manager.set_local_tts_url(url)
+    // Save to config first
+    eprintln!("[LOCAL_TTS] Saving URL to config...");
+    settings_manager.set_local_tts_url(url.clone())
         .map_err(|e| format!("Failed to save settings: {}", e))?;
 
+    // Update runtime state
+    eprintln!("[LOCAL_TTS] Updating runtime state...");
+
+    // Collect data with minimal locks (following deadlock prevention pattern)
+    let current_provider = {
+        let provider = state.tts_providers.lock().clone();
+        provider
+    };
+
+    // Reinitialize LocalTts if it's the active provider
+    if matches!(current_provider.as_ref(), Some(TtsProvider::Local(_))) {
+        eprintln!("[LOCAL_TTS] Local TTS is active, reinitializing with new URL...");
+        state.init_local_tts(url.clone());
+        eprintln!("[LOCAL_TTS] Local TTS reinitialized with URL: {}", url);
+    } else {
+        eprintln!("[LOCAL_TTS] Local TTS is not active, skipping reinitialization");
+    }
+
+    // Update URL in state (always, so it's ready when LocalTts is activated)
+    state.set_local_tts_url(url.clone());
+
+    eprintln!("[LOCAL_TTS] URL set successfully: {}", url);
     Ok(())
 }
 

@@ -91,18 +91,21 @@ impl Default for OpenAiSettings {
 }
 
 /// Local TTS server settings
+///
+/// Compatible with TTSVoiceWizard "Locally Hosted" mode.
+/// Default URL matches TITTS.py server endpoint.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LocalTtsSettings {
     #[serde(default = "default_local_tts_url")]
     pub url: String,
 }
 
-fn default_local_tts_url() -> String { "http://localhost:5002".to_string() }
+fn default_local_tts_url() -> String { "http://127.0.0.1:8124".to_string() }
 
 impl Default for LocalTtsSettings {
     fn default() -> Self {
         Self {
-            url: "http://localhost:5002".to_string(),
+            url: "http://127.0.0.1:8124".to_string(),
         }
     }
 }

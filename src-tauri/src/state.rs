@@ -93,6 +93,9 @@ pub struct AppState {
 
     /// Sender для Twitch событий
     pub twitch_event_tx: TwitchEventSender,
+
+    /// URL для Local TTS (TTSVoiceWizard - Locally Hosted)
+    pub local_tts_url: Arc<Mutex<String>>,
 }
 
 impl AppState {
@@ -119,6 +122,7 @@ impl AppState {
             twitch_settings: Arc::new(tokio::sync::RwLock::new(TwitchSettings::default())),
             twitch_connection_status: Arc::new(Mutex::new(crate::events::TwitchConnectionStatus::Disconnected)),
             twitch_event_tx,
+            local_tts_url: Arc::new(Mutex::new("http://127.0.0.1:8124".to_string())),
         }
     }
 
@@ -247,15 +251,21 @@ impl AppState {
         eprintln!("[STATE] TTS provider set to OpenAi");
     }
 
-    pub fn init_local_tts(&self) {
+    pub fn init_local_tts(&self, url: String) {
+        eprintln!("[STATE] Initializing Local TTS with URL: {}", url);
+
         let mut tts = LocalTts::new();
+        tts.set_url(url);
 
         // Add event sender if available
         if let Some(event_tx) = self.get_event_sender() {
             tts = tts.with_event_tx(event_tx);
         }
 
+        eprintln!("[STATE] Created LocalTts: url={}", tts.get_url());
+
         *self.tts_providers.lock() = Some(TtsProvider::Local(tts));
+        eprintln!("[STATE] TTS provider set to Local");
     }
 
     pub fn init_silero_tts(&self, telegram_client_arc: Arc<tokio::sync::Mutex<Option<TelegramClient>>>) {
@@ -348,6 +358,14 @@ impl AppState {
         // Phase 3: Update proxy settings
         *self.openai_proxy_host.lock() = host;
         *self.openai_proxy_port.lock() = port;
+    }
+
+    pub fn get_local_tts_url(&self) -> String {
+        self.local_tts_url.lock().clone()
+    }
+
+    pub fn set_local_tts_url(&self, url: String) {
+        *self.local_tts_url.lock() = url;
     }
 
     /// Get or create preprocessor instance

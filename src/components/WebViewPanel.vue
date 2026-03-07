@@ -150,6 +150,7 @@ async function resetCss() {
   }
 }
 
+// @ts-ignore - unused function reserved for future use
 async function testConnection() {
   const testUrl = `http://localhost:${settings.value.port}/`
   showError('Testing connection...')
