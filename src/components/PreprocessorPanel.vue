@@ -82,8 +82,6 @@ onMounted(async () => {
 
 <template>
   <div class="preprocessor-panel">
-    <h2>Препроцессор текста</h2>
-
     <div v-if="isLoading" class="loading">
       Загрузка...
     </div>
@@ -158,95 +156,94 @@ placeholder="Введите текст для проверки..."
 
 <style scoped>
 .preprocessor-panel {
-  padding: 20px;
-  max-width: 800px;
+  max-width: 900px;
   margin: 0 auto;
 }
 
-h2 {
-  margin-bottom: 20px;
-  color: #ffffff;
-}
-
 .info-banner {
-  background: rgba(74, 222, 128, 0.1);
-  border: 1px solid rgba(74, 222, 128, 0.3);
-  border-radius: 8px;
+  background: rgba(255, 152, 0, 0.1);
+  border: 1px solid rgba(255, 183, 77, 0.22);
+  border-left: 4px solid #ff9800;
+  border-radius: 12px;
   padding: 12px 16px;
   margin-bottom: 20px;
 }
 
 .info-banner p {
   margin: 0;
-  color: #4ade80;
-  font-size: 13px;
+  color: #ffcc80;
+  font-size: 0.95rem;
+  line-height: 1.6;
 }
 
 .info-banner code {
-  background: rgba(74, 222, 128, 0.2);
+  background: rgba(29, 140, 255, 0.15);
   padding: 2px 6px;
-  border-radius: 3px;
-  font-family: 'Consolas', monospace;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  color: var(--color-info);
+  border: 1px solid rgba(29, 140, 255, 0.28);
 }
 
 .section {
   margin-bottom: 30px;
-  background: #3a3a3a;
-  padding: 20px;
-  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 1.5rem;
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
 }
 
 h3 {
   margin-bottom: 10px;
-  color: #ffffff;
-  font-size: 16px;
+  color: var(--color-text-primary);
+  font-size: 1.1rem;
 }
 
 .hint {
-  font-size: 12px;
-  color: #888;
+  font-size: 0.9rem;
+  color: var(--color-text-secondary);
   margin-bottom: 10px;
+  line-height: 1.6;
 }
 
 .hint code {
-  background: #4a4a4a;
+  background: rgba(29, 140, 255, 0.15);
   padding: 2px 6px;
-  border-radius: 3px;
-  font-family: 'Consolas', monospace;
-  color: #4ec9b0;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  color: var(--color-info);
+  border: 1px solid rgba(29, 140, 255, 0.28);
 }
 
 .input-area {
   width: 100%;
-  background: #2c2c2c;
-  border: 1px solid #4a4a4a;
-  border-radius: 4px;
-  color: #ffffff;
-  padding: 10px;
-  font-family: 'Consolas', monospace;
+  background: var(--color-bg-field);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  color: var(--color-text-primary);
+  padding: 12px;
+  font-family: var(--font-mono);
   font-size: 13px;
   resize: vertical;
 }
 
 .input-area:focus {
   outline: none;
-  border-color: #007acc;
+  border-color: rgba(29, 140, 255, 0.5);
+  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
 }
 
 .status {
-  font-size: 11px;
-  color: #666;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
   margin-top: 5px;
-}
-
-.test-section {
-  background: #3a3a3a;
 }
 
 .test-inputs {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .input-group, .output-group {
@@ -256,51 +253,49 @@ h3 {
 }
 
 label {
-  font-size: 12px;
-  color: #aaa;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
 }
 
 .test-input {
-  background: #2c2c2c;
-  border: 1px solid #4a4a4a;
-  border-radius: 4px;
-  color: #ffffff;
+  background: var(--color-bg-field);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  color: var(--color-text-primary);
   padding: 8px 10px;
-  font-family: 'Consolas', monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
 }
 
 .test-input:focus {
   outline: none;
-  border-color: #007acc;
+  border-color: rgba(29, 140, 255, 0.5);
+  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
 }
 
 .test-button {
   align-self: flex-start;
-  background: #007acc;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
   border: none;
-  border-radius: 4px;
+  border-radius: 10px;
   color: #ffffff;
-  padding: 8px 16px;
+  padding: 10px 18px;
   cursor: pointer;
   font-size: 13px;
+  font-weight: 700;
 }
 
 .test-button:hover {
-  background: #0069b4;
-}
-
-.test-button:active {
-  background: #005a9e;
+  filter: brightness(1.06);
 }
 
 .test-output {
-  background: #2c2c2c;
-  border: 1px solid #4a4a4a;
-  border-radius: 4px;
-  color: #4ec9b0;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  color: var(--color-success);
   padding: 10px;
-  font-family: 'Consolas', monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   min-height: 40px;
 }
@@ -308,6 +303,6 @@ label {
 .loading {
   text-align: center;
   padding: 40px;
-  color: #888;
+  color: var(--color-text-secondary);
 }
 </style>

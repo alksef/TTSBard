@@ -240,8 +240,6 @@ onUnmounted(() => {
 
 <template>
   <div class="webview-panel">
-    <h1>WebView Source</h1>
-
     <!-- Error/Info Message Display -->
     <div v-if="errorMessage" class="message-box" :class="{ error: errorMessage.includes('Failed') || errorMessage.includes('timeout'), success: errorMessage.includes('successful'), info: errorMessage.includes('Testing') }">
       {{ errorMessage }}
@@ -373,47 +371,42 @@ onUnmounted(() => {
 
 <style scoped>
 .webview-panel {
-  max-width: 800px;
+  max-width: 900px;
   margin: 0 auto;
-}
-
-h1 {
-  margin-bottom: 2rem;
-  color: #333;
 }
 
 h2 {
   margin-top: 0;
   margin-bottom: 1rem;
   font-size: 1.1rem;
-  color: #333;
+  color: var(--color-text-primary);
   font-weight: 600;
 }
 
 .message-box {
   padding: 1rem;
   margin-bottom: 1rem;
-  border-radius: 8px;
+  border-radius: 12px;
   animation: slideDown 0.3s ease-out;
 }
 
 .message-box.success {
-  background: #e8f5e9;
-  border: 1px solid #c8e6c9;
-  color: #2e7d32;
+  background: rgba(74, 222, 128, 0.12);
+  border: 1px solid rgba(74, 222, 128, 0.22);
+  color: #bff4d0;
 }
 
 .message-box.info {
-  background: #e3f2fd;
-  border: 1px solid #bbdefb;
-  color: #1976D2;
+  background: rgba(29, 140, 255, 0.12);
+  border: 1px solid rgba(29, 140, 255, 0.22);
+  color: var(--color-info);
 }
 
 .message-box.error {
-  background: #fee;
-  border: 1px solid #fcc;
-  border-left: 4px solid #f44;
-  color: #c33;
+  background: rgba(255, 111, 105, 0.12);
+  border: 1px solid rgba(255, 111, 105, 0.24);
+  border-left: 4px solid var(--color-danger);
+  color: #ffb8b4;
 }
 
 @keyframes slideDown {
@@ -430,8 +423,10 @@ h2 {
 .settings-section {
   margin-bottom: 1.5rem;
   padding: 1.5rem;
-  background: #f5f5f5;
-  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
 }
 
 .section-header {
@@ -453,15 +448,15 @@ h2 {
   gap: 1rem;
   margin-top: 1rem;
   padding: 1rem;
-  background: #f8f9fa;
-  border-radius: 8px;
-  border: 1px solid #e0e0e0;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .setting-row label {
   min-width: 140px;
   font-weight: 500;
-  color: #555;
+  color: var(--color-text-secondary);
   font-size: 14px;
 }
 
@@ -481,7 +476,7 @@ h2 {
 
 .setting-hint {
   font-size: 0.85rem;
-  color: #666;
+  color: var(--color-text-secondary);
   margin: 0;
   width: 100%;
 }
@@ -491,15 +486,16 @@ h2 {
   flex: 1;
   max-width: 200px;
   padding: 0.5rem;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
   font-size: 14px;
-  background: #fff;
+  background: var(--color-bg-field);
+  color: var(--color-text-primary);
 }
 
 .number-input.input-error {
-  border-color: #f44;
-  background: #fee;
+  border-color: rgba(255, 111, 105, 0.38);
+  background: rgba(255, 111, 105, 0.08);
 }
 
 .number-input.input-error:focus {
@@ -508,7 +504,7 @@ h2 {
 }
 
 .error-text {
-  color: #f44;
+  color: #ffb8b4;
   font-size: 13px;
   font-weight: 500;
 }
@@ -517,7 +513,8 @@ h2 {
 .select-input:focus,
 .code-editor:focus {
   outline: none;
-  border-color: #4CAF50;
+  border-color: rgba(29, 140, 255, 0.5);
+  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
 }
 
 .url-display {
@@ -531,12 +528,12 @@ h2 {
 .url-code {
   flex: 1;
   padding: 0.5rem 0.75rem;
-  background: #fff;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  font-family: 'Courier New', monospace;
+  background: var(--color-bg-field);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  font-family: var(--font-mono);
   font-size: 13px;
-  color: #333;
+  color: var(--color-text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -544,34 +541,35 @@ h2 {
 
 .icon-button {
   padding: 0.5rem 0.75rem;
-  background: #fff;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
   cursor: pointer;
   font-size: 16px;
   transition: all 0.2s;
+  color: var(--color-text-primary);
 }
 
 .icon-button:hover {
-  background: #f0f0f0;
-  border-color: #bbb;
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.16);
 }
 
 .reset-button {
   padding: 0.4rem 0.8rem;
-  background: #fff;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
   cursor: pointer;
   font-size: 13px;
-  color: #666;
+  color: var(--color-text-secondary);
   transition: all 0.2s;
 }
 
 .reset-button:hover {
-  background: #f0f0f0;
-  border-color: #bbb;
-  color: #333;
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: var(--color-text-primary);
 }
 
 .test-button {
@@ -604,13 +602,13 @@ h2 {
 
 .code-editor {
   width: 100%;
-  font-family: 'Courier New', monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   padding: 1rem;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  background: #fff;
-  color: #333;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--color-text-primary);
   resize: vertical;
   min-height: 300px;
   line-height: 1.5;
@@ -619,7 +617,7 @@ h2 {
 .value-display {
   min-width: 60px;
   font-size: 14px;
-  color: #666;
+  color: var(--color-text-secondary);
   font-weight: 500;
 }
 
@@ -627,7 +625,7 @@ h2 {
 .stop-button {
   padding: 0.75rem 1.5rem;
   border: none;
-  border-radius: 6px;
+  border-radius: 10px;
   cursor: pointer;
   font-weight: 500;
   font-size: 14px;
@@ -635,25 +633,25 @@ h2 {
 }
 
 .start-button {
-  background: #4CAF50;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
   color: white;
 }
 
 .start-button:hover:not(.disabled) {
-  background: #45a049;
+  filter: brightness(1.06);
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(76, 175, 80, 0.3);
+  box-shadow: 0 2px 8px rgba(29, 140, 255, 0.28);
 }
 
 .stop-button {
-  background: #2196F3;
+  background: rgba(255, 111, 105, 0.16);
   color: white;
 }
 
 .stop-button:hover:not(.disabled) {
-  background: #1976D2;
+  background: rgba(255, 111, 105, 0.24);
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(33, 150, 243, 0.3);
+  box-shadow: 0 2px 8px rgba(255, 111, 105, 0.22);
 }
 
 .start-button.disabled,
@@ -674,15 +672,15 @@ h2 {
   justify-content: flex-end;
   margin-top: 1rem;
   padding-top: 1rem;
-  border-top: 1px solid #e0e0e0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .save-button-inline {
   padding: 0.6rem 1.2rem;
-  background: #4CAF50;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
   color: white;
   border: none;
-  border-radius: 6px;
+  border-radius: 10px;
   cursor: pointer;
   font-weight: 500;
   font-size: 14px;
@@ -690,9 +688,9 @@ h2 {
 }
 
 .save-button-inline:hover {
-  background: #45a049;
+  filter: brightness(1.06);
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(76, 175, 80, 0.3);
+  box-shadow: 0 2px 8px rgba(29, 140, 255, 0.28);
 }
 
 .save-button-inline:active {

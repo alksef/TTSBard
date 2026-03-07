@@ -4,8 +4,6 @@
 
 <template>
   <div class="info-panel">
-    <h1>Руководство</h1>
-
     <!-- Глобальные горячие клавиши -->
     <section class="info-section">
       <h2>🌐 Глобальные горячие клавиши</h2>
@@ -155,23 +153,20 @@
   margin: 0 auto;
 }
 
-h1 {
-  margin-bottom: 2rem;
-  color: #333;
-}
-
 .info-section {
   margin-bottom: 2rem;
   padding: 1.5rem;
-  background: #f5f5f5;
-  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
 }
 
 .info-section h2 {
   margin-top: 0;
   margin-bottom: 1rem;
   font-size: 1.5rem;
-  color: #333;
+  color: var(--color-text-primary);
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -181,25 +176,27 @@ h1 {
   margin-top: 1.5rem;
   margin-bottom: 0.75rem;
   font-size: 1.1rem;
-  color: #555;
+  color: var(--color-text-primary);
 }
 
 .section-description {
-  color: #666;
+  color: var(--color-text-secondary);
   line-height: 1.6;
   margin-bottom: 1rem;
 }
 
 .section-description code {
-  background: #e0e0e0;
+  background: rgba(29, 140, 255, 0.15);
+  color: #70d6ff;
   padding: 0.2rem 0.4rem;
-  border-radius: 3px;
-  font-family: monospace;
+  border-radius: 4px;
+  font-family: var(--font-mono);
   font-size: 0.9rem;
+  border: 1px solid rgba(29, 140, 255, 0.3);
 }
 
 .subsection-description {
-  color: #666;
+  color: var(--color-text-secondary);
   line-height: 1.6;
   margin-bottom: 0.75rem;
 }
@@ -218,27 +215,28 @@ h1 {
 }
 
 .hotkey-item kbd {
-  background: #fff;
-  border: 1px solid #ccc;
-  border-bottom: 2px solid #999;
-  border-radius: 4px;
-  padding: 0.2rem 0.5rem;
-  font-family: monospace;
-  font-weight: bold;
-  font-size: 0.9rem;
-  box-shadow: 0 1px 1px rgba(0,0,0,0.1);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  padding: 0.3rem 0.6rem;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--color-text-primary);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .hotkey-item span {
-  color: #555;
+  color: var(--color-text-secondary);
   flex: 1;
 }
 
 .preset-list {
-  background: #fff;
+  background: rgba(0, 0, 0, 0.25);
   padding: 1rem;
-  border-radius: 6px;
-  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .preset-item {
@@ -253,39 +251,43 @@ h1 {
 }
 
 .preset-item code {
-  background: #e3f2fd;
-  color: #1976d2;
+  background: rgba(29, 140, 255, 0.15);
+  color: #70d6ff;
   padding: 0.3rem 0.6rem;
   border-radius: 4px;
-  font-family: monospace;
-  font-weight: bold;
-  font-size: 0.95rem;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 0.9rem;
+  border: 1px solid rgba(29, 140, 255, 0.3);
 }
 
 .preset-item span {
-  color: #555;
+  color: var(--color-text-secondary);
 }
 
 .preset-example {
   margin-left: 1.5rem;
   font-size: 0.9rem;
-  color: #666;
-  padding: 0.5rem;
-  background: #f9f9f9;
-  border-radius: 4px;
+  color: var(--color-text-secondary);
+  padding: 0.6rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
   margin-top: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .preset-example code {
-  background: #e0e0e0;
-  padding: 0.1rem 0.3rem;
-  border-radius: 2px;
-  font-family: monospace;
+  background: rgba(29, 140, 255, 0.12);
+  color: #70d6ff;
+  padding: 0.15rem 0.35rem;
+  border-radius: 3px;
+  font-family: var(--font-mono);
   font-size: 0.85rem;
+  border: 1px solid rgba(29, 140, 255, 0.25);
 }
 
 .preset-example em {
-  color: #4CAF50;
+  color: #4ade80;
   font-style: normal;
   font-weight: 500;
 }
@@ -293,10 +295,10 @@ h1 {
 .hint {
   margin-top: 1rem;
   padding: 0.75rem;
-  background: #fff3e0;
+  background: rgba(255, 152, 0, 0.1);
   border-left: 4px solid #ff9800;
-  border-radius: 4px;
-  color: #e65100;
+  border-radius: 6px;
+  color: #ffb74d;
   font-size: 0.9rem;
 }
 
@@ -308,16 +310,16 @@ h1 {
 }
 
 .key-badge {
-  background: #fff;
-  border: 1px solid #ccc;
-  border-bottom: 2px solid #999;
-  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
   padding: 0.5rem;
   text-align: center;
-  font-family: monospace;
-  font-weight: bold;
+  font-family: var(--font-mono);
+  font-weight: 600;
   font-size: 0.9rem;
-  color: #555;
+  color: var(--color-text-secondary);
 }
 
 .format-list {
@@ -327,23 +329,34 @@ h1 {
 }
 
 .format-badge {
-  background: #e8f5e9;
-  color: #2e7d32;
+  background: rgba(74, 222, 128, 0.12);
+  color: #4ade80;
   padding: 0.4rem 0.8rem;
-  border-radius: 4px;
-  font-family: monospace;
-  font-weight: bold;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-weight: 600;
   font-size: 0.9rem;
+  border: 1px solid rgba(74, 222, 128, 0.25);
 }
 
 .info-list {
   margin: 0;
   padding-left: 1.5rem;
-  color: #666;
+  color: var(--color-text-secondary);
   line-height: 1.8;
 }
 
 .info-list li {
   margin-bottom: 0.5rem;
+}
+
+.info-list code {
+  background: rgba(29, 140, 255, 0.12);
+  color: #70d6ff;
+  padding: 0.15rem 0.35rem;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  border: 1px solid rgba(29, 140, 255, 0.25);
 }
 </style>

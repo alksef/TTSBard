@@ -163,8 +163,6 @@ onUnmounted(() => {
 
 <template>
   <div class="twitch-panel">
-    <h1>Twitch Chat</h1>
-
     <!-- Error/Info Message Display -->
     <div v-if="errorMessage" class="message-box" :class="{
       error: errorMessage.includes('Failed') || errorMessage.includes('failed') || errorMessage.includes('Error') || errorMessage.includes('Ошибка'),
@@ -279,20 +277,15 @@ onUnmounted(() => {
 
 <style scoped>
 .twitch-panel {
-  max-width: 800px;
+  max-width: 900px;
   margin: 0 auto;
-}
-
-h1 {
-  margin-bottom: 2rem;
-  color: #333;
 }
 
 h2 {
   margin-top: 0;
   margin-bottom: 1rem;
   font-size: 1.1rem;
-  color: #333;
+  color: var(--color-text-primary);
   font-weight: 600;
 }
 
@@ -302,10 +295,11 @@ h2 {
   align-items: center;
   gap: 0.5rem;
   padding: 0.75rem 1rem;
-  border-radius: 8px;
+  border-radius: 12px;
   margin-bottom: 1rem;
   font-weight: 500;
-  background: #f5f5f5;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .status-dot {
@@ -333,23 +327,23 @@ h2 {
 }
 
 .status-indicator.connected {
-  background: #e8f5e9;
-  color: #2e7d32;
+  background: rgba(74, 222, 128, 0.12);
+  color: #bff4d0;
 }
 
 .status-indicator.connecting {
-  background: #fff3e0;
-  color: #f57c00;
+  background: rgba(255, 183, 77, 0.12);
+  color: #ffd7a2;
 }
 
 .status-indicator.error {
-  background: #fee;
-  color: #c33;
+  background: rgba(255, 111, 105, 0.12);
+  color: #ffb8b4;
 }
 
 .status-indicator.disconnected {
-  background: #f5f5f5;
-  color: #666;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--color-text-secondary);
 }
 
 .refresh-button {
@@ -367,7 +361,7 @@ h2 {
 
 .refresh-button:hover {
   opacity: 1;
-  background: rgba(0, 0, 0, 0.05);
+  background: rgba(255, 255, 255, 0.08);
   transform: rotate(180deg);
 }
 
@@ -383,21 +377,21 @@ h2 {
 .message-box {
   padding: 1rem;
   margin-bottom: 1rem;
-  border-radius: 8px;
+  border-radius: 12px;
   animation: slideDown 0.3s ease-out;
 }
 
 .message-box.success {
-  background: #e8f5e9;
-  border: 1px solid #c8e6c9;
-  color: #2e7d32;
+  background: rgba(74, 222, 128, 0.12);
+  border: 1px solid rgba(74, 222, 128, 0.22);
+  color: #bff4d0;
 }
 
 .message-box.error {
-  background: #fee;
-  border: 1px solid #fcc;
-  border-left: 4px solid #f44;
-  color: #c33;
+  background: rgba(255, 111, 105, 0.12);
+  border: 1px solid rgba(255, 111, 105, 0.24);
+  border-left: 4px solid var(--color-danger);
+  color: #ffb8b4;
 }
 
 @keyframes slideDown {
@@ -414,8 +408,10 @@ h2 {
 .settings-section {
   margin-bottom: 1.5rem;
   padding: 1.5rem;
-  background: #f5f5f5;
-  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
 }
 
 .setting-row {
@@ -429,15 +425,15 @@ h2 {
 .setting-row.server-actions {
   gap: 1rem;
   padding: 1rem;
-  background: #f8f9fa;
-  border-radius: 8px;
-  border: 1px solid #e0e0e0;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .setting-row label {
   min-width: 100px;
   font-weight: 500;
-  color: #555;
+  color: var(--color-text-secondary);
   font-size: 14px;
 }
 
@@ -465,22 +461,24 @@ h2 {
   flex: 1;
   max-width: 400px;
   padding: 0.5rem;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
   font-size: 14px;
-  background: #fff;
+  background: var(--color-bg-field);
+  color: var(--color-text-primary);
 }
 
 .text-input:focus {
   outline: none;
-  border-color: #9146FF;
+  border-color: rgba(29, 140, 255, 0.5);
+  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
 }
 
 .start-button,
 .stop-button {
   padding: 0.75rem 1.5rem;
   border: none;
-  border-radius: 6px;
+  border-radius: 10px;
   cursor: pointer;
   font-weight: 500;
   font-size: 14px;
@@ -491,7 +489,7 @@ h2 {
 .test-message-button {
   padding: 0.75rem 1.5rem;
   border: none;
-  border-radius: 6px;
+  border-radius: 10px;
   cursor: pointer;
   font-weight: 500;
   font-size: 14px;
@@ -499,42 +497,42 @@ h2 {
 }
 
 .start-button {
-  background: #4CAF50;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
   color: white;
 }
 
 .start-button:hover:not(.disabled) {
-  background: #45a049;
+  filter: brightness(1.06);
   transform: translateY(-1px);
 }
 
 .stop-button {
-  background: #2196F3;
+  background: rgba(255, 111, 105, 0.16);
   color: white;
 }
 
 .stop-button:hover:not(.disabled) {
-  background: #1976D2;
+  background: rgba(255, 111, 105, 0.24);
   transform: translateY(-1px);
 }
 
 .save-button-inline {
-  background: #9146FF;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
   color: white;
 }
 
 .save-button-inline:hover {
-  background: #772CE8;
+  filter: brightness(1.06);
   transform: translateY(-1px);
 }
 
 .test-message-button {
-  background: #9C27B0;
+  background: rgba(29, 140, 255, 0.16);
   color: white;
 }
 
 .test-message-button:hover {
-  background: #7B1FA2;
+  background: rgba(29, 140, 255, 0.26);
   transform: translateY(-1px);
 }
 
@@ -563,18 +561,18 @@ h2 {
 }
 
 .help-section {
-  background: #fff9e6;
-  border: 1px solid #ffe082;
+  background: rgba(255, 183, 77, 0.1);
+  border: 1px solid rgba(255, 183, 77, 0.2);
 }
 
 .help-text {
   margin: 0.5rem 0;
-  color: #666;
+  color: var(--color-text-secondary);
   font-size: 14px;
 }
 
 .help-link {
-  color: #9146FF;
+  color: var(--color-info);
   text-decoration: none;
   font-weight: 500;
 }
@@ -584,9 +582,11 @@ h2 {
 }
 
 .help-text code {
-  background: #f5f5f5;
+  background: rgba(29, 140, 255, 0.15);
   padding: 0.2rem 0.4rem;
   border-radius: 4px;
-  font-family: monospace;
+  font-family: var(--font-mono);
+  color: var(--color-info);
+  border: 1px solid rgba(29, 140, 255, 0.28);
 }
 </style>
