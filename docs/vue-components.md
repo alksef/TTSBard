@@ -56,30 +56,57 @@ src/
 
 ---
 
-## TtsPanel.vue (~200 lines)
-**OpenAI TTS configuration**
+## TtsPanel.vue (~950 lines)
+**TTS Provider Settings - управление TTS провайдерами**
 
-**UI Elements:**
-- API key input field (password type)
-- Voice selection dropdown
-- Status display
+**Провайдеры:**
+- OpenAI TTS
+- Silero Bot (Telegram)
+- TTSVoiceWizard (Local)
+
+**OpenAI TTS Provider:**
+- **Порядок полей:** API Key → Proxy → Voice
+- **API Key** - поле ввода токена (password type)
+- **Proxy** - настройки прокси (host + port)
+- **Voice** - выбор голоса (автосохранение при смене)
+- **Единая кнопка** "Save Settings" для токена и прокси
 
 **Voices Available:**
-- alloy
-- echo
-- fable
-- onyx
-- nova
-- shimmer
+- alloy, echo, fable, onyx, nova, shimmer
+
+**Silero Bot Provider:**
+- Авторизация через Telegram
+- Отображение текущего голоса и лимитов
+- Кнопки обновления голоса/лимитов
+
+**Local TTS Provider:**
+- URL локального TTS сервера
 
 **Tauri Commands:**
-- `invoke('get_api_key')` -> string
-- `invoke('set_api_key', { key })`
-- `invoke('get_voice')` -> string
-- `invoke('set_voice', { voice })`
+
+OpenAI:
+- `invoke('get_openai_api_key')` -> string | null
+- `invoke('set_openai_api_key', { key })`
+- `invoke('get_openai_voice')` -> string
+- `invoke('set_openai_voice', { voice })`
+- `invoke('get_openai_proxy')` -> (host | null, port | null)
+- `invoke('set_openai_proxy', { host, port })`
+
+Local:
+- `invoke('get_local_tts_url')` -> string
+- `invoke('set_local_tts_url', { url })`
+
+Provider:
+- `invoke('get_tts_provider')` -> 'openai' | 'silero' | 'local'
+- `invoke('set_tts_provider', { provider })`
 
 **Events:**
 - Listens to `tts-error` event for error display
+
+**Features:**
+- Автосохранение голоса при выборе с подтверждением
+- Расширяемые карточки провайдеров
+- Радиокнопка для выбора активного провайдера
 
 ---
 
