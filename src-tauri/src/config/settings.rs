@@ -261,6 +261,7 @@ pub struct SettingsManager {
     cache: Arc<RwLock<AppSettings>>,
 }
 
+#[allow(dead_code)]
 impl SettingsManager {
     /// Create a new SettingsManager with initialized cache
     pub fn new() -> Result<Self> {
