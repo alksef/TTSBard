@@ -222,6 +222,9 @@ pub fn run() {
 
             // Apply OpenAI settings
             if let Some(ref api_key) = settings.tts.openai.api_key {
+                // Store API key in AppState for get_openai_api_key command
+                *app_state.openai_api_key.lock() = Some(api_key.clone());
+                eprintln!("[APP] OpenAI API key loaded and stored in AppState");
                 app_state.init_openai_tts(api_key.clone());
                 app_state.set_openai_voice(settings.tts.openai.voice.clone());
                 app_state.set_openai_proxy(settings.tts.openai.proxy_host.clone(), settings.tts.openai.proxy_port);
