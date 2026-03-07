@@ -291,19 +291,28 @@ pub fn get_openai_voice(
 /// Set OpenAI voice
 #[tauri::command]
 pub fn set_openai_voice(
-    _state: State<'_, AppState>,
+    state: State<'_, AppState>,
     settings_manager: State<'_, SettingsManager>,
     voice: String,
 ) -> Result<(), String> {
+    eprintln!("[TTS] Setting OpenAI voice to: {}", voice);
+
     const VOICES: &[&str] = &["alloy", "echo", "fable", "onyx", "nova", "shimmer"];
     if !VOICES.contains(&voice.as_str()) {
+        eprintln!("[TTS] Invalid voice: {}", voice);
         return Err("Неверный голос".into());
     }
 
-    // Save to config
-    settings_manager.set_openai_voice(voice)
+    // Save to config first
+    eprintln!("[TTS] Saving voice to config...");
+    settings_manager.set_openai_voice(voice.clone())
         .map_err(|e| format!("Failed to save settings: {}", e))?;
 
+    // Update runtime state and reinitialize OpenAI TTS instance
+    eprintln!("[TTS] Updating runtime state and reinitializing OpenAI TTS...");
+    state.set_openai_voice(voice.clone());
+
+    eprintln!("[TTS] OpenAI voice set successfully: {}", voice);
     Ok(())
 }
 

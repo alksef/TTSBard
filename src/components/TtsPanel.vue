@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, computed, inject } from 'vue';
+import { ref, onMounted, onUnmounted, watch, computed, inject, nextTick } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import TelegramAuthModal from './TelegramAuthModal.vue';
@@ -67,43 +67,58 @@ function toggleProvider(provider: TtsProviderType) {
   providers.value[provider].expanded = !providers.value[provider].expanded;
 }
 
-async function saveOpenAiKey() {
+async function saveOpenAiSettings() {
+  console.log('[TTS] Saving OpenAI settings...');
+
+  // Validate API Key
   if (!openaiApiKey.value.trim()) {
     showError('API Key не может быть пустым');
     return;
   }
+
+  // Validate Proxy (both or none)
+  const host = openaiProxyHost.value.trim() || null;
+  const port = openaiProxyPort.value;
+
+  if ((host && !port) || (!host && port)) {
+    showError('Укажите оба параметра прокси: хост и порт');
+    return;
+  }
+
   try {
+    // Save API Key
+    console.log('[TTS] Saving API Key...');
     await invoke('set_openai_api_key', { key: openaiApiKey.value });
     providers.value.openai.configured = true;
+
+    // Save Proxy
+    console.log('[TTS] Saving Proxy:', host, port);
+    await invoke('set_openai_proxy', {
+      host,
+      port
+    });
+
+    console.log('[TTS] OpenAI settings saved successfully');
+    showError('Настройки сохранены');
   } catch (error) {
+    console.error('[TTS] Failed to save OpenAI settings:', error);
     showError(error as string);
   }
 }
 
 async function saveOpenAiVoice() {
+  // Wait for Vue to update v-model before reading the value
+  await nextTick();
+
+  const voice = openaiVoice.value;
+  console.log('[TTS] Saving OpenAI voice:', voice);
+
   try {
-    await invoke('set_openai_voice', { voice: openaiVoice.value });
+    await invoke('set_openai_voice', { voice });
+    console.log('[TTS] OpenAI voice saved successfully:', voice);
+    showError(`Голос "${voice}" сохранён`);
   } catch (error) {
-    showError(error as string);
-  }
-}
-
-async function saveOpenAiProxy() {
-  try {
-    const host = openaiProxyHost.value.trim() || null;
-    const port = openaiProxyPort.value;
-
-    if ((host && !port) || (!host && port)) {
-      showError('Укажите оба параметра прокси: хост и порт');
-      return;
-    }
-
-    await invoke('set_openai_proxy', {
-      host,
-      port
-    });
-    showError('Прокси сохранён');
-  } catch (error) {
+    console.error('[TTS] Failed to save OpenAI voice:', error);
     showError(error as string);
   }
 }
@@ -242,6 +257,7 @@ onUnmounted(() => {
         </div>
 
         <div v-if="providers.openai.expanded" class="card-content">
+          <!-- API Key -->
           <div class="setting-group">
             <label>API Key</label>
             <input
@@ -249,20 +265,10 @@ onUnmounted(() => {
               type="password"
               placeholder="sk-..."
             />
-            <button @click="saveOpenAiKey">Save API Key</button>
             <small>Required for OpenAI TTS functionality</small>
           </div>
 
-          <div class="setting-group">
-            <label>Voice</label>
-            <select v-model="openaiVoice" @change="saveOpenAiVoice">
-              <option v-for="voice in openaiVoices" :key="voice" :value="voice">
-                {{ voice }}
-              </option>
-            </select>
-            <small>Select the voice for text-to-speech</small>
-          </div>
-
+          <!-- Proxy -->
           <div class="setting-group">
             <label>Proxy (optional)</label>
             <div class="proxy-inputs">
@@ -279,8 +285,23 @@ onUnmounted(() => {
                 class="proxy-port"
               />
             </div>
-            <button @click="saveOpenAiProxy">Save Proxy</button>
             <small>Proxy for OpenAI requests only. Leave empty for direct connection.</small>
+          </div>
+
+          <!-- Unified Save Button -->
+          <div class="setting-group">
+            <button @click="saveOpenAiSettings" class="save-settings-button">Save Settings</button>
+          </div>
+
+          <!-- Voice (auto-saves on change) -->
+          <div class="setting-group">
+            <label>Voice</label>
+            <select v-model="openaiVoice" @change="saveOpenAiVoice">
+              <option v-for="voice in openaiVoices" :key="voice" :value="voice">
+                {{ voice }}
+              </option>
+            </select>
+            <small>Select the voice for text-to-speech (auto-saves on change)</small>
           </div>
         </div>
       </div>
@@ -557,6 +578,24 @@ h2 {
 }
 
 .setting-group button:hover {
+  background: #45a049;
+}
+
+.save-settings-button {
+  width: 100%;
+  padding: 12px 20px;
+  background: #4CAF50;
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+  margin-top: 8px;
+}
+
+.save-settings-button:hover {
   background: #45a049;
 }
 
