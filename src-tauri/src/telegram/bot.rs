@@ -139,32 +139,31 @@ impl SileroTtsBot {
     }
 
     /// Извлечь информацию о голосовом сообщении из обновления
+    #[allow(clippy::collapsible_match)]
     fn extract_voice_from_update(update_like: &UpdatesLike) -> Option<VoiceMessageResult> {
-        match update_like {
-            UpdatesLike::Updates(updates_enum) => {
-                if let grammers_tl_types::enums::Updates::Updates(u) = updates_enum {
-                    for update in &u.updates {
-                        if let grammers_tl_types::enums::Update::NewMessage(msg) = update {
-                            if let grammers_tl_types::enums::Message::Message(m) = &msg.message {
-                                // Проверяем, что это сообщение от бота и содержит голосовое
-                                if let Some(media) = &m.media {
-                                    if let grammers_tl_types::enums::MessageMedia::Document(
-                                        doc_media,
-                                    ) = media
+        if let UpdatesLike::Updates(updates_enum) = update_like {
+            if let grammers_tl_types::enums::Updates::Updates(u) = updates_enum {
+                for update in &u.updates {
+                    if let grammers_tl_types::enums::Update::NewMessage(msg) = update {
+                        if let grammers_tl_types::enums::Message::Message(m) = &msg.message {
+                            // Проверяем, что это сообщение от бота и содержит голосовое
+                            if let Some(media) = &m.media {
+                                if let grammers_tl_types::enums::MessageMedia::Document(
+                                    doc_media,
+                                ) = media
+                                {
+                                    if let Some(grammers_tl_types::enums::Document::Document(
+                                        doc,
+                                    )) = &doc_media.document
                                     {
-                                        if let Some(grammers_tl_types::enums::Document::Document(
-                                            doc,
-                                        )) = &doc_media.document
-                                        {
-                                            let mime = &doc.mime_type;
-                                            // Принимаем и OGG и MP3
-                                            if mime == "audio/ogg" || mime == "audio/mpeg" {
-                                                return Some(VoiceMessageResult {
-                                                    file_id: doc.id.to_string(),
-                                                    msg_id: m.id,
-                                                    mime_type: mime.clone(),
-                                                });
-                                            }
+                                        let mime = &doc.mime_type;
+                                        // Принимаем и OGG и MP3
+                                        if mime == "audio/ogg" || mime == "audio/mpeg" {
+                                            return Some(VoiceMessageResult {
+                                                file_id: doc.id.to_string(),
+                                                msg_id: m.id,
+                                                mime_type: mime.clone(),
+                                            });
                                         }
                                     }
                                 }
@@ -173,7 +172,6 @@ impl SileroTtsBot {
                     }
                 }
             }
-            _ => {}
         }
         None
     }
@@ -390,22 +388,21 @@ async fn send_speaker_command(client: &TelegramClient) -> Result<(), String> {
 
 /// Извлечь информацию о текущем голосе из текстового сообщения
 /// Парсит: "Выбранный голос: /speaker hamster_clerk\nНаходится в паке: Хомяки"
+#[allow(clippy::collapsible_match)]
 fn extract_voice_info_from_update(update_like: &UpdatesLike) -> Option<CurrentVoice> {
-    match update_like {
-        UpdatesLike::Updates(updates_enum) => {
-            if let grammers_tl_types::enums::Updates::Updates(u) = updates_enum {
-                for update in &u.updates {
-                    if let grammers_tl_types::enums::Update::NewMessage(msg) = update {
-                        if let grammers_tl_types::enums::Message::Message(m) = &msg.message {
-                            // Ищем текстовое сообщение (без медиа, без меню)
-                            if m.media.is_none() && m.reply_markup.is_none() {
-                                // В TL типе Message текст находится в поле message
-                                let text = &m.message;
-                                if !text.is_empty() {
-                                    // Парсим текст
-                                    if let Some(voice) = parse_voice_info(text) {
-                                        return Some(voice);
-                                    }
+    if let UpdatesLike::Updates(updates_enum) = update_like {
+        if let grammers_tl_types::enums::Updates::Updates(u) = updates_enum {
+            for update in &u.updates {
+                if let grammers_tl_types::enums::Update::NewMessage(msg) = update {
+                    if let grammers_tl_types::enums::Message::Message(m) = &msg.message {
+                        // Ищем текстовое сообщение (без медиа, без меню)
+                        if m.media.is_none() && m.reply_markup.is_none() {
+                            // В TL типе Message текст находится в поле message
+                            let text = &m.message;
+                            if !text.is_empty() {
+                                // Парсим текст
+                                if let Some(voice) = parse_voice_info(text) {
+                                    return Some(voice);
                                 }
                             }
                         }
@@ -413,7 +410,6 @@ fn extract_voice_info_from_update(update_like: &UpdatesLike) -> Option<CurrentVo
                 }
             }
         }
-        _ => {}
     }
     None
 }
@@ -548,22 +544,21 @@ async fn send_limits_command(client: &TelegramClient) -> Result<(), String> {
 
 /// Извлечь информацию о лимитах из текстового сообщения
 /// Парсит: "🔓 Открытые голоса: 0 / 666 символов;" и "🪩 Кружки/гифки: 0 / 10 сообщений;"
+#[allow(clippy::collapsible_match)]
 fn extract_limits_info_from_update(update_like: &UpdatesLike) -> Option<Limits> {
-    match update_like {
-        UpdatesLike::Updates(updates_enum) => {
-            if let grammers_tl_types::enums::Updates::Updates(u) = updates_enum {
-                for update in &u.updates {
-                    if let grammers_tl_types::enums::Update::NewMessage(msg) = update {
-                        if let grammers_tl_types::enums::Message::Message(m) = &msg.message {
-                            // Ищем текстовое сообщение (без медиа, без меню)
-                            if m.media.is_none() && m.reply_markup.is_none() {
-                                // В TL типе Message текст находится в поле message
-                                let text = &m.message;
-                                if !text.is_empty() {
-                                    // Парсим текст
-                                    if let Some(limits) = parse_limits_info(text) {
-                                        return Some(limits);
-                                    }
+    if let UpdatesLike::Updates(updates_enum) = update_like {
+        if let grammers_tl_types::enums::Updates::Updates(u) = updates_enum {
+            for update in &u.updates {
+                if let grammers_tl_types::enums::Update::NewMessage(msg) = update {
+                    if let grammers_tl_types::enums::Message::Message(m) = &msg.message {
+                        // Ищем текстовое сообщение (без медиа, без меню)
+                        if m.media.is_none() && m.reply_markup.is_none() {
+                            // В TL типе Message текст находится в поле message
+                            let text = &m.message;
+                            if !text.is_empty() {
+                                // Парсим текст
+                                if let Some(limits) = parse_limits_info(text) {
+                                    return Some(limits);
                                 }
                             }
                         }
@@ -571,7 +566,6 @@ fn extract_limits_info_from_update(update_like: &UpdatesLike) -> Option<Limits> 
                 }
             }
         }
-        _ => {}
     }
     None
 }

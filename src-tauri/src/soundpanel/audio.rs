@@ -61,7 +61,7 @@ fn play_with_fallback(path: &str) {
     let escaped_path = path.replace('\\', "\\\\").replace(' ', "\\ ");
 
     let result = Command::new("powershell")
-        .args(&[
+        .args([
             "-NoProfile",
             "-Command",
             &format!(

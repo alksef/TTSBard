@@ -8,6 +8,7 @@ use crate::config::TwitchSettings as ConfigTwitchSettings;
 
 /// Настройки подключения к Twitch IRC
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct TwitchSettings {
     pub enabled: bool,
     pub username: String,
@@ -16,17 +17,6 @@ pub struct TwitchSettings {
     pub start_on_boot: bool,
 }
 
-impl Default for TwitchSettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            username: String::new(),
-            token: String::new(),
-            channel: String::new(),
-            start_on_boot: false,
-        }
-    }
-}
 
 /// Валидация настроек Twitch
 #[allow(dead_code)]

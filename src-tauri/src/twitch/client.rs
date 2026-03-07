@@ -161,9 +161,7 @@ impl TwitchClient {
                 ).await {
                     Ok(Ok(Some(line))) => {
                         // Лируем только важные сообщения
-                        if line.starts_with("PING") {
-                            eprintln!("[TWITCH] Received: {}", line);
-                        } else if !line.contains("PRIVMSG") || line.contains("test message") {
+                        if line.starts_with("PING") || !line.contains("PRIVMSG") || line.contains("test message") {
                             eprintln!("[TWITCH] Received: {}", line);
                         }
 

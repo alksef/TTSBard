@@ -133,7 +133,7 @@ pub fn initialize_soundpanel_hook(state: SoundPanelState) -> JoinHandle<()> {
             while GetMessageW(&mut msg, HWND::default(), 0, 0).into() {
                 msg_count += 1;
                 DispatchMessageW(&msg);
-                if msg_count % 100 == 0 {
+                if msg_count.is_multiple_of(100) {
                     eprintln!("[SOUNDPANEL] Message pump running, messages processed: {}", msg_count);
                 }
             }

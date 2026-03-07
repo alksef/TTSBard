@@ -30,8 +30,8 @@ pub fn quit_app(app_handle: AppHandle) -> Result<(), String> {
         // Сохраняем позицию главного окна
         if let Some(main_window) = app_handle.get_webview_window("main") {
             if let Ok(pos) = main_window.outer_position() {
-                let x = pos.x as i32;
-                let y = pos.y as i32;
+                let x = pos.x;
+                let y = pos.y;
                 eprintln!("[APP] Saving main window position: {}, {}", x, y);
                 let _ = windows_manager.set_main_position(Some(x), Some(y));
             }
@@ -41,8 +41,8 @@ pub fn quit_app(app_handle: AppHandle) -> Result<(), String> {
         if let Some(floating_window) = app_handle.get_webview_window("floating") {
             if let Ok(true) = floating_window.is_visible() {
                 if let Ok(pos) = floating_window.outer_position() {
-                    let x = pos.x as i32;
-                    let y = pos.y as i32;
+                    let x = pos.x;
+                    let y = pos.y;
                     eprintln!("[APP] Saving floating window position: {}, {}", x, y);
                     let _ = windows_manager.set_floating_position(Some(x), Some(y));
                 }

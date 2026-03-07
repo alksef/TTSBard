@@ -22,7 +22,7 @@ use tauri::{AppHandle, Manager};
 /// NOTE: Window settings (opacity, colors, etc.) are now stored in config/windows.json
 /// Audio settings are now stored in config/settings.json
 /// This AppState only holds runtime state, not configuration.
-
+///
 /// Активное плавающее окно
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ActiveWindow {

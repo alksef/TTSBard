@@ -8,17 +8,14 @@ use crate::tts::engine::TtsEngine;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum TtsProviderType {
+    #[default]
     OpenAi,
     Silero,
     Local,
 }
 
-impl Default for TtsProviderType {
-    fn default() -> Self {
-        TtsProviderType::OpenAi
-    }
-}
 
 #[derive(Clone, Debug)]
 #[allow(dead_code)]

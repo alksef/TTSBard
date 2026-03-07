@@ -8,7 +8,7 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 /// - Ctrl+Shift+F1: Включить режим перехвата текста
 /// - Ctrl+Shift+F2: Показать звуковую панель
 /// - Ctrl+Shift+F3: Показать главное окно (поверх всех, для фокуса)
-
+///
 /// Регистрация глобальных хоткеев с использованием tauri-plugin-global-shortcut
 pub fn initialize_hotkeys(
     _hwnd: isize,
@@ -25,30 +25,30 @@ pub fn initialize_hotkeys(
     let global_shortcut = app_handle.global_shortcut();
 
     // Проверяем, не заняты ли хоткеи
-    let is_f1_registered = global_shortcut.is_registered(ctrl_shift_f1.clone());
-    let is_f2_registered = global_shortcut.is_registered(ctrl_shift_f2.clone());
-    let is_f3_registered = global_shortcut.is_registered(ctrl_shift_f3.clone());
+    let is_f1_registered = global_shortcut.is_registered(ctrl_shift_f1);
+    let is_f2_registered = global_shortcut.is_registered(ctrl_shift_f2);
+    let is_f3_registered = global_shortcut.is_registered(ctrl_shift_f3);
 
     if is_f1_registered {
         eprintln!("[HOTKEY] Ctrl+Shift+F1 already registered, unregistering first");
-        let _ = global_shortcut.unregister(ctrl_shift_f1.clone());
+        let _ = global_shortcut.unregister(ctrl_shift_f1);
     }
 
     if is_f2_registered {
         eprintln!("[HOTKEY] Ctrl+Shift+F2 already registered, unregistering first");
-        let _ = global_shortcut.unregister(ctrl_shift_f2.clone());
+        let _ = global_shortcut.unregister(ctrl_shift_f2);
     }
 
     if is_f3_registered {
         eprintln!("[HOTKEY] Ctrl+Shift+F3 already registered, unregistering first");
-        let _ = global_shortcut.unregister(ctrl_shift_f3.clone());
+        let _ = global_shortcut.unregister(ctrl_shift_f3);
     }
 
     // Регистрируем обработчик для Ctrl+Shift+F1
     let app_state_clone_f1 = app_state.clone();
     let app_handle_clone_f1 = app_handle.clone();
 
-    global_shortcut.on_shortcut(ctrl_shift_f1.clone(), move |_app, shortcut, event| {
+    global_shortcut.on_shortcut(ctrl_shift_f1, move |_app, shortcut, event| {
         if event.state != ShortcutState::Pressed {
             return;
         }
@@ -92,7 +92,7 @@ pub fn initialize_hotkeys(
     // Регистрируем обработчик для Ctrl+Shift+F2 (Звуковая панель)
     let app_handle_clone_f2 = app_handle.clone();
 
-    global_shortcut.on_shortcut(ctrl_shift_f2.clone(), move |_app, _shortcut, event| {
+    global_shortcut.on_shortcut(ctrl_shift_f2, move |_app, _shortcut, event| {
         if event.state != ShortcutState::Pressed {
             return;
         }
@@ -131,7 +131,7 @@ pub fn initialize_hotkeys(
     // Регистрируем обработчик для Ctrl+Shift+F3
     let app_handle_clone_f3 = app_handle.clone();
 
-    global_shortcut.on_shortcut(ctrl_shift_f3.clone(), move |_app, shortcut, event| {
+    global_shortcut.on_shortcut(ctrl_shift_f3, move |_app, shortcut, event| {
         if event.state != ShortcutState::Pressed {
             return;
         }
@@ -184,15 +184,15 @@ pub fn unregister_hotkeys(app_handle: &AppHandle) -> Result<(), Box<dyn std::err
     let global_shortcut = app_handle.global_shortcut();
 
     // Проверяем, зарегистрированы ли хоткеи перед удалением
-    if global_shortcut.is_registered(ctrl_shift_f1.clone()) {
+    if global_shortcut.is_registered(ctrl_shift_f1) {
         global_shortcut.unregister(ctrl_shift_f1)?;
     }
 
-    if global_shortcut.is_registered(ctrl_shift_f2.clone()) {
+    if global_shortcut.is_registered(ctrl_shift_f2) {
         global_shortcut.unregister(ctrl_shift_f2)?;
     }
 
-    if global_shortcut.is_registered(ctrl_shift_f3.clone()) {
+    if global_shortcut.is_registered(ctrl_shift_f3) {
         global_shortcut.unregister(ctrl_shift_f3)?;
     }
 

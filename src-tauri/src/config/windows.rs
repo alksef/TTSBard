@@ -11,6 +11,7 @@ use super::validation::{is_valid_hex_color, validate_opacity};
 
 /// Main window position
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Default)]
 pub struct WindowPosition {
     pub x: Option<i32>,
     pub y: Option<i32>,
@@ -48,6 +49,7 @@ pub struct SoundPanelWindowSettings {
 
 /// All window settings
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Default)]
 pub struct WindowsSettings {
     pub main: WindowPosition,
     pub floating: FloatingWindowSettings,
@@ -60,11 +62,6 @@ fn default_floating_bg_color() -> String { "#1e1e1e".to_string() }
 fn default_soundpanel_opacity() -> u8 { 90 }
 fn default_soundpanel_bg_color() -> String { "#2a2a2a".to_string() }
 
-impl Default for WindowPosition {
-    fn default() -> Self {
-        Self { x: None, y: None }
-    }
-}
 
 impl Default for FloatingWindowSettings {
     fn default() -> Self {
@@ -92,15 +89,6 @@ impl Default for SoundPanelWindowSettings {
     }
 }
 
-impl Default for WindowsSettings {
-    fn default() -> Self {
-        Self {
-            main: WindowPosition::default(),
-            floating: FloatingWindowSettings::default(),
-            soundpanel: SoundPanelWindowSettings::default(),
-        }
-    }
-}
 
 impl WindowsSettings {
     /// Validate all settings and fix invalid values

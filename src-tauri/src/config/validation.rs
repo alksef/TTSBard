@@ -26,7 +26,7 @@ pub fn validate_volume(volume: u8) -> u8 {
 /// Validate port number (1024-65535)
 pub fn validate_port(port: u16) -> Result<u16, ConfigError> {
     if port < 1024 {
-        Err(ConfigError::InvalidPort("Port must be >= 1024".to_string()))
+        Err(ConfigError::Port("Port must be >= 1024".to_string()))
     } else {
         Ok(port)
     }
@@ -35,9 +35,9 @@ pub fn validate_port(port: u16) -> Result<u16, ConfigError> {
 /// Validate animation speed (1-1000 ms)
 pub fn validate_animation_speed(speed: u32) -> Result<u32, ConfigError> {
     if speed < 1 {
-        Err(ConfigError::InvalidValue("Animation speed must be >= 1".to_string()))
+        Err(ConfigError::Value("Animation speed must be >= 1".to_string()))
     } else if speed > 1000 {
-        Err(ConfigError::InvalidValue("Animation speed must be <= 1000".to_string()))
+        Err(ConfigError::Value("Animation speed must be <= 1000".to_string()))
     } else {
         Ok(speed)
     }
@@ -46,18 +46,18 @@ pub fn validate_animation_speed(speed: u32) -> Result<u32, ConfigError> {
 /// Configuration validation errors
 #[derive(Debug, Clone)]
 pub enum ConfigError {
-    InvalidPort(String),
-    InvalidValue(String),
+    Port(String),
+    Value(String),
     #[allow(dead_code)]
-    InvalidColor(String),
+    Color(String),
 }
 
 impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ConfigError::InvalidPort(msg) => write!(f, "Invalid port: {}", msg),
-            ConfigError::InvalidValue(msg) => write!(f, "Invalid value: {}", msg),
-            ConfigError::InvalidColor(msg) => write!(f, "Invalid color: {}", msg),
+            ConfigError::Port(msg) => write!(f, "Invalid port: {}", msg),
+            ConfigError::Value(msg) => write!(f, "Invalid value: {}", msg),
+            ConfigError::Color(msg) => write!(f, "Invalid color: {}", msg),
         }
     }
 }

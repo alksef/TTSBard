@@ -18,8 +18,8 @@ pub fn show_floating_window(app_handle: &AppHandle) -> tauri::Result<()> {
             if let Some(y) = saved_y {
                 eprintln!("[FLOATING] Applying saved position to existing window: {}, {}", x, y);
                 let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-                    x: x as i32,
-                    y: y as i32,
+                    x,
+                    y,
                 }));
             }
         }
@@ -124,8 +124,8 @@ pub fn hide_floating_window(app_handle: &AppHandle, app_state: &AppState) -> tau
         // Сохраняем текущую позицию перед скрытием
         if let Some(manager) = app_handle.try_state::<WindowsManager>() {
             if let Ok(outer_pos) = window.outer_position() {
-                let x = outer_pos.x as i32;
-                let y = outer_pos.y as i32;
+                let x = outer_pos.x;
+                let y = outer_pos.y;
                 eprintln!("[FLOATING] Saving position before hide: x={}, y={}", x, y);
                 let _ = manager.set_floating_position(Some(x), Some(y));
             }
