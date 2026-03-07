@@ -1,16 +1,96 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 
 const text = ref('')
+const replacements = ref<Map<string, string>>(new Map())
+const usernames = ref<Map<string, string>>(new Map())
+
+onMounted(async () => {
+  try {
+    console.log('[InputPanel] Loading preprocessor data...')
+    const data = await invoke<{
+      replacements: Record<string, string>
+      usernames: Record<string, string>
+    }>('load_preprocessor_data')
+
+    console.log('[InputPanel] Received data:', data)
+    replacements.value = new Map(Object.entries(data.replacements))
+    usernames.value = new Map(Object.entries(data.usernames))
+    console.log('[InputPanel] Loaded replacements:', replacements.value.size, 'entries')
+    console.log('[InputPanel] Loaded usernames:', usernames.value.size, 'entries')
+    console.log('[InputPanel] Replacement keys:', Array.from(replacements.value.keys()))
+    console.log('[InputPanel] Username keys:', Array.from(usernames.value.keys()))
+  } catch (e) {
+    console.error('[InputPanel] Failed to load preprocessor data:', e)
+  }
+})
 
 async function speak() {
   if (!text.value.trim()) return
 
   try {
+    console.log('[InputPanel] Speaking:', text.value)
     await invoke('speak_text', { text: text.value })
   } catch (e) {
-    console.error('Failed to speak:', e)
+    console.error('[InputPanel] Failed to speak:', e)
+  }
+}
+
+function handleEnter() {
+  console.log('[InputPanel] Enter pressed, text:', text.value)
+  speak()
+  text.value = ''
+}
+
+function handleSpace(event: KeyboardEvent) {
+  const currentValue = text.value
+  console.log('[InputPanel] Space pressed, current text:', currentValue)
+  console.log('[InputPanel] Text length:', currentValue.length)
+
+  // Check for \word pattern at end (supports unicode including cyrillic)
+  const replacementMatch = currentValue.match(/\\([^\s]+)$/)
+  console.log('[InputPanel] Replacement match:', replacementMatch)
+
+  if (replacementMatch) {
+    const key = replacementMatch[1]
+    console.log('[InputPanel] Replacement key:', key)
+    const replacement = replacements.value.get(key)
+    console.log('[InputPanel] Found replacement:', replacement)
+
+    if (replacement) {
+      const pattern = `\\${key}`
+      console.log('[InputPanel] Pattern to replace:', pattern)
+      const newValue = currentValue.replace(pattern, replacement) + ' '
+      console.log('[InputPanel] New value:', newValue)
+      text.value = newValue
+      event.preventDefault()
+      return
+    } else {
+      console.log('[InputPanel] No replacement found for key:', key)
+    }
+  }
+
+  // Check for %username pattern at end (supports unicode including cyrillic)
+  const usernameMatch = currentValue.match(/%([^\s]+)$/)
+  console.log('[InputPanel] Username match:', usernameMatch)
+
+  if (usernameMatch) {
+    const key = usernameMatch[1]
+    console.log('[InputPanel] Username key:', key)
+    const username = usernames.value.get(key)
+    console.log('[InputPanel] Found username:', username)
+
+    if (username) {
+      const pattern = `%${key}`
+      console.log('[InputPanel] Pattern to replace:', pattern)
+      const newValue = currentValue.replace(pattern, username) + ' '
+      console.log('[InputPanel] New value:', newValue)
+      text.value = newValue
+      event.preventDefault()
+    } else {
+      console.log('[InputPanel] No username found for key:', key)
+    }
   }
 }
 </script>
@@ -24,12 +104,10 @@ async function speak() {
         placeholder="Введите текст для озвучивания..."
         rows="10"
         class="text-input"
+        @keydown.prevent.enter="handleEnter"
+        @keydown.space="handleSpace"
       />
     </div>
-
-    <button @click="speak" class="speak-button" :disabled="!text.trim()">
-      Озвучить
-    </button>
   </div>
 </template>
 
@@ -68,34 +146,6 @@ async function speak() {
   font-size: clamp(1.1rem, 2vw, 1.35rem);
 }
 
-.speak-button {
-  min-width: 168px;
-  padding: 1rem 2.35rem;
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: white;
-  border: none;
-  border-radius: 16px;
-  font-size: 1rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
-  box-shadow: 0 18px 30px rgba(0, 109, 255, 0.28);
-}
-
-.speak-button:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 22px 38px rgba(0, 109, 255, 0.34);
-  filter: brightness(1.04);
-}
-
-.speak-button:disabled {
-  background: rgba(255, 255, 255, 0.18);
-  color: rgba(255, 255, 255, 0.45);
-  cursor: not-allowed;
-  box-shadow: none;
-  transform: none;
-}
-
 @media (max-width: 960px) {
   .input-panel {
     padding-bottom: 1.5rem;
@@ -104,10 +154,6 @@ async function speak() {
   .text-input {
     min-height: 280px;
     padding: 1rem 1.05rem;
-  }
-
-  .speak-button {
-    width: 100%;
   }
 }
 </style>

@@ -38,10 +38,7 @@ async fn handle_socket(socket: WebSocket, broadcast_tx: WsBroadcast) {
     // Task для получения сообщений от клиента (если нужно в будущем)
     let recv_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = receiver.next().await {
-            match msg {
-                Message::Close(_) => break,
-                _ => {}
-            }
+            if let Message::Close(_) = msg { break }
         }
     });
 

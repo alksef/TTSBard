@@ -123,6 +123,7 @@ pub fn run() {
             commands::preprocessor::get_usernames,
             commands::preprocessor::save_usernames,
             commands::preprocessor::preview_preprocessing,
+            commands::preprocessor::load_preprocessor_data,
             // Telegram commands
             telegram_init,
             telegram_request_code,
@@ -343,8 +344,8 @@ pub fn run() {
                     if let Some(y) = windows.main.y {
                         eprintln!("[APP] Restoring main window position: {}, {}", x, y);
                         let _ = main_window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-                            x: x as i32,
-                            y: y as i32,
+                            x,
+                            y,
                         }));
                     }
                 }
@@ -406,23 +407,20 @@ pub fn run() {
                 .tooltip("TTSBard")
                 .show_menu_on_left_click(false)
                 .on_tray_icon_event(|tray, event| {
-                    match event {
-                        TrayIconEvent::Click { button, button_state, .. } => {
-                            eprintln!("[TRAY] CLICK - button: {:?}, state: {:?}", button, button_state);
-                            // Левый клик - показать главное окно
-                            if matches!(button, tauri::tray::MouseButton::Left) && matches!(button_state, tauri::tray::MouseButtonState::Up) {
-                                eprintln!("[TRAY] LEFT CLICK UP - showing main window");
-                                if let Some(window) = tray.app_handle().get_webview_window("main") {
-                                    let _ = window.show();
-                                    let _ = window.unminimize();
-                                    let _ = window.set_focus();
-                                    eprintln!("[TRAY] Main window shown");
-                                } else {
-                                    eprintln!("[TRAY] ERROR: Main window not found!");
-                                }
+                    if let TrayIconEvent::Click { button, button_state, .. } = event {
+                        eprintln!("[TRAY] CLICK - button: {:?}, state: {:?}", button, button_state);
+                        // Левый клик - показать главное окно
+                        if matches!(button, tauri::tray::MouseButton::Left) && matches!(button_state, tauri::tray::MouseButtonState::Up) {
+                            eprintln!("[TRAY] LEFT CLICK UP - showing main window");
+                            if let Some(window) = tray.app_handle().get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.unminimize();
+                                let _ = window.set_focus();
+                                eprintln!("[TRAY] Main window shown");
+                            } else {
+                                eprintln!("[TRAY] ERROR: Main window not found!");
                             }
                         }
-                        _ => {}
                     }
                 })
                 .on_menu_event(|tray, event| {
@@ -431,7 +429,7 @@ pub fn run() {
                         "show_floating" => {
                             // Показать плавающее окно только если его нет
                             if tray.app_handle().get_webview_window("floating").is_none() {
-                                match show_floating_window(&tray.app_handle()) {
+                                match show_floating_window(tray.app_handle()) {
                                     Ok(_) => {}
                                     Err(e) => eprintln!("[TRAY] Failed to open floating window: {}", e),
                                 }
@@ -784,15 +782,12 @@ pub fn run() {
         .on_window_event(|window, event| {
             // Обрабатываем события главного окна
             if window.label() == "main" {
-                match event {
-                    // Позиция сохраняется только при закрытии (событие Destroyed)
-                    // Предотвращаем закрытие - скрываем окно вместо этого
-                    tauri::WindowEvent::CloseRequested { api, .. } => {
-                        eprintln!("[APP] Main window close requested - hiding to tray");
-                        api.prevent_close();
-                        let _ = window.hide();
-                    }
-                    _ => {}
+                // Позиция сохраняется только при закрытии (событие Destroyed)
+                // Предотвращаем закрытие - скрываем окно вместо этого
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    eprintln!("[APP] Main window close requested - hiding to tray");
+                    api.prevent_close();
+                    let _ = window.hide();
                 }
             }
 
@@ -831,8 +826,8 @@ pub fn run() {
                         // Сохраняем позицию главного окна
                         if let Some(windows_manager) = window.app_handle().try_state::<WindowsManager>() {
                             if let Ok(pos) = window.outer_position() {
-                                let x = pos.x as i32;
-                                let y = pos.y as i32;
+                                let x = pos.x;
+                                let y = pos.y;
                                 eprintln!("[APP] Main window destroyed - saving position: {}, {}", x, y);
                                 let _ = windows_manager.set_main_position(Some(x), Some(y));
                             }
@@ -841,8 +836,8 @@ pub fn run() {
                             if let Some(floating_window) = window.app_handle().get_webview_window("floating") {
                                 if let Ok(true) = floating_window.is_visible() {
                                     if let Ok(pos) = floating_window.outer_position() {
-                                        let x = pos.x as i32;
-                                        let y = pos.y as i32;
+                                        let x = pos.x;
+                                        let y = pos.y;
                                         eprintln!("[APP] Saving floating window position: {}, {}", x, y);
                                         let _ = windows_manager.set_floating_position(Some(x), Some(y));
                                     }
@@ -936,7 +931,7 @@ fn handle_event(event: AppEvent, state: &AppState, app_handle: &tauri::AppHandle
 
             if let Ok(rt) = rt {
                 rt.block_on(async {
-                    match crate::commands::speak_text_internal(&state, text).await {
+                    match crate::commands::speak_text_internal(state, text).await {
                         Ok(_) => {
                             eprintln!("[EVENT] TTS started successfully in interception mode");
                         }
@@ -966,7 +961,7 @@ fn handle_event(event: AppEvent, state: &AppState, app_handle: &tauri::AppHandle
             let settings = state.twitch_settings.blocking_read();
             if settings.enabled {
                 drop(settings);
-                let _ = state.send_twitch_event(TwitchEvent::SendMessage(text));
+                state.send_twitch_event(TwitchEvent::SendMessage(text));
             }
         }
         AppEvent::TtsStatusChanged(status) => {

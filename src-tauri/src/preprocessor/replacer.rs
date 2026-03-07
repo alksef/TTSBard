@@ -243,6 +243,16 @@ impl TextPreprocessor {
         result
     }
 
+    /// Get all replacements as map (for UI live replacement)
+    pub fn get_replacements_map(&self) -> &HashMap<String, String> {
+        self.replacements.get_replacements_map()
+    }
+
+    /// Get all usernames as map (for UI live replacement)
+    pub fn get_usernames_map(&self) -> &HashMap<String, String> {
+        self.replacements.get_usernames_map()
+    }
+
     /// Reload replacements from files
     #[allow(dead_code)]
     pub fn reload(&mut self) -> Result<()> {

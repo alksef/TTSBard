@@ -292,7 +292,7 @@ fn vk_code_to_char(
         eprintln!("[DEBUG] Shift key down? Shift: {}, LShift: {}, RShift: {}",
             shift_down, lshift_down, rshift_down);
 
-        let scan_code = (kb_struct.scanCode & 0xFF) as u32;
+        let scan_code = kb_struct.scanCode & 0xFF ;
         eprintln!("[DEBUG] Scan code: 0x{:02X}, flags: {:?}",
             kb_struct.scanCode, kb_struct.flags);
 

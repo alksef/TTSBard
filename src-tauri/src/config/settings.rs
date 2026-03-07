@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use parking_lot::RwLock;
 
@@ -111,46 +111,30 @@ impl Default for LocalTtsSettings {
 }
 
 /// Telegram TTS settings (for Silero)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct TelegramTtsSettings {
     pub api_id: Option<i64>,
-}
-
-impl Default for TelegramTtsSettings {
-    fn default() -> Self {
-        Self { api_id: None }
-    }
 }
 
 // ==================== Twitch Settings ====================
 
 /// Twitch chat integration settings
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct TwitchSettings {
     #[serde(default)]
     pub enabled: bool,
+    #[serde(default)]
     pub username: String,
+    #[serde(default)]
     pub token: String,
+    #[serde(default)]
     pub channel: String,
     #[serde(default)]
     pub start_on_boot: bool,
 }
 
-impl Default for TwitchSettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            username: String::new(),
-            token: String::new(),
-            channel: String::new(),
-            start_on_boot: false,
-        }
-    }
-}
-
 impl TwitchSettings {
     /// Check if settings are valid
-    #[must_use]
     pub fn is_valid(&self) -> Result<(), String> {
         if self.username.is_empty() {
             return Err("Username cannot be empty".to_string());
@@ -298,7 +282,7 @@ impl SettingsManager {
     }
 
     /// Load settings from disk (internal method)
-    fn load_from_disk(config_dir: &PathBuf) -> Result<AppSettings> {
+    fn load_from_disk(config_dir: &Path) -> Result<AppSettings> {
         let path = config_dir.join("settings.json");
 
         if path.exists() {
@@ -545,6 +529,7 @@ impl SettingsManager {
     }
 
     /// Set OpenAI proxy
+    #[allow(clippy::collapsible_match)]
     pub fn set_openai_proxy(&self, host: Option<String>, port: Option<u16>) -> Result<()> {
         // Update both fields atomically
         let path = self.settings_path();

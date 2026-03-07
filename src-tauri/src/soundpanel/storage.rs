@@ -7,7 +7,7 @@
 //! The old soundpanel_appearance.json file is no longer used.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use crate::soundpanel::state::{SoundPanelState, SoundBinding};
 use crate::config::WindowsManager;
 use serde::{Serialize, Deserialize};
@@ -140,7 +140,7 @@ pub fn delete_sound_file(filename: &str, appdata_path: &str) -> Result<(), Strin
 
 /// Сгенерировать уникальный путь для файла
 /// Если файл с таким именем существует, добавляет суффикс _1, _2 и т.д.
-fn generate_unique_path(dir: &PathBuf, filename: &str) -> PathBuf {
+fn generate_unique_path(dir: &Path, filename: &str) -> PathBuf {
     let mut path = dir.join(filename);
     let mut counter = 1;
 

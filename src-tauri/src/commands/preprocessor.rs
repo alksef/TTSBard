@@ -81,3 +81,23 @@ pub fn preview_preprocessing(text: String) -> Result<String, String> {
 
     Ok(preprocessor.process(&text))
 }
+
+/// Load preprocessor data for live replacement in UI
+/// Returns a struct with replacements and usernames as HashMaps
+#[tauri::command]
+pub fn load_preprocessor_data() -> Result<PreprocessorData, String> {
+    let preprocessor = TextPreprocessor::load_from_files()
+        .map_err(|e| format!("Failed to load preprocessor: {}", e))?;
+
+    Ok(PreprocessorData {
+        replacements: preprocessor.get_replacements_map().clone(),
+        usernames: preprocessor.get_usernames_map().clone(),
+    })
+}
+
+/// Struct to hold preprocessor data for UI
+#[derive(serde::Serialize)]
+pub struct PreprocessorData {
+    pub replacements: std::collections::HashMap<String, String>,
+    pub usernames: std::collections::HashMap<String, String>,
+}
