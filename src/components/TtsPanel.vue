@@ -29,7 +29,7 @@ const openaiProxyHost = ref('');
 const openaiProxyPort = ref<number | null>(null);
 
 // Local TTS settings
-const localTtsUrl = ref('http://localhost:5002');
+const localTtsUrl = ref('http://127.0.0.1:8124');
 
 // Telegram auth
 const showTelegramModal = ref(false);
@@ -176,6 +176,11 @@ const limitsDisplayText = computed(() => {
     return `Открытые голоса: ${limits.value.voices}`;
   }
   return 'Не загружен';
+});
+
+// Computed property for Local TTS description
+const localTtsDescription = computed(() => {
+  return `Обратная совместимость с TTSVoiceWizard. Запросы к ${localTtsUrl.value}`;
 });
 
 // Watch for Telegram errors
@@ -443,7 +448,10 @@ onUnmounted(() => {
             :checked="activeProvider === 'local'"
             @change="setActiveProvider('local')"
           />
-          <span class="card-title">TTSVoiceWizard (Local)</span>
+          <div class="card-title-wrapper">
+            <span class="card-title">Local (TTSVoiceWizard - Locally Hosted)</span>
+            <span class="card-subtitle">{{ localTtsDescription }}</span>
+          </div>
           <span class="expand-icon">{{ providers.local.expanded ? '▼' : '▶' }}</span>
         </div>
 
@@ -453,10 +461,10 @@ onUnmounted(() => {
             <input
               v-model="localTtsUrl"
               type="text"
-              placeholder="http://localhost:5002"
+              placeholder="http://127.0.0.1:8124"
             />
             <button @click="saveLocalTtsUrl">Save URL</button>
-            <small>URL of your local TTS server (e.g., TTSVoiceWizard)</small>
+            <small>URL of your local TTS server (e.g., TTSVoiceWizard/TITTS.py)</small>
           </div>
         </div>
       </div>
@@ -512,11 +520,23 @@ h2 {
   background: #e8e8e8;
 }
 
-.card-title {
+.card-title-wrapper {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.card-title {
   font-weight: 600;
   font-size: 16px;
   color: #333;
+}
+
+.card-subtitle {
+  font-size: 12px;
+  color: #666;
+  font-weight: 400;
 }
 
 .expand-icon {

@@ -234,7 +234,9 @@ pub fn run() {
 
             // Apply local TTS settings
             if settings.tts.provider == crate::tts::TtsProviderType::Local {
-                app_state.init_local_tts();
+                let url = settings.tts.local.url.clone();
+                app_state.set_local_tts_url(url.clone());
+                app_state.init_local_tts(url);
             }
 
             // Store settings managers for later use
