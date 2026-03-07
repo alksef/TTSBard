@@ -148,8 +148,6 @@ onUnmounted(() => {
 
 <template>
   <div class="floating-panel">
-    <h1>Плавающее окно</h1>
-
     <!-- Error Message Display -->
     <div v-if="errorMessage" class="error-message">
       {{ errorMessage }}
@@ -183,7 +181,10 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <section class="settings-section">
+    <!-- Внешний вид плавающего окна -->
+    <section class="appearance-section">
+      <h2>Внешний вид плавающего окна</h2>
+
       <div class="setting-row">
         <label class="setting-label">
           Прозрачность: {{ localOpacity }}%
@@ -198,9 +199,7 @@ onUnmounted(() => {
           @change="saveOpacity"
         />
       </div>
-    </section>
 
-    <section class="settings-section">
       <div class="setting-row">
         <label class="setting-label">Цвет фона</label>
         <div class="color-picker-group">
@@ -222,26 +221,34 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div class="preview-box" :style="previewStyle">
-        <span class="preview-text">Предпросмотр</span>
-      </div>
-    </section>
-
-    <section class="settings-section">
       <div class="setting-row">
-        <label class="setting-label">
+        <label class="setting-label checkbox-label">
           <input
+            v-model="clickthroughEnabled"
             type="checkbox"
-            :checked="clickthroughEnabled"
+            class="checkbox-input"
             @change="toggleClickthrough"
           />
-          Пропускать клики сквозь окно
+          <span>Пропускать нажатия (click-through)</span>
         </label>
+        <span class="setting-hint">Окно не будет перехватывать клики мыши</span>
+      </div>
 
-        <p class="setting-hint">
-          Когда включено, клики мыши проходят сквозь плавающее окно.
-          Полезно для того, чтобы окно не перекрывало другие элементы.
-        </p>
+      <div class="setting-row">
+        <label class="setting-label checkbox-label">
+          <input
+            v-model="excludeFromRecording"
+            type="checkbox"
+            class="checkbox-input"
+            @change="toggleExcludeFromRecording"
+          />
+          <span>Исключить из записи экрана</span>
+        </label>
+        <span class="setting-hint">Скрывает окно от OBS, Game Bar и других средств записи (Windows 8+)</span>
+      </div>
+
+      <div class="preview-box" :style="previewStyle">
+        <span class="preview-text">Предпросмотр</span>
       </div>
     </section>
 
@@ -262,46 +269,25 @@ onUnmounted(() => {
         </p>
       </div>
     </section>
-
-    <section class="settings-section">
-      <div class="setting-row">
-        <label class="setting-label">
-          <input
-            type="checkbox"
-            :checked="excludeFromRecording"
-            @change="toggleExcludeFromRecording"
-          />
-          Исключить из записи экрана
-        </label>
-
-        <p class="setting-hint">
-          Скрывает плавающее окно от OBS, Xbox Game Bar и других средств записи экрана.
-          Работает только на Windows 8+.
-        </p>
-      </div>
-    </section>
   </div>
 </template>
 
 <style scoped>
 .floating-panel {
-  max-width: 800px;
+  max-width: 900px;
   margin: 0 auto;
-}
-
-h1 {
-  margin-bottom: 2rem;
-  color: #333;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
 .error-message {
-  padding: 1rem;
-  margin-bottom: 1rem;
-  background: #fee;
-  border: 1px solid #fcc;
-  border-left: 4px solid #f44;
-  border-radius: 4px;
-  color: #c33;
+  padding: 1rem 1.15rem;
+  background: rgba(255, 111, 105, 0.12);
+  border: 1px solid rgba(255, 111, 105, 0.24);
+  border-left: 4px solid var(--color-danger);
+  border-radius: 12px;
+  color: #ffb8b4;
   font-weight: 500;
   animation: slideDown 0.3s ease-out;
 }
@@ -318,68 +304,78 @@ h1 {
 }
 
 .settings-section {
-  margin-bottom: 1rem;
-  padding: 1.5rem;
-  background: #f5f5f5;
-  border-radius: 8px;
-}
-
-.settings-section h2 {
-  margin-top: 0;
-  margin-bottom: 1rem;
-  font-size: 1.25rem;
-  color: #333;
+  padding: 1.4rem 1.5rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
+  box-shadow: var(--shadow-soft);
 }
 
 .setting-row {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.7rem;
 }
 
 .setting-label {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  font-weight: 500;
+  gap: 0.65rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
 }
 
 .setting-hint {
-  font-size: 0.875rem;
-  color: #666;
+  font-size: 0.92rem;
+  color: var(--color-text-secondary);
   margin: 0;
+  line-height: 1.6;
+}
+
+.setting-hint code {
+  background: rgba(29, 140, 255, 0.15);
+  color: var(--color-info);
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  border: 1px solid rgba(29, 140, 255, 0.28);
+  font-family: var(--font-mono);
 }
 
 .text-input {
-  padding: 0.5rem;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  font-size: 0.9rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  font-size: 0.95rem;
+  background: var(--color-bg-field);
+  color: var(--color-text-primary);
 }
 
 .save-button {
-  padding: 0.5rem 1rem;
-  background: #28a745;
+  padding: 0.7rem 1rem;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 10px;
   cursor: pointer;
   align-self: flex-start;
+  font-weight: 700;
 }
 
 .save-button:hover {
-  background: #218838;
+  filter: brightness(1.06);
 }
 
 .slider-input {
   width: 100%;
   margin-top: 0.5rem;
   cursor: pointer;
+  accent-color: var(--color-accent);
 }
 
 .color-picker-group {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.75rem;
   align-items: center;
   flex-wrap: wrap;
 }
@@ -387,24 +383,25 @@ h1 {
 .color-input {
   width: 50px;
   height: 36px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
   cursor: pointer;
   padding: 0;
+  background: transparent;
 }
 
 .color-text {
   width: 80px;
-  font-family: monospace;
+  font-family: var(--font-mono);
   text-transform: uppercase;
 }
 
 .preview-box {
   margin-top: 1rem;
   padding: 1rem;
-  border-radius: 8px;
+  border-radius: 12px;
   text-align: center;
-  border: 1px solid #ddd;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   min-height: 60px;
   display: flex;
   align-items: center;
@@ -419,34 +416,36 @@ h1 {
 
 .button-group {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 .window-button {
-  padding: 0.5rem 1rem;
+  padding: 0.75rem 1.2rem;
   border: none;
-  border-radius: 4px;
+  border-radius: 10px;
   cursor: pointer;
-  font-weight: 500;
+  font-weight: 700;
   transition: all 0.2s;
 }
 
 .show-button {
-  background: #28a745;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
   color: white;
 }
 
 .show-button:hover:not(:disabled) {
-  background: #218838;
+  filter: brightness(1.06);
 }
 
 .hide-button {
-  background: #dc3545;
+  background: rgba(255, 111, 105, 0.15);
+  border: 1px solid rgba(255, 111, 105, 0.18);
   color: white;
 }
 
 .hide-button:hover:not(:disabled) {
-  background: #c82333;
+  background: rgba(255, 111, 105, 0.22);
 }
 
 .window-button.disabled {
@@ -457,5 +456,40 @@ h1 {
 .window-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.text-input:focus,
+.color-input:focus {
+  outline: none;
+  border-color: rgba(29, 140, 255, 0.5);
+  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
+}
+
+/* Appearance section */
+.appearance-section {
+  padding: 1.5rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
+}
+
+.appearance-section h2 {
+  margin-top: 0;
+  margin-bottom: 1.5rem;
+  font-size: 1.25rem;
+  color: var(--color-text-primary);
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.checkbox-input {
+  width: auto;
+  cursor: pointer;
 }
 </style>

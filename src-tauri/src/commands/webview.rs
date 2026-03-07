@@ -75,6 +75,10 @@ pub async fn save_webview_settings(
             .map_err(|e| format!("Failed to save webview bind_address: {}", e))?;
         manager.set_webview_animation_speed(settings.animation_speed)
             .map_err(|e| format!("Failed to save webview animation_speed: {}", e))?;
+        manager.set_webview_html_template(settings.html_template.clone())
+            .map_err(|e| format!("Failed to save webview html_template: {}", e))?;
+        manager.set_webview_css_style(settings.css_style.clone())
+            .map_err(|e| format!("Failed to save webview css_style: {}", e))?;
     }
 
     // Only after successful file save, update AppState (runtime state)

@@ -32,7 +32,9 @@ nul
 notes/note-run-claude.txt
 
 images
+docs/ideas
 docs/images
 docs/reviews
 notes/
 promts/
+.scripts/

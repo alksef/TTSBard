@@ -188,11 +188,17 @@ pub struct WebViewServerSettings {
     pub bind_address: String,
     #[serde(default = "default_animation_speed")]
     pub animation_speed: u32,
+    #[serde(default = "default_webview_html_template")]
+    pub html_template: String,
+    #[serde(default = "default_webview_css_style")]
+    pub css_style: String,
 }
 
 fn default_webview_port() -> u16 { 10100 }
 fn default_webview_bind_address() -> String { "0.0.0.0".to_string() }
 fn default_animation_speed() -> u32 { 30 }
+fn default_webview_html_template() -> String { crate::webview::templates::default_html() }
+fn default_webview_css_style() -> String { crate::webview::templates::default_css() }
 
 impl Default for WebViewServerSettings {
     fn default() -> Self {
@@ -201,6 +207,8 @@ impl Default for WebViewServerSettings {
             port: 10100,
             bind_address: "0.0.0.0".to_string(),
             animation_speed: 30,
+            html_template: default_webview_html_template(),
+            css_style: default_webview_css_style(),
         }
     }
 }
@@ -676,5 +684,25 @@ impl SettingsManager {
     /// Get WebView animation speed
     pub fn get_webview_animation_speed(&self) -> u32 {
         self.cache.read().webview.animation_speed
+    }
+
+    /// Set WebView HTML template
+    pub fn set_webview_html_template(&self, template: String) -> Result<()> {
+        self.update_field("/webview/html_template", &template)
+    }
+
+    /// Get WebView HTML template
+    pub fn get_webview_html_template(&self) -> String {
+        self.cache.read().webview.html_template.clone()
+    }
+
+    /// Set WebView CSS style
+    pub fn set_webview_css_style(&self, style: String) -> Result<()> {
+        self.update_field("/webview/css_style", &style)
+    }
+
+    /// Get WebView CSS style
+    pub fn get_webview_css_style(&self) -> String {
+        self.cache.read().webview.css_style.clone()
     }
 }

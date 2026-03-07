@@ -169,7 +169,6 @@ onMounted(async () => {
 <template>
   <div class="audio-panel">
     <div class="panel-header">
-      <h2>Audio Settings</h2>
       <button
         @click="refreshData"
         :disabled="isRefreshing"
@@ -315,26 +314,21 @@ onMounted(async () => {
 
 <style scoped>
 .audio-panel {
-  padding: 20px;
-  max-width: 600px;
+  max-width: 900px;
+  margin: 0 auto;
 }
 
 .panel-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 20px;
-}
-
-.panel-header h2 {
-  margin: 0;
-  color: #333;
+  justify-content: flex-end;
+  margin-bottom: 1rem;
 }
 
 .refresh-btn {
-  background: transparent;
-  border: 1px solid #ddd;
-  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
   padding: 8px 12px;
   cursor: pointer;
   font-size: 18px;
@@ -344,11 +338,12 @@ onMounted(async () => {
   justify-content: center;
   min-width: 40px;
   height: 40px;
+  color: var(--color-text-primary);
 }
 
 .refresh-btn:hover:not(:disabled) {
-  background: #f0f0f0;
-  border-color: #4CAF50;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(29, 140, 255, 0.4);
   transform: scale(1.05);
 }
 
@@ -367,12 +362,12 @@ onMounted(async () => {
 }
 
 .error-box {
-  background: #fee;
-  border: 1px solid #fcc;
-  border-radius: 8px;
+  background: rgba(255, 111, 105, 0.12);
+  border: 1px solid rgba(255, 111, 105, 0.24);
+  border-radius: 12px;
   padding: 12px;
   margin-bottom: 16px;
-  color: #c33;
+  color: #ffb8b4;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -383,13 +378,13 @@ onMounted(async () => {
   border: none;
   font-size: 20px;
   cursor: pointer;
-  color: #c33;
+  color: inherit;
 }
 
 .loading {
   text-align: center;
   padding: 40px;
-  color: #666;
+  color: var(--color-text-secondary);
 }
 
 .audio-settings {
@@ -399,9 +394,11 @@ onMounted(async () => {
 }
 
 .setting-section {
-  background: #f9f9f9;
-  border-radius: 8px;
-  padding: 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 1.35rem 1.5rem;
+  backdrop-filter: blur(8px);
 }
 
 .section-header {
@@ -410,7 +407,7 @@ onMounted(async () => {
   gap: 12px;
   margin-bottom: 16px;
   padding-bottom: 12px;
-  border-bottom: 1px solid #e0e0e0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .section-icon {
@@ -421,7 +418,7 @@ onMounted(async () => {
   flex: 1;
   font-weight: 600;
   font-size: 16px;
-  color: #333;
+  color: var(--color-text-primary);
 }
 
 .toggle-buttons {
@@ -431,22 +428,23 @@ onMounted(async () => {
 
 .toggle-btn {
   padding: 6px 12px;
-  border: 1px solid #ddd;
-  background: #fff;
-  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-text-secondary);
+  border-radius: 10px;
   cursor: pointer;
   font-size: 12px;
   transition: all 0.2s;
 }
 
 .toggle-btn:hover {
-  background: #f0f0f0;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .toggle-btn.active {
-  background: #4CAF50;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
   color: #fff;
-  border-color: #4CAF50;
+  border-color: transparent;
 }
 
 .setting-row {
@@ -464,21 +462,22 @@ onMounted(async () => {
 .setting-row label {
   min-width: 80px;
   font-size: 14px;
-  color: #555;
+  color: var(--color-text-secondary);
   font-weight: 500;
 }
 
 .setting-row select {
   flex: 1;
   padding: 8px 12px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  background: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: var(--color-bg-field);
+  color: var(--color-text-primary);
   font-size: 14px;
 }
 
 .setting-row select:disabled {
-  background: #f0f0f0;
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .volume-control {
@@ -492,7 +491,7 @@ onMounted(async () => {
   flex: 1;
   height: 6px;
   -webkit-appearance: none;
-  background: #ddd;
+  background: rgba(255, 255, 255, 0.16);
   border-radius: 3px;
   outline: none;
 }
@@ -501,7 +500,7 @@ onMounted(async () => {
   -webkit-appearance: none;
   width: 16px;
   height: 16px;
-  background: #4CAF50;
+  background: var(--color-accent);
   border-radius: 50%;
   cursor: pointer;
 }
@@ -510,17 +509,23 @@ onMounted(async () => {
   min-width: 45px;
   text-align: right;
   font-size: 14px;
-  color: #666;
+  color: var(--color-text-secondary);
   font-weight: 500;
 }
 
 .info-box {
-  background: #e3f2fd;
-  border: 1px solid #bbdefb;
-  border-radius: 8px;
+  background: rgba(29, 140, 255, 0.12);
+  border: 1px solid rgba(29, 140, 255, 0.24);
+  border-radius: 12px;
   padding: 12px;
   margin-top: 12px;
   font-size: 13px;
-  color: #1976d2;
+  color: var(--color-info);
+}
+
+.setting-row select:focus {
+  outline: none;
+  border-color: rgba(29, 140, 255, 0.5);
+  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
 }
 </style>

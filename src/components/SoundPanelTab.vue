@@ -228,8 +228,6 @@ onMounted(async () => {
 
 <template>
   <div class="sound-panel-tab">
-    <h1>Звуковая панель</h1>
-
     <!-- Сообщения -->
     <div v-if="errorMessage" class="message error-message">
       {{ errorMessage }}
@@ -452,30 +450,25 @@ onMounted(async () => {
   margin: 0 auto;
 }
 
-h1 {
-  margin-bottom: 1.5rem;
-  color: #333;
-}
-
 .message {
   padding: 1rem;
   margin-bottom: 1rem;
-  border-radius: 4px;
+  border-radius: 12px;
   animation: slideDown 0.3s ease-out;
 }
 
 .error-message {
-  background: #fee;
-  border: 1px solid #fcc;
-  border-left: 4px solid #f44;
-  color: #c33;
+  background: rgba(255, 111, 105, 0.12);
+  border: 1px solid rgba(255, 111, 105, 0.24);
+  border-left: 4px solid var(--color-danger);
+  color: #ffb8b4;
 }
 
 .success-message {
-  background: #efe;
-  border: 1px solid #cfc;
-  border-left: 4px solid #4c4;
-  color: #363;
+  background: rgba(74, 222, 128, 0.12);
+  border: 1px solid rgba(74, 222, 128, 0.22);
+  border-left: 4px solid var(--color-success);
+  color: #bff4d0;
 }
 
 @keyframes slideDown {
@@ -490,11 +483,13 @@ h1 {
 }
 
 .info-section {
-  padding: 1rem;
+  padding: 1.2rem 1.35rem;
   margin-bottom: 1.5rem;
-  background: #f0f7ff;
-  border-left: 4px solid #2196f3;
-  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 4px solid var(--color-accent);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
 }
 
 .info-section p {
@@ -502,16 +497,18 @@ h1 {
 }
 
 .info-section code {
-  background: #e3f2fd;
+  background: rgba(29, 140, 255, 0.15);
   padding: 0.2rem 0.4rem;
-  border-radius: 3px;
-  font-family: monospace;
+  border-radius: 4px;
+  font-family: var(--font-mono);
   font-size: 0.9rem;
+  color: var(--color-info);
+  border: 1px solid rgba(29, 140, 255, 0.28);
 }
 
 .hint {
   font-size: 0.85rem;
-  color: #666;
+  color: var(--color-text-secondary);
 }
 
 .actions-section {
@@ -520,10 +517,10 @@ h1 {
 
 .add-button {
   padding: 0.75rem 1.5rem;
-  background: #28a745;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 10px;
   cursor: pointer;
   font-size: 1rem;
   font-weight: 500;
@@ -531,19 +528,21 @@ h1 {
 }
 
 .add-button:hover {
-  background: #218838;
+  filter: brightness(1.06);
 }
 
 .loading-state {
   text-align: center;
   padding: 2rem;
-  color: #666;
+  color: var(--color-text-secondary);
 }
 
 .bindings-section {
-  background: #f5f5f5;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   padding: 1.5rem;
-  border-radius: 8px;
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
 }
 
 .bindings-table {
@@ -555,27 +554,29 @@ h1 {
 .bindings-table th {
   text-align: left;
   padding: 0.75rem;
-  background: #e0e0e0;
-  border-bottom: 2px solid #ccc;
+  background: rgba(255, 255, 255, 0.05);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+  color: var(--color-text-primary);
 }
 
 .bindings-table td {
   padding: 0.75rem;
-  border-bottom: 1px solid #ddd;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--color-text-secondary);
 }
 
 .bindings-table tr:hover {
-  background: #f0f0f0;
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .bindings-table kbd {
-  background: #fff;
-  border: 1px solid #ccc;
-  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
   padding: 0.2rem 0.5rem;
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-weight: bold;
-  box-shadow: 0 1px 1px rgba(0,0,0,0.1);
+  color: var(--color-text-primary);
 }
 
 .filename-cell {
@@ -583,37 +584,37 @@ h1 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #666;
+  color: var(--color-text-muted);
   font-size: 0.9rem;
 }
 
 .empty-state {
   text-align: center;
   padding: 2rem;
-  color: #999;
+  color: var(--color-text-muted);
   font-style: italic;
 }
 
 .stats {
   text-align: center;
-  color: #666;
+  color: var(--color-text-secondary);
   font-size: 0.9rem;
   padding: 0.5rem;
 }
 
 .remove-button {
   padding: 0.4rem 0.8rem;
-  background: #dc3545;
+  background: rgba(255, 111, 105, 0.16);
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 10px;
   cursor: pointer;
   font-size: 0.85rem;
   transition: background 0.2s;
 }
 
 .remove-button:hover {
-  background: #c82333;
+  background: rgba(255, 111, 105, 0.24);
 }
 
 /* Dialog styles */
@@ -631,9 +632,10 @@ h1 {
 }
 
 .dialog {
-  background: white;
+  background: var(--color-bg-panel-strong);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   padding: 1.5rem;
-  border-radius: 8px;
+  border-radius: 14px;
   width: 90%;
   max-width: 500px;
   box-shadow: 0 4px 20px rgba(0,0,0,0.2);
@@ -642,7 +644,7 @@ h1 {
 .dialog h2 {
   margin-top: 0;
   margin-bottom: 1.5rem;
-  color: #333;
+  color: var(--color-text-primary);
 }
 
 .form-group {
@@ -653,16 +655,18 @@ h1 {
   display: block;
   margin-bottom: 0.5rem;
   font-weight: 500;
-  color: #333;
+  color: var(--color-text-primary);
 }
 
 .key-select,
 .text-input {
   width: 100%;
   padding: 0.6rem;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
   font-size: 1rem;
+  background: var(--color-bg-field);
+  color: var(--color-text-primary);
 }
 
 .file-input-group {
@@ -674,39 +678,40 @@ h1 {
 .file-path-input {
   flex: 1;
   padding: 0.6rem;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  background: #f9f9f9;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: var(--color-bg-field);
+  color: var(--color-text-primary);
   font-size: 0.9rem;
 }
 
 .browse-button {
   padding: 0.6rem 1rem;
-  background: #6c757d;
+  background: rgba(255, 255, 255, 0.08);
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 10px;
   cursor: pointer;
   white-space: nowrap;
 }
 
 .browse-button:hover {
-  background: #5a6268;
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .test-button {
   padding: 0.6rem 1rem;
-  background: #17a2b8;
+  background: rgba(29, 140, 255, 0.16);
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 10px;
   cursor: pointer;
   white-space: nowrap;
   transition: background 0.2s;
 }
 
 .test-button:hover:not(:disabled) {
-  background: #138496;
+  background: rgba(29, 140, 255, 0.26);
 }
 
 .test-button:disabled {
@@ -726,7 +731,7 @@ h1 {
 .form-hint {
   margin: 0.5rem 0 0;
   font-size: 0.8rem;
-  color: #666;
+  color: var(--color-text-secondary);
 }
 
 .dialog-actions {
@@ -738,28 +743,28 @@ h1 {
 
 .cancel-button {
   padding: 0.6rem 1.2rem;
-  background: #6c757d;
+  background: rgba(255, 255, 255, 0.08);
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 10px;
   cursor: pointer;
 }
 
 .cancel-button:hover {
-  background: #5a6268;
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .save-button {
   padding: 0.6rem 1.2rem;
-  background: #28a745;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 10px;
   cursor: pointer;
 }
 
 .save-button:hover:not(:disabled) {
-  background: #218838;
+  filter: brightness(1.06);
 }
 
 .save-button:disabled {
@@ -775,15 +780,17 @@ h1 {
 .appearance-section {
   padding: 1.5rem;
   margin-top: 1.5rem;
-  background: #f9f9f9;
-  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
 }
 
 .appearance-section h2 {
   margin-top: 0;
   margin-bottom: 1.5rem;
   font-size: 1.25rem;
-  color: #333;
+  color: var(--color-text-primary);
 }
 
 .setting-row {
@@ -797,7 +804,8 @@ h1 {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  font-weight: 500;
+  font-weight: 600;
+  color: var(--color-text-primary);
 }
 
 .color-picker-group {
@@ -810,24 +818,24 @@ h1 {
 .color-input {
   width: 50px;
   height: 36px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
   cursor: pointer;
   padding: 0;
 }
 
 .color-text {
   width: 80px;
-  font-family: monospace;
+  font-family: var(--font-mono);
   text-transform: uppercase;
 }
 
 .preview-box {
   margin-top: 1rem;
   padding: 1rem;
-  border-radius: 8px;
+  border-radius: 12px;
   text-align: center;
-  border: 1px solid #ddd;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   min-height: 60px;
   display: flex;
   align-items: center;
@@ -854,7 +862,7 @@ h1 {
 
 .setting-hint {
   font-size: 0.8rem;
-  color: #666;
+  color: var(--color-text-secondary);
   margin-top: 0.25rem;
 }
 </style>

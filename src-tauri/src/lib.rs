@@ -196,8 +196,8 @@ pub fn run() {
                 start_on_boot: settings.webview.start_on_boot,
                 port: settings.webview.port,
                 bind_address: settings.webview.bind_address.clone(),
-                html_template: String::new(), // loaded separately
-                css_style: String::new(), // loaded separately
+                html_template: settings.webview.html_template.clone(),
+                css_style: settings.webview.css_style.clone(),
                 animation_speed: settings.webview.animation_speed,
             };
 

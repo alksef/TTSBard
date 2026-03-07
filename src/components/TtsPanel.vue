@@ -237,8 +237,6 @@ onUnmounted(() => {
 
 <template>
   <div class="tts-panel">
-    <h2>TTS Provider Settings</h2>
-
     <!-- Error Message -->
     <div v-if="errorMessage" class="error-box">
       {{ errorMessage }}
@@ -251,14 +249,15 @@ onUnmounted(() => {
         class="provider-card"
         :class="{ active: activeProvider === 'openai' }"
       >
-        <div class="card-header" @click="toggleProvider('openai')">
+        <div class="card-header">
           <input
             type="radio"
             :checked="activeProvider === 'openai'"
             @change="setActiveProvider('openai')"
+            @click.stop
           />
-          <span class="card-title">OpenAI TTS</span>
-          <span class="expand-icon">{{ providers.openai.expanded ? '▼' : '▶' }}</span>
+          <span class="card-title" @click="toggleProvider('openai')">OpenAI TTS</span>
+          <span class="expand-icon" @click="toggleProvider('openai')">{{ providers.openai.expanded ? '▼' : '▶' }}</span>
         </div>
 
         <div v-if="providers.openai.expanded" class="card-content">
@@ -319,14 +318,15 @@ onUnmounted(() => {
           'error-state': sileroError !== null
         }"
       >
-        <div class="card-header" @click="toggleProvider('silero')">
+        <div class="card-header">
           <input
             type="radio"
             :checked="activeProvider === 'silero'"
             @change="setActiveProvider('silero')"
+            @click.stop
           />
-          <span class="card-title">Silero Bot</span>
-          <span class="expand-icon">{{ providers.silero.expanded ? '▼' : '▶' }}</span>
+          <span class="card-title" @click="toggleProvider('silero')">Silero Bot</span>
+          <span class="expand-icon" @click="toggleProvider('silero')">{{ providers.silero.expanded ? '▼' : '▶' }}</span>
         </div>
 
         <div v-if="providers.silero.expanded" class="card-content">
@@ -442,17 +442,18 @@ onUnmounted(() => {
         class="provider-card"
         :class="{ active: activeProvider === 'local' }"
       >
-        <div class="card-header" @click="toggleProvider('local')">
+        <div class="card-header">
           <input
             type="radio"
             :checked="activeProvider === 'local'"
             @change="setActiveProvider('local')"
+            @click.stop
           />
-          <div class="card-title-wrapper">
+          <div class="card-title-wrapper" @click="toggleProvider('local')">
             <span class="card-title">Local (TTSVoiceWizard - Locally Hosted)</span>
             <span class="card-subtitle">{{ localTtsDescription }}</span>
           </div>
-          <span class="expand-icon">{{ providers.local.expanded ? '▼' : '▶' }}</span>
+          <span class="expand-icon" @click="toggleProvider('local')">{{ providers.local.expanded ? '▼' : '▶' }}</span>
         </div>
 
         <div v-if="providers.local.expanded" class="card-content">
@@ -477,34 +478,32 @@ onUnmounted(() => {
 
 <style scoped>
 .tts-panel {
-  padding: 20px;
-}
-
-h2 {
-  margin-bottom: 20px;
+  max-width: 900px;
+  margin: 0 auto;
 }
 
 .provider-cards {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
 }
 
 .provider-card {
-  border: 2px solid #ddd;
-  border-radius: 8px;
-  background: #f5f5f5;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(8px);
   transition: all 0.2s ease;
 }
 
 .provider-card.active {
-  border-color: #4CAF50;
-  background: #e8f5e9;
+  border-color: rgba(29, 140, 255, 0.35);
+  background: rgba(29, 140, 255, 0.08);
 }
 
 .provider-card.error-state {
-  border-color: #ef4444;
-  background: #fef2f2;
+  border-color: rgba(255, 111, 105, 0.28);
+  background: rgba(255, 111, 105, 0.08);
 }
 
 .card-header {
@@ -512,12 +511,11 @@ h2 {
   align-items: center;
   gap: 12px;
   padding: 12px 16px;
-  cursor: pointer;
   user-select: none;
 }
 
 .card-header:hover {
-  background: #e8e8e8;
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .card-title-wrapper {
@@ -525,28 +523,32 @@ h2 {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  cursor: pointer;
 }
 
 .card-title {
   font-weight: 600;
   font-size: 16px;
-  color: #333;
+  color: var(--color-text-primary);
+  cursor: pointer;
 }
 
 .card-subtitle {
   font-size: 12px;
-  color: #666;
+  color: var(--color-text-secondary);
   font-weight: 400;
 }
 
 .expand-icon {
-  color: #666;
+  color: var(--color-text-secondary);
   font-size: 12px;
+  cursor: pointer;
+  margin-left: auto;
 }
 
 .card-content {
   padding: 0 16px 16px;
-  border-top: 1px solid #ddd;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .placeholder {
@@ -563,7 +565,7 @@ h2 {
 .setting-group label {
   display: block;
   margin-bottom: 8px;
-  color: #555;
+  color: var(--color-text-primary);
   font-size: 14px;
 }
 
@@ -572,10 +574,10 @@ h2 {
 .setting-group select {
   width: 100%;
   padding: 10px;
-  background: #fff;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  color: #333;
+  background: var(--color-bg-field);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  color: var(--color-text-primary);
   font-size: 14px;
   margin-bottom: 8px;
   box-sizing: border-box;
@@ -584,29 +586,31 @@ h2 {
 .setting-group input:focus,
 .setting-group select:focus {
   outline: none;
-  border-color: #4CAF50;
+  border-color: rgba(29, 140, 255, 0.5);
+  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
 }
 
 .setting-group button {
   padding: 8px 16px;
-  background: #4CAF50;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
   border: none;
-  border-radius: 4px;
+  border-radius: 10px;
   color: #fff;
   cursor: pointer;
   font-size: 14px;
+  font-weight: 700;
 }
 
 .setting-group button:hover {
-  background: #45a049;
+  filter: brightness(1.06);
 }
 
 .save-settings-button {
   width: 100%;
   padding: 12px 20px;
-  background: #4CAF50;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
   border: none;
-  border-radius: 6px;
+  border-radius: 10px;
   color: white;
   font-size: 14px;
   font-weight: 600;
@@ -616,13 +620,13 @@ h2 {
 }
 
 .save-settings-button:hover {
-  background: #45a049;
+  filter: brightness(1.06);
 }
 
 .setting-group small {
   display: block;
   margin-top: 4px;
-  color: #666;
+  color: var(--color-text-secondary);
   font-size: 12px;
 }
 
@@ -641,19 +645,20 @@ h2 {
 }
 
 .error-box {
-  background: #5a1a1a;
-  border: 1px solid #a33;
-  border-radius: 4px;
+  background: rgba(255, 111, 105, 0.12);
+  border: 1px solid rgba(255, 111, 105, 0.24);
+  border-radius: 12px;
   padding: 12px;
   margin-bottom: 16px;
-  color: #ff9999;
+  color: #ffb8b4;
 }
 
 /* Telegram Styles */
 .telegram-status {
   padding: 16px;
-  background: #f9f9f9;
-  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
   margin-bottom: 16px;
 }
 
@@ -689,19 +694,19 @@ h2 {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 .status-details {
   margin: 4px 0 0;
   font-size: 13px;
-  color: #6b7280;
+  color: var(--color-text-secondary);
 }
 
 .telegram-connect-button {
   width: 100%;
   padding: 12px 20px;
-  background: #229ED9;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
   color: white;
   border: none;
   border-radius: 6px;
@@ -716,7 +721,7 @@ h2 {
 }
 
 .telegram-connect-button:hover {
-  background: #1b8bb8;
+  filter: brightness(1.06);
 }
 
 .telegram-connect-button.connected {
@@ -730,7 +735,8 @@ h2 {
 .telegram-disconnect-button {
   width: 100%;
   padding: 12px 20px;
-  background: #dc2626;
+  background: rgba(255, 111, 105, 0.16);
+  border: 1px solid rgba(255, 111, 105, 0.2);
   color: white;
   border: none;
   border-radius: 6px;
@@ -745,14 +751,14 @@ h2 {
 }
 
 .telegram-disconnect-button:hover {
-  background: #b91c1c;
+  background: rgba(255, 111, 105, 0.24);
 }
 
 .telegram-info {
   padding: 16px;
-  background: #f0f9ff;
-  border-left: 4px solid #229ED9;
-  border-radius: 6px;
+  background: rgba(29, 140, 255, 0.1);
+  border-left: 4px solid var(--color-accent);
+  border-radius: 10px;
   margin-top: 16px;
 }
 
@@ -760,14 +766,14 @@ h2 {
   margin: 0 0 8px;
   font-size: 14px;
   font-weight: 600;
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 .info-list {
   margin: 0;
   padding-left: 20px;
   font-size: 13px;
-  color: #374151;
+  color: var(--color-text-secondary);
   line-height: 1.6;
 }
 
@@ -780,7 +786,7 @@ h2 {
 }
 
 .info-list a {
-  color: #229ED9;
+  color: var(--color-info);
   text-decoration: none;
   font-weight: 500;
 }
@@ -790,16 +796,16 @@ h2 {
 }
 
 .info-list strong {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 /* Silero Error Banner */
 .silero-error-banner {
   padding: 16px;
-  background: #fee;
-  border: 1px solid #fcc;
-  border-left: 4px solid #f44;
-  border-radius: 6px;
+  background: rgba(255, 111, 105, 0.12);
+  border: 1px solid rgba(255, 111, 105, 0.24);
+  border-left: 4px solid var(--color-danger);
+  border-radius: 10px;
   margin-bottom: 16px;
   display: flex;
   align-items: center;
@@ -828,21 +834,21 @@ h2 {
   margin: 0 0 4px;
   font-size: 14px;
   font-weight: 600;
-  color: #c33;
+  color: #ffd5d2;
 }
 
 .error-message {
   margin: 0;
   font-size: 13px;
-  color: #933;
+  color: #ffb8b4;
 }
 
 .fix-button {
   padding: 8px 16px;
-  background: #dc2626;
+  background: rgba(255, 111, 105, 0.18);
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 10px;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
@@ -851,20 +857,21 @@ h2 {
 }
 
 .fix-button:hover {
-  background: #b91c1c;
+  background: rgba(255, 111, 105, 0.26);
 }
 
 /* Current Voice Display */
 .current-voice-display {
   padding: 12px 16px;
-  background: #f0fdf4;
-  border: 1px solid #86efac;
-  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
   margin-bottom: 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  opacity: 0.6;
 }
 
 .voice-info {
@@ -877,12 +884,12 @@ h2 {
 .voice-label {
   font-size: 12px;
   font-weight: 600;
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 .voice-value {
   font-size: 14px;
-  color: #059669;
+  color: var(--color-text-secondary);
   font-weight: 500;
 }
 
@@ -892,12 +899,13 @@ h2 {
 
 .refresh-voice-button {
   padding: 6px 12px;
-  background: #22c55e;
-  color: white;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--color-text-secondary);
   border: none;
-  border-radius: 4px;
+  border-radius: 10px;
   font-size: 16px;
-  cursor: pointer;
+  cursor: not-allowed;
   transition: background 0.2s;
   display: flex;
   align-items: center;
@@ -907,7 +915,7 @@ h2 {
 }
 
 .refresh-voice-button:hover:not(:disabled) {
-  background: #16a34a;
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .refresh-voice-button:disabled {
@@ -918,14 +926,15 @@ h2 {
 /* Limits Display */
 .limits-display {
   padding: 12px 16px;
-  background: #eff6ff;
-  border: 1px solid #93c5fd;
-  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
   margin-bottom: 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  opacity: 0.6;
 }
 
 .limits-info {
@@ -938,12 +947,12 @@ h2 {
 .limits-label {
   font-size: 12px;
   font-weight: 600;
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 .limits-value {
   font-size: 14px;
-  color: #2563eb;
+  color: var(--color-text-secondary);
   font-weight: 500;
 }
 
@@ -953,12 +962,13 @@ h2 {
 
 .refresh-limits-button {
   padding: 6px 12px;
-  background: #3b82f6;
-  color: white;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--color-text-secondary);
   border: none;
-  border-radius: 4px;
+  border-radius: 10px;
   font-size: 16px;
-  cursor: pointer;
+  cursor: not-allowed;
   transition: background 0.2s;
   display: flex;
   align-items: center;
@@ -968,7 +978,7 @@ h2 {
 }
 
 .refresh-limits-button:hover:not(:disabled) {
-  background: #2563eb;
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .refresh-limits-button:disabled {
@@ -979,13 +989,13 @@ h2 {
 /* Voice Error Message */
 .voice-error-message {
   padding: 12px 16px;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  border-left: 4px solid #dc2626;
-  border-radius: 6px;
+  background: rgba(255, 111, 105, 0.12);
+  border: 1px solid rgba(255, 111, 105, 0.24);
+  border-left: 4px solid var(--color-danger);
+  border-radius: 10px;
   margin-bottom: 16px;
   font-size: 13px;
-  color: #991b1b;
+  color: #ffb8b4;
   line-height: 1.5;
 }
 </style>
