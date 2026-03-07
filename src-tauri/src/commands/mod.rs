@@ -1,9 +1,9 @@
 use crate::state::AppState;
 use crate::events::AppEvent;
-use crate::settings::SettingsManager;
+use crate::config::{SettingsManager, WindowsManager, is_valid_hex_color};
 use crate::floating::{show_floating_window, hide_floating_window};
 use crate::tts::TtsProviderType;
-use crate::audio::{AudioPlayer, AudioSettingsManager, OutputConfig};
+use crate::audio::{AudioPlayer, OutputConfig};
 use crate::commands::telegram::TelegramState;
 use tauri::{State, AppHandle, Manager, Emitter};
 use std::sync::Arc;
@@ -26,35 +26,25 @@ pub fn quit_app(app_handle: AppHandle) -> Result<(), String> {
     eprintln!("[APP] Quit requested - saving window states");
 
     // Сохраняем состояние окон перед выходом
-    if let Some(settings_manager) = app_handle.try_state::<SettingsManager>() {
+    if let Some(windows_manager) = app_handle.try_state::<WindowsManager>() {
         // Сохраняем позицию главного окна
         if let Some(main_window) = app_handle.get_webview_window("main") {
             if let Ok(pos) = main_window.outer_position() {
                 let x = pos.x as i32;
                 let y = pos.y as i32;
                 eprintln!("[APP] Saving main window position: {}, {}", x, y);
-                let _ = settings_manager.set_main_window_position(Some(x), Some(y));
+                let _ = windows_manager.set_main_position(Some(x), Some(y));
             }
         }
 
-        // Проверяем видимость плавающего окна
-        let is_visible = app_handle.get_webview_window("floating")
-            .and_then(|w| w.is_visible().ok())
-            .unwrap_or(false);
-
-        eprintln!("[APP] Floating window visible: {}", is_visible);
-
-        // Сохраняем видимость
-        let _ = settings_manager.set_floating_window_visibility(is_visible);
-
-        // Если окно видимо, сохраняем его позицию
-        if is_visible {
-            if let Some(window) = app_handle.get_webview_window("floating") {
-                if let Ok(pos) = window.outer_position() {
+        // Сохраняем позицию плавающего окна (если оно было показано)
+        if let Some(floating_window) = app_handle.get_webview_window("floating") {
+            if let Ok(true) = floating_window.is_visible() {
+                if let Ok(pos) = floating_window.outer_position() {
                     let x = pos.x as i32;
                     let y = pos.y as i32;
                     eprintln!("[APP] Saving floating window position: {}, {}", x, y);
-                    let _ = settings_manager.set_floating_window_position(Some(x), Some(y));
+                    let _ = windows_manager.set_floating_position(Some(x), Some(y));
                 }
             }
         }
@@ -109,8 +99,10 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
     eprintln!("[SPEAK_INTERNAL] Audio synthesized: {} bytes", audio_data.len());
 
     // Load audio settings
-    let audio_settings = AudioSettingsManager::new()
-        .and_then(|mgr| mgr.load())
+    let settings_manager = SettingsManager::new()
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+    let audio_settings = settings_manager.load()
+        .map(|s| s.audio)
         .map_err(|e| format!("Failed to load audio settings: {}", e))?;
 
     // Build speaker config
@@ -190,7 +182,7 @@ pub async fn set_tts_provider(
 
             // Восстанавливаем сессию Telegram (если есть сохранённая)
             eprintln!("[SET_PROVIDER] Checking Telegram session...");
-            let _connected = match telegram::telegram_auto_restore(telegram_state).await {
+            let _connected = match telegram::telegram_auto_restore(telegram_state, settings_manager).await {
                 Ok(connected) => {
                     if connected {
                         eprintln!("[SET_PROVIDER] Telegram session restored");
@@ -218,11 +210,6 @@ pub async fn set_tts_provider(
 
     state.set_tts_provider_type(provider);
 
-    // Auto-save settings
-    let settings = SettingsManager::load_from_state(&state);
-    settings_manager.save(&settings)
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
-
     eprintln!("[SET_PROVIDER] Provider set to {:?}", provider);
     Ok(())
 }
@@ -233,14 +220,16 @@ pub async fn set_tts_provider(
 
 /// Get Local TTS URL
 #[tauri::command]
-pub fn get_local_tts_url(state: State<'_, AppState>) -> String {
-    state.get_local_tts_url()
+pub fn get_local_tts_url(
+    settings_manager: State<'_, SettingsManager>
+) -> String {
+    settings_manager.get_local_tts_url()
 }
 
 /// Set Local TTS URL
 #[tauri::command]
 pub fn set_local_tts_url(
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
     settings_manager: State<'_, SettingsManager>,
     url: String,
 ) -> Result<(), String> {
@@ -252,12 +241,8 @@ pub fn set_local_tts_url(
         return Err("URL должен начинаться с http:// или https://".into());
     }
 
-    state.set_local_tts_url(url.clone());
-    state.init_local_tts();
-
-    // Auto-save settings
-    let settings = SettingsManager::load_from_state(&state);
-    settings_manager.save(&settings)
+    // Save to settings
+    settings_manager.set_local_tts_url(url)
         .map_err(|e| format!("Failed to save settings: {}", e))?;
 
     Ok(())
@@ -286,11 +271,10 @@ pub fn set_openai_api_key(
     }
 
     *state.openai_api_key.lock() = Some(key.clone());
-    state.init_openai_tts(key);
+    state.init_openai_tts(key.clone());
 
-    // Auto-save settings
-    let settings = SettingsManager::load_from_state(&state);
-    settings_manager.save(&settings)
+    // Save to config
+    settings_manager.set_openai_api_key(Some(key))
         .map_err(|e| format!("Failed to save settings: {}", e))?;
 
     Ok(())
@@ -298,14 +282,16 @@ pub fn set_openai_api_key(
 
 /// Get OpenAI voice
 #[tauri::command]
-pub fn get_openai_voice(state: State<'_, AppState>) -> String {
-    state.get_openai_voice()
+pub fn get_openai_voice(
+    settings_manager: State<'_, SettingsManager>
+) -> String {
+    settings_manager.get_openai_voice()
 }
 
 /// Set OpenAI voice
 #[tauri::command]
 pub fn set_openai_voice(
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
     settings_manager: State<'_, SettingsManager>,
     voice: String,
 ) -> Result<(), String> {
@@ -314,11 +300,8 @@ pub fn set_openai_voice(
         return Err("Неверный голос".into());
     }
 
-    state.set_openai_voice(voice.clone());
-
-    // Auto-save settings
-    let settings = SettingsManager::load_from_state(&state);
-    settings_manager.save(&settings)
+    // Save to config
+    settings_manager.set_openai_voice(voice)
         .map_err(|e| format!("Failed to save settings: {}", e))?;
 
     Ok(())
@@ -335,7 +318,7 @@ pub fn get_openai_proxy(
 /// Set OpenAI proxy settings
 #[tauri::command]
 pub fn set_openai_proxy(
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
     settings_manager: State<'_, SettingsManager>,
     host: Option<String>,
     port: Option<u16>,
@@ -351,9 +334,7 @@ pub fn set_openai_proxy(
         _ => return Err("Укажите оба параметра: хост и порт".into()),
     }
 
-    state.set_openai_proxy(host.clone(), port);
-
-    // Auto-save settings
+    // Save to config
     settings_manager.set_openai_proxy(host, port)
         .map_err(|e| format!("Failed to save settings: {}", e))?;
 
@@ -385,6 +366,7 @@ pub fn toggle_interception(state: State<'_, AppState>) -> Result<bool, String> {
 
 /// Validate API key format
 #[tauri::command]
+#[allow(dead_code)]
 pub async fn check_api_key(key: String) -> Result<bool, String> {
     // Simple validation: OpenAI keys start with "sk-" and are longer than 20 characters
     let is_valid = key.starts_with("sk-") && key.len() > 20;
@@ -393,9 +375,11 @@ pub async fn check_api_key(key: String) -> Result<bool, String> {
 
 /// Get floating window appearance settings
 #[tauri::command]
-pub fn get_floating_appearance(state: State<'_, AppState>) -> (u8, String) {
-    let opacity = state.get_floating_opacity();
-    let color = state.get_floating_bg_color();
+pub fn get_floating_appearance(
+    windows_manager: State<'_, WindowsManager>
+) -> (u8, String) {
+    let opacity = windows_manager.get_floating_opacity();
+    let color = windows_manager.get_floating_bg_color();
     (opacity, color)
 }
 
@@ -403,15 +387,17 @@ pub fn get_floating_appearance(state: State<'_, AppState>) -> (u8, String) {
 #[tauri::command]
 pub fn set_floating_opacity(
     value: u8,
-    state: State<'_, AppState>,
-    settings_manager: State<'_, SettingsManager>
+    app_handle: AppHandle,
+    windows_manager: State<'_, WindowsManager>
 ) -> Result<(), String> {
-    state.set_floating_opacity(value);
-
-    // Auto-save
-    let settings = SettingsManager::load_from_state(&state);
-    settings_manager.save(&settings)
+    // Save to config
+    windows_manager.set_floating_opacity(value)
         .map_err(|e| format!("Failed to save settings: {}", e))?;
+
+    // Emit event to update window
+    if let Some(state) = app_handle.try_state::<AppState>() {
+        state.emit_event(AppEvent::FloatingAppearanceChanged);
+    }
 
     Ok(())
 }
@@ -420,40 +406,52 @@ pub fn set_floating_opacity(
 #[tauri::command]
 pub fn set_floating_bg_color(
     color: String,
-    state: State<'_, AppState>,
-    settings_manager: State<'_, SettingsManager>
+    app_handle: AppHandle,
+    windows_manager: State<'_, WindowsManager>
 ) -> Result<(), String> {
     // Validate hex color format
-    if !color.starts_with('#') || color.len() != 7 {
+    if !is_valid_hex_color(&color) {
         return Err("Invalid color format. Use #RRGGBB".to_string());
     }
 
-    state.set_floating_bg_color(color);
-
-    // Auto-save
-    let settings = SettingsManager::load_from_state(&state);
-    settings_manager.save(&settings)
+    // Save to config
+    windows_manager.set_floating_bg_color(color)
         .map_err(|e| format!("Failed to save settings: {}", e))?;
+
+    // Emit event to update window
+    if let Some(state) = app_handle.try_state::<AppState>() {
+        state.emit_event(AppEvent::FloatingAppearanceChanged);
+    }
 
     Ok(())
 }
 
 /// Toggle clickthrough mode for floating window
 #[tauri::command]
-pub fn set_clickthrough(state: State<'_, AppState>, enabled: bool) -> Result<bool, String> {
-    // Update state
-    state.set_clickthrough(enabled);
+pub fn set_clickthrough(
+    app_handle: AppHandle,
+    windows_manager: State<'_, WindowsManager>,
+    enabled: bool
+) -> Result<bool, String> {
+    // Save to config
+    windows_manager.set_floating_clickthrough(enabled)
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
 
-    // Emit event to apply to window
-    state.emit_event(AppEvent::ClickthroughChanged(enabled));
+    // Apply to window
+    if let Some(window) = app_handle.get_webview_window("floating") {
+        window.set_ignore_cursor_events(enabled)
+            .map_err(|e| format!("Failed to set clickthrough: {}", e))?;
+    }
 
     Ok(enabled)
 }
 
 /// Get current clickthrough state
 #[tauri::command]
-pub fn is_clickthrough_enabled(state: State<'_, AppState>) -> bool {
-    state.is_clickthrough_enabled()
+pub fn is_clickthrough_enabled(
+    windows_manager: State<'_, WindowsManager>
+) -> bool {
+    windows_manager.get_floating_clickthrough()
 }
 
 /// Get current Enter closes disabled state (F6 mode)
@@ -467,7 +465,6 @@ pub fn is_enter_closes_disabled(state: State<'_, AppState>) -> bool {
 pub fn toggle_floating_window(
     app_handle: AppHandle,
     app_state: State<'_, AppState>,
-    settings_manager: State<'_, SettingsManager>
 ) -> Result<bool, String> {
     let is_visible = app_handle.get_webview_window("floating")
         .and_then(|w| w.is_visible().ok())
@@ -477,17 +474,11 @@ pub fn toggle_floating_window(
         // Window is visible - hide it
         hide_floating_window(&app_handle, &app_state)
             .map_err(|e| format!("Failed to hide window: {}", e))?;
-        // Save state
-        settings_manager.set_floating_window_visibility(false)
-            .map_err(|e| format!("Failed to save settings: {}", e))?;
         Ok(false)
     } else {
         // Window is hidden or doesn't exist - show it
         show_floating_window(&app_handle)
             .map_err(|e| format!("Failed to show window: {}", e))?;
-        // Save state
-        settings_manager.set_floating_window_visibility(true)
-            .map_err(|e| format!("Failed to save settings: {}", e))?;
         Ok(true)
     }
 }
@@ -496,13 +487,9 @@ pub fn toggle_floating_window(
 #[tauri::command]
 pub fn show_floating_window_cmd(
     app_handle: AppHandle,
-    settings_manager: State<'_, SettingsManager>
 ) -> Result<(), String> {
     show_floating_window(&app_handle)
         .map_err(|e| format!("Failed to show window: {}", e))?;
-    // Save state
-    settings_manager.set_floating_window_visibility(true)
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
     Ok(())
 }
 
@@ -511,13 +498,9 @@ pub fn show_floating_window_cmd(
 pub fn hide_floating_window_cmd(
     app_handle: AppHandle,
     app_state: State<'_, AppState>,
-    settings_manager: State<'_, SettingsManager>
 ) -> Result<(), String> {
     hide_floating_window(&app_handle, &app_state)
         .map_err(|e| format!("Failed to hide window: {}", e))?;
-    // Save state
-    settings_manager.set_floating_window_visibility(false)
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
     Ok(())
 }
 
@@ -541,15 +524,15 @@ pub fn get_hotkey_enabled(
 #[tauri::command]
 pub fn set_hotkey_enabled(
     enabled: bool,
-    state: State<'_, AppState>,
-    settings_manager: State<'_, SettingsManager>
+    settings_manager: State<'_, SettingsManager>,
+    state: State<'_, AppState>
 ) -> Result<(), String> {
-    // Update state
-    state.set_hotkey_enabled(enabled);
-
     // Save to disk
     settings_manager.set_hotkey_enabled(enabled)
         .map_err(|e| format!("Failed to save settings: {}", e))?;
+
+    // Update runtime state
+    state.set_hotkey_enabled(enabled);
 
     Ok(())
 }
@@ -581,16 +564,17 @@ pub fn get_virtual_mic_devices() -> Vec<OutputDeviceInfo> {
 
 /// Get current audio settings
 #[tauri::command]
-pub fn get_audio_settings() -> Result<crate::audio::AudioSettings, String> {
-    AudioSettingsManager::new()
+pub fn get_audio_settings() -> Result<crate::config::AudioSettings, String> {
+    SettingsManager::new()
         .and_then(|mgr| mgr.load())
+        .map(|s| s.audio)
         .map_err(|e| e.to_string())
 }
 
 /// Set speaker device
 #[tauri::command]
 pub fn set_speaker_device(device_id: Option<String>) -> Result<(), String> {
-    AudioSettingsManager::new()
+    SettingsManager::new()
         .and_then(|mgr| mgr.set_speaker_device(device_id))
         .map_err(|e| e.to_string())
 }
@@ -598,7 +582,7 @@ pub fn set_speaker_device(device_id: Option<String>) -> Result<(), String> {
 /// Set speaker enabled
 #[tauri::command]
 pub fn set_speaker_enabled(enabled: bool) -> Result<(), String> {
-    AudioSettingsManager::new()
+    SettingsManager::new()
         .and_then(|mgr| mgr.set_speaker_enabled(enabled))
         .map_err(|e| e.to_string())
 }
@@ -606,7 +590,7 @@ pub fn set_speaker_enabled(enabled: bool) -> Result<(), String> {
 /// Set speaker volume
 #[tauri::command]
 pub fn set_speaker_volume(volume: u8) -> Result<(), String> {
-    AudioSettingsManager::new()
+    SettingsManager::new()
         .and_then(|mgr| mgr.set_speaker_volume(volume))
         .map_err(|e| e.to_string())
 }
@@ -614,7 +598,7 @@ pub fn set_speaker_volume(volume: u8) -> Result<(), String> {
 /// Set virtual mic device
 #[tauri::command]
 pub fn set_virtual_mic_device(device_id: Option<String>) -> Result<(), String> {
-    AudioSettingsManager::new()
+    SettingsManager::new()
         .and_then(|mgr| mgr.set_virtual_mic_device(device_id))
         .map_err(|e| e.to_string())
 }
@@ -622,23 +606,23 @@ pub fn set_virtual_mic_device(device_id: Option<String>) -> Result<(), String> {
 /// Enable virtual mic
 #[tauri::command]
 pub fn enable_virtual_mic() -> Result<(), String> {
-    AudioSettingsManager::new()
-        .and_then(|mgr| mgr.enable_virtual_mic())
+    SettingsManager::new()
+        .and_then(|mgr| mgr.set_virtual_mic_device(Some("".to_string())))  // Enable by setting a device
         .map_err(|e| e.to_string())
 }
 
 /// Disable virtual mic
 #[tauri::command]
 pub fn disable_virtual_mic() -> Result<(), String> {
-    AudioSettingsManager::new()
-        .and_then(|mgr| mgr.disable_virtual_mic())
+    SettingsManager::new()
+        .and_then(|mgr| mgr.set_virtual_mic_device(None))
         .map_err(|e| e.to_string())
 }
 
 /// Set virtual mic volume
 #[tauri::command]
 pub fn set_virtual_mic_volume(volume: u8) -> Result<(), String> {
-    AudioSettingsManager::new()
+    SettingsManager::new()
         .and_then(|mgr| mgr.set_virtual_mic_volume(volume))
         .map_err(|e| e.to_string())
 }
@@ -651,32 +635,49 @@ pub fn set_virtual_mic_volume(volume: u8) -> Result<(), String> {
 #[tauri::command]
 pub fn set_floating_exclude_from_recording(
     value: bool,
-    state: State<'_, AppState>,
-    settings_manager: State<'_, SettingsManager>
+    app_handle: AppHandle,
+    windows_manager: State<'_, WindowsManager>
 ) -> Result<(), String> {
-    state.set_floating_exclude_from_recording(value);
+    // Save to config
+    windows_manager.set_floating_exclude_from_recording(value)
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
 
-    // Auto-save
-    let settings = SettingsManager::load_from_state(&state);
-    settings_manager.save(&settings)
-        .map_err(|e| e.to_string())?;
+    // Apply to window if exists
+    if let Some(window) = app_handle.get_webview_window("floating") {
+        #[cfg(windows)]
+        {
+            use crate::window::set_window_exclude_from_capture;
 
+            if let Ok(hwnd) = window.hwnd() {
+                set_window_exclude_from_capture(hwnd.0 as isize, value)
+                    .map_err(|e| format!("Failed to apply exclude from recording: {}", e))?;
+
+                eprintln!("[FLOATING] Applied exclude from recording: {}", value);
+                return Ok(());
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            // No-op on other platforms
+            return Ok(());
+        }
+    }
     Ok(())
 }
 
 /// Get floating window exclude from recording setting
 #[tauri::command]
 pub fn get_floating_exclude_from_recording(
-    state: State<'_, AppState>
+    windows_manager: State<'_, WindowsManager>
 ) -> bool {
-    state.is_floating_exclude_from_recording()
+    windows_manager.get_floating_exclude_from_recording()
 }
 
 /// Apply exclude from recording to existing floating window
 #[tauri::command]
 pub fn apply_floating_exclude_recording(
     app_handle: AppHandle,
-    state: State<'_, AppState>
+    windows_manager: State<'_, WindowsManager>
 ) -> Result<(), String> {
     if let Some(window) = app_handle.get_webview_window("floating") {
         #[cfg(windows)]
@@ -684,7 +685,7 @@ pub fn apply_floating_exclude_recording(
             use crate::window::set_window_exclude_from_capture;
 
             if let Ok(hwnd) = window.hwnd() {
-                let exclude = state.is_floating_exclude_from_recording();
+                let exclude = windows_manager.get_floating_exclude_from_recording();
                 set_window_exclude_from_capture(hwnd.0 as isize, exclude)
                     .map_err(|e| e.to_string())?;
 
@@ -698,5 +699,10 @@ pub fn apply_floating_exclude_recording(
             return Ok(());
         }
     }
-    Err("Window not available".to_string())
+    Ok(())
+}
+
+#[tauri::command]
+pub fn has_api_key(state: State<'_, AppState>) -> bool {
+    state.openai_api_key.lock().is_some()
 }

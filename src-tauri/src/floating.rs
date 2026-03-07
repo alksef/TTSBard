@@ -1,6 +1,6 @@
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use crate::state::AppState;
-use crate::settings::SettingsManager;
+use crate::config::WindowsManager;
 use crate::soundpanel::SoundPanelState;
 
 pub fn show_floating_window(app_handle: &AppHandle) -> tauri::Result<()> {
@@ -11,8 +11,8 @@ pub fn show_floating_window(app_handle: &AppHandle) -> tauri::Result<()> {
         eprintln!("[FLOATING] Window already exists, showing and focusing");
 
         // Применяем сохранённую позицию к существующему окну
-        let settings_manager = app_handle.state::<SettingsManager>();
-        let (saved_x, saved_y) = settings_manager.get_floating_window_position();
+        let windows_manager = app_handle.state::<WindowsManager>();
+        let (saved_x, saved_y) = windows_manager.get_floating_position();
 
         if let Some(x) = saved_x {
             if let Some(y) = saved_y {
@@ -32,8 +32,8 @@ pub fn show_floating_window(app_handle: &AppHandle) -> tauri::Result<()> {
     eprintln!("[FLOATING] Creating new floating window...");
 
     // Получаем сохранённую позицию окна
-    let settings_manager = app_handle.state::<SettingsManager>();
-    let (saved_x, saved_y) = settings_manager.get_floating_window_position();
+    let windows_manager = app_handle.state::<WindowsManager>();
+    let (saved_x, saved_y) = windows_manager.get_floating_position();
 
     eprintln!("[FLOATING] Saved position: x={:?}, y={:?}", saved_x, saved_y);
 
@@ -71,8 +71,8 @@ pub fn show_floating_window(app_handle: &AppHandle) -> tauri::Result<()> {
     eprintln!("[FLOATING] Window created successfully");
 
     // Применяем clickthrough если включён в настройках
-    let app_state = app_handle.state::<AppState>();
-    if app_state.is_clickthrough_enabled() {
+    let windows_manager = app_handle.state::<WindowsManager>();
+    if windows_manager.get_floating_clickthrough() {
         eprintln!("[FLOATING] Applying clickthrough mode");
         let _ = window.set_ignore_cursor_events(true);
     }
@@ -86,7 +86,7 @@ pub fn show_floating_window(app_handle: &AppHandle) -> tauri::Result<()> {
             let _ = set_floating_window_styles(hwnd.0 as isize);
 
             // Защита от записи экрана
-            if app_state.is_floating_exclude_from_recording() {
+            if windows_manager.get_floating_exclude_from_recording() {
                 eprintln!("[FLOATING] Applying exclude from recording");
                 let _ = set_window_exclude_from_capture(hwnd.0 as isize, true);
             }
@@ -122,12 +122,12 @@ pub fn hide_floating_window(app_handle: &AppHandle, app_state: &AppState) -> tau
 
     if let Some(window) = app_handle.get_webview_window("floating") {
         // Сохраняем текущую позицию перед скрытием
-        if let Some(manager) = app_handle.try_state::<SettingsManager>() {
+        if let Some(manager) = app_handle.try_state::<WindowsManager>() {
             if let Ok(outer_pos) = window.outer_position() {
                 let x = outer_pos.x as i32;
                 let y = outer_pos.y as i32;
                 eprintln!("[FLOATING] Saving position before hide: x={}, y={}", x, y);
-                let _ = manager.set_floating_window_position(Some(x), Some(y));
+                let _ = manager.set_floating_position(Some(x), Some(y));
             }
         }
         window.hide()?;

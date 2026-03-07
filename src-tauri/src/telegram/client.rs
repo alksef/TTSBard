@@ -4,64 +4,13 @@ use grammers_client::types::LoginToken;
 use grammers_mtsender::SenderPool;
 use grammers_session::updates::UpdatesLike;
 use grammers_session::storages::SqliteSession;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-/// Конфигурация с api_id для автоматического восстановления сессии
-#[derive(Debug, Serialize, Deserialize)]
-struct TelegramConfig {
-    api_id: u32,
-}
-
-/// Путь к конфигу Telegram
-fn get_config_path() -> Result<PathBuf, String> {
-    let appdata = std::env::var("APPDATA")
-        .map_err(|e| format!("Failed to get APPDATA: {}", e))?;
-    let app_dir = std::path::Path::new(&appdata).join("ttsbard");
-    std::fs::create_dir_all(&app_dir)
-        .map_err(|e| format!("Failed to create app directory: {}", e))?;
-    Ok(app_dir.join("telegram_config.json"))
-}
-
-/// Сохранить api_id после успешной авторизации
-pub fn save_api_id(api_id: u32) -> Result<(), String> {
-    let config = TelegramConfig { api_id };
-    let path = get_config_path()?;
-    let json = serde_json::to_string_pretty(&config)
-        .map_err(|e| format!("Failed to serialize config: {}", e))?;
-    std::fs::write(&path, json)
-        .map_err(|e| format!("Failed to write config: {}", e))?;
-    println!("[AUTH] api_id {} saved to {:?}", api_id, path);
-    Ok(())
-}
-
-/// Загрузить api_id из конфига
-pub fn load_api_id() -> Result<Option<u32>, String> {
-    let path = get_config_path()?;
-    if !path.exists() {
-        return Ok(None);
-    }
-    let json = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read config: {}", e))?;
-    let config: TelegramConfig = serde_json::from_str(&json)
-        .map_err(|e| format!("Failed to parse config: {}", e))?;
-    println!("[AUTH] api_id {} loaded from {:?}", config.api_id, path);
-    Ok(Some(config.api_id))
-}
-
-/// Удалить конфиг при выходе
-pub fn delete_config() -> Result<(), String> {
-    let path = get_config_path()?;
-    if path.exists() {
-        std::fs::remove_file(&path)
-            .map_err(|e| format!("Failed to delete config: {}", e))?;
-        println!("[AUTH] Config deleted");
-    }
-    Ok(())
-}
+// NOTE: api_id is now stored in settings.json (settings.tts.telegram.api_id)
+// The old telegram_config.json file is no longer used
 
 pub struct TelegramClient {
     pub(crate) pool_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,

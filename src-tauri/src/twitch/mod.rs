@@ -3,6 +3,8 @@ mod client;
 pub use client::{TwitchClient, TwitchStatus};
 
 use serde::{Deserialize, Serialize};
+// Import with alias to avoid name conflict
+use crate::config::TwitchSettings as ConfigTwitchSettings;
 
 /// Настройки подключения к Twitch IRC
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +29,7 @@ impl Default for TwitchSettings {
 }
 
 /// Валидация настроек Twitch
+#[allow(dead_code)]
 impl TwitchSettings {
     pub fn is_valid(&self) -> Result<(), String> {
         if self.username.is_empty() {
@@ -47,6 +50,19 @@ impl TwitchSettings {
             self.token.clone()
         } else {
             format!("oauth:{}", self.token)
+        }
+    }
+}
+
+// Convert from config::settings::TwitchSettings
+impl From<ConfigTwitchSettings> for TwitchSettings {
+    fn from(settings: ConfigTwitchSettings) -> Self {
+        Self {
+            enabled: settings.enabled,
+            username: settings.username,
+            token: settings.token,
+            channel: settings.channel,
+            start_on_boot: settings.start_on_boot,
         }
     }
 }

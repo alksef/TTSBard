@@ -1,4 +1,5 @@
 use crate::telegram::{TelegramClient, UserInfo, TtsResult, SileroTtsBot, CurrentVoice, Limits, get_current_voice, get_limits};
+use crate::config::SettingsManager;
 use tauri::State;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -44,8 +45,9 @@ pub async fn telegram_init(
     // Создаем новый клиент
     let client = TelegramClient::new();
 
-    // Инициализируем
-    client.init(api_id, api_hash, phone).await?;
+    // Инициализируем - игнорируем результат операции, проверяем только на ошибки
+    client.init(api_id, api_hash, phone).await
+        .map_err(|e| format!("Ошибка инициализации клиента: {}", e))?;
 
     // Сохраняем клиент в состоянии
     let mut state_guard = state.client.lock().await;
@@ -63,7 +65,8 @@ pub async fn telegram_request_code(
     let client = client_guard.as_ref()
         .ok_or_else(|| "Клиент не инициализирован. Сначала вызовите telegram_init.".to_string())?;
 
-    client.request_code().await?;
+    client.request_code().await
+        .map_err(|e| format!("Ошибка запроса кода: {}", e))?;
     Ok(())
 }
 
@@ -71,6 +74,7 @@ pub async fn telegram_request_code(
 #[tauri::command]
 pub async fn telegram_sign_in(
     state: State<'_, TelegramState>,
+    settings_manager: State<'_, SettingsManager>,
     code: String,
 ) -> Result<(), String> {
     if code.trim().is_empty() {
@@ -81,9 +85,10 @@ pub async fn telegram_sign_in(
     let client = client_guard.as_ref()
         .ok_or_else(|| "Клиент не инициализирован. Сначала вызовите telegram_init.".to_string())?;
 
-    client.sign_in(&code).await?;
+    client.sign_in(&code).await
+        .map_err(|e| format!("Ошибка входа: {}", e))?;
 
-    // После успешного входа сохраняем api_id
+    // После успешного входа сохраняем api_id в settings.json
     let api_id_to_save = {
         let api_id_lock = client.api_id.lock().await;
         match &*api_id_lock {
@@ -93,7 +98,9 @@ pub async fn telegram_sign_in(
     };
     drop(client_guard);
 
-    crate::telegram::client::save_api_id(api_id_to_save)?;
+    // Save to settings.json (convert u32 to i64)
+    settings_manager.set_telegram_api_id(Some(api_id_to_save as i64))
+        .map_err(|e| format!("Failed to save api_id: {}", e))?;
 
     Ok(())
 }
@@ -102,20 +109,23 @@ pub async fn telegram_sign_in(
 #[tauri::command]
 pub async fn telegram_sign_out(
     state: State<'_, TelegramState>,
+    settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
     let client_guard = state.client.lock().await;
     let client = client_guard.as_ref()
         .ok_or_else(|| "Клиент не инициализирован".to_string())?;
 
-    client.sign_out().await?;
+    client.sign_out().await
+        .map_err(|e| format!("Ошибка выхода: {}", e))?;
 
     // Удаляем клиент из состояния
     drop(client_guard);
     let mut state_guard = state.client.lock().await;
     *state_guard = None;
 
-    // Удаляем сохранённый api_id
-    crate::telegram::client::delete_config()?;
+    // Удаляем сохранённый api_id из settings.json
+    settings_manager.set_telegram_api_id(None)
+        .map_err(|e| format!("Failed to delete api_id: {}", e))?;
 
     Ok(())
 }
@@ -250,12 +260,13 @@ pub async fn telegram_get_limits(
 #[tauri::command]
 pub async fn telegram_auto_restore(
     state: State<'_, TelegramState>,
+    settings_manager: State<'_, SettingsManager>,
 ) -> Result<bool, String> {
     println!("[TELEGRAM] Auto-restoring session...");
 
-    // Загружаем сохранённый api_id
-    let api_id = match crate::telegram::client::load_api_id()? {
-        Some(id) => id,
+    // Загружаем сохранённый api_id из settings.json
+    let api_id = match settings_manager.get_telegram_api_id() {
+        Some(id) => id as u32, // Convert i64 to u32
         None => {
             println!("[TELEGRAM] No saved api_id found");
             return Ok(false);
@@ -268,7 +279,8 @@ pub async fn telegram_auto_restore(
     let client = TelegramClient::new();
 
     // Инициализируем с пустыми данными (сессия уже есть)
-    client.init_empty(api_id).await?;
+    client.init_empty(api_id).await
+        .map_err(|e| format!("Ошибка инициализации сессии: {}", e))?;
 
     // Сохраняем клиент в состоянии
     let mut state_guard = state.client.lock().await;

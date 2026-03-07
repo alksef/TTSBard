@@ -3,7 +3,8 @@
 //! Tauri команды для взаимодействия между frontend и backend.
 
 use crate::soundpanel::state::{SoundPanelState, SoundBinding};
-use crate::soundpanel::storage::{save_bindings, copy_sound_file, delete_sound_file, save_appearance};
+use crate::soundpanel::storage::{save_bindings, copy_sound_file, delete_sound_file};
+use crate::config::{WindowsManager, is_valid_hex_color};
 use crate::soundpanel::audio::play_audio_file;
 use tauri::{State, AppHandle, Manager};
 
@@ -123,35 +124,50 @@ pub fn sp_get_floating_appearance(state: State<'_, SoundPanelState>) -> Result<(
 
 /// Установить прозрачность floating окна звуковой панели
 #[tauri::command]
-pub fn sp_set_floating_opacity(value: u8, state: State<'_, SoundPanelState>) -> Result<(), String> {
+pub fn sp_set_floating_opacity(
+    value: u8,
+    state: State<'_, SoundPanelState>,
+    windows_manager: State<'_, WindowsManager>,
+) -> Result<(), String> {
     eprintln!("[SOUNDPANEL] Setting opacity to {}", value);
     state.set_floating_opacity(value);
-    // Сохраняем в файл
-    save_appearance(&state)?;
+    // Сохраняем в windows.json
+    windows_manager.set_soundpanel_opacity(value)
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
     Ok(())
 }
 
 /// Установить цвет фона floating окна звуковой панели
 #[tauri::command]
-pub fn sp_set_floating_bg_color(color: String, state: State<'_, SoundPanelState>) -> Result<(), String> {
+pub fn sp_set_floating_bg_color(
+    color: String,
+    state: State<'_, SoundPanelState>,
+    windows_manager: State<'_, WindowsManager>,
+) -> Result<(), String> {
     // Валидация hex цвета
-    if !color.starts_with('#') || color.len() != 7 {
+    if !is_valid_hex_color(&color) {
         return Err("Invalid color format. Use #RRGGBB".to_string());
     }
     eprintln!("[SOUNDPANEL] Setting bg color to {}", color);
-    state.set_floating_bg_color(color);
-    // Сохраняем в файл
-    save_appearance(&state)?;
+    state.set_floating_bg_color(color.clone());
+    // Сохраняем в windows.json
+    windows_manager.set_soundpanel_bg_color(color)
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
     Ok(())
 }
 
 /// Установить clickthrough для floating окна звуковой панели
 #[tauri::command]
-pub fn sp_set_floating_clickthrough(enabled: bool, state: State<'_, SoundPanelState>) -> Result<(), String> {
+pub fn sp_set_floating_clickthrough(
+    enabled: bool,
+    state: State<'_, SoundPanelState>,
+    windows_manager: State<'_, WindowsManager>,
+) -> Result<(), String> {
     eprintln!("[SOUNDPANEL] Setting clickthrough to {}", enabled);
     state.set_floating_clickthrough(enabled);
-    // Сохраняем в файл
-    save_appearance(&state)?;
+    // Сохраняем в windows.json
+    windows_manager.set_soundpanel_clickthrough(enabled)
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
     Ok(())
 }
 
@@ -163,11 +179,16 @@ pub fn sp_is_floating_clickthrough_enabled(state: State<'_, SoundPanelState>) ->
 
 /// Установить исключение из записи экрана для звуковой панели
 #[tauri::command]
-pub fn sp_set_exclude_from_recording(enabled: bool, state: State<'_, SoundPanelState>) -> Result<(), String> {
+pub fn sp_set_exclude_from_recording(
+    enabled: bool,
+    state: State<'_, SoundPanelState>,
+    windows_manager: State<'_, WindowsManager>,
+) -> Result<(), String> {
     eprintln!("[SOUNDPANEL] Setting exclude_from_recording to {}", enabled);
     state.set_exclude_from_recording(enabled);
-    // Сохраняем в файл
-    save_appearance(&state)?;
+    // Сохраняем в windows.json
+    windows_manager.set_soundpanel_exclude_from_recording(enabled)
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
     Ok(())
 }
 
