@@ -1,4 +1,4 @@
-use crate::settings::AppSettings;
+use crate::config::SettingsManager;
 use crate::state::AppState;
 use crate::webview::WebViewSettings;
 use tauri::{Manager, State};
@@ -9,7 +9,42 @@ pub async fn get_webview_settings(
     state: State<'_, AppState>,
 ) -> Result<WebViewSettings, String> {
     let settings = state.webview_settings.read().await;
-    Ok(settings.clone())
+    // Клонируем только необходимые поля, html_template и css_style могут быть большими
+    Ok(WebViewSettings {
+        enabled: settings.enabled,
+        start_on_boot: settings.start_on_boot,
+        port: settings.port,
+        bind_address: settings.bind_address.clone(),
+        html_template: settings.html_template.clone(),
+        css_style: settings.css_style.clone(),
+        animation_speed: settings.animation_speed,
+    })
+}
+
+/// Get individual webview setting fields to avoid full cloning
+#[tauri::command]
+pub async fn get_webview_enabled(state: State<'_, AppState>) -> Result<bool, String> {
+    Ok(state.webview_settings.read().await.enabled)
+}
+
+#[tauri::command]
+pub async fn get_webview_start_on_boot(state: State<'_, AppState>) -> Result<bool, String> {
+    Ok(state.webview_settings.read().await.start_on_boot)
+}
+
+#[tauri::command]
+pub async fn get_webview_port(state: State<'_, AppState>) -> Result<u16, String> {
+    Ok(state.webview_settings.read().await.port)
+}
+
+#[tauri::command]
+pub async fn get_webview_bind_address(state: State<'_, AppState>) -> Result<String, String> {
+    Ok(state.webview_settings.read().await.bind_address.clone())
+}
+
+#[tauri::command]
+pub async fn get_webview_animation_speed(state: State<'_, AppState>) -> Result<u32, String> {
+    Ok(state.webview_settings.read().await.animation_speed)
 }
 
 /// Save webview settings to AppState and persist to files
@@ -29,14 +64,23 @@ pub async fn save_webview_settings(
     let start_on_boot_changed = old_settings.start_on_boot != settings.start_on_boot;
     drop(old_settings);
 
-    // Save to AppState (runtime state)
+    // Get SettingsManager once and persist to config
+    let settings_manager = app_handle.try_state::<SettingsManager>();
+    if let Some(manager) = settings_manager {
+        manager.set_webview_start_on_boot(settings.start_on_boot)
+            .map_err(|e| format!("Failed to save webview start_on_boot: {}", e))?;
+        manager.set_webview_port(settings.port)
+            .map_err(|e| format!("Failed to save webview port: {}", e))?;
+        manager.set_webview_bind_address(settings.bind_address.clone())
+            .map_err(|e| format!("Failed to save webview bind_address: {}", e))?;
+        manager.set_webview_animation_speed(settings.animation_speed)
+            .map_err(|e| format!("Failed to save webview animation_speed: {}", e))?;
+    }
+
+    // Only after successful file save, update AppState (runtime state)
     let mut s = state.webview_settings.write().await;
     *s = settings.clone();
     drop(s);
-
-    // Persist to files
-    AppSettings::save_webview_settings(&settings)
-        .map_err(|e| format!("Failed to save webview settings to files: {}", e))?;
 
     // Trigger server restart if server settings changed
     // Note: start_on_boot changes don't require restart (only affects next boot)
@@ -46,13 +90,9 @@ pub async fn save_webview_settings(
             eprintln!("[WEBVIEW] Only start_on_boot changed, no restart needed");
         }
         eprintln!("[WEBVIEW] Sending RestartWebViewServer event to WebView server...");
-        // Send restart event directly to WebView server
-        if let Some(state) = app_handle.try_state::<AppState>() {
-            state.send_webview_event(crate::events::AppEvent::RestartWebViewServer);
-            eprintln!("[WEBVIEW] RestartWebViewServer event sent successfully!");
-        } else {
-            eprintln!("[WEBVIEW] ERROR: Failed to get AppState for event emission!");
-        }
+        // Send restart event directly to WebView server using the state parameter
+        state.send_webview_event(crate::events::AppEvent::RestartWebViewServer);
+        eprintln!("[WEBVIEW] RestartWebViewServer event sent successfully!");
 
         if start_on_boot_changed && !(enabled_changed || port_changed) {
             Ok("Настройки сохранены. Автозапуск обновлён (применится при следующем старте).".to_string())

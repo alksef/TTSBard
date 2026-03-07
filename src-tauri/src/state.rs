@@ -7,26 +7,8 @@ use crate::tts::{TtsProvider, TtsProviderType, openai::OpenAiTts, local::LocalTt
 use crate::preprocessor::TextPreprocessor;
 use crate::telegram::TelegramClient;
 use crate::webview::WebViewSettings;
-use crate::twitch::TwitchSettings;
+use crate::config::TwitchSettings;
 use tauri::{AppHandle, Manager};
-
-/// Load webview settings from files, falling back to defaults on error
-fn load_initial_webview_settings() -> WebViewSettings {
-    use crate::settings::AppSettings;
-
-    eprintln!("[STATE] Loading WebView settings from files...");
-
-    match AppSettings::load_webview_settings() {
-        Ok(settings) => {
-            eprintln!("[STATE] WebView settings loaded successfully");
-            settings
-        }
-        Err(e) => {
-            eprintln!("[STATE] Failed to load WebView settings: {}, using defaults", e);
-            WebViewSettings::default()
-        }
-    }
-}
 
 /// Lock ordering hierarchy (to prevent deadlocks):
 /// 1. tts_providers
@@ -36,6 +18,10 @@ fn load_initial_webview_settings() -> WebViewSettings {
 /// 5. All other individual setting locks
 ///
 /// IMPORTANT: Always acquire locks in this order to prevent deadlocks!
+///
+/// NOTE: Window settings (opacity, colors, etc.) are now stored in config/windows.json
+/// Audio settings are now stored in config/settings.json
+/// This AppState only holds runtime state, not configuration.
 
 /// Активное плавающее окно
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -59,6 +45,9 @@ pub struct AppState {
 
     /// Включен ли режим перехвата
     pub interception_enabled: Arc<Mutex<bool>>,
+
+    /// Включены ли хоткеи (runtime only, synced with settings.json)
+    pub hotkey_enabled: Arc<Mutex<bool>>,
 
     /// Текущий текст из плавающего окна
     pub current_text: Arc<Mutex<String>>,
@@ -84,24 +73,6 @@ pub struct AppState {
     /// Прокси порт для OpenAI
     pub openai_proxy_port: Arc<Mutex<Option<u16>>>,
 
-    /// URL для Local TTS
-    pub local_tts_url: Arc<Mutex<String>>,
-
-    /// Прозрачность плавающего окна (10-100)
-    pub floating_opacity: Arc<Mutex<u8>>,
-
-    /// Цвет фона плавающего окна (hex #RRGGBB)
-    pub floating_bg_color: Arc<Mutex<String>>,
-
-    /// Пропускает ли плавающее окно клики
-    pub floating_clickthrough: Arc<Mutex<bool>>,
-
-    /// Разрешить вызов по горячей клавише
-    pub hotkey_enabled: Arc<Mutex<bool>>,
-
-    /// Исключить ли плавающее окно из записи экрана
-    pub floating_exclude_from_recording: Arc<Mutex<bool>>,
-
     /// Cached preprocessor for live replacement
     pub preprocessor: Arc<Mutex<Option<TextPreprocessor>>>,
 
@@ -126,13 +97,13 @@ pub struct AppState {
 
 impl AppState {
     pub fn new() -> Self {
-        let webview_settings = load_initial_webview_settings();
         let (twitch_event_tx, _) = broadcast::channel::<TwitchEvent>(100);
 
         Self {
             event_sender: Arc::new(Mutex::new(None)),
             webview_event_sender: Arc::new(Mutex::new(None)),
             interception_enabled: Arc::new(Mutex::new(false)),
+            hotkey_enabled: Arc::new(Mutex::new(true)), // default true
             current_text: Arc::new(Mutex::new(String::new())),
             current_layout: Arc::new(Mutex::new(InputLayout::Russian)),
             tts_provider_type: Arc::new(Mutex::new(TtsProviderType::OpenAi)),
@@ -141,16 +112,10 @@ impl AppState {
             openai_voice: Arc::new(Mutex::new("alloy".to_string())),
             openai_proxy_host: Arc::new(Mutex::new(None)),
             openai_proxy_port: Arc::new(Mutex::new(None)),
-            local_tts_url: Arc::new(Mutex::new(String::new())),
-            floating_opacity: Arc::new(Mutex::new(90)),
-            floating_bg_color: Arc::new(Mutex::new("#1e1e1e".to_string())),
-            floating_clickthrough: Arc::new(Mutex::new(false)),
-            hotkey_enabled: Arc::new(Mutex::new(true)),
-            floating_exclude_from_recording: Arc::new(Mutex::new(false)),
             preprocessor: Arc::new(Mutex::new(None)),
             enter_closes_disabled: Arc::new(Mutex::new(false)),
             active_window: Arc::new(Mutex::new(ActiveWindow::None)),
-            webview_settings: Arc::new(tokio::sync::RwLock::new(webview_settings)),
+            webview_settings: Arc::new(tokio::sync::RwLock::new(WebViewSettings::default())),
             twitch_settings: Arc::new(tokio::sync::RwLock::new(TwitchSettings::default())),
             twitch_connection_status: Arc::new(Mutex::new(crate::events::TwitchConnectionStatus::Disconnected)),
             twitch_event_tx,
@@ -207,6 +172,14 @@ impl AppState {
     pub fn set_interception_enabled(&self, enabled: bool) {
         *self.interception_enabled.lock() = enabled;
         self.emit_event(AppEvent::InterceptionChanged(enabled));
+    }
+
+    pub fn is_hotkey_enabled(&self) -> bool {
+        *self.hotkey_enabled.lock()
+    }
+
+    pub fn set_hotkey_enabled(&self, enabled: bool) {
+        *self.hotkey_enabled.lock() = enabled;
     }
 
     pub fn get_current_text(&self) -> String {
@@ -375,56 +348,6 @@ impl AppState {
         // Phase 3: Update proxy settings
         *self.openai_proxy_host.lock() = host;
         *self.openai_proxy_port.lock() = port;
-    }
-
-    pub fn get_local_tts_url(&self) -> String {
-        self.local_tts_url.lock().clone()
-    }
-
-    pub fn set_local_tts_url(&self, url: String) {
-        *self.local_tts_url.lock() = url;
-    }
-
-    pub fn get_floating_opacity(&self) -> u8 {
-        *self.floating_opacity.lock()
-    }
-
-    pub fn set_floating_opacity(&self, value: u8) {
-        *self.floating_opacity.lock() = value.clamp(10, 100);
-        self.emit_event(AppEvent::FloatingAppearanceChanged);
-    }
-
-    pub fn get_floating_bg_color(&self) -> String {
-        self.floating_bg_color.lock().clone()
-    }
-
-    pub fn set_floating_bg_color(&self, color: String) {
-        *self.floating_bg_color.lock() = color;
-        self.emit_event(AppEvent::FloatingAppearanceChanged);
-    }
-
-    pub fn is_clickthrough_enabled(&self) -> bool {
-        *self.floating_clickthrough.lock()
-    }
-
-    pub fn set_clickthrough(&self, enabled: bool) {
-        *self.floating_clickthrough.lock() = enabled;
-    }
-
-    pub fn is_hotkey_enabled(&self) -> bool {
-        *self.hotkey_enabled.lock()
-    }
-
-    pub fn set_hotkey_enabled(&self, enabled: bool) {
-        *self.hotkey_enabled.lock() = enabled;
-    }
-
-    pub fn is_floating_exclude_from_recording(&self) -> bool {
-        *self.floating_exclude_from_recording.lock()
-    }
-
-    pub fn set_floating_exclude_from_recording(&self, value: bool) {
-        *self.floating_exclude_from_recording.lock() = value;
     }
 
     /// Get or create preprocessor instance

@@ -2,16 +2,19 @@
 //!
 //! Хранение привязок звуковой панели в JSON файле в %APPDATA%.
 //! Копирование аудиофайлов в папку soundpanel.
+//!
+//! NOTE: Appearance settings are now stored in windows.json (via WindowsManager)
+//! The old soundpanel_appearance.json file is no longer used.
 
 use std::fs;
 use std::path::PathBuf;
 use crate::soundpanel::state::{SoundPanelState, SoundBinding};
+use crate::config::WindowsManager;
 use serde::{Serialize, Deserialize};
 
 const BINDINGS_FILE: &str = "soundpanel_bindings.json";
-const APPEARANCE_FILE: &str = "soundpanel_appearance.json";
 
-/// Настройки внешнего вида звуковой панели
+/// Настройки внешнего вида звуковой панели (deprecated, use WindowsManager instead)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SoundPanelAppearance {
     pub opacity: u8,
@@ -163,69 +166,38 @@ fn generate_unique_path(dir: &PathBuf, filename: &str) -> PathBuf {
     path
 }
 
-/// Загрузить настройки внешнего вида из JSON файла
-pub fn load_appearance(state: &SoundPanelState) -> Result<SoundPanelAppearance, String> {
-    let appdata_path = state.appdata_path.lock().unwrap().clone();
-    let file_path = PathBuf::from(&appdata_path).join(APPEARANCE_FILE);
+/// Загрузить настройки внешнего вида из windows.json
+pub fn load_appearance(state: &SoundPanelState, windows_manager: &WindowsManager) -> Result<SoundPanelAppearance, String> {
+    eprintln!("[SOUNDPANEL] Loading appearance from windows.json");
 
-    eprintln!("[SOUNDPANEL] Loading appearance from: {:?}", file_path);
+    // Load from WindowsManager
+    let opacity = windows_manager.get_soundpanel_opacity();
+    let bg_color = windows_manager.get_soundpanel_bg_color();
+    let clickthrough = windows_manager.get_soundpanel_clickthrough();
+    let exclude_from_recording = windows_manager.get_soundpanel_exclude_from_recording();
 
-    if !file_path.exists() {
-        eprintln!("[SOUNDPANEL] Appearance file does not exist, using defaults");
-        let appearance = SoundPanelAppearance::default();
-        // Создать файл с настройками по умолчанию
-        let _ = save_appearance_direct(&file_path, &appearance);
-        return Ok(appearance);
-    }
-
-    let content = fs::read_to_string(&file_path)
-        .map_err(|e| format!("Failed to read appearance file: {}", e))?;
-
-    let appearance: SoundPanelAppearance = serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse appearance: {}", e))?;
-
-    eprintln!("[SOUNDPANEL] Loaded appearance: opacity={}%, color={}, clickthrough={}", appearance.opacity, appearance.bg_color, appearance.clickthrough);
+    eprintln!("[SOUNDPANEL] Loaded appearance: opacity={}%, color={}, clickthrough={}, exclude={}",
+        opacity, bg_color, clickthrough, exclude_from_recording);
 
     // Применить к состоянию
-    state.set_floating_opacity(appearance.opacity);
-    state.set_floating_bg_color(appearance.bg_color.clone());
-    state.set_floating_clickthrough(appearance.clickthrough);
-    state.set_exclude_from_recording(appearance.exclude_from_recording);
+    state.set_floating_opacity(opacity);
+    state.set_floating_bg_color(bg_color.clone());
+    state.set_floating_clickthrough(clickthrough);
+    state.set_exclude_from_recording(exclude_from_recording);
 
-    Ok(appearance)
+    Ok(SoundPanelAppearance {
+        opacity,
+        bg_color,
+        clickthrough,
+        exclude_from_recording,
+    })
 }
 
-/// Сохранить настройки внешнего вида в JSON файл
-pub fn save_appearance(state: &SoundPanelState) -> Result<(), String> {
-    let appearance = SoundPanelAppearance {
-        opacity: state.get_floating_opacity(),
-        bg_color: state.get_floating_bg_color(),
-        clickthrough: state.is_floating_clickthrough_enabled(),
-        exclude_from_recording: state.is_exclude_from_recording(),
-    };
-
-    let appdata_path = state.appdata_path.lock().unwrap().clone();
-    let file_path = PathBuf::from(&appdata_path).join(APPEARANCE_FILE);
-
-    save_appearance_direct(&file_path, &appearance)
-}
-
-/// Внутренняя функция сохранения appearance (без доступа к state)
-fn save_appearance_direct(file_path: &PathBuf, appearance: &SoundPanelAppearance) -> Result<(), String> {
-    let json = serde_json::to_string_pretty(&appearance)
-        .map_err(|e| format!("Failed to serialize appearance: {}", e))?;
-
-    fs::write(&file_path, json)
-        .map_err(|e| format!("Failed to write appearance file: {}", e))?;
-
-    eprintln!("[SOUNDPANEL] Appearance saved: opacity={}%, color={}", appearance.opacity, appearance.bg_color);
-    Ok(())
-}
+// NOTE: save_appearance and save_appearance_direct functions removed
+// Appearance settings are now saved via WindowsManager in the command handlers
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_generate_unique_path() {
         // Этот тест требует реальной файловой системы

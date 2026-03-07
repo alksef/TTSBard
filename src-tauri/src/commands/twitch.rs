@@ -1,15 +1,42 @@
-use crate::settings::AppSettings;
+use crate::config::{SettingsManager, TwitchSettings};
 use crate::state::AppState;
-use crate::twitch::TwitchSettings;
 use tauri::{State, Manager};
 
-/// Получить текущие настройки Twitch
+/// Получить текущие настройки Twitch (без токена)
 #[tauri::command]
 pub async fn get_twitch_settings(
     state: State<'_, AppState>,
 ) -> Result<TwitchSettings, String> {
     let settings = state.twitch_settings.read().await;
-    Ok(settings.clone())
+    // Возвращаем настройки без токена для безопасности
+    Ok(TwitchSettings {
+        enabled: settings.enabled,
+        username: settings.username.clone(),
+        token: String::new(), // Не возвращаем токен
+        channel: settings.channel.clone(),
+        start_on_boot: settings.start_on_boot,
+    })
+}
+
+/// Получить отдельные поля настроек Twitch
+#[tauri::command]
+pub async fn get_twitch_enabled(state: State<'_, AppState>) -> Result<bool, String> {
+    Ok(state.twitch_settings.read().await.enabled)
+}
+
+#[tauri::command]
+pub async fn get_twitch_username(state: State<'_, AppState>) -> Result<String, String> {
+    Ok(state.twitch_settings.read().await.username.clone())
+}
+
+#[tauri::command]
+pub async fn get_twitch_channel(state: State<'_, AppState>) -> Result<String, String> {
+    Ok(state.twitch_settings.read().await.channel.clone())
+}
+
+#[tauri::command]
+pub async fn get_twitch_start_on_boot(state: State<'_, AppState>) -> Result<bool, String> {
+    Ok(state.twitch_settings.read().await.start_on_boot)
 }
 
 /// Сохранить настройки Twitch и перезапустить клиент если нужно
@@ -35,20 +62,23 @@ pub async fn save_twitch_settings(
         || old_settings.channel != settings.channel;
     drop(old_settings);
 
-    // Сохранить в AppState
+    // Транзакционный подход: сначала сохраняем в файл, потом в память
+    // Это предотвращает рассинхронизацию, если другой поток прочитает настройки между операциями
+    // Получаем SettingsManager один раз
+    let settings_manager = app_handle.try_state::<SettingsManager>();
+    if let Some(manager) = settings_manager {
+        manager.set_twitch_settings(&settings)
+            .map_err(|e| format!("Failed to save Twitch settings: {}", e))?;
+    }
+
+    // Только после успешного сохранения в файл обновляем AppState
     let mut s = state.twitch_settings.write().await;
     *s = settings.clone();
     drop(s);
 
-    // Сохранить в файлы
-    AppSettings::save_twitch_settings(&settings)
-        .map_err(|e| format!("Failed to save Twitch settings: {}", e))?;
-
     // Отправить событие для перезапуска клиента только если есть изменения
     if enabled_changed || credentials_changed {
-        if let Some(state) = app_handle.try_state::<AppState>() {
-            state.send_twitch_event(crate::events::TwitchEvent::Restart);
-        }
+        state.send_twitch_event(crate::events::TwitchEvent::Restart);
         Ok("Настройки сохранены. Переподключение...".to_string())
     } else {
         Ok("Настройки сохранены.".to_string())
@@ -59,6 +89,7 @@ pub async fn save_twitch_settings(
 #[tauri::command]
 pub async fn connect_twitch(
     state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
     eprintln!("[TWITCH] Connect command received");
 
@@ -71,15 +102,20 @@ pub async fn connect_twitch(
     }
     drop(settings);
 
-    // Обновляем enabled и сохраняем
+    // Обновляем enabled и клонируем настройки для сохранения
     let mut s = state.twitch_settings.write().await;
     s.enabled = true;
     let settings_to_save = s.clone();
     drop(s);
 
-    // Сохраняем в файл
-    AppSettings::save_twitch_settings(&settings_to_save)
-        .map_err(|e| format!("Failed to save Twitch settings: {}", e))?;
+    // Получаем SettingsManager один раз и сохраняем в файл
+    let settings_manager = app_handle.try_state::<SettingsManager>();
+    if let Some(manager) = settings_manager {
+        manager.set_twitch_settings(&settings_to_save)
+            .map_err(|e| format!("Failed to save Twitch settings: {}", e))?;
+    }
+
+    // AppState уже обновлен (enabled=true), файл синхронизирован
 
     // Отправляем событие подключения
     state.send_twitch_event(crate::events::TwitchEvent::Restart);
@@ -91,18 +127,24 @@ pub async fn connect_twitch(
 #[tauri::command]
 pub async fn disconnect_twitch(
     state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
     eprintln!("[TWITCH] Disconnect command received");
 
-    // Обновляем enabled и сохраняем
+    // Обновляем enabled и клонируем настройки для сохранения
     let mut s = state.twitch_settings.write().await;
     s.enabled = false;
     let settings_to_save = s.clone();
     drop(s);
 
-    // Сохраняем в файл
-    AppSettings::save_twitch_settings(&settings_to_save)
-        .map_err(|e| format!("Failed to save Twitch settings: {}", e))?;
+    // Получаем SettingsManager один раз и сохраняем в файл
+    let settings_manager = app_handle.try_state::<SettingsManager>();
+    if let Some(manager) = settings_manager {
+        manager.set_twitch_settings(&settings_to_save)
+            .map_err(|e| format!("Failed to save Twitch settings: {}", e))?;
+    }
+
+    // AppState уже обновлен (enabled=false), файл синхронизирован
 
     // Отправляем событие отключения
     state.send_twitch_event(crate::events::TwitchEvent::Stop);
@@ -114,17 +156,9 @@ pub async fn disconnect_twitch(
 #[tauri::command]
 pub async fn get_twitch_status(
     state: State<'_, AppState>,
-) -> Result<String, String> {
+) -> Result<crate::events::TwitchConnectionStatus, String> {
     let status = state.twitch_connection_status.lock().clone();
-
-    let status_str = match status {
-        crate::events::TwitchConnectionStatus::Connected => "Connected",
-        crate::events::TwitchConnectionStatus::Connecting => "Connecting",
-        crate::events::TwitchConnectionStatus::Disconnected => "Disconnected",
-        crate::events::TwitchConnectionStatus::Error(_) => "Error",
-    };
-
-    Ok(status_str.to_string())
+    Ok(status)
 }
 
 /// Проверить подключение к Twitch

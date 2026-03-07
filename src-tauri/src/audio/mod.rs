@@ -6,11 +6,9 @@
 
 mod device;
 mod player;
-mod settings;
 
 pub use device::{get_output_devices, get_virtual_mic_devices, OutputDeviceInfo};
 pub use player::{AudioPlayer, OutputConfig};
-pub use settings::{AudioSettings, AudioSettingsManager};
 
 use serde::{Deserialize, Serialize};
 

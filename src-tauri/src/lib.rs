@@ -1,14 +1,14 @@
 mod commands;
+mod audio;
+mod config;
 mod events;
 mod floating;
 mod hook;
 mod hotkeys;
-mod settings;
 mod state;
 mod tts;
 mod window;
 mod soundpanel;
-mod audio;
 mod preprocessor;
 mod telegram;
 mod webview;
@@ -22,11 +22,11 @@ use state::AppState;
 use events::{AppEvent, InputLayout, TwitchEvent};
 use hotkeys::initialize_hotkeys;
 use hook::initialize_text_interception_hook;
-use commands::{speak_text, get_tts_provider, set_tts_provider, get_local_tts_url, set_local_tts_url, get_openai_api_key, set_openai_api_key, get_openai_voice, set_openai_voice, get_openai_proxy, set_openai_proxy, get_interception, set_interception, check_api_key, get_floating_appearance, set_floating_opacity, set_floating_bg_color, set_clickthrough, is_clickthrough_enabled, is_enter_closes_disabled, toggle_interception, toggle_floating_window, show_floating_window_cmd, hide_floating_window_cmd, is_floating_window_visible, quit_app, get_hotkey_enabled, set_hotkey_enabled, get_floating_exclude_from_recording, set_floating_exclude_from_recording, apply_floating_exclude_recording, open_file_dialog, get_output_devices, get_virtual_mic_devices, get_audio_settings, set_speaker_device, set_speaker_enabled, set_speaker_volume, set_virtual_mic_device, enable_virtual_mic, disable_virtual_mic, set_virtual_mic_volume};
+use commands::{speak_text, get_tts_provider, set_tts_provider, get_local_tts_url, set_local_tts_url, get_openai_api_key, set_openai_api_key, get_openai_voice, set_openai_voice, get_openai_proxy, set_openai_proxy, get_interception, set_interception, has_api_key, get_floating_appearance, set_floating_opacity, set_floating_bg_color, set_clickthrough, is_clickthrough_enabled, is_enter_closes_disabled, toggle_interception, toggle_floating_window, show_floating_window_cmd, hide_floating_window_cmd, is_floating_window_visible, quit_app, get_hotkey_enabled, set_hotkey_enabled, get_floating_exclude_from_recording, set_floating_exclude_from_recording, apply_floating_exclude_recording, open_file_dialog, get_output_devices, get_virtual_mic_devices, get_audio_settings, set_speaker_device, set_speaker_enabled, set_speaker_volume, set_virtual_mic_device, enable_virtual_mic, disable_virtual_mic, set_virtual_mic_volume};
 use commands::telegram::{telegram_init, telegram_request_code, telegram_sign_in, telegram_sign_out, telegram_get_status, telegram_get_user, telegram_auto_restore, TelegramState};
 use soundpanel::{SoundPanelState, sp_get_bindings, sp_add_binding, sp_remove_binding, sp_test_sound, sp_is_supported_format, sp_get_floating_appearance, sp_set_floating_opacity, sp_set_floating_bg_color, sp_set_floating_clickthrough, sp_is_floating_clickthrough_enabled, sp_is_exclude_from_recording, sp_set_exclude_from_recording, sp_apply_exclude_recording, load_bindings, load_appearance, initialize_soundpanel_hook};
 use floating::{show_floating_window, hide_floating_window, update_floating_text, update_floating_title, show_soundpanel_window, hide_soundpanel_window, emit_soundpanel_no_binding, update_soundpanel_appearance};
-use settings::{SettingsManager, AppSettings};
+use config::{SettingsManager, WindowsManager};
 use webview::WebViewServer;
 use twitch::TwitchClient;
 use tauri::{Manager, Emitter};
@@ -74,7 +74,7 @@ pub fn run() {
             get_interception,
             set_interception,
             toggle_interception,
-            check_api_key,
+            has_api_key,
             get_floating_appearance,
             set_floating_opacity,
             set_floating_bg_color,
@@ -138,6 +138,11 @@ pub fn run() {
             commands::webview::get_webview_settings,
             commands::webview::save_webview_settings,
             commands::webview::get_local_ip,
+            commands::webview::get_webview_enabled,
+            commands::webview::get_webview_start_on_boot,
+            commands::webview::get_webview_port,
+            commands::webview::get_webview_bind_address,
+            commands::webview::get_webview_animation_speed,
             // Twitch commands
             commands::twitch::get_twitch_settings,
             commands::twitch::save_twitch_settings,
@@ -146,6 +151,10 @@ pub fn run() {
             commands::twitch::connect_twitch,
             commands::twitch::disconnect_twitch,
             commands::twitch::get_twitch_status,
+            commands::twitch::get_twitch_enabled,
+            commands::twitch::get_twitch_username,
+            commands::twitch::get_twitch_channel,
+            commands::twitch::get_twitch_start_on_boot,
         ])
         .setup(|app| {
             eprintln!("[APP] === Application setup started ===");
@@ -155,28 +164,49 @@ pub fn run() {
             let settings_manager = SettingsManager::new()
                 .expect("Failed to create settings manager");
 
+            eprintln!("[APP] Creating windows manager...");
+            let windows_manager = WindowsManager::new()
+                .expect("Failed to create windows manager");
+
             eprintln!("[APP] Loading settings from disk...");
             let settings = settings_manager.load()
                 .expect("Failed to load settings");
 
-            eprintln!("[APP] Settings loaded: interception={}, opacity={}, clickthrough={}, floating_visible={}",
-                settings.interception_enabled,
-                settings.floating_opacity,
-                settings.floating_clickthrough,
-                settings.floating_window_visible);
+            eprintln!("[APP] Loading windows settings from disk...");
+            let windows = windows_manager.load()
+                .expect("Failed to load windows settings");
+
+            eprintln!("[APP] Settings loaded: tts_provider={:?}, hotkey_enabled={}",
+                settings.tts.provider, settings.hotkey_enabled);
+            eprintln!("[APP] Windows settings: floating_opacity={}, floating_clickthrough={}",
+                windows.floating.opacity, windows.floating.clickthrough);
 
             let app_state = app.state::<AppState>();
-            let telegram_state = app.state::<TelegramState>();
+            let _telegram_state = app.state::<TelegramState>();
 
-            // Load Twitch settings on startup
+            // Load Twitch and WebView settings into AppState
             eprintln!("[APP] Loading Twitch settings...");
-            let twitch_settings = AppSettings::load_twitch_settings()
-                .unwrap_or_default();
-            *app_state.twitch_settings.blocking_write() = twitch_settings.clone();
+            *app_state.twitch_settings.blocking_write() = settings.twitch.clone();
             eprintln!("[APP] Twitch settings loaded: enabled={}, start_on_boot={}",
-                twitch_settings.enabled, twitch_settings.start_on_boot);
+                settings.twitch.enabled, settings.twitch.start_on_boot);
 
-            // IMPORTANT: Setup event forwarding BEFORE apply_to_state
+            eprintln!("[APP] Loading WebView settings...");
+            *app_state.webview_settings.blocking_write() = crate::webview::WebViewSettings {
+                enabled: false, // runtime only
+                start_on_boot: settings.webview.start_on_boot,
+                port: settings.webview.port,
+                bind_address: settings.webview.bind_address.clone(),
+                html_template: String::new(), // loaded separately
+                css_style: String::new(), // loaded separately
+                animation_speed: settings.webview.animation_speed,
+            };
+
+            // Load hotkey_enabled setting into AppState
+            eprintln!("[APP] Loading hotkey_enabled setting...");
+            *app_state.hotkey_enabled.lock() = settings.hotkey_enabled;
+            eprintln!("[APP] Hotkey enabled: {}", settings.hotkey_enabled);
+
+            // IMPORTANT: Setup event forwarding BEFORE applying settings
             // so TTS providers can get valid event_sender during initialization
             let app_handle = app.handle().clone();
             let app_state_for_events = app_state.inner().clone();
@@ -185,6 +215,28 @@ pub fn run() {
             // Set event_sender in AppState FIRST
             app_state_for_events.set_event_sender(event_tx.clone());
             eprintln!("[APP] Event sender configured in AppState");
+
+            // Initialize TTS provider based on settings
+            eprintln!("[APP] Initializing TTS provider: {:?}", settings.tts.provider);
+            app_state.set_tts_provider_type(settings.tts.provider);
+
+            // Apply OpenAI settings
+            if let Some(ref api_key) = settings.tts.openai.api_key {
+                app_state.init_openai_tts(api_key.clone());
+                app_state.set_openai_voice(settings.tts.openai.voice.clone());
+                app_state.set_openai_proxy(settings.tts.openai.proxy_host.clone(), settings.tts.openai.proxy_port);
+            } else if settings.tts.provider == crate::tts::TtsProviderType::OpenAi {
+                eprintln!("[APP] WARNING: OpenAI selected but no API key found");
+            }
+
+            // Apply local TTS settings
+            if settings.tts.provider == crate::tts::TtsProviderType::Local {
+                app_state.init_local_tts();
+            }
+
+            // Store settings managers for later use
+            app.manage(settings_manager);
+            app.manage(windows_manager);
 
             // Spawn event forwarding thread
             thread::spawn(move || {
@@ -200,12 +252,6 @@ pub fn run() {
                     handle_event(event, &app_state_for_events, &app_handle);
                 }
             });
-
-            // NOW apply settings - TTS providers will get valid event_sender
-            settings_manager.apply_to_state(&settings, &app_state, Some(telegram_state));
-
-            // Store settings manager for later use
-            app.manage(settings_manager);
 
             // Initialize SoundPanel state
             let appdata_path = std::env::var("APPDATA")
@@ -273,7 +319,8 @@ pub fn run() {
             }
 
             // Load soundpanel appearance settings (now event_sender is configured)
-            match load_appearance(&soundpanel_state_for_load) {
+            let windows_manager = app.state::<WindowsManager>();
+            match load_appearance(&soundpanel_state_for_load, &windows_manager) {
                 Ok(appearance) => {
                     eprintln!("[SOUNDPANEL] Loaded appearance: opacity={}%, color={}",
                         appearance.opacity, appearance.bg_color);
@@ -287,8 +334,8 @@ pub fn run() {
 
             // Apply saved main window position before showing
             if let Some(main_window) = app.get_webview_window("main") {
-                if let Some(x) = settings.main_x {
-                    if let Some(y) = settings.main_y {
+                if let Some(x) = windows.main.x {
+                    if let Some(y) = windows.main.y {
                         eprintln!("[APP] Restoring main window position: {}, {}", x, y);
                         let _ = main_window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
                             x: x as i32,
@@ -305,14 +352,7 @@ pub fn run() {
                 }
             }
 
-            // Restore floating window visibility from settings
-            if settings.floating_window_visible {
-                eprintln!("[APP] Restoring floating window visibility");
-                match show_floating_window(&app.handle()) {
-                    Ok(_) => eprintln!("[APP] Floating window restored"),
-                    Err(e) => eprintln!("[APP] Failed to restore floating window: {}", e),
-                }
-            }
+            // NOTE: Floating window is NOT restored on startup - only shown via hotkey
 
             // Initialize system tray
             let app_handle = app.handle().clone();
@@ -642,7 +682,7 @@ pub fn run() {
                                                         last_status = crate::events::TwitchConnectionStatus::Connecting;
                                                         update_status(last_status.clone());
 
-                                                        let client = TwitchClient::new(settings_clone);
+                                                        let client = TwitchClient::new(settings_clone.into());
                                                         match client.start().await {
                                                             Ok(_) => {
                                                                 eprintln!("[TWITCH] Client started, waiting for connection...");
@@ -784,32 +824,22 @@ pub fn run() {
                     }
                     tauri::WindowEvent::Destroyed => {
                         // Сохраняем позицию главного окна
-                        if let Some(settings_manager) = window.app_handle().try_state::<SettingsManager>() {
+                        if let Some(windows_manager) = window.app_handle().try_state::<WindowsManager>() {
                             if let Ok(pos) = window.outer_position() {
                                 let x = pos.x as i32;
                                 let y = pos.y as i32;
                                 eprintln!("[APP] Main window destroyed - saving position: {}, {}", x, y);
-                                let _ = settings_manager.set_main_window_position(Some(x), Some(y));
+                                let _ = windows_manager.set_main_position(Some(x), Some(y));
                             }
 
-                            // Сохраняем состояние плавающего окна при закрытии главного окна
-                            let is_visible = window.app_handle().get_webview_window("floating")
-                                .and_then(|w| w.is_visible().ok())
-                                .unwrap_or(false);
-
-                            eprintln!("[APP] Main window destroyed - saving floating window state, visible: {}", is_visible);
-
-                            // Сохраняем видимость
-                            let _ = settings_manager.set_floating_window_visibility(is_visible);
-
-                            // Если окно видимо, сохраняем его позицию
-                            if is_visible {
-                                if let Some(floating_window) = window.app_handle().get_webview_window("floating") {
+                            // Сохраняем позицию плавающего окна (если оно было показано)
+                            if let Some(floating_window) = window.app_handle().get_webview_window("floating") {
+                                if let Ok(true) = floating_window.is_visible() {
                                     if let Ok(pos) = floating_window.outer_position() {
                                         let x = pos.x as i32;
                                         let y = pos.y as i32;
                                         eprintln!("[APP] Saving floating window position: {}, {}", x, y);
-                                        let _ = settings_manager.set_floating_window_position(Some(x), Some(y));
+                                        let _ = windows_manager.set_floating_position(Some(x), Some(y));
                                     }
                                 }
                             }

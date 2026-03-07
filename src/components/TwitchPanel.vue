@@ -29,6 +29,23 @@ let unlisten: (() => void) | null = null
 // Вычисляемое свойство - подключен ли Twitch
 const isConnected = ref(false)
 
+// Конвертация статуса из объекта Rust enum в строку TypeScript
+function convertStatusFromRust(status: any): TwitchStatus {
+  // Если пришла строка (старый формат), возвращаем как есть
+  if (typeof status === 'string') {
+    return status as TwitchStatus
+  }
+
+  // Если это объект (новый формат - сериализованный Rust enum)
+  if (status.Connected !== undefined) return 'Connected'
+  if (status.Connecting !== undefined) return 'Connecting'
+  if (status.Disconnected !== undefined) return 'Disconnected'
+  if (status.Error !== undefined) return 'Error'
+
+  // Fallback
+  return 'Disconnected'
+}
+
 // Обработка изменения статуса
 function handleStatusChange(status: TwitchStatus) {
   currentStatus.value = status
@@ -42,8 +59,8 @@ function handleStatusChange(status: TwitchStatus) {
 // Обновить статус вручную
 async function refreshStatus() {
   try {
-    const status = await invoke<string>('get_twitch_status')
-    handleStatusChange(status as TwitchStatus)
+    const status = await invoke<any>('get_twitch_status')
+    handleStatusChange(convertStatusFromRust(status))
     showError('Статус обновлён')
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : String(e)
@@ -57,8 +74,8 @@ async function loadSettings() {
     settings.value = loaded
 
     // Запрашиваем текущий статус при загрузке
-    const status = await invoke<string>('get_twitch_status')
-    handleStatusChange(status as TwitchStatus)
+    const status = await invoke<any>('get_twitch_status')
+    handleStatusChange(convertStatusFromRust(status))
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : String(e)
     showError('Failed to load settings: ' + errorMsg)
@@ -129,19 +146,7 @@ onMounted(async () => {
 
   // Слушаем события о статусе Twitch
   unlisten = await listen<any>('twitch-status-changed', (event) => {
-    const status = event.payload
-
-    if (typeof status === 'string') {
-      handleStatusChange(status as TwitchStatus)
-    } else if (status.Connected !== undefined) {
-      handleStatusChange('Connected')
-    } else if (status.Connecting !== undefined) {
-      handleStatusChange('Connecting')
-    } else if (status.Disconnected !== undefined) {
-      handleStatusChange('Disconnected')
-    } else if (status.Error !== undefined) {
-      handleStatusChange('Error')
-    }
+    handleStatusChange(convertStatusFromRust(event.payload))
   })
 })
 
