@@ -182,7 +182,7 @@ pub async fn set_tts_provider(
 
             // Восстанавливаем сессию Telegram (если есть сохранённая)
             eprintln!("[SET_PROVIDER] Checking Telegram session...");
-            let _connected = match telegram::telegram_auto_restore(telegram_state, settings_manager).await {
+            let _connected = match telegram::telegram_auto_restore(telegram_state, settings_manager.clone()).await {
                 Ok(connected) => {
                     if connected {
                         eprintln!("[SET_PROVIDER] Telegram session restored");
@@ -210,6 +210,10 @@ pub async fn set_tts_provider(
     }
 
     state.set_tts_provider_type(provider);
+
+    // Save to settings
+    settings_manager.set_tts_provider(provider)
+        .map_err(|e| format!("Failed to save provider: {}", e))?;
 
     eprintln!("[SET_PROVIDER] Provider set to {:?}", provider);
     Ok(())
