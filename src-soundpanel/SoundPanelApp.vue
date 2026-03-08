@@ -68,8 +68,12 @@ function showNoBinding(key: string) {
   }, 2000)
 }
 
-function closeWindow() {
-  emit('hide-soundpanel-window')
+async function closeWindow() {
+  try {
+    await invoke('close_soundpanel_window')
+  } catch (e) {
+    console.error('Failed to close window:', e)
+  }
 }
 
 async function toggleClickthrough() {
