@@ -147,8 +147,8 @@ pub async fn speak_text(state: State<'_, AppState>, text: String) -> Result<(), 
 
 /// Get current TTS provider type
 #[tauri::command]
-pub fn get_tts_provider(state: State<'_, AppState>) -> TtsProviderType {
-    state.get_tts_provider_type()
+pub fn get_tts_provider(settings_manager: State<'_, SettingsManager>) -> TtsProviderType {
+    settings_manager.get_tts_provider()
 }
 
 /// Set TTS provider type
