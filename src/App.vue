@@ -72,7 +72,7 @@ onMounted(async () => {
   flex: 1;
   min-width: 0;
   position: relative;
-  padding: 3.25rem 3rem 3rem;
+  padding: 1.625rem 1.5rem 3rem;
   overflow-y: auto;
   border-left: 1px solid rgba(255, 255, 255, 0.08);
 }
@@ -95,7 +95,7 @@ onMounted(async () => {
   }
 
   .main-content {
-    padding: 2rem 1.25rem 2.5rem;
+    padding: 1rem 0.6rem 2.5rem;
     border-left: none;
     border-top: 1px solid rgba(255, 255, 255, 0.08);
   }
