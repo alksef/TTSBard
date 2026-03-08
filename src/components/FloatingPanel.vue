@@ -5,9 +5,7 @@ import { invoke } from '@tauri-apps/api/core'
 const errorMessage = ref<string | null>(null)
 const localOpacity = ref(90)
 const localBgColor = ref('#1e1e1e')
-const floatingWindowVisible = ref(false)
 const clickthroughEnabled = ref(false)
-const hotkeyEnabled = ref(true)
 let errorTimeout: number | null = null
 
 const previewStyle = computed(() => ({
@@ -29,24 +27,6 @@ async function saveOpacity() {
   }
 }
 
-async function showFloatingWindow() {
-  try {
-    await invoke('show_floating_window_cmd')
-    floatingWindowVisible.value = true
-  } catch (e) {
-    showError('Ошибка показа окна: ' + (e as Error).message)
-  }
-}
-
-async function hideFloatingWindow() {
-  try {
-    await invoke('hide_floating_window_cmd')
-    floatingWindowVisible.value = false
-  } catch (e) {
-    showError('Ошибка скрытия окна: ' + (e as Error).message)
-  }
-}
-
 async function saveBgColor() {
   try {
     await invoke('set_floating_bg_color', { color: localBgColor.value })
@@ -61,15 +41,6 @@ async function toggleClickthrough() {
     clickthroughEnabled.value = enabled
   } catch (e) {
     showError('Ошибка переключения click-through: ' + (e as Error).message)
-  }
-}
-
-async function toggleHotkeyEnabled() {
-  try {
-    const enabled = await invoke<boolean>('set_hotkey_enabled', { enabled: !hotkeyEnabled.value })
-    hotkeyEnabled.value = enabled
-  } catch (e) {
-    showError('Ошибка переключения вызова по хоткею: ' + (e as Error).message)
   }
 }
 
@@ -96,25 +67,11 @@ onMounted(async () => {
     console.error('Failed to load floating appearance:', e)
   }
 
-  // Load floating window visibility state
-  try {
-    floatingWindowVisible.value = await invoke<boolean>('is_floating_window_visible')
-  } catch (e) {
-    console.error('Failed to load floating window state:', e)
-  }
-
   // Load clickthrough state
   try {
     clickthroughEnabled.value = await invoke<boolean>('is_clickthrough_enabled')
   } catch (e) {
     console.error('Failed to load clickthrough state:', e)
-  }
-
-  // Load hotkey enabled state
-  try {
-    hotkeyEnabled.value = await invoke<boolean>('get_hotkey_enabled')
-  } catch (e) {
-    console.error('Failed to load hotkey state:', e)
   }
 })
 
@@ -134,32 +91,11 @@ onUnmounted(() => {
       {{ errorMessage }}
     </div>
 
-    <section class="settings-section">
-      <div class="setting-row">
-        <div class="button-group">
-          <button
-            @click="showFloatingWindow"
-            :disabled="floatingWindowVisible"
-            class="window-button show-button"
-            :class="{ disabled: floatingWindowVisible }"
-          >
-            Показать
-          </button>
-          <button
-            @click="hideFloatingWindow"
-            :disabled="!floatingWindowVisible"
-            class="window-button hide-button"
-            :class="{ disabled: !floatingWindowVisible }"
-          >
-            Скрыть
-          </button>
-        </div>
-
-        <p class="setting-hint">
-          Плавающее окно для ввода текста с поддержкой переключения раскладки.
-          Состояние сохраняется между запусками.
-        </p>
-      </div>
+    <section class="info-section">
+      <p>
+        Нажмите <code>Ctrl+Shift+F1</code> для быстрого доступа к плавающему окну.
+        Режим перехвата текста будет включен автоматически.
+      </p>
     </section>
 
     <!-- Внешний вид плавающего окна -->
@@ -168,26 +104,14 @@ onUnmounted(() => {
 
       <div class="setting-row">
         <label class="setting-label">
-          Прозрачность: {{ localOpacity }}%
+          Цвет фона
         </label>
-        <input
-          v-model.number="localOpacity"
-          type="range"
-          min="10"
-          max="100"
-          step="5"
-          class="slider-input"
-          @change="saveOpacity"
-        />
-      </div>
-
-      <div class="setting-row">
-        <label class="setting-label">Цвет фона</label>
-        <div class="color-picker-group">
+        <div class="appearance-controls">
           <input
             v-model="localBgColor"
             type="color"
             class="color-input"
+            @change="saveBgColor"
           />
           <input
             v-model="localBgColor"
@@ -195,20 +119,29 @@ onUnmounted(() => {
             placeholder="#1e1e1e"
             class="text-input color-text"
             maxlength="7"
+            @blur="saveBgColor"
+            @keyup.enter="saveBgColor"
           />
-          <button @click="saveBgColor" class="save-button">
-            Применить
-          </button>
+          <input
+            v-model.number="localOpacity"
+            type="range"
+            min="10"
+            max="100"
+            step="5"
+            class="slider-input inline-slider"
+            @change="saveOpacity"
+          />
+          <span class="opacity-value">{{ localOpacity }}%</span>
         </div>
       </div>
 
       <div class="setting-row">
         <label class="setting-label checkbox-label">
           <input
-            v-model="clickthroughEnabled"
             type="checkbox"
-            class="checkbox-input"
+            :checked="clickthroughEnabled"
             @change="toggleClickthrough"
+            class="checkbox-input"
           />
           <span>Пропускать нажатия (click-through)</span>
         </label>
@@ -217,24 +150,6 @@ onUnmounted(() => {
 
       <div class="preview-box" :style="previewStyle">
         <span class="preview-text">Предпросмотр</span>
-      </div>
-    </section>
-
-    <section class="settings-section">
-      <div class="setting-row">
-        <label class="setting-label">
-          <input
-            type="checkbox"
-            :checked="hotkeyEnabled"
-            @change="toggleHotkeyEnabled"
-          />
-          Вызов по горячей клавише
-        </label>
-
-        <p class="setting-hint">
-          Когда включено, нажатие <code>Ctrl+Shift+F1</code> включает режим перехвата.
-          Если окно скрыто — оно будет показано автоматически.
-        </p>
       </div>
     </section>
   </div>
@@ -280,6 +195,29 @@ onUnmounted(() => {
   box-shadow: var(--shadow-soft);
 }
 
+.info-section {
+  padding: 1.2rem 1.35rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 4px solid var(--color-accent);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
+}
+
+.info-section p {
+  margin: 0.5rem 0;
+}
+
+.info-section code {
+  background: rgba(29, 140, 255, 0.15);
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  color: var(--color-info);
+  border: 1px solid rgba(29, 140, 255, 0.28);
+}
+
 .setting-row {
   display: flex;
   flex-direction: column;
@@ -319,21 +257,6 @@ onUnmounted(() => {
   color: var(--color-text-primary);
 }
 
-.save-button {
-  padding: 0.7rem 1rem;
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: white;
-  border: none;
-  border-radius: 10px;
-  cursor: pointer;
-  align-self: flex-start;
-  font-weight: 700;
-}
-
-.save-button:hover {
-  filter: brightness(1.06);
-}
-
 .slider-input {
   width: 100%;
   margin-top: 0.5rem;
@@ -341,7 +264,7 @@ onUnmounted(() => {
   accent-color: var(--color-accent);
 }
 
-.color-picker-group {
+.appearance-controls {
   display: flex;
   gap: 0.75rem;
   align-items: center;
@@ -359,9 +282,22 @@ onUnmounted(() => {
 }
 
 .color-text {
-  width: 80px;
+  width: 95px;
   font-family: var(--font-mono);
   text-transform: uppercase;
+}
+
+.inline-slider {
+  width: 150px;
+  margin-top: 0;
+  flex: 1;
+  min-width: 100px;
+}
+
+.opacity-value {
+  font-size: 0.9rem;
+  color: var(--color-text-secondary);
+  min-width: 45px;
 }
 
 .preview-box {
@@ -380,50 +316,6 @@ onUnmounted(() => {
   color: white;
   font-weight: 500;
   text-shadow: 0 1px 2px rgba(0,0,0,0.5);
-}
-
-.button-group {
-  display: flex;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.window-button {
-  padding: 0.75rem 1.2rem;
-  border: none;
-  border-radius: 10px;
-  cursor: pointer;
-  font-weight: 700;
-  transition: all 0.2s;
-}
-
-.show-button {
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: white;
-}
-
-.show-button:hover:not(:disabled) {
-  filter: brightness(1.06);
-}
-
-.hide-button {
-  background: rgba(255, 111, 105, 0.15);
-  border: 1px solid rgba(255, 111, 105, 0.18);
-  color: white;
-}
-
-.hide-button:hover:not(:disabled) {
-  background: rgba(255, 111, 105, 0.22);
-}
-
-.window-button.disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.window-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .text-input:focus,

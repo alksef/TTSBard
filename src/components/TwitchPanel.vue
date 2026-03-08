@@ -200,7 +200,7 @@ onUnmounted(() => {
           :disabled="isConnected || currentStatus === 'Connecting'"
           :class="{ disabled: isConnected || currentStatus === 'Connecting' }"
         >
-          ▶ Start
+          ▶ Подключиться
         </button>
         <button
           @click="stopTwitch"
@@ -208,7 +208,7 @@ onUnmounted(() => {
           :disabled="!isConnected && currentStatus !== 'Connecting'"
           :class="{ disabled: !isConnected && currentStatus !== 'Connecting' }"
         >
-          ■ Stop
+          ■ Отключиться
         </button>
       </div>
 
@@ -255,8 +255,8 @@ onUnmounted(() => {
           class="test-message-button"
           :disabled="!isConnected"
           :class="{ disabled: !isConnected }"
-        >📨 Test Message</button>
-        <button @click="save" class="save-button-inline">💾 Save</button>
+        >📨 Тестовое сообщение</button>
+        <button @click="save" class="save-button-inline">💾 Сохранить</button>
       </div>
     </section>
 

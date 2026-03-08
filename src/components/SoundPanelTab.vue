@@ -290,26 +290,14 @@ onMounted(async () => {
 
       <div class="setting-row">
         <label class="setting-label">
-          Прозрачность: {{ opacity }}%
+          Цвет фона
         </label>
-        <input
-          v-model.number="opacity"
-          type="range"
-          min="10"
-          max="100"
-          step="5"
-          class="slider-input"
-          @change="saveOpacity"
-        />
-      </div>
-
-      <div class="setting-row">
-        <label class="setting-label">Цвет фона</label>
-        <div class="color-picker-group">
+        <div class="appearance-controls">
           <input
             v-model="bgColor"
             type="color"
             class="color-input"
+            @change="saveBgColor"
           />
           <input
             v-model="bgColor"
@@ -317,10 +305,19 @@ onMounted(async () => {
             placeholder="#2a2a2a"
             class="text-input color-text"
             maxlength="7"
+            @blur="saveBgColor"
+            @keyup.enter="saveBgColor"
           />
-          <button @click="saveBgColor" class="save-button">
-            Применить
-          </button>
+          <input
+            v-model.number="opacity"
+            type="range"
+            min="10"
+            max="100"
+            step="5"
+            class="slider-input inline-slider"
+            @change="saveOpacity"
+          />
+          <span class="opacity-value">{{ opacity }}%</span>
         </div>
       </div>
 
@@ -779,9 +776,9 @@ onMounted(async () => {
   color: var(--color-text-primary);
 }
 
-.color-picker-group {
+.appearance-controls {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.75rem;
   align-items: center;
   flex-wrap: wrap;
 }
@@ -793,12 +790,33 @@ onMounted(async () => {
   border-radius: 10px;
   cursor: pointer;
   padding: 0;
+  background: transparent;
 }
 
 .color-text {
-  width: 80px;
+  width: 95px;
   font-family: var(--font-mono);
   text-transform: uppercase;
+}
+
+.slider-input {
+  width: 100%;
+  margin-top: 0.5rem;
+  cursor: pointer;
+  accent-color: var(--color-accent);
+}
+
+.inline-slider {
+  width: 150px;
+  margin-top: 0;
+  flex: 1;
+  min-width: 100px;
+}
+
+.opacity-value {
+  font-size: 0.9rem;
+  color: var(--color-text-secondary);
+  min-width: 45px;
 }
 
 .preview-box {
