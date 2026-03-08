@@ -92,8 +92,7 @@ const sidebarGroups: SidebarGroup[] = [
     buttons: [
       { id: 'preprocessor', label: 'Препроцессор', icon: ClipboardPenLine },
       { id: 'floating', label: 'Плавающее окно', icon: AppWindow },
-      { id: 'soundpanel', label: 'Звуковая панель', icon: Music },
-      { id: 'settings', label: 'Настройки', icon: Settings }
+      { id: 'soundpanel', label: 'Звуковая панель', icon: Music }
     ]
   },
   {
@@ -101,6 +100,11 @@ const sidebarGroups: SidebarGroup[] = [
     buttons: [
       { id: 'webview', label: 'WebView Source', icon: Globe },
       { id: 'twitch', label: 'Twitch Chat', icon: TwitchIcon }
+    ]
+  },
+  {
+    buttons: [
+      { id: 'settings', label: 'Настройки', icon: Settings }
     ]
   }
 ]
@@ -239,6 +243,10 @@ function toggleCollapse() {
 
 .sidebar-collapsed .collapse-toggle-floating {
   right: -17px;
+}
+
+.collapse-toggle-floating svg {
+  transform: translateX(-5px);
 }
 
 .sidebar-nav {
