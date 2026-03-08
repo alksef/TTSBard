@@ -32,7 +32,7 @@ use twitch::TwitchClient;
 use tauri::{Manager, Emitter};
 use tauri::image::Image;
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{Menu, MenuItem};
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -390,17 +390,7 @@ pub fn run() {
 
             eprintln!("Initializing system tray with icon (resized to 32x32 from {}x{})", width, height);
 
-            // Создаем контекстное меню
-            let show_floating_item = MenuItem::with_id(
-                &app_handle,
-                "show_floating",
-                "Плавающее окно",
-                true,
-                None as Option<&str>
-            ).unwrap();
-
-            let separator = PredefinedMenuItem::separator(&app_handle).unwrap();
-
+            // Создаем контекстное меню (только пункт "Выход")
             let quit_item = MenuItem::with_id(
                 &app_handle,
                 "quit",
@@ -411,7 +401,7 @@ pub fn run() {
 
             let menu = Menu::with_items(
                 &app_handle,
-                &[&show_floating_item, &separator, &quit_item]
+                &[&quit_item]
             ).unwrap();
 
             // Создаем tray icon с контекстным меню
@@ -440,15 +430,6 @@ pub fn run() {
                 .on_menu_event(|tray, event| {
                     eprintln!("[TRAY] Menu event: {:?}", event.id);
                     match event.id.as_ref() {
-                        "show_floating" => {
-                            // Показать плавающее окно только если его нет
-                            if tray.app_handle().get_webview_window("floating").is_none() {
-                                match show_floating_window(tray.app_handle()) {
-                                    Ok(_) => {}
-                                    Err(e) => eprintln!("[TRAY] Failed to open floating window: {}", e),
-                                }
-                            }
-                        }
                         "quit" => {
                             // Закрыть приложение корректно
                             tray.app_handle().exit(0);
