@@ -206,6 +206,8 @@ pub struct AppSettings {
     pub tts: TtsSettings,
     #[serde(default)]
     pub hotkey_enabled: bool,
+    #[serde(default)]
+    pub quick_editor_enabled: bool,
     pub twitch: TwitchSettings,
     pub webview: WebViewServerSettings,
 }
@@ -216,6 +218,7 @@ impl Default for AppSettings {
             audio: AudioSettings::default(),
             tts: TtsSettings::default(),
             hotkey_enabled: true,
+            quick_editor_enabled: false,
             twitch: TwitchSettings::default(),
             webview: WebViewServerSettings::default(),
         }
@@ -610,6 +613,16 @@ impl SettingsManager {
     /// Get hotkey enabled
     pub fn get_hotkey_enabled(&self) -> bool {
         self.cache.read().hotkey_enabled
+    }
+
+    /// Set quick editor enabled
+    pub fn set_quick_editor_enabled(&self, enabled: bool) -> Result<()> {
+        self.update_field("/quick_editor_enabled", &enabled)
+    }
+
+    /// Get quick editor enabled
+    pub fn get_quick_editor_enabled(&self) -> bool {
+        self.cache.read().quick_editor_enabled
     }
 
     // ========== Twitch Settings ==========

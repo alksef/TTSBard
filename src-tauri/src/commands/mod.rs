@@ -697,3 +697,41 @@ pub fn get_global_exclude_from_capture(
 pub fn has_api_key(state: State<'_, AppState>) -> bool {
     state.openai_api_key.lock().is_some()
 }
+
+// ============================================================================
+// Quick editor commands
+// ============================================================================
+
+/// Set quick editor enabled
+#[tauri::command]
+pub fn set_quick_editor_enabled(
+    value: bool,
+    app_handle: AppHandle,
+    settings_manager: State<'_, SettingsManager>
+) -> Result<(), String> {
+    settings_manager.set_quick_editor_enabled(value)
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
+
+    // Emit event to notify frontend
+    let _ = app_handle.emit("settings-changed", ());
+
+    Ok(())
+}
+
+/// Get quick editor enabled
+#[tauri::command]
+pub fn get_quick_editor_enabled(
+    settings_manager: State<'_, SettingsManager>
+) -> bool {
+    settings_manager.get_quick_editor_enabled()
+}
+
+/// Hide main window
+#[tauri::command]
+pub fn hide_main_window(app_handle: AppHandle) -> Result<(), String> {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        window.hide()
+            .map_err(|e| format!("Failed to hide window: {}", e))?;
+    }
+    Ok(())
+}
