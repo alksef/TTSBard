@@ -1,7 +1,7 @@
 use crate::state::AppState;
 use crate::events::AppEvent;
 use crate::config::{SettingsManager, WindowsManager, is_valid_hex_color};
-use crate::floating::{show_floating_window, hide_floating_window};
+use crate::floating::{show_floating_window, hide_floating_window, hide_soundpanel_window};
 use crate::tts::{TtsProviderType, TtsProvider};
 use crate::audio::{AudioPlayer, OutputConfig};
 use crate::commands::telegram::TelegramState;
@@ -737,5 +737,40 @@ pub fn hide_main_window(app_handle: AppHandle) -> Result<(), String> {
         window.hide()
             .map_err(|e| format!("Failed to hide window: {}", e))?;
     }
+    Ok(())
+}
+
+/// Close floating window and stop interception
+#[tauri::command]
+pub fn close_floating_window(
+    app_handle: AppHandle,
+    app_state: State<'_, AppState>,
+) -> Result<(), String> {
+    // Останавливаем перехват
+    app_state.set_interception_enabled(false);
+
+    // Скрываем окно (сбрасывает F6 режим, сохраняет позицию)
+    hide_floating_window(&app_handle, &app_state)
+        .map_err(|e| format!("Failed to hide window: {}", e))?;
+
+    Ok(())
+}
+
+/// Close soundpanel window and stop interception
+#[tauri::command]
+pub fn close_soundpanel_window(
+    app_handle: AppHandle,
+    app_state: State<'_, AppState>,
+    soundpanel_state: State<'_, crate::soundpanel::SoundPanelState>,
+) -> Result<(), String> {
+    // Останавливаем перехват в SoundPanelState (это то, что проверяет хук звуковой панели)
+    soundpanel_state.set_interception_enabled(false);
+    // Также останавливаем основной перехват (для согласованности)
+    app_state.set_interception_enabled(false);
+
+    // Скрываем окно (сохраняет позицию)
+    hide_soundpanel_window(&app_handle, &app_state)
+        .map_err(|e| format!("Failed to hide window: {}", e))?;
+
     Ok(())
 }

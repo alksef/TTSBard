@@ -38,16 +38,11 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
-function closeWindow() {
-  // Отключаем перехват при закрытии окна
-  if (interceptionEnabled.value) {
-    invoke('set_interception', { enabled: false })
-      .then(() => {
-        emit('hide-floating-window')
-      })
-      .catch(console.error)
-  } else {
-    emit('hide-floating-window')
+async function closeWindow() {
+  try {
+    await invoke('close_floating_window')
+  } catch (e) {
+    console.error('Failed to close window:', e)
   }
 }
 
