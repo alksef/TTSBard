@@ -226,15 +226,25 @@ onMounted(async () => {
   box-sizing: border-box;
 }
 
+html {
+  overflow: hidden;
+}
+
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: transparent;
+  overflow: hidden;
 }
 
 #app {
   width: 100%;
   height: 100%;
   overflow: hidden;
+}
+
+/* Скрыть скроллбар WebView2 */
+::-webkit-scrollbar {
+  display: none;
 }
 </style>
 
