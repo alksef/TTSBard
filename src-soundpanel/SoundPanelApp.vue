@@ -215,9 +215,6 @@ onMounted(async () => {
           </div>
         </div>
 
-        <div class="escape-hint">
-          <small>Esc — закрыть</small>
-        </div>
       </div>
     </div>
   </div>
@@ -445,15 +442,6 @@ button.active {
   margin-top: 0.5rem;
   font-size: 0.85rem;
   color: rgba(255, 255, 255, 0.6);
-}
-
-.escape-hint {
-  margin-top: 1.5rem;
-}
-
-.escape-hint small {
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 0.85rem;
 }
 
 @keyframes shake {
