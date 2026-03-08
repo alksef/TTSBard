@@ -113,27 +113,18 @@ function toggleCollapse() {
     class="sidebar"
     :class="{ 'sidebar-collapsed': isCollapsed }"
   >
-    <div class="sidebar-header">
-      <div v-if="!isCollapsed" class="brand-copy">
-        <div class="brand-title">TTSBard</div>
-      </div>
-
-      <button
-        class="collapse-toggle"
-        @click="toggleCollapse"
-        :title="isCollapsed ? 'Развернуть' : 'Свернуть'"
-      >
-        <ChevronLeft v-if="!isCollapsed" :size="20" />
-        <ChevronRight v-else :size="20" />
-      </button>
-    </div>
+    <!-- Floating collapse button positioned outside sidebar -->
+    <button
+      class="collapse-toggle-floating"
+      @click="toggleCollapse"
+      :title="isCollapsed ? 'Развернуть' : 'Свернуть'"
+    >
+      <ChevronLeft v-if="!isCollapsed" :size="18" />
+      <ChevronRight v-else :size="18" />
+    </button>
 
     <nav class="sidebar-nav">
       <template v-for="(group, groupIndex) in sidebarGroups" :key="groupIndex">
-        <div v-if="group.title && !isCollapsed" class="sidebar-group-title">
-          {{ group.title }}
-        </div>
-
         <div
           v-for="button in group.buttons"
           :key="button.id"
@@ -171,9 +162,9 @@ function toggleCollapse() {
 
 <style scoped>
 .sidebar {
-  flex: 0 0 248px;
-  width: 248px;
-  min-width: 248px;
+  flex: 0 0 200px;
+  width: 200px;
+  min-width: 200px;
   position: relative;
   overflow: hidden;
   background:
@@ -200,42 +191,22 @@ function toggleCollapse() {
 }
 
 .sidebar-collapsed {
-  flex-basis: 82px;
-  width: 82px;
-  min-width: 82px;
+  flex-basis: 70px;
+  width: 70px;
+  min-width: 70px;
 }
 
-.sidebar-header {
-  position: relative;
-  z-index: 1;
-  padding: 1.35rem 1rem 1rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.sidebar-collapsed .sidebar-header {
-  justify-content: center;
-  padding: 1rem 0.55rem 0.85rem;
-}
-
-.brand-copy {
-  min-width: 0;
-}
-
-.brand-title {
-  font-size: 1rem;
-  font-weight: 800;
-  letter-spacing: 0.01em;
-}
-
-.collapse-toggle {
-  flex-shrink: 0;
+/* Floating collapse button positioned on right edge of sidebar */
+.collapse-toggle-floating {
+  position: absolute;
+  right: -17px;
+  top: 70%;
+  transform: translateY(-50%);
   width: 34px;
   height: 34px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background:
+    linear-gradient(135deg, rgba(30, 32, 45, 0.98), rgba(20, 22, 32, 0.96));
   color: var(--color-text-secondary);
   cursor: pointer;
   padding: 0;
@@ -243,18 +214,29 @@ function toggleCollapse() {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: color 0.2s, background 0.2s, border-color 0.2s, transform 0.2s;
+  transition: all 0.25s ease;
+  z-index: 1000;
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(255, 255, 255, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
-.collapse-toggle:hover {
+.collapse-toggle-floating:hover {
   color: var(--color-text-primary);
-  background: rgba(255, 255, 255, 0.07);
-  border-color: rgba(255, 255, 255, 0.14);
-  transform: translateX(-1px);
+  background:
+    linear-gradient(135deg, rgba(40, 42, 58, 0.98), rgba(28, 30, 42, 0.96));
+  border-color: rgba(42, 140, 255, 0.5);
+  box-shadow:
+    0 6px 24px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(42, 140, 255, 0.3),
+    0 0 20px rgba(42, 140, 255, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  transform: translateY(-50%) scale(1.06);
 }
 
-.sidebar-collapsed .collapse-toggle {
-  margin: 0;
+.sidebar-collapsed .collapse-toggle-floating {
+  right: -17px;
 }
 
 .sidebar-nav {
@@ -264,16 +246,7 @@ function toggleCollapse() {
   flex-direction: column;
   flex: 1;
   overflow-y: auto;
-  padding: 0.2rem 0 0.75rem;
-}
-
-.sidebar-group-title {
-  font-size: 0.85rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--color-text-muted);
-  padding: 0 0 0.5rem 3.4rem;
+  padding: 1rem 0 0.75rem;
 }
 
 .sidebar-button-wrapper {
@@ -398,11 +371,6 @@ function toggleCollapse() {
 .sidebar-collapsed .sidebar-nav {
   padding-left: 0;
   padding-right: 0;
-}
-
-.sidebar-collapsed .sidebar-group-title,
-.sidebar-collapsed .brand-copy {
-  display: none;
 }
 
 .sidebar-collapsed .sidebar-button {
