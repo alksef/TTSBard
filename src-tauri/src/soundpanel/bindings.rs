@@ -6,7 +6,7 @@ use crate::soundpanel::state::{SoundPanelState, SoundBinding};
 use crate::soundpanel::storage::{save_bindings, copy_sound_file, delete_sound_file};
 use crate::config::{WindowsManager, is_valid_hex_color};
 use crate::soundpanel::audio::play_audio_file;
-use tauri::{State, AppHandle, Manager};
+use tauri::State;
 
 /// Получить все привязки звуковой панели
 #[tauri::command]

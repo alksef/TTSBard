@@ -33,6 +33,19 @@
         "resizable": false,
         "visible": false,
         "focus": false
+      },
+      {
+        "label": "soundpanel",
+        "url": "src-soundpanel/index.html",
+        "title": "",
+        "width": 450,
+        "height": 225,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "visible": false
       }
     ],
     "security": {
