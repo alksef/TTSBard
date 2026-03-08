@@ -1,4 +1,4 @@
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager};
 use crate::state::AppState;
 use crate::config::WindowsManager;
 use crate::soundpanel::SoundPanelState;
@@ -7,16 +7,15 @@ pub fn show_floating_window(app_handle: &AppHandle) -> tauri::Result<()> {
     eprintln!("[FLOATING] show_floating_window called");
 
     if let Some(window) = app_handle.get_webview_window("floating") {
-        // Окно уже существует, показываем его
-        eprintln!("[FLOATING] Window already exists, showing and focusing");
+        eprintln!("[FLOATING] Window exists, showing");
 
-        // Применяем сохранённую позицию к существующему окну
+        // Применяем сохранённую позицию
         let windows_manager = app_handle.state::<WindowsManager>();
         let (saved_x, saved_y) = windows_manager.get_floating_position();
 
         if let Some(x) = saved_x {
             if let Some(y) = saved_y {
-                eprintln!("[FLOATING] Applying saved position to existing window: {}, {}", x, y);
+                eprintln!("[FLOATING] Applying saved position: {}, {}", x, y);
                 let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
                     x,
                     y,
@@ -24,96 +23,19 @@ pub fn show_floating_window(app_handle: &AppHandle) -> tauri::Result<()> {
             }
         }
 
-        // Показываем окно БЕЗ фокуса - чтобы не прерывать перехват клавиш
         window.show()?;
+
+        // Применяем clickthrough после показа
+        if windows_manager.get_floating_clickthrough() {
+            eprintln!("[FLOATING] Applying clickthrough mode");
+            let _ = window.set_ignore_cursor_events(true);
+        }
+
         return Ok(());
     }
 
-    eprintln!("[FLOATING] Creating new floating window...");
-
-    // Получаем сохранённую позицию окна
-    let windows_manager = app_handle.state::<WindowsManager>();
-    let (saved_x, saved_y) = windows_manager.get_floating_position();
-
-    eprintln!("[FLOATING] Saved position: x={:?}, y={:?}", saved_x, saved_y);
-
-    // Создаём билдер окна
-    let mut builder = WebviewWindowBuilder::new(
-        app_handle,
-        "floating",
-        WebviewUrl::App("src-floating/index.html".into())
-    )
-    .title("Floating Input")
-    .inner_size(600.0, 100.0)
-    .decorations(false)
-    .transparent(true)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .resizable(false)
-    .visible(false);  // Создаём скрытым, покажем без фокуса
-
-    // Применяем сохранённую позицию или центрируем
-    if let Some(x) = saved_x {
-        if let Some(y) = saved_y {
-            builder = builder.position(x as f64, y as f64);
-            eprintln!("[FLOATING] Using saved position: {}, {}", x, y);
-        } else {
-            builder = builder.center();
-            eprintln!("[FLOATING] Centering (Y not saved)");
-        }
-    } else {
-        builder = builder.center();
-        eprintln!("[FLOATING] Centering (position not saved)");
-    }
-
-    let window = builder.build()?;
-
-    eprintln!("[FLOATING] Window created successfully");
-
-    // Настраиваем отслеживание событий окна
-    window.on_window_event(move |event| {
-        match event {
-            // Позиция сохраняется только при закрытии (события Destroyed/Hide)
-            tauri::WindowEvent::Destroyed => {
-                eprintln!("[FLOATING] Window destroyed");
-            }
-            tauri::WindowEvent::CloseRequested { .. } => {
-                eprintln!("[FLOATING] Close requested");
-            }
-            _ => {}
-        }
-    });
-
-    // Показываем окно ПЕРВЫМ делом - до применения Win32 API
-    window.show()?;
-
-    // Применяем clickthrough если включён в настройках
-    let windows_manager = app_handle.state::<WindowsManager>();
-    if windows_manager.get_floating_clickthrough() {
-        eprintln!("[FLOATING] Applying clickthrough mode");
-        let _ = window.set_ignore_cursor_events(true);
-    }
-
-    // Применяем Win32 стили ПОСЛЕ показа окна
-    #[cfg(windows)]
-    {
-        use crate::window::{set_floating_window_styles, set_window_exclude_from_capture};
-
-        if let Ok(hwnd) = window.hwnd() {
-            let _ = set_floating_window_styles(hwnd.0 as isize);
-
-            // Защита от записи экрана (глобальная настройка) - ПОСЛЕ show()
-            // Небольшая задержка для инициализации WebView2
-            let exclude_from_capture = windows_manager.get_global_exclude_from_capture();
-            eprintln!("[FLOATING] Applying global exclude from capture: {}", exclude_from_capture);
-
-            // Применяем защиту с небольшой задержкой после показа окна
-            std::thread::sleep(std::time::Duration::from_millis(50));
-            let _ = set_window_exclude_from_capture(hwnd.0 as isize, exclude_from_capture);
-        }
-    }
-
-    Ok(())
+    // Окно создано Tauri из конфига, просто показываем
+    Err(tauri::Error::WindowNotFound)
 }
 
 pub fn hide_floating_window(app_handle: &AppHandle, app_state: &AppState) -> tauri::Result<()> {
@@ -158,78 +80,21 @@ pub fn show_soundpanel_window(app_handle: &AppHandle) -> tauri::Result<()> {
     eprintln!("[SOUNDPANEL] show_soundpanel_window called");
 
     if let Some(window) = app_handle.get_webview_window("soundpanel") {
-        eprintln!("[SOUNDPANEL] Window already exists, showing");
+        eprintln!("[SOUNDPANEL] Window exists, showing");
         window.show()?;
+
+        // Применяем clickthrough после показа
+        let sp_state = app_handle.state::<SoundPanelState>();
+        if sp_state.is_floating_clickthrough_enabled() {
+            eprintln!("[SOUNDPANEL] Applying clickthrough mode");
+            let _ = window.set_ignore_cursor_events(true);
+        }
+
         return Ok(());
     }
 
-    eprintln!("[SOUNDPANEL] Creating new floating window...");
-
-    // Получить настройки внешнего вида
-    let sp_state = app_handle.try_state::<SoundPanelState>();
-    let (opacity, bg_color, clickthrough) = if let Some(state) = &sp_state {
-        (
-            state.get_floating_opacity(),
-            state.get_floating_bg_color(),
-            state.is_floating_clickthrough_enabled(),
-        )
-    } else {
-        (90, "#2a2a2a".to_string(), false)
-    };
-
-    eprintln!("[SOUNDPANEL] Window settings: opacity={}%, color={}, clickthrough={}", opacity, bg_color, clickthrough);
-
-    // Получить глобальную настройку исключения из захвата
-    let windows_manager = app_handle.state::<WindowsManager>();
-    let exclude_from_capture = windows_manager.get_global_exclude_from_capture();
-
-    // Создаём билдер окна для звуковой панели с прозрачностью
-    let builder = WebviewWindowBuilder::new(
-        app_handle,
-        "soundpanel",
-        WebviewUrl::App("src-soundpanel/index.html".into())
-    )
-    .title("")  // Пустой заголовок
-    .inner_size(450.0, 225.0)  // Увеличенный размер (в 1.5 раза)
-    .decorations(false)
-    .transparent(true)   // Включаем прозрачность
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .resizable(false)
-    .visible(false)  // Создаём скрытым, чтобы избежать мигания
-    .center();
-
-    let window = builder.build()?;
-    eprintln!("[SOUNDPANEL] Window created successfully");
-
-    // Показываем окно ПЕРВЫМ делом - до применения Win32 API
-    window.show()?;
-
-    // Применяем clickthrough если включён в настройках
-    if clickthrough {
-        eprintln!("[SOUNDPANEL] Applying clickthrough mode");
-        let _ = window.set_ignore_cursor_events(true);
-    }
-
-    // Применяем Win32 стили ПОСЛЕ показа окна
-    #[cfg(windows)]
-    {
-        use crate::window::{set_floating_window_styles, set_window_exclude_from_capture};
-
-        if let Ok(hwnd) = window.hwnd() {
-            let _ = set_floating_window_styles(hwnd.0 as isize);
-
-            // Защита от записи экрана (глобальная настройка) - ПОСЛЕ show()
-            // Небольшая задержка для инициализации WebView2
-            eprintln!("[SOUNDPANEL] Applying global exclude from capture: {}", exclude_from_capture);
-
-            // Применяем защиту с небольшой задержкой после показа окна
-            std::thread::sleep(std::time::Duration::from_millis(50));
-            let _ = set_window_exclude_from_capture(hwnd.0 as isize, exclude_from_capture);
-        }
-    }
-
-    Ok(())
+    // Окно создано Tauri из конфига, просто показываем
+    Err(tauri::Error::WindowNotFound)
 }
 
 /// Update soundpanel window appearance

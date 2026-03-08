@@ -670,7 +670,7 @@ pub fn set_virtual_mic_volume(volume: u8) -> Result<(), String> {
 #[tauri::command]
 pub fn set_global_exclude_from_capture(
     value: bool,
-    app_handle: AppHandle,
+    _app_handle: AppHandle,
     windows_manager: State<'_, WindowsManager>
 ) -> Result<(), String> {
     eprintln!("[GLOBAL] ===== set_global_exclude_from_capture called with value: {} =====", value);
