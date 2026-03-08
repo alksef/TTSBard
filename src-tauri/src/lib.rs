@@ -17,8 +17,10 @@ mod rate_limiter;
 mod thread_manager;
 
 use std::sync::mpsc;
+use std::sync::Arc;
 use std::thread;
 use state::AppState;
+use tts::TtsProviderType;
 use events::{AppEvent, InputLayout, TwitchEvent};
 use hotkeys::initialize_hotkeys;
 use hook::initialize_text_interception_hook;
@@ -245,23 +247,37 @@ pub fn run() {
             eprintln!("[APP] Initializing TTS provider: {:?}", settings.tts.provider);
             app_state.set_tts_provider_type(settings.tts.provider);
 
-            // Apply OpenAI settings
-            if let Some(ref api_key) = settings.tts.openai.api_key {
-                // Store API key in AppState for get_openai_api_key command
-                *app_state.openai_api_key.lock() = Some(api_key.clone());
-                eprintln!("[APP] OpenAI API key loaded and stored in AppState");
-                app_state.init_openai_tts(api_key.clone());
-                app_state.set_openai_voice(settings.tts.openai.voice.clone());
-                app_state.set_openai_proxy(settings.tts.openai.proxy_host.clone(), settings.tts.openai.proxy_port);
-            } else if settings.tts.provider == crate::tts::TtsProviderType::OpenAi {
-                eprintln!("[APP] WARNING: OpenAI selected but no API key found");
-            }
+            // Initialize TTS provider based on selection
+            match settings.tts.provider {
+                TtsProviderType::OpenAi => {
+                    if let Some(ref api_key) = settings.tts.openai.api_key {
+                        // Store API key in AppState for get_openai_api_key command
+                        *app_state.openai_api_key.lock() = Some(api_key.clone());
+                        eprintln!("[APP] OpenAI TTS initialized with API key");
+                        app_state.init_openai_tts(api_key.clone());
+                        app_state.set_openai_voice(settings.tts.openai.voice.clone());
+                        app_state.set_openai_proxy(settings.tts.openai.proxy_host.clone(), settings.tts.openai.proxy_port);
+                    } else {
+                        eprintln!("[APP] WARNING: OpenAI selected but no API key found");
+                    }
+                }
+                TtsProviderType::Silero => {
+                    eprintln!("[APP] Initializing Silero TTS on startup");
 
-            // Apply local TTS settings
-            if settings.tts.provider == crate::tts::TtsProviderType::Local {
-                let url = settings.tts.local.url.clone();
-                app_state.set_local_tts_url(url.clone());
-                app_state.init_local_tts(url);
+                    // Get Telegram client for Silero
+                    let telegram_state = app.state::<TelegramState>();
+                    let client_arc = Arc::clone(&telegram_state.client);
+
+                    // Initialize Silero with client (user will connect via UI if needed)
+                    app_state.init_silero_tts(client_arc);
+                    eprintln!("[APP] Silero TTS initialized");
+                }
+                TtsProviderType::Local => {
+                    let url = settings.tts.local.url.clone();
+                    app_state.set_local_tts_url(url.clone());
+                    app_state.init_local_tts(url);
+                    eprintln!("[APP] Local TTS initialized");
+                }
             }
 
             // Settings managers are already managed outside setup
