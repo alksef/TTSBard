@@ -3,17 +3,17 @@ import { onMounted, ref, watch, h } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { APP_VERSION } from '../version'
 import {
-  FileText,
   Volume2,
   Headphones,
-  Wrench,
   AppWindow,
   Music,
   Globe,
   BookOpen,
   ChevronLeft,
   ChevronRight,
-  LogOut
+  LogOut,
+  ClipboardPenLine,
+  Pencil
 } from 'lucide-vue-next'
 
 // Custom Twitch icon component
@@ -80,7 +80,7 @@ const sidebarGroups: SidebarGroup[] = [
   {
     title: 'ГЛАВНОЕ',
     buttons: [
-      { id: 'input', label: 'Текст', icon: FileText },
+      { id: 'input', label: 'Текст', icon: Pencil },
       { id: 'info', label: 'Руководство', icon: BookOpen },
       { id: 'tts', label: 'TTS', icon: Volume2 },
       { id: 'audio', label: 'Аудио', icon: Headphones }
@@ -89,7 +89,7 @@ const sidebarGroups: SidebarGroup[] = [
   {
     title: 'Инструменты',
     buttons: [
-      { id: 'preprocessor', label: 'Препроцессор', icon: Wrench },
+      { id: 'preprocessor', label: 'Препроцессор', icon: ClipboardPenLine },
       { id: 'floating', label: 'Плавающее окно', icon: AppWindow },
       { id: 'soundpanel', label: 'Звуковая панель', icon: Music }
     ]
