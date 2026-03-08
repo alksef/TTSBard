@@ -230,10 +230,18 @@ onMounted(async () => {
 }
 
 html {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
 }
 
 body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: transparent;
   overflow: hidden;

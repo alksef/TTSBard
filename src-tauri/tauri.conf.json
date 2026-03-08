@@ -32,7 +32,8 @@
         "skipTaskbar": true,
         "resizable": false,
         "visible": false,
-        "focus": false
+        "focus": false,
+        "hiddenTitle": true
       },
       {
         "label": "soundpanel",
@@ -45,7 +46,8 @@
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "resizable": false,
-        "visible": false
+        "visible": false,
+        "hiddenTitle": true
       }
     ],
     "security": {
