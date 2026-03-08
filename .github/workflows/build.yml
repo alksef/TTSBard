@@ -10,7 +10,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  APP_VERSION_BASE: "0.1.0-alpha"
+  APP_VERSION_BASE: "0.1.0-pre"
 
 jobs:
   build:
