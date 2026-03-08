@@ -22,9 +22,9 @@ use state::AppState;
 use events::{AppEvent, InputLayout, TwitchEvent};
 use hotkeys::initialize_hotkeys;
 use hook::initialize_text_interception_hook;
-use commands::{speak_text, get_tts_provider, set_tts_provider, get_local_tts_url, set_local_tts_url, get_openai_api_key, set_openai_api_key, get_openai_voice, set_openai_voice, get_openai_proxy, set_openai_proxy, get_interception, set_interception, has_api_key, get_floating_appearance, set_floating_opacity, set_floating_bg_color, set_clickthrough, is_clickthrough_enabled, is_enter_closes_disabled, toggle_interception, toggle_floating_window, show_floating_window_cmd, hide_floating_window_cmd, is_floating_window_visible, quit_app, get_hotkey_enabled, set_hotkey_enabled, get_floating_exclude_from_recording, set_floating_exclude_from_recording, apply_floating_exclude_recording, open_file_dialog, get_output_devices, get_virtual_mic_devices, get_audio_settings, set_speaker_device, set_speaker_enabled, set_speaker_volume, set_virtual_mic_device, enable_virtual_mic, disable_virtual_mic, set_virtual_mic_volume};
+use commands::{speak_text, get_tts_provider, set_tts_provider, get_local_tts_url, set_local_tts_url, get_openai_api_key, set_openai_api_key, get_openai_voice, set_openai_voice, get_openai_proxy, set_openai_proxy, get_interception, set_interception, has_api_key, get_floating_appearance, set_floating_opacity, set_floating_bg_color, set_clickthrough, is_clickthrough_enabled, is_enter_closes_disabled, toggle_interception, toggle_floating_window, show_floating_window_cmd, hide_floating_window_cmd, is_floating_window_visible, quit_app, get_hotkey_enabled, set_hotkey_enabled, get_global_exclude_from_capture, set_global_exclude_from_capture, open_file_dialog, get_output_devices, get_virtual_mic_devices, get_audio_settings, set_speaker_device, set_speaker_enabled, set_speaker_volume, set_virtual_mic_device, enable_virtual_mic, disable_virtual_mic, set_virtual_mic_volume};
 use commands::telegram::{telegram_init, telegram_request_code, telegram_sign_in, telegram_sign_out, telegram_get_status, telegram_get_user, telegram_auto_restore, TelegramState};
-use soundpanel::{SoundPanelState, sp_get_bindings, sp_add_binding, sp_remove_binding, sp_test_sound, sp_is_supported_format, sp_get_floating_appearance, sp_set_floating_opacity, sp_set_floating_bg_color, sp_set_floating_clickthrough, sp_is_floating_clickthrough_enabled, sp_is_exclude_from_recording, sp_set_exclude_from_recording, sp_apply_exclude_recording, load_bindings, load_appearance, initialize_soundpanel_hook};
+use soundpanel::{SoundPanelState, sp_get_bindings, sp_add_binding, sp_remove_binding, sp_test_sound, sp_is_supported_format, sp_get_floating_appearance, sp_set_floating_opacity, sp_set_floating_bg_color, sp_set_floating_clickthrough, sp_is_floating_clickthrough_enabled, load_bindings, load_appearance, initialize_soundpanel_hook};
 use floating::{show_floating_window, hide_floating_window, update_floating_text, update_floating_title, show_soundpanel_window, hide_soundpanel_window, emit_soundpanel_no_binding, update_soundpanel_appearance};
 use config::{SettingsManager, WindowsManager};
 use webview::WebViewServer;
@@ -88,10 +88,9 @@ pub fn run() {
             quit_app,
             get_hotkey_enabled,
             set_hotkey_enabled,
-            // Exclude from recording commands
-            get_floating_exclude_from_recording,
-            set_floating_exclude_from_recording,
-            apply_floating_exclude_recording,
+            // Global settings commands
+            get_global_exclude_from_capture,
+            set_global_exclude_from_capture,
             sp_get_bindings,
             sp_add_binding,
             sp_remove_binding,
@@ -102,9 +101,6 @@ pub fn run() {
             sp_set_floating_bg_color,
             sp_set_floating_clickthrough,
             sp_is_floating_clickthrough_enabled,
-            sp_is_exclude_from_recording,
-            sp_set_exclude_from_recording,
-            sp_apply_exclude_recording,
             open_file_dialog,
             // Audio commands
             get_output_devices,
@@ -775,6 +771,25 @@ pub fn run() {
             let soundpanel_state_inner = soundpanel_state.inner().clone();
             let _soundpanel_hook_handle = initialize_soundpanel_hook(soundpanel_state_inner);
             eprintln!("[SOUNDPANEL] Keyboard hook initialized");
+
+            // Apply global exclude from capture to main window (before first show)
+            #[cfg(windows)]
+            {
+                if let Some(windows_manager) = app.try_state::<WindowsManager>() {
+                    let exclude_from_capture = windows_manager.get_global_exclude_from_capture();
+                    eprintln!("[APP] Applying global exclude from capture to main window: {}", exclude_from_capture);
+
+                    if let Some(main_window) = app.get_webview_window("main") {
+                        if let Ok(hwnd) = main_window.hwnd() {
+                            use crate::window::set_window_exclude_from_capture;
+                            match set_window_exclude_from_capture(hwnd.0 as isize, exclude_from_capture) {
+                                Ok(_) => eprintln!("[APP] Main window exclude from capture applied: {}", exclude_from_capture),
+                                Err(e) => eprintln!("[APP] Failed to apply exclude from capture to main window: {}", e),
+                            }
+                        }
+                    }
+                }
+            }
 
             // Инициализация окон
             Ok(())

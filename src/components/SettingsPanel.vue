@@ -1,167 +1,156 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { listen } from '@tauri-apps/api/event'
-import type { AppEvent } from '../types'
-
-defineProps<{
-  isInterceptionEnabled: boolean
-  apiKey: string
-}>()
+import { ref, onMounted } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 
 const errorMessage = ref<string | null>(null)
+const excludeFromCapture = ref(false)
 let errorTimeout: number | null = null
+
+async function loadSettings() {
+  try {
+    excludeFromCapture.value = await invoke<boolean>('get_global_exclude_from_capture')
+  } catch (e) {
+    showError('Ошибка загрузки настроек: ' + (e as Error).message)
+  }
+}
+
+async function toggleExcludeFromCapture() {
+  try {
+    const newValue = !excludeFromCapture.value
+    await invoke('set_global_exclude_from_capture', { value: newValue })
+    excludeFromCapture.value = newValue
+    showError('Настройка сохранена. Перезапустите приложение для применения изменений.')
+  } catch (e) {
+    showError('Ошибка переключения скрытия от захвата: ' + (e as Error).message)
+  }
+}
 
 function showError(message: string) {
   errorMessage.value = message
 
-  // Clear existing timeout if any
   if (errorTimeout !== null) {
     clearTimeout(errorTimeout)
   }
 
-  // Auto-dismiss after 5 seconds
   errorTimeout = window.setTimeout(() => {
     errorMessage.value = null
     errorTimeout = null
   }, 5000)
 }
 
-async function setupTtsErrorListener() {
-  try {
-    const unlisten = await listen<AppEvent>('tts-error', (event) => {
-      if (event.payload && typeof event.payload === 'object' && 'TtsError' in event.payload) {
-        showError('Ошибка TTS: ' + (event.payload as any).TtsError)
-      }
-    })
-    return unlisten
-  } catch (e) {
-    console.error('Failed to set up TTS error listener:', e)
-    return null
-  }
-}
-
-let unlistenFn: Awaited<ReturnType<typeof setupTtsErrorListener>> | null = null
-
-import { onMounted, onUnmounted } from 'vue'
-onMounted(async () => {
-  unlistenFn = await setupTtsErrorListener()
-})
-
-onUnmounted(() => {
-  if (unlistenFn) {
-    unlistenFn()
-  }
-  if (errorTimeout !== null) {
-    clearTimeout(errorTimeout)
-  }
+onMounted(() => {
+  loadSettings()
 })
 </script>
 
 <template>
   <div class="settings-panel">
-    <h1>Настройки</h1>
-
-    <!-- Error Message Display -->
     <div v-if="errorMessage" class="error-message">
       {{ errorMessage }}
     </div>
 
-    <div class="settings-info">
-      <p class="info-text">
-        Настройки приложения были перемещены в соответствующие разделы:
-      </p>
-      <ul class="info-list">
-        <li><strong>TTS</strong> — API ключ OpenAI и выбор голоса</li>
-        <li><strong>Плавающее окно</strong> — прозрачность, цвет фона, click-through</li>
-      </ul>
-      <p class="info-hint">
-        Управление перехватом клавиатуры теперь осуществляется только через горячую клавишу <kbd>Ctrl+Shift+F1</kbd>
-      </p>
-    </div>
+    <section class="settings-section">
+      <h2>Общие настройки</h2>
+
+      <div class="setting-row">
+        <label class="setting-label checkbox-label">
+          <input
+            :checked="excludeFromCapture"
+            type="checkbox"
+            class="checkbox-input"
+            @change="toggleExcludeFromCapture"
+          />
+          <span>Скрыть от записи/захвата экрана</span>
+        </label>
+        <span class="setting-hint">Скрывает все окна от OBS, Game Bar и других средств записи (Windows 8+)</span>
+        <span class="setting-warning">⚠️ Требуется перезапуск приложения для применения настройки</span>
+      </div>
+    </section>
   </div>
 </template>
 
 <style scoped>
 .settings-panel {
-  max-width: 800px;
+  max-width: 900px;
   margin: 0 auto;
-}
-
-h1 {
-  margin-bottom: 2rem;
-  color: #333;
+  padding: 1rem 1.5rem 2rem;
 }
 
 .error-message {
-  padding: 1rem;
-  margin-bottom: 1rem;
-  background: #fee;
-  border: 1px solid #fcc;
-  border-left: 4px solid #f44;
-  border-radius: 4px;
-  color: #c33;
-  font-weight: 500;
-  animation: slideDown 0.3s ease-out;
-}
-
-@keyframes slideDown {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.settings-info {
-  padding: 2rem;
-  background: #f5f5f5;
+  background: rgba(255, 100, 100, 0.15);
+  border: 1px solid rgba(255, 100, 100, 0.3);
   border-radius: 8px;
-  text-align: center;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  color: #ff8a8a;
+  font-size: 0.9rem;
 }
 
-.info-text {
-  font-size: 1rem;
-  color: #333;
+.settings-section {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 1.5rem;
   margin-bottom: 1rem;
 }
 
-.info-list {
-  list-style: none;
-  padding: 0;
-  margin: 1.5rem 0;
-  text-align: left;
-  max-width: 400px;
-  margin-left: auto;
-  margin-right: auto;
+.settings-section h2 {
+  margin: 0 0 1.25rem;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  letter-spacing: 0.01em;
 }
 
-.info-list li {
-  padding: 0.75rem 1rem;
-  margin: 0.5rem 0;
-  background: white;
+.setting-row {
+  margin-bottom: 1.25rem;
+}
+
+.setting-row:last-child {
+  margin-bottom: 0;
+}
+
+.setting-label {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.checkbox-input {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: #1d8cff;
+}
+
+.setting-hint {
+  display: block;
+  margin-top: 0.4rem;
+  margin-left: 2.4rem;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+.setting-hint code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0.15rem 0.35rem;
   border-radius: 4px;
-  border-left: 4px solid #28a745;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
 }
 
-.info-list strong {
-  color: #28a745;
-}
-
-.info-hint {
-  font-size: 0.875rem;
-  color: #666;
-  margin-top: 1.5rem;
-}
-
-kbd {
-  background: #e0e0e0;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  padding: 0.2rem 0.5rem;
-  font-family: monospace;
-  font-size: 0.9em;
+.setting-warning {
+  display: block;
+  margin-top: 0.5rem;
+  margin-left: 2.4rem;
+  font-size: 0.82rem;
+  color: #ffb347;
+  font-style: italic;
 }
 </style>

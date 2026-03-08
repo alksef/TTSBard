@@ -663,78 +663,34 @@ pub fn set_virtual_mic_volume(volume: u8) -> Result<(), String> {
 }
 
 // ============================================================================
-// Exclude from recording commands
+// Global settings commands
 // ============================================================================
 
-/// Set floating window exclude from recording
+/// Set global exclude from capture for all windows
 #[tauri::command]
-pub fn set_floating_exclude_from_recording(
+pub fn set_global_exclude_from_capture(
     value: bool,
     app_handle: AppHandle,
     windows_manager: State<'_, WindowsManager>
 ) -> Result<(), String> {
-    // Save to config
-    windows_manager.set_floating_exclude_from_recording(value)
+    eprintln!("[GLOBAL] ===== set_global_exclude_from_capture called with value: {} =====", value);
+
+    // Save to config only - will be applied on app restart due to Windows API limitations
+    windows_manager.set_global_exclude_from_capture(value)
         .map_err(|e| format!("Failed to save settings: {}", e))?;
 
-    // Apply to window if exists
-    if let Some(window) = app_handle.get_webview_window("floating") {
-        #[cfg(windows)]
-        {
-            use crate::window::set_window_exclude_from_capture;
-
-            if let Ok(hwnd) = window.hwnd() {
-                set_window_exclude_from_capture(hwnd.0 as isize, value)
-                    .map_err(|e| format!("Failed to apply exclude from recording: {}", e))?;
-
-                eprintln!("[FLOATING] Applied exclude from recording: {}", value);
-                return Ok(());
-            }
-        }
-        #[cfg(not(windows))]
-        {
-            // No-op on other platforms
-            return Ok(());
-        }
-    }
+    eprintln!("[GLOBAL] Setting saved. Will apply to all windows after application restart.");
     Ok(())
 }
 
-/// Get floating window exclude from recording setting
+/// Get global exclude from capture setting
 #[tauri::command]
-pub fn get_floating_exclude_from_recording(
+pub fn get_global_exclude_from_capture(
     windows_manager: State<'_, WindowsManager>
 ) -> bool {
-    windows_manager.get_floating_exclude_from_recording()
-}
-
-/// Apply exclude from recording to existing floating window
-#[tauri::command]
-pub fn apply_floating_exclude_recording(
-    app_handle: AppHandle,
-    windows_manager: State<'_, WindowsManager>
-) -> Result<(), String> {
-    if let Some(window) = app_handle.get_webview_window("floating") {
-        #[cfg(windows)]
-        {
-            use crate::window::set_window_exclude_from_capture;
-
-            if let Ok(hwnd) = window.hwnd() {
-                let exclude = windows_manager.get_floating_exclude_from_recording();
-                set_window_exclude_from_capture(hwnd.0 as isize, exclude)
-                    .map_err(|e| e.to_string())?;
-
-                eprintln!("[FLOATING] Applied exclude from recording: {}", exclude);
-                return Ok(());
-            }
-        }
-        #[cfg(not(windows))]
-        {
-            // No-op on other platforms
-            return Ok(());
-        }
-    }
-    Ok(())
+    let value = windows_manager.get_global_exclude_from_capture();
+    eprintln!("[GLOBAL] get_global_exclude_from_capture called, returning: {}", value);
+    value
 }
 
 #[tauri::command]

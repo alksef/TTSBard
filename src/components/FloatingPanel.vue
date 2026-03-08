@@ -8,7 +8,6 @@ const localBgColor = ref('#1e1e1e')
 const floatingWindowVisible = ref(false)
 const clickthroughEnabled = ref(false)
 const hotkeyEnabled = ref(true)
-const excludeFromRecording = ref(false)
 let errorTimeout: number | null = null
 
 const previewStyle = computed(() => ({
@@ -74,17 +73,6 @@ async function toggleHotkeyEnabled() {
   }
 }
 
-async function toggleExcludeFromRecording() {
-  try {
-    await invoke('set_floating_exclude_from_recording', { value: !excludeFromRecording.value })
-    excludeFromRecording.value = !excludeFromRecording.value
-    // Apply to existing window if visible
-    await invoke('apply_floating_exclude_recording')
-  } catch (e) {
-    showError('Ошибка переключения исключения из записи: ' + (e as Error).message)
-  }
-}
-
 function showError(message: string) {
   errorMessage.value = message
 
@@ -127,13 +115,6 @@ onMounted(async () => {
     hotkeyEnabled.value = await invoke<boolean>('get_hotkey_enabled')
   } catch (e) {
     console.error('Failed to load hotkey state:', e)
-  }
-
-  // Load exclude from recording state
-  try {
-    excludeFromRecording.value = await invoke<boolean>('get_floating_exclude_from_recording')
-  } catch (e) {
-    console.error('Failed to load exclude from recording state:', e)
   }
 })
 
@@ -232,19 +213,6 @@ onUnmounted(() => {
           <span>Пропускать нажатия (click-through)</span>
         </label>
         <span class="setting-hint">Окно не будет перехватывать клики мыши</span>
-      </div>
-
-      <div class="setting-row">
-        <label class="setting-label checkbox-label">
-          <input
-            v-model="excludeFromRecording"
-            type="checkbox"
-            class="checkbox-input"
-            @change="toggleExcludeFromRecording"
-          />
-          <span>Исключить из записи экрана</span>
-        </label>
-        <span class="setting-hint">Скрывает окно от OBS, Game Bar и других средств записи (Windows 8+)</span>
       </div>
 
       <div class="preview-box" :style="previewStyle">

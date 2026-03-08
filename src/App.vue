@@ -10,9 +10,10 @@ import PreprocessorPanel from './components/PreprocessorPanel.vue'
 import InfoPanel from './components/InfoPanel.vue'
 import WebViewPanel from './components/WebViewPanel.vue'
 import TwitchPanel from './components/TwitchPanel.vue'
+import SettingsPanel from './components/SettingsPanel.vue'
 import { useTelegramAuth, TELEGRAM_AUTH_KEY } from './composables/useTelegramAuth'
 
-type Panel = 'info' | 'input' | 'tts' | 'floating' | 'soundpanel' | 'audio' | 'preprocessor' | 'webview' | 'twitch'
+type Panel = 'info' | 'input' | 'tts' | 'floating' | 'soundpanel' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'settings'
 
 const currentPanel = ref<Panel>('input')
 
@@ -50,6 +51,7 @@ onMounted(async () => {
       <PreprocessorPanel v-show="currentPanel === 'preprocessor'" />
       <WebViewPanel v-show="currentPanel === 'webview'" />
       <TwitchPanel v-show="currentPanel === 'twitch'" />
+      <SettingsPanel v-show="currentPanel === 'settings'" />
     </main>
   </div>
 </template>
