@@ -52,12 +52,34 @@ pub fn run() {
     // Инициализируем состояние (event_sender будет установлен позже в setup)
     let app_state = AppState::new();
 
+    // Создаём SettingsManager ДО setup, чтобы main окно могло использовать его
+    let settings_manager = SettingsManager::new()
+        .expect("Failed to create settings manager");
+
+    // Создаём WindowsManager ДО setup, чтобы floating/soundpanel окна могли использовать его
+    let windows_manager = WindowsManager::new()
+        .expect("Failed to create windows manager");
+
+    // Создаём SoundPanelState ДО setup, чтобы soundpanel окно могло использовать его
+    let appdata_path = std::env::var("APPDATA")
+        .unwrap_or_else(|_| ".".to_string());
+    let appdata_path = format!("{}\\ttsbard", appdata_path);
+
+    // Ensure appdata directory exists
+    std::fs::create_dir_all(&appdata_path)
+        .expect("Failed to create appdata directory");
+
+    let soundpanel_state = soundpanel::SoundPanelState::new(appdata_path);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .manage(app_state)
         .manage(TelegramState::new())
+        .manage(settings_manager)
+        .manage(windows_manager)
+        .manage(soundpanel_state)
         .invoke_handler(tauri::generate_handler![
             greet,
             speak_text,
@@ -157,13 +179,13 @@ pub fn run() {
             eprintln!("[APP] === Application setup started ===");
 
             // Load settings on startup
-            eprintln!("[APP] Creating settings manager...");
-            let settings_manager = SettingsManager::new()
-                .expect("Failed to create settings manager");
+            // SettingsManager уже создан и управляется вне setup
+            eprintln!("[APP] Getting settings manager from state...");
+            let settings_manager = app.state::<SettingsManager>();
 
-            eprintln!("[APP] Creating windows manager...");
-            let windows_manager = WindowsManager::new()
-                .expect("Failed to create windows manager");
+            // WindowsManager уже создан и управляется вне setup
+            eprintln!("[APP] Getting windows manager from state...");
+            let windows_manager = app.state::<WindowsManager>();
 
             eprintln!("[APP] Loading settings from disk...");
             let settings = settings_manager.load()
@@ -236,9 +258,8 @@ pub fn run() {
                 app_state.init_local_tts(url);
             }
 
-            // Store settings managers for later use
-            app.manage(settings_manager);
-            app.manage(windows_manager);
+            // Settings managers are already managed outside setup
+            // WindowsManager уже управляется снаружи setup
 
             // Spawn event forwarding thread
             thread::spawn(move || {
@@ -255,22 +276,13 @@ pub fn run() {
                 }
             });
 
-            // Initialize SoundPanel state
-            let appdata_path = std::env::var("APPDATA")
-                .unwrap_or_else(|_| ".".to_string());
-            let appdata_path = format!("{}\\ttsbard", appdata_path);
-
-            // Ensure appdata directory exists
-            std::fs::create_dir_all(&appdata_path)
-                .expect("Failed to create appdata directory");
-
-            let soundpanel_state = SoundPanelState::new(appdata_path.clone());
-            app.manage(soundpanel_state.clone());
+            // Initialize SoundPanel state - уже создан и управляется снаружи setup
+            eprintln!("[SOUNDPANEL] Getting SoundPanelState from state...");
+            let soundpanel_state = app.state::<SoundPanelState>();
 
             // Setup event forwarding for soundpanel FIRST (before loading data that might emit events)
-            let soundpanel_state_for_events = soundpanel_state;
             let (soundpanel_tx, soundpanel_rx) = mpsc::channel::<AppEvent>();
-            soundpanel_state_for_events.set_event_sender(soundpanel_tx);
+            soundpanel_state.set_event_sender(soundpanel_tx);
             eprintln!("[SOUNDPANEL] Event sender configured");
 
             let app_handle_for_soundpanel = app.handle().clone();
