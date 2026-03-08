@@ -4,11 +4,13 @@ import { invoke } from '@tauri-apps/api/core'
 
 const errorMessage = ref<string | null>(null)
 const excludeFromCapture = ref(false)
+const quickEditorEnabled = ref(false)
 let errorTimeout: number | null = null
 
 async function loadSettings() {
   try {
     excludeFromCapture.value = await invoke<boolean>('get_global_exclude_from_capture')
+    quickEditorEnabled.value = await invoke<boolean>('get_quick_editor_enabled')
   } catch (e) {
     showError('Ошибка загрузки настроек: ' + (e as Error).message)
   }
@@ -22,6 +24,17 @@ async function toggleExcludeFromCapture() {
     showError('Настройка сохранена. Перезапустите приложение для применения изменений.')
   } catch (e) {
     showError('Ошибка переключения скрытия от захвата: ' + (e as Error).message)
+  }
+}
+
+async function toggleQuickEditor() {
+  try {
+    const newValue = !quickEditorEnabled.value
+    await invoke('set_quick_editor_enabled', { value: newValue })
+    quickEditorEnabled.value = newValue
+    showError('Настройка сохранена')
+  } catch (e) {
+    showError('Ошибка переключения быстрого редактора: ' + (e as Error).message)
   }
 }
 
@@ -64,6 +77,25 @@ onMounted(() => {
         </label>
         <span class="setting-hint">Скрывает все окна от OBS, Game Bar и других средств записи (Windows 8+)</span>
         <span class="setting-warning">⚠️ Требуется перезапуск приложения для применения настройки</span>
+      </div>
+    </section>
+
+    <section class="settings-section">
+      <h2>Редактор</h2>
+
+      <div class="setting-row">
+        <label class="setting-label checkbox-label">
+          <input
+            :checked="quickEditorEnabled"
+            type="checkbox"
+            class="checkbox-input"
+            @change="toggleQuickEditor"
+          />
+          <span>Быстрый редактор</span>
+        </label>
+        <span class="setting-hint">
+          При включении скрывает окно по нажатию <code>Enter</code> (после отправки на TTS) или <code>Esc</code> в поле текста
+        </span>
       </div>
     </section>
   </div>

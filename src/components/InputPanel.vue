@@ -1,12 +1,35 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted as vueOnUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { listen, UnlistenFn } from '@tauri-apps/api/event'
 
 const text = ref('')
 const replacements = ref<Map<string, string>>(new Map())
 const usernames = ref<Map<string, string>>(new Map())
+const quickEditorEnabled = ref(false)
+
+let unlistenSettings: UnlistenFn | null = null
 
 onMounted(async () => {
+  // Load quick editor setting first
+  try {
+    quickEditorEnabled.value = await invoke<boolean>('get_quick_editor_enabled')
+    console.log('[InputPanel] Quick editor enabled:', quickEditorEnabled.value)
+  } catch (e) {
+    console.error('[InputPanel] Failed to load quick editor setting:', e)
+  }
+
+  // Listen for settings changes
+  unlistenSettings = await listen('settings-changed', async () => {
+    try {
+      quickEditorEnabled.value = await invoke<boolean>('get_quick_editor_enabled')
+      console.log('[InputPanel] Quick editor setting updated:', quickEditorEnabled.value)
+    } catch (e) {
+      console.error('[InputPanel] Failed to reload quick editor setting:', e)
+    }
+  })
+
+  // Load preprocessor data
   try {
     console.log('[InputPanel] Loading preprocessor data...')
     const data = await invoke<{
@@ -26,6 +49,20 @@ onMounted(async () => {
   }
 })
 
+vueOnUnmounted(() => {
+  if (unlistenSettings) {
+    unlistenSettings()
+  }
+})
+
+async function hideMainWindow() {
+  try {
+    await invoke('hide_main_window')
+  } catch (e) {
+    console.error('[InputPanel] Failed to hide window:', e)
+  }
+}
+
 async function speak() {
   if (!text.value.trim()) return
 
@@ -37,10 +74,31 @@ async function speak() {
   }
 }
 
-function handleEnter() {
+async function handleEnter() {
   console.log('[InputPanel] Enter pressed, text:', text.value)
-  speak()
-  text.value = ''
+
+  // If quick editor is enabled and text is empty - do nothing
+  if (quickEditorEnabled.value && !text.value.trim()) {
+    return
+  }
+
+  // In quick editor mode, start TTS in background without waiting
+  if (quickEditorEnabled.value) {
+    speak() // Fire and forget - don't await
+    text.value = ''
+    await hideMainWindow()
+  } else {
+    // Normal mode - wait for TTS to complete
+    await speak()
+    text.value = ''
+  }
+}
+
+async function handleEsc() {
+  // Hide window if quick editor is enabled (fire and forget)
+  if (quickEditorEnabled.value) {
+    hideMainWindow()
+  }
 }
 
 function handleSpace(event: KeyboardEvent) {
@@ -105,8 +163,12 @@ function handleSpace(event: KeyboardEvent) {
         rows="10"
         class="text-input"
         @keydown.prevent.enter="handleEnter"
+        @keydown.esc="handleEsc"
         @keydown.space="handleSpace"
       />
+      <div v-if="quickEditorEnabled" class="quick-editor-hint">
+        Режим быстрого редактора
+      </div>
     </div>
   </div>
 </template>
@@ -155,5 +217,12 @@ function handleSpace(event: KeyboardEvent) {
     min-height: 280px;
     padding: 1rem 1.05rem;
   }
+}
+
+.quick-editor-hint {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  opacity: 0.7;
 }
 </style>
