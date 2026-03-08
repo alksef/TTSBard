@@ -1,46 +1,69 @@
 # Documentation Index
 
-Quick reference for the TTS Application v2 project.
+Quick reference for the TTSBard project.
 
 > **📌 Note for AI Context:** When exploring this codebase, prioritize source code (`src-tauri/`, `src/`) and main documentation files. Ignore `docs/plans/` and `docs/img*.png` unless explicitly requested. See [.context-rules.md](./.context-rules.md) for details.
 
-## 📚 Documentation Files
+## 🚀 Quick Start
 
-### [project-overview.md](./project-overview.md)
-**Start here for project introduction**
+**Хотите быстро понять проект?** Начните здесь:
 
-- Description and tech stack
-- Project structure
-- Key features overview
-- Storage locations
-- Registered hotkeys
+1. **[QUICK_START.md](./QUICK_START.md)** — **РЕКОМЕНДУЕТСЯ НАЧАТЬ ОТСЮДА** 📌
+   - Проект за 30 секунд
+   - Ключевые файлы и их назначение
+   - Как это работает
+   - Горячие клавиши
+   - Где что искать (troubleshooting)
+   - Основные модули и их связи
+
+2. **[project-overview.md](./project-overview.md)** — Подробный обзор проекта
+   - Description and tech stack
+   - Project structure
+   - Key features overview
+   - Storage locations
+   - Registered hotkeys
 
 ---
+
+## 📚 Documentation Files
+
+### [QUICK_START.md](./QUICK_START.md)
+**⭐ START HERE — Полный контекст за 2-3 минуты**
+
+- Проект за 30 секунд
+- Ключевые файлы (что где искать)
+- Как это работает (схемы)
+- Горячие клавиши
+- Где что искать при проблемах
+- Основные модули и их связи
+- Event system
+- TTS providers
+- Key patterns
 
 ### [rust-modules.md](./rust-modules.md)
 **Rust backend module reference**
 
 **Core Modules:**
-- `lib.rs` - Main entry point
+- `main.rs` - Entry point
+- `lib.rs` - Main orchestrator
 - `state.rs` - Application state
-- `commands.rs` - Tauri commands
-- `commands/preprocessor.rs` - Preprocessor commands
 - `events.rs` - Event system
-- `hook.rs` - Keyboard hook
+- `hook.rs` - Keyboard hook (WH_KEYBOARD_LL)
 - `hotkeys.rs` - Global hotkeys
-- `tts.rs` - Text-to-speech
-- `floating.rs` - Floating window
-- `settings.rs` - Settings persistence
+- `floating.rs` - Floating window management
 - `window.rs` - Win32 utilities
-- `preprocessor.rs` - Text preprocessor module
+- `settings.rs` - Settings persistence
 
-**SoundPanel Module:**
-- `mod.rs` - Module exports
-- `state.rs` - Sound panel state
-- `bindings.rs` - Tauri commands
-- `storage.rs` - Persistence
-- `audio.rs` - Audio playback
-- `hook.rs` - Sound panel keyboard hook
+**Subsystems:**
+- `tts/` - TTS providers (OpenAI, Silero, Local)
+- `audio/` - Audio subsystem (dual output)
+- `preprocessor/` - Text preprocessing (presets)
+- `webview/` - WebView server for OBS
+- `twitch/` - Twitch Chat integration
+- `telegram/` - Telegram integration (Silero Bot)
+- `soundpanel/` - Sound board module
+- `commands/` - Tauri commands
+- `config/` - Configuration management
 
 ---
 
@@ -51,12 +74,16 @@ Quick reference for the TTS Application v2 project.
 - `App.vue` - Main application
 - `Sidebar.vue` - Navigation
 - `InputPanel.vue` - Manual text input
-- `TtsPanel.vue` - TTS settings
+- `TtsPanel.vue` - TTS provider settings
 - `FloatingPanel.vue` - Floating window settings
 - `SoundPanelTab.vue` - Sound board management
-- `SettingsPanel.vue` - General settings
-- `AudioPanel.vue` - Audio output settings
+- `AudioPanel.vue` - Audio output (dual output)
 - `PreprocessorPanel.vue` - Text preprocessing rules
+- `TwitchPanel.vue` - Twitch Chat settings
+- `WebViewPanel.vue` - WebView server for OBS
+- `TelegramAuthModal.vue` - Telegram authorization modal
+- `SettingsPanel.vue` - General settings
+- `InfoPanel.vue` - Application info
 
 **Also covers:**
 - Tauri event system
@@ -83,6 +110,33 @@ Quick reference for the TTS Application v2 project.
 
 ---
 
+### [KEY_DECISIONS.md](./KEY_DECISIONS.md)
+**Key architecture decisions and their rationale**
+
+**Decisions covered:**
+- Windows-only Platform (WH_KEYBOARD_LL)
+- Tauri 2.0 vs Electron
+- Event-Driven Architecture (MPSC)
+- Command Pattern (Tauri Commands)
+- Thread-Safe State (Arc<Mutex<T>>)
+- Plugin Architecture (SoundPanel)
+- Multiple TTS Providers
+- Dual Audio Output
+- Text Preprocessor (Presets)
+- WebView Server for OBS
+- Twitch Chat Integration
+- System Tray Integration
+- Multiple Floating Windows
+- F6 Hotkey Mode
+- File Storage Strategy
+- Error Handling Strategy
+- Audio Playback Strategy
+- Window Manager Pattern
+- Configuration Management
+- Testing Strategy
+
+---
+
 ## 🔑 Quick Reference
 
 ### File Paths
@@ -100,39 +154,83 @@ Quick reference for the TTS Application v2 project.
 
 | Hotkey | Action |
 |--------|--------|
-| `Ctrl+Shift+F1` | Toggle text interception |
+| `Ctrl+Shift+F1` | Toggle text interception / Floating Window |
 | `Ctrl+Shift+F2` | Show sound panel |
+| `Ctrl+Shift+F3` | Show main window (focus) |
 | `Ctrl+Alt+T` | Show main window |
 | `F8` | Toggle keyboard layout (EN/RU) |
+| `F6` | Toggle: Enter doesn't close window / Enter closes window |
 | `Enter` | Submit text to TTS |
 | `Escape` | Cancel/close floating window |
+| `Backspace` | Delete last character |
+| `Space` | Add space with preset replacement |
 
 ### Module Map
 
 ```
 src-tauri/src/
-├── lib.rs           ← Main entry point
-├── state.rs         ← Application state
-├── commands/        ← Tauri commands
+├── main.rs               ← Entry point
+├── lib.rs                ← Main orchestrator
+├── state.rs              ← Application state
+├── events.rs             ← Event definitions
+├── hook.rs               ← Text interception hook (WH_KEYBOARD_LL)
+├── hotkeys.rs            ← Global hotkey management
+├── floating.rs           ← Floating window management
+├── window.rs             ← Win32 utilities
+├── settings.rs           ← Settings persistence
+│
+├── commands/             ← Tauri commands
 │   ├── mod.rs
-│   └── preprocessor.rs
-├── events.rs        ← Event definitions
-├── hook.rs          ← Text interception hook
-├── hotkeys.rs       ← Global hotkey management
-├── tts.rs           ← OpenAI TTS client
-├── floating.rs      ← Floating window management
-├── settings.rs      ← Settings persistence
-├── window.rs        ← Win32 utilities
-├── preprocessor/    ← Text preprocessor module
+│   ├── preprocessor.rs   ← Preprocessor commands
+│   ├── telegram.rs       ← Telegram commands
+│   ├── twitch.rs         ← Twitch commands
+│   └── webview.rs        ← WebView commands
+│
+├── tts/                  ← TTS providers
 │   ├── mod.rs
-│   └── replacer.rs
-└── soundpanel/      ← Sound panel module
+│   ├── engine.rs         ← TTS engine abstraction
+│   ├── openai.rs         ← OpenAI TTS
+│   ├── silero.rs         ← Silero Bot (Telegram)
+│   └── local.rs          ← TTSVoiceWizard (local)
+│
+├── audio/                ← Audio subsystem
+│   ├── mod.rs
+│   ├── device.rs         ← Audio device selection
+│   └── player.rs         ← Audio playback
+│
+├── preprocessor/         ← Text preprocessing
+│   ├── mod.rs
+│   └── replacer.rs       ← Replacement logic
+│
+├── webview/              ← WebView server for OBS
+│   ├── mod.rs
+│   ├── server.rs         ← HTTP/WebSocket server
+│   ├── websocket.rs      ← WebSocket handling
+│   └── templates.rs      ← HTML templates
+│
+├── twitch/               ← Twitch Chat
+│   ├── mod.rs
+│   └── client.rs         ← Twitch IRC client
+│
+├── telegram/             ← Telegram integration
+│   ├── mod.rs
+│   ├── bot.rs            ← Silero Bot API
+│   ├── client.rs         ← Telegram client
+│   └── types.rs          ← Types
+│
+├── soundpanel/           ← Sound board module
+│   ├── mod.rs
+│   ├── state.rs
+│   ├── bindings.rs
+│   ├── storage.rs
+│   ├── audio.rs
+│   └── hook.rs
+│
+└── config/               ← Configuration
     ├── mod.rs
-    ├── state.rs
-    ├── bindings.rs
-    ├── storage.rs
-    ├── audio.rs
-    └── hook.rs
+    ├── settings.rs       ← Settings struct
+    ├── validation.rs     ← Validation
+    └── windows.rs        ← Windows-specific config
 ```
 
 ### Key Commands
@@ -166,21 +264,27 @@ src-tauri/src/
 
 ### Understanding the Codebase
 
-1. **New to the project?** Start with [project-overview.md](./project-overview.md)
-2. **Working on backend?** Read [rust-modules.md](./rust-modules.md)
-3. **Working on frontend?** Read [vue-components.md](./vue-components.md)
-4. **Designing changes?** Review [architecture.md](./architecture.md)
+1. **⭐ [QUICK_START.md](./QUICK_START.md)** — Полный контекст за 2-3 минуты
+2. **New to the project?** [project-overview.md](./project-overview.md)
+3. **Working on backend?** [rust-modules.md](./rust-modules.md)
+4. **Working on frontend?** [vue-components.md](./vue-components.md)
+5. **Designing changes?** [architecture.md](./architecture.md)
 
 ### Common Tasks
 
 | Task | Reference |
 |------|-----------|
-| Add new Tauri command | [rust-modules.md](./rust-modules.md#commandsrs) |
+| Add new Tauri command | [QUICK_START.md](./QUICK_START.md) → Key Patterns |
 | Add new Vue component | [vue-components.md](./vue-components.md) |
 | Modify keyboard hook | [rust-modules.md](./rust-modules.md#hookrs) |
-| Add new event | [rust-modules.md](./rust-modules.md#eventsrs) |
+| Add new event | [QUICK_START.md](./QUICK_START.md) → Event System |
+| Change TTS provider | [QUICK_START.md](./QUICK_START.md) → TTS Providers |
 | Change sound panel | [rust-modules.md](./rust-modules.md#soundpanel-module) |
 | Update window behavior | [rust-modules.md](./rust-modules.md#floatingrs) |
+| Fix audio output | [QUICK_START.md](./QUICK_START.md) → Where to look (audio/) |
+| WebView for OBS | [QUICK_START.md](./QUICK_START.md) → Where to look (webview/) |
+| Twitch Chat issues | [QUICK_START.md](./QUICK_START.md) → Where to look (twitch/) |
+| Preprocessor issues | [QUICK_START.md](./QUICK_START.md) → Where to look (preprocessor/) |
 
 ---
 
