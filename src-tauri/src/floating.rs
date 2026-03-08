@@ -70,28 +70,6 @@ pub fn show_floating_window(app_handle: &AppHandle) -> tauri::Result<()> {
 
     eprintln!("[FLOATING] Window created successfully");
 
-    // Применяем clickthrough если включён в настройках
-    let windows_manager = app_handle.state::<WindowsManager>();
-    if windows_manager.get_floating_clickthrough() {
-        eprintln!("[FLOATING] Applying clickthrough mode");
-        let _ = window.set_ignore_cursor_events(true);
-    }
-
-    // Применяем Win32 стили
-    #[cfg(windows)]
-    {
-        use crate::window::{set_floating_window_styles, set_window_exclude_from_capture};
-
-        if let Ok(hwnd) = window.hwnd() {
-            let _ = set_floating_window_styles(hwnd.0 as isize);
-
-            // Защита от записи экрана (глобальная настройка)
-            let exclude_from_capture = windows_manager.get_global_exclude_from_capture();
-            eprintln!("[FLOATING] Applying global exclude from capture: {}", exclude_from_capture);
-            let _ = set_window_exclude_from_capture(hwnd.0 as isize, exclude_from_capture);
-        }
-    }
-
     // Настраиваем отслеживание событий окна
     window.on_window_event(move |event| {
         match event {
@@ -106,8 +84,33 @@ pub fn show_floating_window(app_handle: &AppHandle) -> tauri::Result<()> {
         }
     });
 
-    // Показываем окно БЕЗ фокуса - чтобы не прерывать перехват клавиш
+    // Показываем окно ПЕРВЫМ делом - до применения Win32 API
     window.show()?;
+
+    // Применяем clickthrough если включён в настройках
+    let windows_manager = app_handle.state::<WindowsManager>();
+    if windows_manager.get_floating_clickthrough() {
+        eprintln!("[FLOATING] Applying clickthrough mode");
+        let _ = window.set_ignore_cursor_events(true);
+    }
+
+    // Применяем Win32 стили ПОСЛЕ показа окна
+    #[cfg(windows)]
+    {
+        use crate::window::{set_floating_window_styles, set_window_exclude_from_capture, show_window_no_focus};
+
+        if let Ok(hwnd) = window.hwnd() {
+            let _ = set_floating_window_styles(hwnd.0 as isize);
+
+            // Защита от записи экрана (глобальная настройка) - ПОСЛЕ show()
+            let exclude_from_capture = windows_manager.get_global_exclude_from_capture();
+            eprintln!("[FLOATING] Applying global exclude from capture: {}", exclude_from_capture);
+            let _ = set_window_exclude_from_capture(hwnd.0 as isize, exclude_from_capture);
+
+            // Показываем окно БЕЗ фокуса - чтобы не прерывать перехват клавиш
+            let _ = show_window_no_focus(hwnd.0 as isize);
+        }
+    }
 
     Ok(())
 }
@@ -197,32 +200,30 @@ pub fn show_soundpanel_window(app_handle: &AppHandle) -> tauri::Result<()> {
     let window = builder.build()?;
     eprintln!("[SOUNDPANEL] Window created successfully");
 
+    // Показываем окно ПЕРВЫМ делом - до применения Win32 API
+    window.show()?;
+
     // Применяем clickthrough если включён в настройках
     if clickthrough {
         eprintln!("[SOUNDPANEL] Applying clickthrough mode");
         let _ = window.set_ignore_cursor_events(true);
     }
 
-    // Применяем Win32 стили для удаления фокуса
+    // Применяем Win32 стили ПОСЛЕ показа окна
     #[cfg(windows)]
     {
         use crate::window::{set_floating_window_styles, show_window_no_focus, set_window_exclude_from_capture};
 
         if let Ok(hwnd) = window.hwnd() {
             let _ = set_floating_window_styles(hwnd.0 as isize);
-            // Показываем окно БЕЗ фокуса (без активации)
-            let _ = show_window_no_focus(hwnd.0 as isize);
 
-            // Защита от записи экрана (глобальная настройка)
+            // Защита от записи экрана (глобальная настройка) - ПОСЛЕ show()
             eprintln!("[SOUNDPANEL] Applying global exclude from capture: {}", exclude_from_capture);
             let _ = set_window_exclude_from_capture(hwnd.0 as isize, exclude_from_capture);
-        }
-    }
 
-    #[cfg(not(windows))]
-    {
-        // На других платформах просто показываем окно
-        window.show()?;
+            // Показываем окно БЕЗ фокуса (без активации)
+            let _ = show_window_no_focus(hwnd.0 as isize);
+        }
     }
 
     Ok(())
