@@ -97,18 +97,19 @@ pub fn show_floating_window(app_handle: &AppHandle) -> tauri::Result<()> {
     // Применяем Win32 стили ПОСЛЕ показа окна
     #[cfg(windows)]
     {
-        use crate::window::{set_floating_window_styles, set_window_exclude_from_capture, show_window_no_focus};
+        use crate::window::{set_floating_window_styles, set_window_exclude_from_capture};
 
         if let Ok(hwnd) = window.hwnd() {
             let _ = set_floating_window_styles(hwnd.0 as isize);
 
             // Защита от записи экрана (глобальная настройка) - ПОСЛЕ show()
+            // Небольшая задержка для инициализации WebView2
             let exclude_from_capture = windows_manager.get_global_exclude_from_capture();
             eprintln!("[FLOATING] Applying global exclude from capture: {}", exclude_from_capture);
-            let _ = set_window_exclude_from_capture(hwnd.0 as isize, exclude_from_capture);
 
-            // Показываем окно БЕЗ фокуса - чтобы не прерывать перехват клавиш
-            let _ = show_window_no_focus(hwnd.0 as isize);
+            // Применяем защиту с небольшой задержкой после показа окна
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            let _ = set_window_exclude_from_capture(hwnd.0 as isize, exclude_from_capture);
         }
     }
 
@@ -195,6 +196,7 @@ pub fn show_soundpanel_window(app_handle: &AppHandle) -> tauri::Result<()> {
     .always_on_top(true)
     .skip_taskbar(true)
     .resizable(false)
+    .visible(false)  // Создаём скрытым, чтобы избежать мигания
     .center();
 
     let window = builder.build()?;
@@ -212,17 +214,18 @@ pub fn show_soundpanel_window(app_handle: &AppHandle) -> tauri::Result<()> {
     // Применяем Win32 стили ПОСЛЕ показа окна
     #[cfg(windows)]
     {
-        use crate::window::{set_floating_window_styles, show_window_no_focus, set_window_exclude_from_capture};
+        use crate::window::{set_floating_window_styles, set_window_exclude_from_capture};
 
         if let Ok(hwnd) = window.hwnd() {
             let _ = set_floating_window_styles(hwnd.0 as isize);
 
             // Защита от записи экрана (глобальная настройка) - ПОСЛЕ show()
+            // Небольшая задержка для инициализации WebView2
             eprintln!("[SOUNDPANEL] Applying global exclude from capture: {}", exclude_from_capture);
-            let _ = set_window_exclude_from_capture(hwnd.0 as isize, exclude_from_capture);
 
-            // Показываем окно БЕЗ фокуса (без активации)
-            let _ = show_window_no_focus(hwnd.0 as isize);
+            // Применяем защиту с небольшой задержкой после показа окна
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            let _ = set_window_exclude_from_capture(hwnd.0 as isize, exclude_from_capture);
         }
     }
 
