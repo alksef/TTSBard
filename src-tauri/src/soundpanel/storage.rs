@@ -22,13 +22,9 @@ pub struct SoundPanelAppearance {
     /// Пропускает ли плавающее окно клики
     #[serde(default = "default_clickthrough")]
     pub clickthrough: bool,
-    /// Исключить ли окно из записи экрана
-    #[serde(default = "default_exclude_from_recording")]
-    pub exclude_from_recording: bool,
 }
 
 fn default_clickthrough() -> bool { false }
-fn default_exclude_from_recording() -> bool { false }
 
 impl Default for SoundPanelAppearance {
     fn default() -> Self {
@@ -36,7 +32,6 @@ impl Default for SoundPanelAppearance {
             opacity: 90,
             bg_color: "#2a2a2a".to_string(),
             clickthrough: false,
-            exclude_from_recording: false,
         }
     }
 }
@@ -174,22 +169,19 @@ pub fn load_appearance(state: &SoundPanelState, windows_manager: &WindowsManager
     let opacity = windows_manager.get_soundpanel_opacity();
     let bg_color = windows_manager.get_soundpanel_bg_color();
     let clickthrough = windows_manager.get_soundpanel_clickthrough();
-    let exclude_from_recording = windows_manager.get_soundpanel_exclude_from_recording();
 
-    eprintln!("[SOUNDPANEL] Loaded appearance: opacity={}%, color={}, clickthrough={}, exclude={}",
-        opacity, bg_color, clickthrough, exclude_from_recording);
+    eprintln!("[SOUNDPANEL] Loaded appearance: opacity={}%, color={}, clickthrough={}",
+        opacity, bg_color, clickthrough);
 
     // Применить к состоянию
     state.set_floating_opacity(opacity);
     state.set_floating_bg_color(bg_color.clone());
     state.set_floating_clickthrough(clickthrough);
-    state.set_exclude_from_recording(exclude_from_recording);
 
     Ok(SoundPanelAppearance {
         opacity,
         bg_color,
         clickthrough,
-        exclude_from_recording,
     })
 }
 

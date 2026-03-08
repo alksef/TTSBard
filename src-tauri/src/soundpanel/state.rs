@@ -44,9 +44,6 @@ pub struct SoundPanelState {
 
     /// Пропускает ли floating окно клики
     pub floating_clickthrough: Arc<Mutex<bool>>,
-
-    /// Исключить ли окно из записи экрана
-    pub exclude_from_recording: Arc<Mutex<bool>>,
 }
 
 impl SoundPanelState {
@@ -60,7 +57,6 @@ impl SoundPanelState {
             floating_opacity: Arc::new(Mutex::new(90)),
             floating_bg_color: Arc::new(Mutex::new("#2a2a2a".to_string())),
             floating_clickthrough: Arc::new(Mutex::new(false)),
-            exclude_from_recording: Arc::new(Mutex::new(false)),
         }
     }
 
@@ -192,20 +188,6 @@ impl SoundPanelState {
         if let Ok(mut val) = self.floating_clickthrough.lock() {
             *val = enabled;
             eprintln!("[SOUNDPANEL STATE] Clickthrough updated to: {}", enabled);
-        }
-    }
-
-    /// Проверить, исключено ли окно из записи экрана
-    pub fn is_exclude_from_recording(&self) -> bool {
-        self.exclude_from_recording.lock().map(|v| *v).unwrap_or(false)
-    }
-
-    /// Установить исключение из записи экрана
-    pub fn set_exclude_from_recording(&self, enabled: bool) {
-        eprintln!("[SOUNDPANEL STATE] set_exclude_from_recording called with enabled={}", enabled);
-        if let Ok(mut val) = self.exclude_from_recording.lock() {
-            *val = enabled;
-            eprintln!("[SOUNDPANEL STATE] Exclude from recording updated to: {}", enabled);
         }
     }
 }

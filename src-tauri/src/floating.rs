@@ -85,11 +85,10 @@ pub fn show_floating_window(app_handle: &AppHandle) -> tauri::Result<()> {
         if let Ok(hwnd) = window.hwnd() {
             let _ = set_floating_window_styles(hwnd.0 as isize);
 
-            // Защита от записи экрана
-            if windows_manager.get_floating_exclude_from_recording() {
-                eprintln!("[FLOATING] Applying exclude from recording");
-                let _ = set_window_exclude_from_capture(hwnd.0 as isize, true);
-            }
+            // Защита от записи экрана (глобальная настройка)
+            let exclude_from_capture = windows_manager.get_global_exclude_from_capture();
+            eprintln!("[FLOATING] Applying global exclude from capture: {}", exclude_from_capture);
+            let _ = set_window_exclude_from_capture(hwnd.0 as isize, exclude_from_capture);
         }
     }
 
@@ -164,18 +163,21 @@ pub fn show_soundpanel_window(app_handle: &AppHandle) -> tauri::Result<()> {
 
     // Получить настройки внешнего вида
     let sp_state = app_handle.try_state::<SoundPanelState>();
-    let (opacity, bg_color, clickthrough, exclude_from_recording) = if let Some(state) = &sp_state {
+    let (opacity, bg_color, clickthrough) = if let Some(state) = &sp_state {
         (
             state.get_floating_opacity(),
             state.get_floating_bg_color(),
             state.is_floating_clickthrough_enabled(),
-            state.is_exclude_from_recording(),
         )
     } else {
-        (90, "#2a2a2a".to_string(), false, false)
+        (90, "#2a2a2a".to_string(), false)
     };
 
     eprintln!("[SOUNDPANEL] Window settings: opacity={}%, color={}, clickthrough={}", opacity, bg_color, clickthrough);
+
+    // Получить глобальную настройку исключения из захвата
+    let windows_manager = app_handle.state::<WindowsManager>();
+    let exclude_from_capture = windows_manager.get_global_exclude_from_capture();
 
     // Создаём билдер окна для звуковой панели с прозрачностью
     let builder = WebviewWindowBuilder::new(
@@ -211,11 +213,9 @@ pub fn show_soundpanel_window(app_handle: &AppHandle) -> tauri::Result<()> {
             // Показываем окно БЕЗ фокуса (без активации)
             let _ = show_window_no_focus(hwnd.0 as isize);
 
-            // Защита от записи экрана
-            if exclude_from_recording {
-                eprintln!("[SOUNDPANEL] Applying exclude from recording");
-                let _ = set_window_exclude_from_capture(hwnd.0 as isize, true);
-            }
+            // Защита от записи экрана (глобальная настройка)
+            eprintln!("[SOUNDPANEL] Applying global exclude from capture: {}", exclude_from_capture);
+            let _ = set_window_exclude_from_capture(hwnd.0 as isize, exclude_from_capture);
         }
     }
 

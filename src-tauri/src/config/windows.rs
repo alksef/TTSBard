@@ -28,8 +28,6 @@ pub struct FloatingWindowSettings {
     pub bg_color: String,
     #[serde(default)]
     pub clickthrough: bool,
-    #[serde(default)]
-    pub exclude_from_recording: bool,
 }
 
 /// Sound panel window settings
@@ -43,17 +41,42 @@ pub struct SoundPanelWindowSettings {
     pub bg_color: String,
     #[serde(default)]
     pub clickthrough: bool,
+}
+
+/// Global settings that apply to all windows
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GlobalSettings {
     #[serde(default)]
-    pub exclude_from_recording: bool,
+    pub exclude_from_capture: bool,
+}
+
+impl Default for GlobalSettings {
+    fn default() -> Self {
+        Self {
+            exclude_from_capture: false,
+        }
+    }
 }
 
 /// All window settings
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[derive(Default)]
 pub struct WindowsSettings {
+    #[serde(default)]
+    pub global: GlobalSettings,
     pub main: WindowPosition,
     pub floating: FloatingWindowSettings,
     pub soundpanel: SoundPanelWindowSettings,
+}
+
+impl Default for WindowsSettings {
+    fn default() -> Self {
+        Self {
+            global: GlobalSettings::default(),
+            main: WindowPosition::default(),
+            floating: FloatingWindowSettings::default(),
+            soundpanel: SoundPanelWindowSettings::default(),
+        }
+    }
 }
 
 // Default functions
@@ -71,7 +94,6 @@ impl Default for FloatingWindowSettings {
             opacity: 90,
             bg_color: "#1e1e1e".to_string(),
             clickthrough: false,
-            exclude_from_recording: false,
         }
     }
 }
@@ -84,7 +106,6 @@ impl Default for SoundPanelWindowSettings {
             opacity: 90,
             bg_color: "#2a2a2a".to_string(),
             clickthrough: false,
-            exclude_from_recording: false,
         }
     }
 }
@@ -249,20 +270,6 @@ impl WindowsManager {
             .unwrap_or(false)
     }
 
-    /// Set floating window exclude from recording
-    pub fn set_floating_exclude_from_recording(&self, exclude: bool) -> Result<()> {
-        let mut settings = self.load()?;
-        settings.floating.exclude_from_recording = exclude;
-        self.save(&settings)
-    }
-
-    /// Get floating window exclude from recording
-    pub fn get_floating_exclude_from_recording(&self) -> bool {
-        self.load()
-            .map(|s| s.floating.exclude_from_recording)
-            .unwrap_or(false)
-    }
-
     // ========== Sound Panel Window ==========
 
     /// Set soundpanel window position
@@ -326,17 +333,30 @@ impl WindowsManager {
             .unwrap_or(false)
     }
 
-    /// Set soundpanel exclude from recording
-    pub fn set_soundpanel_exclude_from_recording(&self, exclude: bool) -> Result<()> {
+    // ========== Global Settings ==========
+
+    /// Set global exclude from capture
+    pub fn set_global_exclude_from_capture(&self, exclude: bool) -> Result<()> {
+        eprintln!("[WINDOWS] set_global_exclude_from_capture called with: {}", exclude);
         let mut settings = self.load()?;
-        settings.soundpanel.exclude_from_recording = exclude;
-        self.save(&settings)
+        settings.global.exclude_from_capture = exclude;
+        self.save(&settings)?;
+        eprintln!("[WINDOWS] set_global_exclude_from_capture saved: {}", exclude);
+        Ok(())
     }
 
-    /// Get soundpanel exclude from recording
-    pub fn get_soundpanel_exclude_from_recording(&self) -> bool {
-        self.load()
-            .map(|s| s.soundpanel.exclude_from_recording)
-            .unwrap_or(false)
+    /// Get global exclude from capture
+    pub fn get_global_exclude_from_capture(&self) -> bool {
+        let value = self.load()
+            .map(|s| {
+                eprintln!("[WINDOWS] get_global_exclude_from_capture from file: {}", s.global.exclude_from_capture);
+                s.global.exclude_from_capture
+            })
+            .unwrap_or_else(|e| {
+                eprintln!("[WINDOWS] get_global_exclude_from_capture error: {}, using default: false", e);
+                false
+            });
+        eprintln!("[WINDOWS] get_global_exclude_from_capture returning: {}", value);
+        value
     }
 }
