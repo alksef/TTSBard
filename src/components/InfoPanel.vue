@@ -116,20 +116,17 @@
         </div>
       </div>
 
-      <p class="hint">
-        💡 Звуковая панель настраивается в разделе «🎵 Звуковая панель»
-      </p>
-    </section>
-
-    <!-- Поддерживаемые форматы -->
-    <section class="info-section">
-      <h2>📁 Поддерживаемые форматы</h2>
+      <h3>Поддерживаемые форматы</h3>
       <div class="format-list">
         <span class="format-badge">MP3</span>
         <span class="format-badge">WAV</span>
         <span class="format-badge">OGG</span>
         <span class="format-badge">FLAC</span>
       </div>
+
+      <p class="hint">
+        💡 Звуковая панель настраивается в разделе «🎵 Звуковая панель»
+      </p>
     </section>
 
     <!-- Дополнительно -->

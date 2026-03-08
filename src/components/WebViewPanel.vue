@@ -255,7 +255,7 @@ onUnmounted(() => {
           :disabled="settings.enabled || !isPortValid"
           :class="{ disabled: settings.enabled || !isPortValid }"
         >
-          ▶ Запустить сервер
+          ▶ Запустить
         </button>
         <button
           @click="stopServer"
@@ -263,7 +263,7 @@ onUnmounted(() => {
           :disabled="!settings.enabled"
           :class="{ disabled: !settings.enabled }"
         >
-          ■ Остановить сервер
+          ■ Остановить
         </button>
       </div>
 
@@ -305,7 +305,7 @@ onUnmounted(() => {
       </div>
 
       <div class="setting-row save-row">
-        <button @click="saveServerSettings" class="save-button-inline">💾 Сохранить настройки сервера</button>
+        <button @click="saveServerSettings" class="save-button-inline">💾 Сохранить</button>
       </div>
     </section>
 
@@ -363,7 +363,7 @@ onUnmounted(() => {
         Lower values = faster animation. Recommended: 20-50ms
       </p>
       <div class="setting-row save-row">
-        <button @click="saveAnimationSettings" class="save-button-inline">💾 Сохранить настройки анимации</button>
+        <button @click="saveAnimationSettings" class="save-button-inline">💾 Сохранить</button>
       </div>
     </section>
   </div>
