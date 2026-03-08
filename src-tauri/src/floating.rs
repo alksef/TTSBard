@@ -31,6 +31,17 @@ pub fn show_floating_window(app_handle: &AppHandle) -> tauri::Result<()> {
             let _ = window.set_ignore_cursor_events(true);
         }
 
+        // Применяем защиту от захвата ПОСЛЕ показа окна
+        #[cfg(windows)]
+        {
+            use crate::window::set_window_exclude_from_capture;
+            let exclude_from_capture = windows_manager.get_global_exclude_from_capture();
+            if let Ok(hwnd) = window.hwnd() {
+                eprintln!("[FLOATING] Applying exclude from capture: {}", exclude_from_capture);
+                let _ = set_window_exclude_from_capture(hwnd.0 as isize, exclude_from_capture);
+            }
+        }
+
         return Ok(());
     }
 
@@ -88,6 +99,18 @@ pub fn show_soundpanel_window(app_handle: &AppHandle) -> tauri::Result<()> {
         if sp_state.is_floating_clickthrough_enabled() {
             eprintln!("[SOUNDPANEL] Applying clickthrough mode");
             let _ = window.set_ignore_cursor_events(true);
+        }
+
+        // Применяем защиту от захвата ПОСЛЕ показа окна
+        #[cfg(windows)]
+        {
+            use crate::window::set_window_exclude_from_capture;
+            let windows_manager = app_handle.state::<WindowsManager>();
+            let exclude_from_capture = windows_manager.get_global_exclude_from_capture();
+            if let Ok(hwnd) = window.hwnd() {
+                eprintln!("[SOUNDPANEL] Applying exclude from capture: {}", exclude_from_capture);
+                let _ = set_window_exclude_from_capture(hwnd.0 as isize, exclude_from_capture);
+            }
         }
 
         return Ok(());

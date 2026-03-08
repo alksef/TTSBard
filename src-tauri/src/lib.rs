@@ -790,25 +790,9 @@ pub fn run() {
                         }
                     }
 
-                    // Apply to floating window
-                    if let Some(floating_window) = app.get_webview_window("floating") {
-                        if let Ok(hwnd) = floating_window.hwnd() {
-                            match set_window_exclude_from_capture(hwnd.0 as isize, exclude_from_capture) {
-                                Ok(_) => eprintln!("[APP] Floating window exclude from capture applied: {}", exclude_from_capture),
-                                Err(e) => eprintln!("[APP] Failed to apply exclude from capture to floating window: {}", e),
-                            }
-                        }
-                    }
-
-                    // Apply to soundpanel window
-                    if let Some(soundpanel_window) = app.get_webview_window("soundpanel") {
-                        if let Ok(hwnd) = soundpanel_window.hwnd() {
-                            match set_window_exclude_from_capture(hwnd.0 as isize, exclude_from_capture) {
-                                Ok(_) => eprintln!("[APP] SoundPanel window exclude from capture applied: {}", exclude_from_capture),
-                                Err(e) => eprintln!("[APP] Failed to apply exclude from capture to soundpanel window: {}", e),
-                            }
-                        }
-                    }
+                    // NOTE: Floating and SoundPanel windows are NOT protected here
+                    // because SetWindowDisplayAffinity on hidden windows breaks WebView2 rendering.
+                    // Protection is applied when windows are shown (in floating.rs).
                 }
             }
 
