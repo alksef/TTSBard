@@ -92,6 +92,21 @@ pub fn show_soundpanel_window(app_handle: &AppHandle) -> tauri::Result<()> {
 
     if let Some(window) = app_handle.get_webview_window("soundpanel") {
         eprintln!("[SOUNDPANEL] Window exists, showing");
+
+        // Применяем сохранённую позицию
+        let windows_manager = app_handle.state::<WindowsManager>();
+        let (saved_x, saved_y) = windows_manager.get_soundpanel_position();
+
+        if let Some(x) = saved_x {
+            if let Some(y) = saved_y {
+                eprintln!("[SOUNDPANEL] Applying saved position: {}, {}", x, y);
+                let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+                    x,
+                    y,
+                }));
+            }
+        }
+
         window.show()?;
 
         // Применяем clickthrough после показа
@@ -105,7 +120,6 @@ pub fn show_soundpanel_window(app_handle: &AppHandle) -> tauri::Result<()> {
         #[cfg(windows)]
         {
             use crate::window::set_window_exclude_from_capture;
-            let windows_manager = app_handle.state::<WindowsManager>();
             let exclude_from_capture = windows_manager.get_global_exclude_from_capture();
             if let Ok(hwnd) = window.hwnd() {
                 eprintln!("[SOUNDPANEL] Applying exclude from capture: {}", exclude_from_capture);
@@ -140,6 +154,15 @@ pub fn hide_soundpanel_window(app_handle: &AppHandle, app_state: &AppState) -> t
     app_state.set_active_window(crate::state::ActiveWindow::None);
 
     if let Some(window) = app_handle.get_webview_window("soundpanel") {
+        // Сохраняем текущую позицию перед скрытием
+        if let Some(manager) = app_handle.try_state::<WindowsManager>() {
+            if let Ok(outer_pos) = window.outer_position() {
+                let x = outer_pos.x;
+                let y = outer_pos.y;
+                eprintln!("[SOUNDPANEL] Saving position before hide: x={}, y={}", x, y);
+                let _ = manager.set_soundpanel_position(Some(x), Some(y));
+            }
+        }
         window.hide()?;
     }
     Ok(())
