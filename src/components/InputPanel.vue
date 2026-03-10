@@ -224,5 +224,6 @@ function handleSpace(event: KeyboardEvent) {
   font-size: 0.8rem;
   color: var(--color-text-secondary);
   opacity: 0.7;
+  text-align: center;
 }
 </style>
