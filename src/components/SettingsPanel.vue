@@ -105,7 +105,6 @@ onMounted(() => {
 .settings-panel {
   max-width: 900px;
   margin: 0 auto;
-  padding: 1rem 1.5rem 2rem;
 }
 
 .error-message {
@@ -119,11 +118,12 @@ onMounted(() => {
 }
 
 .settings-section {
-  background: rgba(255, 255, 255, 0.02);
+  margin-bottom: 2rem;
+  padding: 1.5rem;
+  background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
-  padding: 1.5rem;
-  margin-bottom: 1rem;
+  backdrop-filter: blur(8px);
 }
 
 .settings-section h2 {
