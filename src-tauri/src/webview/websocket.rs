@@ -18,7 +18,8 @@ lazy_static! {
 }
 
 /// Канал для broadcasting сообщений всем WebSocket клиентам
-pub type WsBroadcast = broadcast::Sender<String>;
+/// Использует Arc<String> для эффективного sharing между подписчиками
+pub type WsBroadcast = broadcast::Sender<Arc<String>>;
 
 /// Обработчик WebSocket_upgrade
 pub async fn websocket_handler(
@@ -45,7 +46,9 @@ async fn handle_socket(socket: WebSocket, broadcast_tx: WsBroadcast) {
     // Task для отправки сообщений клиенту
     let send_task = tokio::spawn(async move {
         while let Ok(msg) = rx.recv().await {
-            if sender.send(Message::Text(msg)).await.is_err() {
+            // Arc<String> нужно преобразовать в String для WebSocket сообщения
+            // Клонирование происходит здесь один раз на клиента, не на каждого подписчика
+            if sender.send(Message::Text(msg.as_ref().clone())).await.is_err() {
                 break;
             }
         }
@@ -64,11 +67,12 @@ pub fn create_broadcast_channel() -> WsBroadcast {
 }
 
 /// Отправляет текст всем подключённым клиентам
-/// Uses cached format string for efficiency
-pub fn broadcast_text(broadcast_tx: &WsBroadcast, text: String) {
+/// Uses cached format string for efficiency and Arc for reduced cloning
+pub fn broadcast_text(broadcast_tx: &WsBroadcast, text: &str) {
     // Use cached format string instead of creating new one each time
-    let json_text = TEXT_MESSAGE_FORMAT.replace("{}", &json_escape(&text));
-    let _ = broadcast_tx.send(json_text);
+    let json_text = TEXT_MESSAGE_FORMAT.replace("{}", &json_escape(text));
+    // Wrap in Arc for efficient sharing between multiple subscribers
+    let _ = broadcast_tx.send(Arc::new(json_text));
 }
 
 /// Escape JSON string special characters

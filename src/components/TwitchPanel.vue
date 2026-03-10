@@ -13,6 +13,25 @@ interface TwitchSettings {
 
 type TwitchStatus = 'Disconnected' | 'Connecting' | 'Connected' | 'Error'
 
+// Serialized Rust enum representation from backend
+interface RustEnumDisconnected {
+  Disconnected?: null
+}
+
+interface RustEnumConnecting {
+  Connecting?: null
+}
+
+interface RustEnumConnected {
+  Connected?: null
+}
+
+interface RustEnumError {
+  Error?: string | null
+}
+
+type RustTwitchStatus = RustEnumDisconnected | RustEnumConnecting | RustEnumConnected | RustEnumError | string
+
 const settings = ref<TwitchSettings>({
   enabled: false,
   username: '',
@@ -29,20 +48,42 @@ let unlisten: (() => void) | null = null
 // Вычисляемое свойство - подключен ли Twitch
 const isConnected = ref(false)
 
+// Type guards для Rust enum
+function isRustEnumDisconnected(obj: unknown): obj is RustEnumDisconnected {
+  return typeof obj === 'object' && obj !== null && 'Disconnected' in obj
+}
+
+function isRustEnumConnecting(obj: unknown): obj is RustEnumConnecting {
+  return typeof obj === 'object' && obj !== null && 'Connecting' in obj
+}
+
+function isRustEnumConnected(obj: unknown): obj is RustEnumConnected {
+  return typeof obj === 'object' && obj !== null && 'Connected' in obj
+}
+
+function isRustEnumError(obj: unknown): obj is RustEnumError {
+  return typeof obj === 'object' && obj !== null && 'Error' in obj
+}
+
 // Конвертация статуса из объекта Rust enum в строку TypeScript
-function convertStatusFromRust(status: any): TwitchStatus {
-  // Если пришла строка (старый формат), возвращаем как есть
+function convertStatusFromRust(status: RustTwitchStatus): TwitchStatus {
+  // Если пришла строка (старый формат), валидируем и возвращаем
   if (typeof status === 'string') {
-    return status as TwitchStatus
+    const validStatuses: TwitchStatus[] = ['Disconnected', 'Connecting', 'Connected', 'Error']
+    if (validStatuses.includes(status as TwitchStatus)) {
+      return status as TwitchStatus
+    }
+    // Некорректная строка - возвращаем дефолт
+    return 'Disconnected'
   }
 
-  // Если это объект (новый формат - сериализованный Rust enum)
-  if (status.Connected !== undefined) return 'Connected'
-  if (status.Connecting !== undefined) return 'Connecting'
-  if (status.Disconnected !== undefined) return 'Disconnected'
-  if (status.Error !== undefined) return 'Error'
+  // Type guards для объекта (новый формат - сериализованный Rust enum)
+  if (isRustEnumConnected(status)) return 'Connected'
+  if (isRustEnumConnecting(status)) return 'Connecting'
+  if (isRustEnumDisconnected(status)) return 'Disconnected'
+  if (isRustEnumError(status)) return 'Error'
 
-  // Fallback
+  // Fallback для неизвестного формата
   return 'Disconnected'
 }
 
@@ -59,7 +100,7 @@ function handleStatusChange(status: TwitchStatus) {
 // Обновить статус вручную
 async function refreshStatus() {
   try {
-    const status = await invoke<any>('get_twitch_status')
+    const status = await invoke<RustTwitchStatus>('get_twitch_status')
     handleStatusChange(convertStatusFromRust(status))
     showError('Статус обновлён')
   } catch (e) {
@@ -74,7 +115,7 @@ async function loadSettings() {
     settings.value = loaded
 
     // Запрашиваем текущий статус при загрузке
-    const status = await invoke<any>('get_twitch_status')
+    const status = await invoke<RustTwitchStatus>('get_twitch_status')
     handleStatusChange(convertStatusFromRust(status))
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : String(e)

@@ -5,6 +5,7 @@
 
 use crate::soundpanel::state::SoundPanelState;
 use crate::events::AppEvent;
+use std::sync::Arc;
 use std::thread::JoinHandle;
 
 #[cfg(target_os = "windows")]
@@ -20,8 +21,11 @@ const VK_ESCAPE: u32 = 0x1B;  // Escape
 const VK_A: u32 = 0x41;       // A
 const VK_Z: u32 = 0x5A;       // Z
 
+/// Safe storage for soundpanel hook state using OnceLock
+/// Windows keyboard hooks run on the same thread that created them,
+/// but we use OnceLock for Rust safety guarantees.
 #[cfg(target_os = "windows")]
-static mut SP_HOOK_STATE: Option<SoundPanelState> = None;
+static SP_HOOK_STATE: std::sync::OnceLock<Arc<SoundPanelState>> = std::sync::OnceLock::new();
 
 /// Low-level keyboard hook procedure для звуковой панели
 #[cfg(target_os = "windows")]
@@ -36,7 +40,8 @@ unsafe extern "system" fn soundpanel_keyboard_proc(
 
         match w_param.0 as u32 {
             WM_KEYDOWN | WM_SYSKEYDOWN => {
-                if let Some(ref state) = SP_HOOK_STATE {
+                // Безопасное получение состояния через OnceLock
+                if let Some(state) = SP_HOOK_STATE.get() {
                     // Работаем только когда включён режим звуковой панели
                     let enabled = state.is_interception_enabled();
                     if !enabled {
@@ -82,7 +87,7 @@ unsafe extern "system" fn soundpanel_keyboard_proc(
                         }
                     }
                 } else {
-                    eprintln!("[SOUNDPANEL HOOK] ERROR: SP_HOOK_STATE is None!");
+                    eprintln!("[SOUNDPANEL HOOK] ERROR: SP_HOOK_STATE not initialized!");
                 }
             }
             _ => {}
@@ -101,8 +106,13 @@ pub fn initialize_soundpanel_hook(state: SoundPanelState) -> JoinHandle<()> {
         {
             eprintln!("[SOUNDPANEL] Thread started, setting up hook...");
 
-            SP_HOOK_STATE = Some(state);
-            eprintln!("[SOUNDPANEL] SP_HOOK_STATE set");
+            // Безопасно сохраняем состояние в OnceLock
+            let state_arc = Arc::new(state);
+            if SP_HOOK_STATE.set(state_arc.clone()).is_err() {
+                eprintln!("[SOUNDPANEL] ERROR: SP_HOOK_STATE already initialized!");
+                return;
+            }
+            eprintln!("[SOUNDPANEL] SP_HOOK_STATE set safely");
 
             let module_handle = GetModuleHandleW(PCWSTR::null()).unwrap();
             eprintln!("[SOUNDPANEL] Got module handle");

@@ -445,12 +445,9 @@ pub fn run() {
                 })
                 .on_menu_event(|tray, event| {
                     eprintln!("[TRAY] Menu event: {:?}", event.id);
-                    match event.id.as_ref() {
-                        "quit" => {
-                            // Закрыть приложение корректно
-                            tray.app_handle().exit(0);
-                        }
-                        _ => {}
+                    if event.id.as_ref() == "quit" {
+                        // Закрыть приложение корректно
+                        tray.app_handle().exit(0);
                     }
                 })
                 .menu(&menu)
@@ -551,7 +548,7 @@ pub fn run() {
                                             match event {
                                                 AppEvent::TextSentToTts(text) => {
                                                     eprintln!("[WEBVIEW] 📤 Broadcasting to WebSocket clients: '{}...'", text.chars().take(50).collect::<String>());
-                                                    server.broadcast_text(text).await;
+                                                    server.broadcast_text(&text).await;
                                                 }
                                                 AppEvent::RestartWebViewServer => {
                                                     eprintln!("[WEBVIEW] ⚠ Restart event received, stopping server...");

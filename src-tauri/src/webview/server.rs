@@ -60,7 +60,7 @@ impl WebViewServer {
         Ok(())
     }
 
-    pub async fn broadcast_text(&self, text: String) {
+    pub async fn broadcast_text(&self, text: &str) {
         websocket::broadcast_text(&self.broadcast_tx, text);
     }
 }

@@ -2,6 +2,7 @@ use reqwest::Client;
 use serde::Serialize;
 use crate::tts::engine::TtsEngine;
 use crate::events::{AppEvent, EventSender};
+use crate::config::DEFAULT_TTS_TIMEOUT_SECS;
 use async_trait::async_trait;
 use std::time::{Duration, Instant};
 
@@ -29,7 +30,7 @@ impl OpenAiTts {
             voice: "alloy".to_string(),
             proxy_host: None,
             proxy_port: None,
-            timeout_secs: 30,
+            timeout_secs: DEFAULT_TTS_TIMEOUT_SECS,
             event_tx: None,
         }
     }
