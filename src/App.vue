@@ -11,6 +11,7 @@ import InfoPanel from './components/InfoPanel.vue'
 import WebViewPanel from './components/WebViewPanel.vue'
 import TwitchPanel from './components/TwitchPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
+import ErrorToasts from './components/ErrorToasts.vue'
 import { useTelegramAuth, TELEGRAM_AUTH_KEY } from './composables/useTelegramAuth'
 
 type Panel = 'info' | 'input' | 'tts' | 'floating' | 'soundpanel' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'settings'
@@ -53,6 +54,9 @@ onMounted(async () => {
       <TwitchPanel v-show="currentPanel === 'twitch'" />
       <SettingsPanel v-show="currentPanel === 'settings'" />
     </main>
+
+    <!-- Global error toasts -->
+    <ErrorToasts />
   </div>
 </template>
 

@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use crate::events::AppEvent;
+use crate::config::{DEFAULT_FLOATING_OPACITY, DEFAULT_FLOATING_BG_COLOR, MIN_FLOATING_OPACITY, MAX_FLOATING_OPACITY};
 
 /// Привязка звука к клавише
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,8 +55,8 @@ impl SoundPanelState {
             bindings: Arc::new(Mutex::new(HashMap::new())),
             event_sender: Arc::new(Mutex::new(None)),
             appdata_path: Arc::new(Mutex::new(appdata_path)),
-            floating_opacity: Arc::new(Mutex::new(90)),
-            floating_bg_color: Arc::new(Mutex::new("#2a2a2a".to_string())),
+            floating_opacity: Arc::new(Mutex::new(DEFAULT_FLOATING_OPACITY)),
+            floating_bg_color: Arc::new(Mutex::new(DEFAULT_FLOATING_BG_COLOR.to_string())),
             floating_clickthrough: Arc::new(Mutex::new(false)),
         }
     }
@@ -69,6 +70,8 @@ impl SoundPanelState {
     pub fn set_interception_enabled(&self, enabled: bool) {
         if let Ok(mut val) = self.interception_enabled.lock() {
             *val = enabled;
+        } else {
+            eprintln!("[SOUNDPANEL STATE] ERROR: Failed to lock interception_enabled");
         }
     }
 
@@ -83,6 +86,8 @@ impl SoundPanelState {
     pub fn add_binding(&self, binding: SoundBinding) {
         if let Ok(mut bindings) = self.bindings.lock() {
             bindings.insert(binding.key, binding.clone());
+        } else {
+            eprintln!("[SOUNDPANEL STATE] ERROR: Failed to lock bindings");
         }
     }
 
@@ -90,6 +95,8 @@ impl SoundPanelState {
     pub fn remove_binding(&self, key: char) {
         if let Ok(mut bindings) = self.bindings.lock() {
             bindings.remove(&key);
+        } else {
+            eprintln!("[SOUNDPANEL STATE] ERROR: Failed to lock bindings");
         }
     }
 
@@ -122,6 +129,8 @@ impl SoundPanelState {
     pub fn set_event_sender(&self, sender: Sender<AppEvent>) {
         if let Ok(mut es) = self.event_sender.lock() {
             *es = Some(sender);
+        } else {
+            eprintln!("[SOUNDPANEL STATE] ERROR: Failed to lock event_sender");
         }
     }
 
@@ -145,16 +154,20 @@ impl SoundPanelState {
 
     /// Получить прозрачность floating окна
     pub fn get_floating_opacity(&self) -> u8 {
-        self.floating_opacity.lock().map(|v| *v).unwrap_or(90)
+        self.floating_opacity.lock().map(|v| *v).unwrap_or(DEFAULT_FLOATING_OPACITY)
     }
 
     /// Установить прозрачность floating окна
     pub fn set_floating_opacity(&self, value: u8) {
         eprintln!("[SOUNDPANEL STATE] set_floating_opacity called with value={}", value);
         if let Ok(mut val) = self.floating_opacity.lock() {
-            *val = value.clamp(10, 100);
+            *val = value.clamp(MIN_FLOATING_OPACITY, MAX_FLOATING_OPACITY);
             eprintln!("[SOUNDPANEL STATE] Opacity updated to: {}", *val);
+        } else {
+            eprintln!("[SOUNDPANEL STATE] ERROR: Failed to lock floating_opacity");
+            return;
         }
+        // Emit event AFTER releasing the mutex to prevent potential deadlock
         eprintln!("[SOUNDPANEL STATE] Emitting SoundPanelAppearanceChanged event");
         self.emit_event(AppEvent::SoundPanelAppearanceChanged);
         eprintln!("[SOUNDPANEL STATE] Event emitted");
@@ -168,10 +181,15 @@ impl SoundPanelState {
     /// Установить цвет фона floating окна
     pub fn set_floating_bg_color(&self, color: String) {
         eprintln!("[SOUNDPANEL STATE] set_floating_bg_color called with color={}", color);
+        let color_clone = color.clone();
         if let Ok(mut val) = self.floating_bg_color.lock() {
-            *val = color.clone();
-            eprintln!("[SOUNDPANEL STATE] Color updated to: {}", color);
+            *val = color_clone.clone();
+            eprintln!("[SOUNDPANEL STATE] Color updated to: {}", color_clone);
+        } else {
+            eprintln!("[SOUNDPANEL STATE] ERROR: Failed to lock floating_bg_color");
+            return;
         }
+        // Emit event AFTER releasing the mutex to prevent potential deadlock
         eprintln!("[SOUNDPANEL STATE] Emitting SoundPanelAppearanceChanged event");
         self.emit_event(AppEvent::SoundPanelAppearanceChanged);
         eprintln!("[SOUNDPANEL STATE] Event emitted");
@@ -188,6 +206,8 @@ impl SoundPanelState {
         if let Ok(mut val) = self.floating_clickthrough.lock() {
             *val = enabled;
             eprintln!("[SOUNDPANEL STATE] Clickthrough updated to: {}", enabled);
+        } else {
+            eprintln!("[SOUNDPANEL STATE] ERROR: Failed to lock floating_clickthrough");
         }
     }
 }

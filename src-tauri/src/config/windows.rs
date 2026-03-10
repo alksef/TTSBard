@@ -44,39 +44,20 @@ pub struct SoundPanelWindowSettings {
 }
 
 /// Global settings that apply to all windows
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct GlobalSettings {
     #[serde(default)]
     pub exclude_from_capture: bool,
 }
 
-impl Default for GlobalSettings {
-    fn default() -> Self {
-        Self {
-            exclude_from_capture: false,
-        }
-    }
-}
-
 /// All window settings
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct WindowsSettings {
     #[serde(default)]
     pub global: GlobalSettings,
     pub main: WindowPosition,
     pub floating: FloatingWindowSettings,
     pub soundpanel: SoundPanelWindowSettings,
-}
-
-impl Default for WindowsSettings {
-    fn default() -> Self {
-        Self {
-            global: GlobalSettings::default(),
-            main: WindowPosition::default(),
-            floating: FloatingWindowSettings::default(),
-            soundpanel: SoundPanelWindowSettings::default(),
-        }
-    }
 }
 
 // Default functions
