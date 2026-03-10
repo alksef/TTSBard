@@ -5,6 +5,7 @@
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
+use std::thread::JoinHandle;
 use serde::{Deserialize, Serialize};
 use crate::events::AppEvent;
 use crate::config::{DEFAULT_FLOATING_OPACITY, DEFAULT_FLOATING_BG_COLOR, MIN_FLOATING_OPACITY, MAX_FLOATING_OPACITY};
@@ -45,6 +46,9 @@ pub struct SoundPanelState {
 
     /// Пропускает ли floating окно клики
     pub floating_clickthrough: Arc<Mutex<bool>>,
+
+    /// Активные воспроизведения звука (thread handles)
+    active_playbacks: Arc<Mutex<Vec<JoinHandle<()>>>>,
 }
 
 impl SoundPanelState {
@@ -58,6 +62,7 @@ impl SoundPanelState {
             floating_opacity: Arc::new(Mutex::new(DEFAULT_FLOATING_OPACITY)),
             floating_bg_color: Arc::new(Mutex::new(DEFAULT_FLOATING_BG_COLOR.to_string())),
             floating_clickthrough: Arc::new(Mutex::new(false)),
+            active_playbacks: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -119,10 +124,26 @@ impl SoundPanelState {
 
         eprintln!("[SOUNDPANEL] Playing sound: {} -> {}", binding.key, sound_path);
 
-        // Запустить воспроизведение в отдельном потоке
-        std::thread::spawn(move || {
+        // Запустить воспроизведение в отдельном потоке и отслеживать handle
+        let handle = std::thread::spawn(move || {
             super::audio::play_audio_file(&sound_path);
         });
+
+        // Сохранить handle и очистить завершённые потоки
+        if let Ok(mut playbacks) = self.active_playbacks.lock() {
+            playbacks.push(handle);
+            // Удаляем завершённые потоки для предотвращения утечки памяти
+            playbacks.retain(|h| !h.is_finished());
+        }
+    }
+
+    /// Остановить все активные воспроизведения звука
+    #[allow(dead_code)]
+    pub fn stop_all_sounds(&self) {
+        if let Ok(mut playbacks) = self.active_playbacks.lock() {
+            // Очищаем все handle - потоки завершатся самостоятельно
+            playbacks.drain(..);
+        }
     }
 
     /// Установить отправитель событий

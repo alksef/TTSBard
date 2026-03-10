@@ -1,6 +1,7 @@
 mod commands;
 mod audio;
 mod config;
+mod error;
 mod events;
 mod floating;
 mod hook;
@@ -252,7 +253,7 @@ pub fn run() {
                 TtsProviderType::OpenAi => {
                     if let Some(ref api_key) = settings.tts.openai.api_key {
                         // Store API key in AppState for get_openai_api_key command
-                        *app_state.openai_api_key.lock() = Some(api_key.clone());
+                        app_state.set_openai_api_key(Some(api_key.clone()));
                         eprintln!("[APP] OpenAI TTS initialized with API key");
                         app_state.init_openai_tts(api_key.clone());
                         app_state.set_openai_voice(settings.tts.openai.voice.clone());

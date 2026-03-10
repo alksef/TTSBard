@@ -1,6 +1,7 @@
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
+use std::collections::HashMap;
 use tokio::sync::broadcast;
 use crate::events::{AppEvent, InputLayout, TwitchEvent, TwitchEventSender};
 use crate::tts::{TtsProvider, TtsProviderType, openai::OpenAiTts, local::LocalTts, silero::SileroTts};
@@ -9,15 +10,10 @@ use crate::telegram::TelegramClient;
 use crate::webview::WebViewSettings;
 use crate::config::TwitchSettings;
 use tauri::{AppHandle, Manager};
+use cpal::traits::{HostTrait, DeviceTrait};
 
-/// Lock ordering hierarchy (to prevent deadlocks):
-/// 1. tts_providers
-/// 2. openai_api_key
-/// 3. event_sender
-/// 4. webview_event_sender
-/// 5. All other individual setting locks
-///
-/// IMPORTANT: Always acquire locks in this order to prevent deadlocks!
+/// NOTE: Lock ordering hierarchy is no longer needed with unified TtsConfig.
+/// The RwLock on tts_config provides efficient concurrent access.
 ///
 /// NOTE: Window settings (opacity, colors, etc.) are now stored in config/windows.json
 /// Audio settings are now stored in config/settings.json
@@ -33,6 +29,30 @@ pub enum ActiveWindow {
     Floating,
     /// SoundPanel окно (звуковая панель)
     SoundPanel,
+}
+
+/// Унифицированная конфигурация TTS
+#[derive(Clone, Debug)]
+pub struct TtsConfig {
+    pub provider_type: TtsProviderType,
+    pub openai_key: Option<String>,
+    pub openai_voice: String,
+    pub openai_proxy_host: Option<String>,
+    pub openai_proxy_port: Option<u16>,
+    pub local_url: String,
+}
+
+impl Default for TtsConfig {
+    fn default() -> Self {
+        Self {
+            provider_type: TtsProviderType::OpenAi,
+            openai_key: None,
+            openai_voice: "alloy".to_string(),
+            openai_proxy_host: None,
+            openai_proxy_port: None,
+            local_url: "http://127.0.0.1:8124".to_string(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -55,23 +75,11 @@ pub struct AppState {
     /// Текущая раскладка (EN/RU)
     pub current_layout: Arc<Mutex<InputLayout>>,
 
-    /// Тип TTS провайдера
-    pub tts_provider_type: Arc<Mutex<TtsProviderType>>,
+    /// Унифицированная конфигурация TTS ( RwLock для эффективного чтения)
+    pub tts_config: Arc<RwLock<TtsConfig>>,
 
     /// TTS провайдеры
     pub tts_providers: Arc<Mutex<Option<TtsProvider>>>,
-
-    /// API ключ OpenAI
-    pub openai_api_key: Arc<Mutex<Option<String>>>,
-
-    /// Голос для OpenAI TTS
-    pub openai_voice: Arc<Mutex<String>>,
-
-    /// Прокси хост для OpenAI
-    pub openai_proxy_host: Arc<Mutex<Option<String>>>,
-
-    /// Прокси порт для OpenAI
-    pub openai_proxy_port: Arc<Mutex<Option<u16>>>,
 
     /// Cached preprocessor for live replacement
     pub preprocessor: Arc<Mutex<Option<TextPreprocessor>>>,
@@ -94,8 +102,8 @@ pub struct AppState {
     /// Sender для Twitch событий
     pub twitch_event_tx: TwitchEventSender,
 
-    /// URL для Local TTS (TTSVoiceWizard - Locally Hosted)
-    pub local_tts_url: Arc<Mutex<String>>,
+    /// Кэшированные аудио устройства (device_id -> Device)
+    pub cached_devices: Arc<RwLock<HashMap<String, cpal::Device>>>,
 }
 
 impl AppState {
@@ -109,12 +117,8 @@ impl AppState {
             hotkey_enabled: Arc::new(Mutex::new(true)), // default true
             current_text: Arc::new(Mutex::new(String::new())),
             current_layout: Arc::new(Mutex::new(InputLayout::Russian)),
-            tts_provider_type: Arc::new(Mutex::new(TtsProviderType::OpenAi)),
+            tts_config: Arc::new(RwLock::new(TtsConfig::default())),
             tts_providers: Arc::new(Mutex::new(None)),
-            openai_api_key: Arc::new(Mutex::new(None)),
-            openai_voice: Arc::new(Mutex::new("alloy".to_string())),
-            openai_proxy_host: Arc::new(Mutex::new(None)),
-            openai_proxy_port: Arc::new(Mutex::new(None)),
             preprocessor: Arc::new(Mutex::new(None)),
             enter_closes_disabled: Arc::new(Mutex::new(false)),
             active_window: Arc::new(Mutex::new(ActiveWindow::None)),
@@ -122,7 +126,7 @@ impl AppState {
             twitch_settings: Arc::new(tokio::sync::RwLock::new(TwitchSettings::default())),
             twitch_connection_status: Arc::new(Mutex::new(crate::events::TwitchConnectionStatus::Disconnected)),
             twitch_event_tx,
-            local_tts_url: Arc::new(Mutex::new("http://127.0.0.1:8124".to_string())),
+            cached_devices: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -190,7 +194,6 @@ impl AppState {
         self.current_text.lock().clone()
     }
 
-    #[allow(dead_code)]
     pub fn set_current_text(&self, text: String) {
         *self.current_text.lock() = text;
     }
@@ -225,20 +228,30 @@ impl AppState {
     }
 
     pub fn get_tts_provider_type(&self) -> TtsProviderType {
-        *self.tts_provider_type.lock()
+        self.tts_config.read().provider_type
     }
 
     pub fn set_tts_provider_type(&self, provider: TtsProviderType) {
-        *self.tts_provider_type.lock() = provider;
+        self.tts_config.write().provider_type = provider;
         self.emit_event(AppEvent::TtsProviderChanged(provider));
+    }
+
+    pub fn get_openai_api_key(&self) -> Option<String> {
+        self.tts_config.read().openai_key.clone()
+    }
+
+    pub fn set_openai_api_key(&self, key: Option<String>) {
+        self.tts_config.write().openai_key = key;
     }
 
     pub fn init_openai_tts(&self, api_key: String) {
         eprintln!("[STATE] init_openai_tts called with key: {}...", &api_key[..7]);
         let mut tts = OpenAiTts::new(api_key);
-        let voice = self.get_openai_voice();
+        let config = self.tts_config.read();
+        let voice = config.openai_voice.clone();
         tts.set_voice(voice.clone());
-        tts.set_proxy(self.get_openai_proxy_host(), self.get_openai_proxy_port());
+        tts.set_proxy(config.openai_proxy_host.clone(), config.openai_proxy_port);
+        drop(config);
 
         // Add event sender if available
         if let Some(event_tx) = self.get_event_sender() {
@@ -288,25 +301,32 @@ impl AppState {
         eprintln!("[STATE] TTS provider set to Silero");
     }
 
+    #[allow(dead_code)]
     pub fn get_openai_voice(&self) -> String {
-        self.openai_voice.lock().clone()
+        self.tts_config.read().openai_voice.clone()
     }
 
-    /// Set OpenAI voice with deadlock prevention using phased locking
+    /// Set OpenAI voice (simplified with unified TtsConfig)
     pub fn set_openai_voice(&self, voice: String) {
-        // Phase 1: Collect all needed data with minimal locks (in hierarchy order)
-        let (api_key, event_tx, current_provider) = {
-            let api_key = self.openai_api_key.lock().clone();
+        // Read current config
+        let (api_key, proxy_host, proxy_port, event_tx, current_provider) = {
+            let config = self.tts_config.read();
             let event_tx = self.get_event_sender();
             let provider = self.tts_providers.lock().clone();
-            (api_key, event_tx, provider)
+            (
+                config.openai_key.clone(),
+                config.openai_proxy_host.clone(),
+                config.openai_proxy_port,
+                event_tx,
+                provider
+            )
         };
 
-        // Phase 2: Reinitialize if needed
+        // Reinitialize if needed
         if let Some(key) = api_key {
             let mut tts = OpenAiTts::new(key);
             tts.set_voice(voice.clone());
-            tts.set_proxy(self.get_openai_proxy_host(), self.get_openai_proxy_port());
+            tts.set_proxy(proxy_host, proxy_port);
 
             if let Some(tx) = event_tx {
                 tts = tts.with_event_tx(tx);
@@ -317,30 +337,36 @@ impl AppState {
             }
         }
 
-        // Phase 3: Update voice setting (move instead of clone)
-        *self.openai_voice.lock() = voice;
+        // Update voice setting
+        self.tts_config.write().openai_voice = voice;
     }
 
+    #[allow(dead_code)]
     pub fn get_openai_proxy_host(&self) -> Option<String> {
-        self.openai_proxy_host.lock().clone()
+        self.tts_config.read().openai_proxy_host.clone()
     }
 
+    #[allow(dead_code)]
     pub fn get_openai_proxy_port(&self) -> Option<u16> {
-        *self.openai_proxy_port.lock()
+        self.tts_config.read().openai_proxy_port
     }
 
-    /// Set OpenAI proxy with deadlock prevention using phased locking
+    /// Set OpenAI proxy (simplified with unified TtsConfig)
     pub fn set_openai_proxy(&self, host: Option<String>, port: Option<u16>) {
-        // Phase 1: Collect all needed data with minimal locks (in hierarchy order)
+        // Read current config
         let (api_key, voice, event_tx, current_provider) = {
-            let api_key = self.openai_api_key.lock().clone();
-            let voice = self.openai_voice.lock().clone();
+            let config = self.tts_config.read();
             let event_tx = self.get_event_sender();
             let provider = self.tts_providers.lock().clone();
-            (api_key, voice, event_tx, provider)
+            (
+                config.openai_key.clone(),
+                config.openai_voice.clone(),
+                event_tx,
+                provider
+            )
         };
 
-        // Phase 2: Reinitialize if needed
+        // Reinitialize if needed
         if let Some(key) = api_key {
             let mut tts = OpenAiTts::new(key);
             tts.set_voice(voice.clone());
@@ -355,17 +381,18 @@ impl AppState {
             }
         }
 
-        // Phase 3: Update proxy settings
-        *self.openai_proxy_host.lock() = host;
-        *self.openai_proxy_port.lock() = port;
+        // Update proxy settings
+        let mut config = self.tts_config.write();
+        config.openai_proxy_host = host;
+        config.openai_proxy_port = port;
     }
 
     pub fn get_local_tts_url(&self) -> String {
-        self.local_tts_url.lock().clone()
+        self.tts_config.read().local_url.clone()
     }
 
     pub fn set_local_tts_url(&self, url: String) {
-        *self.local_tts_url.lock() = url;
+        self.tts_config.write().local_url = url;
     }
 
     /// Get or create preprocessor instance
@@ -450,6 +477,25 @@ impl AppState {
     /// Отправить событие Twitch
     pub fn send_twitch_event(&self, event: TwitchEvent) {
         let _ = self.twitch_event_tx.send(event);
+    }
+
+    /// Refresh the cached audio devices list
+    #[allow(dead_code)]
+    pub fn refresh_devices(&self) -> Result<(), String> {
+        let host = cpal::default_host();
+        let mut cache = self.cached_devices.write();
+        cache.clear();
+
+        for (index, device) in host.output_devices()
+            .map_err(|e| format!("Failed to get devices: {}", e))?
+            .enumerate()
+        {
+            // Use device index as key (matches the device_id format used by play_to_device)
+            let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+            eprintln!("[STATE] Caching device {}: {}", index, device_name);
+            cache.insert(index.to_string(), device);
+        }
+        Ok(())
     }
 }
 
