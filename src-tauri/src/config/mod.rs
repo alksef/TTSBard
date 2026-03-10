@@ -8,6 +8,6 @@ mod validation;
 mod windows;
 
 pub use constants::*;
-pub use settings::{SettingsManager, AudioSettings, TwitchSettings};
+pub use settings::{SettingsManager, AudioSettings, AppSettings, TwitchSettings};
 pub use validation::is_valid_hex_color;
-pub use windows::WindowsManager;
+pub use windows::{WindowsManager, WindowsSettings};
