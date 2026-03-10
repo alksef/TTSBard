@@ -415,7 +415,7 @@ impl SettingsManager {
 
         // API ключ OpenAI
         eprintln!("[SETTINGS] OpenAI API Key: {}", settings.openai_api_key.as_ref().map(|k| format!("{}...", &k[..7])).unwrap_or("None".to_string()));
-        *state.openai_api_key.lock() = settings.openai_api_key.clone();
+        state.set_openai_api_key(settings.openai_api_key.clone());
 
         // Голос OpenAI
         eprintln!("[SETTINGS] OpenAI Voice: {}", settings.openai_voice);

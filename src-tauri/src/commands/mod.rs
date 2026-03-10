@@ -126,9 +126,10 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
         return Err("Аудиовывод и виртуальный микрофон выключены. Включите хотя бы один вывод.".to_string());
     }
 
-    // Play audio with dual output support
+    // Play audio with dual output support (use cached devices if available)
     let mut player = AudioPlayer::new();
-    player.play_mp3_async_dual(audio_data, speaker_config, virtual_mic_config)?;
+    let cached_devices = Some(state.cached_devices.clone());
+    player.play_mp3_async_dual(audio_data, speaker_config, virtual_mic_config, cached_devices)?;
 
     eprintln!("[SPEAK_INTERNAL] TTS completed successfully");
 
@@ -166,7 +167,7 @@ pub async fn set_tts_provider(
         TtsProviderType::OpenAi => {
             eprintln!("[SET_PROVIDER] Initializing OpenAI TTS");
             // Get saved API key and initialize if available
-            let api_key = state.openai_api_key.lock().clone();
+            let api_key = state.get_openai_api_key();
             if let Some(key) = api_key {
                 state.init_openai_tts(key);
                 eprintln!("[SET_PROVIDER] OpenAI TTS initialized");
@@ -285,7 +286,7 @@ pub fn set_local_tts_url(
 /// Get OpenAI API key
 #[tauri::command]
 pub fn get_openai_api_key(state: State<'_, AppState>) -> Option<String> {
-    state.openai_api_key.lock().clone()
+    state.get_openai_api_key()
 }
 
 /// Set OpenAI API key
@@ -300,7 +301,7 @@ pub fn set_openai_api_key(
         return Err("Неверный формат API ключа OpenAI".into());
     }
 
-    *state.openai_api_key.lock() = Some(key.clone());
+    state.set_openai_api_key(Some(key.clone()));
     state.init_openai_tts(key.clone());
 
     // Save to config
@@ -699,7 +700,7 @@ pub fn get_global_exclude_from_capture(
 
 #[tauri::command]
 pub fn has_api_key(state: State<'_, AppState>) -> bool {
-    state.openai_api_key.lock().is_some()
+    state.get_openai_api_key().is_some()
 }
 
 // ============================================================================

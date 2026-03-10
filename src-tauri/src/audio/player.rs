@@ -9,6 +9,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+use parking_lot::RwLock;
+use std::collections::HashMap;
 
 /// Конфигурация вывода звука
 #[derive(Clone, Debug)]
@@ -31,11 +33,13 @@ impl AudioPlayer {
 
     /// Воспроизвести MP3 данные асинхронно на одно или два устройства
     /// Uses Arc to share audio data efficiently between multiple outputs
+    /// cached_devices: Optional cache of audio devices to avoid enumeration
     pub fn play_mp3_async_dual(
         &mut self,
         mp3_data: Vec<u8>,
         speaker_config: Option<OutputConfig>,
         virtual_mic_config: Option<OutputConfig>,
+        cached_devices: Option<Arc<RwLock<HashMap<String, cpal::Device>>>>,
     ) -> Result<(), String> {
         // Сбрасываем флаг остановки
         self.stop_flag.store(false, Ordering::SeqCst);
@@ -60,10 +64,11 @@ impl AudioPlayer {
         if let Some(config) = speaker_config {
             let stop_flag = self.stop_flag.clone();
             let data = Arc::clone(&shared_data);  // Cheap Arc clone, not Vec clone
+            let devices_cache = cached_devices.clone();
 
             thread::spawn(move || {
                 eprintln!("[AUDIO_PLAYER] Speaker thread started");
-                if let Err(e) = Self::play_to_device(stop_flag, data, config, "Speaker") {
+                if let Err(e) = Self::play_to_device(stop_flag, data, config, "Speaker", devices_cache) {
                     eprintln!("[AUDIO_PLAYER] Speaker playback error: {}", e);
                 }
                 eprintln!("[AUDIO_PLAYER] Speaker thread finished");
@@ -74,10 +79,11 @@ impl AudioPlayer {
         if let Some(config) = virtual_mic_config {
             let stop_flag = self.stop_flag.clone();
             let data = Arc::clone(&shared_data);  // Cheap Arc clone, not Vec clone
+            let devices_cache = cached_devices.clone();
 
             thread::spawn(move || {
                 eprintln!("[AUDIO_PLAYER] Virtual mic thread started");
-                if let Err(e) = Self::play_to_device(stop_flag, data, config, "Virtual Mic") {
+                if let Err(e) = Self::play_to_device(stop_flag, data, config, "Virtual Mic", devices_cache) {
                     eprintln!("[AUDIO_PLAYER] Virtual mic playback error: {}", e);
                 }
                 eprintln!("[AUDIO_PLAYER] Virtual mic thread finished");
@@ -93,23 +99,45 @@ impl AudioPlayer {
         mp3_data: Arc<Vec<u8>>,  // Use Arc instead of Vec for efficiency
         config: OutputConfig,
         device_label: &str,
+        cached_devices: Option<Arc<RwLock<HashMap<String, cpal::Device>>>>,
     ) -> Result<(), String> {
         // Получаем устройство
-        let host = cpal::default_host();
-        let device = if let Some(device_id) = config.device_id {
-            // Ищем устройство по индексу
-            let devices = host.output_devices()
-                .map_err(|e| format!("Failed to get output devices: {}", e))?;
-
-            let index: usize = device_id.parse()
-                .map_err(|_| format!("Invalid device ID: {}", device_id))?;
-
-            devices
-                .into_iter()
-                .nth(index)
-                .ok_or_else(|| format!("Device not found: {}", device_id))?
+        let device = if let Some(device_id) = &config.device_id {
+            // Try to use cached devices first
+            if let Some(cache) = cached_devices {
+                let cached = cache.read();
+                if let Some(device) = cached.get(device_id) {
+                    eprintln!("[AUDIO_PLAYER] {} using cached device: {}", device_label,
+                        device.name().unwrap_or_else(|_| "Unknown".to_string()));
+                    let device_clone = device.clone();
+                    drop(cached);
+                    device_clone
+                } else {
+                    drop(cached);
+                    // Fallback to enumeration if device not in cache
+                    let host = cpal::default_host();
+                    let devices = host.output_devices()
+                        .map_err(|e| format!("Failed to get output devices: {}", e))?;
+                    let index: usize = device_id.parse()
+                        .map_err(|_| format!("Invalid device ID: {}", device_id))?;
+                    devices.into_iter()
+                        .nth(index)
+                        .ok_or_else(|| format!("Device not found: {}", device_id))?
+                }
+            } else {
+                // No cache, enumerate devices
+                let host = cpal::default_host();
+                let devices = host.output_devices()
+                    .map_err(|e| format!("Failed to get output devices: {}", e))?;
+                let index: usize = device_id.parse()
+                    .map_err(|_| format!("Invalid device ID: {}", device_id))?;
+                devices.into_iter()
+                    .nth(index)
+                    .ok_or_else(|| format!("Device not found: {}", device_id))?
+            }
         } else {
             // Устройство по умолчанию
+            let host = cpal::default_host();
             host.default_output_device()
                 .ok_or_else(|| "No default output device".to_string())?
         };
@@ -121,8 +149,9 @@ impl AudioPlayer {
         let (_stream, stream_handle) = rodio::OutputStream::try_from_device(&device)
             .map_err(|e| format!("Failed to create output stream: {}", e))?;
 
-        // Декодируем MP3 из байтов (Arc::into_inner is not needed here as Cursor can take Arc<Vec<u8>>)
-        let cursor = Cursor::new((*mp3_data).clone());  // Dereference Arc to get &Vec<u8>
+        // Декодируем MP3 из байтов (Note: Clone is necessary here because Cursor takes ownership
+        // and rodio::Decoder requires 'static. Arc sharing between threads happens before this point.)
+        let cursor = Cursor::new((*mp3_data).clone());  // One-time clone per thread
         let source = rodio::Decoder::new(cursor)
             .map_err(|e| format!("Failed to decode audio: {}", e))?;
 

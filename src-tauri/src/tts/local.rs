@@ -9,7 +9,6 @@ use std::time::{Duration, Instant};
 #[derive(Clone, Debug)]
 pub struct LocalTts {
     server_url: String,
-    configured: bool,
     event_tx: Option<EventSender>,
     timeout_secs: u64,
 }
@@ -18,7 +17,6 @@ impl LocalTts {
     pub fn new() -> Self {
         Self {
             server_url: "http://127.0.0.1:8124".to_string(),
-            configured: true, // Local TTS is always available
             event_tx: None,
             timeout_secs: 30,
         }
@@ -140,7 +138,7 @@ impl TtsEngine for LocalTts {
     }
 
     fn is_configured(&self) -> bool {
-        self.configured
+        true // Local TTS is always available (no API key needed)
     }
 
     fn name(&self) -> &str {

@@ -18,7 +18,6 @@ pub enum TtsProviderType {
 
 
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub enum TtsProvider {
     OpenAi(openai::OpenAiTts),
     Silero(silero::SileroTts),
