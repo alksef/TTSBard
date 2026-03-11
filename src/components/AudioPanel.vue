@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import { RefreshCw, Loader, Volume2, VolumeX, Mic, Info } from 'lucide-vue-next';
 
 interface DeviceInfo {
   id: string;
@@ -168,19 +169,6 @@ onMounted(async () => {
 
 <template>
   <div class="audio-panel">
-    <div class="panel-header">
-      <button
-        @click="refreshData"
-        :disabled="isRefreshing"
-        class="refresh-btn"
-        :class="{ refreshing: isRefreshing }"
-        title="Обновить список устройств"
-      >
-        <span v-if="!isRefreshing">🔄</span>
-        <span v-else class="spinner">⏳</span>
-      </button>
-    </div>
-
     <div v-if="errorMessage" class="error-box">
       {{ errorMessage }}
       <button @click="errorMessage = ''" class="close-btn">×</button>
@@ -194,28 +182,28 @@ onMounted(async () => {
       <!-- Speaker Section -->
       <div class="setting-section">
         <div class="section-header">
-          <span class="section-icon">🔊</span>
-          <span class="section-title">Speaker</span>
+          <Volume2 class="section-icon" :size="20" />
+          <span class="section-title">Динамик</span>
           <div class="toggle-buttons">
             <button
               @click="setSpeakerEnabled(true)"
               :class="{ active: audioSettings.speaker_enabled }"
               class="toggle-btn"
             >
-              🔊 Вкл
+              <Volume2 :size="14" /> Вкл
             </button>
             <button
               @click="setSpeakerEnabled(false)"
               :class="{ active: !audioSettings.speaker_enabled }"
               class="toggle-btn"
             >
-              🔇 Выкл
+              <VolumeX :size="14" /> Выкл
             </button>
           </div>
         </div>
 
         <div class="setting-row" :class="{ disabled: !audioSettings.speaker_enabled }">
-          <label>Device</label>
+          <label>Устройство</label>
           <select
             :disabled="!audioSettings.speaker_enabled"
             @change="setSpeakerDevice(($event.target as HTMLSelectElement).value || null)"
@@ -233,7 +221,7 @@ onMounted(async () => {
         </div>
 
         <div class="setting-row" :class="{ disabled: !audioSettings.speaker_enabled }">
-          <label>Volume</label>
+          <label>Громкость</label>
           <div class="volume-control">
             <input
               type="range"
@@ -251,28 +239,28 @@ onMounted(async () => {
       <!-- Virtual Mic Section -->
       <div class="setting-section">
         <div class="section-header">
-          <span class="section-icon">🎤</span>
-          <span class="section-title">Virtual Mic</span>
+          <Mic class="section-icon" :size="20" />
+          <span class="section-title">Виртуальный микрофон</span>
           <div class="toggle-buttons">
             <button
               @click="enableVirtualMic()"
               :class="{ active: !!audioSettings.virtual_mic_device }"
               class="toggle-btn"
             >
-              🎤 Вкл
+              <Mic :size="14" /> Вкл
             </button>
             <button
               @click="disableVirtualMic()"
               :class="{ active: !audioSettings.virtual_mic_device }"
               class="toggle-btn"
             >
-              🎤 Выкл
+              <Mic :size="14" /> Выкл
             </button>
           </div>
         </div>
 
         <div class="setting-row" :class="{ disabled: !audioSettings.virtual_mic_device }">
-          <label>Device</label>
+          <label>Устройство</label>
           <select
             :disabled="!audioSettings.virtual_mic_device"
             @change="setVirtualMicDevice(($event.target as HTMLSelectElement).value || null)"
@@ -290,7 +278,7 @@ onMounted(async () => {
         </div>
 
         <div class="setting-row" :class="{ disabled: !audioSettings.virtual_mic_device }">
-          <label>Volume</label>
+          <label>Громкость</label>
           <div class="volume-control">
             <input
               type="range"
@@ -305,9 +293,22 @@ onMounted(async () => {
         </div>
 
         <div v-if="virtualMicDevices.length === 0" class="info-box">
-          ℹ️ Virtual audio devices not found. Install VB-Cable or VoiceMeeter to use virtual mic.
+          <Info :size="16" /> Virtual audio devices not found. Install VB-Cable or VoiceMeeter to use virtual mic.
         </div>
       </div>
+    </div>
+
+    <div class="panel-footer">
+      <button
+        @click="refreshData"
+        :disabled="isRefreshing"
+        class="refresh-btn"
+        :class="{ refreshing: isRefreshing }"
+        title="Обновить список устройств"
+      >
+        <RefreshCw v-if="!isRefreshing" :size="18" />
+        <Loader v-else :size="18" class="spinner" />
+      </button>
     </div>
   </div>
 </template>
@@ -318,11 +319,10 @@ onMounted(async () => {
   margin: 0 auto;
 }
 
-.panel-header {
+.panel-footer {
   display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  margin-bottom: 1rem;
+  justify-content: center;
+  margin-top: 1.5rem;
 }
 
 .refresh-btn {
@@ -411,13 +411,15 @@ onMounted(async () => {
 }
 
 .section-icon {
-  font-size: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .section-title {
   flex: 1;
   font-weight: 600;
-  font-size: 16px;
+  font-size: 1.1rem;
   color: var(--color-text-primary);
 }
 
@@ -435,6 +437,9 @@ onMounted(async () => {
   cursor: pointer;
   font-size: 12px;
   transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .toggle-btn:hover {
@@ -460,7 +465,7 @@ onMounted(async () => {
 }
 
 .setting-row label {
-  min-width: 80px;
+  min-width: 100px;
   font-size: 14px;
   color: var(--color-text-secondary);
   font-weight: 500;
@@ -521,6 +526,9 @@ onMounted(async () => {
   margin-top: 12px;
   font-size: 13px;
   color: var(--color-info);
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .setting-row select:focus {

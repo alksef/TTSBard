@@ -159,10 +159,6 @@ pub fn run() {
             commands::twitch::connect_twitch,
             commands::twitch::disconnect_twitch,
             commands::twitch::get_twitch_status,
-            commands::twitch::get_twitch_enabled,
-            commands::twitch::get_twitch_username,
-            commands::twitch::get_twitch_channel,
-            commands::twitch::get_twitch_start_on_boot,
         ])
         .setup(|app| setup::init_app(app))
         .on_window_event(|window, event| {

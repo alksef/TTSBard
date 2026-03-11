@@ -22,10 +22,10 @@ fn sanitize_irc_text(text: &str) -> String {
         .replace('\r', "")
         .replace('\n', " ");
 
-    // Remove null bytes and other control characters except space
+    // Remove control characters but allow Unicode text (including Cyrillic)
     let clean: String = clean
         .chars()
-        .filter(|c| c.is_ascii_graphic() || *c == ' ')
+        .filter(|c| !c.is_control() || *c == ' ' || *c == '\t')
         .collect();
 
     // Trim and limit to 500 chars BEFORE trimming
@@ -70,6 +70,23 @@ mod tests {
         // Control characters
         let result = sanitize_irc_text("Test\x01\x02Text");
         assert_eq!(result, "TestText");
+    }
+
+    #[test]
+    fn test_irc_unicode_support() {
+        // Unicode / Cyrillic support
+        let result = sanitize_irc_text("тест");
+        assert_eq!(result, "тест");
+        assert!(!result.is_empty());
+
+        let result2 = sanitize_irc_text("Hello тест 世界");
+        assert_eq!(result2, "Hello тест 世界");
+
+        // Mixed with control characters
+        let result3 = sanitize_irc_text("тест\r\nпривет");
+        assert_eq!(result3, "тест привет");
+        assert!(!result3.contains('\r'));
+        assert!(!result3.contains('\n'));
     }
 }
 

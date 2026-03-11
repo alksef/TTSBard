@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
+import { Trash2, Plus, Folder, Play } from 'lucide-vue-next'
 import type { SoundBinding } from '../types'
 
 const bindings = ref<SoundBinding[]>([])
@@ -231,13 +232,6 @@ onMounted(async () => {
       </p>
     </section>
 
-    <!-- Кнопка добавления -->
-    <section class="actions-section">
-      <button @click="showAddDialog = true" class="add-button">
-        + Добавить звук
-      </button>
-    </section>
-
     <!-- Загрузка -->
     <div v-if="isLoading" class="loading-state">
       Загрузка привязок...
@@ -267,7 +261,7 @@ onMounted(async () => {
                 class="remove-button"
                 title="Удалить"
               >
-                🗑️ Удалить
+                <Trash2 :size="14" />
               </button>
             </td>
           </tr>
@@ -279,8 +273,11 @@ onMounted(async () => {
         </tbody>
       </table>
 
-      <div v-if="bindings.length > 0" class="stats">
-        Всего привязок: {{ bindings.length }} / 26
+      <div v-if="bindings.length > 0" class="stats-with-add">
+        <button @click="showAddDialog = true" class="add-button-inline" title="Добавить звук">
+          <Plus :size="16" />
+        </button>
+        <span class="stats">Всего привязок: {{ bindings.length }} / 26</span>
       </div>
     </section>
 
@@ -378,7 +375,7 @@ onMounted(async () => {
               class="browse-button"
               type="button"
             >
-              📁 Обзор...
+              <Folder :size="16" /> Обзор...
             </button>
             <button
               v-if="newFilePath"
@@ -388,7 +385,7 @@ onMounted(async () => {
               :class="{ testing: isTesting }"
               type="button"
             >
-              {{ isTesting ? '▶ Воспроизведение...' : '▶ Тест' }}
+              <Play :size="14" /> {{ isTesting ? 'Воспроизведение...' : 'Тест' }}
             </button>
           </div>
           <p class="form-hint">
@@ -451,7 +448,7 @@ onMounted(async () => {
 }
 
 .info-section {
-  padding: 1.2rem 1.35rem;
+  padding: 12px 16px;
   margin-bottom: 1.5rem;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -484,15 +481,18 @@ onMounted(async () => {
 }
 
 .add-button {
-  padding: 0.75rem 1.5rem;
+  padding: 0.6rem;
   background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
   color: white;
   border: none;
   border-radius: 10px;
   cursor: pointer;
-  font-size: 1rem;
-  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   transition: background 0.2s;
+  width: 40px;
+  height: 40px;
 }
 
 .add-button:hover {
@@ -533,6 +533,10 @@ onMounted(async () => {
   color: var(--color-text-secondary);
 }
 
+.bindings-table td:last-child {
+  text-align: center;
+}
+
 .bindings-table tr:hover {
   background: rgba(255, 255, 255, 0.03);
 }
@@ -568,17 +572,50 @@ onMounted(async () => {
   color: var(--color-text-secondary);
   font-size: 0.9rem;
   padding: 0.5rem;
+  margin-left: auto;
 }
 
-.remove-button {
-  padding: 0.4rem 0.8rem;
-  background: rgba(255, 111, 105, 0.16);
+.stats-with-add {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 1rem;
+  padding: 0.5rem;
+}
+
+.add-button-inline {
+  padding: 0;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
   color: white;
   border: none;
   border-radius: 10px;
   cursor: pointer;
-  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   transition: background 0.2s;
+  width: 36px;
+  height: 36px;
+}
+
+.add-button-inline:hover {
+  filter: brightness(1.06);
+}
+
+.remove-button {
+  margin: 0;
+  padding: 0;
+  background: rgba(255, 111, 105, 0.16);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+  width: 32px;
+  height: 32px;
 }
 
 .remove-button:hover {
@@ -661,6 +698,9 @@ onMounted(async () => {
   border-radius: 10px;
   cursor: pointer;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .browse-button:hover {
@@ -676,6 +716,9 @@ onMounted(async () => {
   cursor: pointer;
   white-space: nowrap;
   transition: background 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .test-button:hover:not(:disabled) {
@@ -746,7 +789,7 @@ onMounted(async () => {
 
 /* Appearance section */
 .appearance-section {
-  padding: 1.5rem;
+  padding: 12px 16px;
   margin-top: 1.5rem;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -756,8 +799,8 @@ onMounted(async () => {
 
 .appearance-section h2 {
   margin-top: 0;
-  margin-bottom: 1.5rem;
-  font-size: 1.25rem;
+  margin-bottom: 1rem;
+  font-size: 1.1rem;
   color: var(--color-text-primary);
 }
 

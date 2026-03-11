@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Globe, Zap, Music, Lightbulb } from 'lucide-vue-next';
 // Info panel - static content with hotkeys and presets documentation
 </script>
 
@@ -6,7 +7,7 @@
   <div class="info-panel">
     <!-- Глобальные горячие клавиши -->
     <section class="info-section">
-      <h2>🌐 Глобальные горячие клавиши</h2>
+      <h2><Globe :size="18" class="section-icon" /> Глобальные горячие клавиши</h2>
       <div class="hotkey-list">
         <div class="hotkey-item">
           <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F1</kbd>
@@ -25,7 +26,7 @@
 
     <!-- Перехват текста -->
     <section class="info-section">
-      <h2>⚡ Режим перехвата текста</h2>
+      <h2><Zap :size="18" class="section-icon" /> Режим перехвата текста</h2>
       <p class="section-description">
         Режим перехвата позволяет перехватывать ввод с клавиатуры в реальном времени
         и отправлять текст в TTS. Активируется нажатием <code>Ctrl+Shift+F1</code>.
@@ -84,13 +85,13 @@
       </div>
 
       <p class="hint">
-        💡 Пресеты настраиваются в разделе «🔧 Препроцессор»
+        <Lightbulb :size="14" /> Пресеты настраиваются в разделе «Препроцессор»
       </p>
     </section>
 
     <!-- Звуковая панель -->
     <section class="info-section">
-      <h2>🎵 Звуковая панель (Саунпад)</h2>
+      <h2><Music :size="18" class="section-icon" /> Звуковая панель (Саунпад)</h2>
       <p class="section-description">
         Позволяет привязать аудиофайлы к клавишам для мгновенного воспроизведения.
         Поддерживается до 26 привязок (по одной на каждую букву A-Z).
@@ -125,13 +126,13 @@
       </div>
 
       <p class="hint">
-        💡 Звуковая панель настраивается в разделе «🎵 Звуковая панель»
+        <Lightbulb :size="14" /> Звуковая панель настраивается в разделе «Звуковая панель»
       </p>
     </section>
 
     <!-- Дополнительно -->
     <section class="info-section">
-      <h2>💡 Дополнительная информация</h2>
+      <h2><Lightbulb :size="18" class="section-icon" /> Дополнительная информация</h2>
       <ul class="info-list">
         <li>Все настройки сохраняются автоматически между запусками</li>
         <li>Плавающее окно можно сделать прозрачным и пропускающим клики</li>
@@ -152,7 +153,7 @@
 
 .info-section {
   margin-bottom: 2rem;
-  padding: 1.5rem;
+  padding: 12px 16px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
@@ -162,11 +163,16 @@
 .info-section h2 {
   margin-top: 0;
   margin-bottom: 1rem;
-  font-size: 1.5rem;
+  font-size: 1.1rem;
   color: var(--color-text-primary);
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+.section-icon {
+  color: var(--color-accent);
+  flex-shrink: 0;
 }
 
 .info-section h3 {
@@ -297,6 +303,9 @@
   border-radius: 6px;
   color: #ffb74d;
   font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .soundpad-grid {

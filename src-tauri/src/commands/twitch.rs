@@ -2,41 +2,13 @@ use crate::config::{SettingsManager, TwitchSettings};
 use crate::state::AppState;
 use tauri::{State, Manager};
 
-/// Получить текущие настройки Twitch (без токена)
+/// Получить текущие настройки Twitch (включая токен)
 #[tauri::command]
 pub async fn get_twitch_settings(
     state: State<'_, AppState>,
 ) -> Result<TwitchSettings, String> {
     let settings = state.twitch_settings.read().await;
-    // Возвращаем настройки без токена для безопасности
-    Ok(TwitchSettings {
-        enabled: settings.enabled,
-        username: settings.username.clone(),
-        token: String::new(), // Не возвращаем токен
-        channel: settings.channel.clone(),
-        start_on_boot: settings.start_on_boot,
-    })
-}
-
-/// Получить отдельные поля настроек Twitch
-#[tauri::command]
-pub async fn get_twitch_enabled(state: State<'_, AppState>) -> Result<bool, String> {
-    Ok(state.twitch_settings.read().await.enabled)
-}
-
-#[tauri::command]
-pub async fn get_twitch_username(state: State<'_, AppState>) -> Result<String, String> {
-    Ok(state.twitch_settings.read().await.username.clone())
-}
-
-#[tauri::command]
-pub async fn get_twitch_channel(state: State<'_, AppState>) -> Result<String, String> {
-    Ok(state.twitch_settings.read().await.channel.clone())
-}
-
-#[tauri::command]
-pub async fn get_twitch_start_on_boot(state: State<'_, AppState>) -> Result<bool, String> {
-    Ok(state.twitch_settings.read().await.start_on_boot)
+    Ok(settings.clone())
 }
 
 /// Сохранить настройки Twitch и перезапустить клиент если нужно
