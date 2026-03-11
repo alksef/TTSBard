@@ -23,3 +23,27 @@ When updating the application version, **ALL** of the following files must be up
 | `.github/workflows/build.yml` | `APP_VERSION_BASE` | CI/CD base version |
 
 **Note:** The `scripts/set-version.cjs` script auto-generates `src/version.ts` during CI builds by combining `APP_VERSION_BASE` with the commit SHA. For local development, update `src/version.ts` manually.
+
+## Research and Problem Solving
+
+When searching for solutions, documentation, or troubleshooting information, you can use the **MCP Perplexity** tools available:
+
+- `mcp__perplexity__perplexity_search` - General web search with real-time information and cited sources
+- `mcp__perplexity__perplexity_search_citations` - Search with detailed citations for fact-checking and research
+- `mcp__perplexity__perplexity_search_scientific` - Search for scientific and academic information
+
+Use these tools when you need:
+- Up-to-date information on libraries, frameworks, or APIs
+- Solutions to specific technical problems
+- Documentation or examples
+- Academic or scientific references
+
+## Code Review
+
+After implementing any feature, fix, or significant code change, **you must review the written code** using the **context7** skill/code-review process:
+
+1. Use the code-review skill to validate the implementation against requirements
+2. Ensure code follows project conventions and best practices
+3. Verify all tests pass before marking work as complete
+
+Use `superpowers:requesting-code-review` skill when completing tasks, implementing major features, or before merging.
