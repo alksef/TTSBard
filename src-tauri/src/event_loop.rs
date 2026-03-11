@@ -159,23 +159,36 @@ impl EventHandler {
     fn process_text_sent_to_tts(&self, text: String) {
         eprintln!("[EVENT] Text sent to TTS: '{}'", text);
 
-        // WebView broadcast
-        if let Some(ref sender) = *self.state.webview_event_sender.lock() {
-            eprintln!("[EVENT] Forwarding TextSentToTts to WebView server");
-            match sender.send(AppEvent::TextSentToTts(text.clone())) {
-                Ok(_) => eprintln!("[EVENT] TextSentToTts sent to WebView successfully"),
-                Err(e) => eprintln!("[EVENT] Failed to send to WebView: {}", e),
+        let (skip_twitch, skip_webview) = self.state.get_prefix_flags();
+
+        // === WebView broadcast (check flag) ===
+        if !skip_webview {
+            if let Some(ref sender) = *self.state.webview_event_sender.lock() {
+                eprintln!("[EVENT] Sending to WebView");
+                match sender.send(AppEvent::TextSentToTts(text.clone())) {
+                    Ok(_) => eprintln!("[EVENT] TextSentToTts sent to WebView successfully"),
+                    Err(e) => eprintln!("[EVENT] Failed to send to WebView: {}", e),
+                }
+            } else {
+                eprintln!("[EVENT] WebView sender is None, not forwarding");
             }
         } else {
-            eprintln!("[EVENT] WebView sender is None, not forwarding");
+            eprintln!("[EVENT] WebView skipped (prefix)");
         }
 
-        // Twitch send
-        let settings = self.state.twitch_settings.blocking_read();
-        if settings.enabled {
-            drop(settings);
-            self.state.send_twitch_event(TwitchEvent::SendMessage(text));
+        // === Twitch send (check flag) ===
+        if !skip_twitch {
+            let settings = self.state.twitch_settings.blocking_read();
+            if settings.enabled {
+                drop(settings);
+                self.state.send_twitch_event(TwitchEvent::SendMessage(text));
+            }
+        } else {
+            eprintln!("[EVENT] Twitch skipped (prefix)");
         }
+
+        // Clear flags after use
+        self.state.clear_prefix_flags();
     }
 
     /// Process show floating window event

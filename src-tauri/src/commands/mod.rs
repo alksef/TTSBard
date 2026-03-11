@@ -66,16 +66,32 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
         return Err("Текст не может быть пустым".to_string());
     }
 
-    // Preprocess text before TTS
+    // === STAGE 1: Parse prefixes ===
+    let prefix_result = crate::preprocessor::parse_prefix(&text);
+    let text = prefix_result.text;
+
+    if prefix_result.skip_twitch || prefix_result.skip_webview {
+        eprintln!("[PREFIX] Flags - skip_twitch: {}, skip_webview: {}",
+            prefix_result.skip_twitch, prefix_result.skip_webview);
+    }
+
+    // === STAGE 2: Replacements (existing) ===
     let text = if let Some(preprocessor) = state.get_preprocessor() {
         let processed = preprocessor.process(&text);
         if processed != text {
-            eprintln!("[SPEAK_INTERNAL] Text preprocessed: '{}' -> '{}'", text, processed);
+            eprintln!("[PREPROCESSOR] Replacements: '{}' -> '{}'", text, processed);
         }
         processed
     } else {
         text
     };
+
+    // === STAGE 3: Numbers to text ===
+    let text = crate::preprocessor::process_numbers(&text);
+    eprintln!("[PREPROCESSOR] Final text for TTS: '{}'", text);
+
+    // Store flags for event handlers
+    state.set_prefix_flags(prefix_result.skip_twitch, prefix_result.skip_webview);
 
     // Get the current TTS provider
     let provider = {
