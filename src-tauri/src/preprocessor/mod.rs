@@ -1,6 +1,10 @@
 mod replacer;
+mod numbers;
+mod prefix;
 
 pub use replacer::TextPreprocessor;
+pub use numbers::process_numbers;
+pub use prefix::parse_prefix;
 
 use anyhow::Result;
 use std::path::PathBuf;

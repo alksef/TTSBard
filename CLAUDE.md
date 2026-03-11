@@ -47,3 +47,12 @@ After implementing any feature, fix, or significant code change, **you must revi
 3. Verify all tests pass before marking work as complete
 
 Use `superpowers:requesting-code-review` skill when completing tasks, implementing major features, or before merging.
+
+## Planning
+
+When writing implementation plans to `docs\plans\`:
+1. **Read the counter** from `docs\plans\counter.txt` before writing a plan
+2. Use the counter value as the plan number (e.g., if counter is 38, next plan is `39-YYYY-MMDD-description.md`)
+3. **Increment the counter** after writing the plan file
+
+This ensures sequential plan numbering without conflicts.
