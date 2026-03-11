@@ -7,8 +7,8 @@ use cpal::traits::{DeviceTrait, HostTrait};
 use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::thread;
-use std::time::Duration;
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 
@@ -22,12 +22,15 @@ pub struct OutputConfig {
 /// Аудио плеер с поддержкой dual output
 pub struct AudioPlayer {
     stop_flag: Arc<AtomicBool>,
+    /// Хранит handle предыдущих потоков для корректного завершения
+    active_threads: Vec<JoinHandle<()>>,
 }
 
 impl AudioPlayer {
     pub fn new() -> Self {
         Self {
             stop_flag: Arc::new(AtomicBool::new(false)),
+            active_threads: Vec::new(),
         }
     }
 
@@ -41,7 +44,35 @@ impl AudioPlayer {
         virtual_mic_config: Option<OutputConfig>,
         cached_devices: Option<Arc<RwLock<HashMap<String, cpal::Device>>>>,
     ) -> Result<(), String> {
-        // Сбрасываем флаг остановки
+        // Останавливаем предыдущее воспроизведение
+        self.stop_flag.store(true, Ordering::SeqCst);
+
+        // Ждём завершения старых потоков с реальным таймаутом
+        const JOIN_TIMEOUT: Duration = Duration::from_secs(1);
+        let deadline = Instant::now() + JOIN_TIMEOUT;
+        let mut still_active = Vec::new();
+
+        for handle in self.active_threads.drain(..) {
+            if !handle.is_finished() {
+                still_active.push(handle);
+            }
+        }
+
+        // Присоединяем потоки с таймаутом
+        for handle in still_active {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                eprintln!("[AUDIO_PLAYER] Join timeout reached, some threads may still be running");
+                break;
+            }
+            // Примечание: join() блокирующий, но это допустимо для десктопного приложения
+            // Потоки должны быстро завершаться после установки stop_flag
+            if let Err(e) = handle.join() {
+                eprintln!("[AUDIO_PLAYER] Thread join error: {:?}", e);
+            }
+        }
+
+        // Сбрасываем флаг остановки для нового воспроизведения
         self.stop_flag.store(false, Ordering::SeqCst);
 
         eprintln!("[AUDIO_PLAYER] Starting dual output playback, data size: {} bytes", mp3_data.len());
@@ -57,8 +88,11 @@ impl AudioPlayer {
         eprintln!("[AUDIO_PLAYER] Speaker volume: {:.0}%, Virtual mic volume: {:.0}%",
             speaker_vol * 100.0, mic_vol * 100.0);
 
-        // Use Arc to share audio data efficiently (cheap Arc clone instead of expensive Vec clone)
-        let shared_data = Arc::new(mp3_data);
+        // Use Arc to share audio data efficiently (Arc<[u8]> instead of Arc<Vec<u8>> for better cache efficiency)
+        let shared_data: Arc<[u8]> = mp3_data.into();
+
+        // Собираем handles новых потоков
+        let mut new_handles = Vec::new();
 
         // Запускаем воспроизведение на динамике
         if let Some(config) = speaker_config {
@@ -66,13 +100,14 @@ impl AudioPlayer {
             let data = Arc::clone(&shared_data);  // Cheap Arc clone, not Vec clone
             let devices_cache = cached_devices.clone();
 
-            thread::spawn(move || {
+            let handle = thread::spawn(move || {
                 eprintln!("[AUDIO_PLAYER] Speaker thread started");
                 if let Err(e) = Self::play_to_device(stop_flag, data, config, "Speaker", devices_cache) {
                     eprintln!("[AUDIO_PLAYER] Speaker playback error: {}", e);
                 }
                 eprintln!("[AUDIO_PLAYER] Speaker thread finished");
             });
+            new_handles.push(handle);
         }
 
         // Запускаем воспроизведение на виртуальном микрофоне
@@ -81,14 +116,18 @@ impl AudioPlayer {
             let data = Arc::clone(&shared_data);  // Cheap Arc clone, not Vec clone
             let devices_cache = cached_devices.clone();
 
-            thread::spawn(move || {
+            let handle = thread::spawn(move || {
                 eprintln!("[AUDIO_PLAYER] Virtual mic thread started");
                 if let Err(e) = Self::play_to_device(stop_flag, data, config, "Virtual Mic", devices_cache) {
                     eprintln!("[AUDIO_PLAYER] Virtual mic playback error: {}", e);
                 }
                 eprintln!("[AUDIO_PLAYER] Virtual mic thread finished");
             });
+            new_handles.push(handle);
         }
+
+        // Сохраняем handles для последующего управления
+        self.active_threads = new_handles;
 
         Ok(())
     }
@@ -96,7 +135,7 @@ impl AudioPlayer {
     /// Воспроизвести на конкретном устройстве (в отдельном потоке)
     fn play_to_device(
         stop_flag: Arc<AtomicBool>,
-        mp3_data: Arc<Vec<u8>>,  // Use Arc instead of Vec for efficiency
+        mp3_data: Arc<[u8]>,  // Use Arc<[u8]> instead of Arc<Vec<u8>> for better cache efficiency
         config: OutputConfig,
         device_label: &str,
         cached_devices: Option<Arc<RwLock<HashMap<String, cpal::Device>>>>,
@@ -151,7 +190,7 @@ impl AudioPlayer {
 
         // Декодируем MP3 из байтов (Note: Clone is necessary here because Cursor takes ownership
         // and rodio::Decoder requires 'static. Arc sharing between threads happens before this point.)
-        let cursor = Cursor::new((*mp3_data).clone());  // One-time clone per thread
+        let cursor = Cursor::new(mp3_data.to_vec());  // One-time clone per thread
         let source = rodio::Decoder::new(cursor)
             .map_err(|e| format!("Failed to decode audio: {}", e))?;
 

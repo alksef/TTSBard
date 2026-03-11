@@ -102,6 +102,10 @@ pub struct AppState {
     /// Sender для Twitch событий
     pub twitch_event_tx: TwitchEventSender,
 
+    /// Tokio runtime для async operations
+    /// Arc позволяет клонировать AppState и сохраняет runtime живым
+    pub runtime: Arc<tokio::runtime::Runtime>,
+
     /// Кэшированные аудио устройства (device_id -> Device)
     pub cached_devices: Arc<RwLock<HashMap<String, cpal::Device>>>,
 
@@ -113,6 +117,13 @@ pub struct AppState {
 impl AppState {
     pub fn new() -> Self {
         let (twitch_event_tx, _) = broadcast::channel::<TwitchEvent>(100);
+
+        // Создаём runtime один раз при инициализации AppState
+        // Arc сохраняет runtime живым пока живёт AppState
+        let runtime = Arc::new(
+            tokio::runtime::Runtime::new()
+                .expect("Failed to create tokio runtime")
+        );
 
         Self {
             event_sender: Arc::new(Mutex::new(None)),
@@ -130,6 +141,7 @@ impl AppState {
             twitch_settings: Arc::new(tokio::sync::RwLock::new(TwitchSettings::default())),
             twitch_connection_status: Arc::new(Mutex::new(crate::events::TwitchConnectionStatus::Disconnected)),
             twitch_event_tx,
+            runtime,
             cached_devices: Arc::new(RwLock::new(HashMap::new())),
             prefix_skip_twitch: Arc::new(Mutex::new(false)),
             prefix_skip_webview: Arc::new(Mutex::new(false)),
@@ -144,7 +156,10 @@ impl AppState {
         eprintln!("[STATE_EMIT] Called with: {:?}", std::mem::discriminant(&event));
         // Send to main event channel
         if let Some(ref sender) = *self.event_sender.lock() {
-            let _ = sender.send(event.clone());
+            match sender.send(event.clone()) {
+                Ok(_) => {}
+                Err(e) => eprintln!("[STATE] [WARNING] Failed to send event to main channel: {:?}", e),
+            }
         }
 
         // Also send to WebView channel if it's a TextSentToTts event

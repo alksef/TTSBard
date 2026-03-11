@@ -134,25 +134,19 @@ impl EventHandler {
     fn process_text_ready(&self, text: String) {
         eprintln!("[EVENT] Text ready for TTS: '{}'", text);
 
-        let rt = tokio::runtime::Runtime::new()
-            .map_err(|e| {
-                eprintln!("[EVENT] Failed to create runtime: {}", e);
-                self.state.emit_event(AppEvent::TtsError(format!("Failed to create runtime: {}", e)));
-            });
-
-        if let Ok(rt) = rt {
-            rt.block_on(async {
-                match crate::commands::speak_text_internal(&self.state, text).await {
-                    Ok(_) => {
-                        eprintln!("[EVENT] TTS started successfully in interception mode");
-                    }
-                    Err(e) => {
-                        eprintln!("[EVENT] TTS failed in interception mode: {}", e);
-                        self.state.emit_event(AppEvent::TtsError(e));
-                    }
+        // Используем общий runtime вместо создания нового
+        let state = self.state.clone();
+        self.state.runtime.spawn(async move {
+            match crate::commands::speak_text_internal(&state, text).await {
+                Ok(_) => {
+                    eprintln!("[EVENT] TTS started successfully in interception mode");
                 }
-            });
-        }
+                Err(e) => {
+                    eprintln!("[EVENT] TTS failed in interception mode: {}", e);
+                    state.emit_event(AppEvent::TtsError(e));
+                }
+            }
+        });
     }
 
     /// Process text sent to TTS event
