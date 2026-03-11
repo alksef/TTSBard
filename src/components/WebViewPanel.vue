@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { Copy, RotateCw, Play, Square } from 'lucide-vue-next'
 
 interface WebViewSettings {
   enabled: boolean
@@ -64,12 +65,21 @@ async function startServer() {
   console.log('[WebView] Starting server...')
   settings.value.enabled = true
   await save()
+  showError('Сервер успешно запущен')
 }
 
 async function stopServer() {
   console.log('[WebView] Stopping server...')
   settings.value.enabled = false
   await save()
+  showError('Сервер остановлен')
+}
+
+async function restartServer() {
+  console.log('[WebView] Restarting server...')
+  await stopServer()
+  await startServer()
+  showError('Сервер перезапущен')
 }
 
 async function saveStartOnBoot() {
@@ -241,30 +251,38 @@ onUnmounted(() => {
 <template>
   <div class="webview-panel">
     <!-- Error/Info Message Display -->
-    <div v-if="errorMessage" class="message-box" :class="{ error: errorMessage.includes('Failed') || errorMessage.includes('timeout'), success: errorMessage.includes('successful'), info: errorMessage.includes('Testing') }">
+    <div v-if="errorMessage" class="message-box" :class="{
+      error: errorMessage.includes('Failed') || errorMessage.includes('Error') || errorMessage.includes('ошибка') || errorMessage.includes('Ошибка'),
+      success: errorMessage.includes('запущен') || errorMessage.includes('перезапущен') || errorMessage.includes('сохранен') || errorMessage.includes('successful') || errorMessage.includes('Saved'),
+      info: errorMessage.includes('Тест') || errorMessage.includes('Testing') || errorMessage.includes('остан')
+    }">
       {{ errorMessage }}
     </div>
 
     <section class="settings-section">
-      <h2>Server Settings</h2>
-
-      <div class="setting-row server-actions">
-        <button
-          @click="startServer"
-          class="start-button"
-          :disabled="settings.enabled || !isPortValid"
-          :class="{ disabled: settings.enabled || !isPortValid }"
-        >
-          ▶ Запустить
-        </button>
-        <button
-          @click="stopServer"
-          class="stop-button"
-          :disabled="!settings.enabled"
-          :class="{ disabled: !settings.enabled }"
-        >
-          ■ Остановить
-        </button>
+      <div class="section-header server-header">
+        <h2>Сервер</h2>
+        <div class="server-status">
+          <span class="status-indicator" :class="{ running: settings.enabled }">
+            {{ settings.enabled ? 'Запущен' : 'Остановлен' }}
+          </span>
+          <template v-if="settings.enabled">
+            <button @click="restartServer" class="status-button restart" title="Перезапустить">
+              <RotateCw :size="14" />
+            </button>
+            <button @click="stopServer" class="status-button stop" title="Остановить">
+              <Square :size="14" />
+            </button>
+          </template>
+          <template v-else>
+            <button @click="startServer" class="status-button start" :disabled="!isPortValid" :class="{ disabled: !isPortValid }" title="Запустить">
+              <Play :size="14" />
+            </button>
+            <button @click="stopServer" class="status-button stop disabled" title="Остановить" disabled>
+              <Square :size="14" />
+            </button>
+          </template>
+        </div>
       </div>
 
       <div class="setting-row">
@@ -275,45 +293,45 @@ onUnmounted(() => {
       </div>
 
       <div class="setting-row">
-        <label>Port:</label>
-        <input
-          type="number"
-          v-model.number="settings.port"
-          min="1024"
-          max="65535"
-          class="number-input"
-          :class="{ 'input-error': !isPortValid }"
-        />
+        <label>Адрес:</label>
+        <div class="address-inputs">
+          <select v-model="settings.bind_address" class="address-bind">
+            <option value="0.0.0.0">0.0.0.0 (all interfaces)</option>
+            <option value="127.0.0.1">127.0.0.1 (local only)</option>
+          </select>
+          <input
+            type="number"
+            v-model.number="settings.port"
+            min="1024"
+            max="65535"
+            class="address-port"
+            :class="{ 'input-error': !isPortValid }"
+            placeholder="10100"
+          />
+        </div>
         <span v-if="!isPortValid" class="error-text">Порт должен быть от 1024 до 65535</span>
-      </div>
-
-      <div class="setting-row">
-        <label>Bind Address:</label>
-        <select v-model="settings.bind_address" class="select-input">
-          <option value="0.0.0.0">0.0.0.0 (all interfaces)</option>
-          <option value="127.0.0.1">127.0.0.1 (local only)</option>
-        </select>
       </div>
 
       <div class="setting-row">
         <label>OBS URL:</label>
         <div class="url-display">
           <code class="url-code">{{ url }}</code>
-          <button @click="copyUrl" class="icon-button" title="Copy URL">📋</button>
-          <button @click="refreshIp" class="icon-button" title="Refresh IP">🔄</button>
+          <button @click="copyUrl" class="icon-button" title="Copy URL">
+            <Copy :size="16" />
+          </button>
+          <button @click="refreshIp" class="icon-button" title="Refresh IP">
+            <RotateCw :size="16" />
+          </button>
         </div>
       </div>
 
       <div class="setting-row save-row">
-        <button @click="saveServerSettings" class="save-button-inline">💾 Сохранить</button>
+        <button @click="saveServerSettings" class="save-button-inline">Сохранить</button>
       </div>
     </section>
 
     <section class="settings-section">
-      <div class="section-header">
-        <h2>HTML Template</h2>
-        <button @click="resetHtml" class="reset-button">Reset to Default</button>
-      </div>
+      <h2>HTML шаблон</h2>
       <textarea
         v-model="settings.html_template"
         rows="15"
@@ -325,15 +343,13 @@ onUnmounted(() => {
         Use {{CSS}} for CSS injection and {{JS}} for JavaScript injection
       </p>
       <div class="setting-row save-row">
-        <button @click="saveHtmlTemplate" class="save-button-inline">💾 Сохранить HTML шаблон</button>
+        <button @click="resetHtml" class="reset-button">Сбросить</button>
+        <button @click="saveHtmlTemplate" class="save-button-inline">Сохранить</button>
       </div>
     </section>
 
     <section class="settings-section">
-      <div class="section-header">
-        <h2>CSS Style</h2>
-        <button @click="resetCss" class="reset-button">Reset to Default</button>
-      </div>
+      <h2>CSS стиль</h2>
       <textarea
         v-model="settings.css_style"
         rows="15"
@@ -342,12 +358,13 @@ onUnmounted(() => {
         placeholder="CSS style code..."
       ></textarea>
       <div class="setting-row save-row">
-        <button @click="saveCssStyle" class="save-button-inline">💾 Сохранить CSS стиль</button>
+        <button @click="resetCss" class="reset-button">Сбросить</button>
+        <button @click="saveCssStyle" class="save-button-inline">Сохранить</button>
       </div>
     </section>
 
     <section class="settings-section">
-      <h2>Animation Settings</h2>
+      <h2>Анимация</h2>
       <div class="setting-row">
         <label>Speed (ms per character):</label>
         <input
@@ -355,7 +372,7 @@ onUnmounted(() => {
           v-model.number="settings.animation_speed"
           min="5"
           max="500"
-          class="number-input"
+          class="number-input animation-input"
         />
         <span class="value-display">{{ settings.animation_speed }}ms</span>
       </div>
@@ -363,7 +380,7 @@ onUnmounted(() => {
         Lower values = faster animation. Recommended: 20-50ms
       </p>
       <div class="setting-row save-row">
-        <button @click="saveAnimationSettings" class="save-button-inline">💾 Сохранить</button>
+        <button @click="saveAnimationSettings" class="save-button-inline">Сохранить</button>
       </div>
     </section>
   </div>
@@ -384,49 +401,59 @@ h2 {
 }
 
 .message-box {
-  padding: 1rem;
-  margin-bottom: 1rem;
-  border-radius: 12px;
-  animation: slideDown 0.3s ease-out;
+  position: fixed;
+  top: 20px;
+  left: calc(50% + 100px);
+  transform: translateX(-50%);
+  padding: 0.4rem 0.75rem;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  z-index: 1000;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+  animation: slideDownFade 0.3s ease-out;
+  white-space: nowrap;
 }
 
 .message-box.success {
-  background: rgba(74, 222, 128, 0.12);
-  border: 1px solid rgba(74, 222, 128, 0.22);
-  color: #bff4d0;
+  background: rgba(74, 222, 128, 0.92);
+  border: 1px solid rgba(74, 222, 128, 0.4);
+  color: #0d4d1f;
 }
 
 .message-box.info {
-  background: rgba(29, 140, 255, 0.12);
-  border: 1px solid rgba(29, 140, 255, 0.22);
-  color: var(--color-info);
+  background: rgba(29, 140, 255, 0.92);
+  border: 1px solid rgba(29, 140, 255, 0.4);
+  color: #0a2a4a;
 }
 
 .message-box.error {
-  background: rgba(255, 111, 105, 0.12);
-  border: 1px solid rgba(255, 111, 105, 0.24);
-  border-left: 4px solid var(--color-danger);
-  color: #ffb8b4;
+  background: rgba(255, 111, 105, 0.92);
+  border: 1px solid rgba(255, 111, 105, 0.4);
+  border-left: 4px solid rgba(255, 59, 48, 0.8);
+  color: #4a0d0d;
 }
 
-@keyframes slideDown {
+@keyframes slideDownFade {
   from {
     opacity: 0;
-    transform: translateY(-10px);
+    transform: translateX(-50%) translateY(-20px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateX(-50%) translateY(0);
   }
 }
 
 .settings-section {
   margin-bottom: 1.5rem;
-  padding: 1.5rem;
+  padding: 12px 16px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
   backdrop-filter: blur(8px);
+  font-size: 0.95rem;
 }
 
 .section-header {
@@ -434,6 +461,90 @@ h2 {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 1rem;
+}
+
+/* Server header with status */
+.server-header {
+  padding-top: 0;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 1rem;
+  align-items: flex-start;
+}
+
+.server-header h2 {
+  margin-top: 0;
+}
+
+.server-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: -2px;
+}
+
+.status-indicator {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  padding: 0.15rem 0.5rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  height: 28px;
+  display: flex;
+  align-items: center;
+}
+
+.status-indicator.running {
+  color: #bff4d0;
+  background: rgba(74, 222, 128, 0.12);
+  border-color: rgba(74, 222, 128, 0.2);
+}
+
+.status-button {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  color: white;
+  padding: 0;
+}
+
+.status-button.start {
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
+}
+
+.status-button.start:hover:not(.disabled) {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+
+.status-button.stop {
+  background: rgba(255, 111, 105, 0.16);
+}
+
+.status-button.stop:hover {
+  background: rgba(255, 111, 105, 0.24);
+}
+
+.status-button.restart {
+  background: rgba(29, 140, 255, 0.16);
+}
+
+.status-button.restart:hover {
+  background: rgba(29, 140, 255, 0.26);
+}
+
+.status-button.disabled {
+  background: #ccc;
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .setting-row {
@@ -444,17 +555,8 @@ h2 {
   flex-wrap: wrap;
 }
 
-.setting-row.server-actions {
-  gap: 1rem;
-  margin-top: 1rem;
-  padding: 1rem;
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
 .setting-row label {
-  min-width: 140px;
+  min-width: 60px;
   font-weight: 500;
   color: var(--color-text-secondary);
   font-size: 14px;
@@ -517,6 +619,58 @@ h2 {
   box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
 }
 
+/* Animation input - narrower */
+.animation-input {
+  max-width: 70px;
+}
+
+/* Address inputs group (bind address + port) */
+.address-inputs {
+  display: flex;
+  gap: 8px;
+}
+
+.address-inputs .address-bind,
+.address-inputs .address-port {
+  flex: 2;
+  padding: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  font-size: 14px;
+  background: var(--color-bg-field);
+  color: var(--color-text-primary);
+  box-sizing: border-box;
+  height: 38px;
+}
+
+.address-inputs .address-bind:focus,
+.address-inputs .address-port:focus {
+  outline: none;
+  border-color: rgba(29, 140, 255, 0.5);
+  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
+}
+
+.address-inputs .address-port.input-error {
+  border-color: rgba(255, 111, 105, 0.38);
+  background: rgba(255, 111, 105, 0.08);
+}
+
+.address-inputs .address-port.input-error:focus {
+  border-color: #f44;
+  outline: none;
+}
+
+/* Remove spinner from number input */
+.address-inputs .address-port::-webkit-inner-spin-button,
+.address-inputs .address-port::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.address-inputs .address-port {
+  -moz-appearance: textfield;
+}
+
 .url-display {
   flex: 1;
   display: flex;
@@ -526,7 +680,7 @@ h2 {
 }
 
 .url-code {
-  flex: 1;
+  flex: 0.8;
   padding: 0.5rem 0.75rem;
   background: var(--color-bg-field);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -540,14 +694,16 @@ h2 {
 }
 
 .icon-button {
-  padding: 0.5rem 0.75rem;
+  padding: 0.5rem;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 10px;
   cursor: pointer;
-  font-size: 16px;
   transition: all 0.2s;
   color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .icon-button:hover {
@@ -556,14 +712,16 @@ h2 {
 }
 
 .reset-button {
-  padding: 0.4rem 0.8rem;
+  padding: 0.6rem 1.2rem;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 10px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--color-text-secondary);
   transition: all 0.2s;
+  margin-top: 0;
+  font-weight: 600;
 }
 
 .reset-button:hover {
@@ -621,58 +779,12 @@ h2 {
   font-weight: 500;
 }
 
-.start-button,
-.stop-button {
-  padding: 0.75rem 1.5rem;
-  border: none;
-  border-radius: 10px;
-  cursor: pointer;
-  font-weight: 500;
-  font-size: 14px;
-  transition: all 0.2s;
-}
-
-.start-button {
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: white;
-}
-
-.start-button:hover:not(.disabled) {
-  filter: brightness(1.06);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(29, 140, 255, 0.28);
-}
-
-.stop-button {
-  background: rgba(255, 111, 105, 0.16);
-  color: white;
-}
-
-.stop-button:hover:not(.disabled) {
-  background: rgba(255, 111, 105, 0.24);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(255, 111, 105, 0.22);
-}
-
-.start-button.disabled,
-.stop-button.disabled {
-  background: #ccc;
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.start-button.disabled:hover,
-.stop-button.disabled:hover {
-  background: #ccc;
-  transform: none;
-  box-shadow: none;
-}
-
 .save-row {
   justify-content: flex-end;
-  margin-top: 1rem;
-  padding-top: 1rem;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 0.75rem;
 }
 
 .save-button-inline {

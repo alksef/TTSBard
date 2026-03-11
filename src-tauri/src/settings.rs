@@ -140,12 +140,12 @@ impl AppSettings {
             (
                 json.get("start_on_boot").and_then(|v| v.as_bool()).unwrap_or(false),
                 json.get("port").and_then(|v| v.as_u64()).unwrap_or(10100) as u16,
-                json.get("bind_address").and_then(|v| v.as_str()).unwrap_or("0.0.0.0").to_string(),
+                json.get("bind_address").and_then(|v| v.as_str()).unwrap_or("::").to_string(),
                 json.get("animation_speed").and_then(|v| v.as_u64()).unwrap_or(30) as u32,
             )
         } else {
             eprintln!("[SETTINGS] WebView settings JSON not found, using defaults");
-            (false, 10100, "0.0.0.0".to_string(), 30)
+            (false, 10100, "::".to_string(), 30)
         };
 
         // enabled is always false on load - will be set by start_on_boot logic on boot

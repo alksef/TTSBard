@@ -187,7 +187,7 @@ onUnmounted(() => {
 }
 
 .settings-section {
-  padding: 1.4rem 1.5rem;
+  padding: 12px 16px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
@@ -196,7 +196,7 @@ onUnmounted(() => {
 }
 
 .info-section {
-  padding: 1.2rem 1.35rem;
+  padding: 12px 16px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-left: 4px solid var(--color-accent);
@@ -327,7 +327,7 @@ onUnmounted(() => {
 
 /* Appearance section */
 .appearance-section {
-  padding: 1.5rem;
+  padding: 12px 16px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
@@ -336,8 +336,8 @@ onUnmounted(() => {
 
 .appearance-section h2 {
   margin-top: 0;
-  margin-bottom: 1.5rem;
-  font-size: 1.25rem;
+  margin-bottom: 1rem;
+  font-size: 1.1rem;
   color: var(--color-text-primary);
 }
 

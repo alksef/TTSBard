@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { Eye, EyeOff, Play, Square, RotateCw } from 'lucide-vue-next'
 
 interface TwitchSettings {
   enabled: boolean
@@ -44,6 +45,7 @@ const errorMessage = ref<string | null>(null)
 let errorTimeout: number | null = null
 const currentStatus = ref<TwitchStatus>('Disconnected')
 let unlisten: (() => void) | null = null
+const showToken = ref(false)
 
 // Вычисляемое свойство - подключен ли Twitch
 const isConnected = ref(false)
@@ -207,50 +209,43 @@ onUnmounted(() => {
     <!-- Error/Info Message Display -->
     <div v-if="errorMessage" class="message-box" :class="{
       error: errorMessage.includes('Failed') || errorMessage.includes('failed') || errorMessage.includes('Error') || errorMessage.includes('Ошибка'),
-      success: errorMessage.includes('saved') || errorMessage.includes('сохранен') || errorMessage.includes('валид') || errorMessage.includes('Подключение')
+      success: errorMessage.includes('saved') || errorMessage.includes('сохранен') || errorMessage.includes('валид') || errorMessage.includes('Подключено') || errorMessage.includes('Подключение'),
+      info: errorMessage.includes('Отключено') || errorMessage.includes('disconnect') || errorMessage.includes('Stopped') || errorMessage.includes('Disconnected')
     }">
       {{ errorMessage }}
     </div>
 
-    <!-- Status Indicator -->
-    <div class="status-indicator" :class="{
-      connected: currentStatus === 'Connected',
-      connecting: currentStatus === 'Connecting',
-      error: currentStatus === 'Error',
-      disconnected: currentStatus === 'Disconnected'
-    }">
-      <span class="status-dot"></span>
-      <span class="status-text">
-        {{ currentStatus === 'Connected' ? 'Подключено' :
-           currentStatus === 'Connecting' ? 'Подключение...' :
-           currentStatus === 'Error' ? 'Ошибка' :
-           'Отключено' }}
-      </span>
-      <button @click="refreshStatus" class="refresh-button" title="Обновить статус">
-        ↻
-      </button>
-    </div>
-
     <section class="settings-section">
-      <h2>Connection</h2>
-
-      <div class="setting-row server-actions">
-        <button
-          @click="startTwitch"
-          class="start-button"
-          :disabled="isConnected || currentStatus === 'Connecting'"
-          :class="{ disabled: isConnected || currentStatus === 'Connecting' }"
-        >
-          ▶ Подключиться
-        </button>
-        <button
-          @click="stopTwitch"
-          class="stop-button"
-          :disabled="!isConnected && currentStatus !== 'Connecting'"
-          :class="{ disabled: !isConnected && currentStatus !== 'Connecting' }"
-        >
-          ■ Отключиться
-        </button>
+      <div class="section-header server-header">
+        <h2>Подключение</h2>
+        <div class="server-status">
+          <span class="status-indicator" :class="{
+            running: currentStatus === 'Connected',
+            connecting: currentStatus === 'Connecting',
+            error: currentStatus === 'Error'
+          }">
+            {{ currentStatus === 'Connected' ? 'Подключено' :
+               currentStatus === 'Connecting' ? 'Подключение...' :
+               currentStatus === 'Error' ? 'Ошибка' :
+               'Отключено' }}
+          </span>
+          <template v-if="currentStatus === 'Connected'">
+            <button @click="refreshStatus" class="status-button refresh" title="Обновить">
+              <RotateCw :size="14" />
+            </button>
+            <button @click="stopTwitch" class="status-button stop" title="Отключиться">
+              <Square :size="14" />
+            </button>
+          </template>
+          <template v-else>
+            <button @click="startTwitch" class="status-button start" :disabled="currentStatus === 'Connecting'" :class="{ disabled: currentStatus === 'Connecting' }" title="Подключиться">
+              <Play :size="14" />
+            </button>
+            <button @click="stopTwitch" class="status-button stop disabled" title="Отключиться" disabled>
+              <Square :size="14" />
+            </button>
+          </template>
+        </div>
       </div>
 
       <div class="setting-row">
@@ -272,12 +267,23 @@ onUnmounted(() => {
 
       <div class="setting-row">
         <label>Token:</label>
-        <input
-          type="password"
-          v-model="settings.token"
-          class="text-input"
-          placeholder="xxxxxxxxxxxxxx"
-        />
+        <div class="input-with-toggle">
+          <input
+            :type="showToken ? 'text' : 'password'"
+            v-model="settings.token"
+            class="text-input"
+            placeholder="xxxxxxxxxxxxxx"
+          />
+          <button
+            type="button"
+            class="toggle-icon-button"
+            @click="showToken = !showToken"
+            :title="showToken ? 'Hide' : 'Show'"
+          >
+            <Eye v-if="!showToken" :size="18" />
+            <EyeOff v-else :size="18" />
+          </button>
+        </div>
       </div>
 
       <div class="setting-row">
@@ -296,21 +302,21 @@ onUnmounted(() => {
           class="test-message-button"
           :disabled="!isConnected"
           :class="{ disabled: !isConnected }"
-        >📨 Тестовое сообщение</button>
-        <button @click="save" class="save-button-inline">💾 Сохранить</button>
+        >Тестовое сообщение</button>
+        <button @click="save" class="save-button-inline">Сохранить</button>
       </div>
     </section>
 
     <section class="settings-section help-section">
-      <h2>Help</h2>
+      <h2>Помощь</h2>
       <p class="help-text">
-        Get your OAuth token from:
+        Получите OAuth токен с:
       </p>
       <a href="https://twitchtokengenerator.com" target="_blank" class="help-link">
         https://twitchtokengenerator.com
       </a>
       <p class="help-text">
-        Token format: <code>xxxxxxxxxxxxxxx</code> (paste token only, "oauth:" prefix added automatically)
+        Формат токена: <code>xxxxxxxxxxxxxxx</code> (вставьте только токен, префикс "oauth:" добавляется автоматически)
       </p>
     </section>
   </div>
@@ -330,129 +336,163 @@ h2 {
   font-weight: 600;
 }
 
-/* Status Indicator */
-.status-indicator {
+/* Section header */
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+/* Server header with status */
+.server-header {
+  padding-top: 0;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 1rem;
+  align-items: flex-start;
+}
+
+.server-header h2 {
+  margin-top: 0;
+}
+
+.server-status {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.75rem 1rem;
-  border-radius: 12px;
-  margin-bottom: 1rem;
+  margin-top: -2px;
+}
+
+.status-indicator {
+  font-size: 14px;
   font-weight: 500;
-  background: rgba(255, 255, 255, 0.03);
+  color: var(--color-text-secondary);
+  padding: 0.15rem 0.5rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 5px;
   border: 1px solid rgba(255, 255, 255, 0.08);
+  height: 28px;
+  display: flex;
+  align-items: center;
 }
 
-.status-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  animation: pulse 2s infinite;
-}
-
-.status-indicator.connected .status-dot {
-  background: #4CAF50;
-}
-
-.status-indicator.connecting .status-dot {
-  background: #FF9800;
-}
-
-.status-indicator.error .status-dot {
-  background: #f44;
-}
-
-.status-indicator.disconnected .status-dot {
-  background: #ccc;
-  animation: none;
-}
-
-.status-indicator.connected {
-  background: rgba(74, 222, 128, 0.12);
+.status-indicator.running {
   color: #bff4d0;
+  background: rgba(74, 222, 128, 0.12);
+  border-color: rgba(74, 222, 128, 0.2);
 }
 
 .status-indicator.connecting {
-  background: rgba(255, 183, 77, 0.12);
   color: #ffd7a2;
+  background: rgba(255, 183, 77, 0.12);
+  border-color: rgba(255, 183, 77, 0.2);
 }
 
 .status-indicator.error {
-  background: rgba(255, 111, 105, 0.12);
   color: #ffb8b4;
+  background: rgba(255, 111, 105, 0.12);
+  border-color: rgba(255, 111, 105, 0.2);
 }
 
-.status-indicator.disconnected {
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--color-text-secondary);
-}
-
-.refresh-button {
-  margin-left: auto;
-  background: transparent;
+.status-button {
+  width: 32px;
+  height: 32px;
   border: none;
-  color: inherit;
-  font-size: 1.2rem;
+  border-radius: 8px;
   cursor: pointer;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   transition: all 0.2s;
+  color: white;
+  padding: 0;
+}
+
+.status-button.start {
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
+}
+
+.status-button.start:hover:not(.disabled) {
+  filter: brightness(1.06);
+}
+
+.status-button.stop {
+  background: rgba(255, 111, 105, 0.16);
+}
+
+.status-button.stop:hover {
+  background: rgba(255, 111, 105, 0.24);
+}
+
+.status-button.refresh {
+  background: rgba(29, 140, 255, 0.16);
+}
+
+.status-button.refresh:hover {
+  background: rgba(29, 140, 255, 0.26);
+}
+
+.status-button.disabled {
+  background: #ccc;
+  cursor: not-allowed;
   opacity: 0.6;
 }
 
-.refresh-button:hover {
-  opacity: 1;
-  background: rgba(255, 255, 255, 0.08);
-  transform: rotate(180deg);
-}
-
-.refresh-button:active {
-  transform: rotate(180deg) scale(0.95);
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
 .message-box {
-  padding: 1rem;
-  margin-bottom: 1rem;
-  border-radius: 12px;
-  animation: slideDown 0.3s ease-out;
+  position: fixed;
+  top: 20px;
+  left: calc(50% + 100px);
+  transform: translateX(-50%);
+  padding: 0.4rem 0.75rem;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  z-index: 1000;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+  animation: slideDownFade 0.3s ease-out;
+  white-space: nowrap;
 }
 
 .message-box.success {
-  background: rgba(74, 222, 128, 0.12);
-  border: 1px solid rgba(74, 222, 128, 0.22);
-  color: #bff4d0;
+  background: rgba(74, 222, 128, 0.92);
+  border: 1px solid rgba(74, 222, 128, 0.4);
+  color: #0d4d1f;
 }
 
 .message-box.error {
-  background: rgba(255, 111, 105, 0.12);
-  border: 1px solid rgba(255, 111, 105, 0.24);
-  border-left: 4px solid var(--color-danger);
-  color: #ffb8b4;
+  background: rgba(255, 111, 105, 0.92);
+  border: 1px solid rgba(255, 111, 105, 0.4);
+  border-left: 4px solid rgba(255, 59, 48, 0.8);
+  color: #4a0d0d;
 }
 
-@keyframes slideDown {
+.message-box.info {
+  background: rgba(29, 140, 255, 0.92);
+  border: 1px solid rgba(29, 140, 255, 0.4);
+  color: #0a2a4a;
+}
+
+@keyframes slideDownFade {
   from {
     opacity: 0;
-    transform: translateY(-10px);
+    transform: translateX(-50%) translateY(-20px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateX(-50%) translateY(0);
   }
 }
 
 .settings-section {
   margin-bottom: 1.5rem;
-  padding: 1.5rem;
+  padding: 12px 16px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
   backdrop-filter: blur(8px);
+  font-size: 0.95rem;
 }
 
 .setting-row {
@@ -463,16 +503,8 @@ h2 {
   flex-wrap: wrap;
 }
 
-.setting-row.server-actions {
-  gap: 1rem;
-  padding: 1rem;
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
 .setting-row label {
-  min-width: 100px;
+  min-width: 70px;
   font-weight: 500;
   color: var(--color-text-secondary);
   font-size: 14px;
@@ -481,7 +513,48 @@ h2 {
 .setting-row.button-row {
   justify-content: flex-end;
   gap: 0.75rem;
-  margin-top: 1rem;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.save-button-inline,
+.test-message-button {
+  padding: 0.6rem 1.2rem;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.save-button-inline {
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
+  color: white;
+}
+
+.save-button-inline:hover {
+  filter: brightness(1.06);
+}
+
+.test-message-button {
+  background: rgba(29, 140, 255, 0.16);
+  color: white;
+}
+
+.test-message-button:hover {
+  background: rgba(29, 140, 255, 0.26);
+}
+
+.test-message-button.disabled {
+  background: #ccc;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.test-message-button.disabled:hover {
+  background: #ccc;
 }
 
 .checkbox-label {
@@ -515,95 +588,40 @@ h2 {
   box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
 }
 
-.start-button,
-.stop-button {
-  padding: 0.75rem 1.5rem;
+/* Input with toggle icon button */
+.input-with-toggle {
+  position: relative;
+  flex: 1;
+  max-width: 400px;
+}
+
+.input-with-toggle .text-input {
+  width: 100%;
+  padding-right: 40px; /* Space for the button */
+}
+
+.toggle-icon-button {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 4px;
+  background: transparent;
   border: none;
-  border-radius: 10px;
   cursor: pointer;
-  font-weight: 500;
-  font-size: 14px;
-  transition: all 0.2s;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s;
 }
 
-.save-button-inline,
-.test-message-button {
-  padding: 0.75rem 1.5rem;
-  border: none;
-  border-radius: 10px;
-  cursor: pointer;
-  font-weight: 500;
-  font-size: 14px;
-  transition: all 0.2s;
-}
-
-.start-button {
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: white;
-}
-
-.start-button:hover:not(.disabled) {
-  filter: brightness(1.06);
-  transform: translateY(-1px);
-}
-
-.stop-button {
-  background: rgba(255, 111, 105, 0.16);
-  color: white;
-}
-
-.stop-button:hover:not(.disabled) {
-  background: rgba(255, 111, 105, 0.24);
-  transform: translateY(-1px);
-}
-
-.save-button-inline {
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: white;
-}
-
-.save-button-inline:hover {
-  filter: brightness(1.06);
-  transform: translateY(-1px);
-}
-
-.test-message-button {
-  background: rgba(29, 140, 255, 0.16);
-  color: white;
-}
-
-.test-message-button:hover {
-  background: rgba(29, 140, 255, 0.26);
-  transform: translateY(-1px);
-}
-
-.test-message-button.disabled {
-  background: #ccc;
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.test-message-button.disabled:hover {
-  background: #ccc;
-  transform: none;
-}
-
-.start-button.disabled,
-.stop-button.disabled {
-  background: #ccc;
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.start-button.disabled:hover,
-.stop-button.disabled:hover {
-  background: #ccc;
-  transform: none;
+.toggle-icon-button:hover {
+  color: var(--color-accent);
 }
 
 .help-section {
-  background: rgba(255, 183, 77, 0.1);
-  border: 1px solid rgba(255, 183, 77, 0.2);
+  /* Обычный стиль как у других секций */
 }
 
 .help-text {

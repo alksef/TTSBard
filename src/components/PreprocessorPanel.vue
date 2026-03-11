@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { Lightbulb } from 'lucide-vue-next'
 
 // Reactive state
 const replacements = ref('')
@@ -89,7 +90,7 @@ onMounted(async () => {
     <div v-else class="panel-content">
       <!-- Info Banner -->
       <div class="info-banner">
-        <p>💡 В режиме перехвата текст заменяется <strong>мгновенно</strong> при нажатии пробела после <code>\ключ</code> или <code>%юзернейм</code></p>
+        <p><Lightbulb :size="14" /> В режиме перехвата текст заменяется <strong>мгновенно</strong> при нажатии пробела после <code>\ключ</code> или <code>%юзернейм</code></p>
       </div>
 
       <!-- Replacements Section -->
@@ -174,6 +175,9 @@ placeholder="Введите текст для проверки..."
   color: #ffcc80;
   font-size: 0.95rem;
   line-height: 1.6;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .info-banner code {
@@ -189,13 +193,14 @@ placeholder="Введите текст для проверки..."
   margin-bottom: 30px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  padding: 1.5rem;
+  padding: 12px 16px;
   border-radius: 12px;
   backdrop-filter: blur(8px);
 }
 
 h3 {
-  margin-bottom: 10px;
+  margin-top: 0;
+  margin-bottom: 1rem;
   color: var(--color-text-primary);
   font-size: 1.1rem;
 }

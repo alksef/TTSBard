@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, watch, computed, inject, nextTick } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { Eye, EyeOff, Bot, HardDrive, Cloud, RefreshCw } from 'lucide-vue-next';
 import TelegramAuthModal from './TelegramAuthModal.vue';
 import { TELEGRAM_AUTH_KEY, type UseTelegramAuthReturn } from '../composables/useTelegramAuth';
 
@@ -27,6 +28,7 @@ const openaiVoice = ref('alloy');
 const openaiVoices = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'];
 const openaiProxyHost = ref('');
 const openaiProxyPort = ref<number | null>(null);
+const showOpenApiKey = ref(false);
 
 // Local TTS settings
 const localTtsUrl = ref('http://127.0.0.1:8124');
@@ -256,6 +258,7 @@ onUnmounted(() => {
             @change="setActiveProvider('openai')"
             @click.stop
           />
+          <Cloud :size="18" class="provider-icon" />
           <span class="card-title" @click="toggleProvider('openai')">OpenAI TTS</span>
           <span class="expand-icon" @click="toggleProvider('openai')">{{ providers.openai.expanded ? '▼' : '▶' }}</span>
         </div>
@@ -263,18 +266,30 @@ onUnmounted(() => {
         <div v-if="providers.openai.expanded" class="card-content">
           <!-- API Key -->
           <div class="setting-group">
-            <label>API Key</label>
-            <input
-              v-model="openaiApiKey"
-              type="password"
-              placeholder="sk-..."
-            />
-            <small>Required for OpenAI TTS functionality</small>
+            <label>Ключ API</label>
+            <div class="input-with-toggle">
+              <input
+                v-model="openaiApiKey"
+                :type="showOpenApiKey ? 'text' : 'password'"
+                class="text-input"
+                placeholder="sk-..."
+              />
+              <button
+                type="button"
+                class="toggle-icon-button"
+                @click="showOpenApiKey = !showOpenApiKey"
+                :title="showOpenApiKey ? 'Скрыть' : 'Показать'"
+              >
+                <Eye v-if="!showOpenApiKey" :size="18" />
+                <EyeOff v-else :size="18" />
+              </button>
+            </div>
+            <small>Требуется для работы OpenAI TTS</small>
           </div>
 
           <!-- Proxy -->
           <div class="setting-group">
-            <label>Proxy (optional)</label>
+            <label>Прокси (опционально)</label>
             <div class="proxy-inputs">
               <input
                 v-model="openaiProxyHost"
@@ -289,23 +304,23 @@ onUnmounted(() => {
                 class="proxy-port"
               />
             </div>
-            <small>Proxy for OpenAI requests only. Leave empty for direct connection.</small>
+            <small>Прокси только для запросов OpenAI. Оставьте пустым для прямого подключения.</small>
           </div>
 
           <!-- Unified Save Button -->
           <div class="setting-group">
-            <button @click="saveOpenAiSettings" class="save-settings-button">Save Settings</button>
+            <button @click="saveOpenAiSettings" class="save-settings-button">Сохранить</button>
           </div>
 
           <!-- Voice (auto-saves on change) -->
           <div class="setting-group">
-            <label>Voice</label>
+            <label>Голос</label>
             <select v-model="openaiVoice" @change="saveOpenAiVoice">
               <option v-for="voice in openaiVoices" :key="voice" :value="voice">
                 {{ voice }}
               </option>
             </select>
-            <small>Select the voice for text-to-speech (auto-saves on change)</small>
+            <small>Выберите голос для синтеза речи (сохраняется автоматически)</small>
           </div>
         </div>
       </div>
@@ -325,6 +340,7 @@ onUnmounted(() => {
             @change="setActiveProvider('silero')"
             @click.stop
           />
+          <Bot :size="18" class="provider-icon" />
           <span class="card-title" @click="toggleProvider('silero')">Silero Bot</span>
           <span class="expand-icon" @click="toggleProvider('silero')">{{ providers.silero.expanded ? '▼' : '▶' }}</span>
         </div>
@@ -379,7 +395,7 @@ onUnmounted(() => {
               :disabled="telegramLoading"
               :title="'Обновить информацию о голосе'"
             >
-              {{ telegramLoading ? '⏳' : '🔄' }}
+              <RefreshCw :size="14" />
             </button>
           </div>
 
@@ -397,7 +413,7 @@ onUnmounted(() => {
               :disabled="telegramLoading"
               :title="'Обновить информацию о лимитах'"
             >
-              {{ telegramLoading ? '⏳' : '🔄' }}
+              <RefreshCw :size="14" />
             </button>
           </div>
 
@@ -450,22 +466,27 @@ onUnmounted(() => {
             @click.stop
           />
           <div class="card-title-wrapper" @click="toggleProvider('local')">
-            <span class="card-title">Local (TTSVoiceWizard - Locally Hosted)</span>
-            <span class="card-subtitle">{{ localTtsDescription }}</span>
+            <HardDrive :size="18" class="provider-icon" />
+            <div>
+              <span class="card-title">Локальный сервер</span>
+              <span class="card-subtitle">{{ localTtsDescription }}</span>
+            </div>
           </div>
           <span class="expand-icon" @click="toggleProvider('local')">{{ providers.local.expanded ? '▼' : '▶' }}</span>
         </div>
 
         <div v-if="providers.local.expanded" class="card-content">
           <div class="setting-group">
-            <label>Server URL</label>
-            <input
-              v-model="localTtsUrl"
-              type="text"
-              placeholder="http://127.0.0.1:8124"
-            />
-            <button @click="saveLocalTtsUrl">Save URL</button>
-            <small>URL of your local TTS server (e.g., TTSVoiceWizard/TITTS.py)</small>
+            <label>URL сервера</label>
+            <div class="input-with-button">
+              <input
+                v-model="localTtsUrl"
+                type="text"
+                placeholder="http://127.0.0.1:8124"
+              />
+              <button @click="saveLocalTtsUrl" class="save-url-button">Сохранить</button>
+            </div>
+            <small>URL вашего локального TTS сервера (например, TTSVoiceWizard/TITTS.py)</small>
           </div>
         </div>
       </div>
@@ -514,6 +535,11 @@ onUnmounted(() => {
   user-select: none;
 }
 
+.provider-icon {
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
 .card-header:hover {
   background: rgba(255, 255, 255, 0.04);
 }
@@ -521,14 +547,20 @@ onUnmounted(() => {
 .card-title-wrapper {
   flex: 1;
   display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.card-title-wrapper > div {
+  display: flex;
   flex-direction: column;
   gap: 4px;
-  cursor: pointer;
 }
 
 .card-title {
   font-weight: 600;
-  font-size: 16px;
+  font-size: 1.1rem;
   color: var(--color-text-primary);
   cursor: pointer;
 }
@@ -605,6 +637,37 @@ onUnmounted(() => {
   filter: brightness(1.06);
 }
 
+/* Input with toggle icon button */
+.input-with-toggle {
+  position: relative;
+  flex: 1;
+}
+
+.input-with-toggle input {
+  width: 100%;
+  padding-right: 40px; /* Space for the button */
+}
+
+.input-with-toggle .toggle-icon-button {
+  position: absolute;
+  right: 8px;
+  top: 40%;
+  transform: translateY(-50%);
+  padding: 6px;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s;
+  background: transparent !important;
+}
+
+.input-with-toggle .toggle-icon-button:hover {
+  color: var(--color-accent);
+}
+
 .save-settings-button {
   width: 100%;
   padding: 12px 20px;
@@ -623,6 +686,37 @@ onUnmounted(() => {
   filter: brightness(1.06);
 }
 
+/* Input with button (Local TTS) */
+.input-with-button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.input-with-button input {
+  flex: 1;
+}
+
+.save-url-button {
+  height: 38px;
+  padding: 0 16px;
+  margin-top: -10px;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
+  border: none;
+  border-radius: 10px;
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: filter 0.2s;
+  flex-shrink: 0;
+}
+
+.save-url-button:hover {
+  filter: brightness(1.06);
+}
+
 .setting-group small {
   display: block;
   margin-top: 4px;
@@ -636,12 +730,35 @@ onUnmounted(() => {
   margin-bottom: 8px;
 }
 
-.proxy-inputs .proxy-host {
+.proxy-inputs .proxy-host,
+.proxy-inputs .proxy-port {
   flex: 2;
+  padding: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  font-size: 14px;
+  background: var(--color-bg-field);
+  color: var(--color-text-primary);
+  box-sizing: border-box;
+  height: 38px;
+}
+
+.proxy-inputs .proxy-host:focus,
+.proxy-inputs .proxy-port:focus {
+  outline: none;
+  border-color: rgba(29, 140, 255, 0.5);
+  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
+}
+
+/* Remove spinner from number input */
+.proxy-inputs .proxy-port::-webkit-inner-spin-button,
+.proxy-inputs .proxy-port::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 .proxy-inputs .proxy-port {
-  flex: 2;
+  -moz-appearance: textfield;
 }
 
 .error-box {

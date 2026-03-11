@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { AlertTriangle } from 'lucide-vue-next'
 
 const errorMessage = ref<string | null>(null)
 const excludeFromCapture = ref(false)
@@ -76,7 +77,7 @@ onMounted(() => {
           <span>Скрыть от записи/захвата экрана</span>
         </label>
         <span class="setting-hint">Скрывает все окна от OBS, Game Bar и других средств записи (Windows 8+)</span>
-        <span class="setting-warning">⚠️ Требуется перезапуск приложения для применения настройки</span>
+        <span class="setting-warning"><AlertTriangle :size="14" /> Требуется перезапуск приложения для применения настройки</span>
       </div>
     </section>
 
@@ -119,7 +120,7 @@ onMounted(() => {
 
 .settings-section {
   margin-bottom: 2rem;
-  padding: 1.5rem;
+  padding: 12px 16px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
@@ -127,7 +128,7 @@ onMounted(() => {
 }
 
 .settings-section h2 {
-  margin: 0 0 1.25rem;
+  margin: 0 0 1rem;
   font-size: 1.1rem;
   font-weight: 700;
   color: var(--color-text-primary);
@@ -178,11 +179,12 @@ onMounted(() => {
 }
 
 .setting-warning {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
   margin-top: 0.5rem;
   margin-left: 2.4rem;
   font-size: 0.82rem;
   color: #ffb347;
-  font-style: italic;
 }
 </style>

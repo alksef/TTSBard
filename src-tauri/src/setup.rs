@@ -177,6 +177,12 @@ fn init_tts_provider(
     eprintln!("[APP] Initializing TTS provider: {:?}", settings.tts.provider);
     app_state.set_tts_provider_type(settings.tts.provider);
 
+    // Always load OpenAI API key if available (for UI display)
+    if let Some(ref api_key) = settings.tts.openai.api_key {
+        app_state.set_openai_api_key(Some(api_key.clone()));
+        eprintln!("[APP] OpenAI API key loaded for UI");
+    }
+
     match settings.tts.provider {
         TtsProviderType::OpenAi => {
             if let Some(ref api_key) = settings.tts.openai.api_key {
