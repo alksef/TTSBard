@@ -54,7 +54,9 @@ const sileroError = ref<string | null>(null);
 
 // Error state
 const errorMessage = ref('');
-let errorTimeout: number | null = null;
+let errorTimeout: ReturnType<typeof setTimeout> | null = null;
+// Store listener cleanup function
+let unlistenTtsError: (() => void) | null = null;
 
 // Methods
 function showError(message: string) {
@@ -62,7 +64,7 @@ function showError(message: string) {
   if (errorTimeout) clearTimeout(errorTimeout);
   errorTimeout = setTimeout(() => {
     errorMessage.value = '';
-  }, 5000) as unknown as number;
+  }, 5000);
 }
 
 function toggleProvider(provider: TtsProviderType) {
@@ -224,7 +226,7 @@ onMounted(async () => {
     providers.value.local.configured = localUrl.length > 0;
 
     // Listen to TTS errors
-    await listen('tts-error', (event) => {
+    unlistenTtsError = await listen('tts-error', (event) => {
       showError(event.payload as string);
     });
   } catch (error) {
@@ -234,6 +236,10 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (errorTimeout) clearTimeout(errorTimeout);
+  if (unlistenTtsError) {
+    unlistenTtsError();
+    unlistenTtsError = null;
+  }
 });
 </script>
 

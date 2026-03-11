@@ -101,7 +101,7 @@ impl TtsEngine for OpenAiTts {
         eprintln!("[OpenAI] Voice: {}", self.voice);
         eprintln!("[OpenAI] Text length: {} chars", text.len());
         eprintln!("[OpenAI] Text preview: \"{}\"", text.chars().take(50).collect::<String>());
-        eprintln!("[OpenAI] API Key: {}...{}", &self.api_key[..7], &self.api_key[self.api_key.len().saturating_sub(4)..]);
+        eprintln!("[OpenAI] API Key: {}...{}", &self.api_key[..7.min(self.api_key.len())], &self.api_key[self.api_key.len().saturating_sub(4)..]);
         eprintln!("[OpenAI] Timeout: {}s", self.timeout_secs);
 
         let request = TtsRequest {
@@ -110,7 +110,11 @@ impl TtsEngine for OpenAiTts {
             voice: self.voice.clone(),
         };
 
-        eprintln!("[OpenAI] Request body: {}", serde_json::to_string(&request).unwrap_or_default());
+        // Логируем тело запроса (без аллокации при успехе)
+        match serde_json::to_string(&request) {
+            Ok(body) => eprintln!("[OpenAI] Request body: {}", body),
+            Err(_) => eprintln!("[OpenAI] Request body: (unable to serialize)"),
+        }
 
         let response = client
             .post("https://api.openai.com/v1/audio/speech")
