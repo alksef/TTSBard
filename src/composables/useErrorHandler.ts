@@ -33,6 +33,10 @@ export interface ShowErrorOptions {
 
 const DEFAULT_DURATION = 3000 // 3 секунды по умолчанию
 
+// Shared state (singleton) - один экземпляр для всех компонентов
+const errors = ref<ErrorMessage[]>([])
+let errorIdCounter = 0
+
 /**
  * Composable для унифицированной обработки ошибок
  *
@@ -42,8 +46,6 @@ const DEFAULT_DURATION = 3000 // 3 секунды по умолчанию
  * - Отслеживания активных ошибок
  */
 export function useErrorHandler() {
-  const errors = ref<ErrorMessage[]>([])
-  let errorIdCounter = 0
 
   /**
    * Добавить ошибку в список

@@ -458,7 +458,9 @@ onMounted(async () => {
 }
 
 .info-section p {
-  margin: 0.5rem 0;
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.6;
 }
 
 .info-section code {

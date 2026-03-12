@@ -90,9 +90,13 @@ const sidebarGroups: SidebarGroup[] = [
   {
     title: 'Инструменты',
     buttons: [
-      { id: 'preprocessor', label: 'Препроцессор', icon: ClipboardPenLine },
       { id: 'floating', label: 'Плавающее окно', icon: AppWindow },
       { id: 'soundpanel', label: 'Звуковая панель', icon: Music }
+    ]
+  },
+  {
+    buttons: [
+      { id: 'preprocessor', label: 'Быстрая вставка', icon: ClipboardPenLine }
     ]
   },
   {

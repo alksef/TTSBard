@@ -161,7 +161,6 @@ onUnmounted(() => {
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
 }
 
 .error-message {
@@ -197,6 +196,7 @@ onUnmounted(() => {
 
 .info-section {
   padding: 12px 16px;
+  margin-bottom: 1.5rem;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-left: 4px solid var(--color-accent);
@@ -205,7 +205,9 @@ onUnmounted(() => {
 }
 
 .info-section p {
-  margin: 0.5rem 0;
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.6;
 }
 
 .info-section code {
@@ -221,7 +223,7 @@ onUnmounted(() => {
 .setting-row {
   display: flex;
   flex-direction: column;
-  gap: 0.7rem;
+  gap: 0.5rem;
 }
 
 .setting-label {
