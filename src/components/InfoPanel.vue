@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Globe, Zap, Music, Lightbulb } from 'lucide-vue-next';
+import { Globe, Zap, Music, Lightbulb, ClipboardPenLine } from 'lucide-vue-next';
 // Info panel - static content with hotkeys and presets documentation
 </script>
 
@@ -8,19 +8,74 @@ import { Globe, Zap, Music, Lightbulb } from 'lucide-vue-next';
     <!-- Глобальные горячие клавиши -->
     <section class="info-section">
       <h2><Globe :size="18" class="section-icon" /> Глобальные горячие клавиши</h2>
-      <div class="hotkey-list">
-        <div class="hotkey-item">
-          <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F1</kbd>
-          <span>Включить режим перехвата текста / Показать плавающее окно</span>
+      <div class="info-block">
+        <div class="hotkey-list">
+          <div class="hotkey-item">
+            <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F1</kbd>
+            <span>Включить режим перехвата текста / Показать плавающее окно</span>
+          </div>
+          <div class="hotkey-item">
+            <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F2</kbd>
+            <span>Показать звуковую панель</span>
+          </div>
+          <div class="hotkey-item">
+            <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F3</kbd>
+            <span>Показать главное окно (поверх всех, для фокуса)</span>
+          </div>
         </div>
-        <div class="hotkey-item">
-          <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F2</kbd>
-          <span>Показать звуковую панель</span>
-        </div>
-        <div class="hotkey-item">
-          <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F3</kbd>
-          <span>Показать главное окно (поверх всех, для фокуса)</span>
-        </div>
+      </div>
+    </section>
+
+    <!-- Обработка текста -->
+    <section class="info-section">
+      <h2><ClipboardPenLine :size="18" class="section-icon" /> Обработка текста</h2>
+
+      <h3>Управление отправкой</h3>
+      <p class="section-description">
+        Используйте префиксы для контроля маршрутизации текста:
+      </p>
+      <table class="features-table">
+        <tr>
+          <th>Префикс</th>
+          <th>Описание</th>
+          <th>Twitch</th>
+          <th>WebView</th>
+        </tr>
+        <tr>
+          <td>Нет</td>
+          <td>Отправить везде</td>
+          <td>✅</td>
+          <td>✅</td>
+        </tr>
+        <tr>
+          <td><code>!</code></td>
+          <td>Только WebView</td>
+          <td>❌</td>
+          <td>✅</td>
+        </tr>
+        <tr>
+          <td><code>!!</code></td>
+          <td>Только TTS</td>
+          <td>❌</td>
+          <td>❌</td>
+        </tr>
+      </table>
+
+      <h3>Быстрая вставка</h3>
+      <p class="section-description">
+        <strong>Список замен</strong> — используйте <code>\ключ</code> для замены фраз<br>
+        <strong>Список юзернеймов</strong> — используйте <code>%юзернейм</code> для замены имён
+      </p>
+
+      <h3>Конвертация чисел</h3>
+      <p class="section-description">
+        Числа автоматически преобразуются в текст с согласованием рода:
+      </p>
+
+      <div class="example-block">
+        <div class="example-item"><code>1 книга</code> → <code>одна книга</code></div>
+        <div class="example-item"><code>2 книги</code> → <code>две книги</code></div>
+        <div class="example-item"><code>5 книг</code> → <code>пять книг</code></div>
       </div>
     </section>
 
@@ -56,37 +111,9 @@ import { Globe, Zap, Music, Lightbulb } from 'lucide-vue-next';
         </div>
         <div class="hotkey-item">
           <kbd>Space</kbd>
-          <span>Добавить пробел (с автозаменой пресетов)</span>
+          <span>Добавить пробел</span>
         </div>
       </div>
-
-      <h3>Пресеты препроцессора</h3>
-      <p class="subsection-description">
-        Пресеты позволяют автоматически заменять короткие коды на полный текст при вводе.
-        Замена происходит мгновенно после нажатия пробела.
-      </p>
-
-      <div class="preset-list">
-        <div class="preset-item">
-          <code>\ключ</code>
-          <span>Замена текста по коду</span>
-        </div>
-        <div class="preset-example">
-          Пример: <code>\name</code> + пробел → <em>Александр</em>
-        </div>
-
-        <div class="preset-item">
-          <code>%юзернейм</code>
-          <span>Замена имени пользователя</span>
-        </div>
-        <div class="preset-example">
-          Пример: <code>%admin</code> + пробел → <em>Администратор</em>
-        </div>
-      </div>
-
-      <p class="hint">
-        <Lightbulb :size="14" /> Пресеты настраиваются в разделе «Препроцессор»
-      </p>
     </section>
 
     <!-- Звуковая панель -->
@@ -133,14 +160,9 @@ import { Globe, Zap, Music, Lightbulb } from 'lucide-vue-next';
     <!-- Дополнительно -->
     <section class="info-section">
       <h2><Lightbulb :size="18" class="section-icon" /> Дополнительная информация</h2>
-      <ul class="info-list">
-        <li>Все настройки сохраняются автоматически между запусками</li>
-        <li>Плавающее окно можно сделать прозрачным и пропускающим клики</li>
-        <li>Главное окно при вызове через <code>Ctrl+Shift+F3</code> становится поверх всех только для фокуса</li>
-        <li>После потери фокуса главное окно возвращается в нормальное состояние</li>
-        <li>TTS провайдеры: OpenAI, Silero Bot, TTSVoiceWizard</li>
-        <li>Аудиоустройства можно настраивать independently (вывод и виртуальный микрофон)</li>
-      </ul>
+      <p class="section-description">
+        Все настройки сохраняются автоматически между запусками
+      </p>
     </section>
   </div>
 </template>
@@ -152,7 +174,7 @@ import { Globe, Zap, Music, Lightbulb } from 'lucide-vue-next';
 }
 
 .info-section {
-  margin-bottom: 2rem;
+  margin-bottom: 1.5rem;
   padding: 12px 16px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -176,16 +198,20 @@ import { Globe, Zap, Music, Lightbulb } from 'lucide-vue-next';
 }
 
 .info-section h3 {
-  margin-top: 1.5rem;
-  margin-bottom: 0.75rem;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
   font-size: 1.1rem;
   color: var(--color-text-primary);
+}
+
+.info-section h2 + h3 {
+  margin-top: 0.5rem;
 }
 
 .section-description {
   color: var(--color-text-secondary);
   line-height: 1.6;
-  margin-bottom: 1rem;
+  margin-bottom: 0.5rem;
 }
 
 .section-description code {
@@ -345,24 +371,94 @@ import { Globe, Zap, Music, Lightbulb } from 'lucide-vue-next';
   border: 1px solid rgba(74, 222, 128, 0.25);
 }
 
-.info-list {
-  margin: 0;
-  padding-left: 1.5rem;
-  color: var(--color-text-secondary);
-  line-height: 1.8;
+.info-block {
+  margin-bottom: 1.5rem;
 }
 
-.info-list li {
+.info-block:last-child {
+  margin-bottom: 0;
+}
+
+.info-block h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: 0.75rem;
+}
+
+.info-block p {
   margin-bottom: 0.5rem;
 }
 
-.info-list code {
-  background: rgba(29, 140, 255, 0.12);
-  color: #70d6ff;
+.features-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+
+.features-table th,
+.features-table td {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.features-table th {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.features-table td {
+  color: var(--color-text-secondary);
+}
+
+.info-block code {
+  background: rgba(29, 140, 255, 0.15);
   padding: 0.15rem 0.35rem;
-  border-radius: 3px;
+  border-radius: 4px;
   font-family: var(--font-mono);
-  font-size: 0.85rem;
-  border: 1px solid rgba(29, 140, 255, 0.25);
+  font-size: 0.85em;
+  color: var(--color-info);
+  border: 1px solid rgba(29, 140, 255, 0.28);
+}
+
+.info-block ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.info-block li {
+  margin-bottom: 0.4rem;
+  color: var(--color-text-secondary);
+}
+
+.example-block {
+  background: rgba(0, 0, 0, 0.25);
+  padding: 1rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.example-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+  color: var(--color-text-secondary);
+}
+
+.example-item:last-child {
+  margin-bottom: 0;
+}
+
+.example-item code {
+  background: rgba(29, 140, 255, 0.15);
+  color: #70d6ff;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  border: 1px solid rgba(29, 140, 255, 0.28);
 }
 </style>

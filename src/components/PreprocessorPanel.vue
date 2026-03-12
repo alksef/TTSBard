@@ -90,7 +90,7 @@ onMounted(async () => {
     <div v-else class="panel-content">
       <!-- Info Banner -->
       <div class="info-banner">
-        <p><Lightbulb :size="14" /> В режиме перехвата текст заменяется <strong>мгновенно</strong> при нажатии пробела после <code>\ключ</code> или <code>%юзернейм</code></p>
+        <p><span class="icon-wrapper"><Lightbulb :size="14" /></span> В режиме перехвата текст заменяется <strong>мгновенно</strong> при нажатии пробела после <code>\ключ</code> или <code>%юзернейм</code></p>
       </div>
 
       <!-- Replacements Section -->
@@ -167,7 +167,8 @@ placeholder="Введите текст для проверки..."
   border-left: 4px solid #ff9800;
   border-radius: 12px;
   padding: 12px 16px;
-  margin-bottom: 20px;
+  margin-bottom: 1.5rem;
+  backdrop-filter: blur(8px);
 }
 
 .info-banner p {
@@ -175,9 +176,13 @@ placeholder="Введите текст для проверки..."
   color: #ffcc80;
   font-size: 0.95rem;
   line-height: 1.6;
-  display: flex;
+}
+
+.icon-wrapper {
+  display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
+  vertical-align: middle;
+  margin-right: 0.5rem;
 }
 
 .info-banner code {
@@ -190,7 +195,7 @@ placeholder="Введите текст для проверки..."
 }
 
 .section {
-  margin-bottom: 30px;
+  margin-bottom: 1.5rem;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
   padding: 12px 16px;
@@ -208,7 +213,7 @@ h3 {
 .hint {
   font-size: 0.9rem;
   color: var(--color-text-secondary);
-  margin-bottom: 10px;
+  margin-bottom: 0.5rem;
   line-height: 1.6;
 }
 

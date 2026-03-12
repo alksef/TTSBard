@@ -3,9 +3,9 @@ import { ref, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { AlertTriangle } from 'lucide-vue-next'
 
-const errorMessage = ref<string | null>(null)
 const excludeFromCapture = ref(false)
 const quickEditorEnabled = ref(false)
+const errorMessage = ref<string | null>(null)
 let errorTimeout: number | null = null
 
 async function loadSettings() {
@@ -49,7 +49,7 @@ function showError(message: string) {
   errorTimeout = window.setTimeout(() => {
     errorMessage.value = null
     errorTimeout = null
-  }, 5000)
+  }, 3000)
 }
 
 onMounted(() => {
@@ -59,7 +59,12 @@ onMounted(() => {
 
 <template>
   <div class="settings-panel">
-    <div v-if="errorMessage" class="error-message">
+    <!-- Error/Info Message Display -->
+    <div v-if="errorMessage" class="message-box" :class="{
+      error: errorMessage.includes('Ошибка') || errorMessage.includes('ошибка') || errorMessage.includes('Failed'),
+      success: errorMessage.includes('сохранен') || errorMessage.includes('сохранена') || errorMessage.includes('Saved'),
+      warning: errorMessage.includes('Перезапустите') || errorMessage.includes('перезапустите')
+    }">
       {{ errorMessage }}
     </div>
 
@@ -76,7 +81,7 @@ onMounted(() => {
           />
           <span>Скрыть от записи/захвата экрана</span>
         </label>
-        <span class="setting-hint">Скрывает все окна от OBS, Game Bar и других средств записи (Windows 8+)</span>
+        <span class="setting-hint">Скрывает все окна от OBS, Game Bar и других средств записи</span>
         <span class="setting-warning"><AlertTriangle :size="14" /> Требуется перезапуск приложения для применения настройки</span>
       </div>
     </section>
@@ -108,18 +113,8 @@ onMounted(() => {
   margin: 0 auto;
 }
 
-.error-message {
-  background: rgba(255, 100, 100, 0.15);
-  border: 1px solid rgba(255, 100, 100, 0.3);
-  border-radius: 8px;
-  padding: 0.75rem 1rem;
-  margin-bottom: 1rem;
-  color: #ff8a8a;
-  font-size: 0.9rem;
-}
-
 .settings-section {
-  margin-bottom: 2rem;
+  margin-bottom: 1.5rem;
   padding: 12px 16px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -136,7 +131,7 @@ onMounted(() => {
 }
 
 .setting-row {
-  margin-bottom: 1.25rem;
+  margin-bottom: 1rem;
 }
 
 .setting-row:last-child {
@@ -186,5 +181,51 @@ onMounted(() => {
   margin-left: 2.4rem;
   font-size: 0.82rem;
   color: #ffb347;
+}
+
+.message-box {
+  position: fixed;
+  top: 20px;
+  left: calc(50% + 100px);
+  transform: translateX(-50%);
+  padding: 0.4rem 0.75rem;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  z-index: 1000;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+  animation: slideDownFade 0.3s ease-out;
+  white-space: nowrap;
+}
+
+.message-box.success {
+  background: rgba(74, 222, 128, 0.92);
+  border: 1px solid rgba(74, 222, 128, 0.4);
+  color: #0d4d1f;
+}
+
+.message-box.warning {
+  background: rgba(255, 165, 2, 0.92);
+  border: 1px solid rgba(255, 165, 2, 0.4);
+  color: #4a2d0d;
+}
+
+.message-box.error {
+  background: rgba(255, 111, 105, 0.92);
+  border: 1px solid rgba(255, 111, 105, 0.4);
+  border-left: 4px solid rgba(255, 59, 48, 0.8);
+  color: #4a0d0d;
+}
+
+@keyframes slideDownFade {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 }
 </style>
