@@ -32,6 +32,7 @@ export default defineConfig(async () => ({
 
   // Multi-window build configuration
   build: {
+    target: 'esnext', // Explicit target for Vite 7+ (default changed to 'baseline-widely-available')
     rollupOptions: {
       input: {
         main: './index.html',
