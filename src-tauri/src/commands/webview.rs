@@ -114,18 +114,20 @@ pub async fn open_template_folder() -> Result<(), String> {
     let config_dir = dirs::config_dir()
         .ok_or("Failed to get config dir")?
         .join("ttsbard")
-        .join("webview")
-        .canonicalize()
-        .map_err(|e| format!("Invalid config dir: {}", e))?;
+        .join("webview");
 
+    // Create directory first, before canonicalize
     fs::create_dir_all(&config_dir)
         .map_err(|e| e.to_string())?;
+
+    let config_dir = config_dir.canonicalize()
+        .map_err(|e| format!("Invalid config dir: {}", e))?;
 
     let path = config_dir.to_str().ok_or("Invalid path")?;
 
     #[cfg(target_os = "windows")]
     {
-        let _ = std::process::Command::new("explorer")
+        std::process::Command::new("explorer")
             .args([path])
             .spawn()
             .map_err(|e| e.to_string())?;
@@ -133,7 +135,7 @@ pub async fn open_template_folder() -> Result<(), String> {
 
     #[cfg(target_os = "macos")]
     {
-        let _ = std::process::Command::new("open")
+        std::process::Command::new("open")
             .args([path])
             .spawn()
             .map_err(|e| e.to_string())?;
@@ -141,7 +143,7 @@ pub async fn open_template_folder() -> Result<(), String> {
 
     #[cfg(target_os = "linux")]
     {
-        let _ = std::process::Command::new("xdg-open")
+        std::process::Command::new("xdg-open")
             .args([path])
             .spawn()
             .map_err(|e| e.to_string())?;

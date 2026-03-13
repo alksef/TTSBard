@@ -171,9 +171,8 @@ async fn sse_handler(
     let stream = futures::stream::unfold(rx, move |mut rx| async move {
         match rx.recv().await {
             Ok(text) => {
-                match serde_json::json!({"text": text}).to_string() {
-                    json => Some((Ok(Event::default().data(json)), rx)),
-                }
+                let json = serde_json::json!({"text": text}).to_string();
+                Some((Ok(Event::default().data(json)), rx))
             }
             Err(_) => None,
         }
