@@ -10,7 +10,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  APP_VERSION_BASE: "0.1.0-pre"
 
 jobs:
   build:
@@ -42,8 +41,23 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Extract version from tag
+        id: get_version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            # Strip 'v' prefix from tag (v1.2.3 -> 1.2.3)
+            VERSION=${GITHUB_REF_NAME#v}
+            echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+            echo "Using tag version: $VERSION"
+          else
+            # Use default dev version for PRs and manual runs
+            echo "VERSION=0.1.0-dev" >> $GITHUB_OUTPUT
+            echo "Using dev version"
+          fi
+        shell: bash
+
       - name: Set version
-        run: node scripts/set-version.cjs ${{ env.APP_VERSION_BASE }} ${{ github.sha }}
+        run: node scripts/set-version.cjs "${{ steps.get_version.outputs.VERSION }}" "${{ github.sha }}"
 
       - name: Build application
         run: npm run tauri build -- --target ${{ matrix.target }}
