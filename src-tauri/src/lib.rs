@@ -24,7 +24,13 @@ use state::AppState;
 use commands::telegram::TelegramState;
 use config::{SettingsManager, WindowsManager};
 use tauri::Manager;
+use tracing::{info, warn, error, Level};
+use tracing_subscriber::{fmt, prelude::*, Registry, EnvFilter};
+use tracing_appender::non_blocking;
+use std::path::PathBuf;
+use anyhow::Context;
 use commands::{speak_text, get_tts_provider, set_tts_provider, get_local_tts_url, set_local_tts_url, get_openai_api_key, set_openai_api_key, get_openai_voice, set_openai_voice, get_openai_proxy, set_openai_proxy, get_interception, set_interception, has_api_key, get_floating_appearance, set_floating_opacity, set_floating_bg_color, set_clickthrough, is_clickthrough_enabled, is_enter_closes_disabled, toggle_interception, toggle_floating_window, show_floating_window_cmd, hide_floating_window_cmd, is_floating_window_visible, quit_app, get_hotkey_enabled, set_hotkey_enabled, get_global_exclude_from_capture, set_global_exclude_from_capture, open_file_dialog, get_output_devices, get_virtual_mic_devices, get_audio_settings, set_speaker_device, set_speaker_enabled, set_speaker_volume, set_virtual_mic_device, enable_virtual_mic, disable_virtual_mic, set_virtual_mic_volume, set_quick_editor_enabled, get_quick_editor_enabled, hide_main_window, close_floating_window, close_soundpanel_window};
+use commands::logging::{get_logging_settings, save_logging_settings};
 use commands::telegram::{telegram_init, telegram_request_code, telegram_sign_in, telegram_sign_out, telegram_get_status, telegram_get_user, telegram_auto_restore};
 use soundpanel::{sp_get_bindings, sp_add_binding, sp_remove_binding, sp_test_sound, sp_is_supported_format, sp_get_floating_appearance, sp_set_floating_opacity, sp_set_floating_bg_color, sp_set_floating_clickthrough, sp_is_floating_clickthrough_enabled};
 
@@ -44,6 +50,149 @@ pub fn run() {
 
     let windows_manager = WindowsManager::new()
         .expect("Failed to create windows manager");
+
+    // Load settings to configure logger
+    // These settings will be passed to init_app to avoid race condition
+    let settings = settings_manager.load()
+        .expect("Failed to load settings");
+
+    // Validate module levels (log a warning if invalid)
+    if let Err(e) = commands::logging::validate_module_levels(&settings.logging.module_levels) {
+        warn!(error = %e, "Invalid module_levels in settings.json. Module logging disabled.");
+    }
+
+    // Initialize tracing subscriber
+    let log_dir = PathBuf::from(std::env::var("APPDATA")
+        .unwrap_or_else(|_| ".".to_string()))
+        .join("ttsbard")
+        .join("logs");
+
+    // Ensure log directory exists with graceful fallback
+    if let Err(e) = std::fs::create_dir_all(&log_dir)
+        .with_context(|| format!("Failed to create log directory at {:?}", log_dir))
+    {
+        eprintln!("Failed to create log directory: {}. Logging to stdout only.", e);
+        // Continue with stdout-only logging
+    }
+
+    // Build env filter with per-module directives
+    let default_level = if settings.logging.enabled {
+        match settings.logging.level.as_str() {
+            "error" => Level::ERROR,
+            "warn" => Level::WARN,
+            "info" => Level::INFO,
+            "debug" => Level::DEBUG,
+            "trace" => Level::TRACE,
+            _ => Level::INFO,
+        }
+    } else {
+        Level::ERROR
+    };
+
+    let mut env_filter = EnvFilter::builder()
+        .with_default_directive(default_level.into())
+        .from_env_lossy();
+
+    // Apply per-module filters from settings.json
+    for (module, level_str) in &settings.logging.module_levels {
+        let module_level = match level_str.as_str() {
+            "error" => Level::ERROR,
+            "warn" => Level::WARN,
+            "info" => Level::INFO,
+            "debug" => Level::DEBUG,
+            "trace" => Level::TRACE,
+            _ => Level::INFO,
+        };
+        let directive = format!("{}={}", module, module_level);
+        env_filter = env_filter.add_directive(directive.parse().expect("Invalid log directive"));
+    }
+
+    // WorkerGuard must live for the entire program duration.
+    // We use Box::leak to prevent it from being dropped, which would stop logging.
+    // This is a small memory leak (a few bytes) that is acceptable for a desktop app.
+    let _guard: &'static mut non_blocking::WorkerGuard = if cfg!(debug_assertions) && settings.logging.enabled {
+        // Debug mode + enabled: console and file with non-blocking writer
+        let log_file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_dir.join("ttsbard.log"))
+            .expect("Failed to open log file");
+
+        // Add session separator for readability
+        use std::io::Write;
+        let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
+        writeln!(
+            &log_file,
+            "\n====== New session: {} | Version: {} ======\n",
+            timestamp,
+            env!("CARGO_PKG_VERSION")
+        ).ok();
+
+        let (non_blocking_file, guard) = non_blocking(log_file);
+        let leaked_guard = Box::leak(Box::new(guard));
+
+        tracing::subscriber::set_global_default(
+            Registry::default()
+                .with(env_filter)
+                .with(
+                    fmt::layer()
+                        .with_writer(std::io::stdout)
+                        .with_ansi(true)
+                )
+                .with(
+                    fmt::layer()
+                        .with_writer(non_blocking_file)
+                        .with_ansi(false)
+                )
+        ).expect("Failed to set tracing subscriber");
+
+        leaked_guard
+    } else if settings.logging.enabled {
+        // Release mode + enabled: file only with non-blocking writer
+        let log_file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_dir.join("ttsbard.log"))
+            .expect("Failed to open log file");
+
+        // Add session separator for readability
+        use std::io::Write;
+        let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
+        writeln!(
+            &log_file,
+            "\n====== New session: {} | Version: {} ======\n",
+            timestamp,
+            env!("CARGO_PKG_VERSION")
+        ).ok();
+
+        let (non_blocking_file, guard) = non_blocking(log_file);
+        let leaked_guard = Box::leak(Box::new(guard));
+
+        tracing::subscriber::set_global_default(
+            Registry::default()
+                .with(env_filter)
+                .with(
+                    fmt::layer()
+                        .with_writer(non_blocking_file)
+                        .with_ansi(false)
+                )
+        ).expect("Failed to set tracing subscriber");
+
+        leaked_guard
+    } else {
+        // Logging disabled: errors only to console (no guard needed for stdout)
+        tracing::subscriber::set_global_default(
+            Registry::default()
+                .with(EnvFilter::new("error"))
+                .with(
+                    fmt::layer()
+                        .with_writer(std::io::stdout)
+                        .with_ansi(true)
+                )
+        ).expect("Failed to set tracing subscriber");
+        // Dummy guard to satisfy the type system - won't be used
+        Box::leak(Box::new(non_blocking(std::io::sink()).1))
+    };
 
     let appdata_path = std::env::var("APPDATA")
         .unwrap_or_else(|_| ".".to_string());
@@ -161,15 +310,21 @@ pub fn run() {
             commands::twitch::connect_twitch,
             commands::twitch::disconnect_twitch,
             commands::twitch::get_twitch_status,
+            // Logging commands
+            get_logging_settings,
+            save_logging_settings,
         ])
-        .setup(|app| setup::init_app(app))
+        .setup({
+            let settings_clone = settings.clone();
+            move |app| setup::init_app(app, settings_clone.clone())
+        })
         .on_window_event(|window, event| {
             // Обрабатываем события главного окна
             if window.label() == "main" {
                 // Позиция сохраняется только при закрытии (событие Destroyed)
                 // Предотвращаем закрытие - скрываем окно вместо этого
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                    eprintln!("[APP] Main window close requested - hiding to tray");
+                    info!("Main window close requested - hiding to tray");
                     api.prevent_close();
                     let _ = window.hide();
                 }
@@ -188,21 +343,21 @@ pub fn run() {
                                 let app_state = app_handle.state::<AppState>();
                                 let app_state_inner = app_state.inner().clone();
 
-                                eprintln!("Window focused - initializing hotkeys...");
+                                info!("Window focused - initializing hotkeys...");
 
                                 // Initialize hotkeys using tauri-plugin-global-shortcut
                                 match hotkeys::initialize_hotkeys(0, app_state_inner, app_handle.clone()) {
                                     Ok(_) => {
-                                        eprintln!("Hotkeys initialized successfully");
+                                        info!("Hotkeys initialized successfully");
                                     }
                                     Err(e) => {
-                                        eprintln!("Failed to initialize hotkeys: {}", e);
+                                        error!(error = %e, "Failed to initialize hotkeys");
                                     }
                                 }
                             });
                         } else {
                             // Window lost focus - remove always-on-top
-                            eprintln!("[APP] Main window lost focus - removing always-on-top");
+                            info!("Main window lost focus - removing always-on-top");
                             let _ = window.set_always_on_top(false);
                         }
                     }
@@ -212,7 +367,7 @@ pub fn run() {
                             if let Ok(pos) = window.outer_position() {
                                 let x: i32 = pos.x;
                                 let y: i32 = pos.y;
-                                eprintln!("[APP] Main window destroyed - saving position: {}, {}", x, y);
+                                info!(x, y, "Main window destroyed - saving position");
                                 let _ = windows_manager.set_main_position(Some(x), Some(y));
                             }
 
@@ -222,7 +377,7 @@ pub fn run() {
                                     if let Ok(pos) = floating_window.outer_position() {
                                         let x = pos.x;
                                         let y = pos.y;
-                                        eprintln!("[APP] Saving floating window position: {}, {}", x, y);
+                                        info!(x, y, "Saving floating window position");
                                         let _ = windows_manager.set_floating_position(Some(x), Some(y));
                                     }
                                 }

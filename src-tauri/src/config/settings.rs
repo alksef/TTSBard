@@ -5,6 +5,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -12,6 +13,7 @@ use parking_lot::RwLock;
 
 use crate::tts::TtsProviderType;
 use super::validation::{validate_port, validate_volume};
+use tracing::{info, warn};
 
 // ==================== Audio Settings ====================
 
@@ -185,6 +187,34 @@ impl Default for WebViewServerSettings {
     }
 }
 
+// ==================== Logging Settings ====================
+
+/// Logging configuration
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LoggingSettings {
+    #[serde(default = "default_logging_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_logging_level")]
+    pub level: String,
+    /// Per-module log levels (только для редактирования в settings.json вручную)
+    /// Пример: { "ttsbard::telegram": "debug", "ttsbard::webview": "trace" }
+    #[serde(default)]
+    pub module_levels: HashMap<String, String>,
+}
+
+fn default_logging_enabled() -> bool { false }
+fn default_logging_level() -> String { "info".to_string() }
+
+impl Default for LoggingSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            level: "info".to_string(),
+            module_levels: HashMap::new(),
+        }
+    }
+}
+
 // ==================== Main App Settings ====================
 
 /// All application settings
@@ -198,6 +228,8 @@ pub struct AppSettings {
     pub quick_editor_enabled: bool,
     pub twitch: TwitchSettings,
     pub webview: WebViewServerSettings,
+    #[serde(default)]
+    pub logging: LoggingSettings,
 }
 
 impl Default for AppSettings {
@@ -209,6 +241,7 @@ impl Default for AppSettings {
             quick_editor_enabled: false,
             twitch: TwitchSettings::default(),
             webview: WebViewServerSettings::default(),
+            logging: LoggingSettings::default(),
         }
     }
 }
@@ -222,7 +255,7 @@ impl AppSettings {
 
         // Validate webview port
         if let Err(e) = validate_port(self.webview.port) {
-            eprintln!("[SETTINGS] Invalid webview port: {}, using default", e);
+            warn!(error = %e, "Invalid webview port, using default");
             self.webview.port = 10100;
         }
     }
@@ -280,7 +313,7 @@ impl SettingsManager {
             settings.validate();
             Ok(settings)
         } else {
-            eprintln!("[SETTINGS] Settings file not found, creating with defaults");
+            info!("Settings file not found, creating with defaults");
             let settings = AppSettings::default();
             // Save defaults to disk for next time
             let content = serde_json::to_string_pretty(&settings)
@@ -317,7 +350,7 @@ impl SettingsManager {
         // Update cache after successful disk write
         *self.cache.write() = settings.clone();
 
-        eprintln!("[SETTINGS] Settings saved and cache updated");
+        info!("Settings saved and cache updated");
         Ok(())
     }
 
@@ -327,7 +360,7 @@ impl SettingsManager {
     pub fn reload(&self) -> Result<()> {
         let settings = Self::load_from_disk(&self.config_dir)?;
         *self.cache.write() = settings;
-        eprintln!("[SETTINGS] Settings reloaded from disk");
+        info!("Settings reloaded from disk");
         Ok(())
     }
 
@@ -652,5 +685,28 @@ impl SettingsManager {
     /// Get WebView bind address
     pub fn get_webview_bind_address(&self) -> String {
         self.cache.read().webview.bind_address.clone()
+    }
+
+    // ========== Logging Settings ==========
+
+    /// Update logging settings atomically
+    ///
+    /// This method loads settings, updates logging configuration, and saves
+    /// in a single operation to prevent race conditions.
+    ///
+    /// # Arguments
+    /// * `updater` - Function that receives mutable reference to LoggingSettings
+    pub fn update_logging<F>(&self, updater: F) -> Result<()>
+    where
+        F: FnOnce(&mut LoggingSettings),
+    {
+        let mut settings = self.load()?;
+        updater(&mut settings.logging);
+        self.save(&settings)
+    }
+
+    /// Get logging settings
+    pub fn get_logging_settings(&self) -> LoggingSettings {
+        self.cache.read().logging.clone()
     }
 }

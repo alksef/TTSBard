@@ -41,14 +41,14 @@ impl TemplateCache {
 
         // Create default templates if they don't exist
         if !html_path.exists() {
-            eprintln!("[WEBVIEW] Creating default HTML template");
+            tracing::info!(html_path = ?html_path, "Creating default HTML template");
             tokio::fs::write(&html_path, default_html())
                 .await
                 .map_err(|e| anyhow::anyhow!("Failed to write default HTML: {}", e))?;
         }
 
         if !css_path.exists() {
-            eprintln!("[WEBVIEW] Creating default CSS");
+            tracing::info!(css_path = ?css_path, "Creating default CSS");
             tokio::fs::write(&css_path, default_css())
                 .await
                 .map_err(|e| anyhow::anyhow!("Failed to write default CSS: {}", e))?;
@@ -57,14 +57,14 @@ impl TemplateCache {
         let html = tokio::fs::read_to_string(&html_path)
             .await
             .unwrap_or_else(|e| {
-                eprintln!("[WEBVIEW] Failed to read HTML, using default: {}", e);
+                tracing::warn!(error = %e, html_path = ?html_path, "Failed to read HTML, using default");
                 default_html()
             });
 
         let css = tokio::fs::read_to_string(&css_path)
             .await
             .unwrap_or_else(|e| {
-                eprintln!("[WEBVIEW] Failed to read CSS, using default: {}", e);
+                tracing::warn!(error = %e, css_path = ?css_path, "Failed to read CSS, using default");
                 default_css()
             });
 
@@ -151,14 +151,14 @@ impl WebViewServer {
                 }
             })?;
 
-        tracing::info!("WebView server started on {}", addr);
+        tracing::info!(addr = %addr, "WebView server started");
         axum::serve(listener, app).await?;
         Ok(())
     }
 
     pub async fn broadcast_text(&self, text: &str) {
         if let Err(e) = self.sse_tx.send(text.to_string()) {
-            eprintln!("[WEBVIEW] Failed to broadcast: {} (no receivers)", e);
+            tracing::debug!(error = %e, "Failed to broadcast (no receivers)");
         }
     }
 }

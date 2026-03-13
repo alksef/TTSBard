@@ -7,6 +7,7 @@ use crate::audio::{AudioPlayer, OutputConfig};
 use crate::commands::telegram::TelegramState;
 use tauri::{State, AppHandle, Manager, Emitter};
 use std::sync::Arc;
+use tracing::{info, warn, error, debug};
 
 // Preprocessor commands
 pub mod preprocessor;
@@ -20,10 +21,13 @@ pub mod webview;
 // Twitch commands
 pub mod twitch;
 
+// Logging commands
+pub mod logging;
+
 /// Quit the application
 #[tauri::command]
 pub fn quit_app(app_handle: AppHandle) -> Result<(), String> {
-    eprintln!("[APP] Quit requested - saving window states");
+    info!("Quit requested - saving window states");
 
     // Сохраняем состояние окон перед выходом
     if let Some(windows_manager) = app_handle.try_state::<WindowsManager>() {
@@ -32,7 +36,7 @@ pub fn quit_app(app_handle: AppHandle) -> Result<(), String> {
             if let Ok(pos) = main_window.outer_position() {
                 let x = pos.x;
                 let y = pos.y;
-                eprintln!("[APP] Saving main window position: {}, {}", x, y);
+                info!(x, y, "Saving main window position");
                 let _ = windows_manager.set_main_position(Some(x), Some(y));
             }
         }
@@ -43,7 +47,7 @@ pub fn quit_app(app_handle: AppHandle) -> Result<(), String> {
                 if let Ok(pos) = floating_window.outer_position() {
                     let x = pos.x;
                     let y = pos.y;
-                    eprintln!("[APP] Saving floating window position: {}, {}", x, y);
+                    info!(x, y, "Saving floating window position");
                     let _ = windows_manager.set_floating_position(Some(x), Some(y));
                 }
             }
@@ -60,7 +64,7 @@ pub fn quit_app(app_handle: AppHandle) -> Result<(), String> {
 /// Internal function for TTS synthesis (shared between command and event handler)
 /// This function handles the complete TTS pipeline using the configured provider
 pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), String> {
-    eprintln!("[SPEAK_INTERNAL] Starting TTS for text: '{}'", text);
+    info!(text, "Starting TTS");
 
     if text.trim().is_empty() {
         return Err("Текст не может быть пустым".to_string());
@@ -71,15 +75,14 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
     let text = prefix_result.text;
 
     if prefix_result.skip_twitch || prefix_result.skip_webview {
-        eprintln!("[PREFIX] Flags - skip_twitch: {}, skip_webview: {}",
-            prefix_result.skip_twitch, prefix_result.skip_webview);
+        debug!(skip_twitch = prefix_result.skip_twitch, skip_webview = prefix_result.skip_webview, "Prefix flags");
     }
 
     // === STAGE 2: Replacements (existing) ===
     let text = if let Some(preprocessor) = state.get_preprocessor() {
         let processed = preprocessor.process(&text);
         if processed != text {
-            eprintln!("[PREPROCESSOR] Replacements: '{}' -> '{}'", text, processed);
+            debug!(text, processed, "Replacements");
         }
         processed
     } else {
@@ -88,7 +91,7 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
 
     // === STAGE 3: Numbers to text ===
     let text = crate::preprocessor::process_numbers(&text);
-    eprintln!("[PREPROCESSOR] Final text for TTS: '{}'", text);
+    debug!(text, "Final text for TTS");
 
     // Store flags for event handlers
     state.set_prefix_flags(prefix_result.skip_twitch, prefix_result.skip_webview);
@@ -99,8 +102,8 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
 
         providers.as_ref()
             .ok_or_else(|| {
-                eprintln!("[SPEAK_INTERNAL] ERROR: TTS provider not initialized!");
-                eprintln!("[SPEAK_INTERNAL] Provider type: {:?}", state.get_tts_provider_type());
+                error!("TTS provider not initialized");
+                debug!(provider = ?state.get_tts_provider_type(), "Provider type");
                 "TTS provider не инициализирован. Выберите провайдер в настройках.".to_string()
             })?
             .clone()
@@ -109,10 +112,10 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
     // Synthesize audio
     let audio_data = provider.synthesize(&text).await
         .map_err(|e| {
-            eprintln!("[SPEAK_INTERNAL] synthesize() error: {}", e);
+            error!(error = %e, "synthesize() error");
             e
         })?;
-    eprintln!("[SPEAK_INTERNAL] Audio synthesized: {} bytes", audio_data.len());
+    debug!(bytes = audio_data.len(), "Audio synthesized");
 
     // Send message event immediately before playback (synchronized with audio)
     state.emit_event(AppEvent::TextSentToTts(text.clone()));
@@ -150,7 +153,7 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
     let cached_devices = Some(state.cached_devices.clone());
     player.play_mp3_async_dual(audio_data, speaker_config, virtual_mic_config, cached_devices)?;
 
-    eprintln!("[SPEAK_INTERNAL] TTS completed successfully");
+    info!("TTS completed successfully");
 
     Ok(())
 }
@@ -179,53 +182,53 @@ pub async fn set_tts_provider(
     settings_manager: State<'_, SettingsManager>,
     provider: TtsProviderType,
 ) -> Result<(), String> {
-    eprintln!("[SET_PROVIDER] Switching to provider: {:?}", provider);
+    info!(?provider, "Switching to provider");
 
     // Initialize provider based on type
     match provider {
         TtsProviderType::OpenAi => {
-            eprintln!("[SET_PROVIDER] Initializing OpenAI TTS");
+            info!("Initializing OpenAI TTS");
             // Get saved API key and initialize if available
             let api_key = state.get_openai_api_key();
             if let Some(key) = api_key {
                 state.init_openai_tts(key);
-                eprintln!("[SET_PROVIDER] OpenAI TTS initialized");
+                debug!("OpenAI TTS initialized");
             } else {
-                eprintln!("[SET_PROVIDER] WARNING: No API key found, OpenAI TTS not initialized");
+                warn!("No API key found, OpenAI TTS not initialized");
             }
         }
         TtsProviderType::Silero => {
-            eprintln!("[SET_PROVIDER] Initializing Silero TTS");
+            info!("Initializing Silero TTS");
 
             // Клонируем Arc заранее, чтобы использовать после telegram_auto_restore
             let client_arc = Arc::clone(&telegram_state.client);
 
             // Восстанавливаем сессию Telegram (если есть сохранённая)
-            eprintln!("[SET_PROVIDER] Checking Telegram session...");
+            debug!("Checking Telegram session");
             let _connected = match telegram::telegram_auto_restore(telegram_state, settings_manager.clone()).await {
                 Ok(connected) => {
                     if connected {
-                        eprintln!("[SET_PROVIDER] Telegram session restored");
+                        info!("Telegram session restored");
                     } else {
-                        eprintln!("[SET_PROVIDER] No saved Telegram session");
+                        debug!("No saved Telegram session");
                     }
                     connected
                 }
                 Err(e) => {
-                    eprintln!("[SET_PROVIDER] Telegram check failed: {}", e);
+                    warn!(error = %e, "Telegram check failed");
                     false
                 }
             };
 
             // Инициализируем Silero с клиентом (даже если None - пользователь подключится позже)
             state.init_silero_tts(client_arc);
-            eprintln!("[SET_PROVIDER] Silero TTS initialized");
+            info!("Silero TTS initialized");
         }
         TtsProviderType::Local => {
-            eprintln!("[SET_PROVIDER] Initializing Local TTS");
+            info!("Initializing Local TTS");
             let url = state.get_local_tts_url();
             state.init_local_tts(url);
-            eprintln!("[SET_PROVIDER] Local TTS initialized");
+            debug!("Local TTS initialized");
         }
     }
 
@@ -235,7 +238,7 @@ pub async fn set_tts_provider(
     settings_manager.set_tts_provider(provider)
         .map_err(|e| format!("Failed to save provider: {}", e))?;
 
-    eprintln!("[SET_PROVIDER] Provider set to {:?}", provider);
+    info!(?provider, "Provider set successfully");
     Ok(())
 }
 
@@ -258,7 +261,7 @@ pub fn set_local_tts_url(
     settings_manager: State<'_, SettingsManager>,
     url: String,
 ) -> Result<(), String> {
-    eprintln!("[LOCAL_TTS] Setting URL to: {}", url);
+    info!(url, "Setting Local TTS URL");
 
     // Validate URL
     if url.is_empty() {
@@ -269,12 +272,12 @@ pub fn set_local_tts_url(
     }
 
     // Save to config first
-    eprintln!("[LOCAL_TTS] Saving URL to config...");
+    debug!("Saving URL to config...");
     settings_manager.set_local_tts_url(url.clone())
         .map_err(|e| format!("Failed to save settings: {}", e))?;
 
     // Update runtime state
-    eprintln!("[LOCAL_TTS] Updating runtime state...");
+    debug!("Updating runtime state");
 
     // Collect data with minimal locks (following deadlock prevention pattern)
     let current_provider = {
@@ -284,17 +287,17 @@ pub fn set_local_tts_url(
 
     // Reinitialize LocalTts if it's the active provider
     if matches!(current_provider.as_ref(), Some(TtsProvider::Local(_))) {
-        eprintln!("[LOCAL_TTS] Local TTS is active, reinitializing with new URL...");
+        info!("Local TTS is active, reinitializing with new URL");
         state.init_local_tts(url.clone());
-        eprintln!("[LOCAL_TTS] Local TTS reinitialized with URL: {}", url);
+        debug!(url, "Local TTS reinitialized");
     } else {
-        eprintln!("[LOCAL_TTS] Local TTS is not active, skipping reinitialization");
+        debug!("Local TTS is not active, skipping reinitialization");
     }
 
     // Update URL in state (always, so it's ready when LocalTts is activated)
     state.set_local_tts_url(url.clone());
 
-    eprintln!("[LOCAL_TTS] URL set successfully: {}", url);
+    info!(url, "Local TTS URL set successfully");
     Ok(())
 }
 
@@ -345,24 +348,24 @@ pub fn set_openai_voice(
     settings_manager: State<'_, SettingsManager>,
     voice: String,
 ) -> Result<(), String> {
-    eprintln!("[TTS] Setting OpenAI voice to: {}", voice);
+    info!(voice, "Setting OpenAI voice");
 
     const VOICES: &[&str] = &["alloy", "echo", "fable", "onyx", "nova", "shimmer"];
     if !VOICES.contains(&voice.as_str()) {
-        eprintln!("[TTS] Invalid voice: {}", voice);
+        warn!(voice, "Invalid voice");
         return Err("Неверный голос".into());
     }
 
     // Save to config first
-    eprintln!("[TTS] Saving voice to config...");
+    debug!("Saving voice to config...");
     settings_manager.set_openai_voice(voice.clone())
         .map_err(|e| format!("Failed to save settings: {}", e))?;
 
     // Update runtime state and reinitialize OpenAI TTS instance
-    eprintln!("[TTS] Updating runtime state and reinitializing OpenAI TTS...");
+    debug!("Updating runtime state and reinitializing OpenAI TTS");
     state.set_openai_voice(voice.clone());
 
-    eprintln!("[TTS] OpenAI voice set successfully: {}", voice);
+    info!(voice, "OpenAI voice set successfully");
     Ok(())
 }
 
@@ -697,13 +700,13 @@ pub fn set_global_exclude_from_capture(
     _app_handle: AppHandle,
     windows_manager: State<'_, WindowsManager>
 ) -> Result<(), String> {
-    eprintln!("[GLOBAL] ===== set_global_exclude_from_capture called with value: {} =====", value);
+    info!(value, "Setting global exclude from capture");
 
     // Save to config only - will be applied on app restart due to Windows API limitations
     windows_manager.set_global_exclude_from_capture(value)
         .map_err(|e| format!("Failed to save settings: {}", e))?;
 
-    eprintln!("[GLOBAL] Setting saved. Will apply to all windows after application restart.");
+    info!("Setting saved. Will apply to all windows after application restart.");
     Ok(())
 }
 
@@ -713,7 +716,7 @@ pub fn get_global_exclude_from_capture(
     windows_manager: State<'_, WindowsManager>
 ) -> bool {
     let value = windows_manager.get_global_exclude_from_capture();
-    eprintln!("[GLOBAL] get_global_exclude_from_capture called, returning: {}", value);
+    debug!(value, "Getting global exclude from capture");
     value
 }
 

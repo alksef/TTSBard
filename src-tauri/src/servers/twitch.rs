@@ -4,6 +4,7 @@
 // Refactored from lib.rs Twitch client thread (2026-03-11)
 
 use tauri::{AppHandle, Emitter};
+use tracing::{debug, error, info};
 use crate::events::{TwitchEvent, TwitchConnectionStatus};
 use crate::state::AppState;
 use crate::twitch::TwitchClient;
@@ -58,7 +59,7 @@ pub async fn run_twitch_client(
                     Ok(event) => {
                         match event {
                             TwitchEvent::Restart => {
-                                eprintln!("[TWITCH] Restart event received");
+                                info!("Restart event received");
 
                                 let settings = app_state.twitch_settings.read().await;
                                 let is_enabled = settings.enabled;
@@ -67,7 +68,7 @@ pub async fn run_twitch_client(
                                 drop(settings);
 
                                 if let Some(client) = twitch_client.take() {
-                                    eprintln!("[TWITCH] Stopping previous client...");
+                                    info!("Stopping previous client...");
                                     client.stop().await;
                                 }
 
@@ -76,31 +77,31 @@ pub async fn run_twitch_client(
 
                                 if is_enabled {
                                     if is_valid {
-                                        eprintln!("[TWITCH] Settings valid, creating new client...");
+                                        info!("Settings valid, creating new client");
                                         last_status = TwitchConnectionStatus::Connecting;
                                         update_status(last_status.clone());
 
                                         let client = TwitchClient::new(settings_clone.into());
                                         match client.start().await {
                                             Ok(_) => {
-                                                eprintln!("[TWITCH] Client started, waiting for connection...");
+                                                info!("Client started, waiting for connection");
                                                 twitch_client = Some(client);
                                             }
                                             Err(e) => {
-                                                eprintln!("[TWITCH] Failed to start client: {}", e);
+                                                error!(error = %e, "Failed to start client");
                                                 last_status = TwitchConnectionStatus::Error(e.to_string());
                                                 update_status(last_status.clone());
                                             }
                                         }
                                     } else {
-                                        eprintln!("[TWITCH] Settings invalid, not starting client");
+                                        debug!("Settings invalid, not starting client");
                                     }
                                 } else {
-                                    eprintln!("[TWITCH] Twitch disabled, not starting client");
+                                    debug!("Twitch disabled, not starting client");
                                 }
                             }
                             TwitchEvent::Stop => {
-                                eprintln!("[TWITCH] Stop event received");
+                                info!("Stop event received");
                                 if let Some(client) = twitch_client.take() {
                                     client.stop().await;
                                 }
@@ -108,24 +109,24 @@ pub async fn run_twitch_client(
                                 update_status(last_status.clone());
                             }
                             TwitchEvent::SendMessage(text) => {
-                                eprintln!("[TWITCH] SendMessage event received: '{}'", text);
+                                debug!(message = %text, "SendMessage event received");
                                 if let Some(client) = &twitch_client {
                                     match client.send_message(&text).await {
-                                        Ok(_) => eprintln!("[TWITCH] Message sent successfully"),
+                                        Ok(_) => debug!("Message sent successfully"),
                                         Err(e) => {
-                                            eprintln!("[TWITCH] Failed to send message: {}", e);
+                                            error!(error = %e, "Failed to send message");
                                             last_status = TwitchConnectionStatus::Error(e.to_string());
                                             update_status(last_status.clone());
                                         }
                                     }
                                 } else {
-                                    eprintln!("[TWITCH] Cannot send message - no active client");
+                                    debug!("Cannot send message - no active client");
                                 }
                             }
                         }
                     }
                     Err(e) => {
-                        eprintln!("[TWITCH] Event channel error: {}", e);
+                        error!(error = %e, "Event channel error");
                         break;
                     }
                 }

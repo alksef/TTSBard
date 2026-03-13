@@ -5,6 +5,7 @@ use crate::events::EventSender;
 use crate::config::DEFAULT_TTS_TIMEOUT_SECS;
 use async_trait::async_trait;
 use std::time::{Duration, Instant};
+use tracing::{debug, info, error};
 
 #[derive(Debug, Serialize)]
 struct TtsRequest {
@@ -63,22 +64,31 @@ impl OpenAiTts {
         let timeout = Duration::from_secs(self.timeout_secs);
 
         if let (Some(host), Some(port)) = (&self.proxy_host, self.proxy_port) {
-            eprintln!("[OpenAI] Using proxy: {}:{}", host, port);
+            info!(proxy_host = host, proxy_port = port, "Using proxy");
             let proxy_url = format!("http://{}:{}", host, port);
             let proxy = reqwest::Proxy::all(&proxy_url)
-                .map_err(|e| format!("Failed to create proxy: {}", e))?;
+                .map_err(|e| {
+                    error!(error = %e, "Failed to create proxy");
+                    format!("Failed to create proxy: {}", e)
+                })?;
 
             Client::builder()
                 .proxy(proxy)
                 .timeout(timeout)
                 .build()
-                .map_err(|e| format!("Failed to build client with proxy: {}", e))
+                .map_err(|e| {
+                    error!(error = %e, "Failed to build client with proxy");
+                    format!("Failed to build client with proxy: {}", e)
+                })
         } else {
-            eprintln!("[OpenAI] Direct connection (no proxy)");
+            info!("Direct connection (no proxy)");
             Client::builder()
                 .timeout(timeout)
                 .build()
-                .map_err(|e| format!("Failed to build client: {}", e))
+                .map_err(|e| {
+                    error!(error = %e, "Failed to build client");
+                    format!("Failed to build client: {}", e)
+                })
         }
     }
 }
@@ -89,15 +99,16 @@ impl TtsEngine for OpenAiTts {
         let start_time = Instant::now();
         let client = self.build_client()?;
 
-        // Логирование деталей запроса
-        eprintln!("[OpenAI] ========================================");
-        eprintln!("[OpenAI] TTS Request Started");
-        eprintln!("[OpenAI] Model: tts-1");
-        eprintln!("[OpenAI] Voice: {}", self.voice);
-        eprintln!("[OpenAI] Text length: {} chars", text.len());
-        eprintln!("[OpenAI] Text preview: \"{}\"", text.chars().take(50).collect::<String>());
-        eprintln!("[OpenAI] API Key: {}...{}", &self.api_key[..7.min(self.api_key.len())], &self.api_key[self.api_key.len().saturating_sub(4)..]);
-        eprintln!("[OpenAI] Timeout: {}s", self.timeout_secs);
+        debug!(
+            model = "tts-1",
+            voice = &self.voice,
+            text_length = text.len(),
+            text_preview = &text.chars().take(50).collect::<String>(),
+            api_key_prefix = &self.api_key[..7.min(self.api_key.len())],
+            api_key_suffix = &self.api_key[self.api_key.len().saturating_sub(4)..],
+            timeout_secs = self.timeout_secs,
+            "TTS request started"
+        );
 
         let request = TtsRequest {
             model: "tts-1".to_string(),
@@ -105,10 +116,9 @@ impl TtsEngine for OpenAiTts {
             voice: self.voice.clone(),
         };
 
-        // Логируем тело запроса (без аллокации при успехе)
         match serde_json::to_string(&request) {
-            Ok(body) => eprintln!("[OpenAI] Request body: {}", body),
-            Err(_) => eprintln!("[OpenAI] Request body: (unable to serialize)"),
+            Ok(body) => debug!(request_body = &body, "Request body serialized"),
+            Err(_) => debug!("Request body: (unable to serialize)"),
         }
 
         let response = client
@@ -119,46 +129,72 @@ impl TtsEngine for OpenAiTts {
             .await
             .map_err(|e| {
                 let elapsed = start_time.elapsed();
-                eprintln!("[OpenAI] Request failed after {:.2}s", elapsed.as_secs_f64());
                 if e.is_timeout() {
+                    error!(
+                        error = %e,
+                        elapsed_secs = elapsed.as_secs_f64(),
+                        timeout_secs = self.timeout_secs,
+                        "Request timeout"
+                    );
                     format!("OpenAI timeout ({}s). Check internet or proxy settings.", self.timeout_secs)
                 } else if e.is_connect() {
+                    error!(
+                        error = %e,
+                        elapsed_secs = elapsed.as_secs_f64(),
+                        "Connection failed"
+                    );
                     format!("OpenAI connection failed: {}", e)
                 } else {
+                    error!(
+                        error = %e,
+                        elapsed_secs = elapsed.as_secs_f64(),
+                        "Failed to send TTS request"
+                    );
                     format!("Failed to send TTS request: {}", e)
                 }
             })?;
 
-        // Логирование ответа
         let status = response.status();
-        eprintln!("[OpenAI] Response Status: {} {}", status.as_u16(), status.canonical_reason().unwrap_or_default());
+        debug!(
+            status_code = status.as_u16(),
+            status_reason = status.canonical_reason().unwrap_or_default(),
+            "Response status received"
+        );
 
-        // Логирование заголовков ответа
-        eprintln!("[OpenAI] Response Headers:");
+        debug!("Response headers:");
         for (name, value) in response.headers().iter() {
             if let Ok(value_str) = value.to_str() {
-                eprintln!("[OpenAI]   {}: {}", name, value_str);
+                debug!(header_name = %name, header_value = value_str);
             }
         }
 
         let elapsed = start_time.elapsed();
-        eprintln!("[OpenAI] Response time: {:.2}s", elapsed.as_secs_f64());
+        debug!(response_time_secs = elapsed.as_secs_f64(), "Response time");
 
         if !status.is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            eprintln!("[OpenAI] Error Response: {}", error_text);
+            error!(
+                status_code = status.as_u16(),
+                error_text = &error_text,
+                "TTS request failed"
+            );
             return Err(format!("TTS request failed ({}): {}", status.as_u16(), error_text));
         }
 
         let audio_data = response
             .bytes()
             .await
-            .map_err(|e| format!("Failed to read audio data: {}", e))?
+            .map_err(|e| {
+                error!(error = %e, "Failed to read audio data");
+                format!("Failed to read audio data: {}", e)
+            })?
             .to_vec();
 
-        eprintln!("[OpenAI] Audio data received: {} bytes", audio_data.len());
-        eprintln!("[OpenAI] Total time: {:.2}s", elapsed.as_secs_f64());
-        eprintln!("[OpenAI] ========================================");
+        debug!(
+            audio_data_bytes = audio_data.len(),
+            total_time_secs = elapsed.as_secs_f64(),
+            "Audio data received successfully"
+        );
 
         Ok(audio_data)
     }

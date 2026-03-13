@@ -3,15 +3,35 @@ import { ref, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { AlertTriangle } from 'lucide-vue-next'
 
+
+interface LoggingSettings {
+  enabled: boolean
+  level: string
+  module_levels?: Record<string, string>
+}
+
+
 const excludeFromCapture = ref(false)
 const quickEditorEnabled = ref(false)
 const errorMessage = ref<string | null>(null)
 let errorTimeout: number | null = null
+const loggingEnabled = ref(false)
+const loggingLevel = ref('info')
+const loggingLevels = [
+  { value: 'error', label: 'Error' },
+  { value: 'warn', label: 'Warning' },
+  { value: 'info', label: 'Info' },
+  { value: 'debug', label: 'Debug' },
+  { value: 'trace', label: 'Trace' }
+]
 
 async function loadSettings() {
   try {
     excludeFromCapture.value = await invoke<boolean>('get_global_exclude_from_capture')
     quickEditorEnabled.value = await invoke<boolean>('get_quick_editor_enabled')
+    const loggingSettings = await invoke<LoggingSettings>('get_logging_settings')
+    loggingEnabled.value = loggingSettings.enabled
+    loggingLevel.value = loggingSettings.level
   } catch (e) {
     showError('Ошибка загрузки настроек: ' + (e as Error).message)
   }
@@ -36,6 +56,32 @@ async function toggleQuickEditor() {
     showError('Настройка сохранена')
   } catch (e) {
     showError('Ошибка переключения быстрого редактора: ' + (e as Error).message)
+  }
+}
+
+async function toggleLoggingEnabled() {
+  const newValue = !loggingEnabled.value
+  try {
+    await invoke('save_logging_settings', {
+      enabled: newValue,
+      level: loggingLevel.value
+    })
+    loggingEnabled.value = newValue
+    showError('Настройка сохранена. Перезапустите приложение для применения изменений.')
+  } catch (e) {
+    showError('Ошибка сохранения настроек логирования: ' + (e as Error).message)
+  }
+}
+
+async function changeLoggingLevel() {
+  try {
+    await invoke('save_logging_settings', {
+      enabled: loggingEnabled.value,
+      level: loggingLevel.value
+    })
+    showError('Уровень сохранён. Перезапустите приложение для применения изменений.')
+  } catch (e) {
+    showError('Ошибка сохранения уровня логирования: ' + (e as Error).message)
   }
 }
 
@@ -104,7 +150,43 @@ onMounted(() => {
         </span>
       </div>
     </section>
-  </div>
+
+    <section class="settings-section">
+      <h2>Логирование</h2>
+
+      <div class="setting-row">
+        <label class="setting-label checkbox-label">
+          <input
+            :checked="loggingEnabled"
+            type="checkbox"
+            class="checkbox-input"
+            @change="toggleLoggingEnabled"
+          />
+          <span>Включить логирование</span>
+        </label>
+      </div>
+
+      <div v-if="loggingEnabled" class="setting-group">
+        <div class="setting-row">
+          <label>Уровень:</label>
+          <select
+            :value="loggingLevel"
+            @change="(e: any) => { loggingLevel = e.target.value; changeLoggingLevel() }"
+            class="level-select"
+          >
+            <option v-for="level in loggingLevels" :key="level.value" :value="level.value">
+              {{ level.label }}
+            </option>
+          </select>
+        </div>
+      </div>
+
+      <span class="setting-warning">
+        <AlertTriangle :size="14" />
+        Требуется перезапуск приложения для применения изменений
+      </span>
+    </section>
+</div>
 </template>
 
 <style scoped>
@@ -181,6 +263,52 @@ onMounted(() => {
   margin-left: 2.4rem;
   font-size: 0.82rem;
   color: #ffb347;
+}
+
+.setting-group {
+  margin-top: 1rem;
+  padding-left: 2.4rem;
+}
+
+.level-select {
+  padding: 0.4rem 0.6rem;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: var(--color-text-primary);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  min-width: 140px;
+}
+
+.level-select:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.level-select:focus {
+  outline: none;
+  border-color: #1d8cff;
+  box-shadow: 0 0 0 2px rgba(29, 140, 255, 0.15);
+}
+
+.level-select option {
+  background: #1e1e1e;
+  color: var(--color-text-primary);
+  padding: 0.3rem 0.5rem;
+}
+
+.level-select option:hover {
+  background: #2a2a2a;
+}
+
+.setting-group label {
+  display: inline-block;
+  margin-right: 0.6rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--color-text-primary);
 }
 
 .message-box {

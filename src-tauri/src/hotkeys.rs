@@ -2,6 +2,7 @@ use crate::state::{AppState, ActiveWindow};
 use crate::soundpanel::SoundPanelState;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use tracing::{info, debug, error};
 
 /// Глобальные хоткеи для приложения
 ///
@@ -15,7 +16,7 @@ pub fn initialize_hotkeys(
     app_state: AppState,
     app_handle: AppHandle,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    eprintln!("[HOTKEY] Initializing global shortcuts with tauri-plugin-global-shortcut");
+    info!(hotkey = "initializing", "Initializing global shortcuts with tauri-plugin-global-shortcut");
 
     // Создаём хоткеи
     let ctrl_shift_f1 = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::F1);
@@ -30,17 +31,17 @@ pub fn initialize_hotkeys(
     let is_f3_registered = global_shortcut.is_registered(ctrl_shift_f3);
 
     if is_f1_registered {
-        eprintln!("[HOTKEY] Ctrl+Shift+F1 already registered, unregistering first");
+        debug!(hotkey = "Ctrl+Shift+F1", action = "unregistering_existing", "Shortcut already registered, unregistering first");
         let _ = global_shortcut.unregister(ctrl_shift_f1);
     }
 
     if is_f2_registered {
-        eprintln!("[HOTKEY] Ctrl+Shift+F2 already registered, unregistering first");
+        debug!(hotkey = "Ctrl+Shift+F2", action = "unregistering_existing", "Shortcut already registered, unregistering first");
         let _ = global_shortcut.unregister(ctrl_shift_f2);
     }
 
     if is_f3_registered {
-        eprintln!("[HOTKEY] Ctrl+Shift+F3 already registered, unregistering first");
+        debug!(hotkey = "Ctrl+Shift+F3", action = "unregistering_existing", "Shortcut already registered, unregistering first");
         let _ = global_shortcut.unregister(ctrl_shift_f3);
     }
 
@@ -53,22 +54,22 @@ pub fn initialize_hotkeys(
             return;
         }
 
-        eprintln!("[HOTKEY] Shortcut triggered: {:?}", shortcut);
+        debug!(hotkey = ?shortcut, "Shortcut triggered");
 
         // Проверяем, включены ли хоткеи в настройках
         if !app_state_clone_f1.is_hotkey_enabled() {
-            eprintln!("[HOTKEY] Hotkey is disabled in settings");
+            debug!(hotkey = "Ctrl+Shift+F1", status = "disabled", "Hotkey is disabled in settings");
             return;
         }
 
         // Проверяем, не активен ли soundpanel (взаимное исключение)
         if !app_state_clone_f1.can_activate_floating(&app_handle_clone_f1) {
-            eprintln!("[HOTKEY] SoundPanel is active - ignoring Ctrl+Shift+F1");
+            debug!(hotkey = "Ctrl+Shift+F1", status = "blocked", reason = "soundpanel_active", "SoundPanel is active - ignoring shortcut");
             return;
         }
 
         // Включить режим перехвата
-        eprintln!("[HOTKEY] Ctrl+Shift+F1 detected - enabling interception");
+        info!(hotkey = "Ctrl+Shift+F1", action = "enabling_interception", "Detected - enabling interception");
 
         // Показать плавающее окно если его нет
         let floating_visible = app_handle_clone_f1.get_webview_window("floating")
@@ -76,9 +77,9 @@ pub fn initialize_hotkeys(
             .unwrap_or(false);
 
         if !floating_visible {
-            eprintln!("[HOTKEY] Showing floating window");
+            debug!(window = "floating", action = "showing", "Showing floating window");
             if let Err(e) = crate::floating::show_floating_window(&app_handle_clone_f1) {
-                eprintln!("[HOTKEY] Failed to show floating window: {}", e);
+                error!(error = %e, window = "floating", "Failed to show floating window");
             }
         }
 
@@ -97,17 +98,17 @@ pub fn initialize_hotkeys(
             return;
         }
 
-        eprintln!("[HOTKEY] === Ctrl+Shift+F2 TRIGGERED ===");
+        info!(hotkey = "Ctrl+Shift+F2", status = "triggered", "=== TRIGGERED ===");
 
         // Проверяем, включены ли хоткеи в настройках
         if !app_state.is_hotkey_enabled() {
-            eprintln!("[HOTKEY] Hotkey is disabled in settings");
+            debug!(hotkey = "Ctrl+Shift+F2", status = "disabled", "Hotkey is disabled in settings");
             return;
         }
 
         // Проверяем, не активен ли floating (взаимное исключение)
         if !app_state.can_activate_soundpanel() {
-            eprintln!("[HOTKEY] Floating window is active - ignoring Ctrl+Shift+F2");
+            debug!(hotkey = "Ctrl+Shift+F2", status = "blocked", reason = "floating_active", "Floating window is active - ignoring shortcut");
             return;
         }
 
@@ -115,16 +116,16 @@ pub fn initialize_hotkeys(
         app_state.set_active_window(ActiveWindow::SoundPanel);
 
         // Показать звуковую панель
-        eprintln!("[HOTKEY] Showing soundpanel...");
+        info!(window = "soundpanel", action = "showing", "Showing soundpanel");
 
         // Emit event to show soundpanel window (handled in lib.rs)
         if let Some(sp_state) = app_handle_clone_f2.try_state::<SoundPanelState>() {
-            eprintln!("[HOTKEY] SoundPanel state found, setting interception_enabled=true");
+            debug!(window = "soundpanel", status = "state_found", "SoundPanel state found, setting interception_enabled=true");
             sp_state.set_interception_enabled(true);
-            eprintln!("[HOTKEY] Emitting ShowSoundPanelWindow event");
+            debug!(event = "ShowSoundPanelWindow", "Emitting ShowSoundPanelWindow event");
             sp_state.emit_event(crate::events::AppEvent::ShowSoundPanelWindow);
         } else {
-            eprintln!("[HOTKEY] ERROR: SoundPanel state not found!");
+            error!(window = "soundpanel", error = "state_not_found", "ERROR: SoundPanel state not found");
         }
     })?;
 
@@ -136,15 +137,15 @@ pub fn initialize_hotkeys(
             return;
         }
 
-        eprintln!("[HOTKEY] Shortcut triggered: {:?}", shortcut);
+        debug!(hotkey = ?shortcut, "Shortcut triggered");
 
         // Показать главное окно
-        eprintln!("[HOTKEY] Ctrl+Shift+F3 detected - showing main window");
+        info!(hotkey = "Ctrl+Shift+F3", window = "main", action = "showing", "Detected - showing main window");
 
         if let Some(window) = app_handle_clone_f3.get_webview_window("main") {
             // Проверяем, если окно уже в фокусе - игнорируем
             if let Ok(true) = window.is_focused() {
-                eprintln!("[HOTKEY] Main window already focused - ignoring");
+                debug!(window = "main", status = "already_focused", "Main window already focused - ignoring");
                 return;
             }
 
@@ -160,14 +161,14 @@ pub fn initialize_hotkeys(
             // Сфокусировать окно
             let _ = window.set_focus();
 
-            eprintln!("[HOTKEY] Main window shown and focused (always-on-top will be removed on focus loss)");
+            info!(window = "main", status = "shown_and_focused", note = "always_on_top_will_be_removed_on_focus_loss", "Main window shown and focused");
         }
     })?;
 
-    eprintln!("[HOTKEY] Global shortcuts registered successfully:");
-    eprintln!("[HOTKEY]   - Ctrl+Shift+F1 (toggle text interception mode)");
-    eprintln!("[HOTKEY]   - Ctrl+Shift+F2 (show soundpanel)");
-    eprintln!("[HOTKEY]   - Ctrl+Shift+F3 (show main window with always-on-top)");
+    info!(hotkey = "registration_complete", "Global shortcuts registered successfully");
+    info!(hotkey = "Ctrl+Shift+F1", description = "toggle_text_interception_mode");
+    info!(hotkey = "Ctrl+Shift+F2", description = "show_soundpanel");
+    info!(hotkey = "Ctrl+Shift+F3", description = "show_main_window_with_always_on_top");
 
     Ok(())
 }
@@ -175,7 +176,7 @@ pub fn initialize_hotkeys(
 /// Отмена регистрации глобальных хоткеев
 #[allow(dead_code)]
 pub fn unregister_hotkeys(app_handle: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    eprintln!("[HOTKEY] Unregistering global shortcuts");
+    info!(hotkey = "unregistering", "Unregistering global shortcuts");
 
     let ctrl_shift_f1 = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::F1);
     let ctrl_shift_f2 = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::F2);
@@ -196,7 +197,7 @@ pub fn unregister_hotkeys(app_handle: &AppHandle) -> Result<(), Box<dyn std::err
         global_shortcut.unregister(ctrl_shift_f3)?;
     }
 
-    eprintln!("[HOTKEY] Global shortcuts unregistered");
+    info!(hotkey = "unregistered", status = "complete", "Global shortcuts unregistered");
     Ok(())
 }
 
@@ -207,7 +208,7 @@ pub fn initialize_hotkeys(
     _app_state: AppState,
     _app_handle: AppHandle,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    eprintln!("[HOTKEY] Global shortcuts are supported on all platforms");
+    info!(platform = "non-windows", status = "supported", "Global shortcuts are supported on all platforms");
     Ok(())
 }
 

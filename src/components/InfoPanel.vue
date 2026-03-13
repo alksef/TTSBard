@@ -35,30 +35,34 @@ import { Globe, Zap, Music, Lightbulb, ClipboardPenLine } from 'lucide-vue-next'
         Используйте префиксы для контроля маршрутизации текста:
       </p>
       <table class="features-table">
-        <tr>
-          <th>Префикс</th>
-          <th>Описание</th>
-          <th>Twitch</th>
-          <th>WebView</th>
-        </tr>
-        <tr>
-          <td>Нет</td>
-          <td>Отправить везде</td>
-          <td>✅</td>
-          <td>✅</td>
-        </tr>
-        <tr>
-          <td><code>!</code></td>
-          <td>Только WebView</td>
-          <td>❌</td>
-          <td>✅</td>
-        </tr>
-        <tr>
-          <td><code>!!</code></td>
-          <td>Только TTS</td>
-          <td>❌</td>
-          <td>❌</td>
-        </tr>
+        <thead>
+          <tr>
+            <th>Префикс</th>
+            <th>Описание</th>
+            <th>Twitch</th>
+            <th>WebView</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Нет</td>
+            <td>Отправить везде</td>
+            <td>✅</td>
+            <td>✅</td>
+          </tr>
+          <tr>
+            <td><code>!</code></td>
+            <td>Только WebView</td>
+            <td>❌</td>
+            <td>✅</td>
+          </tr>
+          <tr>
+            <td><code>!!</code></td>
+            <td>Только TTS</td>
+            <td>❌</td>
+            <td>❌</td>
+          </tr>
+        </tbody>
       </table>
 
       <h3>Быстрая вставка</h3>

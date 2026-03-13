@@ -7,11 +7,12 @@ use crate::soundpanel::storage::{save_bindings, copy_sound_file, delete_sound_fi
 use crate::config::{WindowsManager, is_valid_hex_color};
 use crate::soundpanel::audio::play_audio_file;
 use tauri::State;
+use tracing::{debug, info};
 
 /// Получить все привязки звуковой панели
 #[tauri::command]
 pub fn sp_get_bindings(state: State<'_, SoundPanelState>) -> Result<Vec<SoundBinding>, String> {
-    eprintln!("[SOUNDPANEL] Get bindings command");
+    debug!("Get bindings command");
     Ok(state.get_all_bindings())
 }
 
@@ -28,7 +29,7 @@ pub fn sp_add_binding(
     file_path: String,
     state: State<'_, SoundPanelState>,
 ) -> Result<SoundBinding, String> {
-    eprintln!("[SOUNDPANEL] Add binding: key={}, desc={}", key, description);
+    info!(key, description, "Add binding");
 
     // Валидация клавиши: только A-Z
     let key_char = key.to_uppercase().chars().next()
@@ -60,7 +61,7 @@ pub fn sp_add_binding(
     // Сохранить в JSON
     save_bindings(&state)?;
 
-    eprintln!("[SOUNDPANEL] Binding added successfully");
+    info!("Binding added successfully");
     Ok(binding)
 }
 
@@ -70,7 +71,7 @@ pub fn sp_remove_binding(
     key: String,
     state: State<'_, SoundPanelState>,
 ) -> Result<(), String> {
-    eprintln!("[SOUNDPANEL] Remove binding: key={}", key);
+    info!(key, "Remove binding");
 
     let key_char = key.chars().next()
         .ok_or("Key is empty")?;
@@ -88,7 +89,7 @@ pub fn sp_remove_binding(
     // Сохранить изменения
     save_bindings(&state)?;
 
-    eprintln!("[SOUNDPANEL] Binding removed successfully");
+    info!("Binding removed successfully");
     Ok(())
 }
 
@@ -97,7 +98,7 @@ pub fn sp_remove_binding(
 /// Воспроизводит указанный файл без создания привязки
 #[tauri::command]
 pub fn sp_test_sound(file_path: String) -> Result<(), String> {
-    eprintln!("[SOUNDPANEL] Test sound: {}", file_path);
+    info!(file_path, "Test sound");
 
     // Проверить существование файла
     if !std::path::Path::new(&file_path).exists() {
@@ -129,7 +130,7 @@ pub fn sp_set_floating_opacity(
     state: State<'_, SoundPanelState>,
     windows_manager: State<'_, WindowsManager>,
 ) -> Result<(), String> {
-    eprintln!("[SOUNDPANEL] Setting opacity to {}", value);
+    info!(value, "Setting opacity");
     state.set_floating_opacity(value);
     // Сохраняем в windows.json
     windows_manager.set_soundpanel_opacity(value)
@@ -148,7 +149,7 @@ pub fn sp_set_floating_bg_color(
     if !is_valid_hex_color(&color) {
         return Err("Invalid color format. Use #RRGGBB".to_string());
     }
-    eprintln!("[SOUNDPANEL] Setting bg color to {}", color);
+    info!(color, "Setting bg color");
     state.set_floating_bg_color(color.clone());
     // Сохраняем в windows.json
     windows_manager.set_soundpanel_bg_color(color)
@@ -163,7 +164,7 @@ pub fn sp_set_floating_clickthrough(
     state: State<'_, SoundPanelState>,
     windows_manager: State<'_, WindowsManager>,
 ) -> Result<(), String> {
-    eprintln!("[SOUNDPANEL] Setting clickthrough to {}", enabled);
+    info!(enabled, "Setting clickthrough");
     state.set_floating_clickthrough(enabled);
     // Сохраняем в windows.json
     windows_manager.set_soundpanel_clickthrough(enabled)

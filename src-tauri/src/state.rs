@@ -11,6 +11,7 @@ use crate::webview::WebViewSettings;
 use crate::config::TwitchSettings;
 use tauri::{AppHandle, Manager};
 use cpal::traits::{HostTrait, DeviceTrait};
+use tracing::{info, warn, debug};
 
 /// NOTE: Lock ordering hierarchy is no longer needed with unified TtsConfig.
 /// The RwLock on tts_config provides efficient concurrent access.
@@ -153,25 +154,25 @@ impl AppState {
     }
 
     pub fn emit_event(&self, event: AppEvent) {
-        eprintln!("[STATE_EMIT] Called with: {:?}", std::mem::discriminant(&event));
+        debug!(event = ?std::mem::discriminant(&event), "Called with");
         // Send to main event channel
         if let Some(ref sender) = *self.event_sender.lock() {
             match sender.send(event.clone()) {
                 Ok(_) => {}
-                Err(e) => eprintln!("[STATE] [WARNING] Failed to send event to main channel: {:?}", e),
+                Err(e) => warn!(error = %e, "Failed to send event to main channel"),
             }
         }
 
         // Also send to WebView channel if it's a TextSentToTts event
         if matches!(event, AppEvent::TextSentToTts(_)) {
             if let Some(ref sender) = *self.webview_event_sender.lock() {
-                eprintln!("[STATE] [OK] Forwarding TextSentToTts to WebView channel");
+                info!("Forwarding TextSentToTts to WebView channel");
                 match sender.send(event) {
-                    Ok(_) => eprintln!("[STATE] [OK] TextSentToTts sent to WebView successfully"),
-                    Err(e) => eprintln!("[STATE] [X] Failed to send to WebView: {:?}", e),
+                    Ok(_) => info!("TextSentToTts sent to WebView successfully"),
+                    Err(e) => warn!(error = %e, "Failed to send to WebView"),
                 }
             } else {
-                eprintln!("[STATE] [X] WebView sender is None");
+                warn!("WebView sender is None");
             }
         }
     }
@@ -181,16 +182,16 @@ impl AppState {
     }
 
     pub fn set_webview_event_sender(&self, sender: Sender<AppEvent>) {
-        eprintln!("[STATE] Storing WebView event sender");
+        info!("Storing WebView event sender");
         *self.webview_event_sender.lock() = Some(sender);
     }
 
     pub fn send_webview_event(&self, event: AppEvent) {
         if let Some(ref sender) = *self.webview_event_sender.lock() {
-            eprintln!("[STATE] Sending event to WebView: {:?}", event);
+            debug!(event = ?event, "Sending event to WebView");
             let _ = sender.send(event);
         } else {
-            eprintln!("[STATE] WARNING: WebView event sender not set!");
+            warn!("WebView event sender not set");
         }
     }
 
@@ -266,7 +267,7 @@ impl AppState {
     }
 
     pub fn init_openai_tts(&self, api_key: String) {
-        eprintln!("[STATE] init_openai_tts called with key: {}...", &api_key[..7]);
+        info!(key_prefix = %&api_key[..7], "init_openai_tts called");
         let mut tts = OpenAiTts::new(api_key);
         let config = self.tts_config.read();
         let voice = config.openai_voice.clone();
@@ -279,14 +280,14 @@ impl AppState {
             tts = tts.with_event_tx(event_tx);
         }
 
-        eprintln!("[STATE] Created OpenAiTts: voice={}, proxy={:?}", voice, tts.get_proxy_host());
+        info!(voice, proxy_host = ?tts.get_proxy_host(), "Created OpenAiTts");
 
         *self.tts_providers.lock() = Some(TtsProvider::OpenAi(tts));
-        eprintln!("[STATE] TTS provider set to OpenAi");
+        info!("TTS provider set to OpenAi");
     }
 
     pub fn init_local_tts(&self, url: String) {
-        eprintln!("[STATE] Initializing Local TTS with URL: {}", url);
+        info!(url = %url, "Initializing Local TTS");
 
         let mut tts = LocalTts::new();
         tts.set_url(url);
@@ -296,14 +297,14 @@ impl AppState {
             tts = tts.with_event_tx(event_tx);
         }
 
-        eprintln!("[STATE] Created LocalTts: url={}", tts.get_url());
+        info!(url = %tts.get_url(), "Created LocalTts");
 
         *self.tts_providers.lock() = Some(TtsProvider::Local(tts));
-        eprintln!("[STATE] TTS provider set to Local");
+        info!("TTS provider set to Local");
     }
 
     pub fn init_silero_tts(&self, telegram_client_arc: Arc<tokio::sync::Mutex<Option<TelegramClient>>>) {
-        eprintln!("[STATE] Initializing Silero TTS...");
+        info!("Initializing Silero TTS...");
 
         // Создаём SileroTts с Arc на Telegram клиент
         // SileroTts будет извлекать клиент при необходимости
@@ -311,15 +312,15 @@ impl AppState {
 
         // Add event sender if available
         if let Some(event_tx) = self.get_event_sender() {
-            eprintln!("[STATE] [OK] Adding event_tx to SileroTts");
+            info!("Adding event_tx to SileroTts");
             tts = tts.with_event_tx(event_tx);
         } else {
-            eprintln!("[STATE] [X] No event_tx available, SileroTts will not send events");
+            warn!("No event_tx available, SileroTts will not send events");
         }
 
-        eprintln!("[STATE] Created SileroTts with Telegram client Arc");
+        info!("Created SileroTts with Telegram client Arc");
         *self.tts_providers.lock() = Some(TtsProvider::Silero(tts));
-        eprintln!("[STATE] TTS provider set to Silero");
+        info!("TTS provider set to Silero");
     }
 
     #[allow(dead_code)]
@@ -513,7 +514,7 @@ impl AppState {
         {
             // Use device index as key (matches the device_id format used by play_to_device)
             let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
-            eprintln!("[STATE] Caching device {}: {}", index, device_name);
+            info!(index, device_name, "Caching device");
             cache.insert(index.to_string(), device);
         }
         Ok(())
