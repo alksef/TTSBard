@@ -4,6 +4,23 @@
 
 All subagents should be launched using the **glm-4.5** model.
 
+## When to Use Subagents vs Direct Edits
+
+**Use direct edits (Read/Edit tools) for:**
+- Simple file modifications (type fixes, small refactors)
+- Adding/removing imports or constants
+- Fixing typos and minor bugs
+- Changes that affect 1-2 files
+
+**Use subagents (Task tool) for:**
+- Multiple independent tasks that can run in parallel
+- Code exploration and research across many files
+- Complex multi-step operations
+- Tasks requiring autonomous decision-making
+- Long-running operations (builds, tests)
+
+**Rationale:** Direct edits are faster and provide immediate feedback for simple changes. Subagents add overhead but excel at complex, parallel, or exploratory work.
+
 ## Project Analysis Guidelines
 
 When analyzing this project:
