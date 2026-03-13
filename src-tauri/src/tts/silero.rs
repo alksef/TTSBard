@@ -1,6 +1,6 @@
 use crate::tts::engine::TtsEngine;
 use crate::telegram::{TelegramClient, TtsResult};
-use crate::events::{AppEvent, EventSender};
+use crate::events::EventSender;
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -56,17 +56,6 @@ impl Default for SileroTts {
 impl TtsEngine for SileroTts {
     async fn synthesize(&self, text: &str) -> Result<Vec<u8>, String> {
         eprintln!("[SILERO] TTS synthesize requested, text: '{}...'", text.chars().take(30).collect::<String>());
-
-        // Send event before synthesizing
-        if let Some(tx) = &self.event_tx {
-            eprintln!("[SILERO] Sending TextSentToTts event");
-            match tx.send(AppEvent::TextSentToTts(text.to_string())) {
-                Ok(_) => eprintln!("[SILERO] TextSentToTts event sent successfully"),
-                Err(e) => eprintln!("[SILERO] Failed to send TextSentToTts event: {}", e),
-            }
-        } else {
-            eprintln!("[SILERO] No event_tx, skipping TextSentToTts event");
-        }
 
         // Для Silero TTS через Telegram мы возвращаем путь к файлу,
         // а не байты, так как файлы могут быть большими

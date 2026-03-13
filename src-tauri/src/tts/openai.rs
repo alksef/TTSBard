@@ -1,7 +1,7 @@
 use reqwest::Client;
 use serde::Serialize;
 use crate::tts::engine::TtsEngine;
-use crate::events::{AppEvent, EventSender};
+use crate::events::EventSender;
 use crate::config::DEFAULT_TTS_TIMEOUT_SECS;
 use async_trait::async_trait;
 use std::time::{Duration, Instant};
@@ -86,11 +86,6 @@ impl OpenAiTts {
 #[async_trait]
 impl TtsEngine for OpenAiTts {
     async fn synthesize(&self, text: &str) -> Result<Vec<u8>, String> {
-        // Send event before synthesizing
-        if let Some(tx) = &self.event_tx {
-            let _ = tx.send(AppEvent::TextSentToTts(text.to_string()));
-        }
-
         let start_time = Instant::now();
         let client = self.build_client()?;
 
