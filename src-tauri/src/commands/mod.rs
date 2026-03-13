@@ -114,6 +114,9 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
         })?;
     eprintln!("[SPEAK_INTERNAL] Audio synthesized: {} bytes", audio_data.len());
 
+    // Send message event immediately before playback (synchronized with audio)
+    state.emit_event(AppEvent::TextSentToTts(text.clone()));
+
     // Load audio settings
     let settings_manager = SettingsManager::new()
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;

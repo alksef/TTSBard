@@ -1,5 +1,5 @@
 use crate::tts::engine::TtsEngine;
-use crate::events::{AppEvent, EventSender};
+use crate::events::EventSender;
 use async_trait::async_trait;
 use reqwest::Client;
 use std::time::{Duration, Instant};
@@ -65,11 +65,6 @@ impl Default for LocalTts {
 #[async_trait]
 impl TtsEngine for LocalTts {
     async fn synthesize(&self, text: &str) -> Result<Vec<u8>, String> {
-        // Send event before synthesizing
-        if let Some(tx) = &self.event_tx {
-            let _ = tx.send(AppEvent::TextSentToTts(text.to_string()));
-        }
-
         let start_time = Instant::now();
         let client = self.build_client()?;
 
