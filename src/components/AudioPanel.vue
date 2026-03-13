@@ -459,6 +459,10 @@ onMounted(async () => {
   margin-bottom: 12px;
 }
 
+.setting-row:last-child {
+  margin-bottom: 0;
+}
+
 .setting-row.disabled {
   opacity: 0.5;
   pointer-events: none;

@@ -53,6 +53,8 @@ pub enum AppEvent {
     WebViewServerError(String),
     /// Перезапустить WebView сервер (изменились настройки)
     RestartWebViewServer,
+    /// Перезагрузить шаблоны WebView (без перезапуска сервера)
+    ReloadWebViewTemplates,
     /// Изменение статуса подключения Twitch
     TwitchStatusChanged(TwitchConnectionStatus),
 }
@@ -115,6 +117,7 @@ impl AppEvent {
             AppEvent::EnterClosesDisabled(_) => "enter-closes-disabled",
             AppEvent::WebViewServerError(_) => "webview-server-error",
             AppEvent::RestartWebViewServer => "restart-webview-server",
+            AppEvent::ReloadWebViewTemplates => "reload-webview-templates",
             AppEvent::TwitchStatusChanged(_) => "twitch-status-changed",
         }
     }

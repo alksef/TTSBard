@@ -111,7 +111,6 @@ impl AppSettings {
 
     /// Load webview settings from files
     pub fn load_webview_settings() -> Result<WebViewSettings> {
-        use crate::webview::templates::{default_css, default_html};
         use serde_json;
 
         let config_dir = dirs::config_dir()
@@ -120,17 +119,13 @@ impl AppSettings {
             .join("webview");
 
         let json_path = config_dir.join("settings.json");
-        let html_path = config_dir.join("template.html");
-        let css_path = config_dir.join("style.css");
 
         eprintln!("[SETTINGS] WebView dir: {:?}", config_dir);
         eprintln!("[SETTINGS] JSON path: {:?}, exists: {}", json_path, json_path.exists());
-        eprintln!("[SETTINGS] HTML path: {:?}, exists: {}", html_path, html_path.exists());
-        eprintln!("[SETTINGS] CSS path: {:?}, exists: {}", css_path, css_path.exists());
 
         // Load server settings from JSON or use defaults
         // NOTE: enabled is always false on load (runtime-only), controlled by start_on_boot
-        let (start_on_boot, port, bind_addr, anim_speed) = if json_path.exists() {
+        let (start_on_boot, port, bind_addr) = if json_path.exists() {
             let json_content = fs::read_to_string(&json_path)
                 .context("Failed to read WebView settings JSON")?;
             let json: serde_json::Value = serde_json::from_str(&json_content)
@@ -141,33 +136,14 @@ impl AppSettings {
                 json.get("start_on_boot").and_then(|v| v.as_bool()).unwrap_or(false),
                 json.get("port").and_then(|v| v.as_u64()).unwrap_or(10100) as u16,
                 json.get("bind_address").and_then(|v| v.as_str()).unwrap_or("::").to_string(),
-                json.get("animation_speed").and_then(|v| v.as_u64()).unwrap_or(30) as u32,
             )
         } else {
             eprintln!("[SETTINGS] WebView settings JSON not found, using defaults");
-            (false, 10100, "::".to_string(), 30)
+            (false, 10100, "::".to_string())
         };
 
         // enabled is always false on load - will be set by start_on_boot logic on boot
         let enabled = false;
-
-        // Load HTML template or use default
-        let html = if html_path.exists() {
-            fs::read_to_string(&html_path)
-                .with_context(|| format!("Failed to read HTML template from {:?}", html_path))?
-        } else {
-            eprintln!("[SETTINGS] HTML template not found, using default");
-            default_html()
-        };
-
-        // Load CSS style or use default
-        let css = if css_path.exists() {
-            fs::read_to_string(&css_path)
-                .with_context(|| format!("Failed to read CSS style from {:?}", css_path))?
-        } else {
-            eprintln!("[SETTINGS] CSS style not found, using default");
-            default_css()
-        };
 
         // Create webview directory if it doesn't exist
         fs::create_dir_all(&config_dir)
@@ -180,9 +156,6 @@ impl AppSettings {
             start_on_boot,
             port,
             bind_address: bind_addr,
-            html_template: html,
-            css_style: css,
-            animation_speed: anim_speed,
         })
     }
 
@@ -196,13 +169,9 @@ impl AppSettings {
             .join("webview");
 
         let json_path = config_dir.join("settings.json");
-        let html_path = config_dir.join("template.html");
-        let css_path = config_dir.join("style.css");
 
         eprintln!("[SETTINGS] Saving WebView settings...");
         eprintln!("[SETTINGS] JSON path: {:?}", json_path);
-        eprintln!("[SETTINGS] HTML path: {:?}", html_path);
-        eprintln!("[SETTINGS] CSS path: {:?}", css_path);
         eprintln!("[SETTINGS] enabled={}, start_on_boot={}", settings.enabled, settings.start_on_boot);
 
         // Create webview directory if it doesn't exist
@@ -215,18 +184,9 @@ impl AppSettings {
             "start_on_boot": settings.start_on_boot,
             "port": settings.port,
             "bind_address": settings.bind_address,
-            "animation_speed": settings.animation_speed,
         });
         fs::write(&json_path, &serde_json::to_string_pretty(&server_settings).unwrap())
             .context("Failed to write WebView settings JSON")?;
-
-        // Write HTML template
-        fs::write(&html_path, &settings.html_template)
-            .with_context(|| format!("Failed to write HTML template to {:?}", html_path))?;
-
-        // Write CSS style
-        fs::write(&css_path, &settings.css_style)
-            .with_context(|| format!("Failed to write CSS style to {:?}", css_path))?;
 
         eprintln!("[SETTINGS] WebView settings saved successfully");
 

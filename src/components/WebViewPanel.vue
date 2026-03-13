@@ -2,16 +2,13 @@
 import { ref, onMounted, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { Copy, RotateCw, Play, Square } from 'lucide-vue-next'
+import { Copy, RotateCw, Play, Square, AlertTriangle } from 'lucide-vue-next'
 
 interface WebViewSettings {
   enabled: boolean
   start_on_boot: boolean
   port: number
   bind_address: string
-  html_template: string
-  css_style: string
-  animation_speed: number
 }
 
 const settings = ref<WebViewSettings>({
@@ -19,13 +16,11 @@ const settings = ref<WebViewSettings>({
   start_on_boot: false,
   port: 10100,
   bind_address: '0.0.0.0',
-  html_template: '',
-  css_style: '',
-  animation_speed: 30,
 })
 
 const localIp = ref('192.168.1.100')
 const errorMessage = ref<string | null>(null)
+const testMessage = ref('')
 let errorTimeout: number | null = null
 let unlisten: (() => void) | null = null
 
@@ -102,39 +97,6 @@ async function saveServerSettings() {
   }
 }
 
-async function saveHtmlTemplate() {
-  try {
-    console.log('[WebView] Saving HTML template')
-    await invoke('save_webview_settings', { settings: settings.value })
-    showError('HTML template saved')
-  } catch (e) {
-    console.error('[WebView] Failed to save HTML template:', e)
-    showError('Failed to save HTML template: ' + (e as Error).message)
-  }
-}
-
-async function saveCssStyle() {
-  try {
-    console.log('[WebView] Saving CSS style')
-    await invoke('save_webview_settings', { settings: settings.value })
-    showError('CSS style saved')
-  } catch (e) {
-    console.error('[WebView] Failed to save CSS style:', e)
-    showError('Failed to save CSS style: ' + (e as Error).message)
-  }
-}
-
-async function saveAnimationSettings() {
-  try {
-    console.log('[WebView] Saving animation settings')
-    await invoke('save_webview_settings', { settings: settings.value })
-    showError('Animation settings saved')
-  } catch (e) {
-    console.error('[WebView] Failed to save animation settings:', e)
-    showError('Failed to save animation settings: ' + (e as Error).message)
-  }
-}
-
 async function refreshIp() {
   try {
     localIp.value = await invoke<string>('get_local_ip')
@@ -148,69 +110,31 @@ function copyUrl() {
   showError('URL copied to clipboard!')
 }
 
-async function resetHtml() {
-  if (confirm('Reset HTML template to default?')) {
-    settings.value.html_template = getDefaultHtml()
-  }
-}
-
-async function resetCss() {
-  if (confirm('Reset CSS style to default?')) {
-    settings.value.css_style = getDefaultCss()
-  }
-}
-
-// @ts-ignore - unused function reserved for future use
-async function testConnection() {
-  const testUrl = `http://localhost:${settings.value.port}/`
-  showError('Testing connection...')
-
+async function openTemplateFolder() {
   try {
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 5000)
-
-    const response = await fetch(testUrl, {
-      method: 'GET',
-      signal: controller.signal
-    })
-
-    clearTimeout(timeoutId)
-
-    if (response.ok) {
-      showError('Connection successful! Server is responding.')
-    } else {
-      showError(`Connection failed: HTTP ${response.status}`)
-    }
-  } catch (error) {
-    if ((error as Error).name === 'AbortError') {
-      showError('Connection timeout: Server not responding')
-    } else {
-      showError('Connection failed: ' + (error as Error).message)
-    }
+    await invoke('open_template_folder')
+  } catch (e) {
+    showError('Не удалось открыть папку: ' + (e as Error).message)
   }
 }
 
-function getDefaultHtml() {
-  const parts = [
-    '<!DOCTYPE html>',
-    '<html lang="ru">',
-    '<head>',
-    '    <meta charset="UTF-8">',
-    '    <meta name="viewport" content="width=device-width, initial-scale=1.0">',
-    '    <title>TTSBard WebView</title>',
-    '    <style>{{CSS}}</style>',
-    '</head>',
-    '<body>',
-    '    <div id="text-container"></div>',
-    '    <script>{{JS}}<\/script>',
-    '</body>',
-    '</html>'
-  ]
-  return parts.join('\n')
+async function sendTest() {
+  if (!testMessage.value.trim()) return
+  try {
+    await invoke('send_test_message', { text: testMessage.value })
+    showError('Сообщение отправлено!')
+  } catch (e) {
+    showError('Ошибка отправки: ' + (e as Error).message)
+  }
 }
 
-function getDefaultCss() {
-  return 'body {\n    margin: 0;\n    padding: 0;\n    background: transparent;\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    min-height: 100vh;\n}\n\n#text-container {\n    font-family: \'Arial\', sans-serif;\n    font-size: 48px;\n    color: #ffffff;\n    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);\n    text-align: center;\n    padding: 20px;\n}'
+async function reloadTemplates() {
+  try {
+    const message = await invoke<string>('reload_templates')
+    showError(message)
+  } catch (e) {
+    showError('Не удалось обновить шаблоны: ' + (e as Error).message)
+  }
 }
 
 function showError(message: string) {
@@ -252,9 +176,10 @@ onUnmounted(() => {
   <div class="webview-panel">
     <!-- Error/Info Message Display -->
     <div v-if="errorMessage" class="message-box" :class="{
-      error: errorMessage.includes('Failed') || errorMessage.includes('Error') || errorMessage.includes('ошибка') || errorMessage.includes('Ошибка'),
-      success: errorMessage.includes('запущен') || errorMessage.includes('перезапущен') || errorMessage.includes('сохранен') || errorMessage.includes('successful') || errorMessage.includes('Saved'),
-      info: errorMessage.includes('Тест') || errorMessage.includes('Testing') || errorMessage.includes('остан')
+      error: errorMessage.includes('Failed') || errorMessage.includes('Error') || errorMessage.includes('ошибка') || errorMessage.includes('Ошибка') || errorMessage.includes('не удалось'),
+      success: errorMessage.includes('запущен') || errorMessage.includes('перезапущен') || errorMessage.includes('сохранен') || errorMessage.includes('successful') || errorMessage.includes('Saved') || errorMessage.includes('отправлено') || errorMessage.includes('обновлены'),
+      info: errorMessage.includes('Тест') || errorMessage.includes('Testing') || errorMessage.includes('остан'),
+      warning: errorMessage.includes('F5') || errorMessage.includes('OBS')
     }">
       {{ errorMessage }}
     </div>
@@ -331,56 +256,31 @@ onUnmounted(() => {
     </section>
 
     <section class="settings-section">
-      <h2>HTML шаблон</h2>
-      <textarea
-        v-model="settings.html_template"
-        rows="15"
-        spellcheck="false"
-        class="code-editor"
-        placeholder="HTML template code..."
-      ></textarea>
-      <p class="setting-hint" v-pre>
-        Use {{CSS}} for CSS injection and {{JS}} for JavaScript injection
-      </p>
-      <div class="setting-row save-row">
-        <button @click="resetHtml" class="reset-button">Сбросить</button>
-        <button @click="saveHtmlTemplate" class="save-button-inline">Сохранить</button>
-      </div>
-    </section>
-
-    <section class="settings-section">
-      <h2>CSS стиль</h2>
-      <textarea
-        v-model="settings.css_style"
-        rows="15"
-        spellcheck="false"
-        class="code-editor"
-        placeholder="CSS style code..."
-      ></textarea>
-      <div class="setting-row save-row">
-        <button @click="resetCss" class="reset-button">Сбросить</button>
-        <button @click="saveCssStyle" class="save-button-inline">Сохранить</button>
-      </div>
-    </section>
-
-    <section class="settings-section">
-      <h2>Анимация</h2>
+      <h2>Шаблоны</h2>
       <div class="setting-row">
-        <label>Speed (ms per character):</label>
-        <input
-          type="number"
-          v-model.number="settings.animation_speed"
-          min="5"
-          max="500"
-          class="number-input animation-input"
-        />
-        <span class="value-display">{{ settings.animation_speed }}ms</span>
+        <button @click="openTemplateFolder" class="action-button">
+          Открыть папку
+        </button>
+        <button @click="reloadTemplates" class="action-button secondary">
+          Обновить
+        </button>
       </div>
-      <p class="setting-hint">
-        Lower values = faster animation. Recommended: 20-50ms
-      </p>
-      <div class="setting-row save-row">
-        <button @click="saveAnimationSettings" class="save-button-inline">Сохранить</button>
+      <span class="setting-warning"><AlertTriangle :size="14" /> После изменения шаблонов нажмите «Обновить», затем перезагрузите страницу в OBS/браузере</span>
+    </section>
+
+    <section class="settings-section">
+      <h2>Тест</h2>
+      <div class="setting-row">
+        <input
+          type="text"
+          v-model="testMessage"
+          placeholder="Текст для отправки..."
+          class="test-input"
+          @keyup.enter="sendTest"
+        />
+        <button @click="sendTest" class="test-button" :disabled="!settings.enabled || !testMessage">
+          Отправить
+        </button>
       </div>
     </section>
   </div>
@@ -426,6 +326,12 @@ h2 {
   background: rgba(29, 140, 255, 0.92);
   border: 1px solid rgba(29, 140, 255, 0.4);
   color: #0a2a4a;
+}
+
+.message-box.warning {
+  background: rgba(255, 193, 7, 0.92);
+  border: 1px solid rgba(255, 193, 7, 0.4);
+  color: #4a3f00;
 }
 
 .message-box.error {
@@ -555,6 +461,10 @@ h2 {
   flex-wrap: wrap;
 }
 
+.setting-row:last-child {
+  margin-bottom: 0;
+}
+
 .setting-row label {
   min-width: 60px;
   font-weight: 500;
@@ -612,16 +522,10 @@ h2 {
 }
 
 .number-input:focus,
-.select-input:focus,
-.code-editor:focus {
+.select-input:focus {
   outline: none;
   border-color: rgba(29, 140, 255, 0.5);
   box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
-}
-
-/* Animation input - narrower */
-.animation-input {
-  max-width: 70px;
 }
 
 /* Address inputs group (bind address + port) */
@@ -711,72 +615,64 @@ h2 {
   border-color: rgba(255, 255, 255, 0.16);
 }
 
-.reset-button {
+.action-button {
   padding: 0.6rem 1.2rem;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 10px;
   cursor: pointer;
   font-size: 14px;
-  color: var(--color-text-secondary);
+  color: var(--color-text-primary);
   transition: all 0.2s;
-  margin-top: 0;
-  font-weight: 600;
 }
 
-.reset-button:hover {
+.action-button:hover {
   background: rgba(255, 255, 255, 0.1);
   border-color: rgba(255, 255, 255, 0.16);
+}
+
+.action-button.secondary {
+  background: rgba(29, 140, 255, 0.1);
+  border-color: rgba(29, 140, 255, 0.2);
+}
+
+.action-button.secondary:hover {
+  background: rgba(29, 140, 255, 0.16);
+  border-color: rgba(29, 140, 255, 0.3);
+}
+
+.test-input {
+  flex: 1;
+  padding: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  font-size: 14px;
+  background: var(--color-bg-field);
   color: var(--color-text-primary);
 }
 
 .test-button {
-  padding: 0.5rem 1rem;
-  background: #2196F3;
+  padding: 0.6rem 1.2rem;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 10px;
   cursor: pointer;
-  font-size: 14px;
   font-weight: 500;
+  font-size: 14px;
   transition: all 0.2s;
 }
 
 .test-button:hover:not(:disabled) {
-  background: #1976D2;
+  filter: brightness(1.06);
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(33, 150, 243, 0.3);
+  box-shadow: 0 2px 8px rgba(29, 140, 255, 0.28);
 }
 
 .test-button:disabled {
   background: #ccc;
   cursor: not-allowed;
   opacity: 0.6;
-}
-
-.test-button:active {
-  transform: translateY(0);
-}
-
-.code-editor {
-  width: 100%;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  padding: 1rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.2);
-  color: var(--color-text-primary);
-  resize: vertical;
-  min-height: 300px;
-  line-height: 1.5;
-}
-
-.value-display {
-  min-width: 60px;
-  font-size: 14px;
-  color: var(--color-text-secondary);
-  font-weight: 500;
 }
 
 .save-row {
@@ -807,5 +703,14 @@ h2 {
 
 .save-button-inline:active {
   transform: translateY(0);
+}
+
+.setting-warning {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+  font-size: 0.82rem;
+  color: #ffb347;
 }
 </style>

@@ -6,7 +6,8 @@
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 use crate::events::AppEvent;
-use crate::webview::{WebViewServer, WebViewSettings};
+use crate::webview::WebViewServer;
+use crate::webview::WebViewSettings;
 use crate::setup::parse_webview_server_error;
 
 /// Run WebView server in async context
@@ -39,7 +40,18 @@ pub async fn run_webview_server(
             eprintln!("[WEBVIEW] STARTING SERVER");
             eprintln!("[WEBVIEW]   Address: {}:{}", bind_address, port);
             eprintln!("[WEBVIEW] ========================================");
-            let server = WebViewServer::new(Arc::clone(&webview_settings));
+
+            let server = match WebViewServer::new(Arc::clone(&webview_settings)).await {
+                Ok(s) => s,
+                Err(e) => {
+                    let error_msg = format!("Failed to create server: {}", e);
+                    eprintln!("[WEBVIEW] ❌ {}", error_msg);
+                    let _ = app_handle.emit("webview-server-error", &error_msg);
+                    // Wait a bit before retrying
+                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                    continue;
+                }
+            };
 
             // Spawn server task with improved error handling
             let server_clone = server.clone();
@@ -95,12 +107,26 @@ pub async fn run_webview_server(
                             match event {
                                 AppEvent::TextSentToTts(text) => {
                                     let preview = text.chars().take(50).collect::<String>();
-                                    eprintln!("[WEBVIEW] 📤 Broadcasting to WebSocket clients: '{}'...", preview);
+                                    eprintln!("[WEBVIEW] 📤 Broadcasting to SSE clients: '{}'...", preview);
                                     server.broadcast_text(&text).await;
                                 }
                                 AppEvent::RestartWebViewServer => {
                                     eprintln!("[WEBVIEW] ⚠ Restart event received, stopping server...");
+                                    server_handle.abort();
+                                    // Wait a bit for the server to fully shut down
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                                     server_running = false;
+                                }
+                                AppEvent::ReloadWebViewTemplates => {
+                                    eprintln!("[WEBVIEW] 🔄 Reloading templates...");
+                                    match server.templates.reload().await {
+                                        Ok(()) => {
+                                            eprintln!("[WEBVIEW] ✅ Templates reloaded successfully");
+                                        }
+                                        Err(e) => {
+                                            eprintln!("[WEBVIEW] ❌ Failed to reload templates: {}", e);
+                                        }
+                                    }
                                 }
                                 _ => {
                                     eprintln!("[WEBVIEW] ℹ️  Ignoring event: {:?}", std::mem::discriminant(&event));

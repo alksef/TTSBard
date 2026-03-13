@@ -32,22 +32,10 @@ pub fn validate_port(port: u16) -> Result<u16, ConfigError> {
     }
 }
 
-/// Validate animation speed (1-1000 ms)
-pub fn validate_animation_speed(speed: u32) -> Result<u32, ConfigError> {
-    if speed < 1 {
-        Err(ConfigError::Value("Animation speed must be >= 1".to_string()))
-    } else if speed > 1000 {
-        Err(ConfigError::Value("Animation speed must be <= 1000".to_string()))
-    } else {
-        Ok(speed)
-    }
-}
-
 /// Configuration validation errors
 #[derive(Debug, Clone)]
 pub enum ConfigError {
     Port(String),
-    Value(String),
     #[allow(dead_code)]
     Color(String),
 }
@@ -56,7 +44,6 @@ impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ConfigError::Port(msg) => write!(f, "Invalid port: {}", msg),
-            ConfigError::Value(msg) => write!(f, "Invalid value: {}", msg),
             ConfigError::Color(msg) => write!(f, "Invalid color: {}", msg),
         }
     }
@@ -102,14 +89,5 @@ mod tests {
         assert!(validate_port(65535).is_ok());
         assert!(validate_port(0).is_err());
         assert!(validate_port(1023).is_err());
-    }
-
-    #[test]
-    fn test_validate_animation_speed() {
-        assert!(validate_animation_speed(1).is_ok());
-        assert!(validate_animation_speed(30).is_ok());
-        assert!(validate_animation_speed(1000).is_ok());
-        assert!(validate_animation_speed(0).is_err());
-        assert!(validate_animation_speed(1001).is_err());
     }
 }
