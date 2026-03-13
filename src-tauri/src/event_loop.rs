@@ -97,6 +97,9 @@ impl EventHandler {
             AppEvent::RestartWebViewServer => {
                 eprintln!("[EVENT] Restart WebView server requested");
             }
+            AppEvent::ReloadWebViewTemplates => {
+                eprintln!("[EVENT] Reload WebView templates requested");
+            }
             AppEvent::TwitchStatusChanged(status) => {
                 eprintln!("[EVENT] Twitch status changed: {:?}", status);
             }

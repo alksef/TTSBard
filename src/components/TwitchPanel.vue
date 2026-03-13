@@ -503,6 +503,10 @@ h2 {
   flex-wrap: wrap;
 }
 
+.setting-row:last-child {
+  margin-bottom: 0;
+}
+
 .setting-row label {
   min-width: 70px;
   font-weight: 500;

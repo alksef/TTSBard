@@ -1,4 +1,4 @@
-/// Default HTML template with {{CSS}} and {{JS}} placeholders
+/// Default HTML template with {{CSS}} placeholder and inline SSE JavaScript
 pub fn default_html() -> String {
     r#"<!DOCTYPE html>
 <html lang="ru">
@@ -10,12 +10,39 @@ pub fn default_html() -> String {
 </head>
 <body>
     <div id="text-container"></div>
-    <script>{{JS}}</script>
+    <script>
+        const evtSource = new EventSource('/sse');
+        const container = document.getElementById('text-container');
+        let hideTimeout = null;
+
+        evtSource.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            showText(data.text);
+        };
+
+        function showText(text) {
+            if (hideTimeout) clearTimeout(hideTimeout);
+            container.classList.remove('visible');
+            void container.offsetWidth;
+            container.textContent = text;
+            requestAnimationFrame(() => {
+                container.classList.add('visible');
+            });
+            hideTimeout = setTimeout(() => {
+                container.classList.remove('visible');
+            }, 5000);
+        }
+
+        evtSource.onerror = (error) => {
+            console.error('SSE error:', error);
+            // EventSource will automatically attempt to reconnect
+        };
+    </script>
 </body>
 </html>"#.to_string()
 }
 
-/// Default CSS for centered white text with shadow
+/// Default CSS for centered white text with shadow and fade animation
 pub fn default_css() -> String {
     r#"body {
     margin: 0;
@@ -34,54 +61,11 @@ pub fn default_css() -> String {
     text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
     text-align: center;
     padding: 20px;
+    opacity: 0;
+    transition: opacity 0.5s ease-in-out;
+}
+
+#text-container.visible {
+    opacity: 1;
 }"#.to_string()
-}
-
-/// Default JavaScript with WebSocket client and typewriter effect
-pub fn default_js() -> String {
-    r#"const ws = new WebSocket(`ws://${location.host}/ws`);
-let currentText = '';
-let charIndex = 0;
-let timeoutId = null;
-
-ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    if (data.type === 'text') {
-        typeWriter(data.text);
-    }
-};
-
-function typeWriter(text) {
-    // Stop current animation
-    if (timeoutId) {
-        clearTimeout(timeoutId);
-    }
-
-    currentText = text;
-    charIndex = 0;
-
-    const container = document.getElementById('text-container');
-    container.textContent = '';
-
-    function type() {
-        if (charIndex < currentText.length) {
-            container.textContent += currentText.charAt(charIndex);
-            charIndex++;
-            timeoutId = setTimeout(type, {{SPEED}});
-        }
-    }
-
-    type();
-}
-
-ws.onclose = () => {
-    console.log('WebSocket disconnected, attempting to reconnect...');
-    setTimeout(() => {
-        location.reload();
-    }, 2000);
-};
-
-ws.onerror = (error) => {
-    console.error('WebSocket error:', error);
-};"#.to_string()
 }

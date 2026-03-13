@@ -2,6 +2,7 @@ use crate::config::SettingsManager;
 use crate::state::AppState;
 use crate::webview::WebViewSettings;
 use tauri::{Manager, State};
+use std::fs;
 
 /// Get current webview settings from AppState
 #[tauri::command]
@@ -9,15 +10,11 @@ pub async fn get_webview_settings(
     state: State<'_, AppState>,
 ) -> Result<WebViewSettings, String> {
     let settings = state.webview_settings.read().await;
-    // Клонируем только необходимые поля, html_template и css_style могут быть большими
     Ok(WebViewSettings {
         enabled: settings.enabled,
         start_on_boot: settings.start_on_boot,
         port: settings.port,
         bind_address: settings.bind_address.clone(),
-        html_template: settings.html_template.clone(),
-        css_style: settings.css_style.clone(),
-        animation_speed: settings.animation_speed,
     })
 }
 
@@ -40,11 +37,6 @@ pub async fn get_webview_port(state: State<'_, AppState>) -> Result<u16, String>
 #[tauri::command]
 pub async fn get_webview_bind_address(state: State<'_, AppState>) -> Result<String, String> {
     Ok(state.webview_settings.read().await.bind_address.clone())
-}
-
-#[tauri::command]
-pub async fn get_webview_animation_speed(state: State<'_, AppState>) -> Result<u32, String> {
-    Ok(state.webview_settings.read().await.animation_speed)
 }
 
 /// Save webview settings to AppState and persist to files
@@ -73,12 +65,6 @@ pub async fn save_webview_settings(
             .map_err(|e| format!("Failed to save webview port: {}", e))?;
         manager.set_webview_bind_address(settings.bind_address.clone())
             .map_err(|e| format!("Failed to save webview bind_address: {}", e))?;
-        manager.set_webview_animation_speed(settings.animation_speed)
-            .map_err(|e| format!("Failed to save webview animation_speed: {}", e))?;
-        manager.set_webview_html_template(settings.html_template.clone())
-            .map_err(|e| format!("Failed to save webview html_template: {}", e))?;
-        manager.set_webview_css_style(settings.css_style.clone())
-            .map_err(|e| format!("Failed to save webview css_style: {}", e))?;
     }
 
     // Only after successful file save, update AppState (runtime state)
@@ -104,7 +90,7 @@ pub async fn save_webview_settings(
             Ok("Настройки сохранены. Сервер перезапускается...".to_string())
         }
     } else {
-        Ok("Настройки сохранены. Изменения HTML/CSS применены немедленно.".to_string())
+        Ok("Настройки сохранены.".to_string())
     }
 }
 
@@ -120,4 +106,72 @@ pub fn get_local_ip() -> Result<String, String> {
         .ip()
         .to_string();
     Ok(local_ip)
+}
+
+/// Open template folder in file explorer
+#[tauri::command]
+pub async fn open_template_folder() -> Result<(), String> {
+    let config_dir = dirs::config_dir()
+        .ok_or("Failed to get config dir")?
+        .join("ttsbard")
+        .join("webview")
+        .canonicalize()
+        .map_err(|e| format!("Invalid config dir: {}", e))?;
+
+    fs::create_dir_all(&config_dir)
+        .map_err(|e| e.to_string())?;
+
+    let path = config_dir.to_str().ok_or("Invalid path")?;
+
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("explorer")
+            .args([path])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .args([path])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open")
+            .args([path])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+/// Send test message to SSE (without TTS)
+#[tauri::command]
+pub async fn send_test_message(
+    text: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    if text.trim().is_empty() {
+        return Err("Text cannot be empty".to_string());
+    }
+
+    // Send ONLY to WebView channel, not to TTS
+    // This allows testing WebView display without triggering voice synthesis
+    state.send_webview_event(crate::events::AppEvent::TextSentToTts(text));
+    Ok(())
+}
+
+/// Reload templates from disk (hot reload without server restart)
+#[tauri::command]
+pub async fn reload_templates(
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    // Send event to reload templates without restarting the server
+    state.send_webview_event(crate::events::AppEvent::ReloadWebViewTemplates);
+    Ok("Шаблоны обновлены!".to_string())
 }

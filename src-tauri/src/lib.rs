@@ -150,7 +150,9 @@ pub fn run() {
             commands::webview::get_webview_start_on_boot,
             commands::webview::get_webview_port,
             commands::webview::get_webview_bind_address,
-            commands::webview::get_webview_animation_speed,
+            commands::webview::open_template_folder,
+            commands::webview::send_test_message,
+            commands::webview::reload_templates,
             // Twitch commands
             commands::twitch::get_twitch_settings,
             commands::twitch::save_twitch_settings,
