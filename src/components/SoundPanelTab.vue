@@ -510,7 +510,7 @@ onMounted(async () => {
 .bindings-section {
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  padding: 1.5rem;
+  padding: 12px 16px;
   border-radius: 12px;
   backdrop-filter: blur(8px);
 }
@@ -518,7 +518,6 @@ onMounted(async () => {
 .bindings-table {
   width: 100%;
   border-collapse: collapse;
-  margin-bottom: 1rem;
 }
 
 .bindings-table th {
