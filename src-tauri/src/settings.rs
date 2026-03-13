@@ -97,10 +97,10 @@ impl AppSettings {
             .join("webview")
     }
 
-    /// Get the template.html file path
+    /// Get the index.html file path
     #[allow(dead_code)]
     pub fn template_html_path(&self) -> PathBuf {
-        self.webview_dir().join("template.html")
+        self.webview_dir().join("index.html")
     }
 
     /// Get the style.css file path
