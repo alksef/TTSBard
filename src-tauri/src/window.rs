@@ -16,17 +16,17 @@ pub fn set_window_exclude_from_capture(hwnd: isize, exclude: bool) -> anyhow::Re
             WDA_NONE
         };
 
-        eprintln!("[WINDOW] SetWindowDisplayAffinity hwnd={:?}, exclude={}, affinity={:?}", hwnd, exclude, affinity);
+        tracing::debug!(hwnd = ?hwnd, exclude, affinity = ?affinity, "[WINDOW] SetWindowDisplayAffinity");
 
         let result = SetWindowDisplayAffinity(hwnd, affinity);
 
         if result.is_err() {
             let error = GetLastError();
-            eprintln!("[WINDOW] SetWindowDisplayAffinity failed: {:?}", error);
+            tracing::error!(error = ?error, "[WINDOW] SetWindowDisplayAffinity failed");
             return Err(anyhow::anyhow!("SetWindowDisplayAffinity failed: {:?}", error));
         }
 
-        eprintln!("[WINDOW] SetWindowDisplayAffinity SUCCESS: hwnd={:?}, exclude={}, affinity={:?}", hwnd, exclude, affinity);
+        tracing::debug!(hwnd = ?hwnd, exclude, affinity = ?affinity, "[WINDOW] SetWindowDisplayAffinity SUCCESS");
         Ok(())
     }
 }
@@ -34,6 +34,6 @@ pub fn set_window_exclude_from_capture(hwnd: isize, exclude: bool) -> anyhow::Re
 /// Stub для не-Windows платформ
 #[cfg(not(windows))]
 pub fn set_window_exclude_from_capture(_hwnd: isize, _exclude: bool) -> anyhow::Result<()> {
-    eprintln!("[WINDOW] Exclude from capture not supported on this platform");
+    tracing::warn!("[WINDOW] Exclude from capture not supported on this platform");
     Ok(())
 }

@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::thread::JoinHandle;
 use serde::{Deserialize, Serialize};
+use tracing::{error, info, debug};
 use crate::events::AppEvent;
 use crate::config::{DEFAULT_FLOATING_OPACITY, DEFAULT_FLOATING_BG_COLOR, MIN_FLOATING_OPACITY, MAX_FLOATING_OPACITY};
 
@@ -76,7 +77,7 @@ impl SoundPanelState {
         if let Ok(mut val) = self.interception_enabled.lock() {
             *val = enabled;
         } else {
-            eprintln!("[SOUNDPANEL STATE] ERROR: Failed to lock interception_enabled");
+            error!(target = "soundpanel::state", "Failed to lock interception_enabled");
         }
     }
 
@@ -92,7 +93,7 @@ impl SoundPanelState {
         if let Ok(mut bindings) = self.bindings.lock() {
             bindings.insert(binding.key, binding.clone());
         } else {
-            eprintln!("[SOUNDPANEL STATE] ERROR: Failed to lock bindings");
+            error!(target = "soundpanel::state", "Failed to lock bindings");
         }
     }
 
@@ -101,7 +102,7 @@ impl SoundPanelState {
         if let Ok(mut bindings) = self.bindings.lock() {
             bindings.remove(&key);
         } else {
-            eprintln!("[SOUNDPANEL STATE] ERROR: Failed to lock bindings");
+            error!(target = "soundpanel::state", "Failed to lock bindings");
         }
     }
 
@@ -122,7 +123,7 @@ impl SoundPanelState {
         let appdata_path = self.appdata_path.lock().unwrap().clone();
         let sound_path = format!("{}\\soundpanel\\{}", appdata_path, binding.filename);
 
-        eprintln!("[SOUNDPANEL] Playing sound: {} -> {}", binding.key, sound_path);
+        info!(target = "soundpanel", key = %binding.key, path = ?sound_path, "Playing sound");
 
         // Запустить воспроизведение в отдельном потоке и отслеживать handle
         let handle = std::thread::spawn(move || {
@@ -151,25 +152,25 @@ impl SoundPanelState {
         if let Ok(mut es) = self.event_sender.lock() {
             *es = Some(sender);
         } else {
-            eprintln!("[SOUNDPANEL STATE] ERROR: Failed to lock event_sender");
+            error!(target = "soundpanel::state", "Failed to lock event_sender");
         }
     }
 
     /// Отправить событие
     pub fn emit_event(&self, event: AppEvent) {
-        eprintln!("[SOUNDPANEL STATE] emit_event called with event: {:?}", std::mem::discriminant(&event));
+        debug!(target = "soundpanel::state", event = ?std::mem::discriminant(&event), "emit_event called");
         if let Ok(es) = self.event_sender.lock() {
             if let Some(ref sender) = *es {
-                eprintln!("[SOUNDPANEL STATE] Sending event through channel");
+                debug!(target = "soundpanel::state", "Sending event through channel");
                 match sender.send(event) {
-                    Ok(_) => eprintln!("[SOUNDPANEL STATE] Event sent successfully"),
-                    Err(e) => eprintln!("[SOUNDPANEL STATE] Failed to send event: {}", e),
+                    Ok(_) => debug!(target = "soundpanel::state", "Event sent successfully"),
+                    Err(error) => error!(target = "soundpanel::state", error = %error, "Failed to send event"),
                 }
             } else {
-                eprintln!("[SOUNDPANEL STATE] ERROR: event_sender is None!");
+                error!(target = "soundpanel::state", "event_sender is None");
             }
         } else {
-            eprintln!("[SOUNDPANEL STATE] ERROR: failed to lock event_sender!");
+            error!(target = "soundpanel::state", "Failed to lock event_sender");
         }
     }
 
@@ -180,18 +181,18 @@ impl SoundPanelState {
 
     /// Установить прозрачность floating окна
     pub fn set_floating_opacity(&self, value: u8) {
-        eprintln!("[SOUNDPANEL STATE] set_floating_opacity called with value={}", value);
+        debug!(target = "soundpanel::state", value, "set_floating_opacity called");
         if let Ok(mut val) = self.floating_opacity.lock() {
             *val = value.clamp(MIN_FLOATING_OPACITY, MAX_FLOATING_OPACITY);
-            eprintln!("[SOUNDPANEL STATE] Opacity updated to: {}", *val);
+            debug!(target = "soundpanel::state", opacity = *val, "Opacity updated");
         } else {
-            eprintln!("[SOUNDPANEL STATE] ERROR: Failed to lock floating_opacity");
+            error!(target = "soundpanel::state", "Failed to lock floating_opacity");
             return;
         }
         // Emit event AFTER releasing the mutex to prevent potential deadlock
-        eprintln!("[SOUNDPANEL STATE] Emitting SoundPanelAppearanceChanged event");
+        debug!(target = "soundpanel::state", "Emitting SoundPanelAppearanceChanged event");
         self.emit_event(AppEvent::SoundPanelAppearanceChanged);
-        eprintln!("[SOUNDPANEL STATE] Event emitted");
+        debug!(target = "soundpanel::state", "Event emitted");
     }
 
     /// Получить цвет фона floating окна
@@ -201,19 +202,19 @@ impl SoundPanelState {
 
     /// Установить цвет фона floating окна
     pub fn set_floating_bg_color(&self, color: String) {
-        eprintln!("[SOUNDPANEL STATE] set_floating_bg_color called with color={}", color);
+        debug!(target = "soundpanel::state", color, "set_floating_bg_color called");
         let color_clone = color.clone();
         if let Ok(mut val) = self.floating_bg_color.lock() {
             *val = color_clone.clone();
-            eprintln!("[SOUNDPANEL STATE] Color updated to: {}", color_clone);
+            debug!(target = "soundpanel::state", color = ?color_clone, "Color updated");
         } else {
-            eprintln!("[SOUNDPANEL STATE] ERROR: Failed to lock floating_bg_color");
+            error!(target = "soundpanel::state", "Failed to lock floating_bg_color");
             return;
         }
         // Emit event AFTER releasing the mutex to prevent potential deadlock
-        eprintln!("[SOUNDPANEL STATE] Emitting SoundPanelAppearanceChanged event");
+        debug!(target = "soundpanel::state", "Emitting SoundPanelAppearanceChanged event");
         self.emit_event(AppEvent::SoundPanelAppearanceChanged);
-        eprintln!("[SOUNDPANEL STATE] Event emitted");
+        debug!(target = "soundpanel::state", "Event emitted");
     }
 
     /// Проверить, включен ли clickthrough для floating окна
@@ -223,12 +224,12 @@ impl SoundPanelState {
 
     /// Установить clickthrough для floating окна
     pub fn set_floating_clickthrough(&self, enabled: bool) {
-        eprintln!("[SOUNDPANEL STATE] set_floating_clickthrough called with enabled={}", enabled);
+        debug!(target = "soundpanel::state", enabled, "set_floating_clickthrough called");
         if let Ok(mut val) = self.floating_clickthrough.lock() {
             *val = enabled;
-            eprintln!("[SOUNDPANEL STATE] Clickthrough updated to: {}", enabled);
+            debug!(target = "soundpanel::state", enabled, "Clickthrough updated");
         } else {
-            eprintln!("[SOUNDPANEL STATE] ERROR: Failed to lock floating_clickthrough");
+            error!(target = "soundpanel::state", "Failed to lock floating_clickthrough");
         }
     }
 }

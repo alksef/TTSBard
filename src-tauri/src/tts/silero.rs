@@ -4,6 +4,7 @@ use crate::events::EventSender;
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing::debug;
 
 /// Silero TTS implementation using Telegram bot @silero_voice_bot
 #[derive(Clone, Debug)]
@@ -55,7 +56,10 @@ impl Default for SileroTts {
 #[async_trait]
 impl TtsEngine for SileroTts {
     async fn synthesize(&self, text: &str) -> Result<Vec<u8>, String> {
-        eprintln!("[SILERO] TTS synthesize requested, text: '{}...'", text.chars().take(30).collect::<String>());
+        debug!(
+            text_preview = %text.chars().take(30).collect::<String>(),
+            "Silero TTS synthesize requested"
+        );
 
         // Для Silero TTS через Telegram мы возвращаем путь к файлу,
         // а не байты, так как файлы могут быть большими

@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use crate::soundpanel::state::{SoundPanelState, SoundBinding};
 use crate::config::WindowsManager;
 use serde::{Serialize, Deserialize};
+use tracing::{debug, info};
 
 const BINDINGS_FILE: &str = "soundpanel_bindings.json";
 
@@ -41,10 +42,10 @@ pub fn load_bindings(state: &SoundPanelState) -> Result<Vec<SoundBinding>, Strin
     let appdata_path = state.appdata_path.lock().unwrap().clone();
     let file_path = PathBuf::from(&appdata_path).join(BINDINGS_FILE);
 
-    eprintln!("[SOUNDPANEL] Loading bindings from: {:?}", file_path);
+    debug!(?file_path, "Loading bindings");
 
     if !file_path.exists() {
-        eprintln!("[SOUNDPANEL] Bindings file does not exist, starting with empty bindings");
+        debug!("Bindings file does not exist, starting with empty bindings");
         return Ok(Vec::new());
     }
 
@@ -54,7 +55,7 @@ pub fn load_bindings(state: &SoundPanelState) -> Result<Vec<SoundBinding>, Strin
     let bindings: Vec<SoundBinding> = serde_json::from_str(&content)
         .map_err(|e| format!("Failed to parse bindings: {}", e))?;
 
-    eprintln!("[SOUNDPANEL] Loaded {} bindings", bindings.len());
+    info!(count = bindings.len(), "Loaded bindings");
 
     // Загрузить в состояние
     for binding in &bindings {
@@ -71,7 +72,7 @@ pub fn save_bindings(state: &SoundPanelState) -> Result<(), String> {
     let appdata_path = state.appdata_path.lock().unwrap().clone();
     let file_path = PathBuf::from(&appdata_path).join(BINDINGS_FILE);
 
-    eprintln!("[SOUNDPANEL] Saving {} bindings to: {:?}", bindings.len(), file_path);
+    info!(count = bindings.len(), ?file_path, "Saving bindings");
 
     let json = serde_json::to_string_pretty(&bindings)
         .map_err(|e| format!("Failed to serialize bindings: {}", e))?;
@@ -79,7 +80,7 @@ pub fn save_bindings(state: &SoundPanelState) -> Result<(), String> {
     fs::write(&file_path, json)
         .map_err(|e| format!("Failed to write bindings file: {}", e))?;
 
-    eprintln!("[SOUNDPANEL] Bindings saved successfully");
+    info!("Bindings saved successfully");
     Ok(())
 }
 
@@ -93,7 +94,7 @@ pub fn copy_sound_file(source_path: &str, appdata_path: &str) -> Result<String, 
     if !soundpanel_dir.exists() {
         fs::create_dir_all(&soundpanel_dir)
             .map_err(|e| format!("Failed to create soundpanel directory: {}", e))?;
-        eprintln!("[SOUNDPANEL] Created soundpanel directory: {:?}", soundpanel_dir);
+        debug!(?soundpanel_dir, "Created soundpanel directory");
     }
 
     // Получить имя файла
@@ -114,7 +115,7 @@ pub fn copy_sound_file(source_path: &str, appdata_path: &str) -> Result<String, 
         .unwrap()
         .to_string();
 
-    eprintln!("[SOUNDPANEL] Copied sound file: {} -> {}", source_path, final_filename);
+    debug!(source_path, final_filename, "Copied sound file");
 
     Ok(final_filename)
 }
@@ -127,7 +128,7 @@ pub fn delete_sound_file(filename: &str, appdata_path: &str) -> Result<(), Strin
     if file_path.exists() {
         fs::remove_file(&file_path)
             .map_err(|e| format!("Failed to delete sound file: {}", e))?;
-        eprintln!("[SOUNDPANEL] Deleted sound file: {:?}", file_path);
+        debug!(?file_path, "Deleted sound file");
     }
 
     Ok(())
@@ -163,15 +164,19 @@ fn generate_unique_path(dir: &Path, filename: &str) -> PathBuf {
 
 /// Загрузить настройки внешнего вида из windows.json
 pub fn load_appearance(state: &SoundPanelState, windows_manager: &WindowsManager) -> Result<SoundPanelAppearance, String> {
-    eprintln!("[SOUNDPANEL] Loading appearance from windows.json");
+    debug!("Loading appearance from windows.json");
 
     // Load from WindowsManager
     let opacity = windows_manager.get_soundpanel_opacity();
     let bg_color = windows_manager.get_soundpanel_bg_color();
     let clickthrough = windows_manager.get_soundpanel_clickthrough();
 
-    eprintln!("[SOUNDPANEL] Loaded appearance: opacity={}%, color={}, clickthrough={}",
-        opacity, bg_color, clickthrough);
+    info!(
+        opacity,
+        bg_color,
+        clickthrough,
+        "Loaded appearance"
+    );
 
     // Применить к состоянию
     state.set_floating_opacity(opacity);

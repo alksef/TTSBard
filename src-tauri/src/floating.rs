@@ -2,12 +2,13 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::state::AppState;
 use crate::config::WindowsManager;
 use crate::soundpanel::SoundPanelState;
+use tracing::{debug, info};
 
 pub fn show_floating_window(app_handle: &AppHandle) -> tauri::Result<()> {
-    eprintln!("[FLOATING] show_floating_window called");
+    info!(window_type = "floating", action = "show", "show_floating_window called");
 
     if let Some(window) = app_handle.get_webview_window("floating") {
-        eprintln!("[FLOATING] Window exists, showing");
+        info!(window_type = "floating", status = "exists", "Window exists, showing");
 
         // Применяем сохранённую позицию
         let windows_manager = app_handle.state::<WindowsManager>();
@@ -15,7 +16,7 @@ pub fn show_floating_window(app_handle: &AppHandle) -> tauri::Result<()> {
 
         if let Some(x) = saved_x {
             if let Some(y) = saved_y {
-                eprintln!("[FLOATING] Applying saved position: {}, {}", x, y);
+                debug!(window_type = "floating", x, y, "Applying saved position");
                 let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
                     x,
                     y,
@@ -27,7 +28,7 @@ pub fn show_floating_window(app_handle: &AppHandle) -> tauri::Result<()> {
 
         // Применяем clickthrough после показа
         if windows_manager.get_floating_clickthrough() {
-            eprintln!("[FLOATING] Applying clickthrough mode");
+            debug!(window_type = "floating", mode = "clickthrough", "Applying clickthrough mode");
             let _ = window.set_ignore_cursor_events(true);
         }
 
@@ -37,7 +38,7 @@ pub fn show_floating_window(app_handle: &AppHandle) -> tauri::Result<()> {
             use crate::window::set_window_exclude_from_capture;
             let exclude_from_capture = windows_manager.get_global_exclude_from_capture();
             if let Ok(hwnd) = window.hwnd() {
-                eprintln!("[FLOATING] Applying exclude from capture: {}", exclude_from_capture);
+                debug!(window_type = "floating", exclude_from_capture, "Applying exclude from capture");
                 let _ = set_window_exclude_from_capture(hwnd.0 as isize, exclude_from_capture);
             }
         }
@@ -62,7 +63,7 @@ pub fn hide_floating_window(app_handle: &AppHandle, app_state: &AppState) -> tau
             if let Ok(outer_pos) = window.outer_position() {
                 let x = outer_pos.x;
                 let y = outer_pos.y;
-                eprintln!("[FLOATING] Saving position before hide: x={}, y={}", x, y);
+                debug!(window_type = "floating", x, y, action = "hide", "Saving position before hide");
                 let _ = manager.set_floating_position(Some(x), Some(y));
             }
         }
@@ -88,10 +89,10 @@ pub fn update_floating_title(app_handle: &AppHandle, layout: &str, text: &str) -
 
 /// Show soundpanel floating window
 pub fn show_soundpanel_window(app_handle: &AppHandle) -> tauri::Result<()> {
-    eprintln!("[SOUNDPANEL] show_soundpanel_window called");
+    info!(window_type = "soundpanel", action = "show", "show_soundpanel_window called");
 
     if let Some(window) = app_handle.get_webview_window("soundpanel") {
-        eprintln!("[SOUNDPANEL] Window exists, showing");
+        info!(window_type = "soundpanel", status = "exists", "Window exists, showing");
 
         // Применяем сохранённую позицию
         let windows_manager = app_handle.state::<WindowsManager>();
@@ -99,7 +100,7 @@ pub fn show_soundpanel_window(app_handle: &AppHandle) -> tauri::Result<()> {
 
         if let Some(x) = saved_x {
             if let Some(y) = saved_y {
-                eprintln!("[SOUNDPANEL] Applying saved position: {}, {}", x, y);
+                debug!(window_type = "soundpanel", x, y, "Applying saved position");
                 let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
                     x,
                     y,
@@ -112,7 +113,7 @@ pub fn show_soundpanel_window(app_handle: &AppHandle) -> tauri::Result<()> {
         // Применяем clickthrough после показа
         let sp_state = app_handle.state::<SoundPanelState>();
         if sp_state.is_floating_clickthrough_enabled() {
-            eprintln!("[SOUNDPANEL] Applying clickthrough mode");
+            debug!(window_type = "soundpanel", mode = "clickthrough", "Applying clickthrough mode");
             let _ = window.set_ignore_cursor_events(true);
         }
 
@@ -122,7 +123,7 @@ pub fn show_soundpanel_window(app_handle: &AppHandle) -> tauri::Result<()> {
             use crate::window::set_window_exclude_from_capture;
             let exclude_from_capture = windows_manager.get_global_exclude_from_capture();
             if let Ok(hwnd) = window.hwnd() {
-                eprintln!("[SOUNDPANEL] Applying exclude from capture: {}", exclude_from_capture);
+                debug!(window_type = "soundpanel", exclude_from_capture, "Applying exclude from capture");
                 let _ = set_window_exclude_from_capture(hwnd.0 as isize, exclude_from_capture);
             }
         }
@@ -136,14 +137,14 @@ pub fn show_soundpanel_window(app_handle: &AppHandle) -> tauri::Result<()> {
 
 /// Update soundpanel window appearance
 pub fn update_soundpanel_appearance(app_handle: &AppHandle) -> tauri::Result<()> {
-    eprintln!("[SOUNDPANEL] update_soundpanel_appearance called");
+    info!(window_type = "soundpanel", action = "update_appearance", "update_soundpanel_appearance called");
     if let Some(window) = app_handle.get_webview_window("soundpanel") {
-        eprintln!("[SOUNDPANEL] SoundPanel window exists, sending appearance-update event");
+        info!(window_type = "soundpanel", status = "exists", event = "appearance-update", "SoundPanel window exists, sending appearance-update event");
         // Эмитим событие для обновления UI
         window.emit("soundpanel-appearance-update", ())?;
-        eprintln!("[SOUNDPANEL] Event sent successfully");
+        info!(window_type = "soundpanel", status = "event_sent", "Event sent successfully");
     } else {
-        eprintln!("[SOUNDPANEL] SoundPanel window does NOT exist - event not sent");
+        info!(window_type = "soundpanel", status = "not_found", "SoundPanel window does NOT exist - event not sent");
     }
     Ok(())
 }
@@ -159,7 +160,7 @@ pub fn hide_soundpanel_window(app_handle: &AppHandle, app_state: &AppState) -> t
             if let Ok(outer_pos) = window.outer_position() {
                 let x = outer_pos.x;
                 let y = outer_pos.y;
-                eprintln!("[SOUNDPANEL] Saving position before hide: x={}, y={}", x, y);
+                debug!(window_type = "soundpanel", x, y, action = "hide", "Saving position before hide");
                 let _ = manager.set_soundpanel_position(Some(x), Some(y));
             }
         }

@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
+use tracing::{info, error};
 use crate::events::AppEvent;
 use crate::webview::WebViewServer;
 use crate::webview::WebViewSettings;
@@ -28,7 +29,7 @@ pub async fn run_webview_server(
 
         // Auto-start on boot if configured
         if start_on_boot && !enabled {
-            eprintln!("[WEBVIEW] Auto-starting server on boot (start_on_boot=true)");
+            info!("[WEBVIEW] Auto-starting server on boot (start_on_boot=true)");
             let mut s = webview_settings.write().await;
             s.enabled = true;
             enabled = true;
@@ -36,16 +37,16 @@ pub async fn run_webview_server(
         }
 
         if enabled {
-            eprintln!("[WEBVIEW] ========================================");
-            eprintln!("[WEBVIEW] STARTING SERVER");
-            eprintln!("[WEBVIEW]   Address: {}:{}", bind_address, port);
-            eprintln!("[WEBVIEW] ========================================");
+            info!("[WEBVIEW] ========================================");
+            info!("[WEBVIEW] STARTING SERVER");
+            info!("[WEBVIEW]   Address: {}:{}", bind_address, port);
+            info!("[WEBVIEW] ========================================");
 
             let server = match WebViewServer::new(Arc::clone(&webview_settings)).await {
                 Ok(s) => s,
                 Err(e) => {
                     let error_msg = format!("Failed to create server: {}", e);
-                    eprintln!("[WEBVIEW] ❌ {}", error_msg);
+                    error!("[WEBVIEW] ❌ {}", error_msg);
                     let _ = app_handle.emit("webview-server-error", &error_msg);
                     // Wait a bit before retrying
                     tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
@@ -58,7 +59,7 @@ pub async fn run_webview_server(
             let app_handle_clone = app_handle.clone();
             let bind_address_clone = bind_address.clone();
             let server_handle = tokio::spawn(async move {
-                eprintln!("[WEBVIEW] Server task started, waiting for connections...");
+                info!("[WEBVIEW] Server task started, waiting for connections...");
 
                 if let Err(e) = server_clone.start().await {
                     // Extract error details for user-friendly message
@@ -66,9 +67,9 @@ pub async fn run_webview_server(
                     let (user_friendly_msg, log_context) = parse_webview_server_error(&error_msg, bind_address_clone, port);
 
                     // Log with full context
-                    eprintln!("[WEBVIEW] ❌ Server startup failed:");
-                    eprintln!("[WEBVIEW]   Context: {}", log_context);
-                    eprintln!("[WEBVIEW]   Error: {}", error_msg);
+                    error!("[WEBVIEW] ❌ Server startup failed:");
+                    error!("[WEBVIEW]   Context: {}", log_context);
+                    error!("[WEBVIEW]   Error: {}", error_msg);
 
                     // Emit user-friendly error to frontend
                     let _ = app_handle_clone.emit("webview-server-error", &user_friendly_msg);
@@ -79,7 +80,7 @@ pub async fn run_webview_server(
                     }
                 }
                 // Server task completed
-                eprintln!("[WEBVIEW] Server task stopped");
+                info!("[WEBVIEW] Server task stopped");
             });
 
             // Handle events and broadcast text
@@ -92,44 +93,44 @@ pub async fn run_webview_server(
                 drop(current_settings);
 
                 if !still_enabled || !same_port {
-                    eprintln!("[WEBVIEW] ========================================");
-                    eprintln!("[WEBVIEW] STOPPING SERVER (settings changed)");
-                    eprintln!("[WEBVIEW]   Still enabled: {}", still_enabled);
-                    eprintln!("[WEBVIEW]   Same port: {}", same_port);
-                    eprintln!("[WEBVIEW] ========================================");
+                    info!("[WEBVIEW] ========================================");
+                    info!("[WEBVIEW] STOPPING SERVER (settings changed)");
+                    info!("[WEBVIEW]   Still enabled: {}", still_enabled);
+                    info!("[WEBVIEW]   Same port: {}", same_port);
+                    info!("[WEBVIEW] ========================================");
                     server_handle.abort();
                     server_running = false;
                 } else {
                     // Process events with timeout (synchronous)
                     match webview_rx.recv_timeout(std::time::Duration::from_secs(1)) {
                         Ok(event) => {
-                            eprintln!("[WEBVIEW] 📨 Event received: {:?}", std::mem::discriminant(&event));
+                            info!("[WEBVIEW] 📨 Event received: {:?}", std::mem::discriminant(&event));
                             match event {
                                 AppEvent::TextSentToTts(text) => {
                                     let preview = text.chars().take(50).collect::<String>();
-                                    eprintln!("[WEBVIEW] 📤 Broadcasting to SSE clients: '{}'...", preview);
+                                    info!("[WEBVIEW] 📤 Broadcasting to SSE clients: '{}'...", preview);
                                     server.broadcast_text(&text).await;
                                 }
                                 AppEvent::RestartWebViewServer => {
-                                    eprintln!("[WEBVIEW] ⚠ Restart event received, stopping server...");
+                                    info!("[WEBVIEW] ⚠ Restart event received, stopping server...");
                                     server_handle.abort();
                                     // Wait a bit for the server to fully shut down
                                     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                                     server_running = false;
                                 }
                                 AppEvent::ReloadWebViewTemplates => {
-                                    eprintln!("[WEBVIEW] 🔄 Reloading templates...");
+                                    info!("[WEBVIEW] 🔄 Reloading templates...");
                                     match server.templates.reload().await {
                                         Ok(()) => {
-                                            eprintln!("[WEBVIEW] ✅ Templates reloaded successfully");
+                                            info!("[WEBVIEW] ✅ Templates reloaded successfully");
                                         }
                                         Err(e) => {
-                                            eprintln!("[WEBVIEW] ❌ Failed to reload templates: {}", e);
+                                            error!("[WEBVIEW] ❌ Failed to reload templates: {}", e);
                                         }
                                     }
                                 }
                                 _ => {
-                                    eprintln!("[WEBVIEW] ℹ️  Ignoring event: {:?}", std::mem::discriminant(&event));
+                                    info!("[WEBVIEW] ℹ️  Ignoring event: {:?}", std::mem::discriminant(&event));
                                 }
                             }
                         }
@@ -138,45 +139,45 @@ pub async fn run_webview_server(
                         }
                         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                             // Channel closed
-                            eprintln!("[WEBVIEW] Event channel disconnected");
+                            info!("[WEBVIEW] Event channel disconnected");
                             return;
                         }
                     }
                 }
             }
         } else {
-            eprintln!("[WEBVIEW] ========================================");
-            eprintln!("[WEBVIEW] SERVER DISABLED");
-            eprintln!("[WEBVIEW] Waiting for enable signal...");
-            eprintln!("[WEBVIEW] ========================================");
+            info!("[WEBVIEW] ========================================");
+            info!("[WEBVIEW] SERVER DISABLED");
+            info!("[WEBVIEW] Waiting for enable signal...");
+            info!("[WEBVIEW] ========================================");
             // Wait for enable or restart event
             loop {
                 match webview_rx.recv_timeout(std::time::Duration::from_secs(2)) {
                     Ok(AppEvent::RestartWebViewServer) => {
-                        eprintln!("[WEBVIEW] ⚠ Restart event received, exiting disabled state");
+                        info!("[WEBVIEW] ⚠ Restart event received, exiting disabled state");
                         break;
                     }
                     Ok(AppEvent::TextSentToTts(text)) => {
                         // Ignore TTS events while disabled but log them
                         let preview = text.chars().take(30).collect::<String>();
-                        eprintln!("[WEBVIEW] Ignoring TTS text (server disabled): '{}'...", preview);
+                        info!("[WEBVIEW] Ignoring TTS text (server disabled): '{}'...", preview);
                     }
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                         // Timeout - check if enabled now
                         let settings = webview_settings.read().await;
                         if settings.enabled {
                             drop(settings);
-                            eprintln!("[WEBVIEW] ✓ Enabled detected via timeout!");
+                            info!("[WEBVIEW] ✓ Enabled detected via timeout!");
                             break;
                         }
                         drop(settings);
                     }
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                        eprintln!("[WEBVIEW] Event channel disconnected");
+                        info!("[WEBVIEW] Event channel disconnected");
                         return;
                     }
                     Ok(other) => {
-                        eprintln!("[WEBVIEW] Received unexpected event while disabled: {:?}", other);
+                        info!("[WEBVIEW] Received unexpected event while disabled: {:?}", other);
                     }
                 }
             }

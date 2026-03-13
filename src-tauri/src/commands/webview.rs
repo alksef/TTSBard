@@ -46,8 +46,13 @@ pub async fn save_webview_settings(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
-    eprintln!("[WEBVIEW] Saving settings: enabled={}, start_on_boot={}, port={}",
-        settings.enabled, settings.start_on_boot, settings.port);
+    tracing::info!(
+        enabled = settings.enabled,
+        start_on_boot = settings.start_on_boot,
+        port = settings.port,
+        bind_address = %settings.bind_address,
+        "Saving webview settings"
+    );
 
     // Check if enabled status or port changed (start_on_boot doesn't require restart)
     let old_settings = state.webview_settings.read().await;
@@ -77,12 +82,12 @@ pub async fn save_webview_settings(
     if enabled_changed || port_changed {
         if start_on_boot_changed {
             // Only start_on_boot changed, no restart needed
-            eprintln!("[WEBVIEW] Only start_on_boot changed, no restart needed");
+            tracing::info!("Only start_on_boot changed, no restart needed");
         }
-        eprintln!("[WEBVIEW] Sending RestartWebViewServer event to WebView server...");
+        tracing::info!("Sending RestartWebViewServer event to WebView server");
         // Send restart event directly to WebView server using the state parameter
         state.send_webview_event(crate::events::AppEvent::RestartWebViewServer);
-        eprintln!("[WEBVIEW] RestartWebViewServer event sent successfully!");
+        tracing::debug!("RestartWebViewServer event sent successfully");
 
         if start_on_boot_changed && !(enabled_changed || port_changed) {
             Ok("Настройки сохранены. Автозапуск обновлён (применится при следующем старте).".to_string())

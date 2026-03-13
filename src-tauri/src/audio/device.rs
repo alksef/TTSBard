@@ -4,6 +4,7 @@
 
 use cpal::traits::{DeviceTrait, HostTrait};
 use serde::{Deserialize, Serialize};
+use tracing::{debug, info};
 
 /// Информация об устройстве вывода
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,7 +17,7 @@ pub struct OutputDeviceInfo {
 
 /// Получить все устройства вывода звука
 pub fn get_output_devices() -> Vec<OutputDeviceInfo> {
-    eprintln!("[AUDIO] Scanning for output devices...");
+    debug!("Scanning for output devices");
 
     let host = cpal::default_host();
     let mut devices = Vec::new();
@@ -39,7 +40,8 @@ pub fn get_output_devices() -> Vec<OutputDeviceInfo> {
                     is_default,
                 };
 
-                eprintln!("[AUDIO] Found device: {} (default: {})", device_info.name, device_info.is_default);
+                debug!(device_name = device_info.name, is_default = device_info.is_default,
+                    "Found device");
                 devices.push(device_info);
             }
         }
@@ -59,7 +61,7 @@ const VIRTUAL_KEYWORDS: &[&str] = &[
 
 /// Получить только виртуальные аудио устройства
 pub fn get_virtual_mic_devices() -> Vec<OutputDeviceInfo> {
-    eprintln!("[AUDIO] Scanning for virtual devices...");
+    debug!("Scanning for virtual devices");
 
     let all_devices = get_output_devices();
     let virtual_devices: Vec<OutputDeviceInfo> = all_devices
@@ -70,9 +72,10 @@ pub fn get_virtual_mic_devices() -> Vec<OutputDeviceInfo> {
         })
         .collect();
 
-    eprintln!("[AUDIO] Found {} virtual devices", virtual_devices.len());
+    info!(count = virtual_devices.len(),
+        "Found virtual devices");
     for device in &virtual_devices {
-        eprintln!("[AUDIO]   - {}", device.name);
+        debug!(device_name = device.name, "Virtual device");
     }
 
     virtual_devices

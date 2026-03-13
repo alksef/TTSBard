@@ -8,6 +8,7 @@ use serde_json::Value;
 use std::fs;
 use std::path::PathBuf;
 use tauri::State;
+use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AppSettings {
@@ -120,8 +121,8 @@ impl AppSettings {
 
         let json_path = config_dir.join("settings.json");
 
-        eprintln!("[SETTINGS] WebView dir: {:?}", config_dir);
-        eprintln!("[SETTINGS] JSON path: {:?}, exists: {}", json_path, json_path.exists());
+        debug!(webview_dir = ?config_dir, "WebView directory");
+        debug!(json_path = ?json_path, json_exists = json_path.exists(), "JSON path");
 
         // Load server settings from JSON or use defaults
         // NOTE: enabled is always false on load (runtime-only), controlled by start_on_boot
@@ -131,14 +132,14 @@ impl AppSettings {
             let json: serde_json::Value = serde_json::from_str(&json_content)
                 .context("Failed to parse WebView settings JSON")?;
 
-            eprintln!("[SETTINGS] Loaded WebView settings from JSON");
+            info!("Loaded WebView settings from JSON");
             (
                 json.get("start_on_boot").and_then(|v| v.as_bool()).unwrap_or(false),
                 json.get("port").and_then(|v| v.as_u64()).unwrap_or(10100) as u16,
                 json.get("bind_address").and_then(|v| v.as_str()).unwrap_or("::").to_string(),
             )
         } else {
-            eprintln!("[SETTINGS] WebView settings JSON not found, using defaults");
+            info!("WebView settings JSON not found, using defaults");
             (false, 10100, "::".to_string())
         };
 
@@ -149,7 +150,7 @@ impl AppSettings {
         fs::create_dir_all(&config_dir)
             .context("Failed to create webview directory")?;
 
-        eprintln!("[SETTINGS] WebView settings loaded: enabled={}, start_on_boot={}", enabled, start_on_boot);
+        debug!(enabled, start_on_boot, "WebView settings loaded");
 
         Ok(WebViewSettings {
             enabled,
@@ -170,9 +171,9 @@ impl AppSettings {
 
         let json_path = config_dir.join("settings.json");
 
-        eprintln!("[SETTINGS] Saving WebView settings...");
-        eprintln!("[SETTINGS] JSON path: {:?}", json_path);
-        eprintln!("[SETTINGS] enabled={}, start_on_boot={}", settings.enabled, settings.start_on_boot);
+        info!("Saving WebView settings");
+        debug!(json_path = ?json_path, "JSON path");
+        debug!(enabled = settings.enabled, start_on_boot = settings.start_on_boot, "WebView settings values");
 
         // Create webview directory if it doesn't exist
         fs::create_dir_all(&config_dir)
@@ -188,7 +189,7 @@ impl AppSettings {
         fs::write(&json_path, &serde_json::to_string_pretty(&server_settings).unwrap())
             .context("Failed to write WebView settings JSON")?;
 
-        eprintln!("[SETTINGS] WebView settings saved successfully");
+        info!("WebView settings saved successfully");
 
         Ok(())
     }
@@ -219,10 +220,10 @@ impl AppSettings {
             let settings: TwitchSettings = serde_json::from_str(&content)
                 .map_err(|e| format!("Failed to parse Twitch settings: {}", e))?;
 
-            eprintln!("[SETTINGS] Twitch settings loaded: enabled={}", settings.enabled);
+            debug!(enabled = settings.enabled, "Twitch settings loaded");
             Ok(settings)
         } else {
-            eprintln!("[SETTINGS] Twitch settings not found, using defaults");
+            info!("Twitch settings not found, using defaults");
             Ok(TwitchSettings::default())
         }
     }
@@ -244,7 +245,7 @@ impl AppSettings {
         fs::write(&settings_path, json)
             .map_err(|e| format!("Failed to write Twitch settings: {}", e))?;
 
-        eprintln!("[SETTINGS] Twitch settings saved");
+        info!("Twitch settings saved");
         Ok(())
     }
 
@@ -268,13 +269,13 @@ impl SettingsManager {
             .context("Failed to get config dir")?
             .join("ttsbard");
 
-        eprintln!("[SETTINGS] Config directory: {:?}", config_dir);
+        debug!(config_dir = ?config_dir, "Config directory");
 
         // Создаем директорию если не существует
         fs::create_dir_all(&config_dir)
             .context("Failed to create config dir")?;
 
-        eprintln!("[SETTINGS] Config directory created/verified");
+        debug!("Config directory created/verified");
 
         Ok(Self { config_dir })
     }
@@ -286,8 +287,7 @@ impl SettingsManager {
     pub fn load(&self) -> Result<AppSettings> {
         let path = self.settings_path();
 
-        eprintln!("[SETTINGS] Settings path: {:?}", path);
-        eprintln!("[SETTINGS] File exists: {}", path.exists());
+        debug!(settings_path = ?path, path_exists = path.exists(), "Settings path");
 
         if path.exists() {
             let content = fs::read_to_string(&path)
@@ -296,21 +296,21 @@ impl SettingsManager {
             // Migrate old settings format to new format
             let migrated_content = self.migrate_settings(&content);
 
-            eprintln!("[SETTINGS] Parsing settings JSON...");
+            debug!("Parsing settings JSON");
             let settings: AppSettings = serde_json::from_str(&migrated_content)
                 .context("Failed to parse settings")?;
 
             // Save migrated settings for next time
             if migrated_content != content {
-                eprintln!("[SETTINGS] Settings were migrated, saving new format...");
+                debug!("Settings were migrated, saving new format");
                 let _ = self.save(&settings);
-                eprintln!("[SETTINGS] Migrated settings saved");
+                debug!("Migrated settings saved");
             }
 
-            eprintln!("[SETTINGS] Settings parsed successfully");
+            info!("Settings parsed successfully");
             Ok(settings)
         } else {
-            eprintln!("[SETTINGS] Settings file not found, using defaults");
+            info!("Settings file not found, using defaults");
             Ok(AppSettings::default())
         }
     }
@@ -367,52 +367,58 @@ impl SettingsManager {
     }
 
     pub fn apply_to_state(&self, settings: &AppSettings, state: &AppState, telegram_state: Option<State<'_, crate::commands::telegram::TelegramState>>) {
-        eprintln!("[SETTINGS] Applying settings to state...");
+        info!("Applying settings to state");
 
         // TTS Provider
-        eprintln!("[SETTINGS] TTS Provider: {:?}", settings.tts_provider);
+        debug!(tts_provider = ?settings.tts_provider, "TTS Provider");
         state.set_tts_provider_type(settings.tts_provider);
 
         // API ключ OpenAI
-        eprintln!("[SETTINGS] OpenAI API Key: {}", settings.openai_api_key.as_ref().map(|k| format!("{}...", &k[..7])).unwrap_or("None".to_string()));
+        let api_key_display = settings.openai_api_key.as_ref()
+            .map(|k| {
+                let len = k.len().min(7);
+                format!("{}...", &k[..len])
+            })
+            .unwrap_or_else(|| "None".to_string());
+        debug!(api_key = %api_key_display, "OpenAI API Key");
         state.set_openai_api_key(settings.openai_api_key.clone());
 
         // Голос OpenAI
-        eprintln!("[SETTINGS] OpenAI Voice: {}", settings.openai_voice);
+        debug!(openai_voice = %settings.openai_voice, "OpenAI Voice");
         state.set_openai_voice(settings.openai_voice.clone());
 
         // Прокси OpenAI
-        eprintln!("[SETTINGS] OpenAI Proxy: {:?}", settings.openai_proxy_host);
+        debug!(proxy_host = ?settings.openai_proxy_host, proxy_port = ?settings.openai_proxy_port, "OpenAI Proxy");
         state.set_openai_proxy(settings.openai_proxy_host.clone(), settings.openai_proxy_port);
 
         // URL локального TTS
-        eprintln!("[SETTINGS] Local TTS URL: {}", settings.local_tts_url);
+        debug!(local_tts_url = %settings.local_tts_url, "Local TTS URL");
         state.set_local_tts_url(settings.local_tts_url.clone());
 
         // Initialize only the selected provider
         match settings.tts_provider {
             crate::tts::TtsProviderType::OpenAi => {
                 if let Some(ref key) = settings.openai_api_key {
-                    eprintln!("[SETTINGS] Initializing OpenAI TTS with API key...");
+                    debug!("Initializing OpenAI TTS with API key");
                     state.init_openai_tts(key.clone());
-                    eprintln!("[SETTINGS] OpenAI TTS initialized");
+                    info!("OpenAI TTS initialized");
                 } else {
-                    eprintln!("[SETTINGS] WARNING: OpenAI selected but no API key found");
+                    warn!("OpenAI selected but no API key found");
                 }
             }
             crate::tts::TtsProviderType::Local => {
-                eprintln!("[SETTINGS] Initializing Local TTS...");
+                debug!("Initializing Local TTS");
                 state.init_local_tts();
-                eprintln!("[SETTINGS] Local TTS initialized");
+                info!("Local TTS initialized");
             }
             crate::tts::TtsProviderType::Silero => {
-                eprintln!("[SETTINGS] Initializing Silero TTS on startup...");
+                debug!("Initializing Silero TTS on startup");
 
                 // Создаём runtime для async операций
                 let rt = match tokio::runtime::Runtime::new() {
                     Ok(rt) => rt,
                     Err(e) => {
-                        eprintln!("[SETTINGS] ERROR: Failed to create runtime: {}", e);
+                        error!(error = %e, "Failed to create runtime");
                         return;
                     }
                 };
@@ -426,20 +432,20 @@ impl SettingsManager {
                         match crate::commands::telegram::telegram_auto_restore(ts).await {
                             Ok(connected) => {
                                 if connected {
-                                    eprintln!("[SETTINGS] Telegram session restored");
+                                    info!("Telegram session restored");
                                     // Инициализируем Silero с уже скопированным client_arc
                                     state.init_silero_tts(client_arc);
-                                    eprintln!("[SETTINGS] Silero TTS initialized");
+                                    info!("Silero TTS initialized");
                                 } else {
-                                    eprintln!("[SETTINGS] WARNING: Telegram session exists but not authorized");
+                                    warn!("Telegram session exists but not authorized");
                                 }
                             }
                             Err(e) => {
-                                eprintln!("[SETTINGS] WARNING: Failed to restore Telegram session: {}", e);
+                                warn!(error = %e, "Failed to restore Telegram session");
                             }
                         }
                     } else {
-                        eprintln!("[SETTINGS] WARNING: TelegramState not available, Silero will not work");
+                        warn!("TelegramState not available, Silero will not work");
                     }
                 });
             }
@@ -461,7 +467,7 @@ impl SettingsManager {
         // Вызов по горячей клавише
         *state.hotkey_enabled.lock() = settings.hotkey_enabled;
 
-        eprintln!("[SETTINGS] Settings applied successfully");
+        info!("Settings applied successfully");
     }
 
     pub fn load_from_state(state: &AppState) -> AppSettings {

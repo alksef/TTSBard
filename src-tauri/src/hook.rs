@@ -4,6 +4,7 @@ use std::thread::JoinHandle;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::cell::UnsafeCell;
+use tracing::{debug, error, info};
 
 #[cfg(target_os = "windows")]
 use windows::{
@@ -133,13 +134,13 @@ unsafe extern "system" fn low_level_keyboard_proc(
                             VK_F8 => {
                                 // F8 - toggle layout (EN ↔ RU)
                                 let new_layout = app_state.toggle_layout();
-                                eprintln!("Layout switched to: {:?}", new_layout);
+                                debug!(?new_layout, "Layout switched to");
                                 return LRESULT(1); // Block the key
                             }
                             VK_F6 => {
                                 // F6 - toggle Enter closes disabled mode
                                 let new_state = app_state.toggle_enter_closes_disabled();
-                                eprintln!("[F6] Enter closes disabled: {}", new_state);
+                                debug!(new_state, "[F6] Enter closes disabled");
                                 return LRESULT(1); // Block the key
                             }
                             VK_SPACE => {
@@ -163,7 +164,7 @@ unsafe extern "system" fn low_level_keyboard_proc(
                                             let text = app_state.get_current_text();
                                             // Emit update to floating window
                                             app_state.emit_event(AppEvent::UpdateFloatingText(text));
-                                            eprintln!("[PREPROCESSOR] Live replacement performed");
+                                            debug!("[PREPROCESSOR] Live replacement performed");
                                         }
                                     }
                                 } else {
@@ -213,10 +214,10 @@ fn vk_code_to_char(
             InputLayout::Russian => *hook_state.russian_layout.get(),
         };
 
-        eprintln!("[DEBUG] vk_code_to_char called - VK code: 0x{:02X} ({})", vk_code, vk_code);
+        debug!(vk_code = format_args!("0x{:02X}", vk_code), vk_code_decimal = vk_code, "[DEBUG] vk_code_to_char called");
 
         if hkl.0.is_null() {
-            eprintln!("[DEBUG] Layout handle is NULL!");
+            debug!("[DEBUG] Layout handle is NULL");
             return None;
         }
 
@@ -244,10 +245,10 @@ fn vk_code_to_char(
         // Get current keyboard state for shift/ctrl handling
         let get_state_result = GetKeyboardState(keyboard_state.as_mut_ptr());
         if get_state_result == 0 {
-            eprintln!("[HOOK] GetKeyboardState failed!");
+            error!("[HOOK] GetKeyboardState failed");
             return None;
         }
-        eprintln!("[DEBUG] GetKeyboardState result: {}", get_state_result);
+        debug!(get_state_result, "[DEBUG] GetKeyboardState result");
 
         // Update keyboard state with manually tracked modifiers
         // (Low-level hooks fire before system state updates)
@@ -275,26 +276,30 @@ fn vk_code_to_char(
         let vk_rshift = 0xA1;
         let vk_ctrl = 0x11;
         let vk_alt = 0x12;
-        eprintln!("[DEBUG] Keyboard state - VK_SHIFT(0x10): 0x{:02X}, VK_LSHIFT(0xA0): 0x{:02X}, VK_RSHIFT(0xA1): 0x{:02X}",
-            keyboard_state[vk_shift as usize],
-            keyboard_state[vk_lshift as usize],
-            keyboard_state[vk_rshift as usize]
+        debug!(
+            vk_shift = format_args!("0x{:02X}", keyboard_state[vk_shift as usize]),
+            vk_lshift = format_args!("0x{:02X}", keyboard_state[vk_lshift as usize]),
+            vk_rshift = format_args!("0x{:02X}", keyboard_state[vk_rshift as usize]),
+            "[DEBUG] Keyboard state - VK_SHIFT(0x10), VK_LSHIFT(0xA0), VK_RSHIFT(0xA1)"
         );
-        eprintln!("[DEBUG] Keyboard state - VK_CTRL(0x11): 0x{:02X}, VK_ALT(0x12): 0x{:02X}",
-            keyboard_state[vk_ctrl as usize],
-            keyboard_state[vk_alt as usize]
+        debug!(
+            vk_ctrl = format_args!("0x{:02X}", keyboard_state[vk_ctrl as usize]),
+            vk_alt = format_args!("0x{:02X}", keyboard_state[vk_alt as usize]),
+            "[DEBUG] Keyboard state - VK_CTRL(0x11), VK_ALT(0x12)"
         );
 
         // Check if high bit is set (key is down)
         let shift_down = (keyboard_state[vk_shift as usize] & 0x80) != 0;
         let lshift_down = (keyboard_state[vk_lshift as usize] & 0x80) != 0;
         let rshift_down = (keyboard_state[vk_rshift as usize] & 0x80) != 0;
-        eprintln!("[DEBUG] Shift key down? Shift: {}, LShift: {}, RShift: {}",
-            shift_down, lshift_down, rshift_down);
+        debug!(shift_down, lshift_down, rshift_down, "[DEBUG] Shift key down");
 
         let scan_code = kb_struct.scanCode & 0xFF ;
-        eprintln!("[DEBUG] Scan code: 0x{:02X}, flags: {:?}",
-            kb_struct.scanCode, kb_struct.flags);
+        debug!(
+            scan_code = format_args!("0x{:02X}", kb_struct.scanCode),
+            flags = ?kb_struct.flags,
+            "[DEBUG] Scan code"
+        );
 
         let result = ToUnicodeEx(
             vk_code,
@@ -306,8 +311,8 @@ fn vk_code_to_char(
             hkl.0 as usize as isize,
         );
 
-        eprintln!("[DEBUG] ToUnicodeEx result: {}", result);
-        eprintln!("[DEBUG] Buffer: {:02X?}", &buffer[..result as usize]);
+        debug!(result, "[DEBUG] ToUnicodeEx result");
+        debug!(buffer = format_args!("{:02X?}", &buffer[..result as usize]), "[DEBUG] Buffer");
 
         if result > 0 {
             // Convert UTF-16 to char
@@ -315,22 +320,27 @@ fn vk_code_to_char(
                 .ok()
                 .and_then(|s| s.chars().next())
             {
-                eprintln!("[DEBUG] Converted char: '{}' (U+{:04X}), is_ascii_graphic: {}, is_ascii: {}, is_control: {}",
-                    ch, ch as u32, ch.is_ascii_graphic(), ch.is_ascii(), ch.is_control());
+                debug!(
+                    ch = format_args!("'{}' (U+{:04X})", ch, ch as u32),
+                    is_ascii_graphic = ch.is_ascii_graphic(),
+                    is_ascii = ch.is_ascii(),
+                    is_control = ch.is_control(),
+                    "[DEBUG] Converted char"
+                );
                 // Filter out non-printable characters and control characters
                 if ch.is_ascii_graphic() || (!ch.is_ascii() && !ch.is_control()) {
-                    eprintln!("[DEBUG] Character PASSED filter - returning: '{}'", ch);
+                    debug!(ch = format_args!("'{}'", ch), "[DEBUG] Character PASSED filter - returning");
                     return Some(ch);
                 } else {
-                    eprintln!("[DEBUG] Character REJECTED by filter");
+                    debug!("[DEBUG] Character REJECTED by filter");
                 }
             } else {
-                eprintln!("[DEBUG] Failed to convert UTF-16 to char");
+                debug!("[DEBUG] Failed to convert UTF-16 to char");
             }
         } else if result == 0 {
-            eprintln!("[DEBUG] ToUnicodeEx returned 0 - no translation available");
+            debug!("[DEBUG] ToUnicodeEx returned 0 - no translation available");
         } else {
-            eprintln!("[DEBUG] ToUnicodeEx returned {} - dead key or error", result);
+            debug!(result, "[DEBUG] ToUnicodeEx returned - dead key or error");
         }
     }
 
@@ -359,7 +369,7 @@ pub fn initialize_text_interception_hook(state: AppState) -> JoinHandle<()> {
                 0x00000001, // KLF_ACTIVATE
             );
             if en_layout.0.is_null() {
-                eprintln!("[HOOK] Failed to load English keyboard layout");
+                error!("[HOOK] Failed to load English keyboard layout");
                 return;
             }
 
@@ -370,14 +380,14 @@ pub fn initialize_text_interception_hook(state: AppState) -> JoinHandle<()> {
                 0x00000001, // KLF_ACTIVATE
             );
             if ru_layout.0.is_null() {
-                eprintln!("[HOOK] Failed to load Russian keyboard layout");
+                error!("[HOOK] Failed to load Russian keyboard layout");
                 return;
             }
 
             // Log layout handles (avoid direct reference to mutable static)
             let en_hkl = en_layout.0 as usize;
             let ru_hkl = ru_layout.0 as usize;
-            eprintln!("Keyboard layouts loaded: EN={:#x}, RU={:#x}", en_hkl, ru_hkl);
+            info!(en = format_args!("{:#x}", en_hkl), ru = format_args!("{:#x}", ru_hkl), "Keyboard layouts loaded");
 
             // Store layouts and state in thread-safe global
             if let Some(mut hook_state) = HOOK_STATE.try_lock() {
@@ -385,14 +395,14 @@ pub fn initialize_text_interception_hook(state: AppState) -> JoinHandle<()> {
                 *hook_state.russian_layout.get() = ru_layout;
                 hook_state.app_state = Some(state);
             } else {
-                eprintln!("[HOOK] Failed to acquire lock for hook state initialization");
+                error!("[HOOK] Failed to acquire lock for hook state initialization");
                 return;
             }
 
             let module_handle = match GetModuleHandleW(PCWSTR::null()) {
                 Ok(h) => h,
                 Err(e) => {
-                    eprintln!("Failed to get module handle: {}", e);
+                    error!(error = %e, "Failed to get module handle");
                     return;
                 }
             };
@@ -407,12 +417,12 @@ pub fn initialize_text_interception_hook(state: AppState) -> JoinHandle<()> {
             let hook = match hook_result {
                 Ok(h) => h,
                 Err(e) => {
-                    eprintln!("Failed to set keyboard hook: {}", e);
+                    error!(error = %e, "Failed to set keyboard hook");
                     return;
                 }
             };
 
-            eprintln!("Keyboard hook initialized successfully");
+            info!("Keyboard hook initialized successfully");
 
             // Message pump to keep hook alive
             let mut msg: MSG = std::mem::zeroed();
@@ -421,12 +431,12 @@ pub fn initialize_text_interception_hook(state: AppState) -> JoinHandle<()> {
             }
 
             let _ = UnhookWindowsHookEx(hook);
-            eprintln!("Keyboard hook uninstalled");
+            info!("Keyboard hook uninstalled");
         }
 
         #[cfg(not(target_os = "windows"))]
         {
-            eprintln!("Keyboard hook is only supported on Windows");
+            info!("Keyboard hook is only supported on Windows");
         }
     })
 }

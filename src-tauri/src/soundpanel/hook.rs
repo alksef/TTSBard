@@ -7,6 +7,7 @@ use crate::soundpanel::state::SoundPanelState;
 use crate::events::AppEvent;
 use std::sync::Arc;
 use std::thread::JoinHandle;
+use tracing::{debug, error, info};
 
 #[cfg(target_os = "windows")]
 use windows::{
@@ -50,13 +51,16 @@ unsafe extern "system" fn soundpanel_keyboard_proc(
                     }
 
                     // Логируем только когда перехват включен
-                    eprintln!("[SOUNDPANEL HOOK] KeyDown: vk_code=0x{:X}, interception_enabled=true",
-                        vk_code);
+                    debug!(
+                        vk_code = format!("0x{:X}", vk_code),
+                        interception_enabled = true,
+                        "KeyDown"
+                    );
 
                     match vk_code {
                         VK_ESCAPE => {
                             // Escape - закрыть панель
-                            eprintln!("[SOUNDPANEL HOOK] === ESC PRESSED === - hiding panel");
+                            info!("ESC pressed - hiding panel");
                             state.set_interception_enabled(false);
                             state.emit_event(AppEvent::HideSoundPanelWindow);
                             return LRESULT(1); // Блокируем клавишу
@@ -65,29 +69,29 @@ unsafe extern "system" fn soundpanel_keyboard_proc(
                             // Проверяем A-Z
                             if (VK_A..=VK_Z).contains(&vk_code) {
                                 let key_char = (b'A' + (vk_code - VK_A) as u8) as char;
-                                eprintln!("[SOUNDPANEL HOOK] === A-Z KEY: {} ===", key_char);
+                                debug!(key = %key_char, "A-Z key pressed");
 
                                 // Ищем привязку
                                 if let Some(binding) = state.get_binding(key_char) {
                                     // Привязка найдена - воспроизводим звук
-                                    eprintln!("[SOUNDPANEL HOOK] Binding FOUND: {}", binding.description);
+                                    debug!(description = binding.description, "Binding found");
                                     state.play_sound(&binding);
                                     state.set_interception_enabled(false);
                                     state.emit_event(AppEvent::HideSoundPanelWindow);
                                     return LRESULT(1); // Блокируем клавишу
                                 } else {
                                     // Нет привязки - показываем сообщение
-                                    eprintln!("[SOUNDPANEL HOOK] NO binding for: {}", key_char);
+                                    debug!(key = %key_char, "No binding found");
                                     state.emit_event(AppEvent::SoundPanelNoBinding(key_char));
                                     return LRESULT(1); // Блокируем клавишу
                                 }
                             } else {
-                                eprintln!("[SOUNDPANEL HOOK] Not A-Z key, passing through");
+                                debug!("Not A-Z key, passing through");
                             }
                         }
                     }
                 } else {
-                    eprintln!("[SOUNDPANEL HOOK] ERROR: SP_HOOK_STATE not initialized!");
+                    error!("SP_HOOK_STATE not initialized");
                 }
             }
             _ => {}
@@ -99,23 +103,23 @@ unsafe extern "system" fn soundpanel_keyboard_proc(
 
 /// Инициализировать keyboard hook для звуковой панели
 pub fn initialize_soundpanel_hook(state: SoundPanelState) -> JoinHandle<()> {
-    eprintln!("[SOUNDPANEL] === initialize_soundpanel_hook called ===");
+    info!("initialize_soundpanel_hook called");
 
     std::thread::spawn(move || unsafe {
         #[cfg(target_os = "windows")]
         {
-            eprintln!("[SOUNDPANEL] Thread started, setting up hook...");
+            debug!("Thread started, setting up hook");
 
             // Безопасно сохраняем состояние в OnceLock
             let state_arc = Arc::new(state);
             if SP_HOOK_STATE.set(state_arc.clone()).is_err() {
-                eprintln!("[SOUNDPANEL] ERROR: SP_HOOK_STATE already initialized!");
+                error!("SP_HOOK_STATE already initialized");
                 return;
             }
-            eprintln!("[SOUNDPANEL] SP_HOOK_STATE set safely");
+            debug!("SP_HOOK_STATE set safely");
 
             let module_handle = GetModuleHandleW(PCWSTR::null()).unwrap();
-            eprintln!("[SOUNDPANEL] Got module handle");
+            debug!("Got module handle");
 
             let hook_result = SetWindowsHookExW(
                 WH_KEYBOARD_LL,
@@ -126,16 +130,16 @@ pub fn initialize_soundpanel_hook(state: SoundPanelState) -> JoinHandle<()> {
 
             let hook = match hook_result {
                 Ok(h) => {
-                    eprintln!("[SOUNDPANEL] ✓ SetWindowsHookExW SUCCESS");
+                    info!("SetWindowsHookExW SUCCESS");
                     h
                 },
                 Err(e) => {
-                    eprintln!("[SOUNDPANEL] ✗ Failed to set keyboard hook: {}", e);
+                    error!(error = %e, "Failed to set keyboard hook");
                     return;
                 }
             };
 
-            eprintln!("[SOUNDPANEL] Keyboard hook initialized successfully, starting message pump");
+            info!("Keyboard hook initialized successfully, starting message pump");
 
             // Message pump для поддержания хука активным
             let mut msg: MSG = std::mem::zeroed();
@@ -144,17 +148,17 @@ pub fn initialize_soundpanel_hook(state: SoundPanelState) -> JoinHandle<()> {
                 msg_count += 1;
                 DispatchMessageW(&msg);
                 if msg_count.is_multiple_of(100) {
-                    eprintln!("[SOUNDPANEL] Message pump running, messages processed: {}", msg_count);
+                    debug!(msg_count, "Message pump running");
                 }
             }
 
             let _ = UnhookWindowsHookEx(hook);
-            eprintln!("[SOUNDPANEL] Keyboard hook uninstalled");
+            info!("Keyboard hook uninstalled");
         }
 
         #[cfg(not(target_os = "windows"))]
         {
-            eprintln!("[SOUNDPANEL] Keyboard hook is only supported on Windows");
+            error!("Keyboard hook is only supported on Windows");
         }
     })
 }

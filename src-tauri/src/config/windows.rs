@@ -101,11 +101,11 @@ impl WindowsSettings {
 
         // Validate colors
         if !is_valid_hex_color(&self.floating.bg_color) {
-            eprintln!("[WINDOWS] Invalid floating bg_color, using default");
+            tracing::warn!(bg_color = ?self.floating.bg_color, "Invalid floating bg_color, using default");
             self.floating.bg_color = "#1e1e1e".to_string();
         }
         if !is_valid_hex_color(&self.soundpanel.bg_color) {
-            eprintln!("[WINDOWS] Invalid soundpanel bg_color, using default");
+            tracing::warn!(bg_color = ?self.soundpanel.bg_color, "Invalid soundpanel bg_color, using default");
             self.soundpanel.bg_color = "#2a2a2a".to_string();
         }
     }
@@ -149,7 +149,7 @@ impl WindowsManager {
             settings.validate();
             Ok(settings)
         } else {
-            eprintln!("[WINDOWS] Settings file not found, creating with defaults");
+            tracing::info!("Settings file not found, creating with defaults");
             let settings = WindowsSettings::default();
             // Save defaults to disk for next time
             self.save(&settings)?;
@@ -167,7 +167,7 @@ impl WindowsManager {
         fs::write(&path, content)
             .context("Failed to write windows settings file")?;
 
-        eprintln!("[WINDOWS] Settings saved");
+        tracing::info!("Settings saved");
         Ok(())
     }
 
@@ -318,11 +318,11 @@ impl WindowsManager {
 
     /// Set global exclude from capture
     pub fn set_global_exclude_from_capture(&self, exclude: bool) -> Result<()> {
-        eprintln!("[WINDOWS] set_global_exclude_from_capture called with: {}", exclude);
+        tracing::debug!(exclude, "set_global_exclude_from_capture called");
         let mut settings = self.load()?;
         settings.global.exclude_from_capture = exclude;
         self.save(&settings)?;
-        eprintln!("[WINDOWS] set_global_exclude_from_capture saved: {}", exclude);
+        tracing::debug!(exclude, "set_global_exclude_from_capture saved");
         Ok(())
     }
 
@@ -330,14 +330,14 @@ impl WindowsManager {
     pub fn get_global_exclude_from_capture(&self) -> bool {
         let value = self.load()
             .map(|s| {
-                eprintln!("[WINDOWS] get_global_exclude_from_capture from file: {}", s.global.exclude_from_capture);
+                tracing::debug!(exclude_from_capture = s.global.exclude_from_capture, "get_global_exclude_from_capture from file");
                 s.global.exclude_from_capture
             })
             .unwrap_or_else(|e| {
-                eprintln!("[WINDOWS] get_global_exclude_from_capture error: {}, using default: false", e);
+                tracing::error!(error = %e, "get_global_exclude_from_capture error, using default: false");
                 false
             });
-        eprintln!("[WINDOWS] get_global_exclude_from_capture returning: {}", value);
+        tracing::debug!(value, "get_global_exclude_from_capture returning");
         value
     }
 }

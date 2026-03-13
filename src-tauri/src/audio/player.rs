@@ -11,6 +11,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use parking_lot::RwLock;
 use std::collections::HashMap;
+use tracing::{debug, error, info};
 
 /// Конфигурация вывода звука
 #[derive(Clone, Debug)]
@@ -62,20 +63,21 @@ impl AudioPlayer {
         for handle in still_active {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
-                eprintln!("[AUDIO_PLAYER] Join timeout reached, some threads may still be running");
+                error!("Join timeout reached, some threads may still be running");
                 break;
             }
             // Примечание: join() блокирующий, но это допустимо для десктопного приложения
             // Потоки должны быстро завершаться после установки stop_flag
             if let Err(e) = handle.join() {
-                eprintln!("[AUDIO_PLAYER] Thread join error: {:?}", e);
+                error!(error = ?e, "Thread join error");
             }
         }
 
         // Сбрасываем флаг остановки для нового воспроизведения
         self.stop_flag.store(false, Ordering::SeqCst);
 
-        eprintln!("[AUDIO_PLAYER] Starting dual output playback, data size: {} bytes", mp3_data.len());
+        info!(data_size = mp3_data.len(),
+            "Starting dual output playback");
 
         // Проверяем, что хотя бы один вывод включен
         if speaker_config.is_none() && virtual_mic_config.is_none() {
@@ -85,8 +87,8 @@ impl AudioPlayer {
         // Получаем конфигурацию громкости для логирования
         let speaker_vol = speaker_config.as_ref().map(|c| c.volume).unwrap_or(0.0);
         let mic_vol = virtual_mic_config.as_ref().map(|c| c.volume).unwrap_or(0.0);
-        eprintln!("[AUDIO_PLAYER] Speaker volume: {:.0}%, Virtual mic volume: {:.0}%",
-            speaker_vol * 100.0, mic_vol * 100.0);
+        debug!(speaker_volume = speaker_vol * 100.0, virtual_mic_volume = mic_vol * 100.0,
+            "Volume configuration");
 
         // Use Arc to share audio data efficiently (Arc<[u8]> instead of Arc<Vec<u8>> for better cache efficiency)
         let shared_data: Arc<[u8]> = mp3_data.into();
@@ -101,11 +103,11 @@ impl AudioPlayer {
             let devices_cache = cached_devices.clone();
 
             let handle = thread::spawn(move || {
-                eprintln!("[AUDIO_PLAYER] Speaker thread started");
+                debug!("Speaker thread started");
                 if let Err(e) = Self::play_to_device(stop_flag, data, config, "Speaker", devices_cache) {
-                    eprintln!("[AUDIO_PLAYER] Speaker playback error: {}", e);
+                    error!(error = %e, "Speaker playback error");
                 }
-                eprintln!("[AUDIO_PLAYER] Speaker thread finished");
+                debug!("Speaker thread finished");
             });
             new_handles.push(handle);
         }
@@ -117,11 +119,11 @@ impl AudioPlayer {
             let devices_cache = cached_devices.clone();
 
             let handle = thread::spawn(move || {
-                eprintln!("[AUDIO_PLAYER] Virtual mic thread started");
+                debug!("Virtual mic thread started");
                 if let Err(e) = Self::play_to_device(stop_flag, data, config, "Virtual Mic", devices_cache) {
-                    eprintln!("[AUDIO_PLAYER] Virtual mic playback error: {}", e);
+                    error!(error = %e, "Virtual mic playback error");
                 }
-                eprintln!("[AUDIO_PLAYER] Virtual mic thread finished");
+                debug!("Virtual mic thread finished");
             });
             new_handles.push(handle);
         }
@@ -146,8 +148,9 @@ impl AudioPlayer {
             if let Some(cache) = cached_devices {
                 let cached = cache.read();
                 if let Some(device) = cached.get(device_id) {
-                    eprintln!("[AUDIO_PLAYER] {} using cached device: {}", device_label,
-                        device.name().unwrap_or_else(|_| "Unknown".to_string()));
+                    let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+                    debug!(device_label = %device_label, device_name = %device_name,
+                        "Using cached device");
                     let device_clone = device.clone();
                     drop(cached);
                     device_clone
@@ -182,7 +185,8 @@ impl AudioPlayer {
         };
 
         let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
-        eprintln!("[AUDIO_PLAYER] {} playing on: {}", device_label, device_name);
+        info!(device_label = %device_label, device_name = %device_name,
+            "Playing on device");
 
         // Создаём выходной поток
         let (_stream, stream_handle) = rodio::OutputStream::try_from_device(&device)
@@ -200,7 +204,8 @@ impl AudioPlayer {
 
         // Применяем громкость
         sink.set_volume(config.volume);
-        eprintln!("[AUDIO_PLAYER] {} volume set to: {:.2}", device_label, config.volume);
+        debug!(device_label = %device_label, volume = config.volume,
+            "Volume set");
 
         // Воспроизводим
         sink.append(source);
@@ -208,7 +213,8 @@ impl AudioPlayer {
         // Ждём окончания воспроизведения или остановки
         while !sink.empty() {
             if stop_flag.load(Ordering::SeqCst) {
-                eprintln!("[AUDIO_PLAYER] {} playback stopped by flag", device_label);
+                debug!(device_label = %device_label,
+                    "Playback stopped by flag");
                 sink.stop();
                 break;
             }
@@ -216,7 +222,7 @@ impl AudioPlayer {
         }
 
         if !stop_flag.load(Ordering::SeqCst) {
-            eprintln!("[AUDIO_PLAYER] {} playback completed", device_label);
+            debug!(device_label = %device_label, "Playback completed");
         }
 
         Ok(())
@@ -225,7 +231,7 @@ impl AudioPlayer {
     /// Остановить воспроизведение
     #[allow(dead_code)]
     pub fn stop(&mut self) {
-        eprintln!("[AUDIO_PLAYER] Stopping playback");
+        debug!("Stopping playback");
         self.stop_flag.store(true, Ordering::SeqCst);
     }
 }

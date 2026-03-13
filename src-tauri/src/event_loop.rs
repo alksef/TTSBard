@@ -7,10 +7,11 @@ use crate::events::{AppEvent, InputLayout, TwitchEvent};
 use crate::state::AppState;
 use crate::floating::{show_floating_window, hide_floating_window, update_floating_text, update_floating_title, update_soundpanel_appearance};
 use tauri::{AppHandle, Manager};
+use tracing::{debug, error, info};
 
 /// Update tray icon based on interception state
 fn update_tray_icon(_app_handle: &AppHandle, is_intercepting: bool) {
-    eprintln!("[TRAY] Interception mode: {}, tray icon update skipped (not implemented)", is_intercepting);
+    debug!(is_intercepting, "[TRAY] Interception mode: tray icon update skipped (not implemented)");
     // TODO: Implement tray icon update with proper resource paths
 }
 
@@ -28,7 +29,7 @@ impl EventHandler {
 
     /// Handle an application event
     pub fn handle(&self, event: AppEvent) {
-        eprintln!("[HANDLE_EVENT] Received event: {:?}", std::mem::discriminant(&event));
+        debug!(event = ?std::mem::discriminant(&event), "[HANDLE_EVENT] Received event");
         match event {
             AppEvent::InterceptionChanged(enabled) => {
                 self.process_interception_changed(enabled);
@@ -43,10 +44,10 @@ impl EventHandler {
                 self.process_text_sent_to_tts(text);
             }
             AppEvent::TtsStatusChanged(status) => {
-                eprintln!("TTS status changed: {:?}", status);
+                debug!(?status, "TTS status changed");
             }
             AppEvent::TtsError(err) => {
-                eprintln!("TTS error: {}", err);
+                error!(error = %err, "TTS error");
             }
             AppEvent::ShowFloatingWindow => {
                 self.process_show_floating_window();
@@ -64,63 +65,63 @@ impl EventHandler {
                 self.process_update_tray_icon(is_intercepting);
             }
             AppEvent::FloatingAppearanceChanged => {
-                eprintln!("Floating window appearance changed");
+                debug!("Floating window appearance changed");
             }
             AppEvent::ClickthroughChanged(enabled) => {
                 self.process_clickthrough_changed(enabled);
             }
             AppEvent::ShowSoundPanelWindow => {
-                eprintln!("[EVENT] ShowSoundPanelWindow event received");
+                debug!("[EVENT] ShowSoundPanelWindow event received");
                 // Handled by SoundPanel event system
             }
             AppEvent::HideSoundPanelWindow => {
-                eprintln!("[EVENT] HideSoundPanelWindow event received");
+                debug!("[EVENT] HideSoundPanelWindow event received");
                 // Handled by SoundPanel event system
             }
             AppEvent::SoundPanelNoBinding(key) => {
-                eprintln!("[EVENT] SoundPanelNoBinding: {}", key);
+                debug!(key = %key, "[EVENT] SoundPanelNoBinding");
                 // Handled by SoundPanel event system
             }
             AppEvent::SoundPanelAppearanceChanged => {
-                eprintln!("[EVENT MAIN] === SoundPanelAppearanceChanged event received ===");
+                debug!("[EVENT MAIN] === SoundPanelAppearanceChanged event received ===");
                 let _ = update_soundpanel_appearance(&self.app_handle);
             }
             AppEvent::TtsProviderChanged(provider) => {
-                eprintln!("[EVENT] TTS provider changed to: {:?}", provider);
+                debug!(?provider, "[EVENT] TTS provider changed");
             }
             AppEvent::EnterClosesDisabled(disabled) => {
-                eprintln!("[EVENT] Enter closes disabled: {}", disabled);
+                debug!(disabled, "[EVENT] Enter closes disabled");
             }
             AppEvent::WebViewServerError(error) => {
-                eprintln!("[EVENT] WebView server error: {}", error);
+                error!(error = %error, "[EVENT] WebView server error");
             }
             AppEvent::RestartWebViewServer => {
-                eprintln!("[EVENT] Restart WebView server requested");
+                debug!("[EVENT] Restart WebView server requested");
             }
             AppEvent::ReloadWebViewTemplates => {
-                eprintln!("[EVENT] Reload WebView templates requested");
+                debug!("[EVENT] Reload WebView templates requested");
             }
             AppEvent::TwitchStatusChanged(status) => {
-                eprintln!("[EVENT] Twitch status changed: {:?}", status);
+                debug!(?status, "[EVENT] Twitch status changed");
             }
         }
     }
 
     /// Process interception changed event
     fn process_interception_changed(&self, enabled: bool) {
-        eprintln!("Interception changed: {}", enabled);
+        info!(enabled, "Interception changed");
         if enabled {
-            eprintln!("Text interception mode enabled - type to capture text");
-            eprintln!("Press F8 to switch layout (EN/RU)");
-            eprintln!("Press Enter to send text to TTS");
-            eprintln!("Press Escape to cancel");
+            info!("Text interception mode enabled - type to capture text");
+            info!("Press F8 to switch layout (EN/RU)");
+            info!("Press Enter to send text to TTS");
+            info!("Press Escape to cancel");
         }
         update_tray_icon(&self.app_handle, enabled);
     }
 
     /// Process layout changed event
     fn process_layout_changed(&self, layout: InputLayout) {
-        eprintln!("Layout changed: {:?}", layout);
+        debug!(?layout, "Layout changed");
         let layout_str = match layout {
             InputLayout::English => "EN",
             InputLayout::Russian => "RU",
@@ -128,24 +129,24 @@ impl EventHandler {
         let text = self.state.get_current_text();
         let _ = update_floating_title(&self.app_handle, layout_str, &text);
         match layout {
-            InputLayout::English => eprintln!("Current layout: English (EN)"),
-            InputLayout::Russian => eprintln!("Current layout: Russian (RU)"),
+            InputLayout::English => debug!("Current layout: English (EN)"),
+            InputLayout::Russian => debug!("Current layout: Russian (RU)"),
         }
     }
 
     /// Process text ready for TTS event
     fn process_text_ready(&self, text: String) {
-        eprintln!("[EVENT] Text ready for TTS: '{}'", text);
+        debug!(text = %text, "[EVENT] Text ready for TTS");
 
         // Используем общий runtime вместо создания нового
         let state = self.state.clone();
         self.state.runtime.spawn(async move {
             match crate::commands::speak_text_internal(&state, text).await {
                 Ok(_) => {
-                    eprintln!("[EVENT] TTS started successfully in interception mode");
+                    debug!("[EVENT] TTS started successfully in interception mode");
                 }
                 Err(e) => {
-                    eprintln!("[EVENT] TTS failed in interception mode: {}", e);
+                    error!(error = %e, "[EVENT] TTS failed in interception mode");
                     state.emit_event(AppEvent::TtsError(e));
                 }
             }
@@ -154,23 +155,23 @@ impl EventHandler {
 
     /// Process text sent to TTS event
     fn process_text_sent_to_tts(&self, text: String) {
-        eprintln!("[EVENT] Text sent to TTS: '{}'", text);
+        debug!(text = %text, "[EVENT] Text sent to TTS");
 
         let (skip_twitch, skip_webview) = self.state.get_prefix_flags();
 
         // === WebView broadcast (check flag) ===
         if !skip_webview {
             if let Some(ref sender) = *self.state.webview_event_sender.lock() {
-                eprintln!("[EVENT] Sending to WebView");
+                debug!("[EVENT] Sending to WebView");
                 match sender.send(AppEvent::TextSentToTts(text.clone())) {
-                    Ok(_) => eprintln!("[EVENT] TextSentToTts sent to WebView successfully"),
-                    Err(e) => eprintln!("[EVENT] Failed to send to WebView: {}", e),
+                    Ok(_) => debug!("[EVENT] TextSentToTts sent to WebView successfully"),
+                    Err(e) => error!(error = %e, "[EVENT] Failed to send to WebView"),
                 }
             } else {
-                eprintln!("[EVENT] WebView sender is None, not forwarding");
+                debug!("[EVENT] WebView sender is None, not forwarding");
             }
         } else {
-            eprintln!("[EVENT] WebView skipped (prefix)");
+            debug!("[EVENT] WebView skipped (prefix)");
         }
 
         // === Twitch send (check flag) ===
@@ -181,7 +182,7 @@ impl EventHandler {
                 self.state.send_twitch_event(TwitchEvent::SendMessage(text));
             }
         } else {
-            eprintln!("[EVENT] Twitch skipped (prefix)");
+            debug!("[EVENT] Twitch skipped (prefix)");
         }
 
         // Clear flags after use
@@ -190,10 +191,10 @@ impl EventHandler {
 
     /// Process show floating window event
     fn process_show_floating_window(&self) {
-        eprintln!("[EVENT] ShowFloatingWindow event received");
+        debug!("[EVENT] ShowFloatingWindow event received");
         match show_floating_window(&self.app_handle) {
-            Ok(_) => eprintln!("[EVENT] Floating window shown successfully"),
-            Err(e) => eprintln!("[EVENT] Failed to show floating window: {}", e),
+            Ok(_) => debug!("[EVENT] Floating window shown successfully"),
+            Err(e) => error!(error = %e, "[EVENT] Failed to show floating window"),
         }
         // Clear text when showing window
         self.state.clear_text();
@@ -208,13 +209,13 @@ impl EventHandler {
 
     /// Process hide floating window event
     fn process_hide_floating_window(&self) {
-        eprintln!("Hide floating window");
+        debug!("Hide floating window");
         let _ = hide_floating_window(&self.app_handle, &self.state);
     }
 
     /// Process show main window event
     fn process_show_main_window(&self) {
-        eprintln!("Show main window");
+        debug!("Show main window");
         if let Some(window) = self.app_handle.get_webview_window("main") {
             let _ = window.show();
             let _ = window.set_focus();
@@ -223,7 +224,7 @@ impl EventHandler {
 
     /// Process update floating text event
     fn process_update_floating_text(&self, text: String) {
-        eprintln!("Update floating text: '{}'", text);
+        debug!(text = %text, "Update floating text");
         let _ = update_floating_text(&self.app_handle, &text);
         // Also update title
         let layout = match self.state.get_current_layout() {
@@ -235,13 +236,13 @@ impl EventHandler {
 
     /// Process update tray icon event
     fn process_update_tray_icon(&self, is_intercepting: bool) {
-        eprintln!("Update tray icon: {}", is_intercepting);
+        debug!(is_intercepting, "Update tray icon");
         update_tray_icon(&self.app_handle, is_intercepting);
     }
 
     /// Process clickthrough changed event
     fn process_clickthrough_changed(&self, enabled: bool) {
-        eprintln!("Clickthrough changed: {}", enabled);
+        debug!(enabled, "Clickthrough changed");
         if let Some(window) = self.app_handle.get_webview_window("floating") {
             let _ = window.set_ignore_cursor_events(enabled);
         }

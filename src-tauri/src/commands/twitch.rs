@@ -18,8 +18,12 @@ pub async fn save_twitch_settings(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
-    eprintln!("[TWITCH] Saving settings: enabled={}, start_on_boot={}, channel={}",
-        settings.enabled, settings.start_on_boot, settings.channel);
+    tracing::info!(
+        enabled = settings.enabled,
+        start_on_boot = settings.start_on_boot,
+        channel = ?settings.channel,
+        "Saving Twitch settings"
+    );
 
     // Валидация
     if let Err(e) = settings.is_valid() {
@@ -63,7 +67,7 @@ pub async fn connect_twitch(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
-    eprintln!("[TWITCH] Connect command received");
+    tracing::info!("Connect command received");
 
     // Получаем текущие настройки
     let settings = state.twitch_settings.read().await;
@@ -101,7 +105,7 @@ pub async fn disconnect_twitch(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
-    eprintln!("[TWITCH] Disconnect command received");
+    tracing::info!("Disconnect command received");
 
     // Обновляем enabled и клонируем настройки для сохранения
     let mut s = state.twitch_settings.write().await;

@@ -15,6 +15,7 @@ use tauri::{App, AppHandle, Manager, Emitter};
 use tauri::image::Image;
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::menu::{Menu, MenuItem};
+use tracing::{info, warn, error};
 
 use crate::state::AppState;
 use crate::events::AppEvent;
@@ -25,31 +26,30 @@ use crate::tts::TtsProviderType;
 use crate::event_loop::EventHandler;
 
 /// Initialize the application (called from Tauri's setup callback)
-pub fn init_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
-    eprintln!("[APP] === Application setup started ===");
+///
+/// Settings are passed from lib.rs to avoid race condition from double loading.
+/// Logger is initialized before this function with the same settings.
+pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::error::Error>> {
+    info!("=== Application setup started ===");
 
     // Get state managers
-    let settings_manager = app.state::<SettingsManager>();
+    let _settings_manager = app.state::<SettingsManager>();
     let windows_manager = app.state::<WindowsManager>();
     let app_state = app.state::<AppState>();
     let telegram_state = app.state::<TelegramState>();
     let soundpanel_state = app.state::<SoundPanelState>();
 
-    // Load settings
-    let settings = settings_manager.load()?;
-    eprintln!("[APP] Settings loaded: tts_provider={:?}, hotkey_enabled={}",
-        settings.tts.provider, settings.hotkey_enabled);
+    info!(tts_provider = ?settings.tts.provider, hotkey_enabled = settings.hotkey_enabled, "Settings loaded");
 
     let windows = windows_manager.load()?;
-    eprintln!("[APP] Windows settings: floating_opacity={}, floating_clickthrough={}",
-        windows.floating.opacity, windows.floating.clickthrough);
+    info!(floating_opacity = windows.floating.opacity, floating_clickthrough = windows.floating.clickthrough, "Windows settings");
 
     // Load Twitch settings into AppState
-    eprintln!("[APP] Loading Twitch settings...");
+    info!("Loading Twitch settings...");
     *app_state.inner().twitch_settings.blocking_write() = settings.twitch.clone();
 
     // Load WebView settings into AppState
-    eprintln!("[APP] Loading WebView settings...");
+    info!("Loading WebView settings...");
     *app_state.inner().webview_settings.blocking_write() = crate::webview::WebViewSettings {
         enabled: false,
         start_on_boot: settings.webview.start_on_boot,
@@ -58,7 +58,7 @@ pub fn init_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Load hotkey_enabled setting into AppState
-    eprintln!("[APP] Loading hotkey_enabled setting...");
+    info!("Loading hotkey_enabled setting...");
     *app_state.inner().hotkey_enabled.lock() = settings.hotkey_enabled;
 
     // Setup event system
@@ -67,12 +67,12 @@ pub fn init_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     let (event_tx, event_rx) = mpsc::channel::<AppEvent>();
 
     app_state_for_events.set_event_sender(event_tx.clone());
-    eprintln!("[APP] Event sender configured in AppState");
+    info!("Event sender configured in AppState");
 
     thread::spawn(move || {
-        eprintln!("[EVENT_LOOP] Event thread started, waiting for events...");
+        info!("Event thread started, waiting for events...");
         for event in event_rx {
-            eprintln!("[EVENT_LOOP] Received from channel: {:?}", std::mem::discriminant(&event));
+            info!(event = ?std::mem::discriminant(&event), "Received from channel");
             let event_name = event.to_tauri_event();
             let _ = app_handle.emit(event_name, &event);
 
@@ -87,7 +87,7 @@ pub fn init_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
 
     let (soundpanel_tx, soundpanel_rx) = mpsc::channel::<AppEvent>();
     soundpanel_state.inner().set_event_sender(soundpanel_tx);
-    eprintln!("[SOUNDPANEL] Event sender configured");
+    info!("[SOUNDPANEL] Event sender configured");
 
     let app_handle_for_soundpanel = app.handle().clone();
     let app_state_for_soundpanel = app_state.inner().clone();
@@ -98,19 +98,19 @@ pub fn init_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
 
             match event {
                 AppEvent::ShowSoundPanelWindow => {
-                    eprintln!("[SOUNDPANEL] Show soundpanel window");
+                    info!("[SOUNDPANEL] Show soundpanel window");
                     let _ = show_soundpanel_window(&app_handle_for_soundpanel);
                 }
                 AppEvent::HideSoundPanelWindow => {
-                    eprintln!("[SOUNDPANEL] Hide soundpanel window");
+                    info!("[SOUNDPANEL] Hide soundpanel window");
                     let _ = hide_soundpanel_window(&app_handle_for_soundpanel, &app_state_for_soundpanel);
                 }
                 AppEvent::SoundPanelNoBinding(key) => {
-                    eprintln!("[SOUNDPANEL] No binding for key: {}", key);
+                    info!(key = ?key, "No binding for key");
                     let _ = emit_soundpanel_no_binding(&app_handle_for_soundpanel, key);
                 }
                 AppEvent::SoundPanelAppearanceChanged => {
-                    eprintln!("[SOUNDPANEL] === Appearance changed event received ===");
+                    info!("[SOUNDPANEL] === Appearance changed event received ===");
                     let _ = update_soundpanel_appearance(&app_handle_for_soundpanel);
                 }
                 AppEvent::TtsProviderChanged(_) => {}
@@ -122,20 +122,19 @@ pub fn init_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     // Load soundpanel bindings
     match load_bindings(&soundpanel_state) {
         Ok(bindings) => {
-            eprintln!("[SOUNDPANEL] Loaded {} bindings on startup", bindings.len());
+            info!(count = bindings.len(), "Loaded bindings on startup");
         }
         Err(e) => {
-            eprintln!("[SOUNDPANEL] Failed to load bindings: {}", e);
+            error!(error = %e, "Failed to load bindings");
         }
     }
 
     match load_appearance(&soundpanel_state, &windows_manager) {
         Ok(appearance) => {
-            eprintln!("[SOUNDPANEL] Loaded appearance: opacity={}%, color={}",
-                appearance.opacity, appearance.bg_color);
+            info!(opacity = appearance.opacity, bg_color = %appearance.bg_color, "[SOUNDPANEL] Loaded appearance");
         }
         Err(e) => {
-            eprintln!("[SOUNDPANEL] Failed to load appearance: {}", e);
+            error!(error = %e, "Failed to load appearance");
         }
     }
 
@@ -161,7 +160,7 @@ pub fn init_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(windows)]
     init_window_protection(app, &windows_manager);
 
-    eprintln!("[APP] Setup complete - hotkeys will be registered when window gains focus");
+    info!("Setup complete - hotkeys will be registered when window gains focus");
     Ok(())
 }
 
@@ -171,13 +170,13 @@ fn init_tts_provider(
     telegram_state: &TelegramState,
     settings: AppSettings,
 ) {
-    eprintln!("[APP] Initializing TTS provider: {:?}", settings.tts.provider);
+    info!(provider = ?settings.tts.provider, "Initializing TTS provider");
     app_state.set_tts_provider_type(settings.tts.provider);
 
     // Always load OpenAI API key if available (for UI display)
     if let Some(ref api_key) = settings.tts.openai.api_key {
         app_state.set_openai_api_key(Some(api_key.clone()));
-        eprintln!("[APP] OpenAI API key loaded for UI");
+        info!("OpenAI API key loaded for UI");
     }
 
     match settings.tts.provider {
@@ -185,25 +184,25 @@ fn init_tts_provider(
             if let Some(ref api_key) = settings.tts.openai.api_key {
                 let api_key_str: String = api_key.clone();
                 app_state.set_openai_api_key(Some(api_key_str.clone()));
-                eprintln!("[APP] OpenAI TTS initialized with API key");
+                info!("OpenAI TTS initialized with API key");
                 app_state.init_openai_tts(api_key_str.clone());
                 app_state.set_openai_voice(settings.tts.openai.voice.clone());
                 app_state.set_openai_proxy(settings.tts.openai.proxy_host.clone(), settings.tts.openai.proxy_port);
             } else {
-                eprintln!("[APP] WARNING: OpenAI selected but no API key found");
+                warn!("OpenAI selected but no API key found");
             }
         }
         TtsProviderType::Silero => {
-            eprintln!("[APP] Initializing Silero TTS on startup");
+            info!("Initializing Silero TTS on startup");
             let client_arc = std::sync::Arc::clone(&telegram_state.client);
             app_state.init_silero_tts(client_arc);
-            eprintln!("[APP] Silero TTS initialized");
+            info!("Silero TTS initialized");
         }
         TtsProviderType::Local => {
             let url = settings.tts.local.url.clone();
             app_state.set_local_tts_url(url.clone());
             app_state.init_local_tts(url);
-            eprintln!("[APP] Local TTS initialized");
+            info!("Local TTS initialized");
         }
     }
 }
@@ -214,13 +213,13 @@ fn init_windows(
     windows: &WindowsSettings,
     _windows_manager: &WindowsManager,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    eprintln!("[APP] State initialized");
+    info!("State initialized");
 
     // Apply saved main window position before showing
     if let Some(main_window) = app.get_webview_window("main") {
         if let Some(x) = windows.main.x {
             if let Some(y) = windows.main.y {
-                eprintln!("[APP] Restoring main window position: {}, {}", x, y);
+                info!(x, y, "Restoring main window position");
                 let _ = main_window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
             }
         }
@@ -245,7 +244,7 @@ fn init_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     let resized = image::imageops::resize(&rgba_image, 32, 32, image::imageops::FilterType::Lanczos3);
     let tray_icon = Image::new_owned(resized.into_raw(), 32, 32);
 
-    eprintln!("Initializing system tray with icon (resized to 32x32 from {}x{})", width, height);
+    info!(width, height, "Initializing system tray with icon (resized to 32x32 from original)");
 
     // Create context menu (only "Quit" item)
     let quit_item = MenuItem::with_id(
@@ -259,7 +258,7 @@ fn init_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     let menu = Menu::with_items(&app_handle, &[&quit_item]).unwrap();
 
     // Create tray icon
-    eprintln!("[TRAY] Creating tray icon...");
+    info!("[TRAY] Creating tray icon...");
     let _ = TrayIconBuilder::with_id("main")
         .icon(tray_icon)
         .tooltip("TTSBard")
@@ -282,7 +281,7 @@ fn init_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         })
         .menu(&menu)
         .build(&app_handle);
-    eprintln!("[TRAY] Tray icon created successfully");
+    info!("[TRAY] Tray icon created successfully");
 
     Ok(())
 }
@@ -296,10 +295,10 @@ fn init_hooks(
     use crate::soundpanel::initialize_soundpanel_hook;
 
     let _hook_handle = initialize_text_interception_hook(app_state.clone());
-    eprintln!("Keyboard hook initialized");
+    info!("Keyboard hook initialized");
 
     let _soundpanel_hook_handle = initialize_soundpanel_hook(soundpanel_state.clone());
-    eprintln!("[SOUNDPANEL] Keyboard hook initialized");
+    info!("[SOUNDPANEL] Keyboard hook initialized");
 
     Ok(())
 }
@@ -351,9 +350,9 @@ fn init_twitch_client(app_state: &AppState, app_handle: AppHandle) {
             let settings = app_state_autostart.twitch_settings.read().await;
             if settings.start_on_boot && settings.enabled {
                 if let Ok(()) = settings.is_valid() {
-                    eprintln!("[TWITCH] Auto-starting on boot");
+                    info!("[TWITCH] Auto-starting on boot");
                     app_state_autostart.send_twitch_event(crate::events::TwitchEvent::Restart);
-                    eprintln!("[TWITCH] Restart event sent for auto-start");
+                    info!("[TWITCH] Restart event sent for auto-start");
                 }
             }
         });
@@ -366,13 +365,13 @@ fn init_window_protection(app: &App, windows_manager: &WindowsManager) {
     use crate::window::set_window_exclude_from_capture;
 
     let exclude_from_capture = windows_manager.get_global_exclude_from_capture();
-    eprintln!("[APP] Applying global exclude from capture to main window: {}", exclude_from_capture);
+    info!(exclude_from_capture, "Applying global exclude from capture to main window");
 
     if let Some(main_window) = app.get_webview_window("main") {
         if let Ok(hwnd) = main_window.hwnd() {
             match set_window_exclude_from_capture(hwnd.0 as isize, exclude_from_capture) {
-                Ok(_) => eprintln!("[APP] Main window exclude from capture applied: {}", exclude_from_capture),
-                Err(e) => eprintln!("[APP] Failed to apply exclude from capture to main window: {}", e),
+                Ok(_) => info!(exclude_from_capture, "Main window exclude from capture applied"),
+                Err(e) => error!(error = %e, "Failed to apply exclude from capture to main window"),
             }
         }
     }

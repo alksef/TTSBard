@@ -8,6 +8,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing::{info, error, debug};
 
 // NOTE: api_id is now stored in settings.json (settings.tts.telegram.api_id)
 // The old telegram_config.json file is no longer used
@@ -69,8 +70,8 @@ impl TelegramClient {
         *self.phone_number.lock().await = Some(phone.clone());
         *self.session_path.lock().await = Some(session_path.clone());
 
-        println!("[AUTH] Session path: {:?}", session_path);
-        println!("[AUTH] Session exists: {}", session_path.exists());
+        debug!(session_path = ?session_path, "[AUTH] Session path");
+        debug!(exists = session_path.exists(), "[AUTH] Session exists");
 
         // Создаём сессию (откроет существующую или создаст новую)
         let session = SqliteSession::open(&session_path)
@@ -99,11 +100,11 @@ impl TelegramClient {
             if let Some(c) = client_guard.as_ref() {
                 match c.is_authorized().await {
                     Ok(authorized) => {
-                        println!("[AUTH] Session restored, authorized: {}", authorized);
+                        debug!(authorized, "[AUTH] Session restored");
                         authorized
                     }
                     Err(e) => {
-                        println!("[AUTH] Error checking authorization: {}", e);
+                        error!(error = %e, "[AUTH] Error checking authorization");
                         false
                     }
                 }
@@ -114,12 +115,12 @@ impl TelegramClient {
 
         if is_authorized {
             // Сессия валидна и пользователь авторизован
-            println!("[AUTH] User already authorized, session restored");
+            info!("[AUTH] User already authorized, session restored");
             return Ok(OperationResult::success("Сессия восстановлена"));
         }
 
         // Нужно авторизоваться заново
-        println!("[AUTH] Session not authorized, need to sign in");
+        info!("[AUTH] Session not authorized, need to sign in");
         Ok(OperationResult::success("Клиент инициализирован, требуется авторизация"))
     }
 
@@ -159,18 +160,17 @@ impl TelegramClient {
     /// Uses timing normalization and jitter to prevent timing attacks
     pub async fn sign_in(&self, code: &str) -> Result<AuthState, String> {
         // Security: Don't log the actual code - prevents timing analysis via logs
-        // println!("[AUTH] Starting sign_in with code: {}", code);  // REMOVED FOR SECURITY
-        eprintln!("[AUTH] Starting sign_in (code not logged for security)");
+        info!("[AUTH] Starting sign_in (code not logged for security)");
 
         let client = self.client.lock().await;
         let client = client.as_ref()
             .ok_or_else(|| "Клиент не инициализирован".to_string())?;
-        eprintln!("[AUTH] Client acquired");
+        info!("[AUTH] Client acquired");
 
         // Забираем токен из Option (take() освобождает мьютекс, возвращая значение)
         let token = self.login_token.lock().await.take()
             .ok_or_else(|| "Токен авторизации не найден. Сначала запросите код.".to_string())?;
-        eprintln!("[AUTH] Token acquired and removed from mutex");
+        info!("[AUTH] Token acquired and removed from mutex");
 
         let start_time = std::time::Instant::now();
 
@@ -185,7 +185,7 @@ impl TelegramClient {
         let signed_in = match sign_in_result {
             Ok(result) => result,
             Err(_) => {
-                eprintln!("[AUTH] Sign in timed out after 30 seconds");
+                error!("[AUTH] Sign in timed out after 30 seconds");
                 // Add jitter to obscure timing even on timeout
                 let jitter = rand::random::<u64>() % 500;
                 tokio::time::sleep(tokio::time::Duration::from_millis(500 + jitter)).await;
@@ -193,12 +193,12 @@ impl TelegramClient {
             }
         };
 
-        eprintln!("[AUTH] Sign in result: {:?}", signed_in.is_ok());
-        eprintln!("[AUTH] About to match on signed_in...");
+        info!("[AUTH] Sign in result: {:?}", signed_in.is_ok());
+        info!("[AUTH] About to match on signed_in...");
 
         match signed_in {
             Ok(_) => {
-                eprintln!("[AUTH] Sign in successful (token already cleared)");
+                info!("[AUTH] Sign in successful (token already cleared)");
                 // Normalize timing to ~1 second to prevent timing attacks
                 let target_duration = std::time::Duration::from_millis(1000);
                 let remaining = target_duration.saturating_sub(elapsed);
@@ -214,7 +214,7 @@ impl TelegramClient {
                 Err("Требуется двухфакторная аутентификация. Эта функция пока не реализована.".to_string())
             }
             Err(e) => {
-                eprintln!("[AUTH] Sign in error: {:?}", e);
+                error!("[AUTH] Sign in error: {:?}", e);
                 // Add jitter to obscure timing on error
                 let jitter = rand::random::<u64>() % 500;
                 tokio::time::sleep(tokio::time::Duration::from_millis(1000 + jitter)).await;
@@ -225,7 +225,7 @@ impl TelegramClient {
 
     /// Получение информации о пользователе
     pub async fn get_user_info(&self) -> Result<UserInfo, String> {
-        println!("[AUTH] Getting user info...");
+        debug!("[AUTH] Getting user info");
 
         let client = self.client.lock().await;
         let client = client.as_ref()
@@ -239,7 +239,7 @@ impl TelegramClient {
         .map_err(|_| "Превышено время ожидания при получении информации о пользователе".to_string())?
         .map_err(|e| format!("Ошибка при получении информации: {}", e))?;
 
-        println!("[AUTH] User info received: {:?}", me.username());
+        debug!(username = ?me.username(), "[AUTH] User info received");
 
         let phone_number = self.phone_number.lock().await;
         let phone_number = phone_number.as_ref()
@@ -298,8 +298,8 @@ impl TelegramClient {
         *self.api_id.lock().await = Some(api_id);
         *self.session_path.lock().await = Some(session_path.clone());
 
-        println!("[AUTH] Session path: {:?}", session_path);
-        println!("[AUTH] Session exists: {}", session_path.exists());
+        debug!(session_path = ?session_path, "[AUTH] Session path");
+        debug!(exists = session_path.exists(), "[AUTH] Session exists");
 
         // Открываем существующую сессию
         let session = SqliteSession::open(&session_path)

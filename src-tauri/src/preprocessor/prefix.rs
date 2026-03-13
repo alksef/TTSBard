@@ -49,12 +49,12 @@ impl PrefixResult {
 /// - `!text`  → PrefixResult { text: "text", skip_twitch: true, skip_webview: false }
 /// - `text`   → PrefixResult { text: "text", skip_twitch: false, skip_webview: false }
 /// - ` !text` → PrefixResult { text: " !text", skip_twitch: false, skip_webview: false }
-///            (leading space means no prefix)
+///   (leading space means no prefix)
 pub fn parse_prefix(text: &str) -> PrefixResult {
-    if text.starts_with("!!") {
-        PrefixResult::skip_both(text[2..].trim_start().to_string())
-    } else if text.starts_with('!') {
-        PrefixResult::skip_twitch_only(text[1..].trim_start().to_string())
+    if let Some(stripped) = text.strip_prefix("!!") {
+        PrefixResult::skip_both(stripped.trim_start().to_string())
+    } else if let Some(stripped) = text.strip_prefix('!') {
+        PrefixResult::skip_twitch_only(stripped.trim_start().to_string())
     } else {
         PrefixResult::normal(text.to_string())
     }
@@ -68,63 +68,63 @@ mod tests {
     fn test_parse_double_bang() {
         let result = parse_prefix("!!Привет мир");
         assert_eq!(result.text, "Привет мир");
-        assert_eq!(result.skip_twitch, true);
-        assert_eq!(result.skip_webview, true);
+        assert!(result.skip_twitch);
+        assert!(result.skip_webview);
     }
 
     #[test]
     fn test_parse_single_bang() {
         let result = parse_prefix("!Привет мир");
         assert_eq!(result.text, "Привет мир");
-        assert_eq!(result.skip_twitch, true);
-        assert_eq!(result.skip_webview, false);
+        assert!(result.skip_twitch);
+        assert!(!result.skip_webview);
     }
 
     #[test]
     fn test_parse_no_prefix() {
         let result = parse_prefix("Привет мир");
         assert_eq!(result.text, "Привет мир");
-        assert_eq!(result.skip_twitch, false);
-        assert_eq!(result.skip_webview, false);
+        assert!(!result.skip_twitch);
+        assert!(!result.skip_webview);
     }
 
     #[test]
     fn test_parse_leading_space_no_prefix() {
         let result = parse_prefix(" !Привет мир");
         assert_eq!(result.text, " !Привет мир");
-        assert_eq!(result.skip_twitch, false);
-        assert_eq!(result.skip_webview, false);
+        assert!(!result.skip_twitch);
+        assert!(!result.skip_webview);
     }
 
     #[test]
     fn test_parse_single_bang_trim() {
         let result = parse_prefix("!   Привет мир");
         assert_eq!(result.text, "Привет мир");
-        assert_eq!(result.skip_twitch, true);
-        assert_eq!(result.skip_webview, false);
+        assert!(result.skip_twitch);
+        assert!(!result.skip_webview);
     }
 
     #[test]
     fn test_parse_double_bang_trim() {
         let result = parse_prefix("!!   Привет мир");
         assert_eq!(result.text, "Привет мир");
-        assert_eq!(result.skip_twitch, true);
-        assert_eq!(result.skip_webview, true);
+        assert!(result.skip_twitch);
+        assert!(result.skip_webview);
     }
 
     #[test]
     fn test_parse_empty_text() {
         let result = parse_prefix("!");
         assert_eq!(result.text, "");
-        assert_eq!(result.skip_twitch, true);
-        assert_eq!(result.skip_webview, false);
+        assert!(result.skip_twitch);
+        assert!(!result.skip_webview);
     }
 
     #[test]
     fn test_parse_empty_text_double() {
         let result = parse_prefix("!!");
         assert_eq!(result.text, "");
-        assert_eq!(result.skip_twitch, true);
-        assert_eq!(result.skip_webview, true);
+        assert!(result.skip_twitch);
+        assert!(result.skip_webview);
     }
 }

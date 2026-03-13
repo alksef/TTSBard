@@ -2,6 +2,7 @@ use super::client::TelegramClient;
 use super::types::{TtsResult, CurrentVoice, Limits};
 use grammers_session::updates::UpdatesLike;
 use std::path::PathBuf;
+use tracing::{info, error, debug, warn};
 
 /// Имя бота Silero TTS в Telegram
 const BOT_USERNAME: &str = "silero_voice_bot";
@@ -32,7 +33,7 @@ impl SileroTtsBot {
         client: &TelegramClient,
         text: &str,
     ) -> Result<TtsResult, String> {
-        println!("[SILORO] Starting TTS synthesis for text: '{}'", text);
+        info!(text, "Starting TTS synthesis");
 
         // Валидация входного текста
         let text = text.trim();
@@ -55,14 +56,14 @@ impl SileroTtsBot {
         // 3. Скачиваем аудиофайл во временную папку
         let audio_path = Self::download_voice_to_temp(client, &voice_result).await?;
 
-        println!("[SILORO] TTS synthesis completed: {}", audio_path);
+        info!(?audio_path, "TTS synthesis completed");
 
         Ok(TtsResult::success(audio_path))
     }
 
     /// Отправить текст боту
     async fn send_text_to_bot(client: &TelegramClient, text: &str) -> Result<(), String> {
-        println!("[SILORO] Sending text to bot: {}", text);
+        info!(text, "Sending text to bot");
 
         let client_inner = client.client.lock().await;
         let client_inner = client_inner
@@ -76,7 +77,7 @@ impl SileroTtsBot {
             .map_err(|e| format!("Failed to resolve bot: {}", e))?
             .ok_or_else(|| "Bot not found".to_string())?;
 
-        println!("[SILORO] Bot resolved: {:?}", bot.username());
+        debug!(username = ?bot.username(), "Bot resolved");
 
         // Отправляем сообщение
         let result = client_inner
@@ -84,7 +85,7 @@ impl SileroTtsBot {
             .await
             .map_err(|e| format!("Failed to send message: {}", e))?;
 
-        println!("[SILORO] Message sent: {:?}", result);
+        debug!(?result, "Message sent");
 
         Ok(())
     }
@@ -96,7 +97,7 @@ impl SileroTtsBot {
     ) -> Result<VoiceMessageResult, String> {
         use tokio::sync::mpsc::UnboundedReceiver;
 
-        println!("[SILORO] Waiting for voice message (timeout: {}s)...", timeout_secs);
+        info!(timeout_secs, "Waiting for voice message");
 
         let start_time = std::time::Instant::now();
         let total_timeout = std::time::Duration::from_secs(timeout_secs);
@@ -110,7 +111,7 @@ impl SileroTtsBot {
             // Проверяем общий таймаут
             let elapsed = start_time.elapsed();
             if elapsed >= total_timeout {
-                println!("[SILORO] Timeout waiting for voice message");
+                warn!("Timeout waiting for voice message");
                 return Err("Timeout waiting for voice message".to_string());
             }
 
@@ -119,7 +120,7 @@ impl SileroTtsBot {
             match tokio::time::timeout(remaining, updates.recv()).await {
                 Ok(Some(update_like)) => {
                     if let Some(result) = Self::extract_voice_from_update(&update_like) {
-                        println!(
+                        debug!(
                             "[SILORO] Voice message found: file_id={}, msg_id={}, mime={}",
                             result.file_id, result.msg_id, result.mime_type
                         );
@@ -127,7 +128,7 @@ impl SileroTtsBot {
                     }
                 }
                 Ok(None) => {
-                    println!("[SILORO] Updates channel closed");
+                    warn!("Updates channel closed");
                     return Err("Updates channel closed".to_string());
                 }
                 Err(_) => {
@@ -181,7 +182,7 @@ impl SileroTtsBot {
         client: &TelegramClient,
         voice: &VoiceMessageResult,
     ) -> Result<String, String> {
-        println!(
+        debug!(
             "[SILORO] Downloading voice file_id={}, msg_id={}, mime={}",
             voice.file_id, voice.msg_id, voice.mime_type
         );
@@ -207,7 +208,7 @@ impl SileroTtsBot {
                 Ok(Some(msg)) => {
                     msg_count += 1;
                     if msg.id() == voice.msg_id {
-                        println!(
+                        debug!(
                             "[SILORO] Found message {} after checking {} messages",
                             voice.msg_id, msg_count
                         );
@@ -230,7 +231,7 @@ impl SileroTtsBot {
                             let file_name = format!("silero_tts_{}.{}", timestamp, extension);
                             let dest_path = temp_dir.join(&file_name);
 
-                            println!("[SILORO] Downloading to: {}", dest_path.display());
+                            info!(?dest_path, "Downloading voice file");
 
                             // Скачиваем медиа
                             client_inner
@@ -238,7 +239,7 @@ impl SileroTtsBot {
                                 .await
                                 .map_err(|e| format!("Download failed: {}", e))?;
 
-                            println!("[SILORO] Download completed: {}", dest_path.display());
+                            info!(?dest_path, "Download completed");
 
                             return Ok(dest_path
                                 .to_str()
@@ -248,14 +249,14 @@ impl SileroTtsBot {
                     }
                 }
                 Ok(None) => {
-                    println!(
+                    debug!(
                         "[SILORO] Message {} not found after checking {} messages",
                         voice.msg_id, msg_count
                     );
                     return Err(format!("Message {} not found", voice.msg_id));
                 }
                 Err(e) => {
-                    eprintln!("[SILORO] Error iterating messages: {}", e);
+                    error!("[SILORO] Error iterating messages: {}", e);
                     continue;
                 }
             }
@@ -311,12 +312,12 @@ impl Default for SileroTtsBot {
 pub async fn get_current_voice(client: &TelegramClient) -> Result<Option<CurrentVoice>, String> {
     use tokio::sync::mpsc::UnboundedReceiver;
 
-    println!("[SILERO VOICE] Getting current voice from bot");
+    info!("Getting current voice from bot");
 
     // 1. Отправляем /speaker
     send_speaker_command(client).await?;
 
-    println!("[SILERO VOICE] /speaker sent, waiting for text response...");
+    info!("/speaker sent, waiting for text response");
 
     // 2. Ждем текстовое сообщение (не меню, не голос)
     let start_time = std::time::Instant::now();
@@ -331,7 +332,7 @@ pub async fn get_current_voice(client: &TelegramClient) -> Result<Option<Current
         // Проверяем общий таймаут
         let elapsed = start_time.elapsed();
         if elapsed >= total_timeout {
-            println!("[SILERO VOICE] Timeout (60s) waiting for voice info");
+            warn!("Timeout (60s) waiting for voice info");
             return Ok(None);  // Таймаут - возвращаем None
         }
 
@@ -341,12 +342,12 @@ pub async fn get_current_voice(client: &TelegramClient) -> Result<Option<Current
             Ok(Some(update_like)) => {
                 // Проверяем, есть ли текстовое сообщение с информацией о голосе
                 if let Some(voice_info) = extract_voice_info_from_update(&update_like) {
-                    println!("[SILERO VOICE] Voice info found: {} ({})", voice_info.name, voice_info.id);
+                    info!(voice_info.name, voice_info.id, "Voice info found");
                     return Ok(Some(voice_info));  // Нашли - возвращаем Some
                 }
             }
             Ok(None) => {
-                println!("[SILERO VOICE] Updates channel closed");
+                warn!("Updates channel closed");
                 return Err("Updates channel closed".to_string());
             }
             Err(_) => {
@@ -359,7 +360,7 @@ pub async fn get_current_voice(client: &TelegramClient) -> Result<Option<Current
 
 /// Отправить команду /speaker боту
 async fn send_speaker_command(client: &TelegramClient) -> Result<(), String> {
-    println!("[SILERO VOICE] Sending /speaker to bot");
+    info!("Sending /speaker to bot");
 
     let client_inner = client.client.lock().await;
     let client_inner = client_inner
@@ -373,7 +374,7 @@ async fn send_speaker_command(client: &TelegramClient) -> Result<(), String> {
         .map_err(|e| format!("Failed to resolve bot: {}", e))?
         .ok_or_else(|| "Bot not found".to_string())?;
 
-    println!("[SILERO VOICE] Bot resolved: {:?}", bot.username());
+    debug!(username = ?bot.username(), "Bot resolved");
 
     // Отправляем сообщение
     let result = client_inner
@@ -381,7 +382,7 @@ async fn send_speaker_command(client: &TelegramClient) -> Result<(), String> {
         .await
         .map_err(|e| format!("Failed to send message: {}", e))?;
 
-    println!("[SILERO VOICE] Message sent: {:?}", result);
+    debug!(?result, "Message sent");
 
     Ok(())
 }
@@ -417,7 +418,7 @@ fn extract_voice_info_from_update(update_like: &UpdatesLike) -> Option<CurrentVo
 /// Парсит текст ответа бота для получения информации о голосе
 /// Формат: "Выбранный голос: /speaker hamster_clerk\nНаходится в паке: Хомяки"
 fn parse_voice_info(text: &str) -> Option<CurrentVoice> {
-    println!("[SILERO VOICE] Parsing text: '{}'", text);
+    debug!(text, "Parsing text");
 
     // Ищем строки с ключевыми словами
     let mut voice_id: Option<String> = None;
@@ -453,10 +454,10 @@ fn parse_voice_info(text: &str) -> Option<CurrentVoice> {
 
     // Возвращаем результат если нашли оба поля
     if let (Some(id), Some(name)) = (voice_id, voice_name) {
-        println!("[SILERO VOICE] Parsed: id={}, name={}", id, name);
+        debug!(id, name, "Parsed voice info");
         Some(CurrentVoice { name, id })
     } else {
-        println!("[SILERO VOICE] Failed to parse voice info from text");
+        warn!("Failed to parse voice info from text");
         None
     }
 }
@@ -467,12 +468,12 @@ fn parse_voice_info(text: &str) -> Option<CurrentVoice> {
 pub async fn get_limits(client: &TelegramClient) -> Result<Option<Limits>, String> {
     use tokio::sync::mpsc::UnboundedReceiver;
 
-    println!("[SILERO LIMITS] Getting limits from bot");
+    info!("Getting limits from bot");
 
     // 1. Отправляем /limits
     send_limits_command(client).await?;
 
-    println!("[SILERO LIMITS] /limits sent, waiting for text response...");
+    info!("/limits sent, waiting for text response");
 
     // 2. Ждем текстовое сообщение (не меню, не голос)
     let start_time = std::time::Instant::now();
@@ -487,7 +488,7 @@ pub async fn get_limits(client: &TelegramClient) -> Result<Option<Limits>, Strin
         // Проверяем общий таймаут
         let elapsed = start_time.elapsed();
         if elapsed >= total_timeout {
-            println!("[SILERO LIMITS] Timeout (60s) waiting for limits info");
+            warn!("Timeout (60s) waiting for limits info");
             return Ok(None);  // Таймаут - возвращаем None
         }
 
@@ -497,12 +498,12 @@ pub async fn get_limits(client: &TelegramClient) -> Result<Option<Limits>, Strin
             Ok(Some(update_like)) => {
                 // Проверяем, есть ли текстовое сообщение с информацией о лимитах
                 if let Some(limits_info) = extract_limits_info_from_update(&update_like) {
-                    println!("[SILERO LIMITS] Limits info found: voices={}, gifs={}", limits_info.voices, limits_info.gifs);
+                    info!(limits_info.voices, limits_info.gifs, "Limits info found");
                     return Ok(Some(limits_info));  // Нашли - возвращаем Some
                 }
             }
             Ok(None) => {
-                println!("[SILERO LIMITS] Updates channel closed");
+                warn!("Updates channel closed");
                 return Err("Updates channel closed".to_string());
             }
             Err(_) => {
@@ -515,7 +516,7 @@ pub async fn get_limits(client: &TelegramClient) -> Result<Option<Limits>, Strin
 
 /// Отправить команду /limits боту
 async fn send_limits_command(client: &TelegramClient) -> Result<(), String> {
-    println!("[SILERO LIMITS] Sending /limits to bot");
+    info!("Sending /limits to bot");
 
     let client_inner = client.client.lock().await;
     let client_inner = client_inner
@@ -529,7 +530,7 @@ async fn send_limits_command(client: &TelegramClient) -> Result<(), String> {
         .map_err(|e| format!("Failed to resolve bot: {}", e))?
         .ok_or_else(|| "Bot not found".to_string())?;
 
-    println!("[SILERO LIMITS] Bot resolved: {:?}", bot.username());
+    debug!(username = ?bot.username(), "Bot resolved");
 
     // Отправляем сообщение
     let result = client_inner
@@ -537,7 +538,7 @@ async fn send_limits_command(client: &TelegramClient) -> Result<(), String> {
         .await
         .map_err(|e| format!("Failed to send message: {}", e))?;
 
-    println!("[SILERO LIMITS] Message sent: {:?}", result);
+    debug!(?result, "Message sent");
 
     Ok(())
 }
@@ -573,7 +574,7 @@ fn extract_limits_info_from_update(update_like: &UpdatesLike) -> Option<Limits> 
 /// Парсит текст ответа бота для получения информации о лимитах
 /// Формат: "🔓 Открытые голоса: 0 / 666 символов;" и "🪩 Кружки/гифки: 0 / 10 сообщений;"
 fn parse_limits_info(text: &str) -> Option<Limits> {
-    println!("[SILERO LIMITS] Parsing text: '{}'", text);
+    debug!(text, "Parsing text");
 
     let mut voices: Option<String> = None;
     let mut gifs: Option<String> = None;
@@ -626,13 +627,13 @@ fn parse_limits_info(text: &str) -> Option<Limits> {
 
     // Возвращаем результат если нашли оба поля
     if let (Some(voices_val), Some(gifs_val)) = (voices, gifs) {
-        println!("[SILERO LIMITS] Parsed: voices={}, gifs={}", voices_val, gifs_val);
+        debug!(voices_val, gifs_val, "Parsed limits info");
         Some(Limits {
             voices: voices_val,
             gifs: gifs_val,
         })
     } else {
-        println!("[SILERO LIMITS] Failed to parse limits info from text");
+        warn!("Failed to parse limits info from text");
         None
     }
 }

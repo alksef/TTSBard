@@ -6,29 +6,30 @@
 
 use std::fs::File;
 use std::io::BufReader;
+use tracing::{debug, error, info};
 
 /// Воспроизвести аудиофайл
 ///
 /// Поддерживаемые форматы: MP3, WAV, OGG, FLAC (через rodio)
 pub fn play_audio_file(path: &str) {
-    eprintln!("[SOUNDPANEL] Playing audio: {}", path);
+    info!(path, "Playing audio");
 
     // Проверяем существование файла
     if !std::path::Path::new(path).exists() {
-        eprintln!("[SOUNDPANEL] File not found: {}", path);
+        error!(path, "File not found");
         return;
     }
 
     // Используем rodio для воспроизведения
     match play_with_rodio(path) {
         Ok(_) => {
-            eprintln!("[SOUNDPANEL] Playback completed");
+            info!("Playback completed");
         }
         Err(e) => {
-            eprintln!("[SOUNDPANEL] Failed to play: {}", e);
+            error!(error = %e, "Failed to play");
 
             // Fallback: попробовать системный способ
-            eprintln!("[SOUNDPANEL] Trying fallback method...");
+            debug!("Trying fallback method");
             play_with_fallback(path);
         }
     }
@@ -74,13 +75,13 @@ fn play_with_fallback(path: &str) {
     match result {
         Ok(output) => {
             if output.status.success() {
-                eprintln!("[SOUNDPANEL] Fallback playback succeeded");
+                info!("Fallback playback succeeded");
             } else {
-                eprintln!("[SOUNDPANEL] Fallback playback failed: {:?}", output);
+                error!(output = ?output, "Fallback playback failed");
             }
         }
         Err(e) => {
-            eprintln!("[SOUNDPANEL] Fallback command failed: {}", e);
+            error!(error = %e, "Fallback command failed");
         }
     }
 }
@@ -88,7 +89,7 @@ fn play_with_fallback(path: &str) {
 /// Fallback метод для non-Windows (пустой)
 #[cfg(not(target_os = "windows"))]
 fn play_with_fallback(_path: &str) {
-    eprintln!("[SOUNDPANEL] No fallback available for this platform");
+    error!("No fallback available for this platform");
 }
 
 /// Проверить, является ли файл поддерживаемым аудиоформатом

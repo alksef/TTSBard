@@ -172,7 +172,7 @@ pub async fn speak_text_silero(
     state: State<'_, TelegramState>,
     text: String,
 ) -> Result<TtsResult, String> {
-    println!("[SILERO COMMAND] Starting TTS for text: '{}'", text);
+    tracing::debug!(text, "Starting TTS");
 
     // Валидация
     let text = text.trim();
@@ -207,7 +207,7 @@ pub async fn speak_text_silero(
 pub async fn telegram_get_current_voice(
     state: State<'_, TelegramState>,
 ) -> Result<Option<CurrentVoice>, String> {
-    println!("[TELEGRAM COMMAND] Getting current voice");
+    tracing::debug!("Getting current voice");
 
     // Получаем клиент
     let client_guard = state.client.lock().await;
@@ -234,7 +234,7 @@ pub async fn telegram_get_current_voice(
 pub async fn telegram_get_limits(
     state: State<'_, TelegramState>,
 ) -> Result<Option<Limits>, String> {
-    println!("[TELEGRAM COMMAND] Getting limits");
+    tracing::debug!("Getting limits");
 
     // Получаем клиент
     let client_guard = state.client.lock().await;
@@ -262,18 +262,18 @@ pub async fn telegram_auto_restore(
     state: State<'_, TelegramState>,
     settings_manager: State<'_, SettingsManager>,
 ) -> Result<bool, String> {
-    println!("[TELEGRAM] Auto-restoring session...");
+    tracing::info!("Auto-restoring session...");
 
     // Загружаем сохранённый api_id из settings.json
     let api_id = match settings_manager.get_telegram_api_id() {
         Some(id) => id as u32, // Convert i64 to u32
         None => {
-            println!("[TELEGRAM] No saved api_id found");
+            tracing::info!("No saved api_id found");
             return Ok(false);
         }
     };
 
-    println!("[TELEGRAM] Found saved api_id: {}", api_id);
+    tracing::debug!(api_id, "Found saved api_id");
 
     // Создаём новый клиент
     let client = TelegramClient::new();
@@ -296,10 +296,10 @@ pub async fn telegram_auto_restore(
     };
 
     if is_authorized {
-        println!("[TELEGRAM] Session auto-restored successfully");
+        tracing::info!("Session auto-restored successfully");
         Ok(true)
     } else {
-        println!("[TELEGRAM] Session exists but not authorized");
+        tracing::info!("Session exists but not authorized");
         Ok(false)
     }
 }

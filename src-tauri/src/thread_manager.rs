@@ -40,7 +40,7 @@ impl ThreadPoolManager {
 
         // Join previous thread with same name if exists
         if let Some(handle) = threads.remove(&name) {
-            eprintln!("[THREAD_POOL] Joining previous thread: {}", name);
+            tracing::debug!(thread_name = %name, "[THREAD_POOL] Joining previous thread");
             let _ = handle.join();
         }
 
@@ -53,12 +53,12 @@ impl ThreadPoolManager {
     /// Shutdown all threads gracefully
     pub fn shutdown(&self) {
         let mut threads = self.threads.lock();
-        eprintln!("[THREAD_POOL] Shutting down {} threads", threads.len());
+        tracing::debug!(thread_count = threads.len(), "[THREAD_POOL] Shutting down threads");
         for (name, handle) in threads.drain() {
-            eprintln!("[THREAD_POOL] Joining thread: {}", name);
+            tracing::debug!(thread_name = %name, "[THREAD_POOL] Joining thread");
             let _ = handle.join();
         }
-        eprintln!("[THREAD_POOL] All threads shut down");
+        tracing::debug!("[THREAD_POOL] All threads shut down");
     }
 
     /// Get current thread count

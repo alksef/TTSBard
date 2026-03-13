@@ -3,6 +3,7 @@ use crate::events::EventSender;
 use async_trait::async_trait;
 use reqwest::Client;
 use std::time::{Duration, Instant};
+use tracing::{debug, error, info};
 
 /// Local TTS implementation using TTSVoiceWizard Locally Hosted API
 /// Compatible with TITTS.py and similar local TTS servers
@@ -68,18 +69,19 @@ impl TtsEngine for LocalTts {
         let start_time = Instant::now();
         let client = self.build_client()?;
 
-        eprintln!("[LocalTTS] ========================================");
-        eprintln!("[LocalTTS] TTS Request Started");
-        eprintln!("[LocalTTS] Server: {}", self.server_url);
-        eprintln!("[LocalTTS] Text length: {} chars", text.len());
-        eprintln!("[LocalTTS] Text preview: \"{}\"", text.chars().take(50).collect::<String>());
-        eprintln!("[LocalTTS] Timeout: {}s", self.timeout_secs);
+        info!(
+            server_url = %self.server_url,
+            text_length = text.len(),
+            text_preview = %text.chars().take(50).collect::<String>(),
+            timeout_secs = self.timeout_secs,
+            "LocalTTS request started"
+        );
 
         // URL encode the text for the path parameter
         let encoded_text = urlencoding::encode(text);
         let url = format!("{}/synthesize/{}", self.server_url.trim_end_matches('/'), encoded_text);
 
-        eprintln!("[LocalTTS] Request URL: {}", url);
+        debug!(request_url = %url, "Sending LocalTTS request");
 
         let response = client
             .get(&url)
@@ -87,7 +89,13 @@ impl TtsEngine for LocalTts {
             .await
             .map_err(|e| {
                 let elapsed = start_time.elapsed();
-                eprintln!("[LocalTTS] Request failed after {:.2}s", elapsed.as_secs_f64());
+                error!(
+                    error = %e,
+                    elapsed_secs = elapsed.as_secs_f64(),
+                    timeout_secs = self.timeout_secs,
+                    server_url = %self.server_url,
+                    "LocalTTS request failed"
+                );
                 if e.is_timeout() {
                     format!("Local TTS timeout ({}s). Server at {} may be slow or unavailable.", self.timeout_secs, self.server_url)
                 } else if e.is_connect() {
@@ -99,14 +107,22 @@ impl TtsEngine for LocalTts {
 
         // Log response status
         let status = response.status();
-        eprintln!("[LocalTTS] Response Status: {} {}", status.as_u16(), status.canonical_reason().unwrap_or_default());
-
         let elapsed = start_time.elapsed();
-        eprintln!("[LocalTTS] Response time: {:.2}s", elapsed.as_secs_f64());
+
+        debug!(
+            status_code = status.as_u16(),
+            status_reason = %status.canonical_reason().unwrap_or_default(),
+            response_time_secs = elapsed.as_secs_f64(),
+            "LocalTTS response received"
+        );
 
         if !status.is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            eprintln!("[LocalTTS] Error Response: {}", error_text);
+            error!(
+                status_code = status.as_u16(),
+                error_text = %error_text,
+                "LocalTTS request failed"
+            );
             return Err(format!("TTS request failed ({}): {}", status.as_u16(), error_text));
         }
 
@@ -114,20 +130,25 @@ impl TtsEngine for LocalTts {
         let base64_data = response
             .text()
             .await
-            .map_err(|e| format!("Failed to read response text: {}", e))?;
+            .map_err(|e| {
+                error!(error = %e, "Failed to read LocalTTS response text");
+                format!("Failed to read response text: {}", e)
+            })?;
 
-        eprintln!("[LocalTTS] Base64 data received: {} chars", base64_data.len());
+        debug!(base64_length = base64_data.len(), "Base64 data received");
 
         // Decode base64 to bytes
         let audio_data = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &base64_data)
             .map_err(|e| {
-                eprintln!("[LocalTTS] Base64 decode failed: {}", e);
+                error!(error = %e, "Base64 decode failed");
                 format!("Failed to decode base64 audio data: {}", e)
             })?;
 
-        eprintln!("[LocalTTS] Audio data decoded: {} bytes", audio_data.len());
-        eprintln!("[LocalTTS] Total time: {:.2}s", elapsed.as_secs_f64());
-        eprintln!("[LocalTTS] ========================================");
+        info!(
+            audio_bytes = audio_data.len(),
+            total_time_secs = elapsed.as_secs_f64(),
+            "LocalTTS synthesis completed"
+        );
 
         Ok(audio_data)
     }
