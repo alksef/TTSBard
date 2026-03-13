@@ -10,7 +10,7 @@ on:
 
 jobs:
   analyze:
-    name: Analyze
+    name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: ['javascript', 'cpp']
+        language: ['javascript-typescript', 'rust']
 
     steps:
       - name: Checkout repository
@@ -30,11 +30,8 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
-          # CodeQL для Rust находится в бета-режиме, используем cpp для анализа C-подобного кода
-          # Для JavaScript/TypeScript используется стандартный анализ
-
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+          queries: security-extended
+          build-mode: none  # Обязательно для Rust, работает для JS тоже
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
