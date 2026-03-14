@@ -1,5 +1,6 @@
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
 use tokio::sync::broadcast;
@@ -103,6 +104,9 @@ pub struct AppState {
     /// Sender для Twitch событий
     pub twitch_event_tx: TwitchEventSender,
 
+    /// Backend ready flag - set to true when all initialization is complete
+    pub backend_ready: Arc<AtomicBool>,
+
     /// Tokio runtime для async operations
     /// Arc позволяет клонировать AppState и сохраняет runtime живым
     pub runtime: Arc<tokio::runtime::Runtime>,
@@ -142,6 +146,7 @@ impl AppState {
             twitch_settings: Arc::new(tokio::sync::RwLock::new(TwitchSettings::default())),
             twitch_connection_status: Arc::new(Mutex::new(crate::events::TwitchConnectionStatus::Disconnected)),
             twitch_event_tx,
+            backend_ready: Arc::new(AtomicBool::new(false)),
             runtime,
             cached_devices: Arc::new(RwLock::new(HashMap::new())),
             prefix_skip_twitch: Arc::new(Mutex::new(false)),

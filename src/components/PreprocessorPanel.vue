@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { Lightbulb } from 'lucide-vue-next'
+import { debugLog, debugError } from '../utils/debug'
 
 // Reactive state
 const replacements = ref('')
@@ -16,7 +17,7 @@ async function loadReplacements() {
     const content = await invoke<string>('get_replacements')
     replacements.value = content
   } catch (error) {
-    console.error('Failed to load replacements:', error)
+    debugError('Failed to load replacements:', error)
   }
 }
 
@@ -26,7 +27,7 @@ async function loadUsernames() {
     const content = await invoke<string>('get_usernames')
     usernames.value = content
   } catch (error) {
-    console.error('Failed to load usernames:', error)
+    debugError('Failed to load usernames:', error)
   }
 }
 
@@ -34,9 +35,9 @@ async function loadUsernames() {
 async function saveReplacements() {
   try {
     await invoke('save_replacements', { content: replacements.value })
-    console.log('Replacements saved')
+    debugLog('Replacements saved')
   } catch (error) {
-    console.error('Failed to save replacements:', error)
+    debugError('Failed to save replacements:', error)
   }
 }
 
@@ -44,9 +45,9 @@ async function saveReplacements() {
 async function saveUsernames() {
   try {
     await invoke('save_usernames', { content: usernames.value })
-    console.log('Usernames saved')
+    debugLog('Usernames saved')
   } catch (error) {
-    console.error('Failed to save usernames:', error)
+    debugError('Failed to save usernames:', error)
   }
 }
 

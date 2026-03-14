@@ -1,53 +1,59 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted as vueOnUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted as vueOnUnmounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, UnlistenFn } from '@tauri-apps/api/event'
+import { useGeneralSettings } from '../composables/useAppSettings'
+import { debugLog, debugError } from '../utils/debug'
 
 const text = ref('')
 const replacements = ref<Map<string, string>>(new Map())
 const usernames = ref<Map<string, string>>(new Map())
-const quickEditorEnabled = ref(false)
+
+// Get settings from composable
+const generalSettings = useGeneralSettings()
+
+// Computed property for template
+const quickEditorEnabled = computed(() => generalSettings.value?.quick_editor_enabled ?? false)
 
 let unlistenSettings: UnlistenFn | null = null
 
 onMounted(async () => {
-  // Load quick editor setting first
-  try {
-    quickEditorEnabled.value = await invoke<boolean>('get_quick_editor_enabled')
-    console.log('[InputPanel] Quick editor enabled:', quickEditorEnabled.value)
-  } catch (e) {
-    console.error('[InputPanel] Failed to load quick editor setting:', e)
-  }
+  // Quick editor enabled is now loaded from composable via watch
 
-  // Listen for settings changes
+  // Listen for settings changes (kept for other potential settings)
   unlistenSettings = await listen('settings-changed', async () => {
-    try {
-      quickEditorEnabled.value = await invoke<boolean>('get_quick_editor_enabled')
-      console.log('[InputPanel] Quick editor setting updated:', quickEditorEnabled.value)
-    } catch (e) {
-      console.error('[InputPanel] Failed to reload quick editor setting:', e)
-    }
+    debugLog('[InputPanel] Settings changed event received')
   })
 
   // Load preprocessor data
   try {
-    console.log('[InputPanel] Loading preprocessor data...')
+    debugLog('[InputPanel] Loading preprocessor data...')
     const data = await invoke<{
       replacements: Record<string, string>
       usernames: Record<string, string>
     }>('load_preprocessor_data')
 
-    console.log('[InputPanel] Received data:', data)
+    debugLog('[InputPanel] Received data:', data)
     replacements.value = new Map(Object.entries(data.replacements))
     usernames.value = new Map(Object.entries(data.usernames))
-    console.log('[InputPanel] Loaded replacements:', replacements.value.size, 'entries')
-    console.log('[InputPanel] Loaded usernames:', usernames.value.size, 'entries')
-    console.log('[InputPanel] Replacement keys:', Array.from(replacements.value.keys()))
-    console.log('[InputPanel] Username keys:', Array.from(usernames.value.keys()))
+    debugLog('[InputPanel] Loaded replacements:', replacements.value.size, 'entries')
+    debugLog('[InputPanel] Loaded usernames:', usernames.value.size, 'entries')
+    debugLog('[InputPanel] Replacement keys:', Array.from(replacements.value.keys()))
+    debugLog('[InputPanel] Username keys:', Array.from(usernames.value.keys()))
   } catch (e) {
-    console.error('[InputPanel] Failed to load preprocessor data:', e)
+    debugError('[InputPanel] Failed to load preprocessor data:', e)
   }
 })
+
+// Watch for settings changes from composable
+watch(generalSettings, (newSettings) => {
+  if (!newSettings) return;
+
+  debugLog('[InputPanel] General settings updated from composable:', newSettings);
+
+  // Update quick editor enabled from general settings
+  // This will be used in handleEnter
+}, { immediate: true })
 
 vueOnUnmounted(() => {
   if (unlistenSettings) {
@@ -67,23 +73,26 @@ async function speak() {
   if (!text.value.trim()) return
 
   try {
-    console.log('[InputPanel] Speaking:', text.value)
+    debugLog('[InputPanel] Speaking:', text.value)
     await invoke('speak_text', { text: text.value })
   } catch (e) {
-    console.error('[InputPanel] Failed to speak:', e)
+    debugError('[InputPanel] Failed to speak:', e)
   }
 }
 
 async function handleEnter() {
-  console.log('[InputPanel] Enter pressed, text:', text.value)
+  debugLog('[InputPanel] Enter pressed, text:', text.value)
+
+  // Get quick editor enabled from composable
+  const quickEditorEnabledValue = generalSettings.value?.quick_editor_enabled ?? false
 
   // If quick editor is enabled and text is empty - do nothing
-  if (quickEditorEnabled.value && !text.value.trim()) {
+  if (quickEditorEnabledValue && !text.value.trim()) {
     return
   }
 
   // In quick editor mode, start TTS in background without waiting
-  if (quickEditorEnabled.value) {
+  if (quickEditorEnabledValue) {
     speak() // Fire and forget - don't await
     text.value = ''
     await hideMainWindow()
@@ -95,59 +104,62 @@ async function handleEnter() {
 }
 
 async function handleEsc() {
+  // Get quick editor enabled from composable
+  const quickEditorEnabledValue = generalSettings.value?.quick_editor_enabled ?? false
+
   // Hide window if quick editor is enabled (fire and forget)
-  if (quickEditorEnabled.value) {
+  if (quickEditorEnabledValue) {
     hideMainWindow()
   }
 }
 
 function handleSpace(event: KeyboardEvent) {
   const currentValue = text.value
-  console.log('[InputPanel] Space pressed, current text:', currentValue)
-  console.log('[InputPanel] Text length:', currentValue.length)
+  debugLog('[InputPanel] Space pressed, current text:', currentValue)
+  debugLog('[InputPanel] Text length:', currentValue.length)
 
   // Check for \word pattern at end (supports unicode including cyrillic)
   const replacementMatch = currentValue.match(/\\([^\s]+)$/)
-  console.log('[InputPanel] Replacement match:', replacementMatch)
+  debugLog('[InputPanel] Replacement match:', replacementMatch)
 
   if (replacementMatch) {
     const key = replacementMatch[1]
-    console.log('[InputPanel] Replacement key:', key)
+    debugLog('[InputPanel] Replacement key:', key)
     const replacement = replacements.value.get(key)
-    console.log('[InputPanel] Found replacement:', replacement)
+    debugLog('[InputPanel] Found replacement:', replacement)
 
     if (replacement) {
       const pattern = `\\${key}`
-      console.log('[InputPanel] Pattern to replace:', pattern)
+      debugLog('[InputPanel] Pattern to replace:', pattern)
       const newValue = currentValue.replace(pattern, replacement) + ' '
-      console.log('[InputPanel] New value:', newValue)
+      debugLog('[InputPanel] New value:', newValue)
       text.value = newValue
       event.preventDefault()
       return
     } else {
-      console.log('[InputPanel] No replacement found for key:', key)
+      debugLog('[InputPanel] No replacement found for key:', key)
     }
   }
 
   // Check for %username pattern at end (supports unicode including cyrillic)
   const usernameMatch = currentValue.match(/%([^\s]+)$/)
-  console.log('[InputPanel] Username match:', usernameMatch)
+  debugLog('[InputPanel] Username match:', usernameMatch)
 
   if (usernameMatch) {
     const key = usernameMatch[1]
-    console.log('[InputPanel] Username key:', key)
+    debugLog('[InputPanel] Username key:', key)
     const username = usernames.value.get(key)
-    console.log('[InputPanel] Found username:', username)
+    debugLog('[InputPanel] Found username:', username)
 
     if (username) {
       const pattern = `%${key}`
-      console.log('[InputPanel] Pattern to replace:', pattern)
+      debugLog('[InputPanel] Pattern to replace:', pattern)
       const newValue = currentValue.replace(pattern, username) + ' '
-      console.log('[InputPanel] New value:', newValue)
+      debugLog('[InputPanel] New value:', newValue)
       text.value = newValue
       event.preventDefault()
     } else {
-      console.log('[InputPanel] No username found for key:', key)
+      debugLog('[InputPanel] No username found for key:', key)
     }
   }
 }

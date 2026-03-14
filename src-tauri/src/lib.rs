@@ -313,6 +313,10 @@ pub fn run() {
             // Logging commands
             get_logging_settings,
             save_logging_settings,
+            // Unified settings commands
+            commands::get_all_app_settings,
+            commands::is_backend_ready,
+            commands::confirm_backend_ready,
         ])
         .setup({
             let settings_clone = settings.clone();

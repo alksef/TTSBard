@@ -167,6 +167,8 @@ impl TwitchSettings {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WebViewServerSettings {
     #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
     pub start_on_boot: bool,
     #[serde(default = "default_webview_port")]
     pub port: u16,
@@ -180,6 +182,7 @@ fn default_webview_bind_address() -> String { "0.0.0.0".to_string() }
 impl Default for WebViewServerSettings {
     fn default() -> Self {
         Self {
+            enabled: false,
             start_on_boot: false,
             port: 10100,
             bind_address: "0.0.0.0".to_string(),
@@ -655,6 +658,16 @@ impl SettingsManager {
     }
 
     // ========== WebView Settings ==========
+
+    /// Set WebView enabled
+    pub fn set_webview_enabled(&self, enabled: bool) -> Result<()> {
+        self.update_field("/webview/enabled", &enabled)
+    }
+
+    /// Get WebView enabled
+    pub fn get_webview_enabled(&self) -> bool {
+        self.cache.read().webview.enabled
+    }
 
     /// Set WebView start on boot
     pub fn set_webview_start_on_boot(&self, start: bool) -> Result<()> {

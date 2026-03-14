@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { debugLog, debugError, debugWarn, debugInfo } from '../utils/debug'
 
 /**
  * Типы ошибок
@@ -108,16 +109,16 @@ export function useErrorHandler() {
     if (logToConsole) {
       switch (level) {
         case ErrorLevel.ERROR:
-          console.error(`[Error] ${message}`)
+          debugError(`[Error] ${message}`)
           break
         case ErrorLevel.WARNING:
-          console.warn(`[Warning] ${message}`)
+          debugWarn(`[Warning] ${message}`)
           break
         case ErrorLevel.INFO:
-          console.info(`[Info] ${message}`)
+          debugInfo(`[Info] ${message}`)
           break
         case ErrorLevel.SUCCESS:
-          console.log(`[Success] ${message}`)
+          debugLog(`[Success] ${message}`)
           break
       }
     }

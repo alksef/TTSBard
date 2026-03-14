@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { open } from '@tauri-apps/plugin-dialog'
+import { open, confirm } from '@tauri-apps/plugin-dialog'
 import { Trash2, Plus, Folder, Play } from 'lucide-vue-next'
 import type { SoundBinding } from '../types'
+import { useAppSettings } from '../composables/useAppSettings'
+import { debugLog, debugError } from '../utils/debug'
+
+const { settings: appSettings, reload: reloadSettings } = useAppSettings()
 
 const bindings = ref<SoundBinding[]>([])
 const errorMessage = ref<string | null>(null)
-const successMessage = ref<string | null>(null)
 const showAddDialog = ref(false)
 const isLoading = ref(false)
 
@@ -66,7 +69,6 @@ async function addBinding() {
     bindings.value.push(binding)
     bindings.value.sort((a, b) => a.key.localeCompare(b.key))
 
-    showSuccess(`Привязка "${newKey.value} — ${newDescription.value}" добавлена`)
     closeAddDialog()
   } catch (e) {
     showError('Ошибка добавления: ' + (e as Error).message)
@@ -76,14 +78,18 @@ async function addBinding() {
 }
 
 async function removeBinding(key: string) {
-  if (!confirm(`Удалить привязку для клавиши ${key}?`)) {
+  const confirmed = await confirm(`Удалить привязку для клавиши ${key}?`, {
+    title: 'Подтверждение удаления',
+    kind: 'warning'
+  })
+
+  if (!confirmed) {
     return
   }
 
   try {
     await invoke('sp_remove_binding', { key })
     bindings.value = bindings.value.filter(b => b.key !== key)
-    showSuccess(`Привязка для клавиши ${key} удалена`)
   } catch (e) {
     showError('Ошибка удаления: ' + (e as Error).message)
   }
@@ -107,7 +113,7 @@ async function testSound() {
 
 async function browseFile() {
   try {
-    console.log('[browseFile] Opening file dialog...')
+    debugLog('[browseFile] Opening file dialog...')
     const filePath = await open({
       title: 'Выберите аудиофайл',
       multiple: false,
@@ -119,18 +125,18 @@ async function browseFile() {
       ]
     })
 
-    console.log('[browseFile] Dialog result:', filePath)
+    debugLog('[browseFile] Dialog result:', filePath)
 
     if (filePath) {
       // open возвращает строку или null
       const pathStr = typeof filePath === 'string' ? filePath : String(filePath)
-      console.log('[browseFile] Selected path:', pathStr)
+      debugLog('[browseFile] Selected path:', pathStr)
       newFilePath.value = pathStr
     } else {
-      console.log('[browseFile] Dialog cancelled')
+      debugLog('[browseFile] Dialog cancelled')
     }
   } catch (e) {
-    console.error('[browseFile] Error:', e)
+    debugError('[browseFile] Error:', e)
     showError('Ошибка выбора файла: ' + (e as Error).message)
   }
 }
@@ -147,11 +153,6 @@ function showError(message: string) {
   setTimeout(() => errorMessage.value = null, 5000)
 }
 
-function showSuccess(message: string) {
-  successMessage.value = message
-  setTimeout(() => successMessage.value = null, 3000)
-}
-
 function getAvailableKeys(): string[] {
   const usedKeys = new Set(bindings.value.map(b => b.key))
   return availableKeys.filter(key => !usedKeys.has(key))
@@ -163,12 +164,12 @@ async function loadAppearanceSettings() {
     opacity.value = loadedOpacity
     bgColor.value = loadedColor
   } catch (e) {
-    console.error('Failed to load appearance settings:', e)
+    debugError('Failed to load appearance settings:', e)
   }
   try {
     clickthroughEnabled.value = await invoke<boolean>('sp_is_floating_clickthrough_enabled')
   } catch (e) {
-    console.error('Failed to load clickthrough setting:', e)
+    debugError('Failed to load clickthrough setting:', e)
   }
 }
 
@@ -197,18 +198,55 @@ async function saveClickthrough() {
 }
 
 onMounted(async () => {
-  loadBindings()
-  await loadAppearanceSettings()
+  // Initialize data from unified config
+  if (appSettings.value) {
+    // Load bindings from unified config
+    bindings.value = appSettings.value.soundpanel_bindings || []
+    debugLog('[SoundPanelTab] Loaded bindings from unified config:', bindings.value.length)
+
+    // Load appearance settings from unified config (windows.soundpanel)
+    opacity.value = appSettings.value.windows.soundpanel.opacity
+    bgColor.value = appSettings.value.windows.soundpanel.bg_color
+    clickthroughEnabled.value = appSettings.value.windows.soundpanel.clickthrough
+    debugLog('[SoundPanelTab] Loaded appearance from unified config:', { opacity: opacity.value, bgColor: bgColor.value, clickthrough: clickthroughEnabled.value })
+  } else {
+    // Fallback: load directly if appSettings is not available
+    console.warn('[SoundPanelTab] appSettings not available, loading directly')
+    loadBindings()
+    await loadAppearanceSettings()
+  }
 
   // Слушаем события обновления внешнего вида
-  const unlisten = await listen('soundpanel-appearance-update', () => {
+  const unlistenAppearance = await listen('soundpanel-appearance-update', () => {
     loadAppearanceSettings()
   })
 
+  // Слушаем события обновления биндингов
+  const unlistenBindings = await listen('soundpanel-bindings-changed', async () => {
+    debugLog('[SoundPanelTab] Bindings changed event, reloading')
+    await reloadSettings()
+    // Update local bindings from reloaded settings
+    if (appSettings.value) {
+      bindings.value = appSettings.value.soundpanel_bindings || []
+    }
+  })
+
   onUnmounted(() => {
-    unlisten()
+    unlistenAppearance()
+    unlistenBindings()
   })
 })
+
+// Watch for settings changes (e.g., from reload)
+watch(() => appSettings.value, (newSettings) => {
+  if (newSettings) {
+    debugLog('[SoundPanelTab] Settings changed, updating local state')
+    bindings.value = newSettings.soundpanel_bindings || []
+    opacity.value = newSettings.windows.soundpanel.opacity
+    bgColor.value = newSettings.windows.soundpanel.bg_color
+    clickthroughEnabled.value = newSettings.windows.soundpanel.clickthrough
+  }
+}, { deep: true })
 </script>
 
 <template>
@@ -216,9 +254,6 @@ onMounted(async () => {
     <!-- Сообщения -->
     <div v-if="errorMessage" class="message error-message">
       {{ errorMessage }}
-    </div>
-    <div v-if="successMessage" class="message success-message">
-      {{ successMessage }}
     </div>
 
     <!-- Описание -->
@@ -664,7 +699,39 @@ onMounted(async () => {
   color: var(--color-text-primary);
 }
 
-.key-select,
+.key-select {
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: var(--color-text-primary);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.key-select:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.key-select:focus {
+  outline: none;
+  border-color: #1d8cff;
+  box-shadow: 0 0 0 2px rgba(29, 140, 255, 0.15);
+}
+
+.key-select option {
+  background: #1e1e1e;
+  color: var(--color-text-primary);
+  padding: 0.3rem 0.5rem;
+}
+
+.key-select option:hover {
+  background: #2a2a2a;
+}
+
 .text-input {
   width: 100%;
   padding: 0.6rem;

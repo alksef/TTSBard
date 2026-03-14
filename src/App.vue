@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, provide } from 'vue'
+import { ref, onMounted, watch, provide } from 'vue'
 import Sidebar from './components/Sidebar.vue'
 import InputPanel from './components/InputPanel.vue'
 import TtsPanel from './components/TtsPanel.vue'
@@ -13,10 +13,15 @@ import TwitchPanel from './components/TwitchPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import ErrorToasts from './components/ErrorToasts.vue'
 import { useTelegramAuth, TELEGRAM_AUTH_KEY } from './composables/useTelegramAuth'
+import { provideAppSettings } from './composables/useAppSettings'
+import { debugLog } from './utils/debug'
 
 type Panel = 'info' | 'input' | 'tts' | 'floating' | 'soundpanel' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'settings'
 
 const currentPanel = ref<Panel>('input')
+
+// Create and provide app settings context
+const appSettings = provideAppSettings()
 
 // Create single shared instance of Telegram auth
 const telegramAuth = useTelegramAuth()
@@ -28,35 +33,77 @@ function setPanel(panel: Panel) {
   currentPanel.value = panel
 }
 
+// Watch for error changes
+watch(() => appSettings.error.value, (newError) => {
+  debugLog('[App] ⚠️ appSettings.error changed:', {
+    value: newError,
+    type: typeof newError,
+    length: newError?.length,
+    isEmpty: newError === '',
+    isNull: newError === null,
+    isUndefined: newError === undefined,
+    truthy: !!newError
+  })
+  debugLog('[App] appSettings.settings:', appSettings.settings.value)
+  debugLog('[App] appSettings.isLoading:', appSettings.isLoading.value)
+  debugLog('[App] Will show error?', newError && newError.length > 0)
+})
+
+// Watch for settings changes
+watch(() => appSettings.settings, (newSettings) => {
+  debugLog('[App] ✅ appSettings.settings changed:', newSettings)
+})
+
+// Watch for loading state
+watch(() => appSettings.isLoading, (newLoading) => {
+  debugLog('[App] 🔄 appSettings.isLoading changed:', newLoading)
+})
+
 // Initialize Telegram session on app start
 onMounted(async () => {
+  debugLog('[App] 🚀 App mounted')
+  debugLog('[App] Initial state:', {
+    hasSettings: !!appSettings.settings,
+    isLoading: appSettings.isLoading,
+    error: appSettings.error
+  })
+
   try {
     await telegramAuth.init()
   } catch (error) {
-    console.log('[APP] Telegram auto-init failed or no session:', error)
+    debugLog('[APP] Telegram auto-init failed or no session:', error)
   }
 })
 </script>
 
 <template>
   <div class="app-container">
-    <Sidebar :current-panel="currentPanel" @set-panel="setPanel" />
+    <!-- Show error if settings failed to load -->
+    <div v-if="appSettings.error.value && appSettings.error.value.length > 0" class="error-container">
+      <p>Failed to load settings: {{ appSettings.error.value }}</p>
+      <button @click="appSettings.reload()">Retry</button>
+    </div>
 
-    <main class="main-content">
-      <InfoPanel v-show="currentPanel === 'info'" />
-      <InputPanel v-show="currentPanel === 'input'" />
-      <TtsPanel v-show="currentPanel === 'tts'" />
-      <FloatingPanel v-show="currentPanel === 'floating'" />
-      <SoundPanelTab v-show="currentPanel === 'soundpanel'" />
-      <AudioPanel v-show="currentPanel === 'audio'" />
-      <PreprocessorPanel v-show="currentPanel === 'preprocessor'" />
-      <WebViewPanel v-show="currentPanel === 'webview'" />
-      <TwitchPanel v-show="currentPanel === 'twitch'" />
-      <SettingsPanel v-show="currentPanel === 'settings'" />
-    </main>
+    <!-- Main app content -->
+    <template v-else>
+      <Sidebar :current-panel="currentPanel" @set-panel="setPanel" />
 
-    <!-- Global error toasts -->
-    <ErrorToasts />
+      <main class="main-content">
+        <InfoPanel v-show="currentPanel === 'info'" />
+        <InputPanel v-show="currentPanel === 'input'" />
+        <TtsPanel v-show="currentPanel === 'tts'" />
+        <FloatingPanel v-show="currentPanel === 'floating'" />
+        <SoundPanelTab v-show="currentPanel === 'soundpanel'" />
+        <AudioPanel v-show="currentPanel === 'audio'" />
+        <PreprocessorPanel v-show="currentPanel === 'preprocessor'" />
+        <WebViewPanel v-show="currentPanel === 'webview'" />
+        <TwitchPanel v-show="currentPanel === 'twitch'" />
+        <SettingsPanel v-show="currentPanel === 'settings'" />
+      </main>
+
+      <!-- Global error toasts -->
+      <ErrorToasts />
+    </template>
   </div>
 </template>
 
@@ -91,6 +138,29 @@ onMounted(async () => {
     linear-gradient(90deg, rgba(255, 255, 255, 0.014) 1px, transparent 1px);
   background-size: 34px 34px;
   mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.22) 18%, rgba(0, 0, 0, 0.7));
+}
+
+.error-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  gap: 1rem;
+  color: #ff4757;
+}
+
+.error-container button {
+  padding: 0.5rem 1rem;
+  background: #1d8cff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.error-container button:hover {
+  background: #0d6efd;
 }
 
 @media (max-width: 720px) {

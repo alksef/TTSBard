@@ -5,8 +5,9 @@ import { listen } from '@tauri-apps/api/event';
 import { Eye, EyeOff, Bot, HardDrive, Cloud, RefreshCw } from 'lucide-vue-next';
 import TelegramAuthModal from './TelegramAuthModal.vue';
 import { TELEGRAM_AUTH_KEY, type UseTelegramAuthReturn } from '../composables/useTelegramAuth';
-
-type TtsProviderType = 'openai' | 'silero' | 'local';
+import { useTtsSettings } from '../composables/useAppSettings';
+import type { TtsProviderType } from '../types/settings';
+import { debugLog, debugError } from '../utils/debug';
 
 interface TtsProviderState {
   type: TtsProviderType;
@@ -22,6 +23,9 @@ const providers = ref<Record<TtsProviderType, TtsProviderState>>({
   local: { type: 'local', configured: false, expanded: false },
 });
 
+// Get settings from composable
+const ttsSettings = useTtsSettings();
+
 // OpenAI settings
 const openaiApiKey = ref('');
 const openaiVoice = ref('alloy');
@@ -30,7 +34,7 @@ const openaiProxyHost = ref('');
 const openaiProxyPort = ref<number | null>(null);
 const showOpenApiKey = ref(false);
 
-// Local TTS settings
+// local TTS settings
 const localTtsUrl = ref('http://127.0.0.1:8124');
 
 // Telegram auth
@@ -49,7 +53,7 @@ const {
   loading: telegramLoading
 } = telegramAuth;
 
-// Silero error state
+// silero error state
 const sileroError = ref<string | null>(null);
 
 // Error state
@@ -72,7 +76,7 @@ function toggleProvider(provider: TtsProviderType) {
 }
 
 async function saveOpenAiSettings() {
-  console.log('[TTS] Saving OpenAI settings...');
+  debugLog('[TTS] Saving OpenAI settings...');
 
   // Validate API Key
   if (!openaiApiKey.value.trim()) {
@@ -91,21 +95,21 @@ async function saveOpenAiSettings() {
 
   try {
     // Save API Key
-    console.log('[TTS] Saving API Key...');
+    debugLog('[TTS] Saving API Key...');
     await invoke('set_openai_api_key', { key: openaiApiKey.value });
     providers.value.openai.configured = true;
 
     // Save Proxy
-    console.log('[TTS] Saving Proxy:', host, port);
+    debugLog('[TTS] Saving Proxy:', host, port);
     await invoke('set_openai_proxy', {
       host,
       port
     });
 
-    console.log('[TTS] OpenAI settings saved successfully');
+    debugLog('[TTS] OpenAI settings saved successfully');
     showError('Настройки сохранены');
   } catch (error) {
-    console.error('[TTS] Failed to save OpenAI settings:', error);
+    debugError('[TTS] Failed to save OpenAI settings:', error);
     showError(error as string);
   }
 }
@@ -115,14 +119,14 @@ async function saveOpenAiVoice() {
   await nextTick();
 
   const voice = openaiVoice.value;
-  console.log('[TTS] Saving OpenAI voice:', voice);
+  debugLog('[TTS] Saving OpenAI voice:', voice);
 
   try {
     await invoke('set_openai_voice', { voice });
-    console.log('[TTS] OpenAI voice saved successfully:', voice);
+    debugLog('[TTS] OpenAI voice saved successfully:', voice);
     showError(`Голос "${voice}" сохранён`);
   } catch (error) {
-    console.error('[TTS] Failed to save OpenAI voice:', error);
+    debugError('[TTS] Failed to save OpenAI voice:', error);
     showError(error as string);
   }
 }
@@ -182,7 +186,7 @@ const limitsDisplayText = computed(() => {
   return 'Не загружен';
 });
 
-// Computed property for Local TTS description
+// Computed property for local TTS description
 const localTtsDescription = computed(() => {
   return `Обратная совместимость с TTSVoiceWizard. Запросы к ${localTtsUrl.value}`;
 });
@@ -192,46 +196,58 @@ watch([telegramErrorMessage, telegramHasError], () => {
   handleSileroError();
 });
 
-// Clear Silero error when successfully connected
+// Clear silero error when successfully connected
 watch(telegramConnected, (newValue) => {
   if (newValue) {
     sileroError.value = null;
   }
 });
 
-// Load on mount
-onMounted(async () => {
-  try {
-    const provider = await invoke<TtsProviderType>('get_tts_provider');
-    activeProvider.value = provider;
+// Watch for settings changes from composable
+watch(ttsSettings, (newSettings) => {
+  if (!newSettings) return;
 
-    // Note: Telegram auth is initialized once in App.vue via provide/inject
+  debugLog('[TTS] Settings updated from composable:', newSettings);
+  debugLog('[TTS] Provider from settings:', newSettings.provider, 'type:', typeof newSettings.provider);
+  debugLog('[TTS] Current activeProvider:', activeProvider.value, 'type:', typeof activeProvider.value);
 
-    const apiKey = await invoke<string | null>('get_openai_api_key');
-    if (apiKey) {
-      openaiApiKey.value = apiKey;
+  // Update provider
+  if (newSettings.provider) {
+    debugLog('[TTS] Setting activeProvider to:', newSettings.provider);
+    activeProvider.value = newSettings.provider;
+    debugLog('[TTS] After update, activeProvider is:', activeProvider.value);
+  }
+
+  // Update OpenAI settings
+  if (newSettings.openai) {
+    if (newSettings.openai.api_key) {
+      openaiApiKey.value = newSettings.openai.api_key;
       providers.value.openai.configured = true;
     }
-
-    const voice = await invoke<string>('get_openai_voice');
-    openaiVoice.value = voice;
-
-    // Load proxy settings
-    const [proxyHost, proxyPort] = await invoke<[string | null, number | null]>('get_openai_proxy');
-    if (proxyHost) openaiProxyHost.value = proxyHost;
-    if (proxyPort) openaiProxyPort.value = proxyPort;
-
-    const localUrl = await invoke<string>('get_local_tts_url');
-    localTtsUrl.value = localUrl;
-    providers.value.local.configured = localUrl.length > 0;
-
-    // Listen to TTS errors
-    unlistenTtsError = await listen('tts-error', (event) => {
-      showError(event.payload as string);
-    });
-  } catch (error) {
-    console.error('Failed to load TTS settings:', error);
+    if (newSettings.openai.voice) {
+      openaiVoice.value = newSettings.openai.voice;
+    }
+    if (newSettings.openai.proxy_host !== undefined) {
+      openaiProxyHost.value = newSettings.openai.proxy_host || '';
+    }
+    if (newSettings.openai.proxy_port !== undefined) {
+      openaiProxyPort.value = newSettings.openai.proxy_port || null;
+    }
   }
+
+  // Update local TTS URL
+  if (newSettings.local && newSettings.local.url) {
+    localTtsUrl.value = newSettings.local.url;
+    providers.value.local.configured = newSettings.local.url.length > 0;
+  }
+}, { immediate: true, deep: true });
+
+// Load on mount
+onMounted(async () => {
+  // Listen to TTS errors
+  unlistenTtsError = await listen('tts-error', (event) => {
+    showError(event.payload as string);
+  });
 });
 
 onUnmounted(() => {
@@ -331,7 +347,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Silero Provider -->
+      <!-- silero Provider -->
       <div
         class="provider-card"
         :class="{
@@ -382,7 +398,7 @@ onUnmounted(() => {
               <div class="status-indicator disconnected"></div>
               <div class="status-info">
                 <p class="status-text">Не подключено</p>
-                <p class="status-details">Авторизуйтесь для использования Silero TTS</p>
+                <p class="status-details">Авторизуйтесь для использования silero TTS</p>
               </div>
             </div>
           </div>
@@ -450,16 +466,16 @@ onUnmounted(() => {
           <div v-if="!telegramConnected" class="telegram-info">
             <p class="info-title">Информация:</p>
             <ul class="info-list">
-              <li>Для работы Silero TTS необходима авторизация через Telegram</li>
+              <li>Для работы silero TTS необходима авторизация через Telegram</li>
               <li>Получите API credentials на <a href="https://my.telegram.org/apps" target="_blank" rel="noopener noreferrer">my.telegram.org</a></li>
-              <li>Убедитесь, что в боте <strong>@SileroBot</strong> включены голосовые сообщения</li>
+              <li>Убедитесь, что в боте <strong>@sileroBot</strong> включены голосовые сообщения</li>
               <li>TTS работает через отправку сообщений в бота и получение голосового ответа</li>
             </ul>
           </div>
         </div>
       </div>
 
-      <!-- Local Provider -->
+      <!-- local Provider -->
       <div
         class="provider-card"
         :class="{ active: activeProvider === 'local' }"
@@ -692,7 +708,7 @@ onUnmounted(() => {
   filter: brightness(1.06);
 }
 
-/* Input with button (Local TTS) */
+/* Input with button (local TTS) */
 .input-with-button {
   display: flex;
   gap: 8px;
@@ -922,7 +938,7 @@ onUnmounted(() => {
   color: var(--color-text-primary);
 }
 
-/* Silero Error Banner */
+/* silero Error Banner */
 .silero-error-banner {
   padding: 16px;
   background: rgba(255, 111, 105, 0.12);
