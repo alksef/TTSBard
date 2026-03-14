@@ -119,7 +119,21 @@ async function setVirtualMicDevice(deviceId: string | null) {
 
 async function enableVirtualMic() {
   try {
-    await invoke('enable_virtual_mic');
+    // Determine which device to use: remembered device or first available
+    let deviceId = audioSettings.value.virtual_mic_device;
+
+    if (!deviceId && virtualMicDevices.value.length > 0) {
+      deviceId = virtualMicDevices.value[0].id;
+    }
+
+    if (!deviceId) {
+      errorMessage.value = 'Нет доступных виртуальных устройств';
+      return;
+    }
+
+    // Set the device (this enables the virtual mic)
+    await invoke('set_virtual_mic_device', { deviceId });
+    audioSettings.value.virtual_mic_device = deviceId;
   } catch (error) {
     console.error('Failed to enable virtual mic:', error);
     errorMessage.value = error as string;
