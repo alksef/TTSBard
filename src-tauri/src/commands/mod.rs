@@ -689,6 +689,29 @@ pub fn set_virtual_mic_volume(volume: u8) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Test playback on a specific audio device
+/// Plays a short test sound on the specified device with the given volume
+#[tauri::command]
+pub fn test_audio_device(device_id: Option<String>, volume: u8) -> Result<(), String> {
+    info!(?device_id, volume, "Testing audio device");
+
+    // Load test sound from embedded data
+    let mp3_data = crate::assets::TEST_SOUND_MP3.to_vec();
+
+    // Build output config
+    let config = crate::audio::OutputConfig {
+        device_id,
+        volume: volume as f32 / 100.0,
+    };
+
+    // Play test sound (blocking)
+    let mut player = crate::audio::AudioPlayer::new();
+    player.play_test_sound_blocking(mp3_data, config)?;
+
+    info!("Test sound playback completed");
+    Ok(())
+}
+
 // ============================================================================
 // Global settings commands
 // ============================================================================

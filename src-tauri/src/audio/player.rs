@@ -228,6 +228,27 @@ impl AudioPlayer {
         Ok(())
     }
 
+    /// Воспроизвести тестовый звук на одном устройстве (блокирующе)
+    /// Используется для тестирования аудиоустройств
+    pub fn play_test_sound_blocking(
+        &mut self,
+        mp3_data: Vec<u8>,
+        config: OutputConfig,
+    ) -> Result<(), String> {
+        info!("Playing test sound (blocking)");
+
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let data: Arc<[u8]> = mp3_data.into();
+
+        // Use existing play_to_device logic but block until completion
+        let result = Self::play_to_device(stop_flag.clone(), data, config, "Test Device", None);
+
+        // Clean up the stop flag
+        drop(stop_flag);
+
+        result
+    }
+
     /// Остановить воспроизведение
     #[allow(dead_code)]
     pub fn stop(&mut self) {
