@@ -160,3 +160,13 @@ pub async fn send_twitch_test_message(
     state.send_twitch_event(crate::events::TwitchEvent::SendMessage("test message".to_string()));
     Ok("Тестовое сообщение отправлено".to_string())
 }
+
+/// Перезапустить Twitch клиент
+#[tauri::command]
+pub async fn restart_twitch(
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    tracing::info!("Restart command received");
+    state.send_twitch_event(crate::events::TwitchEvent::Restart);
+    Ok("Перезапуск Twitch...".to_string())
+}

@@ -96,15 +96,14 @@ function handleStatusChange(status: TwitchStatus) {
   }
 }
 
-// Обновить статус вручную
-async function refreshStatus() {
+// Перезапустить Twitch клиент
+async function restartTwitch() {
   try {
-    const status = await invoke<RustTwitchStatus>('get_twitch_status')
-    handleStatusChange(convertStatusFromRust(status))
-    showError('Статус обновлён')
+    const result = await invoke<string>('restart_twitch')
+    showError(result)
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : String(e)
-    showError('Failed to refresh status: ' + errorMsg)
+    showError('Failed to restart: ' + errorMsg)
   }
 }
 
@@ -222,7 +221,7 @@ onUnmounted(() => {
     <!-- Error/Info Message Display -->
     <div v-if="errorMessage" class="message-box" :class="{
       error: errorMessage.includes('Failed') || errorMessage.includes('failed') || errorMessage.includes('Error') || errorMessage.includes('Ошибка'),
-      success: errorMessage.includes('saved') || errorMessage.includes('сохранен') || errorMessage.includes('валид') || errorMessage.includes('Подключено') || errorMessage.includes('Подключение'),
+      success: errorMessage.includes('saved') || errorMessage.includes('сохранен') || errorMessage.includes('валид') || errorMessage.includes('Подключено') || errorMessage.includes('Перезапуск') || errorMessage.includes('Переподключение'),
       info: errorMessage.includes('Отключено') || errorMessage.includes('disconnect') || errorMessage.includes('Stopped') || errorMessage.includes('Disconnected')
     }">
       {{ errorMessage }}
@@ -243,7 +242,7 @@ onUnmounted(() => {
                'Отключено' }}
           </span>
           <template v-if="currentStatus === 'Connected'">
-            <button @click="refreshStatus" class="status-button refresh" title="Обновить">
+            <button @click="restartTwitch" class="status-button refresh" title="Перезапустить">
               <RotateCw :size="14" />
             </button>
             <button @click="stopTwitch" class="status-button stop" title="Отключиться">
