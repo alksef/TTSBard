@@ -32,6 +32,9 @@ const isTestingVirtualMic = ref(false);
 const errorMessage = ref('');
 const isDataLoaded = ref(false);
 
+// UI-only state for virtual mic selector (persists across enable/disable)
+const selectedVirtualMicDevice = ref<string | null>(null);
+
 // Methods
 async function loadDevices(force = false) {
   if (isDataLoaded.value && !force) {
@@ -112,6 +115,7 @@ async function setSpeakerVolume(volume: number) {
 async function setVirtualMicDevice(deviceId: string | null) {
   try {
     await invoke('set_virtual_mic_device', { deviceId });
+    selectedVirtualMicDevice.value = deviceId;
     audioSettings.value.virtual_mic_device = deviceId;
   } catch (error) {
     console.error('Failed to set virtual mic device:', error);
@@ -121,9 +125,10 @@ async function setVirtualMicDevice(deviceId: string | null) {
 
 async function enableVirtualMic() {
   try {
-    // Determine which device to use: remembered device or first available
-    let deviceId = audioSettings.value.virtual_mic_device;
+    // Use UI-selected device (persists across enable/disable)
+    let deviceId = selectedVirtualMicDevice.value;
 
+    // Fallback to first available if nothing selected
     if (!deviceId && virtualMicDevices.value.length > 0) {
       deviceId = virtualMicDevices.value[0].id;
     }
@@ -135,6 +140,7 @@ async function enableVirtualMic() {
 
     // Set the device (this enables the virtual mic)
     await invoke('set_virtual_mic_device', { deviceId });
+    selectedVirtualMicDevice.value = deviceId;
     audioSettings.value.virtual_mic_device = deviceId;
   } catch (error) {
     console.error('Failed to enable virtual mic:', error);
@@ -145,7 +151,9 @@ async function enableVirtualMic() {
 async function disableVirtualMic() {
   try {
     await invoke('disable_virtual_mic');
+    // Update UI state to reflect disabled (but keep selector state)
     audioSettings.value.virtual_mic_device = null;
+    // selectedVirtualMicDevice persists for re-enable
   } catch (error) {
     console.error('Failed to disable virtual mic:', error);
     errorMessage.value = error as string;
@@ -220,12 +228,19 @@ watch(audioSettingsFromComposable, (newSettings) => {
 
   debugLog('[AudioPanel] Settings updated from composable:', newSettings);
 
-  // Update local state
+  // Initialize selectedVirtualMicDevice on first load (only if not set)
+  if (selectedVirtualMicDevice.value === null && newSettings.virtual_mic_device) {
+    selectedVirtualMicDevice.value = newSettings.virtual_mic_device;
+  }
+
+  // Update local state from backend
+  // Note: virtual_mic_device is managed by local functions (enable/disable/set)
+  // and may differ from backend value when disabled
   audioSettings.value = {
     speaker_device: newSettings.speaker_device || null,
     speaker_enabled: newSettings.speaker_enabled,
     speaker_volume: newSettings.speaker_volume,
-    virtual_mic_device: newSettings.virtual_mic_device || null,
+    virtual_mic_device: audioSettings.value.virtual_mic_device ?? newSettings.virtual_mic_device ?? null,
     virtual_mic_volume: newSettings.virtual_mic_volume,
   };
 }, { immediate: true });
@@ -346,7 +361,7 @@ watch(audioSettingsFromComposable, (newSettings) => {
                 v-for="device in virtualMicDevices"
                 :key="device.id"
                 :value="device.id"
-                :selected="audioSettings.virtual_mic_device === device.id"
+                :selected="selectedVirtualMicDevice === device.id"
               >
                 {{ device.name }}
               </option>
