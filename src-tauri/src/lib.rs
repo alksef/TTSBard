@@ -309,6 +309,7 @@ pub fn run() {
             commands::twitch::send_twitch_test_message,
             commands::twitch::connect_twitch,
             commands::twitch::disconnect_twitch,
+            commands::twitch::restart_twitch,
             commands::twitch::get_twitch_status,
             // Logging commands
             get_logging_settings,
