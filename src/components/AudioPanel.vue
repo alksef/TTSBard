@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
-import { RefreshCw, Loader, Volume2, VolumeX, Mic, Info } from 'lucide-vue-next';
+import { RefreshCw, Loader, Volume2, VolumeX, Mic, Info, Play } from 'lucide-vue-next';
 import { useAudioSettings } from '../composables/useAppSettings';
 import { debugLog } from '../utils/debug';
 
@@ -27,6 +27,8 @@ const audioSettings = ref({
 
 const isLoading = ref(false);
 const isRefreshing = ref(false);
+const isTestingSpeaker = ref(false);
+const isTestingVirtualMic = ref(false);
 const errorMessage = ref('');
 const isDataLoaded = ref(false);
 
@@ -160,6 +162,40 @@ async function setVirtualMicVolume(volume: number) {
   }
 }
 
+async function testSpeaker() {
+  if (isTestingSpeaker.value) return;
+
+  isTestingSpeaker.value = true;
+  try {
+    await invoke('test_audio_device', {
+      deviceId: audioSettings.value.speaker_device,
+      volume: audioSettings.value.speaker_volume,
+    });
+  } catch (error) {
+    console.error('Failed to test speaker:', error);
+    errorMessage.value = error as string;
+  } finally {
+    isTestingSpeaker.value = false;
+  }
+}
+
+async function testVirtualMic() {
+  if (isTestingVirtualMic.value) return;
+
+  isTestingVirtualMic.value = true;
+  try {
+    await invoke('test_audio_device', {
+      deviceId: audioSettings.value.virtual_mic_device,
+      volume: audioSettings.value.virtual_mic_volume,
+    });
+  } catch (error) {
+    console.error('Failed to test virtual mic:', error);
+    errorMessage.value = error as string;
+  } finally {
+    isTestingVirtualMic.value = false;
+  }
+}
+
 function getDeviceDisplayName(device: DeviceInfo): string {
   if (device.is_default) {
     return `${device.name} (по умолчанию)`;
@@ -232,20 +268,31 @@ watch(audioSettingsFromComposable, (newSettings) => {
 
         <div class="setting-row" :class="{ disabled: !audioSettings.speaker_enabled }">
           <label>Устройство</label>
-          <select
-            :disabled="!audioSettings.speaker_enabled"
-            @change="setSpeakerDevice(($event.target as HTMLSelectElement).value || null)"
-          >
-            <option value="">(по умолчанию)</option>
-            <option
-              v-for="device in outputDevices"
-              :key="device.id"
-              :value="device.id"
-              :selected="audioSettings.speaker_device === device.id"
+          <div class="input-with-action">
+            <select
+              :disabled="!audioSettings.speaker_enabled"
+              @change="setSpeakerDevice(($event.target as HTMLSelectElement).value || null)"
             >
-              {{ getDeviceDisplayName(device) }}
-            </option>
-          </select>
+              <option value="">(по умолчанию)</option>
+              <option
+                v-for="device in outputDevices"
+                :key="device.id"
+                :value="device.id"
+                :selected="audioSettings.speaker_device === device.id"
+              >
+                {{ getDeviceDisplayName(device) }}
+              </option>
+            </select>
+            <button
+              @click="testSpeaker"
+              :disabled="!audioSettings.speaker_enabled || isTestingSpeaker"
+              class="test-btn"
+              title="Тест воспроизведения"
+            >
+              <Loader v-if="isTestingSpeaker" :size="16" class="spinner" />
+              <Play v-else :size="16" />
+            </button>
+          </div>
         </div>
 
         <div class="setting-row" :class="{ disabled: !audioSettings.speaker_enabled }">
@@ -289,20 +336,31 @@ watch(audioSettingsFromComposable, (newSettings) => {
 
         <div class="setting-row" :class="{ disabled: !audioSettings.virtual_mic_device }">
           <label>Устройство</label>
-          <select
-            :disabled="!audioSettings.virtual_mic_device"
-            @change="setVirtualMicDevice(($event.target as HTMLSelectElement).value || null)"
-          >
-            <option value="">(не выбрано)</option>
-            <option
-              v-for="device in virtualMicDevices"
-              :key="device.id"
-              :value="device.id"
-              :selected="audioSettings.virtual_mic_device === device.id"
+          <div class="input-with-action">
+            <select
+              :disabled="!audioSettings.virtual_mic_device"
+              @change="setVirtualMicDevice(($event.target as HTMLSelectElement).value || null)"
             >
-              {{ device.name }}
-            </option>
-          </select>
+              <option value="">(не выбрано)</option>
+              <option
+                v-for="device in virtualMicDevices"
+                :key="device.id"
+                :value="device.id"
+                :selected="audioSettings.virtual_mic_device === device.id"
+              >
+                {{ device.name }}
+              </option>
+            </select>
+            <button
+              @click="testVirtualMic"
+              :disabled="!audioSettings.virtual_mic_device || isTestingVirtualMic"
+              class="test-btn"
+              title="Тест воспроизведения"
+            >
+              <Loader v-if="isTestingVirtualMic" :size="16" class="spinner" />
+              <Play v-else :size="16" />
+            </button>
+          </div>
         </div>
 
         <div class="setting-row" :class="{ disabled: !audioSettings.virtual_mic_device }">
@@ -513,6 +571,57 @@ watch(audioSettingsFromComposable, (newSettings) => {
   font-size: 14px;
   cursor: pointer;
   transition: all 0.15s ease;
+}
+
+.input-with-action {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+  align-items: center;
+}
+
+.input-with-action select {
+  flex: 1;
+  min-width: 0;
+}
+
+.test-btn {
+  flex-shrink: 0;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-text-secondary);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.test-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.test-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.test-btn .spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .setting-row select:hover {
