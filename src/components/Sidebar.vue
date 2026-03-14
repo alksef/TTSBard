@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { APP_VERSION } from '../version'
 import {
   Volume2,
-  Headphones,
+  Speech,
   AppWindow,
   Music,
   Globe,
@@ -83,8 +83,8 @@ const sidebarGroups: SidebarGroup[] = [
     buttons: [
       { id: 'input', label: 'Текст', icon: Pencil },
       { id: 'info', label: 'Руководство', icon: BookOpen },
-      { id: 'tts', label: 'TTS', icon: Volume2 },
-      { id: 'audio', label: 'Аудио', icon: Headphones }
+      { id: 'tts', label: 'TTS', icon: Speech },
+      { id: 'audio', label: 'Аудио', icon: Volume2 }
     ]
   },
   {
