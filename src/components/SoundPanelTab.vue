@@ -273,7 +273,7 @@ onMounted(async () => {
         </tbody>
       </table>
 
-      <div v-if="bindings.length > 0" class="stats-with-add">
+      <div class="stats-with-add">
         <button @click="showAddDialog = true" class="add-button-inline" title="Добавить звук">
           <Plus :size="16" />
         </button>
