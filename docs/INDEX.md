@@ -137,6 +137,22 @@ Quick reference for the TTSBard project.
 
 ---
 
+### [sse-integration.md](./sse-integration.md)
+**SSE (Server-Sent Events) integration guide**
+
+**Topics:**
+- SSE endpoint configuration
+- Connection details and URL format
+- Event format (JSON)
+- Code examples (JavaScript, Python, cURL)
+- HTML page customization
+- Broadcasting behavior
+- Troubleshooting
+- Security considerations
+- Integration examples (OBS, custom overlays)
+
+---
+
 ## 🔑 Quick Reference
 
 ### File Paths
