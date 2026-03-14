@@ -210,7 +210,7 @@ function toggleCollapse() {
 .collapse-toggle-floating {
   position: absolute;
   right: -17px;
-  top: 70%;
+  top: calc(70% + 36px);
   transform: translateY(-50%);
   width: 34px;
   height: 34px;

@@ -494,13 +494,27 @@ watch(audioSettingsFromComposable, (newSettings) => {
   padding: 8px 12px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 10px;
-  background: var(--color-bg-field);
+  background: rgba(255, 255, 255, 0.06);
   color: var(--color-text-primary);
   font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.setting-row select:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .setting-row select:disabled {
   background: rgba(255, 255, 255, 0.03);
+  cursor: not-allowed;
+}
+
+.setting-row select option {
+  background: #1e1e1e;
+  color: var(--color-text-primary);
+  padding: 0.3rem 0.5rem;
 }
 
 .volume-control {
