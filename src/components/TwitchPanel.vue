@@ -1,16 +1,13 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { Eye, EyeOff, Play, Square, RotateCw } from 'lucide-vue-next'
+import { useTwitchSettings } from '../composables/useAppSettings'
+import { debugLog } from '../utils/debug'
 
-interface TwitchSettings {
-  enabled: boolean
-  username: string
-  token: string
-  channel: string
-  start_on_boot: boolean
-}
+// Get settings from composable
+const twitchSettingsFromComposable = useTwitchSettings()
 
 type TwitchStatus = 'Disconnected' | 'Connecting' | 'Connected' | 'Error'
 
@@ -33,7 +30,7 @@ interface RustEnumError {
 
 type RustTwitchStatus = RustEnumDisconnected | RustEnumConnecting | RustEnumConnected | RustEnumError | string
 
-const settings = ref<TwitchSettings>({
+const settings = ref({
   enabled: false,
   username: '',
   token: '',
@@ -113,15 +110,15 @@ async function refreshStatus() {
 
 async function loadSettings() {
   try {
-    const loaded = await invoke<TwitchSettings>('get_twitch_settings')
-    settings.value = loaded
+    // Settings are now loaded from composable via watch
+    // Status is loaded separately via get_twitch_status
 
     // Запрашиваем текущий статус при загрузке
     const status = await invoke<RustTwitchStatus>('get_twitch_status')
     handleStatusChange(convertStatusFromRust(status))
   } catch (e) {
-    const errorMsg = e instanceof Error ? e.message : String(e)
-    showError('Failed to load settings: ' + errorMsg)
+    // Status loading failed - not critical, just log it
+    console.error('[TwitchPanel] Failed to load status:', e)
   }
 }
 
@@ -192,6 +189,22 @@ onMounted(async () => {
     handleStatusChange(convertStatusFromRust(event.payload))
   })
 })
+
+// Watch for settings changes from composable
+watch(twitchSettingsFromComposable, (newSettings) => {
+  if (!newSettings) return;
+
+  debugLog('[TwitchPanel] Settings updated from composable:', newSettings);
+
+  // Update local state
+  settings.value = {
+    enabled: newSettings.enabled,
+    username: newSettings.username,
+    token: newSettings.token,
+    channel: newSettings.channel,
+    start_on_boot: newSettings.start_on_boot,
+  };
+}, { immediate: true })
 
 // Cleanup
 onUnmounted(() => {

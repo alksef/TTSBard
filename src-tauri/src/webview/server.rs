@@ -128,7 +128,11 @@ impl WebViewServer {
 
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
         let settings = self.settings.read().await;
-        let addr = format!("{}:{}", settings.bind_address, settings.port);
+        let addr = if settings.bind_address.contains(':') && !settings.bind_address.starts_with('[') {
+            format!("[{}]:{}", settings.bind_address, settings.port)
+        } else {
+            format!("{}:{}", settings.bind_address, settings.port)
+        };
         drop(settings);
 
         let app = Router::new()

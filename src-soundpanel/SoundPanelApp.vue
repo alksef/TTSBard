@@ -137,8 +137,16 @@ onMounted(async () => {
   })
   console.log('[SoundPanel] Registered appearance update listener')
 
+  // Listen for bindings changes
+  const unlistenBindings = await listen('soundpanel-bindings-changed', async () => {
+    console.log('[SoundPanel] Bindings changed event received, reloading')
+    await loadBindings()
+  })
+  console.log('[SoundPanel] Registered bindings changed listener')
+
   onUnmounted(() => {
     unlisten()
+    unlistenBindings()
     if (messageTimeout !== null) {
       clearTimeout(messageTimeout)
     }
@@ -199,7 +207,6 @@ onMounted(async () => {
       <!-- Список привязок или сообщение по умолчанию -->
       <div v-else class="content-inner">
         <div v-if="bindings.length > 0" class="bindings-list">
-          <div class="bindings-title">Доступные звуки:</div>
           <div class="bindings-grid">
             <div v-for="binding in bindings" :key="binding.key" class="binding-item">
               <kbd class="binding-key">{{ binding.key }}</kbd>

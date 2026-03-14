@@ -1,17 +1,15 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { Copy, RotateCw, Play, Square, AlertTriangle } from 'lucide-vue-next'
+import { useWebViewSettings } from '../composables/useAppSettings'
+import { debugLog, debugError } from '../utils/debug'
 
-interface WebViewSettings {
-  enabled: boolean
-  start_on_boot: boolean
-  port: number
-  bind_address: string
-}
+// Get settings from composable
+const webviewSettingsFromComposable = useWebViewSettings()
 
-const settings = ref<WebViewSettings>({
+const settings = ref({
   enabled: false,
   start_on_boot: false,
   port: 10100,
@@ -33,45 +31,36 @@ const isPortValid = computed(() => {
   return port >= 1024 && port <= 65535
 })
 
-async function loadSettings() {
-  try {
-    const loaded = await invoke<WebViewSettings>('get_webview_settings')
-    settings.value = loaded
-  } catch (e) {
-    showError('Failed to load settings: ' + (e as Error).message)
-  }
-}
-
 async function save() {
   try {
-    console.log('[WebView] Saving settings:', settings.value)
+    debugLog('[WebView] Saving settings:', settings.value)
     const result = await invoke<string>('save_webview_settings', { settings: settings.value })
-    console.log('[WebView] Save result:', result)
+    debugLog('[WebView] Save result:', result)
 
     // Show the result message from backend
     showError(result)
   } catch (e) {
-    console.error('[WebView] Save failed:', e)
+    debugError('[WebView] Save failed:', e)
     showError('Failed to save settings: ' + (e as Error).message)
   }
 }
 
 async function startServer() {
-  console.log('[WebView] Starting server...')
+  debugLog('[WebView] Starting server...')
   settings.value.enabled = true
   await save()
   showError('Сервер успешно запущен')
 }
 
 async function stopServer() {
-  console.log('[WebView] Stopping server...')
+  debugLog('[WebView] Stopping server...')
   settings.value.enabled = false
   await save()
   showError('Сервер остановлен')
 }
 
 async function restartServer() {
-  console.log('[WebView] Restarting server...')
+  debugLog('[WebView] Restarting server...')
   await stopServer()
   await startServer()
   showError('Сервер перезапущен')
@@ -79,20 +68,20 @@ async function restartServer() {
 
 async function saveStartOnBoot() {
   try {
-    console.log('[WebView] Saving start_on_boot:', settings.value.start_on_boot)
+    debugLog('[WebView] Saving start_on_boot:', settings.value.start_on_boot)
     await invoke('save_webview_settings', { settings: settings.value })
   } catch (e) {
-    console.error('[WebView] Failed to save start_on_boot:', e)
+    debugError('[WebView] Failed to save start_on_boot:', e)
   }
 }
 
 async function saveServerSettings() {
   try {
-    console.log('[WebView] Saving server settings')
+    debugLog('[WebView] Saving server settings')
     const result = await invoke<string>('save_webview_settings', { settings: settings.value })
     showError(result)
   } catch (e) {
-    console.error('[WebView] Failed to save server settings:', e)
+    debugError('[WebView] Failed to save server settings:', e)
     showError('Failed to save server settings: ' + (e as Error).message)
   }
 }
@@ -151,7 +140,6 @@ function showError(message: string) {
 }
 
 onMounted(async () => {
-  await loadSettings()
   await refreshIp()
 
   // Listen for webview server errors
@@ -159,6 +147,19 @@ onMounted(async () => {
     showError(event.payload)
   })
 })
+
+// Watch for settings changes from composable
+watch(webviewSettingsFromComposable, (newSettings) => {
+  if (!newSettings) return;
+
+  // Update local state
+  settings.value = {
+    enabled: newSettings.enabled,
+    start_on_boot: newSettings.start_on_boot,
+    port: newSettings.port,
+    bind_address: newSettings.bind_address,
+  };
+}, { immediate: true, deep: true })
 
 // Cleanup
 import { onUnmounted } from 'vue'
@@ -534,9 +535,43 @@ h2 {
   gap: 8px;
 }
 
-.address-inputs .address-bind,
-.address-inputs .address-port {
+.address-inputs .address-bind {
   flex: 2;
+  padding: 0.4rem 0.6rem;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: var(--color-text-primary);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  min-width: 200px;
+  height: 38px;
+}
+
+.address-inputs .address-bind:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.address-inputs .address-bind:focus {
+  outline: none;
+  border-color: #1d8cff;
+  box-shadow: 0 0 0 2px rgba(29, 140, 255, 0.15);
+}
+
+.address-inputs .address-bind option {
+  background: #1e1e1e;
+  color: var(--color-text-primary);
+  padding: 0.3rem 0.5rem;
+}
+
+.address-inputs .address-bind option:hover {
+  background: #2a2a2a;
+}
+
+.address-inputs .address-port {
+  flex: 1;
   padding: 0.5rem;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 10px;
@@ -545,13 +580,6 @@ h2 {
   color: var(--color-text-primary);
   box-sizing: border-box;
   height: 38px;
-}
-
-.address-inputs .address-bind:focus,
-.address-inputs .address-port:focus {
-  outline: none;
-  border-color: rgba(29, 140, 255, 0.5);
-  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
 }
 
 .address-inputs .address-port.input-error {

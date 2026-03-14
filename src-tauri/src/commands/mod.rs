@@ -1,6 +1,6 @@
 use crate::state::AppState;
 use crate::events::AppEvent;
-use crate::config::{SettingsManager, WindowsManager, is_valid_hex_color};
+use crate::config::{SettingsManager, WindowsManager, is_valid_hex_color, AppSettingsDto};
 use crate::floating::{show_floating_window, hide_floating_window, hide_soundpanel_window};
 use crate::tts::{TtsProviderType, TtsProvider};
 use crate::audio::{AudioPlayer, OutputConfig};
@@ -794,6 +794,100 @@ pub fn close_soundpanel_window(
     // Скрываем окно (сохраняет позицию)
     hide_soundpanel_window(&app_handle, &app_state)
         .map_err(|e| format!("Failed to hide window: {}", e))?;
+
+    Ok(())
+}
+
+// ============================================================================
+// Unified settings loading commands
+// ============================================================================
+
+/// Get all application settings in a single call
+///
+/// This command is the unified entry point for loading all settings.
+/// It eliminates race conditions by providing all settings from a single
+/// point in time, collected atomically from all sources.
+#[tauri::command]
+pub async fn get_all_app_settings(
+    app_state: State<'_, AppState>,
+    windows_manager: State<'_, WindowsManager>,
+    settings_manager: State<'_, SettingsManager>,
+    soundpanel_state: State<'_, crate::soundpanel::SoundPanelState>,
+) -> Result<AppSettingsDto, String> {
+    info!("get_all_app_settings: Loading all settings");
+
+    // Load settings from all sources
+    let config = settings_manager.load()
+        .map_err(|e| format!("Failed to load settings: {}", e))?;
+
+    let webview_settings = {
+        let s = app_state.webview_settings.read().await;
+        s.clone()
+    };
+
+    let twitch_settings = {
+        let s = app_state.twitch_settings.read().await;
+        s.clone()
+    };
+
+    let windows_settings = windows_manager.load()
+        .map_err(|e| format!("Failed to load windows settings: {}", e))?;
+
+    let interception_enabled = app_state.is_interception_enabled();
+    let enter_closes_disabled = app_state.is_enter_closes_disabled();
+    let preprocessor = app_state.get_preprocessor();
+
+    // Load soundpanel bindings from state
+    let soundpanel_bindings = soundpanel_state.get_all_bindings();
+    info!(count = soundpanel_bindings.len(), "get_all_app_settings: Loaded soundpanel bindings");
+
+    let settings = AppSettingsDto::from_all_sources(
+        crate::config::AllSourcesParams {
+            config: &config,
+            webview_settings: &webview_settings,
+            twitch_settings: &twitch_settings,
+            windows_settings: &windows_settings,
+            interception_enabled,
+            enter_closes_disabled,
+            preprocessor: preprocessor.as_ref(),
+            soundpanel_bindings,
+        }
+    );
+
+    info!(
+        tts_provider = ?settings.tts.provider,
+        webview_enabled = settings.webview.enabled,
+        hotkey_enabled = settings.general.hotkey_enabled,
+        soundpanel_bindings_count = settings.soundpanel_bindings.len(),
+        "get_all_app_settings: Settings loaded successfully"
+    );
+
+    Ok(settings)
+}
+
+/// Check if backend is ready (settings loaded, initialization complete)
+#[tauri::command]
+pub fn is_backend_ready(app_state: State<'_, AppState>) -> bool {
+    app_state.backend_ready.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Confirm backend is ready and emit event if already ready
+///
+/// This command is used by frontend to wait for backend initialization.
+/// If backend is already ready, it immediately emits the event.
+#[tauri::command]
+pub async fn confirm_backend_ready(
+    app_state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    let ready = app_state.backend_ready.load(std::sync::atomic::Ordering::SeqCst);
+
+    if ready {
+        info!("confirm_backend_ready: Backend already ready, emitting event");
+        let _ = app_handle.emit("backend-ready", &());
+    } else {
+        info!("confirm_backend_ready: Backend not ready yet");
+    }
 
     Ok(())
 }

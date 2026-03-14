@@ -253,6 +253,11 @@ impl TextPreprocessor {
         self.replacements.get_usernames_map()
     }
 
+    /// Get the total number of replacements (for status display)
+    pub fn replacements_count(&self) -> usize {
+        self.replacements.get_replacements_map().len() + self.replacements.get_usernames_map().len()
+    }
+
     /// Reload replacements from files
     #[allow(dead_code)]
     pub fn reload(&mut self) -> Result<()> {

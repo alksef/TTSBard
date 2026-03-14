@@ -1,5 +1,6 @@
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { debugLog, debugError } from '../utils/debug'
 
 export type TelegramAuthState = 'idle' | 'loading' | 'code_required' | 'connected' | 'error'
 
@@ -81,7 +82,7 @@ export function useTelegramAuth() {
         return null
       }
 
-      console.error('Failed to get Telegram status:', error)
+      debugError('Failed to get Telegram status:', error)
       errorMessage.value = errorMsg
       state.value = 'error'
       return null
@@ -110,7 +111,7 @@ export function useTelegramAuth() {
       state.value = 'code_required'
       return true
     } catch (error) {
-      console.error('Failed to request code:', error)
+      debugError('Failed to request code:', error)
       errorMessage.value = error as string
       state.value = 'error'
       return false
@@ -135,7 +136,7 @@ export function useTelegramAuth() {
       errorMessage.value = null
       return true
     } catch (error) {
-      console.error('Failed to sign in:', error)
+      debugError('Failed to sign in:', error)
       errorMessage.value = error as string
       state.value = 'error'
       return false
@@ -156,7 +157,7 @@ export function useTelegramAuth() {
       state.value = 'idle'
       return true
     } catch (error) {
-      console.error('Failed to sign out:', error)
+      debugError('Failed to sign out:', error)
       errorMessage.value = error as string
       state.value = 'error'
       return false
@@ -168,20 +169,20 @@ export function useTelegramAuth() {
   // Speak text using Silero TTS via Telegram
   async function speak(text: string): Promise<TtsResult> {
     try {
-      console.log('[TELEGRAM TTS] Starting synthesis for text:', text)
+      debugLog('[TELEGRAM TTS] Starting synthesis for text:', text)
 
       const result = await invoke<TtsResult>('speak_text_silero', { text })
 
-      console.log('[TELEGRAM TTS] Synthesis result:', result)
+      debugLog('[TELEGRAM TTS] Synthesis result:', result)
 
       if (!result.success) {
-        console.error('[TELEGRAM TTS] Synthesis failed:', result.error)
+        debugError('[TELEGRAM TTS] Synthesis failed:', result.error)
         errorMessage.value = result.error || 'Unknown error'
       }
 
       return result
     } catch (error) {
-      console.error('[TELEGRAM TTS] Exception during synthesis:', error)
+      debugError('[TELEGRAM TTS] Exception during synthesis:', error)
       errorMessage.value = error as string
       return {
         success: false,
@@ -193,11 +194,11 @@ export function useTelegramAuth() {
   // Refresh current voice information
   async function refreshVoice(): Promise<CurrentVoice | null> {
     try {
-      console.log('[TELEGRAM VOICE] Refreshing current voice')
+      debugLog('[TELEGRAM VOICE] Refreshing current voice')
 
       const voice = await invoke<CurrentVoice | null>('telegram_get_current_voice')
 
-      console.log('[TELEGRAM VOICE] Current voice:', voice)
+      debugLog('[TELEGRAM VOICE] Current voice:', voice)
 
       if (voice) {
         currentVoice.value = voice
@@ -210,7 +211,7 @@ export function useTelegramAuth() {
 
       return voice
     } catch (error) {
-      console.error('[TELEGRAM VOICE] Exception during refresh:', error)
+      debugError('[TELEGRAM VOICE] Exception during refresh:', error)
       errorMessage.value = error as string
       currentVoice.value = null
       return null
@@ -220,11 +221,11 @@ export function useTelegramAuth() {
   // Refresh limits information
   async function refreshLimits(): Promise<Limits | null> {
     try {
-      console.log('[TELEGRAM LIMITS] Refreshing limits')
+      debugLog('[TELEGRAM LIMITS] Refreshing limits')
 
       const limitsData = await invoke<Limits | null>('telegram_get_limits')
 
-      console.log('[TELEGRAM LIMITS] Limits:', limitsData)
+      debugLog('[TELEGRAM LIMITS] Limits:', limitsData)
 
       if (limitsData) {
         limits.value = limitsData
@@ -237,7 +238,7 @@ export function useTelegramAuth() {
 
       return limitsData
     } catch (error) {
-      console.error('[TELEGRAM LIMITS] Exception during refresh:', error)
+      debugError('[TELEGRAM LIMITS] Exception during refresh:', error)
       errorMessage.value = error as string
       limits.value = null
       return null
@@ -254,11 +255,11 @@ export function useTelegramAuth() {
         // Session restored - get user data
         await getStatus()
       } else {
-        console.log('[TELEGRAM] No session to restore')
+        debugLog('[TELEGRAM] No session to restore')
       }
     } catch (error) {
       // Error or no session - ignore
-      console.log('[TELEGRAM] Auto-restore failed:', error)
+      debugLog('[TELEGRAM] Auto-restore failed:', error)
     }
   }
 

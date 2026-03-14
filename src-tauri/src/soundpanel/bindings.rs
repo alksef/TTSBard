@@ -6,7 +6,8 @@ use crate::soundpanel::state::{SoundPanelState, SoundBinding};
 use crate::soundpanel::storage::{save_bindings, copy_sound_file, delete_sound_file};
 use crate::config::{WindowsManager, is_valid_hex_color};
 use crate::soundpanel::audio::play_audio_file;
-use tauri::State;
+use crate::floating::emit_soundpanel_bindings_changed;
+use tauri::{AppHandle, State};
 use tracing::{debug, info};
 
 /// Получить все привязки звуковой панели
@@ -27,6 +28,7 @@ pub fn sp_add_binding(
     key: String,
     description: String,
     file_path: String,
+    app_handle: AppHandle,
     state: State<'_, SoundPanelState>,
 ) -> Result<SoundBinding, String> {
     info!(key, description, "Add binding");
@@ -61,6 +63,9 @@ pub fn sp_add_binding(
     // Сохранить в JSON
     save_bindings(&state)?;
 
+    // Notify soundpanel window to reload bindings
+    let _ = emit_soundpanel_bindings_changed(&app_handle);
+
     info!("Binding added successfully");
     Ok(binding)
 }
@@ -69,6 +74,7 @@ pub fn sp_add_binding(
 #[tauri::command]
 pub fn sp_remove_binding(
     key: String,
+    app_handle: AppHandle,
     state: State<'_, SoundPanelState>,
 ) -> Result<(), String> {
     info!(key, "Remove binding");
@@ -88,6 +94,9 @@ pub fn sp_remove_binding(
 
     // Сохранить изменения
     save_bindings(&state)?;
+
+    // Notify soundpanel window to reload bindings
+    let _ = emit_soundpanel_bindings_changed(&app_handle);
 
     info!("Binding removed successfully");
     Ok(())

@@ -20,8 +20,7 @@ impl Default for WebViewSettings {
             enabled: false,
             start_on_boot: false,
             port: 10100,
-            // Bind to both IPv4 and IPv6 loopback for localhost support
-            bind_address: "::".to_string(),
+            bind_address: "0.0.0.0".to_string(),
         }
     }
 }

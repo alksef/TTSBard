@@ -1,22 +1,17 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { AlertTriangle } from 'lucide-vue-next'
+import { useGeneralSettings, useWindowsSettings, useLoggingSettings } from '../composables/useAppSettings'
+import { debugLog } from '../utils/debug'
 
+// Get settings from composables
+const generalSettings = useGeneralSettings()
+const windowsSettings = useWindowsSettings()
+const loggingSettings = useLoggingSettings()
 
-interface LoggingSettings {
-  enabled: boolean
-  level: string
-  module_levels?: Record<string, string>
-}
-
-
-const excludeFromCapture = ref(false)
-const quickEditorEnabled = ref(false)
 const errorMessage = ref<string | null>(null)
 let errorTimeout: number | null = null
-const loggingEnabled = ref(false)
-const loggingLevel = ref('info')
 const loggingLevels = [
   { value: 'error', label: 'Error' },
   { value: 'warn', label: 'Warning' },
@@ -25,23 +20,40 @@ const loggingLevels = [
   { value: 'trace', label: 'Trace' }
 ]
 
-async function loadSettings() {
+// Local state for immediate UI feedback
+const localLoggingEnabled = ref(false)
+
+// Computed properties for template bindings
+const excludeFromCapture = computed(() => windowsSettings.value?.global.exclude_from_capture ?? false)
+const quickEditorEnabled = computed(() => generalSettings.value?.quick_editor_enabled ?? false)
+const loggingEnabled = computed(() => localLoggingEnabled.value)
+
+/**
+ * Set logging enabled with automatic rollback on error
+ */
+async function setLoggingEnabled(value: boolean) {
+  const previousValue = localLoggingEnabled.value
+  localLoggingEnabled.value = value
+
   try {
-    excludeFromCapture.value = await invoke<boolean>('get_global_exclude_from_capture')
-    quickEditorEnabled.value = await invoke<boolean>('get_quick_editor_enabled')
-    const loggingSettings = await invoke<LoggingSettings>('get_logging_settings')
-    loggingEnabled.value = loggingSettings.enabled
-    loggingLevel.value = loggingSettings.level
+    await invoke('save_logging_settings', {
+      enabled: value,
+      level: loggingSettings.value?.level ?? 'info'
+    })
+    showError('Настройка сохранена. Перезапустите приложение для применения изменений.')
   } catch (e) {
-    showError('Ошибка загрузки настроек: ' + (e as Error).message)
+    // Rollback to previous value on error
+    localLoggingEnabled.value = previousValue
+    showError('Ошибка сохранения настроек логирования: ' + (e as Error).message)
   }
 }
 
+const loggingLevel = computed(() => loggingSettings.value?.level ?? 'info')
+
 async function toggleExcludeFromCapture() {
   try {
-    const newValue = !excludeFromCapture.value
+    const newValue = !(windowsSettings.value?.global.exclude_from_capture ?? false)
     await invoke('set_global_exclude_from_capture', { value: newValue })
-    excludeFromCapture.value = newValue
     showError('Настройка сохранена. Перезапустите приложение для применения изменений.')
   } catch (e) {
     showError('Ошибка переключения скрытия от захвата: ' + (e as Error).message)
@@ -50,34 +62,21 @@ async function toggleExcludeFromCapture() {
 
 async function toggleQuickEditor() {
   try {
-    const newValue = !quickEditorEnabled.value
+    const newValue = !(generalSettings.value?.quick_editor_enabled ?? false)
     await invoke('set_quick_editor_enabled', { value: newValue })
-    quickEditorEnabled.value = newValue
     showError('Настройка сохранена')
   } catch (e) {
     showError('Ошибка переключения быстрого редактора: ' + (e as Error).message)
   }
 }
 
-async function toggleLoggingEnabled() {
-  const newValue = !loggingEnabled.value
+async function onLoggingLevelChange(event: Event) {
+  const target = event.target as HTMLSelectElement
+  const newLevel = target.value
   try {
     await invoke('save_logging_settings', {
-      enabled: newValue,
-      level: loggingLevel.value
-    })
-    loggingEnabled.value = newValue
-    showError('Настройка сохранена. Перезапустите приложение для применения изменений.')
-  } catch (e) {
-    showError('Ошибка сохранения настроек логирования: ' + (e as Error).message)
-  }
-}
-
-async function changeLoggingLevel() {
-  try {
-    await invoke('save_logging_settings', {
-      enabled: loggingEnabled.value,
-      level: loggingLevel.value
+      enabled: localLoggingEnabled.value,
+      level: newLevel
     })
     showError('Уровень сохранён. Перезапустите приложение для применения изменений.')
   } catch (e) {
@@ -98,9 +97,23 @@ function showError(message: string) {
   }, 3000)
 }
 
-onMounted(() => {
-  loadSettings()
-})
+// Watch for settings changes from composables
+watch(generalSettings, (newSettings) => {
+  if (!newSettings) return
+  debugLog('[SettingsPanel] General settings updated from composable:', newSettings)
+}, { immediate: true })
+
+watch(windowsSettings, (newSettings) => {
+  if (!newSettings) return
+  debugLog('[SettingsPanel] Windows settings updated from composable:', newSettings)
+}, { immediate: true })
+
+watch(loggingSettings, (newSettings) => {
+  if (!newSettings) return
+  debugLog('[SettingsPanel] Logging settings updated from composable:', newSettings)
+  // Sync local state with composable
+  localLoggingEnabled.value = newSettings.enabled
+}, { immediate: true })
 </script>
 
 <template>
@@ -158,9 +171,9 @@ onMounted(() => {
         <label class="setting-label checkbox-label">
           <input
             :checked="loggingEnabled"
+            @change="(e) => setLoggingEnabled((e.target as HTMLInputElement).checked)"
             type="checkbox"
             class="checkbox-input"
-            @change="toggleLoggingEnabled"
           />
           <span>Включить логирование</span>
         </label>
@@ -171,7 +184,7 @@ onMounted(() => {
           <label>Уровень:</label>
           <select
             :value="loggingLevel"
-            @change="(e: any) => { loggingLevel = e.target.value; changeLoggingLevel() }"
+            @change="onLoggingLevelChange"
             class="level-select"
           >
             <option v-for="level in loggingLevels" :key="level.value" :value="level.value">

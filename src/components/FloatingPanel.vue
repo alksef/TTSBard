@@ -1,12 +1,17 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { useWindowsSettings } from '../composables/useAppSettings'
+import { debugLog } from '../utils/debug'
 
 const errorMessage = ref<string | null>(null)
 const localOpacity = ref(90)
 const localBgColor = ref('#1e1e1e')
 const clickthroughEnabled = ref(false)
 let errorTimeout: number | null = null
+
+// Get settings from composable
+const windowsSettings = useWindowsSettings()
 
 const previewStyle = computed(() => ({
   backgroundColor: hexToRgba(localBgColor.value, localOpacity.value / 100),
@@ -58,25 +63,22 @@ function showError(message: string) {
 }
 
 onMounted(async () => {
-  // Load floating appearance settings
-  try {
-    const [opacity, color] = await invoke<[number, string]>('get_floating_appearance')
-    localOpacity.value = opacity
-    localBgColor.value = color
-  } catch (e) {
-    console.error('Failed to load floating appearance:', e)
-  }
-
-  // Load clickthrough state
-  try {
-    clickthroughEnabled.value = await invoke<boolean>('is_clickthrough_enabled')
-  } catch (e) {
-    console.error('Failed to load clickthrough state:', e)
-  }
+  // Settings are now loaded from composable via watch
 })
 
+// Watch for settings changes from composable
+watch(windowsSettings, (newSettings) => {
+  if (!newSettings) return;
+
+  debugLog('[FloatingPanel] Settings updated from composable:', newSettings);
+
+  // Update local state from windows settings
+  localOpacity.value = newSettings.floating.opacity
+  localBgColor.value = newSettings.floating.bg_color
+  clickthroughEnabled.value = newSettings.floating.clickthrough
+}, { immediate: true })
+
 // Cleanup
-import { onUnmounted } from 'vue'
 onUnmounted(() => {
   if (errorTimeout !== null) {
     clearTimeout(errorTimeout)

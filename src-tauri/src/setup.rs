@@ -51,7 +51,7 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
     // Load WebView settings into AppState
     info!("Loading WebView settings...");
     *app_state.inner().webview_settings.blocking_write() = crate::webview::WebViewSettings {
-        enabled: false,
+        enabled: settings.webview.enabled,
         start_on_boot: settings.webview.start_on_boot,
         port: settings.webview.port,
         bind_address: settings.webview.bind_address.clone(),
@@ -160,6 +160,16 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
     #[cfg(windows)]
     init_window_protection(app, &windows_manager);
 
+    // Set backend ready flag - all initialization complete
+    app_state.backend_ready.store(true, std::sync::atomic::Ordering::SeqCst);
+    info!("Backend ready flag set");
+
+    // Show main window after backend is fully initialized
+    if let Some(main_window) = app.get_webview_window("main") {
+        let _ = main_window.show();
+        info!("Main window shown");
+    }
+
     info!("Setup complete - hotkeys will be registered when window gains focus");
     Ok(())
 }
@@ -215,7 +225,7 @@ fn init_windows(
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!("State initialized");
 
-    // Apply saved main window position before showing
+    // Apply saved main window position (window will be shown after backend is ready)
     if let Some(main_window) = app.get_webview_window("main") {
         if let Some(x) = windows.main.x {
             if let Some(y) = windows.main.y {
@@ -223,7 +233,6 @@ fn init_windows(
                 let _ = main_window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
             }
         }
-        let _ = main_window.show();
     }
 
     Ok(())

@@ -9,7 +9,7 @@ mod audio;
 mod bindings;
 mod hook;
 
-pub use state::SoundPanelState;
+pub use state::{SoundPanelState, SoundBinding};
 pub use storage::{load_bindings, load_appearance};
 pub use hook::initialize_soundpanel_hook;
 

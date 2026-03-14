@@ -149,6 +149,15 @@ pub fn update_soundpanel_appearance(app_handle: &AppHandle) -> tauri::Result<()>
     Ok(())
 }
 
+/// Emit event to soundpanel window when bindings change
+pub fn emit_soundpanel_bindings_changed(app_handle: &AppHandle) -> tauri::Result<()> {
+    if let Some(window) = app_handle.get_webview_window("soundpanel") {
+        info!(window_type = "soundpanel", status = "exists", event = "bindings-changed", "Sending bindings-changed event");
+        window.emit("soundpanel-bindings-changed", ())?;
+    }
+    Ok(())
+}
+
 /// Hide soundpanel floating window
 pub fn hide_soundpanel_window(app_handle: &AppHandle, app_state: &AppState) -> tauri::Result<()> {
     // Сбрасываем активное окно (взаимное исключение хоткеев)

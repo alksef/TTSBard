@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { RefreshCw, Loader, Volume2, VolumeX, Mic, Info } from 'lucide-vue-next';
+import { useAudioSettings } from '../composables/useAppSettings';
+import { debugLog } from '../utils/debug';
 
 interface DeviceInfo {
   id: string;
@@ -9,22 +11,17 @@ interface DeviceInfo {
   is_default: boolean;
 }
 
-interface AudioSettings {
-  speaker_device: string | null;
-  speaker_enabled: boolean;
-  speaker_volume: number;
-  virtual_mic_device: string | null;
-  virtual_mic_volume: number;
-}
+// Get settings from composable
+const audioSettingsFromComposable = useAudioSettings();
 
 // State
 const outputDevices = ref<DeviceInfo[]>([]);
 const virtualMicDevices = ref<DeviceInfo[]>([]);
-const audioSettings = ref<AudioSettings>({
-  speaker_device: null,
+const audioSettings = ref({
+  speaker_device: null as string | null,
   speaker_enabled: true,
   speaker_volume: 80,
-  virtual_mic_device: null,
+  virtual_mic_device: null as string | null,
   virtual_mic_volume: 100,
 });
 
@@ -59,10 +56,11 @@ async function loadSettings(force = false) {
   }
 
   try {
-    const settings = await invoke<AudioSettings>('get_audio_settings');
-    audioSettings.value = settings;
+    // Settings are now loaded from composable via watch
+    isDataLoaded.value = true;
   } catch (error) {
     console.error('Failed to load audio settings:', error);
+    errorMessage.value = error as string;
   }
 }
 
@@ -165,6 +163,22 @@ onMounted(async () => {
     isLoading.value = false;
   }
 });
+
+// Watch for settings changes from composable
+watch(audioSettingsFromComposable, (newSettings) => {
+  if (!newSettings) return;
+
+  debugLog('[AudioPanel] Settings updated from composable:', newSettings);
+
+  // Update local state
+  audioSettings.value = {
+    speaker_device: newSettings.speaker_device || null,
+    speaker_enabled: newSettings.speaker_enabled,
+    speaker_volume: newSettings.speaker_volume,
+    virtual_mic_device: newSettings.virtual_mic_device || null,
+    virtual_mic_volume: newSettings.virtual_mic_volume,
+  };
+}, { immediate: true });
 </script>
 
 <template>
