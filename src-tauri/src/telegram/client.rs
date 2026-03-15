@@ -1,17 +1,36 @@
 use super::types::{AuthState, OperationResult, UserInfo};
 use grammers_client::{Client, SignInError};
 use grammers_client::types::LoginToken;
-use grammers_mtsender::SenderPool;
+use grammers_mtsender::{SenderPool, ConnectionParams};
 use grammers_session::updates::UpdatesLike;
 use grammers_session::storages::SqliteSession;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{info, error, debug};
+use tracing::{info, error, debug, warn};
+use crate::config::ProxyMode;
 
 // NOTE: api_id is now stored in settings.json (settings.tts.telegram.api_id)
 // The old telegram_config.json file is no longer used
+
+/// Current proxy status for Telegram connection
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub struct ProxyStatus {
+    /// Current proxy mode
+    pub mode: ProxyMode,
+    /// Proxy URL being used (if any)
+    pub proxy_url: Option<String>,
+}
+
+impl fmt::Display for ProxyStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.mode {
+            ProxyMode::None => write!(f, "No proxy"),
+            ProxyMode::Socks5 => write!(f, "SOCKS5 proxy: {}", self.proxy_url.as_deref().unwrap_or("not configured")),
+        }
+    }
+}
 
 pub struct TelegramClient {
     pub(crate) pool_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
@@ -22,6 +41,8 @@ pub struct TelegramClient {
     api_hash: Arc<Mutex<Option<String>>>,
     phone_number: Arc<Mutex<Option<String>>>,
     session_path: Arc<Mutex<Option<PathBuf>>>,
+    /// Current proxy status
+    proxy_status: Arc<Mutex<ProxyStatus>>,
 }
 
 impl fmt::Debug for TelegramClient {
@@ -43,6 +64,7 @@ impl TelegramClient {
             api_hash: Arc::new(Mutex::new(None)),
             phone_number: Arc::new(Mutex::new(None)),
             session_path: Arc::new(Mutex::new(None)),
+            proxy_status: Arc::new(Mutex::new(ProxyStatus::default())),
         }
     }
 
@@ -60,8 +82,90 @@ impl TelegramClient {
         Ok(app_dir.join("telegram.session"))
     }
 
+    /// Validate and normalize proxy URL
+    ///
+    /// Supports:
+    /// - SOCKS5: socks5://host:port or socks5://user:pass@host:port
+    fn validate_proxy_url(url: &str, mode: &ProxyMode) -> Result<String, String> {
+        match mode {
+            ProxyMode::None => Err("Proxy mode is None but URL was provided".to_string()),
+            ProxyMode::Socks5 => {
+                // Validate SOCKS5 URL format: socks5://[user:pass@]host:port
+                if !url.starts_with("socks5://") {
+                    return Err(format!("Invalid SOCKS5 URL: must start with socks5://"));
+                }
+
+                let url_without_scheme = &url[9..]; // Remove "socks5://"
+
+                // Split into auth part and address part
+                let (_auth, address) = match url_without_scheme.find('@') {
+                    Some(at_idx) => {
+                        let (user_pass, addr) = url_without_scheme.split_at(at_idx);
+                        (Some(user_pass), &addr[1..]) // Skip '@'
+                    }
+                    None => (None, url_without_scheme),
+                };
+
+                // Split address into host and port
+                let (host, port_str) = address.rsplit_once(':')
+                    .ok_or_else(|| format!("Invalid SOCKS5 URL: missing port"))?;
+
+                let _port: u16 = port_str.parse()
+                    .map_err(|_| format!("Invalid SOCKS5 URL: invalid port"))?;
+
+                info!(host, _port, has_auth = _auth.is_some(), "Validated SOCKS5 proxy");
+
+                Ok(url.to_string())
+            }
+        }
+    }
+
     /// Инициализация клиента
+    #[allow(dead_code)]
     pub async fn init(&self, api_id: u32, api_hash: String, phone: String) -> Result<OperationResult, String> {
+        self.init_with_proxy(api_id, api_hash, phone, None).await
+    }
+
+    /// Инициализация клиента с поддержкой прокси
+    pub async fn init_with_proxy(&self, api_id: u32, api_hash: String, phone: String, proxy_url: Option<String>) -> Result<OperationResult, String> {
+        // Determine proxy mode from URL
+        let (proxy_mode, proxy_url_str) = if let Some(ref url) = &proxy_url {
+            let mode = ProxyMode::from_url(url);
+            if mode == ProxyMode::None && !url.is_empty() {
+                warn!(url = %url, "[AUTH] Unknown proxy URL format, using direct connection");
+                (ProxyMode::None, None)
+            } else {
+                (mode, proxy_url.clone())
+            }
+        } else {
+            (ProxyMode::None, None)
+        };
+
+        // Validate and normalize proxy URL
+        let normalized_proxy_url = if let Some(url) = &proxy_url_str {
+            match Self::validate_proxy_url(url, &proxy_mode) {
+                Ok(url) => Some(url),
+                Err(e) => {
+                    error!(error = %e, "[AUTH] Failed to validate proxy URL");
+                    return Err(e);
+                }
+            }
+        } else {
+            None
+        };
+
+        // Update proxy status
+        *self.proxy_status.lock().await = ProxyStatus {
+            mode: proxy_mode.clone(),
+            proxy_url: proxy_url_str.clone(),
+        };
+
+        if let Some(ref url) = proxy_url_str {
+            info!(proxy_url = %url, mode = ?proxy_mode, "[AUTH] Initializing with proxy");
+        } else {
+            info!("[AUTH] Initializing without proxy");
+        }
+
         let session_path = Self::get_session_path()?;
 
         // Сохраняем для последующего использования
@@ -73,13 +177,23 @@ impl TelegramClient {
         debug!(session_path = ?session_path, "[AUTH] Session path");
         debug!(exists = session_path.exists(), "[AUTH] Session exists");
 
-        // Создаём сессию (откроет существующую или создаст новую)
+        // Создаём сессию (откроем существующую или создадим новую)
         let session = SqliteSession::open(&session_path)
             .map_err(|e| format!("Не удалось создать сессию: {}", e))?;
         let session = Arc::new(session);
 
-        // Создаём SenderPool
-        let pool = SenderPool::new(session, api_id as i32);
+        // Создаём SenderPool with proxy if configured
+        let pool = if let Some(proxy) = normalized_proxy_url {
+            info!("[AUTH] Creating SenderPool with proxy configuration");
+            let conn_params = ConnectionParams {
+                proxy_url: Some(proxy),
+                ..Default::default()
+            };
+            SenderPool::with_configuration(session, api_id as i32, conn_params)
+        } else {
+            info!("[AUTH] Creating SenderPool without proxy");
+            SenderPool::new(session, api_id as i32)
+        };
 
         // Создаём клиент
         let client = Client::new(&pool);
@@ -291,7 +405,51 @@ impl TelegramClient {
     }
 
     /// Инициализация с существующей сессией (без phone/api_hash)
+    #[allow(dead_code)]
     pub async fn init_empty(&self, api_id: u32) -> Result<OperationResult, String> {
+        self.init_empty_with_proxy(api_id, None).await
+    }
+
+    /// Инициализация с существующей сессией с поддержкой прокси
+    pub async fn init_empty_with_proxy(&self, api_id: u32, proxy_url: Option<String>) -> Result<OperationResult, String> {
+        // Determine proxy mode from URL
+        let (proxy_mode, proxy_url_str) = if let Some(ref url) = &proxy_url {
+            let mode = ProxyMode::from_url(url);
+            if mode == ProxyMode::None && !url.is_empty() {
+                warn!(url = %url, "[AUTH] Unknown proxy URL format, using direct connection");
+                (ProxyMode::None, None)
+            } else {
+                (mode, proxy_url.clone())
+            }
+        } else {
+            (ProxyMode::None, None)
+        };
+
+        // Validate and normalize proxy URL
+        let normalized_proxy_url = if let Some(url) = &proxy_url_str {
+            match Self::validate_proxy_url(url, &proxy_mode) {
+                Ok(url) => Some(url),
+                Err(e) => {
+                    error!(error = %e, "[AUTH] Failed to validate proxy URL");
+                    return Err(e);
+                }
+            }
+        } else {
+            None
+        };
+
+        // Update proxy status
+        *self.proxy_status.lock().await = ProxyStatus {
+            mode: proxy_mode.clone(),
+            proxy_url: proxy_url_str.clone(),
+        };
+
+        if let Some(ref url) = proxy_url_str {
+            info!(proxy_url = %url, mode = ?proxy_mode, "[AUTH] Restoring session with proxy");
+        } else {
+            info!("[AUTH] Restoring session without proxy");
+        }
+
         let session_path = Self::get_session_path()?;
 
         // Сохраняем api_id
@@ -306,8 +464,18 @@ impl TelegramClient {
             .map_err(|e| format!("Не удалось создать сессию: {}", e))?;
         let session = Arc::new(session);
 
-        // Создаём SenderPool
-        let pool = SenderPool::new(session, api_id as i32);
+        // Создаём SenderPool with proxy if configured
+        let pool = if let Some(proxy) = normalized_proxy_url {
+            info!("[AUTH] Creating SenderPool with proxy configuration for session restore");
+            let conn_params = ConnectionParams {
+                proxy_url: Some(proxy),
+                ..Default::default()
+            };
+            SenderPool::with_configuration(session, api_id as i32, conn_params)
+        } else {
+            info!("[AUTH] Creating SenderPool without proxy for session restore");
+            SenderPool::new(session, api_id as i32)
+        };
 
         // Создаём клиент
         let client = Client::new(&pool);
@@ -323,6 +491,11 @@ impl TelegramClient {
         *self.updates.lock().await = Some(updates);
 
         Ok(OperationResult::success("Клиент инициализирован с существующей сессией"))
+    }
+
+    /// Get current proxy status
+    pub async fn get_proxy_status(&self) -> ProxyStatus {
+        self.proxy_status.lock().await.clone()
     }
 }
 

@@ -1,19 +1,33 @@
-use crate::telegram::{TelegramClient, UserInfo, TtsResult, SileroTtsBot, CurrentVoice, Limits, get_current_voice, get_limits};
-use crate::config::SettingsManager;
+use crate::telegram::{TelegramClient, UserInfo, TtsResult, SileroTtsBot, CurrentVoice, Limits, get_current_voice, get_limits, ProxyStatus};
+use crate::config::{SettingsManager, ProxyMode};
 use tauri::State;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
+use tracing::info;
 
 /// Глобальное состояние Telegram клиента
 pub struct TelegramState {
     pub client: Arc<Mutex<Option<TelegramClient>>>,
+    /// Cached proxy status (updated on connection changes)
+    proxy_status: Arc<RwLock<ProxyStatus>>,
 }
 
 impl TelegramState {
     pub fn new() -> Self {
         Self {
             client: Arc::new(Mutex::new(None)),
+            proxy_status: Arc::new(RwLock::new(ProxyStatus::default())),
         }
+    }
+
+    /// Get cached proxy status (fast, no lock on client)
+    pub async fn get_proxy_status_cached(&self) -> ProxyStatus {
+        self.proxy_status.read().await.clone()
+    }
+
+    /// Update cached proxy status
+    pub async fn update_proxy_status(&self, status: ProxyStatus) {
+        *self.proxy_status.write().await = status;
     }
 }
 
@@ -27,6 +41,7 @@ impl Default for TelegramState {
 #[tauri::command]
 pub async fn telegram_init(
     state: State<'_, TelegramState>,
+    settings_manager: State<'_, SettingsManager>,
     api_id: u32,
     api_hash: String,
     phone: String,
@@ -42,16 +57,37 @@ pub async fn telegram_init(
         return Err("Номер телефона не может быть пустым".to_string());
     }
 
+    // Load proxy settings
+    let settings = settings_manager.load()
+        .map_err(|e| format!("Failed to load settings: {}", e))?;
+
+    // Get proxy URL based on proxy mode
+    let proxy_url = match settings.tts.telegram.proxy_mode {
+        ProxyMode::None => None,
+        ProxyMode::Socks5 => settings.tts.network.proxy.proxy_url.clone(),
+    };
+
+    info!(proxy_mode = ?settings.tts.telegram.proxy_mode, has_proxy = proxy_url.is_some(), "Initializing Telegram with proxy settings");
+
     // Создаем новый клиент
     let client = TelegramClient::new();
 
-    // Инициализируем - игнорируем результат операции, проверяем только на ошибки
-    client.init(api_id, api_hash, phone).await
+    // Инициализируем с поддержкой прокси
+    client.init_with_proxy(api_id, api_hash, phone, proxy_url).await
         .map_err(|e| format!("Ошибка инициализации клиента: {}", e))?;
 
     // Сохраняем клиент в состоянии
-    let mut state_guard = state.client.lock().await;
-    *state_guard = Some(client);
+    {
+        let mut state_guard = state.client.lock().await;
+        *state_guard = Some(client);
+    }
+
+    // Update cached proxy status
+    let client_guard = state.client.lock().await;
+    if let Some(c) = client_guard.as_ref() {
+        let proxy_status = c.get_proxy_status().await;
+        state.update_proxy_status(proxy_status).await;
+    }
 
     Ok(())
 }
@@ -262,44 +298,60 @@ pub async fn telegram_auto_restore(
     state: State<'_, TelegramState>,
     settings_manager: State<'_, SettingsManager>,
 ) -> Result<bool, String> {
-    tracing::info!("Auto-restoring session...");
+    info!("Auto-restoring session...");
 
     // Загружаем сохранённый api_id из settings.json
     let api_id = match settings_manager.get_telegram_api_id() {
         Some(id) => id as u32, // Convert i64 to u32
         None => {
-            tracing::info!("No saved api_id found");
+            info!("No saved api_id found");
             return Ok(false);
         }
     };
 
-    tracing::debug!(api_id, "Found saved api_id");
+    info!(api_id, "Found saved api_id");
+
+    // Load proxy settings
+    let settings = settings_manager.load()
+        .map_err(|e| format!("Failed to load settings: {}", e))?;
+
+    // Get proxy URL based on proxy mode
+    let proxy_url = match settings.tts.telegram.proxy_mode {
+        ProxyMode::None => None,
+        ProxyMode::Socks5 => settings.tts.network.proxy.proxy_url.clone(),
+    };
+
+    info!(proxy_mode = ?settings.tts.telegram.proxy_mode, has_proxy = proxy_url.is_some(), "Restoring session with proxy settings");
 
     // Создаём новый клиент
     let client = TelegramClient::new();
 
-    // Инициализируем с пустыми данными (сессия уже есть)
-    client.init_empty(api_id).await
+    // Инициализируем с пустыми данными (сессия уже есть) и поддержкой прокси
+    client.init_empty_with_proxy(api_id, proxy_url).await
         .map_err(|e| format!("Ошибка инициализации сессии: {}", e))?;
 
     // Сохраняем клиент в состоянии
     let mut state_guard = state.client.lock().await;
     *state_guard = Some(client);
 
+    // Update cached proxy status
+    if let Some(c) = state_guard.as_ref() {
+        let proxy_status = c.get_proxy_status().await;
+        state.update_proxy_status(proxy_status).await;
+    }
+
     // Проверяем авторизацию
-    drop(state_guard);
-    let client_guard = state.client.lock().await;
-    let is_authorized = if let Some(c) = client_guard.as_ref() {
+    let is_authorized = if let Some(c) = state_guard.as_ref() {
         c.is_authorized().await?
     } else {
         false
     };
 
     if is_authorized {
-        tracing::info!("Session auto-restored successfully");
+        info!("Session auto-restored successfully");
         Ok(true)
     } else {
-        tracing::info!("Session exists but not authorized");
+        info!("Session exists but not authorized");
         Ok(false)
     }
 }

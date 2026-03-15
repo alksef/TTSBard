@@ -25,6 +25,7 @@ export interface OpenAiSettingsDto {
   voice: string
   proxy_host?: string
   proxy_port?: number
+  use_proxy?: boolean
 }
 
 export interface LocalTtsSettingsDto {
@@ -33,6 +34,15 @@ export interface LocalTtsSettingsDto {
 
 export interface TelegramTtsSettingsDto {
   api_id?: number
+  proxy_mode?: string
+}
+
+export interface Socks5SettingsDto {
+  proxy_url?: string
+}
+
+export interface NetworkSettingsDto {
+  proxy: Socks5SettingsDto
 }
 
 export interface TtsSettingsDto {
@@ -40,6 +50,18 @@ export interface TtsSettingsDto {
   openai: OpenAiSettingsDto
   local: LocalTtsSettingsDto
   telegram: TelegramTtsSettingsDto
+  network: NetworkSettingsDto
+}
+
+// ============================================================================
+// Legacy Proxy Settings Types (deprecated, use NetworkSettingsDto)
+// ============================================================================
+
+export type ProxyTypeDto = 'Socks5' | 'Socks4' | 'Http'
+
+export interface ProxySettingsDto {
+  proxy_url?: string
+  proxy_type: ProxyTypeDto
 }
 
 // ============================================================================
