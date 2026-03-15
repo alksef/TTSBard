@@ -39,8 +39,8 @@ pub struct TtsConfig {
     pub provider_type: TtsProviderType,
     pub openai_key: Option<String>,
     pub openai_voice: String,
-    pub openai_proxy_host: Option<String>,
-    pub openai_proxy_port: Option<u16>,
+    /// Unified proxy URL (socks5://, socks4://, http://user:pass@host:port)
+    pub openai_proxy_url: Option<String>,
     pub local_url: String,
 }
 
@@ -50,8 +50,7 @@ impl Default for TtsConfig {
             provider_type: TtsProviderType::OpenAi,
             openai_key: None,
             openai_voice: "alloy".to_string(),
-            openai_proxy_host: None,
-            openai_proxy_port: None,
+            openai_proxy_url: None,
             local_url: "http://127.0.0.1:8124".to_string(),
         }
     }
@@ -277,7 +276,9 @@ impl AppState {
         let config = self.tts_config.read();
         let voice = config.openai_voice.clone();
         tts.set_voice(voice.clone());
-        tts.set_proxy(config.openai_proxy_host.clone(), config.openai_proxy_port);
+        if let Some(proxy_url) = &config.openai_proxy_url {
+            tts.set_proxy(Some(proxy_url.clone()));
+        }
         drop(config);
 
         // Add event sender if available
@@ -285,7 +286,7 @@ impl AppState {
             tts = tts.with_event_tx(event_tx);
         }
 
-        info!(voice, proxy_host = ?tts.get_proxy_host(), "Created OpenAiTts");
+        info!(voice, proxy_url = ?tts.get_proxy_url(), "Created OpenAiTts");
 
         *self.tts_providers.lock() = Some(TtsProvider::OpenAi(tts));
         info!("TTS provider set to OpenAi");
@@ -336,14 +337,13 @@ impl AppState {
     /// Set OpenAI voice (simplified with unified TtsConfig)
     pub fn set_openai_voice(&self, voice: String) {
         // Read current config
-        let (api_key, proxy_host, proxy_port, event_tx, current_provider) = {
+        let (api_key, proxy_url, event_tx, current_provider) = {
             let config = self.tts_config.read();
             let event_tx = self.get_event_sender();
             let provider = self.tts_providers.lock().clone();
             (
                 config.openai_key.clone(),
-                config.openai_proxy_host.clone(),
-                config.openai_proxy_port,
+                config.openai_proxy_url.clone(),
                 event_tx,
                 provider
             )
@@ -353,7 +353,9 @@ impl AppState {
         if let Some(key) = api_key {
             let mut tts = OpenAiTts::new(key);
             tts.set_voice(voice.clone());
-            tts.set_proxy(proxy_host, proxy_port);
+            if let Some(url) = proxy_url {
+                tts.set_proxy(Some(url));
+            }
 
             if let Some(tx) = event_tx {
                 tts = tts.with_event_tx(tx);
@@ -369,17 +371,12 @@ impl AppState {
     }
 
     #[allow(dead_code)]
-    pub fn get_openai_proxy_host(&self) -> Option<String> {
-        self.tts_config.read().openai_proxy_host.clone()
+    pub fn get_openai_proxy_url(&self) -> Option<String> {
+        self.tts_config.read().openai_proxy_url.clone()
     }
 
-    #[allow(dead_code)]
-    pub fn get_openai_proxy_port(&self) -> Option<u16> {
-        self.tts_config.read().openai_proxy_port
-    }
-
-    /// Set OpenAI proxy (simplified with unified TtsConfig)
-    pub fn set_openai_proxy(&self, host: Option<String>, port: Option<u16>) {
+    /// Set OpenAI proxy URL (simplified with unified TtsConfig)
+    pub fn set_openai_proxy(&self, proxy_url: Option<String>) {
         // Read current config
         let (api_key, voice, event_tx, current_provider) = {
             let config = self.tts_config.read();
@@ -397,7 +394,9 @@ impl AppState {
         if let Some(key) = api_key {
             let mut tts = OpenAiTts::new(key);
             tts.set_voice(voice.clone());
-            tts.set_proxy(host.clone(), port);
+            if let Some(url) = &proxy_url {
+                tts.set_proxy(Some(url.clone()));
+            }
 
             if let Some(tx) = event_tx {
                 tts = tts.with_event_tx(tx);
@@ -409,9 +408,22 @@ impl AppState {
         }
 
         // Update proxy settings
-        let mut config = self.tts_config.write();
-        config.openai_proxy_host = host;
-        config.openai_proxy_port = port;
+        self.tts_config.write().openai_proxy_url = proxy_url;
+    }
+
+    /// Legacy method for backward compatibility - converts host/port to URL
+    pub fn set_openai_proxy_legacy(&self, host: Option<String>, port: Option<u16>) {
+        let proxy_url = match (host, port) {
+            (Some(h), Some(p)) => {
+                if h.trim().is_empty() {
+                    None
+                } else {
+                    Some(format!("http://{}:{}", h.trim(), p))
+                }
+            }
+            _ => None,
+        };
+        self.set_openai_proxy(proxy_url);
     }
 
     pub fn get_local_tts_url(&self) -> String {

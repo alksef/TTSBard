@@ -18,8 +18,8 @@ struct TtsRequest {
 pub struct OpenAiTts {
     api_key: String,
     voice: String,
-    proxy_host: Option<String>,
-    proxy_port: Option<u16>,
+    /// Unified proxy URL (socks5://, socks4://, http://user:pass@host:port)
+    proxy_url: Option<String>,
     timeout_secs: u64,
     event_tx: Option<EventSender>,
 }
@@ -29,8 +29,7 @@ impl OpenAiTts {
         Self {
             api_key,
             voice: "alloy".to_string(),
-            proxy_host: None,
-            proxy_port: None,
+            proxy_url: None,
             timeout_secs: DEFAULT_TTS_TIMEOUT_SECS,
             event_tx: None,
         }
@@ -45,33 +44,39 @@ impl OpenAiTts {
         self.voice = voice;
     }
 
-    pub fn set_proxy(&mut self, host: Option<String>, port: Option<u16>) {
-        self.proxy_host = host;
-        self.proxy_port = port;
+    /// Set unified proxy URL (socks5://, socks4://, http://user:pass@host:port)
+    pub fn set_proxy(&mut self, proxy_url: Option<String>) {
+        self.proxy_url = proxy_url;
+    }
+
+    /// Legacy method for backward compatibility - converts host/port to URL
+    #[allow(dead_code)]
+    pub fn set_proxy_legacy(&mut self, host: Option<String>, port: Option<u16>) {
+        self.proxy_url = match (host, port) {
+            (Some(h), Some(p)) => {
+                if h.trim().is_empty() {
+                    None
+                } else {
+                    Some(format!("http://{}:{}", h.trim(), p))
+                }
+            }
+            _ => None,
+        };
     }
 
     #[allow(dead_code)]
-    pub fn get_proxy_host(&self) -> Option<&str> {
-        self.proxy_host.as_deref()
-    }
-
-    #[allow(dead_code)]
-    pub fn get_proxy_port(&self) -> Option<u16> {
-        self.proxy_port
+    pub fn get_proxy_url(&self) -> Option<&str> {
+        self.proxy_url.as_deref()
     }
 
     fn build_client(&self) -> Result<Client, String> {
         let timeout = Duration::from_secs(self.timeout_secs);
 
-        if let (Some(host), Some(port)) = (&self.proxy_host, self.proxy_port) {
-            info!(proxy_host = host, proxy_port = port, "Using proxy");
-            let proxy_url = format!("http://{}:{}", host, port);
-            let proxy = reqwest::Proxy::all(&proxy_url)
-                .map_err(|e| {
-                    error!(error = %e, "Failed to create proxy");
-                    format!("Failed to create proxy: {}", e)
-                })?;
+        if let Some(proxy_url) = &self.proxy_url {
+            // Parse proxy URL to determine type
+            let proxy = self.parse_proxy_url(proxy_url)?;
 
+            info!(proxy_url = %proxy_url, "Using proxy");
             Client::builder()
                 .proxy(proxy)
                 .timeout(timeout)
@@ -90,6 +95,25 @@ impl OpenAiTts {
                     format!("Failed to build client: {}", e)
                 })
         }
+    }
+
+    /// Parse proxy URL and create appropriate reqwest::Proxy
+    fn parse_proxy_url(&self, url: &str) -> Result<reqwest::Proxy, String> {
+        // Validate URL scheme
+        let (scheme, _rest) = url.split_once("://")
+            .ok_or_else(|| format!("Invalid proxy URL: missing scheme"))?;
+
+        // Supported schemes by reqwest: socks5, socks5h, socks4, socks4a, http, https
+        let scheme_lower = scheme.to_lowercase();
+        if !matches!(scheme_lower.as_str(), "socks5" | "socks5h" | "socks4" | "socks4a" | "http" | "https") {
+            return Err(format!("Unsupported proxy URL scheme: {}", scheme));
+        }
+
+        reqwest::Proxy::all(url)
+            .map_err(|e| {
+                error!(error = %e, proxy_url = %url, scheme = %scheme, "Failed to create proxy");
+                format!("Failed to create {} proxy: {}", scheme, e)
+            })
     }
 }
 

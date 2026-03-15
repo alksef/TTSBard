@@ -197,7 +197,8 @@ fn init_tts_provider(
                 info!("OpenAI TTS initialized with API key");
                 app_state.init_openai_tts(api_key_str.clone());
                 app_state.set_openai_voice(settings.tts.openai.voice.clone());
-                app_state.set_openai_proxy(settings.tts.openai.proxy_host.clone(), settings.tts.openai.proxy_port);
+                // Use legacy method to convert host/port to proxy URL
+                app_state.set_openai_proxy_legacy(settings.tts.openai.proxy_host.clone(), settings.tts.openai.proxy_port);
             } else {
                 warn!("OpenAI selected but no API key found");
             }

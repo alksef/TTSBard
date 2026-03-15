@@ -2,11 +2,11 @@
 import { ref, onMounted, onUnmounted, watch, computed, inject, nextTick } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Eye, EyeOff, Bot, HardDrive, Cloud, RefreshCw } from 'lucide-vue-next';
+import { Eye, EyeOff, Bot, HardDrive, Cloud, RefreshCw, LogOut } from 'lucide-vue-next';
 import TelegramAuthModal from './TelegramAuthModal.vue';
 import { TELEGRAM_AUTH_KEY, type UseTelegramAuthReturn } from '../composables/useTelegramAuth';
 import { useTtsSettings } from '../composables/useAppSettings';
-import type { TtsProviderType } from '../types/settings';
+import type { TtsProviderType, NetworkSettingsDto } from '../types/settings';
 import { debugLog, debugError } from '../utils/debug';
 
 interface TtsProviderState {
@@ -16,7 +16,7 @@ interface TtsProviderState {
 }
 
 // State
-const activeProvider = ref<TtsProviderType>('openai');
+const activeProvider = ref<TtsProviderType>('silero');
 const providers = ref<Record<TtsProviderType, TtsProviderState>>({
   openai: { type: 'openai', configured: false, expanded: false },
   silero: { type: 'silero', configured: false, expanded: false },
@@ -30,9 +30,11 @@ const ttsSettings = useTtsSettings();
 const openaiApiKey = ref('');
 const openaiVoice = ref('alloy');
 const openaiVoices = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'];
-const openaiProxyHost = ref('');
-const openaiProxyPort = ref<number | null>(null);
+const openaiUseProxy = ref(false);
 const showOpenApiKey = ref(false);
+
+// Network/proxy settings (from unified settings)
+const networkSettings = ref<NetworkSettingsDto | null>(null);
 
 // local TTS settings
 const localTtsUrl = ref('http://127.0.0.1:8124');
@@ -46,29 +48,65 @@ const {
   errorMessage: telegramErrorMessage,
   hasError: telegramHasError,
   signOut: signOutTelegram,
-  currentVoice,
-  refreshVoice,
-  refreshLimits,
-  limits,
-  loading: telegramLoading
+  currentVoice
+  // refreshVoice,  // Reserved for future use
+  // refreshLimits,  // Reserved for future use
+  // limits  // Reserved for future use
 } = telegramAuth;
 
 // silero error state
 const sileroError = ref<string | null>(null);
 
+// Telegram proxy state
+const telegramProxyMode = ref<string>('none');
+const telegramProxyModes = [
+  { value: 'none', label: 'Нет' },
+  { value: 'socks5', label: 'SOCKS5' }
+];
+
+// Proxy test state (reserved for future use)
+// const testingProxy = ref(false);
+// const proxyTestResult = ref<{
+//   success: boolean
+//   latency_ms?: number
+//   mode: string
+//   error?: string
+// } | null>(null);
+
+// Telegram reconnection state
+const reconnectingTelegram = ref(false);
+const telegramConnectionStatus = ref<string | null>(null);
+
+// Current Telegram proxy status (from backend)
+const currentTelegramProxyStatus = ref<{
+  mode: string
+  proxy_url: string | null
+} | null>(null);
+
 // Error state
-const errorMessage = ref('');
+const statusMessage = ref('');
+const statusType = ref<'success' | 'error'>('error');
+let statusTimeout: ReturnType<typeof setTimeout> | null = null;
 let errorTimeout: ReturnType<typeof setTimeout> | null = null;
 // Store listener cleanup function
 let unlistenTtsError: (() => void) | null = null;
 
 // Methods
+function showStatus(message: string, type: 'success' | 'error' = 'error') {
+  statusMessage.value = message;
+  statusType.value = type;
+  if (statusTimeout) clearTimeout(statusTimeout);
+  statusTimeout = setTimeout(() => {
+    statusMessage.value = '';
+  }, 3000);
+}
+
 function showError(message: string) {
-  errorMessage.value = message;
-  if (errorTimeout) clearTimeout(errorTimeout);
-  errorTimeout = setTimeout(() => {
-    errorMessage.value = '';
-  }, 5000);
+  showStatus(message, 'error');
+}
+
+function showSuccess(message: string) {
+  showStatus(message, 'success');
 }
 
 function toggleProvider(provider: TtsProviderType) {
@@ -84,33 +122,133 @@ async function saveOpenAiSettings() {
     return;
   }
 
-  // Validate Proxy (both or none)
-  const host = openaiProxyHost.value.trim() || null;
-  const port = openaiProxyPort.value;
-
-  if ((host && !port) || (!host && port)) {
-    showError('Укажите оба параметра прокси: хост и порт');
-    return;
-  }
-
   try {
     // Save API Key
     debugLog('[TTS] Saving API Key...');
     await invoke('set_openai_api_key', { key: openaiApiKey.value });
     providers.value.openai.configured = true;
 
-    // Save Proxy
-    debugLog('[TTS] Saving Proxy:', host, port);
-    await invoke('set_openai_proxy', {
-      host,
-      port
-    });
-
     debugLog('[TTS] OpenAI settings saved successfully');
     showError('Настройки сохранены');
   } catch (error) {
     debugError('[TTS] Failed to save OpenAI settings:', error);
     showError(error as string);
+  }
+}
+
+async function toggleOpenAiUseProxy() {
+  try {
+    await invoke('set_openai_use_proxy', { enabled: openaiUseProxy.value });
+    debugLog('[TTS] OpenAI use proxy toggled:', openaiUseProxy.value);
+
+    // Apply proxy to active OpenAI provider if OpenAI is the active provider
+    if (activeProvider.value === 'openai') {
+      await invoke('apply_openai_proxy_settings');
+      debugLog('[TTS] Applied proxy settings to OpenAI provider');
+    }
+
+    showError(openaiUseProxy.value ? 'Прокси включён' : 'Прокси выключен');
+  } catch (error) {
+    debugError('[TTS] Failed to toggle OpenAI proxy:', error);
+    showError(error as string);
+    // Revert the toggle on error
+    openaiUseProxy.value = !openaiUseProxy.value;
+  }
+}
+
+// Load current Telegram proxy status from backend
+async function loadTelegramProxyStatus() {
+  if (!telegramConnected.value) {
+    currentTelegramProxyStatus.value = null;
+    return;
+  }
+
+  try {
+    const status = await invoke<{
+      mode: string
+      proxy_url: string | null
+    }>('get_telegram_proxy_status');
+    currentTelegramProxyStatus.value = status;
+    debugLog('[TTS] Telegram proxy status loaded:', status);
+  } catch (error) {
+    debugError('[TTS] Failed to load Telegram proxy status:', error);
+    // Don't show error to user, just log it
+    currentTelegramProxyStatus.value = null;
+  }
+}
+
+// Test proxy connection - reserved for future use
+// async function testProxyConnection() {
+//   if (!networkSettings.value?.proxy.proxy_url) {
+//     showError('Настройте прокси в настройках приложения');
+//     return;
+//   }
+//
+//   // Parse proxy URL to get type, host, port
+//   const url = networkSettings.value.proxy.proxy_url;
+//   const urlMatch = url.match(/^(socks5|socks4|https?):\/\/([^:]+):(\d+)/);
+//
+//   if (!urlMatch) {
+//     showError('Неверный формат прокси URL');
+//     return;
+//   }
+//
+//   const [, proxyType, host, port] = urlMatch;
+//
+//   testingProxy.value = true;
+//   proxyTestResult.value = null;
+//
+//   try {
+//     const result = await invoke<{
+//       success: boolean
+//       latency_ms?: number
+//       mode: string
+//       error?: string
+//     }>('test_proxy', {
+//       proxyType,
+//       host,
+//       port: parseInt(port, 10),
+//       timeoutSecs: 5
+//     });
+//
+//     proxyTestResult.value = result;
+//
+//     if (result.success) {
+//       showError(`Подключено через ${result.mode} (${result.latency_ms}мс)`);
+//     } else {
+//       showError(`Ошибка подключения: ${result.error || 'Неизвестная ошибка'}`);
+//     }
+//   } catch (error) {
+//     debugError('[TTS] Failed to test proxy:', error);
+//     showError(error as string);
+//   } finally {
+//     testingProxy.value = false;
+//   }
+// }
+
+async function reconnectTelegram() {
+  reconnectingTelegram.value = true;
+  telegramConnectionStatus.value = null;
+
+  try {
+    // First save the current proxy mode selection
+    await invoke('set_telegram_proxy_mode', { mode: telegramProxyMode.value });
+    debugLog('[TTS] Telegram proxy mode saved before reconnect:', telegramProxyMode.value);
+
+    // Then reconnect with new settings
+    const result = await invoke<string>('reconnect_telegram');
+    telegramConnectionStatus.value = result;
+    debugLog('[TTS] Telegram reconnected:', result);
+
+    // Load proxy status after reconnection
+    await loadTelegramProxyStatus();
+
+    showSuccess('Telegram переподключён');
+  } catch (error) {
+    debugError('[TTS] Failed to reconnect Telegram:', error);
+    showError(error as string);
+  } finally {
+    reconnectingTelegram.value = false;
   }
 }
 
@@ -166,29 +304,43 @@ async function handleSignOut() {
   sileroError.value = null;
 }
 
-async function handleRefreshVoice() {
-  await refreshVoice();
-}
+// Reserved for future voice refresh functionality
+// async function handleRefreshVoice() {
+//   await refreshVoice();
+// }
 
-// Computed property for voice display text
-const voiceDisplayText = computed(() => {
-  if (currentVoice.value) {
-    return `${currentVoice.value.name} (${currentVoice.value.id})`;
-  }
-  return 'Не загружен';
-});
+// Reserved for future voice display functionality
+// const voiceDisplayText = computed(() => {
+//   if (currentVoice.value) {
+//     return `${currentVoice.value.name} (${currentVoice.value.id})`;
+//   }
+//   return 'Не загружен';
+// });
 
-// Computed property for limits display text
-const limitsDisplayText = computed(() => {
-  if (limits.value) {
-    return `Открытые голоса: ${limits.value.voices}`;
-  }
-  return 'Не загружен';
-});
+// Reserved for future limits display functionality
+// const limitsDisplayText = computed(() => {
+//   if (limits.value) {
+//     return `Открытые голоса: ${limits.value.voices}`;
+//   }
+//   return 'Не загружен';
+// });
 
 // Computed property for local TTS description
 const localTtsDescription = computed(() => {
   return `Обратная совместимость с TTSVoiceWizard. Запросы к ${localTtsUrl.value}`;
+});
+
+// Computed property for proxy mode label in status
+// Uses actual backend proxy status if available, otherwise falls back to settings
+const proxyModeLabel = computed(() => {
+  // ONLY use backend status - this represents the actual active connection
+  if (currentTelegramProxyStatus.value) {
+    const mode = currentTelegramProxyStatus.value.mode;
+    if (mode === 'none') return '';
+    if (mode === 'socks5') return 'SOCKS5';
+  }
+  // No backend status = no proxy label (don't show UI settings as connection status)
+  return '';
 });
 
 // Watch for Telegram errors
@@ -200,6 +352,11 @@ watch([telegramErrorMessage, telegramHasError], () => {
 watch(telegramConnected, (newValue) => {
   if (newValue) {
     sileroError.value = null;
+    // Load actual proxy status from backend when connected
+    loadTelegramProxyStatus();
+  } else {
+    // Clear proxy status when disconnected
+    currentTelegramProxyStatus.value = null;
   }
 });
 
@@ -227,12 +384,21 @@ watch(ttsSettings, (newSettings) => {
     if (newSettings.openai.voice) {
       openaiVoice.value = newSettings.openai.voice;
     }
-    if (newSettings.openai.proxy_host !== undefined) {
-      openaiProxyHost.value = newSettings.openai.proxy_host || '';
+    if (newSettings.openai.use_proxy !== undefined) {
+      openaiUseProxy.value = newSettings.openai.use_proxy;
     }
-    if (newSettings.openai.proxy_port !== undefined) {
-      openaiProxyPort.value = newSettings.openai.proxy_port || null;
-    }
+  }
+
+  // Update Telegram proxy mode
+  if (newSettings.telegram?.proxy_mode) {
+    telegramProxyMode.value = newSettings.telegram.proxy_mode;
+  }
+
+  // Update network settings (unified proxy settings)
+  if (newSettings.network) {
+    networkSettings.value = {
+      proxy: { proxy_url: newSettings.network.proxy.proxy_url }
+    };
   }
 
   // Update local TTS URL
@@ -261,93 +427,16 @@ onUnmounted(() => {
 
 <template>
   <div class="tts-panel">
-    <!-- Error Message -->
-    <div v-if="errorMessage" class="error-box">
-      {{ errorMessage }}
-    </div>
+    <!-- Status Message -->
+    <Transition name="fade-slide">
+      <div v-if="statusMessage" class="status-message" :class="statusType">
+        <span>{{ statusMessage }}</span>
+      </div>
+    </Transition>
 
     <!-- Provider Cards -->
     <div class="provider-cards">
-      <!-- OpenAI Provider -->
-      <div
-        class="provider-card"
-        :class="{ active: activeProvider === 'openai' }"
-      >
-        <div class="card-header">
-          <input
-            type="radio"
-            :checked="activeProvider === 'openai'"
-            @change="setActiveProvider('openai')"
-            @click.stop
-          />
-          <Cloud :size="18" class="provider-icon" />
-          <span class="card-title" @click="toggleProvider('openai')">OpenAI TTS</span>
-          <span class="expand-icon" @click="toggleProvider('openai')">{{ providers.openai.expanded ? '▼' : '▶' }}</span>
-        </div>
-
-        <div v-if="providers.openai.expanded" class="card-content">
-          <!-- API Key -->
-          <div class="setting-group">
-            <label>Ключ API</label>
-            <div class="input-with-toggle">
-              <input
-                v-model="openaiApiKey"
-                :type="showOpenApiKey ? 'text' : 'password'"
-                class="text-input"
-                placeholder="sk-..."
-              />
-              <button
-                type="button"
-                class="toggle-icon-button"
-                @click="showOpenApiKey = !showOpenApiKey"
-                :title="showOpenApiKey ? 'Скрыть' : 'Показать'"
-              >
-                <Eye v-if="!showOpenApiKey" :size="18" />
-                <EyeOff v-else :size="18" />
-              </button>
-            </div>
-            <small>Требуется для работы OpenAI TTS</small>
-          </div>
-
-          <!-- Proxy -->
-          <div class="setting-group">
-            <label>Прокси (опционально)</label>
-            <div class="proxy-inputs">
-              <input
-                v-model="openaiProxyHost"
-                type="text"
-                placeholder="localhost"
-                class="proxy-host"
-              />
-              <input
-                v-model.number="openaiProxyPort"
-                type="number"
-                placeholder="8080"
-                class="proxy-port"
-              />
-            </div>
-            <small>Прокси только для запросов OpenAI. Оставьте пустым для прямого подключения.</small>
-          </div>
-
-          <!-- Unified Save Button -->
-          <div class="setting-group">
-            <button @click="saveOpenAiSettings" class="save-settings-button">Сохранить</button>
-          </div>
-
-          <!-- Voice (auto-saves on change) -->
-          <div class="setting-group">
-            <label>Голос</label>
-            <select v-model="openaiVoice" @change="saveOpenAiVoice">
-              <option v-for="voice in openaiVoices" :key="voice" :value="voice">
-                {{ voice }}
-              </option>
-            </select>
-            <small>Выберите голос для синтеза речи (сохраняется автоматически)</small>
-          </div>
-        </div>
-      </div>
-
-      <!-- silero Provider -->
+      <!-- Silero Provider -->
       <div
         class="provider-card"
         :class="{
@@ -392,7 +481,11 @@ onUnmounted(() => {
                   {{ telegramStatus.first_name }} {{ telegramStatus.last_name }}
                   <span v-if="telegramStatus.username">@{{ telegramStatus.username }}</span>
                 </p>
+                <p v-if="proxyModeLabel" class="status-proxy">через {{ proxyModeLabel }}</p>
               </div>
+              <button class="status-signout-button" @click="handleSignOut" title="Выйти">
+                <LogOut :size="16" />
+              </button>
             </div>
             <div v-else class="status-disconnected">
               <div class="status-indicator disconnected"></div>
@@ -403,8 +496,8 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- Current Voice Display -->
-          <div v-if="telegramConnected" class="current-voice-display">
+          <!-- Current Voice Display - hidden -->
+          <!-- <div v-if="telegramConnected" class="current-voice-display">
             <div class="voice-info">
               <span class="voice-label">Текущий голос:</span>
               <span class="voice-value" :class="{ 'voice-error': telegramErrorMessage && !currentVoice }">
@@ -419,10 +512,10 @@ onUnmounted(() => {
             >
               <RefreshCw :size="14" />
             </button>
-          </div>
+          </div> -->
 
-          <!-- Limits Display -->
-          <div v-if="telegramConnected" class="limits-display">
+          <!-- Limits Display - hidden -->
+          <!-- <div v-if="telegramConnected" class="limits-display">
             <div class="limits-info">
               <span class="limits-label">Лимиты:</span>
               <span class="limits-value" :class="{ 'limits-error': telegramErrorMessage && !limits }">
@@ -437,28 +530,53 @@ onUnmounted(() => {
             >
               <RefreshCw :size="14" />
             </button>
-          </div>
+          </div> -->
 
           <!-- Voice Error Message -->
           <div v-if="telegramConnected && telegramErrorMessage && !currentVoice" class="voice-error-message">
             ⚠️ {{ telegramErrorMessage }}
           </div>
 
+          <!-- Proxy Settings -->
+          <div v-if="telegramConnected" class="setting-group">
+            <div class="proxy-settings-row">
+              <div class="proxy-select-row">
+                <div class="form-field">
+                  <label>Прокси:</label>
+                  <select
+                    v-model="telegramProxyMode"
+                    class="network-select"
+                  >
+                    <option
+                      v-for="mode in telegramProxyModes"
+                      :key="mode.value"
+                      :value="mode.value"
+                    >
+                      {{ mode.label }}
+                    </option>
+                  </select>
+                </div>
+              </div>
+              <button
+                @click="reconnectTelegram"
+                :disabled="reconnectingTelegram"
+                class="reconnect-button-fixed"
+                :title="'Переподключить Telegram'"
+              >
+                <RefreshCw v-if="reconnectingTelegram" :size="14" class="spin-icon" />
+                <RefreshCw v-else :size="14" />
+                {{ reconnectingTelegram ? 'Переподключение...' : 'Переподключить' }}
+              </button>
+            </div>
+          </div>
+
           <!-- Connect Button -->
-          <div class="setting-group">
+          <div v-if="!telegramConnected" class="setting-group">
             <button
-              v-if="!telegramConnected"
               class="telegram-connect-button"
               @click="openTelegramModal"
             >
               Подключить Telegram
-            </button>
-            <button
-              v-else
-              class="telegram-disconnect-button"
-              @click="handleSignOut"
-            >
-              Выйти
             </button>
           </div>
 
@@ -471,6 +589,83 @@ onUnmounted(() => {
               <li>Убедитесь, что в боте <strong>@sileroBot</strong> включены голосовые сообщения</li>
               <li>TTS работает через отправку сообщений в бота и получение голосового ответа</li>
             </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- OpenAI Provider -->
+      <div
+        class="provider-card"
+        :class="{ active: activeProvider === 'openai' }"
+      >
+        <div class="card-header">
+          <input
+            type="radio"
+            :checked="activeProvider === 'openai'"
+            @change="setActiveProvider('openai')"
+            @click.stop
+          />
+          <Cloud :size="18" class="provider-icon" />
+          <span class="card-title" @click="toggleProvider('openai')">OpenAI TTS</span>
+          <span class="expand-icon" @click="toggleProvider('openai')">{{ providers.openai.expanded ? '▼' : '▶' }}</span>
+        </div>
+
+        <div v-if="providers.openai.expanded" class="card-content">
+          <!-- API Key -->
+          <div class="setting-group">
+            <div class="openai-api-row">
+              <label>Ключ API:</label>
+              <div class="input-with-toggle">
+                <input
+                  v-model="openaiApiKey"
+                  :type="showOpenApiKey ? 'text' : 'password'"
+                  class="text-input"
+                  placeholder="sk-..."
+                />
+                <button
+                  type="button"
+                  class="toggle-icon-button"
+                  @click="showOpenApiKey = !showOpenApiKey"
+                  :title="showOpenApiKey ? 'Скрыть' : 'Показать'"
+                >
+                  <Eye v-if="!showOpenApiKey" :size="18" />
+                  <EyeOff v-else :size="18" />
+                </button>
+              </div>
+              <button @click="saveOpenAiSettings" class="save-settings-button openai-save-button">Сохранить</button>
+            </div>
+          </div>
+
+          <!-- Voice (auto-saves on change) -->
+          <div class="setting-group">
+            <div class="form-field">
+              <label>Голос:</label>
+              <select
+                v-model="openaiVoice"
+                @change="saveOpenAiVoice"
+                class="network-select"
+              >
+                <option v-for="voice in openaiVoices" :key="voice" :value="voice">
+                  {{ voice }}
+                </option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Proxy -->
+          <div class="setting-group">
+            <div class="proxy-checkbox-container">
+              <input
+                id="openai-use-proxy"
+                type="checkbox"
+                v-model="openaiUseProxy"
+                @change="toggleOpenAiUseProxy"
+                class="proxy-checkbox"
+              />
+              <label for="openai-use-proxy" class="proxy-checkbox-label openai-proxy-label">
+                Использовать SOCKS5
+              </label>
+            </div>
           </div>
         </div>
       </div>
@@ -499,16 +694,16 @@ onUnmounted(() => {
 
         <div v-if="providers.local.expanded" class="card-content">
           <div class="setting-group">
-            <label>URL сервера</label>
-            <div class="input-with-button">
+            <div class="local-url-row">
+              <label>URL:</label>
               <input
                 v-model="localTtsUrl"
                 type="text"
                 placeholder="http://127.0.0.1:8124"
+                class="local-url-input"
               />
               <button @click="saveLocalTtsUrl" class="save-url-button">Сохранить</button>
             </div>
-            <small>URL вашего локального TTS сервера (например, TTSVoiceWizard/TITTS.py)</small>
           </div>
         </div>
       </div>
@@ -601,8 +796,12 @@ onUnmounted(() => {
 }
 
 .card-content {
-  padding: 0 16px 16px;
+  padding: 0 16px 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.card-content .setting-group {
+  margin-bottom: 8px !important;
 }
 
 .placeholder {
@@ -614,6 +813,11 @@ onUnmounted(() => {
 
 .setting-group {
   margin-top: 16px;
+  margin-bottom: 12px;
+}
+
+.setting-group:last-child {
+  margin-bottom: 0;
 }
 
 .setting-group label {
@@ -691,8 +895,7 @@ onUnmounted(() => {
 }
 
 .save-settings-button {
-  width: 100%;
-  padding: 12px 20px;
+  padding: 0.6rem 1.2rem;
   background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
   border: none;
   border-radius: 10px;
@@ -701,28 +904,56 @@ onUnmounted(() => {
   font-weight: 600;
   cursor: pointer;
   transition: background 0.2s;
-  margin-top: 8px;
 }
 
 .save-settings-button:hover {
   filter: brightness(1.06);
 }
 
-/* Input with button (local TTS) */
-.input-with-button {
+/* Local URL row - label, input and button in one line */
+.local-url-row {
   display: flex;
-  gap: 8px;
   align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
-.input-with-button input {
+.local-url-row label {
+  min-width: fit-content;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+  margin-bottom: 0;
+}
+
+.local-url-row input[type="text"].local-url-input {
   flex: 1;
+  min-width: 200px;
+  width: auto;
+  padding: 10px 12px;
+  margin: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-primary);
+  font-size: 14px;
+  transition: all 0.15s ease;
 }
 
-.save-url-button {
-  height: 38px;
-  padding: 0 16px;
-  margin-top: -10px;
+.local-url-row input[type="text"].local-url-input:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.local-url-row input[type="text"].local-url-input:focus {
+  outline: none;
+  border-color: rgba(29, 140, 255, 0.5);
+  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
+}
+
+.local-url-row .save-url-button {
+  padding: 0.6rem 1.2rem;
+  margin: 0;
   background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
   border: none;
   border-radius: 10px;
@@ -735,8 +966,33 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-.save-url-button:hover {
+.local-url-row .save-url-button:hover {
   filter: brightness(1.06);
+}
+
+/* OpenAI API row - label, input with toggle and save button in one line */
+.openai-api-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.openai-api-row label {
+  min-width: fit-content;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.openai-api-row .input-with-toggle {
+  flex: 1;
+  min-width: 200px;
+}
+
+.openai-api-row .openai-save-button {
+  flex-shrink: 0;
+  margin-bottom: 8px;
 }
 
 .setting-group small {
@@ -746,50 +1002,51 @@ onUnmounted(() => {
   font-size: 12px;
 }
 
-.proxy-inputs {
+/* Status Message - fixed bubble at top */
+.status-message {
+  position: fixed;
+  top: 20px;
+  left: calc(50% + 100px);
+  transform: translateX(-50%);
   display: flex;
+  align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
+  padding: 0.4rem 0.75rem;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  z-index: 1000;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+  white-space: nowrap;
 }
 
-.proxy-inputs .proxy-host,
-.proxy-inputs .proxy-port {
-  flex: 2;
-  padding: 0.5rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 10px;
-  font-size: 14px;
-  background: var(--color-bg-field);
-  color: var(--color-text-primary);
-  box-sizing: border-box;
-  height: 38px;
+.status-message.success {
+  background: rgba(74, 222, 128, 0.92);
+  border: 1px solid rgba(74, 222, 128, 0.4);
+  color: #0d4d1f;
 }
 
-.proxy-inputs .proxy-host:focus,
-.proxy-inputs .proxy-port:focus {
-  outline: none;
-  border-color: rgba(29, 140, 255, 0.5);
-  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
+.status-message.error {
+  background: rgba(255, 111, 105, 0.92);
+  border: 1px solid rgba(255, 111, 105, 0.4);
+  border-left: 4px solid rgba(255, 59, 48, 0.8);
+  color: #4a0d0d;
 }
 
-/* Remove spinner from number input */
-.proxy-inputs .proxy-port::-webkit-inner-spin-button,
-.proxy-inputs .proxy-port::-webkit-outer-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
+/* Fade-slide transition for status bubble */
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: all 0.3s ease;
 }
 
-.proxy-inputs .proxy-port {
-  -moz-appearance: textfield;
+.fade-slide-enter-from {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-20px);
 }
 
-.error-box {
-  background: rgba(255, 111, 105, 0.12);
-  border: 1px solid rgba(255, 111, 105, 0.24);
-  border-radius: 12px;
-  padding: 12px;
-  margin-bottom: 16px;
-  color: #ffb8b4;
+.fade-slide-leave-to {
+  opacity: 0;
 }
 
 /* Telegram Styles */
@@ -798,6 +1055,7 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
+  margin-top: 8px;
   margin-bottom: 16px;
 }
 
@@ -805,6 +1063,7 @@ onUnmounted(() => {
 .status-disconnected {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
 }
 
@@ -893,6 +1152,26 @@ onUnmounted(() => {
   background: rgba(255, 111, 105, 0.24);
 }
 
+/* Sign out button in status */
+.status-signout-button {
+  padding: 6px;
+  background: rgba(255, 111, 105, 0.05);
+  border: 1px solid rgba(255, 111, 105, 0.12);
+  border-radius: 8px;
+  color: var(--color-danger);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.status-signout-button:hover {
+  background: rgba(255, 111, 105, 0.12);
+  color: #ff8f8a;
+}
+
 .telegram-info {
   padding: 16px;
   background: rgba(29, 140, 255, 0.1);
@@ -932,6 +1211,131 @@ onUnmounted(() => {
 
 .info-list a:hover {
   text-decoration: underline;
+}
+
+/* Setting label with badge */
+.setting-label-with-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.setting-label-with-badge label {
+  margin: 0;
+}
+
+/* Proxy settings row - contains select and reconnect button */
+.proxy-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* Proxy select row - matches NetworkPanel form-row pattern */
+.proxy-select-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.proxy-select-row .form-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.proxy-select-row label {
+  min-width: fit-content;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.proxy-select-row .network-select {
+  width: fit-content;
+  min-width: 100px;
+}
+
+/* Form field - for inline label + input/select */
+.form-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.setting-group .form-field label {
+  display: inline;
+  min-width: fit-content;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.setting-group .form-field .network-select {
+  width: fit-content;
+  min-width: 100px;
+}
+
+/* Network select - matches NetworkPanel styling */
+.network-select {
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-primary);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.network-select:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.network-select:focus {
+  outline: none;
+  border-color: rgba(29, 140, 255, 0.5);
+  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
+}
+
+.network-select option {
+  background: #1e1e1e;
+  color: var(--color-text-primary);
+  padding: 0.3rem 0.5rem;
+}
+
+/* Reconnect button - fixed width, always blue */
+.reconnect-button-fixed {
+  padding: 0.6rem 1.5rem;
+  margin-bottom: 8px;
+  background: rgba(29, 140, 255, 0.16);
+  border: 1px solid rgba(29, 140, 255, 0.3);
+  color: white;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 180px;
+}
+
+.reconnect-button-fixed:hover:not(:disabled) {
+  background: rgba(29, 140, 255, 0.26);
+  border-color: rgba(29, 140, 255, 0.5);
+}
+
+.reconnect-button-fixed:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .info-list strong {
@@ -1136,5 +1540,80 @@ onUnmounted(() => {
   font-size: 13px;
   color: #ffb8b4;
   line-height: 1.5;
+}
+
+/* Proxy checkbox container */
+.proxy-checkbox-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.proxy-checkbox {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: var(--color-accent);
+}
+
+.proxy-checkbox-label {
+  cursor: pointer;
+  user-select: none;
+  font-size: 14px;
+  color: var(--color-text-primary);
+}
+
+.setting-group .openai-proxy-label {
+  margin-bottom: 0;
+}
+
+.spin-icon {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Status proxy info */
+.status-proxy {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--color-accent);
+  font-weight: 500;
+}
+
+/* Small reconnect button */
+.reconnect-button-small {
+  width: 100%;
+  padding: 8px 12px;
+  background: rgba(29, 140, 255, 0.1);
+  border: 1px solid rgba(29, 140, 255, 0.3);
+  border-radius: 8px;
+  color: var(--color-text-primary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.reconnect-button-small:hover:not(:disabled) {
+  background: rgba(29, 140, 255, 0.2);
+  border-color: rgba(29, 140, 255, 0.4);
+}
+
+.reconnect-button-small:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 </style>

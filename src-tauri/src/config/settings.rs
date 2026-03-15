@@ -56,6 +56,8 @@ pub struct TtsSettings {
     pub openai: OpenAiSettings,
     pub local: LocalTtsSettings,
     pub telegram: TelegramTtsSettings,
+    #[serde(default)]
+    pub network: NetworkSettings,
 }
 
 impl Default for TtsSettings {
@@ -65,29 +67,7 @@ impl Default for TtsSettings {
             openai: OpenAiSettings::default(),
             local: LocalTtsSettings::default(),
             telegram: TelegramTtsSettings::default(),
-        }
-    }
-}
-
-/// OpenAI TTS settings
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct OpenAiSettings {
-    pub api_key: Option<String>,
-    #[serde(default = "default_openai_voice")]
-    pub voice: String,
-    pub proxy_host: Option<String>,
-    pub proxy_port: Option<u16>,
-}
-
-fn default_openai_voice() -> String { "alloy".to_string() }
-
-impl Default for OpenAiSettings {
-    fn default() -> Self {
-        Self {
-            api_key: None,
-            voice: "alloy".to_string(),
-            proxy_host: None,
-            proxy_port: None,
+            network: NetworkSettings::default(),
         }
     }
 }
@@ -116,6 +96,127 @@ impl Default for LocalTtsSettings {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct TelegramTtsSettings {
     pub api_id: Option<i64>,
+    #[serde(default)]
+    pub proxy_mode: ProxyMode,
+}
+
+/// Proxy mode for Telegram connection
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ProxyMode {
+    #[default]
+    None,
+    Socks5,
+}
+
+impl ProxyMode {
+    /// Detect proxy mode from URL scheme
+    ///
+    /// Returns the appropriate ProxyMode based on the URL prefix.
+    /// Unknown URLs return None.
+    pub fn from_url(url: &str) -> Self {
+        let url_lower = url.to_lowercase();
+        if url_lower.starts_with("socks5://") || url_lower.starts_with("socks5h://") {
+            ProxyMode::Socks5
+        } else {
+            ProxyMode::None
+        }
+    }
+}
+
+// ==================== Network Settings ====================
+
+/// SOCKS5 proxy settings
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Socks5Settings {
+    /// SOCKS5 proxy URL (socks5://user:pass@host:port)
+    pub proxy_url: Option<String>,
+}
+
+impl Default for Socks5Settings {
+    fn default() -> Self {
+        Self {
+            proxy_url: None,
+        }
+    }
+}
+
+/// Unified network settings containing all proxy configurations
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NetworkSettings {
+    /// SOCKS5 proxy settings
+    #[serde(default)]
+    pub proxy: Socks5Settings,
+}
+
+impl Default for NetworkSettings {
+    fn default() -> Self {
+        Self {
+            proxy: Socks5Settings::default(),
+        }
+    }
+}
+
+// ==================== Legacy Proxy Settings (for migration) ====================
+
+/// Legacy proxy settings (deprecated, use NetworkSettings instead)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProxySettings {
+    /// Unified proxy URL (socks5://, socks4://, http://user:pass@host:port)
+    pub proxy_url: Option<String>,
+    /// Proxy type for UI selection
+    #[serde(default)]
+    pub proxy_type: ProxyType,
+}
+
+impl Default for ProxySettings {
+    fn default() -> Self {
+        Self {
+            proxy_url: None,
+            proxy_type: ProxyType::Socks5,
+        }
+    }
+}
+
+/// Proxy type enum
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ProxyType {
+    #[default]
+    Socks5,
+    Socks4,
+    Http,
+}
+
+/// OpenAI TTS settings
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OpenAiSettings {
+    pub api_key: Option<String>,
+    #[serde(default = "default_openai_voice")]
+    pub voice: String,
+    /// Legacy proxy host (for backward compatibility)
+    #[serde(default)]
+    pub proxy_host: Option<String>,
+    /// Legacy proxy port (for backward compatibility)
+    #[serde(default)]
+    pub proxy_port: Option<u16>,
+    /// Use unified proxy from global proxy settings
+    #[serde(default)]
+    pub use_proxy: bool,
+}
+
+fn default_openai_voice() -> String { "alloy".to_string() }
+
+impl Default for OpenAiSettings {
+    fn default() -> Self {
+        Self {
+            api_key: None,
+            voice: "alloy".to_string(),
+            proxy_host: None,
+            proxy_port: None,
+            use_proxy: false,
+        }
+    }
 }
 
 // ==================== Twitch Settings ====================
@@ -549,58 +650,6 @@ impl SettingsManager {
         self.cache.read().tts.openai.voice.clone()
     }
 
-    /// Set OpenAI proxy
-    #[allow(clippy::collapsible_match)]
-    pub fn set_openai_proxy(&self, host: Option<String>, port: Option<u16>) -> Result<()> {
-        // Update both fields atomically
-        let path = self.settings_path();
-        let mut json_value = if path.exists() {
-            let content = fs::read_to_string(&path)
-                .context("Failed to read settings file")?;
-            serde_json::from_str(&content)
-                .context("Failed to parse settings JSON")?
-        } else {
-            serde_json::to_value(AppSettings::default())
-                .context("Failed to create default settings")?
-        };
-
-        // Navigate to tts.openai object
-        if let Some(tts_obj) = json_value.get_mut("tts") {
-            if let Some(openai_obj) = tts_obj.get_mut("openai") {
-                if let Value::Object(map) = openai_obj {
-                    if let Some(host_val) = &host {
-                        map.insert("proxy_host".to_string(), serde_json::to_value(host_val)?);
-                    } else {
-                        map.remove("proxy_host");
-                    }
-                    if let Some(port_val) = port {
-                        map.insert("proxy_port".to_string(), serde_json::to_value(port_val)?);
-                    } else {
-                        map.remove("proxy_port");
-                    }
-                }
-            }
-        }
-
-        let content = serde_json::to_string_pretty(&json_value)
-            .context("Failed to serialize updated settings")?;
-        fs::write(&path, &content)
-            .context("Failed to write settings file")?;
-
-        // Update cache after successful disk write
-        let settings: AppSettings = serde_json::from_str(&content)
-            .context("Failed to parse updated settings")?;
-        *self.cache.write() = settings;
-
-        Ok(())
-    }
-
-    /// Get OpenAI proxy
-    pub fn get_openai_proxy(&self) -> (Option<String>, Option<u16>) {
-        let cache = self.cache.read();
-        (cache.tts.openai.proxy_host.clone(), cache.tts.openai.proxy_port)
-    }
-
     /// Set local TTS URL
     pub fn set_local_tts_url(&self, url: String) -> Result<()> {
         self.update_field("/tts/local/url", &url)
@@ -721,5 +770,81 @@ impl SettingsManager {
     /// Get logging settings
     pub fn get_logging_settings(&self) -> LoggingSettings {
         self.cache.read().logging.clone()
+    }
+
+    // ========== Proxy Settings ==========
+
+    /// Set SOCKS5 proxy URL
+    ///
+    /// Updates the /tts/network/proxy/proxy_url field.
+    ///
+    /// # Arguments
+    /// * `url` - SOCKS5 proxy URL (e.g., socks5://host:port, socks5://user:pass@host:port)
+    pub fn set_socks5_proxy_url(&self, url: String) -> Result<()> {
+        self.update_field("/tts/network/proxy/proxy_url", &Some(url))
+    }
+
+    /// Get SOCKS5 proxy URL
+    ///
+    /// Returns the cached SOCKS5 proxy URL.
+    pub fn get_socks5_proxy_url(&self) -> Option<String> {
+        self.cache.read().tts.network.proxy.proxy_url.clone()
+    }
+
+    // ========== Legacy methods (deprecated) ==========
+
+    /// Set proxy URL and type (legacy, use set_socks5_proxy_url instead)
+    ///
+    /// # Arguments
+    /// * `url` - Proxy URL (e.g., socks5://host:port)
+    /// * `proxy_type` - Type of proxy (ignored, always SOCKS5)
+    #[allow(unused_variables)]
+    pub fn set_proxy_url(&self, url: String, proxy_type: ProxyType) -> Result<()> {
+        // Migrate to new structure
+        self.set_socks5_proxy_url(url)
+    }
+
+    /// Get proxy URL (legacy, use get_socks5_proxy_url instead)
+    pub fn get_proxy_url(&self) -> Option<String> {
+        self.get_socks5_proxy_url()
+    }
+
+    /// Get proxy type (legacy, always returns Socks5)
+    pub fn get_proxy_type(&self) -> ProxyType {
+        ProxyType::Socks5
+    }
+
+    /// Set OpenAI use proxy flag
+    ///
+    /// Updates the /tts/openai/use_proxy field.
+    ///
+    /// # Arguments
+    /// * `enabled` - Whether OpenAI should use the unified proxy
+    pub fn set_openai_use_proxy(&self, enabled: bool) -> Result<()> {
+        self.update_field("/tts/openai/use_proxy", &enabled)
+    }
+
+    /// Get OpenAI use proxy flag
+    ///
+    /// Returns whether OpenAI is configured to use the unified proxy.
+    pub fn get_openai_use_proxy(&self) -> bool {
+        self.cache.read().tts.openai.use_proxy
+    }
+
+    /// Set Telegram proxy mode
+    ///
+    /// Updates the /tts/telegram/proxy_mode field.
+    ///
+    /// # Arguments
+    /// * `mode` - Proxy mode for Telegram (None, Socks5, MtProxy)
+    pub fn set_telegram_proxy_mode(&self, mode: ProxyMode) -> Result<()> {
+        self.update_field("/tts/telegram/proxy_mode", &mode)
+    }
+
+    /// Get Telegram proxy mode
+    ///
+    /// Returns the cached Telegram proxy mode.
+    pub fn get_telegram_proxy_mode(&self) -> ProxyMode {
+        self.cache.read().tts.telegram.proxy_mode.clone()
     }
 }

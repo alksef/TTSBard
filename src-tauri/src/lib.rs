@@ -30,7 +30,7 @@ use tracing_subscriber::{fmt, prelude::*, Registry, EnvFilter};
 use tracing_appender::non_blocking;
 use std::path::PathBuf;
 use anyhow::Context;
-use commands::{speak_text, get_tts_provider, set_tts_provider, get_local_tts_url, set_local_tts_url, get_openai_api_key, set_openai_api_key, get_openai_voice, set_openai_voice, get_openai_proxy, set_openai_proxy, get_interception, set_interception, has_api_key, get_floating_appearance, set_floating_opacity, set_floating_bg_color, set_clickthrough, is_clickthrough_enabled, is_enter_closes_disabled, toggle_interception, toggle_floating_window, show_floating_window_cmd, hide_floating_window_cmd, is_floating_window_visible, quit_app, get_hotkey_enabled, set_hotkey_enabled, get_global_exclude_from_capture, set_global_exclude_from_capture, open_file_dialog, get_output_devices, get_virtual_mic_devices, get_audio_settings, set_speaker_device, set_speaker_enabled, set_speaker_volume, set_virtual_mic_device, enable_virtual_mic, disable_virtual_mic, set_virtual_mic_volume, test_audio_device, set_quick_editor_enabled, get_quick_editor_enabled, hide_main_window, close_floating_window, close_soundpanel_window};
+use commands::{speak_text, get_tts_provider, set_tts_provider, get_local_tts_url, set_local_tts_url, get_openai_api_key, set_openai_api_key, get_openai_voice, set_openai_voice, apply_openai_proxy_settings, get_interception, set_interception, has_api_key, get_floating_appearance, set_floating_opacity, set_floating_bg_color, set_clickthrough, is_clickthrough_enabled, is_enter_closes_disabled, toggle_interception, toggle_floating_window, show_floating_window_cmd, hide_floating_window_cmd, is_floating_window_visible, quit_app, get_hotkey_enabled, set_hotkey_enabled, get_global_exclude_from_capture, set_global_exclude_from_capture, open_file_dialog, get_output_devices, get_virtual_mic_devices, get_audio_settings, set_speaker_device, set_speaker_enabled, set_speaker_volume, set_virtual_mic_device, enable_virtual_mic, disable_virtual_mic, set_virtual_mic_volume, test_audio_device, set_quick_editor_enabled, get_quick_editor_enabled, hide_main_window, close_floating_window, close_soundpanel_window};
 use commands::logging::{get_logging_settings, save_logging_settings};
 use commands::telegram::{telegram_init, telegram_request_code, telegram_sign_in, telegram_sign_out, telegram_get_status, telegram_get_user, telegram_auto_restore};
 use soundpanel::{sp_get_bindings, sp_add_binding, sp_remove_binding, sp_test_sound, sp_is_supported_format, sp_get_floating_appearance, sp_set_floating_opacity, sp_set_floating_bg_color, sp_set_floating_clickthrough, sp_is_floating_clickthrough_enabled};
@@ -224,8 +224,7 @@ pub fn run() {
             set_openai_api_key,
             get_openai_voice,
             set_openai_voice,
-            get_openai_proxy,
-            set_openai_proxy,
+            apply_openai_proxy_settings,
             get_interception,
             set_interception,
             toggle_interception,
@@ -316,6 +315,14 @@ pub fn run() {
             // Logging commands
             get_logging_settings,
             save_logging_settings,
+            // Proxy commands
+            commands::proxy::test_proxy,
+            commands::proxy::get_proxy_settings,
+            commands::proxy::set_proxy_url,
+            commands::proxy::set_openai_use_proxy,
+            commands::proxy::set_telegram_proxy_mode,
+            commands::proxy::get_telegram_proxy_status,
+            commands::proxy::reconnect_telegram,
             // Unified settings commands
             commands::get_all_app_settings,
             commands::is_backend_ready,

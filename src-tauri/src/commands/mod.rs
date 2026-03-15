@@ -24,6 +24,9 @@ pub mod twitch;
 // Logging commands
 pub mod logging;
 
+// Proxy commands
+pub mod proxy;
+
 /// Quit the application
 #[tauri::command]
 pub fn quit_app(app_handle: AppHandle) -> Result<(), String> {
@@ -369,36 +372,45 @@ pub fn set_openai_voice(
     Ok(())
 }
 
-/// Get OpenAI proxy settings
+/// Apply OpenAI proxy settings from unified config to active provider
+///
+/// This command reads the use_proxy flag and applies the appropriate proxy settings
+/// to the active OpenAI TTS provider.
 #[tauri::command]
-pub fn get_openai_proxy(
+pub fn apply_openai_proxy_settings(
+    state: State<'_, AppState>,
     settings_manager: State<'_, SettingsManager>,
-) -> (Option<String>, Option<u16>) {
-    settings_manager.get_openai_proxy()
-}
-
-/// Set OpenAI proxy settings
-#[tauri::command]
-pub fn set_openai_proxy(
-    _state: State<'_, AppState>,
-    settings_manager: State<'_, SettingsManager>,
-    host: Option<String>,
-    port: Option<u16>,
 ) -> Result<(), String> {
-    // Validate: both or neither must be set
-    match (&host, port) {
-        (Some(h), Some(_)) => {
-            if h.trim().is_empty() {
-                return Err("Хост прокси не может быть пустым".into());
-            }
-        }
-        (None, None) => {}
-        _ => return Err("Укажите оба параметра: хост и порт".into()),
-    }
+    // Load settings to check if proxy is enabled
+    let settings = settings_manager.load()
+        .map_err(|e| format!("Failed to load settings: {}", e))?;
 
-    // Save to config
-    settings_manager.set_openai_proxy(host, port)
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    // Determine proxy URL to use
+    let proxy_url = if settings.tts.openai.use_proxy {
+        // Use unified proxy from global settings
+        settings.tts.network.proxy.proxy_url.clone()
+    } else {
+        // Use legacy OpenAI proxy settings
+        if let (Some(host), Some(port)) = (&settings.tts.openai.proxy_host, settings.tts.openai.proxy_port) {
+            if !host.trim().is_empty() {
+                Some(format!("http://{}:{}", host.trim(), port))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    };
+
+    // Log proxy info before moving proxy_url
+    tracing::info!(
+        use_proxy = settings.tts.openai.use_proxy,
+        has_proxy_url = proxy_url.is_some(),
+        "Applying OpenAI proxy settings"
+    );
+
+    // Apply proxy to state (which updates the active provider if OpenAI is active)
+    state.set_openai_proxy(proxy_url);
 
     Ok(())
 }
