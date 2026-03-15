@@ -558,6 +558,9 @@ watch(audioSettingsFromComposable, (newSettings) => {
   align-items: center;
   gap: 12px;
   margin-bottom: 12px;
+  flex-wrap: nowrap;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .setting-row:last-child {
@@ -593,11 +596,17 @@ watch(audioSettingsFromComposable, (newSettings) => {
   gap: 8px;
   flex: 1;
   align-items: center;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .input-with-action select {
   flex: 1;
   min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .test-btn {
