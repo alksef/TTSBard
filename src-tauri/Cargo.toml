@@ -53,11 +53,11 @@ tracing-appender = "0.2"
 tower-http = { version = "0.5", features = ["fs", "cors"] }
 
 # Telegram client
-# Using fork with MTProxy support from https://github.com/alksef/grammers
-grammers-client = { git = "https://github.com/alksef/grammers", branch = "master", features = ["proxy"] }
-grammers-session = { git = "https://github.com/alksef/grammers", branch = "master" }
-grammers-mtsender = { git = "https://github.com/alksef/grammers", branch = "master", features = ["proxy"] }
-grammers-tl-types = { git = "https://github.com/alksef/grammers", branch = "master" }
+# Using fork with MTProxy support from https://github.com/alksef/grammers-mtproxy
+grammers-client = { git = "https://github.com/alksef/grammers-mtproxy", branch = "master", features = ["proxy"] }
+grammers-session = { git = "https://github.com/alksef/grammers-mtproxy", branch = "master" }
+grammers-mtsender = { git = "https://github.com/alksef/grammers-mtproxy", branch = "master", features = ["proxy"] }
+grammers-tl-types = { git = "https://github.com/alksef/grammers-mtproxy", branch = "master" }
 
 # Time utilities
 chrono = "0.4"
