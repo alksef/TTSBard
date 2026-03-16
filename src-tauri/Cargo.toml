@@ -54,7 +54,7 @@ tower-http = { version = "0.5", features = ["fs", "cors"] }
 # Telegram client
 grammers-client = { version = "0.8.0", features = ["proxy"] }
 grammers-session = "0.8.0"
-grammers-mtsender = { version = "0.8.0", features = ["proxy"] }
+grammers-mtsender = { version = "0.9.0", features = ["proxy"] }
 grammers-tl-types = "0.8.0"
 
 # Time utilities
