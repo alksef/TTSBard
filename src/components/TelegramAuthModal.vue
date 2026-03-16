@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, inject } from 'vue'
+import { Eye, EyeOff } from 'lucide-vue-next'
 import { type TelegramCredentials, TELEGRAM_AUTH_KEY, type UseTelegramAuthReturn } from '../composables/useTelegramAuth'
 
 interface Props {
@@ -38,6 +39,7 @@ const credentials = ref<TelegramCredentials>({
 })
 
 const code = ref('')
+const showApiHash = ref(false)
 
 // Watch for modal open to init status
 watch(() => props.modelValue, async (isOpen) => {
@@ -126,7 +128,6 @@ async function handleSignOut() {
         <!-- State 1: Form Input -->
         <div v-if="canInit || state === 'loading'" class="auth-form">
           <div class="form-info">
-            <p>Для подключения Silero TTS через Telegram бот необходимо авторизоваться.</p>
             <p class="info-link">
               Получите API credentials на
               <a
@@ -163,16 +164,27 @@ async function handleSignOut() {
             />
           </div>
 
-          <div class="form-group">
+          <div class="form-group password-group">
             <label for="api_hash">API Hash</label>
-            <input
-              id="api_hash"
-              v-model="credentials.api_hash"
-              type="password"
-              placeholder="ваш_api_hash"
-              :disabled="isLoading"
-              @keypress.enter="handleRequestCode"
-            />
+            <div class="input-with-toggle">
+              <input
+                id="api_hash"
+                v-model="credentials.api_hash"
+                :type="showApiHash ? 'text' : 'password'"
+                placeholder="ваш_api_hash"
+                :disabled="isLoading"
+                @keypress.enter="handleRequestCode"
+              />
+              <button
+                type="button"
+                class="toggle-button"
+                @click="showApiHash = !showApiHash"
+                :title="showApiHash ? 'Скрыть' : 'Показать'"
+              >
+                <Eye v-if="!showApiHash" :size="16" />
+                <EyeOff v-else :size="16" />
+              </button>
+            </div>
           </div>
 
           <button
@@ -287,7 +299,7 @@ async function handleSignOut() {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.7);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -296,13 +308,15 @@ async function handleSignOut() {
 }
 
 .modal-container {
-  background: white;
-  border-radius: 12px;
+  background: rgba(30, 30, 30, 0.95);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
   max-width: 500px;
   width: 100%;
   max-height: 90vh;
   overflow-y: auto;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
 }
 
 .modal-header {
@@ -310,35 +324,35 @@ async function handleSignOut() {
   align-items: center;
   justify-content: space-between;
   padding: 20px 24px;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .modal-header h2 {
   margin: 0;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 .close-button {
-  background: none;
+  background: transparent;
   border: none;
-  font-size: 28px;
-  color: #6b7280;
+  font-size: 24px;
+  color: var(--color-text-secondary);
   cursor: pointer;
-  padding: 0;
+  padding: 4px;
   width: 32px;
   height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
-  transition: background 0.2s;
+  border-radius: 6px;
+  transition: background 0.2s, color 0.2s;
 }
 
 .close-button:hover {
-  background: #f3f4f6;
-  color: #111827;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--color-text-primary);
 }
 
 .modal-content {
@@ -346,13 +360,13 @@ async function handleSignOut() {
 }
 
 .error-message {
-  margin: 0 24px 16px;
+  margin: 0 0 16px;
   padding: 12px 16px;
-  background: #fee;
-  border: 1px solid #fcc;
-  border-left: 4px solid #f44;
-  border-radius: 4px;
-  color: #c33;
+  background: rgba(255, 111, 105, 0.12);
+  border: 1px solid rgba(255, 111, 105, 0.24);
+  border-left: 4px solid rgba(255, 59, 48, 0.8);
+  border-radius: 8px;
+  color: #ffb8b4;
   font-size: 14px;
 }
 
@@ -364,9 +378,10 @@ async function handleSignOut() {
 
 .form-info {
   padding: 16px;
-  background: #f3f4f6;
-  border-radius: 8px;
-  color: #374151;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  color: var(--color-text-secondary);
   font-size: 14px;
   line-height: 1.5;
 }
@@ -380,7 +395,7 @@ async function handleSignOut() {
 }
 
 .info-link a {
-  color: #2563eb;
+  color: var(--color-accent);
   text-decoration: none;
   font-weight: 500;
 }
@@ -391,79 +406,126 @@ async function handleSignOut() {
 
 .phone-display {
   font-weight: 600;
-  color: #111827;
+  color: var(--color-text-primary);
   margin-top: 8px;
 }
 
 .form-group {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .form-group label {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 .form-group input {
   padding: 10px 12px;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-primary);
   font-size: 14px;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  font-family: var(--font-mono);
+  transition: all 0.15s ease;
 }
 
 .form-group input:focus {
   outline: none;
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+  border-color: rgba(29, 140, 255, 0.5);
+  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
 }
 
 .form-group input:disabled {
-  background: #f9fafb;
+  background: rgba(255, 255, 255, 0.03);
   cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.form-group input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.password-group {
+  position: relative;
+}
+
+.input-with-toggle {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-with-toggle input {
+  flex: 1;
+  padding-right: 40px;
+}
+
+.toggle-button {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.2s, background 0.2s;
+}
+
+.toggle-button:hover {
+  color: var(--color-accent);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .submit-button {
   padding: 12px 20px;
-  background: #2563eb;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
   color: white;
   border: none;
-  border-radius: 6px;
+  border-radius: 10px;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s;
   margin-top: 8px;
 }
 
 .submit-button:hover:not(:disabled) {
-  background: #1d4ed8;
+  filter: brightness(1.06);
+  transform: translateY(-1px);
 }
 
 .submit-button:disabled {
-  background: #9ca3af;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
 .back-button {
   padding: 12px 20px;
   background: transparent;
-  color: #374151;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
+  color: var(--color-text-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.2s, border-color 0.2s;
+  transition: all 0.15s ease;
   margin-top: 8px;
 }
 
 .back-button:hover:not(:disabled) {
-  background: #f9fafb;
-  border-color: #9ca3af;
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--color-accent);
+  color: var(--color-text-primary);
 }
 
 .back-button:disabled {
@@ -480,7 +542,7 @@ async function handleSignOut() {
   width: 64px;
   height: 64px;
   margin: 0 auto 16px;
-  background: #10b981;
+  background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%);
   color: white;
   border-radius: 50%;
   display: flex;
@@ -488,18 +550,20 @@ async function handleSignOut() {
   justify-content: center;
   font-size: 32px;
   font-weight: bold;
+  box-shadow: 0 4px 12px rgba(74, 222, 128, 0.3);
 }
 
 .connected-state h3 {
   margin: 0 0 20px;
-  font-size: 20px;
-  color: #111827;
+  font-size: 18px;
+  color: var(--color-text-primary);
 }
 
 .user-info {
   padding: 16px;
-  background: #f3f4f6;
-  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
   margin-bottom: 16px;
 }
 
@@ -507,19 +571,19 @@ async function handleSignOut() {
   margin: 0;
   font-size: 16px;
   font-weight: 600;
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 .user-username {
   margin: 4px 0 0;
   font-size: 14px;
-  color: #6b7280;
+  color: var(--color-text-secondary);
 }
 
 .user-phone {
   margin: 4px 0 0;
   font-size: 14px;
-  color: #6b7280;
+  color: var(--color-text-secondary);
 }
 
 .success-info {
@@ -529,8 +593,8 @@ async function handleSignOut() {
 .info-hint {
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px solid #e5e7eb;
-  color: #6b7280;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--color-text-muted);
   font-size: 13px;
 }
 
@@ -543,35 +607,37 @@ async function handleSignOut() {
 .disconnect-button {
   flex: 1;
   padding: 12px 20px;
-  background: #ef4444;
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
   color: white;
   border: none;
-  border-radius: 6px;
+  border-radius: 10px;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s;
 }
 
 .disconnect-button:hover {
-  background: #dc2626;
+  filter: brightness(1.1);
+  transform: translateY(-1px);
 }
 
 .close-button-primary {
   flex: 1;
   padding: 12px 20px;
-  background: #374151;
-  color: white;
-  border: none;
-  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--color-text-primary);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.15s ease;
 }
 
 .close-button-primary:hover {
-  background: #1f2937;
+  background: rgba(255, 255, 255, 0.15);
+  border-color: var(--color-accent);
 }
 
 .loading-state {
@@ -583,8 +649,8 @@ async function handleSignOut() {
   width: 40px;
   height: 40px;
   margin: 0 auto 16px;
-  border: 4px solid #e5e7eb;
-  border-top-color: #2563eb;
+  border: 3px solid rgba(255, 255, 255, 0.1);
+  border-top-color: var(--color-accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -597,7 +663,7 @@ async function handleSignOut() {
 
 .loading-state p {
   margin: 0;
-  color: #6b7280;
+  color: var(--color-text-secondary);
   font-size: 14px;
 }
 
@@ -610,7 +676,7 @@ async function handleSignOut() {
   width: 64px;
   height: 64px;
   margin: 0 auto 16px;
-  background: #ef4444;
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
   color: white;
   border-radius: 50%;
   display: flex;
@@ -618,21 +684,22 @@ async function handleSignOut() {
   justify-content: center;
   font-size: 32px;
   font-weight: bold;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
 }
 
 .error-state h3 {
   margin: 0 0 16px;
-  font-size: 20px;
-  color: #111827;
+  font-size: 18px;
+  color: var(--color-text-primary);
 }
 
 .error-message-modal {
   padding: 12px 16px;
-  background: #fee;
-  border: 1px solid #fcc;
-  border-left: 4px solid #f44;
-  border-radius: 6px;
-  color: #c33;
+  background: rgba(255, 111, 105, 0.12);
+  border: 1px solid rgba(255, 111, 105, 0.24);
+  border-left: 4px solid rgba(255, 59, 48, 0.8);
+  border-radius: 8px;
+  color: #ffb8b4;
   font-size: 14px;
   margin-bottom: 16px;
   text-align: left;
@@ -640,41 +707,43 @@ async function handleSignOut() {
 
 .error-info {
   text-align: left;
-  background: #fef2f2;
+  background: rgba(255, 59, 48, 0.05);
   border-left-color: #ef4444;
 }
 
 .retry-button {
   flex: 1;
   padding: 12px 20px;
-  background: #2563eb;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
   color: white;
   border: none;
-  border-radius: 6px;
+  border-radius: 10px;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s;
 }
 
-.retry-button:hover {
-  background: #1d4ed8;
+.retry-button:hover:not(:disabled) {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
 }
 
 .disable-button {
   flex: 1;
   padding: 12px 20px;
-  background: #6b7280;
-  color: white;
-  border: none;
-  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--color-text-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.15s ease;
 }
 
 .disable-button:hover {
-  background: #4b5563;
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
 }
 </style>
