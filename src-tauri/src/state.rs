@@ -125,7 +125,10 @@ impl AppState {
         // Создаём runtime один раз при инициализации AppState
         // Arc сохраняет runtime живым пока живёт AppState
         let runtime = Arc::new(
-            tokio::runtime::Runtime::new()
+            tokio::runtime::Builder::new_multi_thread()
+                .thread_stack_size(8 * 1024 * 1024)
+                .enable_all()
+                .build()
                 .expect("Failed to create tokio runtime")
         );
 
