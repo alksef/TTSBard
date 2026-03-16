@@ -66,7 +66,7 @@ native-tls = "0.2"
 
 # Thread safety and rate limiting
 parking_lot = "0.12"
-governor = "0.6"
+governor = "0.10"
 
 # Russian number to text conversion
 russian_numbers = "0.2.0"
