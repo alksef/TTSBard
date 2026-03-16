@@ -362,6 +362,18 @@ watch(telegramConnected, (newValue) => {
   }
 });
 
+// Save proxy mode when user opens Telegram connection modal
+watch(showTelegramModal, async (isOpen) => {
+  if (isOpen) {
+    try {
+      await invoke('set_telegram_proxy_mode', { mode: telegramProxyMode.value });
+      debugLog('[TTS] Telegram proxy mode saved before connection:', telegramProxyMode.value);
+    } catch (error) {
+      debugError('[TTS] Failed to save proxy mode:', error);
+    }
+  }
+});
+
 // Watch for settings changes from composable
 watch(ttsSettings, (newSettings) => {
   if (!newSettings) return;
@@ -544,7 +556,7 @@ onUnmounted(() => {
           </div>
 
           <!-- Proxy Settings -->
-          <div v-if="telegramConnected" class="setting-group">
+          <div class="setting-group">
             <div class="proxy-settings-row">
               <div class="proxy-select-row">
                 <div class="form-field">
@@ -564,6 +576,7 @@ onUnmounted(() => {
                 </div>
               </div>
               <button
+                v-if="telegramConnected"
                 @click="reconnectTelegram"
                 :disabled="reconnectingTelegram"
                 class="reconnect-button-fixed"
