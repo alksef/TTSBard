@@ -1,7 +1,9 @@
 use super::types::{AuthState, OperationResult, UserInfo};
 use grammers_client::{Client, SignInError};
-use grammers_client::types::LoginToken;
+use grammers_client::client::LoginToken;
 use grammers_mtsender::{SenderPool, ConnectionParams};
+#[cfg(feature = "mtproxy")]
+use grammers_mtsender::MtProxyConfig;
 use grammers_session::updates::UpdatesLike;
 use grammers_session::storages::SqliteSession;
 use std::fmt;
@@ -10,6 +12,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{info, error, debug, warn};
 use crate::config::ProxyMode;
+#[cfg(feature = "mtproxy")]
+use crate::config::MtProxySettings;
 
 // NOTE: api_id is now stored in settings.json (settings.tts.telegram.api_id)
 // The old telegram_config.json file is no longer used
@@ -28,6 +32,100 @@ impl fmt::Display for ProxyStatus {
         match &self.mode {
             ProxyMode::None => write!(f, "No proxy"),
             ProxyMode::Socks5 => write!(f, "SOCKS5 proxy: {}", self.proxy_url.as_deref().unwrap_or("not configured")),
+            ProxyMode::MtProxy => {
+                if let Some(url) = &self.proxy_url {
+                    write!(f, "MTProxy: {}", url)
+                } else {
+                    write!(f, "MTProxy: not configured")
+                }
+            }
+        }
+    }
+}
+
+/// Unified proxy configuration for all proxy types
+#[derive(Debug, Clone)]
+pub enum ProxyConfig {
+    /// No proxy
+    None,
+    /// SOCKS5 proxy with URL
+    Socks5(String),
+    /// MTProxy configuration (only available with mtproxy feature)
+    #[cfg(feature = "mtproxy")]
+    MtProxy(MtProxySettings),
+}
+
+impl ProxyConfig {
+    /// Validate the proxy configuration
+    pub fn validate(&self) -> Result<(), String> {
+        match self {
+            ProxyConfig::None => Ok(()),
+            ProxyConfig::Socks5(url) => {
+                TelegramClient::validate_proxy_url(url, &ProxyMode::Socks5)?;
+                Ok(())
+            }
+            #[cfg(feature = "mtproxy")]
+            ProxyConfig::MtProxy(settings) => {
+                if settings.host.is_none() {
+                    return Err("MTProxy host is required".to_string());
+                }
+                if settings.secret.is_none() {
+                    return Err("MTProxy secret is required".to_string());
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// Get the proxy mode for this configuration
+    pub fn mode(&self) -> ProxyMode {
+        match self {
+            ProxyConfig::None => ProxyMode::None,
+            ProxyConfig::Socks5(_) => ProxyMode::Socks5,
+            #[cfg(feature = "mtproxy")]
+            ProxyConfig::MtProxy(_) => ProxyMode::MtProxy,
+        }
+    }
+
+    /// Get the proxy URL string for status display
+    pub fn proxy_url_string(&self) -> Option<String> {
+        match self {
+            ProxyConfig::None => None,
+            ProxyConfig::Socks5(url) => Some(url.clone()),
+            #[cfg(feature = "mtproxy")]
+            ProxyConfig::MtProxy(settings) => {
+                settings.host.as_ref().map(|h| format!("{}:{}", h, settings.port))
+            }
+        }
+    }
+
+    /// Convert to ConnectionParams for SenderPool
+    pub fn to_connection_params(&self) -> ConnectionParams {
+        match self {
+            ProxyConfig::None => ConnectionParams::default(),
+            ProxyConfig::Socks5(url) => ConnectionParams {
+                proxy_url: Some(url.clone()),
+                ..Default::default()
+            },
+            #[cfg(feature = "mtproxy")]
+            ProxyConfig::MtProxy(settings) => {
+                let host_ref = settings.host.as_ref();
+                let secret_ref = settings.secret.as_ref();
+
+                // Note: validation should be called before this method
+                let host = host_ref.expect("MTProxy host should be validated");
+                let secret = secret_ref.expect("MTProxy secret should be validated");
+
+                ConnectionParams {
+                    mtproxy: Some(MtProxyConfig {
+                        host: host.clone(),
+                        port: settings.port,
+                        secret: secret.clone(),
+                        dc_id: settings.dc_id,
+                    }),
+                    ..Default::default()
+                }
+            }
         }
     }
 }
@@ -92,7 +190,7 @@ impl TelegramClient {
             ProxyMode::Socks5 => {
                 // Validate SOCKS5 URL format: socks5://[user:pass@]host:port
                 if !url.starts_with("socks5://") {
-                    return Err(format!("Invalid SOCKS5 URL: must start with socks5://"));
+                    return Err("Invalid SOCKS5 URL: must start with socks5://".to_string());
                 }
 
                 let url_without_scheme = &url[9..]; // Remove "socks5://"
@@ -108,14 +206,18 @@ impl TelegramClient {
 
                 // Split address into host and port
                 let (host, port_str) = address.rsplit_once(':')
-                    .ok_or_else(|| format!("Invalid SOCKS5 URL: missing port"))?;
+                    .ok_or_else(|| "Invalid SOCKS5 URL: missing port".to_string())?;
 
                 let _port: u16 = port_str.parse()
-                    .map_err(|_| format!("Invalid SOCKS5 URL: invalid port"))?;
+                    .map_err(|_| "Invalid SOCKS5 URL: invalid port".to_string())?;
 
                 info!(host, _port, has_auth = _auth.is_some(), "Validated SOCKS5 proxy");
 
                 Ok(url.to_string())
+            }
+            ProxyMode::MtProxy => {
+                // MTProxy doesn't use URL format, it uses separate host/port/secret settings
+                Err("MTProxy mode should not use validate_proxy_url".to_string())
             }
         }
     }
@@ -154,52 +256,105 @@ impl TelegramClient {
             None
         };
 
-        // Update proxy status
-        *self.proxy_status.lock().await = ProxyStatus {
-            mode: proxy_mode.clone(),
-            proxy_url: proxy_url_str.clone(),
+        // Convert to ProxyConfig
+        let proxy_config = if let Some(url) = normalized_proxy_url {
+            ProxyConfig::Socks5(url)
+        } else {
+            ProxyConfig::None
         };
 
-        if let Some(ref url) = proxy_url_str {
-            info!(proxy_url = %url, mode = ?proxy_mode, "[AUTH] Initializing with proxy");
-        } else {
-            info!("[AUTH] Initializing without proxy");
+        self.init_with_config_internal(
+            api_id,
+            Some(api_hash),
+            Some(phone),
+            proxy_config,
+            "Initializing",
+        ).await
+    }
+
+    /// Internal: Unified initialization with ProxyConfig
+    ///
+    /// This is the core initialization logic shared by all init methods.
+    /// It handles session creation, SenderPool setup, and authorization check.
+    async fn init_with_config_internal(
+        &self,
+        api_id: u32,
+        api_hash: Option<String>,
+        phone: Option<String>,
+        proxy_config: ProxyConfig,
+        log_context: &str, // "Initializing" or "Restoring"
+    ) -> Result<OperationResult, String> {
+        // Validate proxy configuration
+        proxy_config.validate()?;
+
+        // Update proxy status
+        *self.proxy_status.lock().await = ProxyStatus {
+            mode: proxy_config.mode(),
+            proxy_url: proxy_config.proxy_url_string(),
+        };
+
+        // Log based on proxy type
+        match &proxy_config {
+            ProxyConfig::None => {
+                info!("[AUTH] {} without proxy", log_context);
+            }
+            ProxyConfig::Socks5(url) => {
+                info!(proxy_url = %url, "[AUTH] {} with SOCKS5 proxy", log_context);
+            }
+            #[cfg(feature = "mtproxy")]
+            ProxyConfig::MtProxy(settings) => {
+                info!(
+                    host = %settings.host.as_deref().unwrap_or("none"),
+                    port = %settings.port,
+                    dc_id = ?settings.dc_id,
+                    phone = %phone.as_deref().unwrap_or("none"),
+                    "[AUTH] {} with MTProxy", log_context
+                );
+            }
         }
 
         let session_path = Self::get_session_path()?;
 
         // Сохраняем для последующего использования
         *self.api_id.lock().await = Some(api_id);
-        *self.api_hash.lock().await = Some(api_hash.clone());
-        *self.phone_number.lock().await = Some(phone.clone());
+        if let Some(ref hash) = api_hash {
+            *self.api_hash.lock().await = Some(hash.clone());
+        }
+        if let Some(ref pn) = phone {
+            *self.phone_number.lock().await = Some(pn.clone());
+        }
         *self.session_path.lock().await = Some(session_path.clone());
 
         debug!(session_path = ?session_path, "[AUTH] Session path");
         debug!(exists = session_path.exists(), "[AUTH] Session exists");
 
         // Создаём сессию (откроем существующую или создадим новую)
-        let session = SqliteSession::open(&session_path)
+        let session = SqliteSession::open(&session_path).await
             .map_err(|e| format!("Не удалось создать сессию: {}", e))?;
         let session = Arc::new(session);
 
-        // Создаём SenderPool with proxy if configured
-        let pool = if let Some(proxy) = normalized_proxy_url {
-            info!("[AUTH] Creating SenderPool with proxy configuration");
-            let conn_params = ConnectionParams {
-                proxy_url: Some(proxy),
-                ..Default::default()
-            };
-            SenderPool::with_configuration(session, api_id as i32, conn_params)
-        } else {
-            info!("[AUTH] Creating SenderPool without proxy");
-            SenderPool::new(session, api_id as i32)
+        // Создаём SenderPool with appropriate configuration
+        let conn_params = proxy_config.to_connection_params();
+        let SenderPool { runner, handle, updates } = match &proxy_config {
+            ProxyConfig::None => {
+                info!("[AUTH] Creating SenderPool without proxy");
+                SenderPool::new(session, api_id as i32)
+            }
+            ProxyConfig::Socks5(_) => {
+                info!("[AUTH] Creating SenderPool with SOCKS5 configuration");
+                SenderPool::with_configuration(session, api_id as i32, conn_params)
+            }
+            #[cfg(feature = "mtproxy")]
+            ProxyConfig::MtProxy(_) => {
+                info!("[AUTH] Creating SenderPool with MTProxy configuration");
+                SenderPool::with_configuration(session, api_id as i32, conn_params)
+            }
         };
 
         // Создаём клиент
-        let client = Client::new(&pool);
+        let client = Client::new(handle);
 
-        // Запускаем runner и сохраняем updates канал
-        let SenderPool { runner, handle: _, updates } = pool;
+        // Запускаем runner
         let pool_task = tokio::spawn(async move {
             runner.run().await;
         });
@@ -208,34 +363,53 @@ impl TelegramClient {
         *self.client.lock().await = Some(client);
         *self.updates.lock().await = Some(updates);
 
-        // Проверяем, авторизован ли уже пользователь (восстановление сессии)
-        let is_authorized = {
-            let client_guard = self.client.lock().await;
-            if let Some(c) = client_guard.as_ref() {
-                match c.is_authorized().await {
-                    Ok(authorized) => {
-                        debug!(authorized, "[AUTH] Session restored");
-                        authorized
+        // Проверяем, авторизован ли уже пользователь (только если есть phone)
+        if phone.is_some() {
+            let is_authorized = {
+                let client_guard = self.client.lock().await;
+                if let Some(c) = client_guard.as_ref() {
+                    match c.is_authorized().await {
+                        Ok(authorized) => {
+                            debug!(authorized, "[AUTH] Session restored");
+                            authorized
+                        }
+                        Err(e) => {
+                            error!(error = %e, "[AUTH] Error checking authorization");
+                            false
+                        }
                     }
-                    Err(e) => {
-                        error!(error = %e, "[AUTH] Error checking authorization");
-                        false
-                    }
+                } else {
+                    false
                 }
-            } else {
-                false
+            };
+
+            if is_authorized {
+                // Сессия валидна и пользователь авторизован
+                info!("[AUTH] User already authorized, session restored");
+                return Ok(OperationResult::success("Сессия восстановлена"));
             }
-        };
 
-        if is_authorized {
-            // Сессия валидна и пользователь авторизован
-            info!("[AUTH] User already authorized, session restored");
-            return Ok(OperationResult::success("Сессия восстановлена"));
+            // Нужно авторизоваться заново
+            info!("[AUTH] Session not authorized, need to sign in");
+            Ok(OperationResult::success("Клиент инициализирован, требуется авторизация"))
+        } else {
+            Ok(OperationResult::success("Клиент инициализирован с существующей сессией"))
         }
+    }
 
-        // Нужно авторизоваться заново
-        info!("[AUTH] Session not authorized, need to sign in");
-        Ok(OperationResult::success("Клиент инициализирован, требуется авторизация"))
+    /// Инициализация клиента с поддержкой MTProxy
+    #[cfg(feature = "mtproxy")]
+    pub async fn init_with_mtproxy(&self, api_id: u32, api_hash: String, phone: String, mtproxy_settings: &MtProxySettings) -> Result<OperationResult, String> {
+        // Clone settings since we need to own them for ProxyConfig
+        let settings = mtproxy_settings.clone();
+
+        self.init_with_config_internal(
+            api_id,
+            Some(api_hash),
+            Some(phone),
+            ProxyConfig::MtProxy(settings),
+            "Initializing",
+        ).await
     }
 
     /// Проверка авторизации
@@ -438,59 +612,35 @@ impl TelegramClient {
             None
         };
 
-        // Update proxy status
-        *self.proxy_status.lock().await = ProxyStatus {
-            mode: proxy_mode.clone(),
-            proxy_url: proxy_url_str.clone(),
+        // Convert to ProxyConfig
+        let proxy_config = if let Some(url) = normalized_proxy_url {
+            ProxyConfig::Socks5(url)
+        } else {
+            ProxyConfig::None
         };
 
-        if let Some(ref url) = proxy_url_str {
-            info!(proxy_url = %url, mode = ?proxy_mode, "[AUTH] Restoring session with proxy");
-        } else {
-            info!("[AUTH] Restoring session without proxy");
-        }
+        self.init_with_config_internal(
+            api_id,
+            None,
+            None,
+            proxy_config,
+            "Restoring",
+        ).await
+    }
 
-        let session_path = Self::get_session_path()?;
+    /// Инициализация с существующей сессией с поддержкой MTProxy
+    #[cfg(feature = "mtproxy")]
+    pub async fn init_empty_with_mtproxy(&self, api_id: u32, mtproxy_settings: &MtProxySettings) -> Result<OperationResult, String> {
+        // Clone settings since we need to own them for ProxyConfig
+        let settings = mtproxy_settings.clone();
 
-        // Сохраняем api_id
-        *self.api_id.lock().await = Some(api_id);
-        *self.session_path.lock().await = Some(session_path.clone());
-
-        debug!(session_path = ?session_path, "[AUTH] Session path");
-        debug!(exists = session_path.exists(), "[AUTH] Session exists");
-
-        // Открываем существующую сессию
-        let session = SqliteSession::open(&session_path)
-            .map_err(|e| format!("Не удалось создать сессию: {}", e))?;
-        let session = Arc::new(session);
-
-        // Создаём SenderPool with proxy if configured
-        let pool = if let Some(proxy) = normalized_proxy_url {
-            info!("[AUTH] Creating SenderPool with proxy configuration for session restore");
-            let conn_params = ConnectionParams {
-                proxy_url: Some(proxy),
-                ..Default::default()
-            };
-            SenderPool::with_configuration(session, api_id as i32, conn_params)
-        } else {
-            info!("[AUTH] Creating SenderPool without proxy for session restore");
-            SenderPool::new(session, api_id as i32)
-        };
-
-        // Создаём клиент
-        let client = Client::new(&pool);
-
-        // Запускаем runner
-        let SenderPool { runner, handle: _, updates } = pool;
-        let pool_task = tokio::spawn(async move {
-            runner.run().await;
-        });
-
-        *self.pool_task.lock().await = Some(pool_task);
-        *self.client.lock().await = Some(client);
-        *self.updates.lock().await = Some(updates);
-
-        Ok(OperationResult::success("Клиент инициализирован с существующей сессией"))
+        self.init_with_config_internal(
+            api_id,
+            None,
+            None,
+            ProxyConfig::MtProxy(settings),
+            "Restoring",
+        ).await
     }
 
     /// Get current proxy status

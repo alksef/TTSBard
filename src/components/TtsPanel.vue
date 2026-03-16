@@ -61,7 +61,8 @@ const sileroError = ref<string | null>(null);
 const telegramProxyMode = ref<string>('none');
 const telegramProxyModes = [
   { value: 'none', label: 'Нет' },
-  { value: 'socks5', label: 'SOCKS5' }
+  { value: 'socks5', label: 'SOCKS5' },
+  { value: 'mtproxy', label: 'MTProxy' }
 ];
 
 // Proxy test state (reserved for future use)
@@ -338,6 +339,7 @@ const proxyModeLabel = computed(() => {
     const mode = currentTelegramProxyStatus.value.mode;
     if (mode === 'none') return '';
     if (mode === 'socks5') return 'SOCKS5';
+    if (mode === 'mtproxy') return 'MTProxy';
   }
   // No backend status = no proxy label (don't show UI settings as connection status)
   return '';
@@ -397,7 +399,8 @@ watch(ttsSettings, (newSettings) => {
   // Update network settings (unified proxy settings)
   if (newSettings.network) {
     networkSettings.value = {
-      proxy: { proxy_url: newSettings.network.proxy.proxy_url }
+      proxy: { proxy_url: newSettings.network.proxy.proxy_url },
+      mtproxy: newSettings.network.mtproxy
     };
   }
 
@@ -482,6 +485,9 @@ onUnmounted(() => {
                   <span v-if="telegramStatus.username">@{{ telegramStatus.username }}</span>
                 </p>
                 <p v-if="proxyModeLabel" class="status-proxy">через {{ proxyModeLabel }}</p>
+                <p v-if="currentTelegramProxyStatus?.proxy_url" class="status-details">
+                  {{ currentTelegramProxyStatus.proxy_url }}
+                </p>
               </div>
               <button class="status-signout-button" @click="handleSignOut" title="Выйти">
                 <LogOut :size="16" />

@@ -79,9 +79,11 @@ impl SileroTtsBot {
 
         debug!(username = ?bot.username(), "Bot resolved");
 
-        // Отправляем сообщение
+        // Отправляем сообщение - используем bot.to_ref() для получения PeerRef
+        let bot_ref = bot.to_ref().await
+            .ok_or_else(|| "Failed to get bot peer ref".to_string())?;
         let result = client_inner
-            .send_message(&bot, text)
+            .send_message(bot_ref, text)
             .await
             .map_err(|e| format!("Failed to send message: {}", e))?;
 
@@ -200,7 +202,9 @@ impl SileroTtsBot {
             .ok_or_else(|| "Bot not found".to_string())?;
 
         // Находим сообщение с нужным file_id
-        let mut iter = client_inner.iter_messages(&bot);
+        let bot_ref = bot.to_ref().await
+            .ok_or_else(|| "Failed to get bot peer ref".to_string())?;
+        let mut iter = client_inner.iter_messages(bot_ref);
         let mut msg_count = 0;
 
         loop {
@@ -377,8 +381,10 @@ async fn send_speaker_command(client: &TelegramClient) -> Result<(), String> {
     debug!(username = ?bot.username(), "Bot resolved");
 
     // Отправляем сообщение
+    let bot_ref = bot.to_ref().await
+        .ok_or_else(|| "Failed to get bot peer ref".to_string())?;
     let result = client_inner
-        .send_message(&bot, "/speaker")
+        .send_message(bot_ref, "/speaker")
         .await
         .map_err(|e| format!("Failed to send message: {}", e))?;
 
@@ -533,8 +539,10 @@ async fn send_limits_command(client: &TelegramClient) -> Result<(), String> {
     debug!(username = ?bot.username(), "Bot resolved");
 
     // Отправляем сообщение
+    let bot_ref = bot.to_ref().await
+        .ok_or_else(|| "Failed to get bot peer ref".to_string())?;
     let result = client_inner
-        .send_message(&bot, "/limits")
+        .send_message(bot_ref, "/limits")
         .await
         .map_err(|e| format!("Failed to send message: {}", e))?;
 

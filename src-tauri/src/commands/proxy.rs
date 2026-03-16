@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use tauri::{command, State};
 use tracing::{info, error, warn};
-use std::mem;
-use crate::config::{SettingsManager, dto::ProxySettingsDto, ProxyType, ProxyMode};
+use std::time::Instant;
+use crate::config::{SettingsManager, dto::ProxySettingsDto, ProxyType, ProxyMode, MtProxySettings};
 use crate::commands::telegram::TelegramState;
 use crate::telegram::ProxyStatus;
 
@@ -302,14 +302,6 @@ pub async fn reconnect_telegram(
     let settings = settings_manager.load()
         .map_err(|e| format!("Failed to load settings: {}", e))?;
 
-    // Get proxy mode and determine proxy URL
-    let proxy_url = match settings.tts.telegram.proxy_mode {
-        ProxyMode::None => None,
-        ProxyMode::Socks5 => settings.tts.network.proxy.proxy_url.clone(),
-    };
-
-    info!(proxy_mode = ?settings.tts.telegram.proxy_mode, has_proxy = proxy_url.is_some(), "Reconnecting with proxy settings");
-
     // Check if we have a saved api_id
     let api_id = match settings_manager.get_telegram_api_id() {
         Some(id) => id as u32,
@@ -319,19 +311,43 @@ pub async fn reconnect_telegram(
         }
     };
 
-    // Create new client and initialize with proxy
+    // Create new client and initialize with appropriate proxy settings
     let client = crate::telegram::TelegramClient::new();
-    info!("Initializing new Telegram client with proxy settings");
+    info!(proxy_mode = ?settings.tts.telegram.proxy_mode, "Initializing new Telegram client with proxy settings");
 
-    client.init_empty_with_proxy(api_id, proxy_url).await
-        .map_err(|e| format!("Failed to reconnect: {}", e))?;
+    // Initialize client based on proxy mode
+    match &settings.tts.telegram.proxy_mode {
+        ProxyMode::None => {
+            info!("Initializing without proxy");
+            client.init_empty(api_id).await
+                .map_err(|e| format!("Failed to reconnect: {}", e))?;
+        }
+        ProxyMode::Socks5 => {
+            let proxy_url = settings.tts.network.proxy.proxy_url.clone();
+            info!(has_proxy = proxy_url.is_some(), "Initializing with SOCKS5 proxy");
+            client.init_empty_with_proxy(api_id, proxy_url).await
+                .map_err(|e| format!("Failed to reconnect: {}", e))?;
+        }
+        ProxyMode::MtProxy => {
+            #[cfg(feature = "mtproxy")]
+            {
+                info!("Initializing with MTProxy");
+                client.init_empty_with_mtproxy(api_id, &settings.tts.network.mtproxy).await
+                    .map_err(|e| format!("Failed to reconnect: {}", e))?;
+            }
+            #[cfg(not(feature = "mtproxy"))]
+            {
+                return Err("MTProxy feature is not enabled".to_string());
+            }
+        }
+    }
 
     // Replace old client with new one in a single lock
     let (is_authorized, proxy_status) = {
         let mut client_guard = telegram_state.client.lock().await;
 
         // Disconnect and take old client if exists
-        if let Some(old_client) = mem::replace(&mut *client_guard, None) {
+        if let Some(old_client) = (*client_guard).take() {
             info!("Disconnecting existing Telegram client");
             if let Err(e) = old_client.disconnect().await {
                 warn!("Failed to disconnect old client: {}", e);
@@ -367,4 +383,230 @@ pub async fn reconnect_telegram(
         warn!("Telegram reconnected but not authorized");
         Ok("Reconnected but session is not authorized".to_string())
     }
+}
+
+// ============================================================================
+// MTProxy Commands
+// ============================================================================
+
+/// Validate MTProxy secret format
+///
+/// Validates that the secret is either:
+/// - Hex (32 chars for 16 bytes, or 34 chars with dd/ee prefix)
+/// - Base64 (24 chars)
+fn validate_mtproxy_secret(secret: &str) -> Result<(), String> {
+    let secret = secret.trim();
+    let len = secret.len();
+
+    // Base64 format (24 chars = 16 bytes encoded)
+    if len == 24 {
+        // Try to decode as base64 using Engine
+        use base64::Engine;
+        if base64::engine::general_purpose::STANDARD.decode(secret).is_ok() {
+            return Ok(());
+        }
+    }
+
+    // Hex format (32 chars = 16 bytes, or 34 chars with prefix)
+    if len == 32 || len == 34 {
+        // Check for prefix
+        if len == 34 {
+            let prefix = &secret[..2].to_lowercase();
+            if prefix != "dd" && prefix != "ee" {
+                return Err("Secret prefix must be 'dd' or 'ee' for 34-character hex".to_string());
+            }
+        }
+
+        // Try to decode as hex
+        if hex::decode(&secret[2..]).or_else(|_| hex::decode(secret)).is_ok() {
+            return Ok(());
+        }
+    }
+
+    Err(format!(
+        "Invalid secret format. Expected hex (32 or 34 chars) or base64 (24 chars), got {} chars",
+        len
+    ))
+}
+
+/// Test MTProxy connection to Telegram
+///
+/// This command tests an MTProxy connection by attempting to connect
+/// to Telegram through the specified MTProxy server.
+///
+/// # Arguments
+/// * `host` - MTProxy server hostname or IP address
+/// * `port` - MTProxy server port (typically 8888)
+/// * `secret` - MTProxy secret key (hex or base64 encoded)
+/// * `dc_id` - Optional DC ID (data center ID)
+/// * `timeout_secs` - Connection timeout in seconds (default 10)
+///
+/// # Returns
+/// * `TestResultDto` containing success status, latency, and error details
+#[command]
+pub async fn test_mtproxy(
+    host: String,
+    port: u16,
+    secret: String,
+    dc_id: Option<i32>,
+    timeout_secs: Option<u64>,
+) -> Result<TestResultDto, String> {
+    let start = Instant::now();
+
+    info!(
+        %host,
+        %port,
+        secret_preview = &secret[..secret.len().min(4)],
+        ?dc_id,
+        "Testing MTProxy connection"
+    );
+
+    // Validate input
+    if host.trim().is_empty() {
+        return Ok(TestResultDto {
+            success: false,
+            latency_ms: None,
+            mode: "mtproxy".to_string(),
+            error: Some("MTProxy host cannot be empty".to_string()),
+        });
+    }
+
+    // Validate port range
+    if port == 0 {
+        return Ok(TestResultDto {
+            success: false,
+            latency_ms: None,
+            mode: "mtproxy".to_string(),
+            error: Some("Port cannot be 0".to_string()),
+        });
+    }
+
+    // Validate secret format
+    if let Err(e) = validate_mtproxy_secret(&secret) {
+        return Ok(TestResultDto {
+            success: false,
+            latency_ms: None,
+            mode: "mtproxy".to_string(),
+            error: Some(format!("Invalid secret: {}", e)),
+        });
+    }
+
+    // For MTProxy, we need to test with the actual Telegram protocol
+    // which requires API credentials. For now, we'll do a basic TCP connection
+    // test to verify the MTProxy server is reachable.
+    //
+    // Full MTProxy testing requires Telegram client initialization which
+    // is done in the actual connection process.
+
+    let timeout = std::time::Duration::from_secs(timeout_secs.unwrap_or(10));
+
+    // Test TCP connection to MTProxy server
+    let addr = format!("{}:{}", host, port);
+    let test_result = match tokio::time::timeout(
+        timeout,
+        tokio::net::TcpStream::connect(&addr)
+    ).await {
+        Ok(Ok(_stream)) => {
+            let latency = start.elapsed().as_millis() as u64;
+            info!(
+                latency_ms = latency,
+                "MTProxy server is reachable"
+            );
+            TestResultDto {
+                success: true,
+                latency_ms: Some(latency),
+                mode: "mtproxy".to_string(),
+                error: None,
+            }
+        }
+        Ok(Err(e)) => {
+            let latency = start.elapsed().as_millis() as u64;
+            error!(
+                error = %e,
+                latency_ms = latency,
+                "Failed to connect to MTProxy server"
+            );
+            TestResultDto {
+                success: false,
+                latency_ms: Some(latency),
+                mode: "mtproxy".to_string(),
+                error: Some(format!("Connection failed: {}", e)),
+            }
+        }
+        Err(_) => {
+            let latency = start.elapsed().as_millis() as u64;
+            error!(
+                latency_ms = latency,
+                "MTProxy connection timed out"
+            );
+            TestResultDto {
+                success: false,
+                latency_ms: Some(latency),
+                mode: "mtproxy".to_string(),
+                error: Some("Connection timed out".to_string()),
+            }
+        }
+    };
+
+    Ok(test_result)
+}
+
+/// Get MTProxy settings
+///
+/// Returns the current MTProxy configuration.
+#[command]
+pub fn get_mtproxy_settings(
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<MtProxySettings, String> {
+    let settings = settings_manager.load()
+        .map_err(|e| format!("Failed to load settings: {}", e))?;
+
+    Ok(settings.tts.network.mtproxy)
+}
+
+/// Set MTProxy settings
+///
+/// Updates the MTProxy configuration with the specified parameters.
+///
+/// # Arguments
+/// * `host` - MTProxy server host (IP or domain)
+/// * `port` - MTProxy server port
+/// * `secret` - MTProxy secret key (hex or base64 encoded)
+/// * `dc_id` - Optional DC ID (data center ID)
+#[command]
+pub fn set_mtproxy_settings(
+    settings_manager: State<'_, SettingsManager>,
+    host: Option<String>,
+    port: u16,
+    secret: Option<String>,
+    dc_id: Option<i32>,
+) -> Result<(), String> {
+    info!(
+        ?host,
+        %port,
+        has_secret = secret.is_some(),
+        ?dc_id,
+        "Setting MTProxy configuration"
+    );
+
+    // Validate host if provided
+    if let Some(ref h) = host {
+        if h.trim().is_empty() {
+            return Err("MTProxy host cannot be empty".to_string());
+        }
+    }
+
+    // Validate secret if provided
+    if let Some(ref s) = secret {
+        if !s.trim().is_empty() {
+            validate_mtproxy_secret(s)
+                .map_err(|e| format!("Invalid secret: {}", e))?;
+        }
+    }
+
+    settings_manager.set_mtproxy_settings(host, port, secret, dc_id)
+        .map_err(|e| format!("Failed to save MTProxy settings: {}", e))?;
+
+    info!("MTProxy settings updated successfully");
+    Ok(())
 }

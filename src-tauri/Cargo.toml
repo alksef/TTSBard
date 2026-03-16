@@ -38,6 +38,7 @@ async-trait = "0.1"
 axum = { version = "0.8" }
 reqwest = { version = "0.12", features = ["json"] }
 base64 = "0.22"
+hex = "0.4"
 urlencoding = "2.1"
 dirs = "5"
 rodio = { version = "0.19", features = ["symphonia-mp3"] }
@@ -52,10 +53,11 @@ tracing-appender = "0.2"
 tower-http = { version = "0.5", features = ["fs", "cors"] }
 
 # Telegram client
-grammers-client = { version = "0.8.0", features = ["proxy"] }
-grammers-session = "0.8.0"
-grammers-mtsender = { version = "0.8.0", features = ["proxy"] }
-grammers-tl-types = "0.8.0"
+# Using fork with MTProxy support from https://github.com/alksef/grammers
+grammers-client = { git = "https://github.com/alksef/grammers", branch = "master", features = ["proxy"] }
+grammers-session = { git = "https://github.com/alksef/grammers", branch = "master" }
+grammers-mtsender = { git = "https://github.com/alksef/grammers", branch = "master", features = ["proxy"] }
+grammers-tl-types = { git = "https://github.com/alksef/grammers", branch = "master" }
 
 # Time utilities
 chrono = "0.4"
@@ -87,3 +89,6 @@ windows = { version = "0.58", features = [
     "Win32_UI_Shell"
 ] }
 
+[features]
+default = ["mtproxy"]
+mtproxy = ["grammers-mtsender/mtproxy"]

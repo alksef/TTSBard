@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::tts::TtsProviderType;
 use crate::webview::WebViewSettings;
 use crate::config::{TwitchSettings, AudioSettings, LoggingSettings, AppSettings as ConfigAppSettings};
-use crate::config::settings::{OpenAiSettings, LocalTtsSettings, TelegramTtsSettings, TtsSettings, ProxySettings, NetworkSettings, Socks5Settings, ProxyType, ProxyMode};
+use crate::config::settings::{OpenAiSettings, LocalTtsSettings, TelegramTtsSettings, TtsSettings, ProxySettings, NetworkSettings, Socks5Settings, MtProxySettings, ProxyType, ProxyMode};
 use crate::config::windows::{WindowsSettings, FloatingWindowSettings, SoundPanelWindowSettings, GlobalSettings, WindowPosition};
 use crate::soundpanel::SoundBinding;
 
@@ -37,16 +37,49 @@ impl From<Socks5SettingsDto> for Socks5Settings {
     }
 }
 
+/// MTProxy settings DTO
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MtProxySettingsDto {
+    pub host: Option<String>,
+    pub port: u16,
+    pub secret: Option<String>,
+    pub dc_id: Option<i32>,
+}
+
+impl From<MtProxySettings> for MtProxySettingsDto {
+    fn from(s: MtProxySettings) -> Self {
+        Self {
+            host: s.host,
+            port: s.port,
+            secret: s.secret,
+            dc_id: s.dc_id,
+        }
+    }
+}
+
+impl From<MtProxySettingsDto> for MtProxySettings {
+    fn from(dto: MtProxySettingsDto) -> Self {
+        Self {
+            host: dto.host,
+            port: dto.port,
+            secret: dto.secret,
+            dc_id: dto.dc_id,
+        }
+    }
+}
+
 /// Network settings DTO
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkSettingsDto {
     pub proxy: Socks5SettingsDto,
+    pub mtproxy: MtProxySettingsDto,
 }
 
 impl From<NetworkSettings> for NetworkSettingsDto {
     fn from(s: NetworkSettings) -> Self {
         Self {
             proxy: s.proxy.into(),
+            mtproxy: s.mtproxy.into(),
         }
     }
 }
@@ -55,6 +88,7 @@ impl From<NetworkSettingsDto> for NetworkSettings {
     fn from(dto: NetworkSettingsDto) -> Self {
         Self {
             proxy: dto.proxy.into(),
+            mtproxy: dto.mtproxy.into(),
         }
     }
 }
@@ -98,6 +132,7 @@ impl From<ProxyTypeDto> for ProxyType {
 pub enum ProxyModeDto {
     None,
     Socks5,
+    MtProxy,
 }
 
 impl From<ProxyMode> for ProxyModeDto {
@@ -105,6 +140,7 @@ impl From<ProxyMode> for ProxyModeDto {
         match m {
             ProxyMode::None => ProxyModeDto::None,
             ProxyMode::Socks5 => ProxyModeDto::Socks5,
+            ProxyMode::MtProxy => ProxyModeDto::MtProxy,
         }
     }
 }
@@ -114,6 +150,7 @@ impl From<ProxyModeDto> for ProxyMode {
         match dto {
             ProxyModeDto::None => ProxyMode::None,
             ProxyModeDto::Socks5 => ProxyMode::Socks5,
+            ProxyModeDto::MtProxy => ProxyMode::MtProxy,
         }
     }
 }
@@ -211,7 +248,7 @@ impl From<TelegramTtsSettings> for TelegramTtsSettingsDto {
         Self {
             api_id: s.api_id,
             proxy_mode: serde_json::to_value(&s.proxy_mode)
-                .and_then(|v| Ok(v.as_str().unwrap_or("none").to_string()))
+                .map(|v| v.as_str().unwrap_or("none").to_string())
                 .unwrap_or_else(|_| "none".to_string()),
         }
     }
