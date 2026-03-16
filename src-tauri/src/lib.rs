@@ -323,6 +323,10 @@ pub fn run() {
             commands::proxy::set_telegram_proxy_mode,
             commands::proxy::get_telegram_proxy_status,
             commands::proxy::reconnect_telegram,
+            // MTProxy commands
+            commands::proxy::get_mtproxy_settings,
+            commands::proxy::set_mtproxy_settings,
+            commands::proxy::test_mtproxy,
             // Unified settings commands
             commands::get_all_app_settings,
             commands::is_backend_ready,

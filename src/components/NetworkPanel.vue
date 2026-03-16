@@ -1,13 +1,20 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
-import { Check, X, Shield, Eye, EyeOff, AlertTriangle } from 'lucide-vue-next';
+import { Check, X, Shield, Eye, EyeOff, AlertTriangle, Loader2 } from 'lucide-vue-next';
 import { debugLog } from '../utils/debug';
 
 // Types for proxy settings
 interface ProxySettings {
   proxy_url: string | null;
   proxy_type: 'socks5' | 'socks4' | 'http';
+}
+
+interface MtProxySettings {
+  host?: string;
+  port: number;
+  secret?: string;
+  dc_id?: number;
 }
 
 interface TestResult {
@@ -24,22 +31,47 @@ const username = ref<string>('');
 const password = ref<string>('');
 const showPassword = ref(false);
 
+// State - individual fields for MTProxy
+const mtHost = ref<string>('');
+const mtPort = ref<string>('');
+const mtSecret = ref<string>('');
+const mtShowSecret = ref(false);
+const mtDcId = ref<string>('');
+
+// DC ID options for MTProxy
+const dcIdOptions = [
+  { value: '', label: 'Авто' },
+  { value: '1', label: '1' },
+  { value: '2', label: '2' },
+  { value: '3', label: '3' },
+  { value: '4', label: '4' },
+  { value: '5', label: '5' },
+];
+
 // UI State
 const testHost = ref<string>(''); // For connection test
 const isLoading = ref(false);
-const isTesting = ref(false);
+const isTestingSocks5 = ref(false);
+const isTestingMtProxy = ref(false);
 const isSaving = ref(false);
-const testResult = ref<TestResult | null>(null);
+const socks5TestResult = ref<TestResult | null>(null);
+const mtProxyTestResult = ref<TestResult | null>(null);
 const statusMessage = ref<string>('');
 const statusType = ref<'success' | 'error' | 'info'>('info');
 
 // Timer IDs for cleanup on unmount
-let testResultTimeoutId: ReturnType<typeof setTimeout> | null = null;
+let socks5TestTimeoutId: ReturnType<typeof setTimeout> | null = null;
+let mtProxyTestTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let statusTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
 // Computed: check if any field has value
 const hasProxyData = computed(() => {
   return host.value || port.value || username.value || password.value;
+});
+
+// Computed: check if MTProxy has data
+const hasMtProxyData = computed(() => {
+  return mtHost.value || mtSecret.value || mtDcId.value;
 });
 
 // Computed: build SOCKS5 URL from fields
@@ -57,21 +89,21 @@ const socks5Url = computed(() => {
   return url;
 });
 
-// Computed: check if MTProxy has data (reserved for future)
-// const hasMtProxyData = computed(() => {
-//   return mtHost.value || mtPort.value || mtKey.value;
-// });
-
 // Load proxy settings on mount
 onMounted(async () => {
   await loadProxySettings();
+  await loadMtProxySettings();
 });
 
 // Cleanup timers on unmount to prevent memory leaks
 onUnmounted(() => {
-  if (testResultTimeoutId !== null) {
-    clearTimeout(testResultTimeoutId);
-    testResultTimeoutId = null;
+  if (socks5TestTimeoutId !== null) {
+    clearTimeout(socks5TestTimeoutId);
+    socks5TestTimeoutId = null;
+  }
+  if (mtProxyTestTimeoutId !== null) {
+    clearTimeout(mtProxyTestTimeoutId);
+    mtProxyTestTimeoutId = null;
   }
   if (statusTimeoutId !== null) {
     clearTimeout(statusTimeoutId);
@@ -188,8 +220,14 @@ async function testConnection() {
 
   const portNum = parseInt(port.value) || 1080;
 
-  isTesting.value = true;
-  testResult.value = null;
+  isTestingSocks5.value = true;
+  socks5TestResult.value = null;
+
+  // Clear any existing timeout for SOCKS5 test
+  if (socks5TestTimeoutId !== null) {
+    clearTimeout(socks5TestTimeoutId);
+    socks5TestTimeoutId = null;
+  }
 
   try {
     const result = await invoke<TestResult>('test_proxy', {
@@ -199,13 +237,13 @@ async function testConnection() {
       timeoutSecs: 3
     });
 
-    testResult.value = result;
+    socks5TestResult.value = result;
 
     // Auto-clear test result after 20 seconds
-    testResultTimeoutId = setTimeout(() => {
-      if (testResult.value === result) {
-        testResult.value = null;
-        testResultTimeoutId = null;
+    socks5TestTimeoutId = setTimeout(() => {
+      if (socks5TestResult.value === result) {
+        socks5TestResult.value = null;
+        socks5TestTimeoutId = null;
       }
     }, 20000);
 
@@ -222,7 +260,7 @@ async function testConnection() {
     }
   } catch (error) {
     console.error('Failed to test proxy:', error);
-    testResult.value = {
+    socks5TestResult.value = {
       success: false,
       latency_ms: null,
       mode: 'socks5',
@@ -230,7 +268,137 @@ async function testConnection() {
     };
     showStatus('Ошибка тестирования: ' + (error as Error).message, 'error');
   } finally {
-    isTesting.value = false;
+    isTestingSocks5.value = false;
+  }
+}
+
+// ============================================================================
+// MTProxy Functions
+// ============================================================================
+
+async function loadMtProxySettings() {
+  try {
+    const settings = await invoke<MtProxySettings>('get_mtproxy_settings');
+    debugLog('[NetworkPanel] Loaded MTProxy settings:', settings);
+    mtHost.value = settings.host || '';
+    // Показываем пустое поле если порт = дефолт (8888)
+    mtPort.value = settings.port === 8888 ? '' : settings.port.toString();
+    mtSecret.value = settings.secret || '';
+    mtDcId.value = settings.dc_id?.toString() || '';
+  } catch (error) {
+    console.error('Failed to load MTProxy settings:', error);
+    showStatus('Ошибка загрузки настроек MTProxy: ' + (error as Error).message, 'error');
+  }
+}
+
+async function saveMtProxySettings() {
+  // Validate host
+  if (!mtHost.value.trim()) {
+    showStatus('Введите хост MTProxy', 'error');
+    return;
+  }
+
+  // Validate port
+  const portNum = parseInt(mtPort.value) || 8888;
+  if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
+    showStatus('Порт должен быть от 1 до 65535', 'error');
+    return;
+  }
+
+  // Validate secret format (optional if clearing)
+  if (mtSecret.value.trim()) {
+    const secretLen = mtSecret.value.trim().length;
+    if (secretLen !== 24 && secretLen !== 32 && secretLen !== 34) {
+      showStatus('Секрет должен быть 24 (base64), 32 или 34 символа (hex)', 'error');
+      return;
+    }
+  }
+
+  // DC ID from select (always valid due to select constraints)
+  const dcIdNum: number | undefined = mtDcId.value ? parseInt(mtDcId.value) : undefined;
+
+  isSaving.value = true;
+  try {
+    await invoke('set_mtproxy_settings', {
+      host: mtHost.value.trim() || undefined,
+      port: portNum,
+      secret: mtSecret.value.trim() || undefined,
+      dcId: dcIdNum
+    });
+    showStatus('Настройки MTProxy сохранены', 'success');
+  } catch (error) {
+    console.error('Failed to save MTProxy settings:', error);
+    showStatus('Ошибка сохранения: ' + (error as Error).message, 'error');
+  } finally {
+    isSaving.value = false;
+  }
+}
+
+async function testMtProxyConnection() {
+  // Validate host
+  if (!mtHost.value.trim()) {
+    showStatus('Введите хост MTProxy', 'error');
+    return;
+  }
+
+  // Validate secret
+  if (!mtSecret.value.trim()) {
+    showStatus('Введите секрет MTProxy', 'error');
+    return;
+  }
+
+  const portNum = parseInt(mtPort.value) || 8888;
+
+  isTestingMtProxy.value = true;
+  mtProxyTestResult.value = null;
+
+  // Clear any existing timeout for MTProxy test
+  if (mtProxyTestTimeoutId !== null) {
+    clearTimeout(mtProxyTestTimeoutId);
+    mtProxyTestTimeoutId = null;
+  }
+
+  try {
+    const result = await invoke<TestResult>('test_mtproxy', {
+      host: mtHost.value,
+      port: portNum,
+      secret: mtSecret.value,
+      dcId: mtDcId.value ? parseInt(mtDcId.value) : null,
+      timeoutSecs: 10
+    });
+
+    mtProxyTestResult.value = result;
+
+    // Auto-clear test result after 20 seconds
+    mtProxyTestTimeoutId = setTimeout(() => {
+      if (mtProxyTestResult.value === result) {
+        mtProxyTestResult.value = null;
+        mtProxyTestTimeoutId = null;
+      }
+    }, 20000);
+
+    if (result.success) {
+      showStatus(
+        `Соединение MTProxy успешно! Задержка: ${result.latency_ms}мс`,
+        'success'
+      );
+    } else {
+      showStatus(
+        `Ошибка соединения MTProxy: ${result.error || 'Неизвестная ошибка'}`,
+        'error'
+      );
+    }
+  } catch (error) {
+    console.error('Failed to test MTProxy:', error);
+    mtProxyTestResult.value = {
+      success: false,
+      latency_ms: null,
+      mode: 'mtproxy',
+      error: (error as Error).message
+    };
+    showStatus('Ошибка тестирования MTProxy: ' + (error as Error).message, 'error');
+  } finally {
+    isTestingMtProxy.value = false;
   }
 }
 
@@ -288,14 +456,12 @@ function dismissStatus() {
             <input
               v-model="host"
               type="text"
-              placeholder="127.0.0.1"
               class="network-input network-input-host"
             />
             <label>Порт:</label>
             <input
               v-model="port"
               type="number"
-              placeholder="1080"
               min="1"
               max="65535"
               class="network-input network-input-port"
@@ -341,22 +507,107 @@ function dismissStatus() {
             />
             <button
               @click="testConnection"
-              :disabled="isTesting || !hasProxyData"
+              :disabled="isTestingSocks5 || !hasProxyData"
               class="test-button"
-              :class="{ disabled: isTesting || !hasProxyData }"
-            >{{ isTesting ? 'Проверка...' : 'Тест' }}</button>
+              :class="{ disabled: isTestingSocks5 || !hasProxyData }"
+            >{{ isTestingSocks5 ? 'Проверка...' : 'Тест' }}</button>
             <button @click="saveSettings" :disabled="isSaving" class="save-button-inline">Сохранить</button>
           </div>
 
           <!-- Test Result -->
           <Transition name="fade">
-            <div v-if="testResult" class="test-result" :class="{ success: testResult.success, error: !testResult.success }">
-              <Check v-if="testResult.success" :size="16" />
+            <div v-if="socks5TestResult" class="test-result" :class="{ success: socks5TestResult.success, error: !socks5TestResult.success }">
+              <Check v-if="socks5TestResult.success" :size="16" />
               <X v-else :size="16" />
-              <span v-if="testResult.success">
-                Соединение успешно <span v-if="testResult.latency_ms">{{ testResult.latency_ms }}мс</span>
+              <span v-if="socks5TestResult.success">
+                Соединение успешно <span v-if="socks5TestResult.latency_ms">{{ socks5TestResult.latency_ms }}мс</span>
               </span>
-              <span v-else>{{ testResult.error || 'Ошибка соединения' }}</span>
+              <span v-else>{{ socks5TestResult.error || 'Ошибка соединения' }}</span>
+            </div>
+          </Transition>
+        </div>
+
+      </section>
+
+      <!-- MTProxy Section -->
+      <section class="network-section">
+        <div class="section-header">
+          <h3>MTProxy</h3>
+        </div>
+
+        <div class="network-form">
+          <!-- Host and Port Row -->
+          <div class="form-row">
+            <label>Хост:</label>
+            <input
+              v-model="mtHost"
+              type="text"
+              class="network-input network-input-host"
+            />
+            <label>Порт:</label>
+            <input
+              v-model="mtPort"
+              type="number"
+              min="1"
+              max="65535"
+              class="network-input network-input-port"
+            />
+          </div>
+
+          <!-- Secret Row -->
+          <div class="form-row">
+            <label>Ключ:</label>
+            <div class="input-with-toggle input-with-toggle-wide">
+              <input
+                :type="mtShowSecret ? 'text' : 'password'"
+                v-model="mtSecret"
+                class="network-input network-input-key"
+              />
+              <button
+                type="button"
+                class="toggle-icon-button"
+                @click="mtShowSecret = !mtShowSecret"
+                :title="mtShowSecret ? 'Скрыть' : 'Показать'"
+              >
+                <Eye v-if="!mtShowSecret" :size="18" />
+                <EyeOff v-else :size="18" />
+              </button>
+            </div>
+          </div>
+
+          <!-- DC ID Row (Optional) -->
+          <div class="form-row">
+            <label>DC ID:</label>
+            <select
+              v-model="mtDcId"
+              class="network-select dc-id-select"
+            >
+              <option v-for="opt in dcIdOptions" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+          </div>
+
+          <!-- Buttons Row -->
+          <div class="button-row">
+            <button
+              @click="testMtProxyConnection"
+              :disabled="isTestingMtProxy || !hasMtProxyData"
+              class="test-button"
+              :class="{ disabled: isTestingMtProxy || !hasMtProxyData }"
+            >{{ isTestingMtProxy ? 'Проверка...' : 'Тест' }}</button>
+            <button @click="saveMtProxySettings" :disabled="isSaving" class="save-button-inline">Сохранить</button>
+          </div>
+
+          <!-- Test Result -->
+          <Transition name="fade">
+            <div v-if="mtProxyTestResult" class="test-result" :class="{ success: mtProxyTestResult.success, error: !mtProxyTestResult.success }">
+              <Check v-if="mtProxyTestResult.success" :size="16" />
+              <X v-else :size="16" />
+              <span v-if="mtProxyTestResult.success">
+                Соединение MTProxy успешно <span v-if="mtProxyTestResult.latency_ms">{{ mtProxyTestResult.latency_ms }}мс</span>
+              </span>
+              <span v-else>{{ mtProxyTestResult.error || 'Ошибка соединения MTProxy' }}</span>
             </div>
           </Transition>
         </div>
@@ -590,6 +841,10 @@ function dismissStatus() {
   padding: 0.3rem 0.5rem;
 }
 
+.dc-id-select {
+  max-width: 150px;
+}
+
 /* Input with toggle icon button */
 .input-with-toggle {
   position: relative;
@@ -626,12 +881,29 @@ function dismissStatus() {
   color: var(--color-accent);
 }
 
+/* Wide input toggle for MTProxy secret */
+.input-with-toggle-wide {
+  position: relative;
+  flex: 1;
+  max-width: 100%;
+}
+
+.input-with-toggle-wide .network-input {
+  width: 100%;
+  padding-right: 40px;
+}
+
+.input-with-toggle-wide .network-input-key {
+  max-width: 100%;
+}
+
 /* Buttons */
 .button-row {
   display: flex;
   gap: 0.75rem;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   margin-top: 0.5rem;
   padding-top: 0.5rem;
   border-top: 1px solid rgba(255, 255, 255, 0.08);

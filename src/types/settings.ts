@@ -41,8 +41,16 @@ export interface Socks5SettingsDto {
   proxy_url?: string
 }
 
+export interface MtProxySettingsDto {
+  host?: string
+  port: number
+  secret?: string
+  dc_id?: number
+}
+
 export interface NetworkSettingsDto {
   proxy: Socks5SettingsDto
+  mtproxy: MtProxySettingsDto
 }
 
 export interface TtsSettingsDto {

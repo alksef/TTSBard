@@ -102,11 +102,12 @@ pub struct TelegramTtsSettings {
 
 /// Proxy mode for Telegram connection
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "lowercase")]
 pub enum ProxyMode {
     #[default]
     None,
     Socks5,
+    MtProxy,
 }
 
 impl ProxyMode {
@@ -118,6 +119,8 @@ impl ProxyMode {
         let url_lower = url.to_lowercase();
         if url_lower.starts_with("socks5://") || url_lower.starts_with("socks5h://") {
             ProxyMode::Socks5
+        } else if url_lower.starts_with("mtproxy://") || url_lower.starts_with("mtproto://") {
+            ProxyMode::MtProxy
         } else {
             ProxyMode::None
         }
@@ -127,34 +130,48 @@ impl ProxyMode {
 // ==================== Network Settings ====================
 
 /// SOCKS5 proxy settings
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct Socks5Settings {
     /// SOCKS5 proxy URL (socks5://user:pass@host:port)
     pub proxy_url: Option<String>,
 }
 
-impl Default for Socks5Settings {
+/// MTProxy settings for Telegram
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MtProxySettings {
+    /// MTProxy server host (IP or domain)
+    pub host: Option<String>,
+    /// MTProxy server port
+    #[serde(default = "default_mtproxy_port")]
+    pub port: u16,
+    /// MTProxy secret key (hex or base64 encoded)
+    pub secret: Option<String>,
+    /// Optional DC ID (data center ID)
+    pub dc_id: Option<i32>,
+}
+
+fn default_mtproxy_port() -> u16 { 8888 }
+
+impl Default for MtProxySettings {
     fn default() -> Self {
         Self {
-            proxy_url: None,
+            host: None,
+            port: 8888,
+            secret: None,
+            dc_id: None,
         }
     }
 }
 
 /// Unified network settings containing all proxy configurations
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct NetworkSettings {
     /// SOCKS5 proxy settings
     #[serde(default)]
     pub proxy: Socks5Settings,
-}
-
-impl Default for NetworkSettings {
-    fn default() -> Self {
-        Self {
-            proxy: Socks5Settings::default(),
-        }
-    }
+    /// MTProxy settings
+    #[serde(default)]
+    pub mtproxy: MtProxySettings,
 }
 
 // ==================== Legacy Proxy Settings (for migration) ====================
@@ -846,5 +863,34 @@ impl SettingsManager {
     /// Returns the cached Telegram proxy mode.
     pub fn get_telegram_proxy_mode(&self) -> ProxyMode {
         self.cache.read().tts.telegram.proxy_mode.clone()
+    }
+
+    // ========== MTProxy Settings ==========
+
+    /// Set MTProxy settings
+    ///
+    /// Updates all MTProxy fields atomically.
+    ///
+    /// # Arguments
+    /// * `host` - MTProxy server host (IP or domain)
+    /// * `port` - MTProxy server port
+    /// * `secret` - MTProxy secret key (hex or base64 encoded)
+    /// * `dc_id` - Optional DC ID (data center ID)
+    pub fn set_mtproxy_settings(&self, host: Option<String>, port: u16, secret: Option<String>, dc_id: Option<i32>) -> Result<()> {
+        let mut settings = self.load()?;
+        settings.tts.network.mtproxy = MtProxySettings {
+            host,
+            port,
+            secret,
+            dc_id,
+        };
+        self.save(&settings)
+    }
+
+    /// Get MTProxy settings
+    ///
+    /// Returns the cached MTProxy settings.
+    pub fn get_mtproxy_settings(&self) -> MtProxySettings {
+        self.cache.read().tts.network.mtproxy.clone()
     }
 }

@@ -101,7 +101,7 @@ impl OpenAiTts {
     fn parse_proxy_url(&self, url: &str) -> Result<reqwest::Proxy, String> {
         // Validate URL scheme
         let (scheme, _rest) = url.split_once("://")
-            .ok_or_else(|| format!("Invalid proxy URL: missing scheme"))?;
+            .ok_or_else(|| "Invalid proxy URL: missing scheme".to_string())?;
 
         // Supported schemes by reqwest: socks5, socks5h, socks4, socks4a, http, https
         let scheme_lower = scheme.to_lowercase();

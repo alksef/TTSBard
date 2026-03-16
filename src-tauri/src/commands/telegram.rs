@@ -61,20 +61,37 @@ pub async fn telegram_init(
     let settings = settings_manager.load()
         .map_err(|e| format!("Failed to load settings: {}", e))?;
 
-    // Get proxy URL based on proxy mode
-    let proxy_url = match settings.tts.telegram.proxy_mode {
-        ProxyMode::None => None,
-        ProxyMode::Socks5 => settings.tts.network.proxy.proxy_url.clone(),
-    };
-
-    info!(proxy_mode = ?settings.tts.telegram.proxy_mode, has_proxy = proxy_url.is_some(), "Initializing Telegram with proxy settings");
+    info!(proxy_mode = ?settings.tts.telegram.proxy_mode, "Initializing Telegram with proxy settings");
 
     // Создаем новый клиент
     let client = TelegramClient::new();
 
-    // Инициализируем с поддержкой прокси
-    client.init_with_proxy(api_id, api_hash, phone, proxy_url).await
-        .map_err(|e| format!("Ошибка инициализации клиента: {}", e))?;
+    // Инициализируем с поддержкой выбранного прокси
+    match &settings.tts.telegram.proxy_mode {
+        ProxyMode::None => {
+            info!("Initializing without proxy");
+            client.init_with_proxy(api_id, api_hash, phone, None).await
+                .map_err(|e| format!("Ошибка инициализации клиента: {}", e))?;
+        }
+        ProxyMode::Socks5 => {
+            let proxy_url = settings.tts.network.proxy.proxy_url.clone();
+            info!(has_proxy = proxy_url.is_some(), "Initializing with SOCKS5 proxy");
+            client.init_with_proxy(api_id, api_hash, phone, proxy_url).await
+                .map_err(|e| format!("Ошибка инициализации клиента: {}", e))?;
+        }
+        ProxyMode::MtProxy => {
+            #[cfg(feature = "mtproxy")]
+            {
+                info!("Initializing with MTProxy");
+                client.init_with_mtproxy(api_id, api_hash, phone, &settings.tts.network.mtproxy).await
+                    .map_err(|e| format!("Ошибка инициализации клиента: {}", e))?;
+            }
+            #[cfg(not(feature = "mtproxy"))]
+            {
+                return Err("MTProxy feature is not enabled".to_string());
+            }
+        }
+    }
 
     // Сохраняем клиент в состоянии
     {
@@ -315,20 +332,37 @@ pub async fn telegram_auto_restore(
     let settings = settings_manager.load()
         .map_err(|e| format!("Failed to load settings: {}", e))?;
 
-    // Get proxy URL based on proxy mode
-    let proxy_url = match settings.tts.telegram.proxy_mode {
-        ProxyMode::None => None,
-        ProxyMode::Socks5 => settings.tts.network.proxy.proxy_url.clone(),
-    };
-
-    info!(proxy_mode = ?settings.tts.telegram.proxy_mode, has_proxy = proxy_url.is_some(), "Restoring session with proxy settings");
+    info!(proxy_mode = ?settings.tts.telegram.proxy_mode, "Restoring session with proxy settings");
 
     // Создаём новый клиент
     let client = TelegramClient::new();
 
-    // Инициализируем с пустыми данными (сессия уже есть) и поддержкой прокси
-    client.init_empty_with_proxy(api_id, proxy_url).await
-        .map_err(|e| format!("Ошибка инициализации сессии: {}", e))?;
+    // Инициализируем с пустыми данными (сессия уже есть) и поддержкой выбранного прокси
+    match &settings.tts.telegram.proxy_mode {
+        ProxyMode::None => {
+            info!("Initializing without proxy");
+            client.init_empty(api_id).await
+                .map_err(|e| format!("Ошибка инициализации сессии: {}", e))?;
+        }
+        ProxyMode::Socks5 => {
+            let proxy_url = settings.tts.network.proxy.proxy_url.clone();
+            info!(has_proxy = proxy_url.is_some(), "Initializing with SOCKS5 proxy");
+            client.init_empty_with_proxy(api_id, proxy_url).await
+                .map_err(|e| format!("Ошибка инициализации сессии: {}", e))?;
+        }
+        ProxyMode::MtProxy => {
+            #[cfg(feature = "mtproxy")]
+            {
+                info!("Initializing with MTProxy");
+                client.init_empty_with_mtproxy(api_id, &settings.tts.network.mtproxy).await
+                    .map_err(|e| format!("Ошибка инициализации сессии: {}", e))?;
+            }
+            #[cfg(not(feature = "mtproxy"))]
+            {
+                return Err("MTProxy feature is not enabled".to_string());
+            }
+        }
+    }
 
     // Сохраняем клиент в состоянии
     let mut state_guard = state.client.lock().await;
