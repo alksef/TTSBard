@@ -69,7 +69,7 @@ Use `superpowers:requesting-code-review` skill when completing tasks, implementi
 
 When writing implementation plans to `docs\plans\`:
 1. **Read the counter** from `docs\plans\counter.txt` before writing a plan
-2. Use the counter value as the plan number (e.g., if counter is 38, next plan is `39-YYYY-MMDD-description.md`)
+2. Use the counter value as the plan number (e.g., if counter is 38, next plan is `39-YYYY-MM-DD-description.md`)
 3. **Increment the counter** after writing the plan file
 
 This ensures sequential plan numbering without conflicts.
