@@ -180,8 +180,8 @@ import { Globe, Zap, Music, Lightbulb, ClipboardPenLine } from 'lucide-vue-next'
 .info-section {
   margin-bottom: 1.5rem;
   padding: 12px 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   backdrop-filter: blur(8px);
 }
@@ -219,13 +219,13 @@ import { Globe, Zap, Music, Lightbulb, ClipboardPenLine } from 'lucide-vue-next'
 }
 
 .section-description code {
-  background: rgba(29, 140, 255, 0.15);
-  color: #70d6ff;
+  background: var(--color-accent-glow);
+  color: var(--color-info);
   padding: 0.2rem 0.4rem;
   border-radius: 4px;
   font-family: var(--font-mono);
   font-size: 0.9rem;
-  border: 1px solid rgba(29, 140, 255, 0.3);
+  border: 1px solid var(--info-border);
 }
 
 .subsection-description {
@@ -248,16 +248,16 @@ import { Globe, Zap, Music, Lightbulb, ClipboardPenLine } from 'lucide-vue-next'
 }
 
 .hotkey-item kbd {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+  background: var(--kbd-bg);
+  border: 1px solid var(--color-border-strong);
+  border-bottom: 2px solid var(--color-border);
   border-radius: 6px;
   padding: 0.3rem 0.6rem;
   font-family: var(--font-mono);
   font-weight: 600;
   font-size: 0.85rem;
   color: var(--color-text-primary);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 2px 4px var(--kbd-shadow);
 }
 
 .hotkey-item span {
@@ -266,10 +266,10 @@ import { Globe, Zap, Music, Lightbulb, ClipboardPenLine } from 'lucide-vue-next'
 }
 
 .preset-list {
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--output-bg-dark);
   padding: 1rem;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border);
 }
 
 .preset-item {
@@ -284,14 +284,14 @@ import { Globe, Zap, Music, Lightbulb, ClipboardPenLine } from 'lucide-vue-next'
 }
 
 .preset-item code {
-  background: rgba(29, 140, 255, 0.15);
-  color: #70d6ff;
+  background: var(--color-accent-glow);
+  color: var(--color-info);
   padding: 0.3rem 0.6rem;
   border-radius: 4px;
   font-family: var(--font-mono);
   font-weight: 600;
   font-size: 0.9rem;
-  border: 1px solid rgba(29, 140, 255, 0.3);
+  border: 1px solid var(--info-border);
 }
 
 .preset-item span {
@@ -303,24 +303,24 @@ import { Globe, Zap, Music, Lightbulb, ClipboardPenLine } from 'lucide-vue-next'
   font-size: 0.9rem;
   color: var(--color-text-secondary);
   padding: 0.6rem;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--color-bg-field);
   border-radius: 6px;
   margin-top: 0.5rem;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--color-border-weak);
 }
 
 .preset-example code {
-  background: rgba(29, 140, 255, 0.12);
-  color: #70d6ff;
+  background: var(--color-accent-glow);
+  color: var(--color-info);
   padding: 0.15rem 0.35rem;
   border-radius: 3px;
   font-family: var(--font-mono);
   font-size: 0.85rem;
-  border: 1px solid rgba(29, 140, 255, 0.25);
+  border: 1px solid var(--info-border);
 }
 
 .preset-example em {
-  color: #4ade80;
+  color: var(--success-text-bright);
   font-style: normal;
   font-weight: 500;
 }
@@ -328,10 +328,10 @@ import { Globe, Zap, Music, Lightbulb, ClipboardPenLine } from 'lucide-vue-next'
 .hint {
   margin-top: 1rem;
   padding: 0.75rem;
-  background: rgba(255, 152, 0, 0.1);
-  border-left: 4px solid #ff9800;
+  background: var(--warning-bg-weak);
+  border-left: 4px solid var(--warning-border-solid);
   border-radius: 6px;
-  color: #ffb74d;
+  color: var(--color-warning);
   font-size: 0.9rem;
   display: flex;
   align-items: center;
@@ -346,9 +346,9 @@ import { Globe, Zap, Music, Lightbulb, ClipboardPenLine } from 'lucide-vue-next'
 }
 
 .key-badge {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+  background: var(--kbd-bg);
+  border: 1px solid var(--color-border-strong);
+  border-bottom: 2px solid var(--color-border);
   border-radius: 6px;
   padding: 0.5rem;
   text-align: center;
@@ -365,14 +365,14 @@ import { Globe, Zap, Music, Lightbulb, ClipboardPenLine } from 'lucide-vue-next'
 }
 
 .format-badge {
-  background: rgba(74, 222, 128, 0.12);
-  color: #4ade80;
+  background: var(--success-bg-weak);
+  color: var(--success-text-bright);
   padding: 0.4rem 0.8rem;
   border-radius: 6px;
   font-family: var(--font-mono);
   font-weight: 600;
   font-size: 0.9rem;
-  border: 1px solid rgba(74, 222, 128, 0.25);
+  border: 1px solid var(--success-shadow);
 }
 
 .info-block {
@@ -404,7 +404,7 @@ import { Globe, Zap, Music, Lightbulb, ClipboardPenLine } from 'lucide-vue-next'
 .features-table td {
   padding: 0.5rem 0.75rem;
   text-align: left;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .features-table th {
@@ -417,13 +417,13 @@ import { Globe, Zap, Music, Lightbulb, ClipboardPenLine } from 'lucide-vue-next'
 }
 
 .info-block code {
-  background: rgba(29, 140, 255, 0.15);
+  background: var(--color-accent-glow);
   padding: 0.15rem 0.35rem;
   border-radius: 4px;
   font-family: var(--font-mono);
   font-size: 0.85em;
   color: var(--color-info);
-  border: 1px solid rgba(29, 140, 255, 0.28);
+  border: 1px solid var(--info-border);
 }
 
 .info-block ul {
@@ -437,10 +437,10 @@ import { Globe, Zap, Music, Lightbulb, ClipboardPenLine } from 'lucide-vue-next'
 }
 
 .example-block {
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--output-bg-dark);
   padding: 1rem;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border);
 }
 
 .example-item {
@@ -457,12 +457,12 @@ import { Globe, Zap, Music, Lightbulb, ClipboardPenLine } from 'lucide-vue-next'
 }
 
 .example-item code {
-  background: rgba(29, 140, 255, 0.15);
-  color: #70d6ff;
+  background: var(--color-accent-glow);
+  color: var(--color-info);
   padding: 0.2rem 0.5rem;
   border-radius: 4px;
   font-family: var(--font-mono);
   font-size: 0.9rem;
-  border: 1px solid rgba(29, 140, 255, 0.28);
+  border: 1px solid var(--info-border);
 }
 </style>

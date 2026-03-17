@@ -211,8 +211,8 @@ watch(loggingSettings, (newSettings) => {
 .settings-section {
   margin-bottom: 1.5rem;
   padding: 12px 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   backdrop-filter: blur(8px);
 }
@@ -248,7 +248,7 @@ watch(loggingSettings, (newSettings) => {
   width: 18px;
   height: 18px;
   cursor: pointer;
-  accent-color: #1d8cff;
+  accent-color: var(--color-accent);
 }
 
 .setting-hint {
@@ -261,7 +261,7 @@ watch(loggingSettings, (newSettings) => {
 }
 
 .setting-hint code {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--btn-neutral-bg);
   padding: 0.15rem 0.35rem;
   border-radius: 4px;
   font-family: var(--font-mono);
@@ -275,7 +275,7 @@ watch(loggingSettings, (newSettings) => {
   margin-top: 0.5rem;
   margin-left: 2.4rem;
   font-size: 0.82rem;
-  color: #ffb347;
+  color: var(--warning-text-bright);
 }
 
 .setting-group {
@@ -285,8 +285,8 @@ watch(loggingSettings, (newSettings) => {
 
 .level-select {
   padding: 0.4rem 0.6rem;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--color-bg-field-hover);
+  border: 1px solid var(--color-border-strong);
   border-radius: 6px;
   color: var(--color-text-primary);
   font-size: 0.9rem;
@@ -296,24 +296,24 @@ watch(loggingSettings, (newSettings) => {
 }
 
 .level-select:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: var(--btn-neutral-bg);
+  border-color: var(--color-border-strong);
 }
 
 .level-select:focus {
   outline: none;
-  border-color: #1d8cff;
-  box-shadow: 0 0 0 2px rgba(29, 140, 255, 0.15);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--focus-glow);
 }
 
 .level-select option {
-  background: #1e1e1e;
+  background: var(--select-bg);
   color: var(--color-text-primary);
   padding: 0.3rem 0.5rem;
 }
 
 .level-select option:hover {
-  background: #2a2a2a;
+  background: var(--select-bg-hover);
 }
 
 .setting-group label {
@@ -334,29 +334,29 @@ watch(loggingSettings, (newSettings) => {
   font-size: 12px;
   font-weight: 500;
   z-index: 1000;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--dialog-shadow);
   backdrop-filter: blur(10px);
   animation: slideDownFade 0.3s ease-out;
   white-space: nowrap;
 }
 
 .message-box.success {
-  background: rgba(74, 222, 128, 0.92);
-  border: 1px solid rgba(74, 222, 128, 0.4);
-  color: #0d4d1f;
+  background: var(--success-bg);
+  border: 1px solid var(--success-border-weak, rgba(74, 222, 128, 0.4));
+  color: var(--success-text);
 }
 
 .message-box.warning {
-  background: rgba(255, 165, 2, 0.92);
-  border: 1px solid rgba(255, 165, 2, 0.4);
-  color: #4a2d0d;
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-border);
+  color: var(--warning-text);
 }
 
 .message-box.error {
-  background: rgba(255, 111, 105, 0.92);
-  border: 1px solid rgba(255, 111, 105, 0.4);
-  border-left: 4px solid rgba(255, 59, 48, 0.8);
-  color: #4a0d0d;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
+  border-left: 4px solid var(--status-disconnected);
+  color: var(--danger-text);
 }
 
 @keyframes slideDownFade {

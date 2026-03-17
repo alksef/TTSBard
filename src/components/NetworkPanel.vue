@@ -667,22 +667,22 @@ function dismissStatus() {
 }
 
 .status-message.success {
-  background: rgba(74, 222, 128, 0.92);
-  border: 1px solid rgba(74, 222, 128, 0.4);
-  color: #0d4d1f;
+  background: var(--success-bg);
+  border: 1px solid var(--success-border, rgba(74, 222, 128, 0.4));
+  color: var(--success-text);
 }
 
 .status-message.error {
-  background: rgba(255, 111, 105, 0.92);
-  border: 1px solid rgba(255, 111, 105, 0.4);
-  border-left: 4px solid rgba(255, 59, 48, 0.8);
-  color: #4a0d0d;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border-strong);
+  border-left: 4px solid var(--danger-border-strong);
+  color: var(--danger-text);
 }
 
 .status-message.info {
-  background: rgba(29, 140, 255, 0.92);
-  border: 1px solid rgba(29, 140, 255, 0.4);
-  color: #0a2a4a;
+  background: var(--info-bg);
+  border: 1px solid var(--info-border);
+  color: var(--info-text);
 }
 
 @keyframes slideDownFade {
@@ -725,8 +725,8 @@ function dismissStatus() {
 
 /* Network Section */
 .network-section {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   padding: 12px 16px;
   backdrop-filter: blur(8px);
@@ -739,7 +739,7 @@ function dismissStatus() {
   gap: 10px;
   margin-bottom: 16px;
   padding-bottom: 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .section-header h3 {
@@ -774,9 +774,9 @@ function dismissStatus() {
 .network-input {
   flex: 1;
   padding: 8px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-strong);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--color-bg-field);
   color: var(--color-text-primary);
   font-size: 14px;
   font-family: var(--font-mono);
@@ -797,14 +797,14 @@ function dismissStatus() {
 }
 
 .network-input:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: var(--color-bg-field-hover);
+  border-color: var(--color-border-strong);
 }
 
 .network-input:focus {
   outline: none;
-  border-color: rgba(29, 140, 255, 0.5);
-  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
 .network-input::placeholder {
@@ -815,9 +815,9 @@ function dismissStatus() {
 
 .network-select {
   padding: 10px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--color-bg-field);
   color: var(--color-text-primary);
   font-size: 14px;
   cursor: pointer;
@@ -825,18 +825,18 @@ function dismissStatus() {
 }
 
 .network-select:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: var(--color-bg-field-hover);
+  border-color: var(--color-border-strong);
 }
 
 .network-select:focus {
   outline: none;
-  border-color: rgba(29, 140, 255, 0.5);
-  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
 .network-select option {
-  background: #1e1e1e;
+  background: var(--select-bg);
   color: var(--color-text-primary);
   padding: 0.3rem 0.5rem;
 }
@@ -906,14 +906,14 @@ function dismissStatus() {
   justify-content: flex-end;
   margin-top: 0.5rem;
   padding-top: 0.5rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--color-border);
 }
 
 .test-host-input {
   padding: 0.6rem 1rem;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--color-bg-field);
   color: var(--color-text-primary);
   font-size: 14px;
   min-width: 150px;
@@ -922,8 +922,8 @@ function dismissStatus() {
 
 .test-host-input:focus {
   outline: none;
-  border-color: rgba(29, 140, 255, 0.4);
-  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.1);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
 .test-host-input::placeholder {
@@ -944,7 +944,7 @@ function dismissStatus() {
 
 .save-button-inline {
   background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: white;
+  color: var(--color-text-white);
 }
 
 .save-button-inline:hover:not(:disabled) {
@@ -957,22 +957,22 @@ function dismissStatus() {
 }
 
 .test-button {
-  background: rgba(29, 140, 255, 0.16);
-  color: white;
+  background: var(--btn-accent-bg);
+  color: var(--color-text-white);
 }
 
 .test-button:hover:not(:disabled) {
-  background: rgba(29, 140, 255, 0.26);
+  background: var(--btn-accent-bg-hover);
 }
 
 .test-button.disabled {
-  background: #ccc;
+  background: var(--btn-disabled-bg);
   cursor: not-allowed;
   opacity: 0.6;
 }
 
 .test-button.disabled:hover {
-  background: #ccc;
+  background: var(--btn-disabled-bg);
 }
 
 /* Test Result */
@@ -987,15 +987,15 @@ function dismissStatus() {
 }
 
 .test-result.success {
-  background: rgba(74, 222, 128, 0.12);
-  border: 1px solid rgba(74, 222, 128, 0.24);
-  color: #4ade80;
+  background: var(--success-bg-weak);
+  border: 1px solid var(--success-border, rgba(74, 222, 128, 0.24));
+  color: var(--success-text-bright);
 }
 
 .test-result.error {
-  background: rgba(255, 111, 105, 0.12);
-  border: 1px solid rgba(255, 111, 105, 0.24);
-  color: #ffb8b4;
+  background: var(--danger-bg-weak);
+  border: 1px solid var(--danger-border-strong);
+  color: var(--danger-text-weak);
 }
 
 .test-result span {

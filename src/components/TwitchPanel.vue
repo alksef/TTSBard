@@ -360,7 +360,7 @@ h2 {
 .server-header {
   padding-top: 0;
   padding-bottom: 0.75rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--color-border);
   margin-bottom: 1rem;
   align-items: flex-start;
 }
@@ -381,30 +381,30 @@ h2 {
   font-weight: 500;
   color: var(--color-text-secondary);
   padding: 0.15rem 0.5rem;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--color-bg-field);
   border-radius: 5px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border);
   height: 28px;
   display: flex;
   align-items: center;
 }
 
 .status-indicator.running {
-  color: #bff4d0;
-  background: rgba(74, 222, 128, 0.12);
-  border-color: rgba(74, 222, 128, 0.2);
+  color: var(--success-text-bright);
+  background: var(--success-bg-weak);
+  border-color: var(--success-shadow);
 }
 
 .status-indicator.connecting {
-  color: #ffd7a2;
-  background: rgba(255, 183, 77, 0.12);
-  border-color: rgba(255, 183, 77, 0.2);
+  color: var(--warning-text-bright);
+  background: var(--warning-bg-weak);
+  border-color: var(--warning-border);
 }
 
 .status-indicator.error {
-  color: #ffb8b4;
-  background: rgba(255, 111, 105, 0.12);
-  border-color: rgba(255, 111, 105, 0.2);
+  color: var(--danger-text-weak);
+  background: var(--danger-bg-weak);
+  border-color: var(--danger-border);
 }
 
 .status-button {
@@ -417,7 +417,7 @@ h2 {
   align-items: center;
   justify-content: center;
   transition: all 0.2s;
-  color: white;
+  color: var(--color-text-white);
   padding: 0;
 }
 
@@ -430,23 +430,23 @@ h2 {
 }
 
 .status-button.stop {
-  background: rgba(255, 111, 105, 0.16);
+  background: var(--danger-bg-weak);
 }
 
 .status-button.stop:hover {
-  background: rgba(255, 111, 105, 0.24);
+  background: var(--danger-bg-hover);
 }
 
 .status-button.refresh {
-  background: rgba(29, 140, 255, 0.16);
+  background: var(--btn-accent-bg);
 }
 
 .status-button.refresh:hover {
-  background: rgba(29, 140, 255, 0.26);
+  background: var(--btn-accent-bg-hover);
 }
 
 .status-button.disabled {
-  background: #ccc;
+  background: var(--btn-disabled-bg);
   cursor: not-allowed;
   opacity: 0.6;
 }
@@ -468,22 +468,22 @@ h2 {
 }
 
 .message-box.success {
-  background: rgba(74, 222, 128, 0.92);
-  border: 1px solid rgba(74, 222, 128, 0.4);
-  color: #0d4d1f;
+  background: var(--success-bg);
+  border: 1px solid var(--success-border, rgba(74, 222, 128, 0.4));
+  color: var(--success-text);
 }
 
 .message-box.error {
-  background: rgba(255, 111, 105, 0.92);
-  border: 1px solid rgba(255, 111, 105, 0.4);
-  border-left: 4px solid rgba(255, 59, 48, 0.8);
-  color: #4a0d0d;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
+  border-left: 4px solid var(--status-disconnected);
+  color: var(--danger-text);
 }
 
 .message-box.info {
-  background: rgba(29, 140, 255, 0.92);
-  border: 1px solid rgba(29, 140, 255, 0.4);
-  color: #0a2a4a;
+  background: var(--info-bg);
+  border: 1px solid var(--info-border);
+  color: var(--info-text);
 }
 
 @keyframes slideDownFade {
@@ -500,8 +500,8 @@ h2 {
 .settings-section {
   margin-bottom: 1.5rem;
   padding: 12px 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   backdrop-filter: blur(8px);
   font-size: 0.95rem;
@@ -531,7 +531,7 @@ h2 {
   gap: 0.75rem;
   margin-top: 0.5rem;
   padding-top: 0.5rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--color-border);
 }
 
 .save-button-inline,
@@ -547,7 +547,7 @@ h2 {
 
 .save-button-inline {
   background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: white;
+  color: var(--color-text-white);
 }
 
 .save-button-inline:hover {
@@ -555,22 +555,22 @@ h2 {
 }
 
 .test-message-button {
-  background: rgba(29, 140, 255, 0.16);
-  color: white;
+  background: var(--btn-accent-bg);
+  color: var(--color-text-white);
 }
 
 .test-message-button:hover {
-  background: rgba(29, 140, 255, 0.26);
+  background: var(--btn-accent-bg-hover);
 }
 
 .test-message-button.disabled {
-  background: #ccc;
+  background: var(--btn-disabled-bg);
   cursor: not-allowed;
   opacity: 0.6;
 }
 
 .test-message-button.disabled:hover {
-  background: #ccc;
+  background: var(--btn-disabled-bg);
 }
 
 .checkbox-label {
@@ -591,7 +591,7 @@ h2 {
   flex: 1;
   max-width: 400px;
   padding: 0.5rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
   font-size: 14px;
   background: var(--color-bg-field);
@@ -600,8 +600,8 @@ h2 {
 
 .text-input:focus {
   outline: none;
-  border-color: rgba(29, 140, 255, 0.5);
-  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
 /* Input with toggle icon button */
@@ -657,11 +657,11 @@ h2 {
 }
 
 .help-text code {
-  background: rgba(29, 140, 255, 0.15);
+  background: var(--info-bg-weak);
   padding: 0.2rem 0.4rem;
   border-radius: 4px;
   font-family: var(--font-mono);
   color: var(--color-info);
-  border: 1px solid rgba(29, 140, 255, 0.28);
+  border: 1px solid var(--info-border);
 }
 </style>

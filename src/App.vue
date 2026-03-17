@@ -116,9 +116,9 @@ onMounted(async () => {
   overflow: hidden;
   width: 100%;
   background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.03), transparent 28%),
-    radial-gradient(circle at 28% 12%, rgba(29, 140, 255, 0.12), transparent 26%),
-    linear-gradient(135deg, #0b0d12 0%, #10131a 48%, #0a0c10 100%);
+    var(--app-gradient-line),
+    var(--app-gradient-glow),
+    var(--app-gradient-bg);
 }
 
 .main-content {
@@ -127,7 +127,7 @@ onMounted(async () => {
   position: relative;
   padding: 1.625rem 1.5rem 3rem;
   overflow-y: auto;
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 1px solid var(--color-border);
 }
 
 .main-content::before {
@@ -135,9 +135,7 @@ onMounted(async () => {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background:
-    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.014) 1px, transparent 1px);
+  background: var(--grid-pattern);
   background-size: 34px 34px;
   mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.22) 18%, rgba(0, 0, 0, 0.7));
 }
@@ -149,20 +147,20 @@ onMounted(async () => {
   justify-content: center;
   height: 100vh;
   gap: 1rem;
-  color: #ff4757;
+  color: var(--toast-error-border);
 }
 
 .error-container button {
   padding: 0.5rem 1rem;
-  background: #1d8cff;
-  color: white;
+  background: var(--color-accent);
+  color: var(--color-text-white);
   border: none;
   border-radius: 4px;
   cursor: pointer;
 }
 
 .error-container button:hover {
-  background: #0d6efd;
+  background: var(--color-accent-strong);
 }
 
 @media (max-width: 720px) {
@@ -173,7 +171,7 @@ onMounted(async () => {
   .main-content {
     padding: 1rem 0.6rem 2.5rem;
     border-left: none;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border-top: 1px solid var(--color-border);
   }
 }
 </style>

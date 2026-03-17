@@ -181,12 +181,12 @@ function toggleCollapse() {
   overflow: hidden;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 22%),
-    linear-gradient(180deg, rgba(17, 19, 26, 0.98) 0%, rgba(14, 16, 22, 0.96) 100%);
+    linear-gradient(180deg, var(--sidebar-bg-top) 0%, var(--sidebar-bg-bottom) 100%);
   color: var(--color-text-primary);
   display: flex;
   flex-direction: column;
   transition: width 0.28s ease, min-width 0.28s ease;
-  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.06);
+  box-shadow: inset -1px 0 0 var(--color-border-weak);
 }
 
 .sidebar::before {
@@ -195,9 +195,9 @@ function toggleCollapse() {
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(circle at top left, rgba(29, 140, 255, 0.18), transparent 30%),
-    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.014) 1px, transparent 1px);
+    radial-gradient(circle at top left, var(--color-accent-glow-strong), transparent 30%),
+    linear-gradient(var(--grid-line-color) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line-color) 1px, transparent 1px);
   background-size: auto, 18px 18px, 18px 18px;
   mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.95) 0%, rgba(0, 0, 0, 0.7) 78%, rgba(0, 0, 0, 0.92) 100%);
 }
@@ -216,9 +216,9 @@ function toggleCollapse() {
   transform: translateY(-50%);
   width: 34px;
   height: 34px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--color-border-strong);
   background:
-    linear-gradient(135deg, rgba(30, 32, 45, 0.98), rgba(20, 22, 32, 0.96));
+    linear-gradient(135deg, var(--color-bg-elevated), var(--color-bg));
   color: var(--color-text-secondary);
   cursor: pointer;
   padding: 0;
@@ -238,11 +238,11 @@ function toggleCollapse() {
   color: var(--color-text-primary);
   background:
     linear-gradient(135deg, rgba(40, 42, 58, 0.98), rgba(28, 30, 42, 0.96));
-  border-color: rgba(42, 140, 255, 0.5);
+  border-color: var(--card-active-border);
   box-shadow:
     0 6px 24px rgba(0, 0, 0, 0.5),
-    0 0 0 1px rgba(42, 140, 255, 0.3),
-    0 0 20px rgba(42, 140, 255, 0.25),
+    0 0 0 1px var(--color-accent-glow-strong),
+    0 0 20px var(--color-accent-glow-strong),
     inset 0 1px 0 rgba(255, 255, 255, 0.12);
   transform: translateY(-50%) scale(1.06);
 }
@@ -275,7 +275,7 @@ function toggleCollapse() {
   min-height: 30px;
   padding: 0 0.85rem 0 1rem;
   border: 1px solid transparent;
-  background: rgba(255, 255, 255, 0.01);
+  background: var(--sidebar-btn-bg);
   color: var(--color-text-secondary);
   cursor: pointer;
   text-align: left;
@@ -289,14 +289,14 @@ function toggleCollapse() {
 }
 
 .sidebar-button:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--sidebar-btn-hover-bg);
   color: var(--color-text-primary);
-  border-color: rgba(255, 255, 255, 0.08);
+  border-color: var(--color-border);
 }
 
 .sidebar-button-active {
-  background: rgba(255, 255, 255, 0.09);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: var(--sidebar-btn-active-bg);
+  border-color: var(--color-border);
   color: var(--color-text-primary) !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
@@ -312,14 +312,14 @@ function toggleCollapse() {
   transform: translateY(-50%);
   width: 6px;
   height: 1.75rem;
-  background: linear-gradient(180deg, #2aa9ff 0%, #0f74ff 100%);
+  background: linear-gradient(180deg, var(--indicator-gradient-start) 0%, var(--indicator-gradient-end) 100%);
   border-radius: 0 999px 999px 0;
-  box-shadow: 0 0 16px rgba(29, 140, 255, 0.5);
+  box-shadow: 0 0 16px var(--indicator-shadow);
 }
 
 .sidebar-divider {
   height: 1px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--color-border);
   margin: 1rem 0 0.85rem;
 }
 
@@ -349,7 +349,7 @@ function toggleCollapse() {
   position: relative;
   z-index: 1;
   padding: 0.7rem 0 0.85rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
@@ -366,13 +366,13 @@ function toggleCollapse() {
 .quit-button {
   justify-content: center;
   color: var(--color-danger);
-  background: rgba(255, 111, 105, 0.05);
-  border-color: rgba(255, 111, 105, 0.12);
+  background: var(--danger-bg-weak);
+  border-color: var(--danger-border);
 }
 
 .quit-button:hover {
-  background: rgba(255, 111, 105, 0.12);
-  color: #ff8f8a;
+  background: var(--danger-bg-hover);
+  color: var(--danger-text-bright);
 }
 
 .sidebar-collapsed .version-info {
@@ -407,7 +407,7 @@ function toggleCollapse() {
   }
 
   .sidebar {
-    box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 -1px 0 var(--color-border);
   }
 
   .sidebar-nav {

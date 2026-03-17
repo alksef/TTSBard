@@ -427,8 +427,8 @@ watch(audioSettingsFromComposable, (newSettings) => {
 }
 
 .refresh-btn {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
   padding: 8px 12px;
   cursor: pointer;
@@ -443,8 +443,8 @@ watch(audioSettingsFromComposable, (newSettings) => {
 }
 
 .refresh-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(29, 140, 255, 0.4);
+  background: var(--color-bg-field-hover);
+  border-color: var(--card-active-border);
   transform: scale(1.05);
 }
 
@@ -463,12 +463,12 @@ watch(audioSettingsFromComposable, (newSettings) => {
 }
 
 .error-box {
-  background: rgba(255, 111, 105, 0.12);
-  border: 1px solid rgba(255, 111, 105, 0.24);
+  background: var(--danger-bg-weak);
+  border: 1px solid var(--danger-border-strong);
   border-radius: 12px;
   padding: 12px;
   margin-bottom: 16px;
-  color: #ffb8b4;
+  color: var(--danger-text-weak);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -495,8 +495,8 @@ watch(audioSettingsFromComposable, (newSettings) => {
 }
 
 .setting-section {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   padding: 1.35rem 1.5rem;
   backdrop-filter: blur(8px);
@@ -508,7 +508,7 @@ watch(audioSettingsFromComposable, (newSettings) => {
   gap: 12px;
   margin-bottom: 16px;
   padding-bottom: 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .section-icon {
@@ -531,8 +531,8 @@ watch(audioSettingsFromComposable, (newSettings) => {
 
 .toggle-btn {
   padding: 6px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-field);
   color: var(--color-text-secondary);
   border-radius: 10px;
   cursor: pointer;
@@ -544,12 +544,12 @@ watch(audioSettingsFromComposable, (newSettings) => {
 }
 
 .toggle-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-field-hover);
 }
 
 .toggle-btn.active {
   background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: #fff;
+  color: var(--color-text-white);
   border-color: transparent;
 }
 
@@ -582,9 +582,9 @@ watch(audioSettingsFromComposable, (newSettings) => {
 .setting-row select {
   flex: 1;
   padding: 8px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--input-bg-strong);
   color: var(--color-text-primary);
   font-size: 14px;
   cursor: pointer;
@@ -617,8 +617,8 @@ watch(audioSettingsFromComposable, (newSettings) => {
   justify-content: center;
   min-width: 36px;
   height: 36px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-field);
   color: var(--color-text-secondary);
   border-radius: 8px;
   cursor: pointer;
@@ -626,8 +626,8 @@ watch(audioSettingsFromComposable, (newSettings) => {
 }
 
 .test-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.15);
+  background: var(--color-bg-field-hover);
+  border-color: var(--color-border-strong);
 }
 
 .test-btn:disabled {
@@ -649,17 +649,17 @@ watch(audioSettingsFromComposable, (newSettings) => {
 }
 
 .setting-row select:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: var(--color-bg-field-hover);
+  border-color: var(--color-border-strong);
 }
 
 .setting-row select:disabled {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--color-border-weak);
   cursor: not-allowed;
 }
 
 .setting-row select option {
-  background: #1e1e1e;
+  background: var(--select-bg);
   color: var(--color-text-primary);
   padding: 0.3rem 0.5rem;
 }
@@ -675,7 +675,7 @@ watch(audioSettingsFromComposable, (newSettings) => {
   flex: 1;
   height: 6px;
   -webkit-appearance: none;
-  background: rgba(255, 255, 255, 0.16);
+  background: var(--range-bg);
   border-radius: 3px;
   outline: none;
 }
@@ -698,8 +698,8 @@ watch(audioSettingsFromComposable, (newSettings) => {
 }
 
 .info-box {
-  background: rgba(29, 140, 255, 0.12);
-  border: 1px solid rgba(29, 140, 255, 0.24);
+  background: var(--info-bg-weak);
+  border: 1px solid var(--info-border);
   border-radius: 12px;
   padding: 12px;
   margin-top: 12px;
@@ -712,7 +712,7 @@ watch(audioSettingsFromComposable, (newSettings) => {
 
 .setting-row select:focus {
   outline: none;
-  border-color: rgba(29, 140, 255, 0.5);
-  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
+  border-color: var(--card-active-border);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 </style>

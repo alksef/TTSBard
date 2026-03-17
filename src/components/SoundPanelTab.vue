@@ -458,17 +458,17 @@ watch(() => appSettings.value, (newSettings) => {
 }
 
 .error-message {
-  background: rgba(255, 111, 105, 0.12);
-  border: 1px solid rgba(255, 111, 105, 0.24);
+  background: var(--danger-bg-weak);
+  border: 1px solid var(--danger-border-strong);
   border-left: 4px solid var(--color-danger);
-  color: #ffb8b4;
+  color: var(--danger-text-weak);
 }
 
 .success-message {
-  background: rgba(74, 222, 128, 0.12);
-  border: 1px solid rgba(74, 222, 128, 0.22);
+  background: var(--success-bg-weak);
+  border: 1px solid var(--success-border);
   border-left: 4px solid var(--color-success);
-  color: #bff4d0;
+  color: var(--success-text-weak);
 }
 
 @keyframes slideDown {
@@ -485,8 +485,8 @@ watch(() => appSettings.value, (newSettings) => {
 .info-section {
   padding: 12px 16px;
   margin-bottom: 1.5rem;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
   border-left: 4px solid var(--color-accent);
   border-radius: 12px;
   backdrop-filter: blur(8px);
@@ -499,13 +499,13 @@ watch(() => appSettings.value, (newSettings) => {
 }
 
 .info-section code {
-  background: rgba(29, 140, 255, 0.15);
+  background: var(--info-bg);
   padding: 0.2rem 0.4rem;
   border-radius: 4px;
   font-family: var(--font-mono);
   font-size: 0.9rem;
   color: var(--color-info);
-  border: 1px solid rgba(29, 140, 255, 0.28);
+  border: 1px solid var(--info-border);
 }
 
 .hint {
@@ -520,7 +520,7 @@ watch(() => appSettings.value, (newSettings) => {
 .add-button {
   padding: 0.6rem;
   background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: white;
+  color: var(--color-text-white);
   border: none;
   border-radius: 10px;
   cursor: pointer;
@@ -543,8 +543,8 @@ watch(() => appSettings.value, (newSettings) => {
 }
 
 .bindings-section {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
   padding: 12px 16px;
   border-radius: 12px;
   backdrop-filter: blur(8px);
@@ -558,14 +558,14 @@ watch(() => appSettings.value, (newSettings) => {
 .bindings-table th {
   text-align: left;
   padding: 0.75rem;
-  background: rgba(255, 255, 255, 0.05);
-  border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+  background: var(--btn-neutral-bg);
+  border-bottom: 2px solid var(--color-border-strong);
   color: var(--color-text-primary);
 }
 
 .bindings-table td {
   padding: 0.75rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--color-border);
   color: var(--color-text-secondary);
 }
 
@@ -574,12 +574,12 @@ watch(() => appSettings.value, (newSettings) => {
 }
 
 .bindings-table tr:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--color-bg-field);
 }
 
 .bindings-table kbd {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--color-bg-field-hover);
+  border: 1px solid var(--color-border-strong);
   border-radius: 6px;
   padding: 0.2rem 0.5rem;
   font-family: var(--font-mono);
@@ -622,7 +622,7 @@ watch(() => appSettings.value, (newSettings) => {
 .add-button-inline {
   padding: 0;
   background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: white;
+  color: var(--color-text-white);
   border: none;
   border-radius: 10px;
   cursor: pointer;
@@ -641,8 +641,8 @@ watch(() => appSettings.value, (newSettings) => {
 .remove-button {
   margin: 0;
   padding: 0;
-  background: rgba(255, 111, 105, 0.16);
-  color: white;
+  background: var(--danger-bg-weak);
+  color: var(--color-text-white);
   border: none;
   border-radius: 8px;
   cursor: pointer;
@@ -655,7 +655,7 @@ watch(() => appSettings.value, (newSettings) => {
 }
 
 .remove-button:hover {
-  background: rgba(255, 111, 105, 0.24);
+  background: var(--danger-bg-hover);
 }
 
 /* Dialog styles */
@@ -674,12 +674,12 @@ watch(() => appSettings.value, (newSettings) => {
 
 .dialog {
   background: var(--color-bg-panel-strong);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border);
   padding: 1.5rem;
   border-radius: 14px;
   width: 90%;
   max-width: 500px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+  box-shadow: var(--dialog-shadow);
 }
 
 .dialog h2 {
@@ -702,8 +702,8 @@ watch(() => appSettings.value, (newSettings) => {
 .key-select {
   width: 100%;
   padding: 0.4rem 0.6rem;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--color-bg-field-hover);
+  border: 1px solid var(--color-border-strong);
   border-radius: 6px;
   color: var(--color-text-primary);
   font-size: 0.9rem;
@@ -712,30 +712,30 @@ watch(() => appSettings.value, (newSettings) => {
 }
 
 .key-select:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: var(--input-bg-strong);
+  border-color: var(--color-border-strong);
 }
 
 .key-select:focus {
   outline: none;
-  border-color: #1d8cff;
-  box-shadow: 0 0 0 2px rgba(29, 140, 255, 0.15);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-glow);
 }
 
 .key-select option {
-  background: #1e1e1e;
+  background: var(--select-bg);
   color: var(--color-text-primary);
   padding: 0.3rem 0.5rem;
 }
 
 .key-select option:hover {
-  background: #2a2a2a;
+  background: var(--color-bg-field-hover);
 }
 
 .text-input {
   width: 100%;
   padding: 0.6rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
   font-size: 1rem;
   background: var(--color-bg-field);
@@ -751,7 +751,7 @@ watch(() => appSettings.value, (newSettings) => {
 .file-path-input {
   flex: 1;
   padding: 0.6rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
   background: var(--color-bg-field);
   color: var(--color-text-primary);
@@ -760,8 +760,8 @@ watch(() => appSettings.value, (newSettings) => {
 
 .browse-button {
   padding: 0.6rem 1rem;
-  background: rgba(255, 255, 255, 0.08);
-  color: white;
+  background: var(--btn-neutral-bg);
+  color: var(--color-text-white);
   border: none;
   border-radius: 10px;
   cursor: pointer;
@@ -772,13 +772,13 @@ watch(() => appSettings.value, (newSettings) => {
 }
 
 .browse-button:hover {
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--btn-neutral-hover);
 }
 
 .test-button {
   padding: 0.6rem 1rem;
-  background: rgba(29, 140, 255, 0.16);
-  color: white;
+  background: var(--btn-accent-bg);
+  color: var(--color-text-white);
   border: none;
   border-radius: 10px;
   cursor: pointer;
@@ -790,7 +790,7 @@ watch(() => appSettings.value, (newSettings) => {
 }
 
 .test-button:hover:not(:disabled) {
-  background: rgba(29, 140, 255, 0.26);
+  background: var(--btn-accent-bg-hover);
 }
 
 .test-button:disabled {
@@ -822,21 +822,21 @@ watch(() => appSettings.value, (newSettings) => {
 
 .cancel-button {
   padding: 0.6rem 1.2rem;
-  background: rgba(255, 255, 255, 0.08);
-  color: white;
+  background: var(--btn-neutral-bg);
+  color: var(--color-text-white);
   border: none;
   border-radius: 10px;
   cursor: pointer;
 }
 
 .cancel-button:hover {
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--btn-neutral-hover);
 }
 
 .save-button {
   padding: 0.6rem 1.2rem;
   background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: white;
+  color: var(--color-text-white);
   border: none;
   border-radius: 10px;
   cursor: pointer;
@@ -859,8 +859,8 @@ watch(() => appSettings.value, (newSettings) => {
 .appearance-section {
   padding: 12px 16px;
   margin-top: 1.5rem;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   backdrop-filter: blur(8px);
 }
@@ -897,7 +897,7 @@ watch(() => appSettings.value, (newSettings) => {
 .color-input {
   width: 50px;
   height: 36px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
   cursor: pointer;
   padding: 0;
@@ -935,7 +935,7 @@ watch(() => appSettings.value, (newSettings) => {
   padding: 1rem;
   border-radius: 12px;
   text-align: center;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border);
   min-height: 60px;
   display: flex;
   align-items: center;
@@ -943,9 +943,9 @@ watch(() => appSettings.value, (newSettings) => {
 }
 
 .preview-text {
-  color: white;
+  color: var(--color-text-white);
   font-weight: 500;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+  text-shadow: 0 1px 2px var(--text-shadow-dark);
 }
 
 .checkbox-label {

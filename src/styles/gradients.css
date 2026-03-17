@@ -1,0 +1,60 @@
+/* gradients.css - Gradient definitions using color-mix() */
+
+:root {
+  /* Gradient presets using color-mix() for automatic adaptation */
+
+  /* App background gradient */
+  --app-gradient-bg: linear-gradient(135deg,
+    color-mix(in srgb, var(--color-bg), black 5%) 0%,
+    var(--color-bg-elevated) 48%,
+    color-mix(in srgb, var(--color-bg), black 3%) 100%
+  );
+
+  /* Accent glow effect */
+  --app-gradient-glow: radial-gradient(
+    circle at 28% 12%,
+    color-mix(in srgb, var(--color-accent) 12%, transparent),
+    transparent 26%
+  );
+
+  /* Subtle line gradient */
+  --app-gradient-line: linear-gradient(
+    90deg,
+    color-mix(in srgb, white 3%, transparent),
+    transparent 28%
+  );
+
+  /* Grid overlay pattern */
+  --grid-pattern: linear-gradient(var(--grid-line-color) 1px, transparent 1px),
+                  linear-gradient(90deg, var(--grid-line-color) 1px, transparent 1px);
+
+  /* Accent button gradient */
+  --btn-accent-gradient: linear-gradient(
+    135deg,
+    var(--color-accent) 0%,
+    var(--color-accent-strong) 100%
+  );
+
+  /* Success gradient */
+  --success-gradient: linear-gradient(
+    135deg,
+    var(--success-gradient-start) 0%,
+    var(--success-gradient-end) 100%
+  );
+
+  /* Danger gradient */
+  --danger-gradient: linear-gradient(
+    135deg,
+    var(--danger-gradient-start) 0%,
+    var(--danger-gradient-end) 100%
+  );
+}
+
+/* Fallback for browsers without color-mix() support */
+@supports not (color: color-mix(in srgb, red, blue)) {
+  :root {
+    --app-gradient-bg: linear-gradient(135deg, #0b0d12 0%, #10131a 48%, #0a0c10 100%);
+    --app-gradient-glow: radial-gradient(circle at 28% 12%, rgba(var(--rgb-accent), 0.12), transparent 26%);
+    --app-gradient-line: linear-gradient(90deg, rgba(var(--rgb-white), 0.03), transparent 28%);
+  }
+}

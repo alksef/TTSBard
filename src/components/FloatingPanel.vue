@@ -167,11 +167,11 @@ onUnmounted(() => {
 
 .error-message {
   padding: 1rem 1.15rem;
-  background: rgba(255, 111, 105, 0.12);
-  border: 1px solid rgba(255, 111, 105, 0.24);
+  background: var(--danger-bg-weak);
+  border: 1px solid var(--danger-border-strong);
   border-left: 4px solid var(--color-danger);
   border-radius: 12px;
-  color: #ffb8b4;
+  color: var(--danger-text-weak);
   font-weight: 500;
   animation: slideDown 0.3s ease-out;
 }
@@ -189,8 +189,8 @@ onUnmounted(() => {
 
 .settings-section {
   padding: 12px 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   backdrop-filter: blur(8px);
   box-shadow: var(--shadow-soft);
@@ -199,8 +199,8 @@ onUnmounted(() => {
 .info-section {
   padding: 12px 16px;
   margin-bottom: 1.5rem;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
   border-left: 4px solid var(--color-accent);
   border-radius: 12px;
   backdrop-filter: blur(8px);
@@ -213,13 +213,13 @@ onUnmounted(() => {
 }
 
 .info-section code {
-  background: rgba(29, 140, 255, 0.15);
+  background: var(--info-bg-weak);
   padding: 0.2rem 0.4rem;
   border-radius: 4px;
   font-family: var(--font-mono);
   font-size: 0.9rem;
   color: var(--color-info);
-  border: 1px solid rgba(29, 140, 255, 0.28);
+  border: 1px solid var(--info-border);
 }
 
 .setting-row {
@@ -244,17 +244,17 @@ onUnmounted(() => {
 }
 
 .setting-hint code {
-  background: rgba(29, 140, 255, 0.15);
+  background: var(--info-bg-weak);
   color: var(--color-info);
   padding: 0.15rem 0.4rem;
   border-radius: 4px;
-  border: 1px solid rgba(29, 140, 255, 0.28);
+  border: 1px solid var(--info-border);
   font-family: var(--font-mono);
 }
 
 .text-input {
   padding: 0.7rem 0.85rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
   font-size: 0.95rem;
   background: var(--color-bg-field);
@@ -278,7 +278,7 @@ onUnmounted(() => {
 .color-input {
   width: 50px;
   height: 36px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
   cursor: pointer;
   padding: 0;
@@ -309,7 +309,7 @@ onUnmounted(() => {
   padding: 1rem;
   border-radius: 12px;
   text-align: center;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border);
   min-height: 60px;
   display: flex;
   align-items: center;
@@ -317,23 +317,23 @@ onUnmounted(() => {
 }
 
 .preview-text {
-  color: white;
+  color: var(--color-text-white);
   font-weight: 500;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+  text-shadow: 0 1px 2px var(--text-shadow-dark);
 }
 
 .text-input:focus,
 .color-input:focus {
   outline: none;
   border-color: rgba(29, 140, 255, 0.5);
-  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
 /* Appearance section */
 .appearance-section {
   padding: 12px 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   backdrop-filter: blur(8px);
 }

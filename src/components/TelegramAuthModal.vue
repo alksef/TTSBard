@@ -299,7 +299,7 @@ async function handleSignOut() {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: var(--modal-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -308,15 +308,15 @@ async function handleSignOut() {
 }
 
 .modal-container {
-  background: rgba(30, 30, 30, 0.95);
+  background: var(--color-bg-panel-strong);
   backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-strong);
   border-radius: 16px;
   max-width: 500px;
   width: 100%;
   max-height: 90vh;
   overflow-y: auto;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-soft);
 }
 
 .modal-header {
@@ -324,7 +324,7 @@ async function handleSignOut() {
   align-items: center;
   justify-content: space-between;
   padding: 20px 24px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid var(--color-border-strong);
 }
 
 .modal-header h2 {
@@ -351,7 +351,7 @@ async function handleSignOut() {
 }
 
 .close-button:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--btn-neutral-bg);
   color: var(--color-text-primary);
 }
 
@@ -362,11 +362,11 @@ async function handleSignOut() {
 .error-message {
   margin: 0 0 16px;
   padding: 12px 16px;
-  background: rgba(255, 111, 105, 0.12);
-  border: 1px solid rgba(255, 111, 105, 0.24);
-  border-left: 4px solid rgba(255, 59, 48, 0.8);
+  background: var(--danger-bg-weak);
+  border: 1px solid var(--danger-border-strong);
+  border-left: 4px solid var(--status-disconnected);
   border-radius: 8px;
-  color: #ffb8b4;
+  color: var(--danger-text-weak);
   font-size: 14px;
 }
 
@@ -378,8 +378,8 @@ async function handleSignOut() {
 
 .form-info {
   padding: 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   color: var(--color-text-secondary);
   font-size: 14px;
@@ -424,9 +424,9 @@ async function handleSignOut() {
 
 .form-group input {
   padding: 10px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-strong);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--color-bg-field);
   color: var(--color-text-primary);
   font-size: 14px;
   font-family: var(--font-mono);
@@ -435,18 +435,33 @@ async function handleSignOut() {
 
 .form-group input:focus {
   outline: none;
-  border-color: rgba(29, 140, 255, 0.5);
-  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
 .form-group input:disabled {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--color-border-weak);
   cursor: not-allowed;
   opacity: 0.6;
 }
 
 .form-group input::placeholder {
   color: var(--color-text-muted);
+}
+
+/* Override browser autofill styles */
+.form-group input:-webkit-autofill,
+.form-group input:-webkit-autofill:hover,
+.form-group input:-webkit-autofill:focus,
+.form-group input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px var(--color-bg-field) inset !important;
+  -webkit-text-fill-color: var(--color-text-primary) !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+.form-group input:-webkit-autofill::first-line {
+  font-family: var(--font-mono);
+  font-size: 14px;
 }
 
 .password-group {
@@ -483,13 +498,13 @@ async function handleSignOut() {
 
 .toggle-button:hover {
   color: var(--color-accent);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--color-bg-field);
 }
 
 .submit-button {
   padding: 12px 20px;
   background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: white;
+  color: var(--color-text-white);
   border: none;
   border-radius: 10px;
   font-size: 14px;
@@ -513,7 +528,7 @@ async function handleSignOut() {
   padding: 12px 20px;
   background: transparent;
   color: var(--color-text-secondary);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
   font-size: 14px;
   font-weight: 500;
@@ -523,7 +538,7 @@ async function handleSignOut() {
 }
 
 .back-button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--color-bg-field);
   border-color: var(--color-accent);
   color: var(--color-text-primary);
 }
@@ -542,15 +557,15 @@ async function handleSignOut() {
   width: 64px;
   height: 64px;
   margin: 0 auto 16px;
-  background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%);
-  color: white;
+  background: linear-gradient(135deg, var(--success-gradient-start) 0%, var(--success-gradient-end) 100%);
+  color: var(--color-text-white);
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 32px;
   font-weight: bold;
-  box-shadow: 0 4px 12px rgba(74, 222, 128, 0.3);
+  box-shadow: 0 4px 12px var(--success-shadow);
 }
 
 .connected-state h3 {
@@ -561,8 +576,8 @@ async function handleSignOut() {
 
 .user-info {
   padding: 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   margin-bottom: 16px;
 }
@@ -593,7 +608,7 @@ async function handleSignOut() {
 .info-hint {
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid var(--color-border);
   color: var(--color-text-muted);
   font-size: 13px;
 }
@@ -607,8 +622,8 @@ async function handleSignOut() {
 .disconnect-button {
   flex: 1;
   padding: 12px 20px;
-  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-  color: white;
+  background: linear-gradient(135deg, var(--danger-gradient-start) 0%, var(--danger-gradient-end) 100%);
+  color: var(--color-text-white);
   border: none;
   border-radius: 10px;
   font-size: 14px;
@@ -625,9 +640,9 @@ async function handleSignOut() {
 .close-button-primary {
   flex: 1;
   padding: 12px 20px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--btn-neutral-bg);
   color: var(--color-text-primary);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
   font-size: 14px;
   font-weight: 500;
@@ -636,7 +651,7 @@ async function handleSignOut() {
 }
 
 .close-button-primary:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--btn-neutral-hover);
   border-color: var(--color-accent);
 }
 
@@ -649,7 +664,7 @@ async function handleSignOut() {
   width: 40px;
   height: 40px;
   margin: 0 auto 16px;
-  border: 3px solid rgba(255, 255, 255, 0.1);
+  border: 3px solid var(--color-border);
   border-top-color: var(--color-accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -676,15 +691,15 @@ async function handleSignOut() {
   width: 64px;
   height: 64px;
   margin: 0 auto 16px;
-  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-  color: white;
+  background: linear-gradient(135deg, var(--danger-gradient-start) 0%, var(--danger-gradient-end) 100%);
+  color: var(--color-text-white);
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 32px;
   font-weight: bold;
-  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+  box-shadow: 0 4px 12px var(--status-disconnected-glow);
 }
 
 .error-state h3 {
@@ -695,11 +710,11 @@ async function handleSignOut() {
 
 .error-message-modal {
   padding: 12px 16px;
-  background: rgba(255, 111, 105, 0.12);
-  border: 1px solid rgba(255, 111, 105, 0.24);
-  border-left: 4px solid rgba(255, 59, 48, 0.8);
+  background: var(--danger-bg-weak);
+  border: 1px solid var(--danger-border);
+  border-left: 4px solid var(--status-disconnected);
   border-radius: 8px;
-  color: #ffb8b4;
+  color: var(--danger-text-weak);
   font-size: 14px;
   margin-bottom: 16px;
   text-align: left;
@@ -707,15 +722,15 @@ async function handleSignOut() {
 
 .error-info {
   text-align: left;
-  background: rgba(255, 59, 48, 0.05);
-  border-left-color: #ef4444;
+  background: var(--danger-bg-weak);
+  border-left-color: var(--status-disconnected);
 }
 
 .retry-button {
   flex: 1;
   padding: 12px 20px;
   background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: white;
+  color: var(--color-text-white);
   border: none;
   border-radius: 10px;
   font-size: 14px;
@@ -732,9 +747,9 @@ async function handleSignOut() {
 .disable-button {
   flex: 1;
   padding: 12px 20px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--btn-neutral-bg);
   color: var(--color-text-secondary);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
   font-size: 14px;
   font-weight: 500;
@@ -743,7 +758,7 @@ async function handleSignOut() {
 }
 
 .disable-button:hover {
-  background: rgba(255, 255, 255, 0.15);
-  border-color: rgba(255, 255, 255, 0.3);
+  background: var(--btn-neutral-hover);
+  border-color: var(--color-border-strong);
 }
 </style>
