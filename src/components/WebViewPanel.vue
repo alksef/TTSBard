@@ -318,28 +318,28 @@ h2 {
 }
 
 .message-box.success {
-  background: rgba(74, 222, 128, 0.92);
-  border: 1px solid rgba(74, 222, 128, 0.4);
-  color: #0d4d1f;
+  background: var(--success-bg);
+  border: 1px solid var(--success-shadow);
+  color: var(--success-text);
 }
 
 .message-box.info {
-  background: rgba(29, 140, 255, 0.92);
-  border: 1px solid rgba(29, 140, 255, 0.4);
-  color: #0a2a4a;
+  background: var(--info-bg);
+  border: 1px solid var(--info-border);
+  color: var(--info-text);
 }
 
 .message-box.warning {
-  background: rgba(255, 193, 7, 0.92);
-  border: 1px solid rgba(255, 193, 7, 0.4);
-  color: #4a3f00;
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-border);
+  color: var(--warning-text);
 }
 
 .message-box.error {
-  background: rgba(255, 111, 105, 0.92);
-  border: 1px solid rgba(255, 111, 105, 0.4);
-  border-left: 4px solid rgba(255, 59, 48, 0.8);
-  color: #4a0d0d;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
+  border-left: 4px solid var(--danger-gradient-start);
+  color: var(--danger-text);
 }
 
 @keyframes slideDownFade {
@@ -356,8 +356,8 @@ h2 {
 .settings-section {
   margin-bottom: 1.5rem;
   padding: 12px 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   backdrop-filter: blur(8px);
   font-size: 0.95rem;
@@ -374,7 +374,7 @@ h2 {
 .server-header {
   padding-top: 0;
   padding-bottom: 0.75rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--color-border);
   margin-bottom: 1rem;
   align-items: flex-start;
 }
@@ -395,18 +395,18 @@ h2 {
   font-weight: 500;
   color: var(--color-text-secondary);
   padding: 0.15rem 0.5rem;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--color-bg-field);
   border-radius: 5px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border);
   height: 28px;
   display: flex;
   align-items: center;
 }
 
 .status-indicator.running {
-  color: #bff4d0;
-  background: rgba(74, 222, 128, 0.12);
-  border-color: rgba(74, 222, 128, 0.2);
+  color: var(--success-text-bright);
+  background: var(--success-bg-weak);
+  border-color: var(--success-shadow);
 }
 
 .status-button {
@@ -419,7 +419,7 @@ h2 {
   align-items: center;
   justify-content: center;
   transition: all 0.2s;
-  color: white;
+  color: var(--color-text-white);
   padding: 0;
 }
 
@@ -433,23 +433,23 @@ h2 {
 }
 
 .status-button.stop {
-  background: rgba(255, 111, 105, 0.16);
+  background: var(--danger-bg-weak);
 }
 
 .status-button.stop:hover {
-  background: rgba(255, 111, 105, 0.24);
+  background: var(--danger-bg-hover);
 }
 
 .status-button.restart {
-  background: rgba(29, 140, 255, 0.16);
+  background: var(--btn-accent-bg);
 }
 
 .status-button.restart:hover {
-  background: rgba(29, 140, 255, 0.26);
+  background: var(--btn-accent-bg-hover);
 }
 
 .status-button.disabled {
-  background: #ccc;
+  background: var(--btn-disabled-bg);
   cursor: not-allowed;
   opacity: 0.6;
 }
@@ -499,7 +499,7 @@ h2 {
   flex: 1;
   max-width: 200px;
   padding: 0.5rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
   font-size: 14px;
   background: var(--color-bg-field);
@@ -507,17 +507,17 @@ h2 {
 }
 
 .number-input.input-error {
-  border-color: rgba(255, 111, 105, 0.38);
-  background: rgba(255, 111, 105, 0.08);
+  border-color: var(--danger-border-strong);
+  background: var(--card-error-bg);
 }
 
 .number-input.input-error:focus {
-  border-color: #f44;
+  border-color: var(--danger-gradient-start);
   outline: none;
 }
 
 .error-text {
-  color: #ffb8b4;
+  color: var(--danger-text-weak);
   font-size: 13px;
   font-weight: 500;
 }
@@ -525,8 +525,8 @@ h2 {
 .number-input:focus,
 .select-input:focus {
   outline: none;
-  border-color: rgba(29, 140, 255, 0.5);
-  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
 /* Address inputs group (bind address + port) */
@@ -538,8 +538,8 @@ h2 {
 .address-inputs .address-bind {
   flex: 2;
   padding: 0.4rem 0.6rem;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--color-bg-field-hover);
+  border: 1px solid var(--color-border-strong);
   border-radius: 6px;
   color: var(--color-text-primary);
   font-size: 14px;
@@ -550,30 +550,30 @@ h2 {
 }
 
 .address-inputs .address-bind:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: var(--btn-neutral-hover);
+  border-color: var(--color-border-strong);
 }
 
 .address-inputs .address-bind:focus {
   outline: none;
-  border-color: #1d8cff;
-  box-shadow: 0 0 0 2px rgba(29, 140, 255, 0.15);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--focus-glow);
 }
 
 .address-inputs .address-bind option {
-  background: #1e1e1e;
+  background: var(--select-bg);
   color: var(--color-text-primary);
   padding: 0.3rem 0.5rem;
 }
 
 .address-inputs .address-bind option:hover {
-  background: #2a2a2a;
+  background: var(--select-bg-hover);
 }
 
 .address-inputs .address-port {
   flex: 1;
   padding: 0.5rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
   font-size: 14px;
   background: var(--color-bg-field);
@@ -583,12 +583,12 @@ h2 {
 }
 
 .address-inputs .address-port.input-error {
-  border-color: rgba(255, 111, 105, 0.38);
-  background: rgba(255, 111, 105, 0.08);
+  border-color: var(--danger-border-strong);
+  background: var(--card-error-bg);
 }
 
 .address-inputs .address-port.input-error:focus {
-  border-color: #f44;
+  border-color: var(--danger-gradient-start);
   outline: none;
 }
 
@@ -615,7 +615,7 @@ h2 {
   flex: 0.8;
   padding: 0.5rem 0.75rem;
   background: var(--color-bg-field);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
   font-family: var(--font-mono);
   font-size: 13px;
@@ -627,8 +627,8 @@ h2 {
 
 .icon-button {
   padding: 0.5rem;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--color-bg-field-hover);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
   cursor: pointer;
   transition: all 0.2s;
@@ -639,14 +639,14 @@ h2 {
 }
 
 .icon-button:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.16);
+  background: var(--btn-neutral-hover);
+  border-color: var(--color-border-strong);
 }
 
 .action-button {
   padding: 0.6rem 1.2rem;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--color-bg-field-hover);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
   cursor: pointer;
   font-size: 14px;
@@ -655,24 +655,24 @@ h2 {
 }
 
 .action-button:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.16);
+  background: var(--btn-neutral-hover);
+  border-color: var(--color-border-strong);
 }
 
 .action-button.secondary {
-  background: rgba(29, 140, 255, 0.1);
-  border-color: rgba(29, 140, 255, 0.2);
+  background: var(--info-bg-weak);
+  border-color: var(--info-border);
 }
 
 .action-button.secondary:hover {
-  background: rgba(29, 140, 255, 0.16);
-  border-color: rgba(29, 140, 255, 0.3);
+  background: var(--btn-accent-bg);
+  border-color: var(--card-active-border);
 }
 
 .test-input {
   flex: 1;
   padding: 0.5rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
   font-size: 14px;
   background: var(--color-bg-field);
@@ -682,7 +682,7 @@ h2 {
 .test-button {
   padding: 0.6rem 1.2rem;
   background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: white;
+  color: var(--color-text-white);
   border: none;
   border-radius: 10px;
   cursor: pointer;
@@ -694,11 +694,11 @@ h2 {
 .test-button:hover:not(:disabled) {
   filter: brightness(1.06);
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(29, 140, 255, 0.28);
+  box-shadow: 0 2px 8px var(--focus-glow);
 }
 
 .test-button:disabled {
-  background: #ccc;
+  background: var(--btn-disabled-bg);
   cursor: not-allowed;
   opacity: 0.6;
 }
@@ -707,14 +707,14 @@ h2 {
   justify-content: flex-end;
   margin-top: 0.5rem;
   padding-top: 0.5rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--color-border);
   gap: 0.75rem;
 }
 
 .save-button-inline {
   padding: 0.6rem 1.2rem;
   background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: white;
+  color: var(--color-text-white);
   border: none;
   border-radius: 10px;
   cursor: pointer;
@@ -726,7 +726,7 @@ h2 {
 .save-button-inline:hover {
   filter: brightness(1.06);
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(29, 140, 255, 0.28);
+  box-shadow: 0 2px 8px var(--focus-glow);
 }
 
 .save-button-inline:active {
@@ -739,6 +739,6 @@ h2 {
   gap: 0.4rem;
   margin-top: 0.5rem;
   font-size: 0.82rem;
-  color: #ffb347;
+  color: var(--warning-text-bright);
 }
 </style>

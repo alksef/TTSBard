@@ -163,9 +163,9 @@ placeholder="Введите текст для проверки..."
 }
 
 .info-banner {
-  background: rgba(255, 152, 0, 0.1);
-  border: 1px solid rgba(255, 183, 77, 0.22);
-  border-left: 4px solid #ff9800;
+  background: var(--warning-bg-weak);
+  border: 1px solid var(--warning-border);
+  border-left: 4px solid var(--warning-border-solid);
   border-radius: 12px;
   padding: 12px 16px;
   margin-bottom: 1.5rem;
@@ -174,7 +174,7 @@ placeholder="Введите текст для проверки..."
 
 .info-banner p {
   margin: 0;
-  color: #ffcc80;
+  color: var(--warning-text-bright);
   font-size: 0.95rem;
   line-height: 1.6;
 }
@@ -187,18 +187,18 @@ placeholder="Введите текст для проверки..."
 }
 
 .info-banner code {
-  background: rgba(29, 140, 255, 0.15);
+  background: var(--info-bg-weak);
   padding: 2px 6px;
   border-radius: 4px;
   font-family: var(--font-mono);
   color: var(--color-info);
-  border: 1px solid rgba(29, 140, 255, 0.28);
+  border: 1px solid var(--info-border);
 }
 
 .section {
   margin-bottom: 1.5rem;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
   padding: 12px 16px;
   border-radius: 12px;
   backdrop-filter: blur(8px);
@@ -219,18 +219,18 @@ h3 {
 }
 
 .hint code {
-  background: rgba(29, 140, 255, 0.15);
+  background: var(--info-bg-weak);
   padding: 2px 6px;
   border-radius: 4px;
   font-family: var(--font-mono);
   color: var(--color-info);
-  border: 1px solid rgba(29, 140, 255, 0.28);
+  border: 1px solid var(--info-border);
 }
 
 .input-area {
   width: 100%;
   background: var(--color-bg-field);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
   color: var(--color-text-primary);
   padding: 12px;
@@ -241,8 +241,8 @@ h3 {
 
 .input-area:focus {
   outline: none;
-  border-color: rgba(29, 140, 255, 0.5);
-  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
 .status {
@@ -270,7 +270,7 @@ label {
 
 .test-input {
   background: var(--color-bg-field);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
   color: var(--color-text-primary);
   padding: 8px 10px;
@@ -280,8 +280,8 @@ label {
 
 .test-input:focus {
   outline: none;
-  border-color: rgba(29, 140, 255, 0.5);
-  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
 .test-button {
@@ -289,7 +289,7 @@ label {
   background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
   border: none;
   border-radius: 10px;
-  color: #ffffff;
+  color: var(--color-text-white);
   padding: 10px 18px;
   cursor: pointer;
   font-size: 13px;
@@ -301,8 +301,8 @@ label {
 }
 
 .test-output {
-  background: rgba(0, 0, 0, 0.25);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--output-bg-dark);
+  border: 1px solid var(--color-border);
   border-radius: 10px;
   color: var(--color-success);
   padding: 10px;

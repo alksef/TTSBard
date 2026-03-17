@@ -79,8 +79,8 @@ function getIcon(level: ErrorLevel): string {
   max-width: 500px;
   padding: 12px 16px;
   border-radius: 8px;
-  background: var(--bg-secondary, #1a1a1a);
-  border: 1px solid var(--border-color, #333);
+  background: var(--toast-bg);
+  border: 1px solid var(--toast-border);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   display: flex;
   align-items: center;
@@ -95,23 +95,23 @@ function getIcon(level: ErrorLevel): string {
 }
 
 .error-toast.error {
-  border-left: 4px solid #ff4757;
-  background: linear-gradient(90deg, rgba(255, 71, 87, 0.1) 0%, var(--bg-secondary, #1a1a1a) 20%);
+  border-left: 4px solid var(--toast-error-border);
+  background: linear-gradient(90deg, var(--toast-error-bg) 0%, var(--toast-bg) 20%);
 }
 
 .error-toast.warning {
-  border-left: 4px solid #ffa502;
-  background: linear-gradient(90deg, rgba(255, 165, 2, 0.1) 0%, var(--bg-secondary, #1a1a1a) 20%);
+  border-left: 4px solid var(--toast-warning-border);
+  background: linear-gradient(90deg, var(--toast-warning-bg) 0%, var(--toast-bg) 20%);
 }
 
 .error-toast.info {
-  border-left: 4px solid #2ed573;
-  background: linear-gradient(90deg, rgba(46, 213, 115, 0.1) 0%, var(--bg-secondary, #1a1a1a) 20%);
+  border-left: 4px solid var(--toast-success-border);
+  background: linear-gradient(90deg, var(--toast-success-bg) 0%, var(--toast-bg) 20%);
 }
 
 .error-toast.success {
-  border-left: 4px solid #2ed573;
-  background: linear-gradient(90deg, rgba(46, 213, 115, 0.1) 0%, var(--bg-secondary, #1a1a1a) 20%);
+  border-left: 4px solid var(--toast-success-border);
+  background: linear-gradient(90deg, var(--toast-success-bg) 0%, var(--toast-bg) 20%);
 }
 
 .toast-icon {

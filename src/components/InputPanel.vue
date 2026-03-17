@@ -202,21 +202,18 @@ function handleSpace(event: KeyboardEvent) {
   width: 100%;
   min-height: 340px;
   padding: 1.35rem 1.45rem;
-  border: 1px solid rgba(17, 19, 26, 0.18);
+  border: 1px solid var(--color-border-strong);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.96);
-  color: #3d3a36;
+  background: var(--input-bg-strong);
+  color: var(--color-text-primary);
   font-family: inherit;
   font-size: 1rem;
   line-height: 1.6;
   resize: vertical;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.95),
-    0 10px 30px rgba(0, 0, 0, 0.24);
 }
 
 .text-input::placeholder {
-  color: rgba(86, 78, 71, 0.68);
+  color: var(--color-text-muted);
   font-size: clamp(1.1rem, 2vw, 1.35rem);
 }
 

@@ -1,0 +1,386 @@
+# Plan 50: Unified Theme System - CSS Variables Refactoring
+
+## Overview
+
+Refactor all UI styles in main window to use a unified CSS variable system. This prepares the codebase for future theme customization (light/dark themes, accent colors).
+
+**Goal:** All styling controlled through CSS variables, no hardcoded colors in components.
+
+---
+
+## Scope
+
+### In Scope
+- Main window (`src/` components)
+- All 15 Vue components in `src/components/`
+- `src/App.vue`
+- `src/style.css` → split into `src/styles/` directory
+
+### Out of Scope
+- **Floating windows** (`src-floating/`, `src-soundpanel/`)
+- **WebView** styling (separate system)
+- Theme switching UI (future work)
+- Backend/Rust changes
+
+---
+
+## Architecture
+
+### File Structure
+```
+src/
+├── styles/
+│   ├── variables.css      # All CSS variables (colors, fonts, spacing)
+│   ├── base.css           # Reset, body, typography, scrollbar
+│   ├── gradients.css      # Gradient definitions using color-mix()
+│   └── index.css          # Entry point (imports all)
+├── style.css              # Main entry (imports styles/index.css)
+└── components/
+    └── *.vue              # Use var(--variable-name)
+```
+
+### CSS Variables Organization
+
+```css
+/* variables.css */
+
+:root {
+  /* ========== RGB COLOR VALUES ========== */
+  /* Single source of truth for color RGB values */
+  --rgb-accent: 29, 140, 255;
+  --rgb-accent-strong: 0, 109, 255;
+  --rgb-success: 74, 222, 128;
+  --rgb-warning: 255, 183, 77;
+  --rgb-warning-alt: 255, 152, 0;
+  --rgb-danger: 255, 111, 105;
+  --rgb-danger-alt: 239, 68, 68;
+  --rgb-info: 112, 214, 255;
+  --rgb-white: 255, 255, 255;
+  --rgb-black: 0, 0, 0;
+  --rgb-bg: 9, 11, 15;
+  --rgb-bg-elevated: 16, 19, 26;
+  --rgb-text: 244, 242, 238;
+
+  /* ========== BASE COLORS ========== */
+  --color-bg: rgb(var(--rgb-bg));
+  --color-bg-elevated: rgb(var(--rgb-bg-elevated));
+  --color-bg-panel: rgba(var(--rgb-bg-elevated), 0.86);
+  --color-bg-panel-strong: rgba(var(--rgb-bg-elevated), 0.94);
+  --color-bg-field: rgba(var(--rgb-white), 0.05);
+  --color-bg-field-hover: rgba(var(--rgb-white), 0.08);
+
+  /* ========== TEXT ========== */
+  --color-text-primary: rgb(var(--rgb-text));
+  --color-text-secondary: rgba(var(--rgb-text), 0.7);
+  --color-text-muted: rgba(var(--rgb-text), 0.42);
+  --color-text-white: rgb(var(--rgb-white));
+  --color-text-disabled: #888;
+
+  /* ========== ACCENT ========== */
+  --color-accent: rgb(var(--rgb-accent));
+  --color-accent-strong: rgb(var(--rgb-accent-strong));
+
+  /* ========== SEMANTIC COLORS ========== */
+  --color-success: rgb(var(--rgb-success));
+  --color-warning: rgb(var(--rgb-warning));
+  --color-info: rgb(var(--rgb-info));
+  --color-danger: rgb(var(--rgb-danger));
+
+  /* ========== BORDERS ========== */
+  --color-border: rgba(var(--rgb-white), 0.08);
+  --color-border-weak: rgba(var(--rgb-white), 0.04);
+  --color-border-strong: rgba(var(--rgb-white), 0.14);
+
+  /* ========== FOCUS & GLOW ========== */
+  --focus-glow: rgba(var(--rgb-accent), 0.15);
+  --color-accent-glow: rgba(var(--rgb-accent), 0.12);
+  --color-accent-glow-strong: rgba(var(--rgb-accent), 0.18);
+
+  /* ========== BUTTONS ========== */
+  --btn-accent-bg: rgba(var(--rgb-accent), 0.16);
+  --btn-accent-bg-hover: rgba(var(--rgb-accent), 0.26);
+  --btn-neutral-bg: rgba(var(--rgb-white), 0.08);
+  --btn-neutral-hover: rgba(var(--rgb-white), 0.14);
+  --btn-disabled-bg: #ccc;
+
+  /* ========== FORM ELEMENTS ========== */
+  --select-bg: #1e1e1e;
+  --select-bg-hover: #2a2a2a;
+  --input-bg-strong: rgba(var(--rgb-white), 0.16);
+  --range-bg: rgba(var(--rgb-white), 0.16);
+
+  /* ========== STATUS INDICATORS ========== */
+  --status-connected: rgb(var(--rgb-success));
+  --status-connected-glow: rgba(var(--rgb-success), 0.2);
+  --status-disconnected: rgb(var(--rgb-danger-alt));
+  --status-disconnected-glow: rgba(var(--rgb-danger-alt), 0.2);
+
+  /* ========== CARDS ========== */
+  --card-active-border: rgba(var(--rgb-accent), 0.35);
+  --card-active-bg: rgba(var(--rgb-accent), 0.08);
+  --card-error-border: rgba(var(--rgb-danger), 0.28);
+  --card-error-bg: rgba(var(--rgb-danger), 0.08);
+
+  /* ========== SUCCESS MESSAGES ========== */
+  --success-bg: rgba(var(--rgb-success), 0.92);
+  --success-bg-weak: rgba(var(--rgb-success), 0.12);
+  --success-text: #0d4d1f;
+  --success-text-bright: rgb(var(--rgb-success));
+  --success-gradient-start: rgb(var(--rgb-success));
+  --success-gradient-end: #22c55e;
+  --success-shadow: rgba(var(--rgb-success), 0.3);
+  --success-border: rgba(var(--rgb-success), 0.4);
+  --success-border-weak: rgba(var(--rgb-success), 0.24);
+  --success-text-weak: rgba(var(--rgb-success), 0.7);
+
+  /* ========== WARNING MESSAGES ========== */
+  --warning-bg: rgba(var(--rgb-warning-alt), 0.92);
+  --warning-bg-weak: rgba(var(--rgb-warning-alt), 0.1);
+  --warning-text: #4a2d0d;
+  --warning-text-bright: #ffb347;
+  --warning-border: rgba(var(--rgb-warning), 0.22);
+  --warning-border-solid: rgb(var(--rgb-warning-alt));
+
+  /* ========== DANGER/ERROR MESSAGES ========== */
+  --danger-bg: rgba(var(--rgb-danger), 0.92);
+  --danger-bg-weak: rgba(var(--rgb-danger), 0.12);
+  --danger-bg-hover: rgba(var(--rgb-danger), 0.24);
+  --danger-text: #4a0d0d;
+  --danger-text-weak: #ffb8b4;
+  --danger-text-bright: #ff8f8a;
+  --danger-border: rgba(var(--rgb-danger), 0.12);
+  --danger-border-strong: rgba(var(--rgb-danger), 0.38);
+  --danger-gradient-start: rgb(var(--rgb-danger-alt));
+  --danger-gradient-end: #dc2626;
+
+  /* ========== INFO MESSAGES ========== */
+  --info-bg: rgba(var(--rgb-accent), 0.92);
+  --info-bg-weak: rgba(var(--rgb-accent), 0.1);
+  --info-border: rgba(var(--rgb-accent), 0.28);
+  --info-text: #0a2a4a;
+  --info-text-bright: rgb(var(--rgb-info));
+
+  /* ========== MODAL & OVERLAY ========== */
+  --modal-overlay: rgba(var(--rgb-black), 0.7);
+  --dialog-shadow: 0 4px 20px rgba(var(--rgb-black), 0.2);
+
+  /* ========== TOAST NOTIFICATIONS ========== */
+  --toast-bg: #1a1a1a;
+  --toast-border: #333;
+  --toast-error-border: #ff4757;
+  --toast-error-bg: rgba(255, 71, 87, 0.1);
+  --toast-warning-border: #ffa502;
+  --toast-warning-bg: rgba(var(--rgb-warning-alt), 0.1);
+  --toast-success-border: #2ed573;
+  --toast-success-bg: rgba(46, 213, 115, 0.1);
+
+  /* ========== SIDEBAR SPECIFIC ========== */
+  --sidebar-bg-top: rgba(var(--rgb-bg-elevated), 0.98);
+  --sidebar-bg-bottom: rgba(var(--rgb-bg), 0.96);
+  --sidebar-btn-bg: rgba(var(--rgb-white), 0.01);
+  --sidebar-btn-hover-bg: rgba(var(--rgb-white), 0.06);
+  --sidebar-btn-active-bg: rgba(var(--rgb-white), 0.09);
+  --indicator-gradient-start: #2aa9ff;
+  --indicator-gradient-end: #0f74ff;
+  --indicator-shadow: rgba(var(--rgb-accent), 0.5);
+
+  /* ========== TABLE ========== */
+  --table-header-bg: rgba(var(--rgb-white), 0.05);
+
+  /* ========== MISC ========== */
+  --shadow-soft: 0 18px 48px rgba(var(--rgb-black), 0.34);
+  --text-shadow-dark: rgba(var(--rgb-black), 0.5);
+  --grid-line-color: rgba(var(--rgb-white), 0.018);
+  --kbd-bg: rgba(var(--rgb-white), 0.06);
+  --kbd-shadow: rgba(var(--rgb-black), 0.2);
+  --output-bg-dark: rgba(var(--rgb-black), 0.25);
+
+  /* ========== FONTS ========== */
+  --font-sans: 'Manrope', 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Code', monospace;
+}
+```
+
+### Gradients (Hybrid Approach)
+
+```css
+/* gradients.css */
+
+:root {
+  /* Gradient presets using color-mix() for automatic adaptation */
+
+  /* App background gradient */
+  --app-gradient-bg: linear-gradient(135deg,
+    color-mix(in srgb, var(--color-bg), black 5%) 0%,
+    var(--color-bg-elevated) 48%,
+    color-mix(in srgb, var(--color-bg), black 3%) 100%
+  );
+
+  /* Accent glow effect */
+  --app-gradient-glow: radial-gradient(
+    circle at 28% 12%,
+    color-mix(in srgb, var(--color-accent) 12%, transparent),
+    transparent 26%
+  );
+
+  /* Subtle line gradient */
+  --app-gradient-line: linear-gradient(
+    90deg,
+    color-mix(in srgb, white 3%, transparent),
+    transparent 28%
+  );
+
+  /* Grid overlay pattern */
+  --grid-pattern: linear-gradient(var(--grid-line-color) 1px, transparent 1px),
+                  linear-gradient(90deg, var(--grid-line-color) 1px, transparent 1px);
+
+  /* Accent button gradient */
+  --btn-accent-gradient: linear-gradient(
+    135deg,
+    var(--color-accent) 0%,
+    var(--color-accent-strong) 100%
+  );
+
+  /* Success gradient */
+  --success-gradient: linear-gradient(
+    135deg,
+    var(--success-gradient-start) 0%,
+    var(--success-gradient-end) 100%
+  );
+
+  /* Danger gradient */
+  --danger-gradient: linear-gradient(
+    135deg,
+    var(--danger-gradient-start) 0%,
+    var(--danger-gradient-end) 100%
+  );
+}
+
+/* Fallback for browsers without color-mix() support */
+@supports not (color: color-mix(in srgb, red, blue)) {
+  :root {
+    --app-gradient-bg: linear-gradient(135deg, #0b0d12 0%, #10131a 48%, #0a0c10 100%);
+    --app-gradient-glow: radial-gradient(circle at 28% 12%, rgba(var(--rgb-accent), 0.12), transparent 26%);
+    --app-gradient-line: linear-gradient(90deg, rgba(var(--rgb-white), 0.03), transparent 28%);
+  }
+}
+```
+
+---
+
+## Implementation Steps
+
+### Phase 1: Create CSS Structure
+
+1. Create `src/styles/` directory
+2. Create `src/styles/variables.css` with all variables
+3. Create `src/styles/base.css` (move from style.css)
+4. Create `src/styles/gradients.css` with gradient definitions
+5. Create `src/styles/index.css` (imports all)
+6. Update `src/style.css` to import from `styles/`
+
+### Phase 2: Refactor Components (in order of complexity)
+
+| Order | Component | Hardcoded Colors | Complexity |
+|-------|-----------|------------------|------------|
+| 1 | `App.vue` | 11 | High (gradients) |
+| 2 | `Sidebar.vue` | 33 | High |
+| 3 | `TelegramAuthModal.vue` | 42 | Medium |
+| 4 | `TtsPanel.vue` | 79 | Medium |
+| 5 | `SettingsPanel.vue` | 24 | Medium |
+| 6 | `NetworkPanel.vue` | 42 | Medium |
+| 7 | `WebViewPanel.vue` | 65 | Medium |
+| 8 | `SoundPanelTab.vue` | 47 | Low |
+| 9 | `AudioPanel.vue` | 29 | Low |
+| 10 | `TwitchPanel.vue` | 40 | Low |
+| 11 | `FloatingPanel.vue` | 22 | Low |
+| 12 | `PreprocessorPanel.vue` | 19 | Low |
+| 13 | `InfoPanel.vue` | 37 | Low |
+| 14 | `InputPanel.vue` | 6 | Low |
+| 15 | `ErrorToasts.vue` | 12 | Low |
+
+### Phase 3: Testing & Verification
+
+1. Visual regression check - all components look the same
+2. No hardcoded colors remaining (grep verification)
+3. Build verification - no CSS errors
+4. Runtime verification - app works correctly
+
+---
+
+## Files to Modify
+
+### New Files
+- `src/styles/variables.css`
+- `src/styles/base.css`
+- `src/styles/gradients.css`
+- `src/styles/index.css`
+
+### Modified Files
+- `src/style.css` - change to import-only
+- `src/App.vue`
+- `src/components/Sidebar.vue`
+- `src/components/TelegramAuthModal.vue`
+- `src/components/TtsPanel.vue`
+- `src/components/SettingsPanel.vue`
+- `src/components/NetworkPanel.vue`
+- `src/components/WebViewPanel.vue`
+- `src/components/SoundPanelTab.vue`
+- `src/components/AudioPanel.vue`
+- `src/components/TwitchPanel.vue`
+- `src/components/FloatingPanel.vue`
+- `src/components/PreprocessorPanel.vue`
+- `src/components/InfoPanel.vue`
+- `src/components/InputPanel.vue`
+- `src/components/ErrorToasts.vue`
+
+---
+
+## Code Review Fixes
+
+### Fixed Issues
+| Priority | File | Fix |
+|-----------|-------|-----|
+| High | `SoundPanelTab.vue` | Replaced `--shadow-color` with `--dialog-shadow` and `--text-shadow-dark` |
+| Medium | `variables.css` | Added missing `--success-border`, `--success-border-weak`, `--success-text-weak` |
+| Medium | `Sidebar.vue` | Replaced `rgba(255,255,255,0.014)` with `--grid-line-color` |
+| Medium #1 | `variables.css` | Added RGB variables for backgrounds and text, consolidated status-connected |
+| Medium #2 | `variables.css` | Added `--rgb-bg`, `--rgb-bg-elevated`, `--rgb-text` |
+
+### Bugs Fixed
+| File | Issue | Fix |
+|-------|--------|-----|
+| `WebViewPanel.vue` | Buttons used `--indicator-shadow` instead of `--focus-glow` | Changed to `--focus-glow` |
+
+### Style Changes
+| File | Change | Reason |
+|-------|---------|--------|
+| `InputPanel.vue` | Removed `box-shadow` from textarea | User request |
+
+---
+
+## Notes
+
+- **Floating windows are NOT affected** - they have their own styling system with color pickers
+- **WebView is NOT affected** - separate system
+- Only **main window** styling is refactored
+- `color-mix()` requires Chrome 111+, Edge 111+, Firefox 113+ - fallback provided
+- This is a **non-breaking refactor** - visual output remains identical
+
+---
+
+## Future Work (Not in this plan)
+
+1. Theme switching UI in SettingsPanel
+2. Light theme variables
+3. Accent color picker
+4. Theme persistence (localStorage/backend)
+5. Export/import theme presets
+
+---
+
+## Estimated Scope
+
+- **Total CSS files modified:** 4
+- **Total Vue components refactored:** 16
+- **Risk level:** Low (visual output unchanged)

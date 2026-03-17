@@ -746,21 +746,21 @@ onUnmounted(() => {
 }
 
 .provider-card {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--color-bg-field);
   backdrop-filter: blur(8px);
   transition: all 0.2s ease;
 }
 
 .provider-card.active {
-  border-color: rgba(29, 140, 255, 0.35);
-  background: rgba(29, 140, 255, 0.08);
+  border-color: var(--card-active-border);
+  background: var(--card-active-bg);
 }
 
 .provider-card.error-state {
-  border-color: rgba(255, 111, 105, 0.28);
-  background: rgba(255, 111, 105, 0.08);
+  border-color: var(--card-error-border);
+  background: var(--card-error-bg);
 }
 
 .card-header {
@@ -777,7 +777,7 @@ onUnmounted(() => {
 }
 
 .card-header:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--color-border-weak);
 }
 
 .card-title-wrapper {
@@ -816,7 +816,7 @@ onUnmounted(() => {
 
 .card-content {
   padding: 0 16px 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--color-border);
 }
 
 .card-content .setting-group {
@@ -826,7 +826,7 @@ onUnmounted(() => {
 .placeholder {
   padding: 24px;
   text-align: center;
-  color: #888;
+  color: var(--color-text-disabled);
   font-style: italic;
 }
 
@@ -852,7 +852,7 @@ onUnmounted(() => {
   width: 100%;
   padding: 10px;
   background: var(--color-bg-field);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
   color: var(--color-text-primary);
   font-size: 14px;
@@ -863,8 +863,8 @@ onUnmounted(() => {
 .setting-group input:focus,
 .setting-group select:focus {
   outline: none;
-  border-color: rgba(29, 140, 255, 0.5);
-  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
 .setting-group button {
@@ -872,7 +872,7 @@ onUnmounted(() => {
   background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
   border: none;
   border-radius: 10px;
-  color: #fff;
+  color: var(--color-text-white);
   cursor: pointer;
   font-size: 14px;
   font-weight: 700;
@@ -918,7 +918,7 @@ onUnmounted(() => {
   background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
   border: none;
   border-radius: 10px;
-  color: white;
+  color: var(--color-text-white);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -951,23 +951,23 @@ onUnmounted(() => {
   width: auto;
   padding: 10px 12px;
   margin: 0;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--color-bg-field-hover);
   color: var(--color-text-primary);
   font-size: 14px;
   transition: all 0.15s ease;
 }
 
 .local-url-row input[type="text"].local-url-input:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: var(--input-bg-strong);
+  border-color: var(--color-border-strong);
 }
 
 .local-url-row input[type="text"].local-url-input:focus {
   outline: none;
-  border-color: rgba(29, 140, 255, 0.5);
-  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
 .local-url-row .save-url-button {
@@ -976,7 +976,7 @@ onUnmounted(() => {
   background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
   border: none;
   border-radius: 10px;
-  color: white;
+  color: var(--color-text-white);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -1041,16 +1041,16 @@ onUnmounted(() => {
 }
 
 .status-message.success {
-  background: rgba(74, 222, 128, 0.92);
-  border: 1px solid rgba(74, 222, 128, 0.4);
-  color: #0d4d1f;
+  background: var(--success-bg);
+  border: 1px solid var(--success-bg);
+  color: var(--success-text);
 }
 
 .status-message.error {
-  background: rgba(255, 111, 105, 0.92);
-  border: 1px solid rgba(255, 111, 105, 0.4);
-  border-left: 4px solid rgba(255, 59, 48, 0.8);
-  color: #4a0d0d;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-bg);
+  border-left: 4px solid var(--danger-gradient-start);
+  color: var(--danger-text);
 }
 
 /* Fade-slide transition for status bubble */
@@ -1071,8 +1071,8 @@ onUnmounted(() => {
 /* Telegram Styles */
 .telegram-status {
   padding: 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   margin-top: 8px;
   margin-bottom: 16px;
@@ -1094,13 +1094,13 @@ onUnmounted(() => {
 }
 
 .status-indicator.connected {
-  background: #10b981;
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+  background: var(--status-connected);
+  box-shadow: 0 0 0 3px var(--status-connected-glow);
 }
 
 .status-indicator.disconnected {
-  background: #ef4444;
-  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2);
+  background: var(--status-disconnected);
+  box-shadow: 0 0 0 3px var(--status-disconnected-glow);
 }
 
 .status-info {
@@ -1124,7 +1124,7 @@ onUnmounted(() => {
   width: 100%;
   padding: 12px 20px;
   background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: white;
+  color: var(--color-text-white);
   border: none;
   border-radius: 6px;
   font-size: 14px;
@@ -1142,19 +1142,19 @@ onUnmounted(() => {
 }
 
 .telegram-connect-button.connected {
-  background: #374151;
+  background: var(--btn-neutral-bg);
 }
 
 .telegram-connect-button.connected:hover {
-  background: #1f2937;
+  background: var(--btn-neutral-hover);
 }
 
 .telegram-disconnect-button {
   width: 100%;
   padding: 12px 20px;
-  background: rgba(255, 111, 105, 0.16);
-  border: 1px solid rgba(255, 111, 105, 0.2);
-  color: white;
+  background: var(--danger-bg-weak);
+  border: 1px solid var(--danger-border);
+  color: var(--color-text-white);
   border: none;
   border-radius: 6px;
   font-size: 14px;
@@ -1168,14 +1168,14 @@ onUnmounted(() => {
 }
 
 .telegram-disconnect-button:hover {
-  background: rgba(255, 111, 105, 0.24);
+  background: var(--danger-bg-hover);
 }
 
 /* Sign out button in status */
 .status-signout-button {
   padding: 6px;
-  background: rgba(255, 111, 105, 0.05);
-  border: 1px solid rgba(255, 111, 105, 0.12);
+  background: var(--danger-border);
+  border: 1px solid var(--danger-border);
   border-radius: 8px;
   color: var(--color-danger);
   cursor: pointer;
@@ -1187,13 +1187,13 @@ onUnmounted(() => {
 }
 
 .status-signout-button:hover {
-  background: rgba(255, 111, 105, 0.12);
-  color: #ff8f8a;
+  background: var(--danger-bg-weak);
+  color: var(--danger-text-bright);
 }
 
 .telegram-info {
   padding: 16px;
-  background: rgba(29, 140, 255, 0.1);
+  background: var(--info-bg-weak);
   border-left: 4px solid var(--color-accent);
   border-radius: 10px;
   margin-top: 16px;
@@ -1302,9 +1302,9 @@ onUnmounted(() => {
 /* Network select - matches NetworkPanel styling */
 .network-select {
   padding: 10px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--color-bg-field-hover);
   color: var(--color-text-primary);
   font-size: 14px;
   cursor: pointer;
@@ -1312,18 +1312,18 @@ onUnmounted(() => {
 }
 
 .network-select:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: var(--input-bg-strong);
+  border-color: var(--color-border-strong);
 }
 
 .network-select:focus {
   outline: none;
-  border-color: rgba(29, 140, 255, 0.5);
-  box-shadow: 0 0 0 3px rgba(29, 140, 255, 0.12);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
 .network-select option {
-  background: #1e1e1e;
+  background: var(--select-bg);
   color: var(--color-text-primary);
   padding: 0.3rem 0.5rem;
 }
@@ -1332,9 +1332,9 @@ onUnmounted(() => {
 .reconnect-button-fixed {
   padding: 0.6rem 1.5rem;
   margin-bottom: 8px;
-  background: rgba(29, 140, 255, 0.16);
-  border: 1px solid rgba(29, 140, 255, 0.3);
-  color: white;
+  background: var(--btn-accent-bg);
+  border: 1px solid var(--card-active-border);
+  color: var(--color-text-white);
   border-radius: 10px;
   cursor: pointer;
   font-size: 14px;
@@ -1348,8 +1348,8 @@ onUnmounted(() => {
 }
 
 .reconnect-button-fixed:hover:not(:disabled) {
-  background: rgba(29, 140, 255, 0.26);
-  border-color: rgba(29, 140, 255, 0.5);
+  background: var(--btn-accent-bg-hover);
+  border-color: var(--color-accent);
 }
 
 .reconnect-button-fixed:disabled {
@@ -1364,8 +1364,8 @@ onUnmounted(() => {
 /* silero Error Banner */
 .silero-error-banner {
   padding: 16px;
-  background: rgba(255, 111, 105, 0.12);
-  border: 1px solid rgba(255, 111, 105, 0.24);
+  background: var(--danger-bg-weak);
+  border: 1px solid var(--danger-border-strong);
   border-left: 4px solid var(--color-danger);
   border-radius: 10px;
   margin-bottom: 16px;
@@ -1396,19 +1396,19 @@ onUnmounted(() => {
   margin: 0 0 4px;
   font-size: 14px;
   font-weight: 600;
-  color: #ffd5d2;
+  color: var(--danger-text-bright);
 }
 
 .error-message {
   margin: 0;
   font-size: 13px;
-  color: #ffb8b4;
+  color: var(--danger-text-weak);
 }
 
 .fix-button {
   padding: 8px 16px;
-  background: rgba(255, 111, 105, 0.18);
-  color: white;
+  background: var(--danger-bg-hover);
+  color: var(--color-text-white);
   border: none;
   border-radius: 10px;
   font-size: 13px;
@@ -1419,14 +1419,14 @@ onUnmounted(() => {
 }
 
 .fix-button:hover {
-  background: rgba(255, 111, 105, 0.26);
+  background: var(--danger-border-strong);
 }
 
 /* Current Voice Display */
 .current-voice-display {
   padding: 12px 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
   border-radius: 10px;
   margin-bottom: 16px;
   display: flex;
@@ -1456,13 +1456,13 @@ onUnmounted(() => {
 }
 
 .voice-value.voice-error {
-  color: #dc2626;
+  color: var(--danger-gradient-end);
 }
 
 .refresh-voice-button {
   padding: 6px 12px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--btn-neutral-bg);
+  border: 1px solid var(--color-border-strong);
   color: var(--color-text-secondary);
   border: none;
   border-radius: 10px;
@@ -1477,7 +1477,7 @@ onUnmounted(() => {
 }
 
 .refresh-voice-button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--btn-neutral-bg);
 }
 
 .refresh-voice-button:disabled {
@@ -1488,8 +1488,8 @@ onUnmounted(() => {
 /* Limits Display */
 .limits-display {
   padding: 12px 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
   border-radius: 10px;
   margin-bottom: 16px;
   display: flex;
@@ -1519,13 +1519,13 @@ onUnmounted(() => {
 }
 
 .limits-value.limits-error {
-  color: #dc2626;
+  color: var(--danger-gradient-end);
 }
 
 .refresh-limits-button {
   padding: 6px 12px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--btn-neutral-bg);
+  border: 1px solid var(--color-border-strong);
   color: var(--color-text-secondary);
   border: none;
   border-radius: 10px;
@@ -1540,7 +1540,7 @@ onUnmounted(() => {
 }
 
 .refresh-limits-button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--btn-neutral-bg);
 }
 
 .refresh-limits-button:disabled {
@@ -1551,13 +1551,13 @@ onUnmounted(() => {
 /* Voice Error Message */
 .voice-error-message {
   padding: 12px 16px;
-  background: rgba(255, 111, 105, 0.12);
-  border: 1px solid rgba(255, 111, 105, 0.24);
+  background: var(--danger-bg-weak);
+  border: 1px solid var(--danger-border-strong);
   border-left: 4px solid var(--color-danger);
   border-radius: 10px;
   margin-bottom: 16px;
   font-size: 13px;
-  color: #ffb8b4;
+  color: var(--danger-text-weak);
   line-height: 1.5;
 }
 
@@ -1612,8 +1612,8 @@ onUnmounted(() => {
 .reconnect-button-small {
   width: 100%;
   padding: 8px 12px;
-  background: rgba(29, 140, 255, 0.1);
-  border: 1px solid rgba(29, 140, 255, 0.3);
+  background: var(--info-bg-weak);
+  border: 1px solid var(--info-border);
   border-radius: 8px;
   color: var(--color-text-primary);
   font-size: 12px;
@@ -1627,8 +1627,8 @@ onUnmounted(() => {
 }
 
 .reconnect-button-small:hover:not(:disabled) {
-  background: rgba(29, 140, 255, 0.2);
-  border-color: rgba(29, 140, 255, 0.4);
+  background: var(--btn-accent-bg);
+  border-color: var(--color-accent);
 }
 
 .reconnect-button-small:disabled {
