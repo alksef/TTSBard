@@ -13,10 +13,10 @@ html {
 body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  -moz-osx-osx-font-smoothing: grayscale;
   background:
-    radial-gradient(circle at top left, rgba(var(--rgb-accent), 0.14), transparent 28%),
-    radial-gradient(circle at bottom right, rgba(255, 162, 67, 0.08), transparent 22%),
+    radial-gradient(circle at top left, rgba(var(--rgb-accent), 0.12), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(var(--rgb-warning), 0.06), transparent 22%),
     var(--color-bg);
   color: var(--color-text-primary);
 }
@@ -46,14 +46,14 @@ textarea {
 }
 
 *::-webkit-scrollbar-track {
-  background: rgba(var(--rgb-white), 0.03);
+  background: rgba(var(--rgb-contrast), 0.03);
 }
 
 *::-webkit-scrollbar-thumb {
-  background: rgba(var(--rgb-white), 0.14);
+  background: rgba(var(--rgb-contrast), 0.14);
   border-radius: 999px;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: rgba(var(--rgb-white), 0.22);
+  background: rgba(var(--rgb-contrast), 0.22);
 }

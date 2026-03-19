@@ -77,7 +77,8 @@ export function createAppSettings(): AppSettingsContext {
         tts_provider: data.tts.provider,
         webview_enabled: data.webview.enabled,
         hotkey_enabled: data.general.hotkey_enabled,
-        audio_speaker_enabled: data.audio.speaker_enabled
+        audio_speaker_enabled: data.audio.speaker_enabled,
+        theme: data.general.theme
       })
       debugLog('[useAppSettings] Error state after load:', error.value)
     } catch (e) {

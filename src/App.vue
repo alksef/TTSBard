@@ -60,13 +60,33 @@ watch(() => appSettings.isLoading, (newLoading) => {
   debugLog('[App] 🔄 appSettings.isLoading changed:', newLoading)
 })
 
+// Watch for theme changes and apply data-theme attribute
+watch(() => appSettings.settings.value?.general?.theme, (newTheme, oldTheme) => {
+  const theme = newTheme || 'dark'
+  debugLog('[App] Theme watcher triggered:', {
+    oldTheme,
+    newTheme,
+    finalTheme: theme,
+    settingsLoaded: !!appSettings.settings.value,
+    currentAttribute: document.documentElement.getAttribute('data-theme'),
+    localStorageTheme: localStorage.getItem('app-theme')
+  })
+  // Save to localStorage for instant access on next app launch (prevents flash)
+  localStorage.setItem('app-theme', theme)
+  document.documentElement.setAttribute('data-theme', theme)
+  debugLog('[App] Theme applied:', document.documentElement.getAttribute('data-theme'))
+}, { immediate: true })
+
 // Initialize Telegram session on app start
 onMounted(async () => {
   debugLog('[App] 🚀 App mounted')
   debugLog('[App] Initial state:', {
     hasSettings: !!appSettings.settings,
     isLoading: appSettings.isLoading,
-    error: appSettings.error
+    error: appSettings.error,
+    currentDataTheme: document.documentElement.getAttribute('data-theme'),
+    localStorageTheme: localStorage.getItem('app-theme'),
+    savedThemeInSettings: appSettings.settings.value?.general?.theme
   })
 
   try {

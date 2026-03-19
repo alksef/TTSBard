@@ -20,7 +20,7 @@
   /* Subtle line gradient */
   --app-gradient-line: linear-gradient(
     90deg,
-    color-mix(in srgb, white 3%, transparent),
+    color-mix(in srgb, var(--color-text-primary) 3%, transparent),
     transparent 28%
   );
 

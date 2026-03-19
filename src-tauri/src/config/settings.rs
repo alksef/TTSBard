@@ -336,6 +336,19 @@ impl Default for LoggingSettings {
     }
 }
 
+// ==================== Theme ====================
+
+/// Application theme
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    #[default]
+    Dark,
+    Light,
+}
+
+fn default_theme() -> Theme { Theme::Dark }
+
 // ==================== Main App Settings ====================
 
 /// All application settings
@@ -347,6 +360,8 @@ pub struct AppSettings {
     pub hotkey_enabled: bool,
     #[serde(default)]
     pub quick_editor_enabled: bool,
+    #[serde(default = "default_theme")]
+    pub theme: Theme,
     pub twitch: TwitchSettings,
     pub webview: WebViewServerSettings,
     #[serde(default)]
@@ -360,6 +375,7 @@ impl Default for AppSettings {
             tts: TtsSettings::default(),
             hotkey_enabled: true,
             quick_editor_enabled: false,
+            theme: Theme::Dark,
             twitch: TwitchSettings::default(),
             webview: WebViewServerSettings::default(),
             logging: LoggingSettings::default(),
@@ -892,5 +908,17 @@ impl SettingsManager {
     /// Returns the cached MTProxy settings.
     pub fn get_mtproxy_settings(&self) -> MtProxySettings {
         self.cache.read().tts.network.mtproxy.clone()
+    }
+
+    // ========== Theme Settings ==========
+
+    /// Set theme
+    pub fn set_theme(&self, theme: Theme) -> Result<()> {
+        self.update_field("/theme", &theme)
+    }
+
+    /// Get theme
+    pub fn get_theme(&self) -> Theme {
+        self.cache.read().theme.clone()
     }
 }

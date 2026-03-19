@@ -157,11 +157,14 @@ export interface WindowsSettingsDto {
 // General Settings Types
 // ============================================================================
 
+export type Theme = 'dark' | 'light'
+
 export interface GeneralSettingsDto {
   hotkey_enabled: boolean
   quick_editor_enabled: boolean
   interception_enabled: boolean
   enter_closes_disabled: boolean
+  theme?: Theme
 }
 
 // ============================================================================

@@ -206,10 +206,20 @@ function handleSpace(event: KeyboardEvent) {
   border-radius: 18px;
   background: var(--input-bg-strong);
   color: var(--color-text-primary);
+  box-shadow: 0 2px 16px rgba(var(--rgb-black), 0.03);
   font-family: inherit;
   font-size: 1rem;
   line-height: 1.6;
   resize: vertical;
+  transition: all 0.2s ease;
+}
+
+.text-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 
+    0 8px 24px rgba(var(--rgb-black), 0.04),
+    0 0 0 3px var(--focus-glow);
 }
 
 .text-input::placeholder {

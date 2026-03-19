@@ -415,6 +415,8 @@ pub struct GeneralSettingsDto {
     pub quick_editor_enabled: bool,
     pub interception_enabled: bool,
     pub enter_closes_disabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub theme: Option<String>,
 }
 
 impl GeneralSettingsDto {
@@ -428,6 +430,10 @@ impl GeneralSettingsDto {
             quick_editor_enabled: config.quick_editor_enabled,
             interception_enabled,
             enter_closes_disabled,
+            theme: Some(match config.theme {
+                crate::config::settings::Theme::Dark => "dark".to_string(),
+                crate::config::settings::Theme::Light => "light".to_string(),
+            }),
         }
     }
 }

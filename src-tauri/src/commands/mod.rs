@@ -1,6 +1,6 @@
 use crate::state::AppState;
 use crate::events::AppEvent;
-use crate::config::{SettingsManager, WindowsManager, is_valid_hex_color, AppSettingsDto};
+use crate::config::{SettingsManager, WindowsManager, is_valid_hex_color, AppSettingsDto, Theme};
 use crate::floating::{show_floating_window, hide_floating_window, hide_soundpanel_window};
 use crate::tts::{TtsProviderType, TtsProvider};
 use crate::audio::{AudioPlayer, OutputConfig};
@@ -786,6 +786,29 @@ pub fn get_quick_editor_enabled(
     settings_manager: State<'_, SettingsManager>
 ) -> bool {
     settings_manager.get_quick_editor_enabled()
+}
+
+// ============================================================================
+// Theme commands
+// ============================================================================
+
+/// Update application theme
+#[tauri::command]
+pub fn update_theme(
+    settings_manager: State<'_, SettingsManager>,
+    app_handle: AppHandle,
+    theme: Theme,
+) -> Result<(), String> {
+    info!(?theme, "Updating theme");
+
+    settings_manager.set_theme(theme)
+        .map_err(|e| format!("Failed to update theme: {}", e))?;
+
+    // Emit event to notify frontend
+    let _ = app_handle.emit("settings-changed", ());
+
+    info!(?theme, "Theme updated successfully");
+    Ok(())
 }
 
 /// Hide main window
