@@ -16,20 +16,22 @@
   --rgb-bg: 9, 11, 15;
   --rgb-bg-elevated: 16, 19, 26;
   --rgb-text: 244, 242, 238;
+  --rgb-contrast: 255, 255, 255;
+  --rgb-border: 255, 255, 255;
 
   /* ========== BASE COLORS ========== */
   --color-bg: rgb(var(--rgb-bg));
   --color-bg-elevated: rgb(var(--rgb-bg-elevated));
   --color-bg-panel: rgba(var(--rgb-bg-elevated), 0.86);
   --color-bg-panel-strong: rgba(var(--rgb-bg-elevated), 0.94);
-  --color-bg-field: rgba(var(--rgb-white), 0.05);
-  --color-bg-field-hover: rgba(var(--rgb-white), 0.08);
+  --color-bg-field: rgba(var(--rgb-contrast), 0.05);
+  --color-bg-field-hover: rgba(var(--rgb-contrast), 0.08);
 
   /* ========== TEXT ========== */
   --color-text-primary: rgb(var(--rgb-text));
   --color-text-secondary: rgba(var(--rgb-text), 0.7);
   --color-text-muted: rgba(var(--rgb-text), 0.42);
-  --color-text-white: rgb(var(--rgb-white));
+  --color-text-white: rgb(255, 255, 255);
   --color-text-disabled: #888;
 
   /* ========== ACCENT ========== */
@@ -43,9 +45,9 @@
   --color-danger: rgb(var(--rgb-danger));
 
   /* ========== BORDERS ========== */
-  --color-border: rgba(var(--rgb-white), 0.08);
-  --color-border-weak: rgba(var(--rgb-white), 0.04);
-  --color-border-strong: rgba(var(--rgb-white), 0.14);
+  --color-border: rgba(var(--rgb-border), 0.08);
+  --color-border-weak: rgba(var(--rgb-border), 0.04);
+  --color-border-strong: rgba(var(--rgb-border), 0.14);
 
   /* ========== FOCUS & GLOW ========== */
   --focus-glow: rgba(var(--rgb-accent), 0.15);
@@ -55,15 +57,15 @@
   /* ========== BUTTONS ========== */
   --btn-accent-bg: rgba(var(--rgb-accent), 0.16);
   --btn-accent-bg-hover: rgba(var(--rgb-accent), 0.26);
-  --btn-neutral-bg: rgba(var(--rgb-white), 0.08);
-  --btn-neutral-hover: rgba(var(--rgb-white), 0.14);
+  --btn-neutral-bg: rgba(var(--rgb-contrast), 0.08);
+  --btn-neutral-hover: rgba(var(--rgb-contrast), 0.14);
   --btn-disabled-bg: #ccc;
 
   /* ========== FORM ELEMENTS ========== */
-  --select-bg: #1e1e1e;
-  --select-bg-hover: #2a2a2a;
-  --input-bg-strong: rgba(var(--rgb-white), 0.16);
-  --range-bg: rgba(var(--rgb-white), 0.16);
+  --select-bg: color-mix(in srgb, var(--color-bg-elevated), black 10%);
+  --select-bg-hover: color-mix(in srgb, var(--color-bg-elevated), black 5%);
+  --input-bg-strong: rgba(var(--rgb-contrast), 0.16);
+  --range-bg: rgba(var(--rgb-contrast), 0.16);
 
   /* ========== STATUS INDICATORS ========== */
   --status-connected: rgb(var(--rgb-success));
@@ -133,25 +135,53 @@
   /* ========== SIDEBAR SPECIFIC ========== */
   --sidebar-bg-top: rgba(var(--rgb-bg-elevated), 0.98);
   --sidebar-bg-bottom: rgba(var(--rgb-bg), 0.96);
-  --sidebar-btn-bg: rgba(var(--rgb-white), 0.01);
-  --sidebar-btn-hover-bg: rgba(var(--rgb-white), 0.06);
-  --sidebar-btn-active-bg: rgba(var(--rgb-white), 0.09);
+  --sidebar-btn-bg: rgba(var(--rgb-contrast), 0.01);
+  --sidebar-btn-hover-bg: rgba(var(--rgb-contrast), 0.06);
+  --sidebar-btn-active-bg: rgba(var(--rgb-contrast), 0.09);
   --indicator-gradient-start: #2aa9ff;
   --indicator-gradient-end: #0f74ff;
   --indicator-shadow: rgba(var(--rgb-accent), 0.5);
 
   /* ========== TABLE ========== */
-  --table-header-bg: rgba(var(--rgb-white), 0.05);
+  --table-header-bg: rgba(var(--rgb-contrast), 0.05);
 
   /* ========== MISC ========== */
   --shadow-soft: 0 18px 48px rgba(var(--rgb-black), 0.34);
   --text-shadow-dark: rgba(var(--rgb-black), 0.5);
-  --grid-line-color: rgba(var(--rgb-white), 0.018);
-  --kbd-bg: rgba(var(--rgb-white), 0.06);
+  --grid-line-color: rgba(var(--rgb-contrast), 0.018);
+  --kbd-bg: rgba(var(--rgb-contrast), 0.06);
   --kbd-shadow: rgba(var(--rgb-black), 0.2);
   --output-bg-dark: rgba(var(--rgb-black), 0.25);
 
   /* ========== FONTS ========== */
   --font-sans: 'Manrope', 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', 'Cascadia Code', monospace;
+}
+
+/* ==================== Light Theme ==================== */
+
+[data-theme="light"] {
+  /* RGB Colors */
+  --rgb-bg: 250, 252, 255;
+  --rgb-bg-elevated: 255, 255, 255;
+  --rgb-text: 15, 23, 42;
+  --rgb-text-secondary: 71, 85, 105;
+  --rgb-text-muted: 148, 163, 184;
+  --rgb-accent: 59, 130, 246;
+  --rgb-accent-strong: 37, 99, 235;
+  --rgb-success: 34, 197, 94;
+  --rgb-warning: 217, 119, 6;
+  --warning-text-bright: #9a3412;
+  --rgb-danger: 239, 68, 68;
+  --rgb-info: 59, 130, 246;
+  --rgb-border: 15, 23, 42;
+  --rgb-contrast: 0, 0, 0;
+
+  /* Adjustments for light mode */
+  --input-bg-strong: #ffffff;
+  --color-bg-field: rgba(var(--rgb-accent), 0.04);
+  --color-bg-field-hover: rgba(var(--rgb-accent), 0.08);
+  --color-bg-panel: rgba(255, 255, 255, 0.88);
+  --shadow-soft: 0 12px 32px rgba(var(--rgb-black), 0.08);
+  --modal-overlay: rgba(var(--rgb-black), 0.4);
 }

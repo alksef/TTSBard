@@ -180,7 +180,7 @@ function toggleCollapse() {
   position: relative;
   overflow: hidden;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 22%),
+    linear-gradient(180deg, rgba(var(--rgb-contrast), 0.03), transparent 22%),
     linear-gradient(180deg, var(--sidebar-bg-top) 0%, var(--sidebar-bg-bottom) 100%);
   color: var(--color-text-primary);
   display: flex;
@@ -229,9 +229,9 @@ function toggleCollapse() {
   transition: all 0.25s ease;
   z-index: 1000;
   box-shadow:
-    0 4px 16px rgba(0, 0, 0, 0.4),
-    0 0 0 1px rgba(255, 255, 255, 0.04),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    0 4px 16px rgba(0, 0, 0, 0.2),
+    0 0 0 1px rgba(var(--rgb-contrast), 0.04),
+    inset 0 1px 0 rgba(var(--rgb-contrast), 0.08);
 }
 
 .collapse-toggle-floating:hover {
@@ -240,10 +240,10 @@ function toggleCollapse() {
     linear-gradient(135deg, rgba(40, 42, 58, 0.98), rgba(28, 30, 42, 0.96));
   border-color: var(--card-active-border);
   box-shadow:
-    0 6px 24px rgba(0, 0, 0, 0.5),
+    0 6px 24px rgba(0, 0, 0, 0.3),
     0 0 0 1px var(--color-accent-glow-strong),
     0 0 20px var(--color-accent-glow-strong),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    inset 0 1px 0 rgba(var(--rgb-contrast), 0.12);
   transform: translateY(-50%) scale(1.06);
 }
 
@@ -298,7 +298,7 @@ function toggleCollapse() {
   background: var(--sidebar-btn-active-bg);
   border-color: var(--color-border);
   color: var(--color-text-primary) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 1px 0 rgba(var(--rgb-contrast), 0.04);
 }
 
 .sidebar-button-active .sidebar-icon {
@@ -391,7 +391,7 @@ function toggleCollapse() {
 
 .sidebar-collapsed .sidebar-button {
   justify-content: center;
-  padding: 0;
+  padding: 0.25rem 0;
 }
 
 .sidebar-collapsed .active-indicator {

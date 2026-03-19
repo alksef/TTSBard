@@ -499,7 +499,7 @@ watch(() => appSettings.value, (newSettings) => {
 }
 
 .info-section code {
-  background: var(--info-bg);
+  background: var(--info-bg-weak);
   padding: 0.2rem 0.4rem;
   border-radius: 4px;
   font-family: var(--font-mono);
