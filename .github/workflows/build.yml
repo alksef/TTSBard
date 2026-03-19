@@ -51,7 +51,7 @@ jobs:
             echo "Using tag version: $VERSION"
           else
             # Use default dev version for PRs and manual runs
-            echo "VERSION=0.1.0-dev" >> $GITHUB_OUTPUT
+            echo "VERSION=0.2.0-dev" >> $GITHUB_OUTPUT
             echo "Using dev version"
           fi
         shell: bash
