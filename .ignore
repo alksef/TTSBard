@@ -1,0 +1,5 @@
+# Claude Code context exclusions
+docs/plans/
+docs/reviews/
+docs/ideas/
+docs/works/
