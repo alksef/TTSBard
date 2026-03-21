@@ -27,6 +27,9 @@ pub mod logging;
 // Proxy commands
 pub mod proxy;
 
+// AI commands
+pub mod ai;
+
 /// Quit the application
 #[tauri::command]
 pub fn quit_app(app_handle: AppHandle) -> Result<(), String> {

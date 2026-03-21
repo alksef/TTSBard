@@ -349,6 +349,60 @@ pub enum Theme {
 
 fn default_theme() -> Theme { Theme::Dark }
 
+// ==================== AI Settings ====================
+
+/// AI provider type for text correction
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AiProviderType {
+    #[default]
+    OpenAi,
+    ZAi,
+}
+
+/// OpenAI settings for AI text correction
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct AiOpenAiSettings {
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub use_proxy: bool,
+}
+
+/// Z.ai settings (Anthropic-compatible) for AI text correction
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct AiZAiSettings {
+    pub url: Option<String>,
+    pub token: Option<String>,
+}
+
+/// AI settings for text correction
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AiSettings {
+    #[serde(default)]
+    pub provider: AiProviderType,
+    #[serde(default)]
+    pub openai: AiOpenAiSettings,
+    #[serde(default)]
+    pub zai: AiZAiSettings,
+    #[serde(default = "default_ai_prompt")]
+    pub prompt: String,
+}
+
+fn default_ai_prompt() -> String {
+    "Correct grammar, spelling, and punctuation errors in the following text. Maintain the original tone and style.".to_string()
+}
+
+impl Default for AiSettings {
+    fn default() -> Self {
+        Self {
+            provider: AiProviderType::OpenAi,
+            openai: AiOpenAiSettings::default(),
+            zai: AiZAiSettings::default(),
+            prompt: default_ai_prompt(),
+        }
+    }
+}
+
 // ==================== Main App Settings ====================
 
 /// All application settings
@@ -366,6 +420,8 @@ pub struct AppSettings {
     pub webview: WebViewServerSettings,
     #[serde(default)]
     pub logging: LoggingSettings,
+    #[serde(default)]
+    pub ai: AiSettings,
 }
 
 impl Default for AppSettings {
@@ -379,6 +435,7 @@ impl Default for AppSettings {
             twitch: TwitchSettings::default(),
             webview: WebViewServerSettings::default(),
             logging: LoggingSettings::default(),
+            ai: AiSettings::default(),
         }
     }
 }
@@ -920,5 +977,67 @@ impl SettingsManager {
     /// Get theme
     pub fn get_theme(&self) -> Theme {
         self.cache.read().theme.clone()
+    }
+
+    // ========== AI Settings ==========
+
+    /// Set AI provider
+    pub fn set_ai_provider(&self, provider: AiProviderType) -> Result<()> {
+        self.update_field("/ai/provider", &provider)
+    }
+
+    /// Get AI provider
+    pub fn get_ai_provider(&self) -> AiProviderType {
+        self.cache.read().ai.provider.clone()
+    }
+
+    /// Set AI global prompt
+    pub fn set_ai_prompt(&self, prompt: String) -> Result<()> {
+        self.update_field("/ai/prompt", &prompt)
+    }
+
+    /// Get AI global prompt
+    pub fn get_ai_prompt(&self) -> String {
+        self.cache.read().ai.prompt.clone()
+    }
+
+    /// Set OpenAI API key for AI text correction
+    pub fn set_ai_openai_api_key(&self, key: Option<String>) -> Result<()> {
+        self.update_field("/ai/openai/api_key", &key)
+    }
+
+    /// Get OpenAI API key for AI text correction
+    pub fn get_ai_openai_api_key(&self) -> Option<String> {
+        self.cache.read().ai.openai.api_key.clone()
+    }
+
+    /// Set OpenAI use proxy for AI text correction
+    pub fn set_ai_openai_use_proxy(&self, enabled: bool) -> Result<()> {
+        self.update_field("/ai/openai/use_proxy", &enabled)
+    }
+
+    /// Get OpenAI use proxy for AI text correction
+    pub fn get_ai_openai_use_proxy(&self) -> bool {
+        self.cache.read().ai.openai.use_proxy
+    }
+
+    /// Set Z.ai URL
+    pub fn set_ai_zai_url(&self, url: Option<String>) -> Result<()> {
+        self.update_field("/ai/zai/url", &url)
+    }
+
+    /// Get Z.ai URL
+    pub fn get_ai_zai_url(&self) -> Option<String> {
+        self.cache.read().ai.zai.url.clone()
+    }
+
+    /// Set Z.ai token
+    pub fn set_ai_zai_token(&self, token: Option<String>) -> Result<()> {
+        self.update_field("/ai/zai/token", &token)
+    }
+
+    /// Get Z.ai token
+    pub fn get_ai_zai_token(&self) -> Option<String> {
+        self.cache.read().ai.zai.token.clone()
     }
 }

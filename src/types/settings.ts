@@ -177,6 +177,36 @@ export interface PreprocessorSettingsDto {
 }
 
 // ============================================================================
+// AI Settings Types
+// ============================================================================
+
+export const AiProviderType = {
+  OpenAi: 'openai',
+  ZAi: 'zai'  // Z.ai (capital Z)
+} as const
+
+export type AiProviderType = (typeof AiProviderType)[keyof typeof AiProviderType]
+
+export interface AiOpenAiSettingsDto {
+  api_key?: string
+  use_proxy?: boolean
+}
+
+export interface AiZAiSettingsDto {
+  url?: string
+  token?: string
+}
+
+// Z.ai (Anthropic-compatible AI provider)
+
+export interface AiSettingsDto {
+  provider: AiProviderType
+  openai: AiOpenAiSettingsDto
+  zai: AiZAiSettingsDto
+  prompt: string
+}
+
+// ============================================================================
 // Main App Settings DTO
 // ============================================================================
 
@@ -194,6 +224,7 @@ export interface AppSettingsDto {
   logging: LoggingSettingsDto
   preprocessor: PreprocessorSettingsDto
   soundpanel_bindings: SoundBinding[]
+  ai: AiSettingsDto
 }
 
 // ============================================================================

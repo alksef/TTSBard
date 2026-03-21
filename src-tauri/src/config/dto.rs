@@ -473,6 +473,118 @@ impl PreprocessorSettingsDto {
 pub type SoundBindingDto = SoundBinding;
 
 // ============================================================================
+// AI Settings DTO
+// ============================================================================
+
+/// AI provider type DTO
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AiProviderTypeDto {
+    OpenAi,
+    ZAi,
+}
+
+impl From<crate::config::AiProviderType> for AiProviderTypeDto {
+    fn from(t: crate::config::AiProviderType) -> Self {
+        match t {
+            crate::config::AiProviderType::OpenAi => AiProviderTypeDto::OpenAi,
+            crate::config::AiProviderType::ZAi => AiProviderTypeDto::ZAi,
+        }
+    }
+}
+
+impl From<AiProviderTypeDto> for crate::config::AiProviderType {
+    fn from(dto: AiProviderTypeDto) -> Self {
+        match dto {
+            AiProviderTypeDto::OpenAi => crate::config::AiProviderType::OpenAi,
+            AiProviderTypeDto::ZAi => crate::config::AiProviderType::ZAi,
+        }
+    }
+}
+
+/// OpenAI AI settings DTO
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiOpenAiSettingsDto {
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub use_proxy: bool,
+}
+
+impl From<crate::config::AiOpenAiSettings> for AiOpenAiSettingsDto {
+    fn from(s: crate::config::AiOpenAiSettings) -> Self {
+        Self {
+            api_key: s.api_key,
+            use_proxy: s.use_proxy,
+        }
+    }
+}
+
+impl From<AiOpenAiSettingsDto> for crate::config::AiOpenAiSettings {
+    fn from(dto: AiOpenAiSettingsDto) -> Self {
+        Self {
+            api_key: dto.api_key,
+            use_proxy: dto.use_proxy,
+        }
+    }
+}
+
+/// Z.ai AI settings DTO
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiZAiSettingsDto {
+    pub url: Option<String>,
+    pub token: Option<String>,
+}
+
+impl From<crate::config::AiZAiSettings> for AiZAiSettingsDto {
+    fn from(s: crate::config::AiZAiSettings) -> Self {
+        Self {
+            url: s.url,
+            token: s.token,
+        }
+    }
+}
+
+impl From<AiZAiSettingsDto> for crate::config::AiZAiSettings {
+    fn from(dto: AiZAiSettingsDto) -> Self {
+        Self {
+            url: dto.url,
+            token: dto.token,
+        }
+    }
+}
+
+/// AI settings DTO
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiSettingsDto {
+    pub provider: AiProviderTypeDto,
+    pub openai: AiOpenAiSettingsDto,
+    pub zai: AiZAiSettingsDto,
+    pub prompt: String,
+}
+
+impl From<crate::config::AiSettings> for AiSettingsDto {
+    fn from(s: crate::config::AiSettings) -> Self {
+        Self {
+            provider: s.provider.into(),
+            openai: s.openai.into(),
+            zai: s.zai.into(),
+            prompt: s.prompt,
+        }
+    }
+}
+
+impl From<AiSettingsDto> for crate::config::AiSettings {
+    fn from(dto: AiSettingsDto) -> Self {
+        Self {
+            provider: dto.provider.into(),
+            openai: dto.openai.into(),
+            zai: dto.zai.into(),
+            prompt: dto.prompt,
+        }
+    }
+}
+
+// ============================================================================
 // Main App Settings DTO
 // ============================================================================
 
@@ -509,6 +621,8 @@ pub struct AppSettingsDto {
     pub preprocessor: PreprocessorSettingsDto,
     /// SoundPanel bindings
     pub soundpanel_bindings: Vec<SoundBindingDto>,
+    /// AI settings
+    pub ai: AiSettingsDto,
 }
 
 impl AppSettingsDto {
@@ -528,6 +642,7 @@ impl AppSettingsDto {
             logging: params.config.logging.clone(),
             preprocessor: PreprocessorSettingsDto::from_preprocessor(params.preprocessor),
             soundpanel_bindings: params.soundpanel_bindings,
+            ai: params.config.ai.clone().into(),
         }
     }
 }

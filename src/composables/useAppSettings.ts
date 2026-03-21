@@ -263,3 +263,8 @@ export function usePreprocessorSettings(): ComputedRef<AppSettingsDto['preproces
   const { settings } = useAppSettings()
   return computed(() => settings.value?.preprocessor)
 }
+
+export function useAiSettings(): ComputedRef<AppSettingsDto['ai'] | undefined> {
+  const { settings } = useAppSettings()
+  return computed(() => settings.value?.ai)
+}
