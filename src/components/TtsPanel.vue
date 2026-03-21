@@ -632,7 +632,7 @@ onUnmounted(() => {
         <div v-if="providers.openai.expanded" class="card-content">
           <!-- API Key -->
           <div class="setting-group">
-            <div class="openai-api-row">
+            <div class="openai-form-row">
               <label>Ключ API:</label>
               <div class="input-with-toggle">
                 <input
@@ -657,7 +657,7 @@ onUnmounted(() => {
 
           <!-- Voice (auto-saves on change) -->
           <div class="setting-group">
-            <div class="form-field">
+            <div class="openai-form-row">
               <label>Голос:</label>
               <select
                 v-model="openaiVoice"
@@ -922,7 +922,7 @@ onUnmounted(() => {
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: filter 0.2s;
 }
 
 .save-settings-button:hover {
@@ -989,29 +989,35 @@ onUnmounted(() => {
   filter: brightness(1.06);
 }
 
-/* OpenAI API row - label, input with toggle and save button in one line */
-.openai-api-row {
+/* OpenAI form row - matches AI Z.ai form-row pattern */
+.openai-form-row {
   display: flex;
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
 }
 
-.openai-api-row label {
-  min-width: fit-content;
+.openai-form-row label {
+  min-width: 60px;
   font-size: 13px;
   color: var(--color-text-secondary);
   font-weight: 500;
 }
 
-.openai-api-row .input-with-toggle {
+.openai-form-row .input-with-toggle {
   flex: 1;
   min-width: 200px;
 }
 
-.openai-api-row .openai-save-button {
+.openai-form-row .openai-save-button {
   flex-shrink: 0;
   margin-bottom: 8px;
+  padding: 0.6rem 1.2rem !important;
+}
+
+.openai-form-row .network-select {
+  width: fit-content;
+  min-width: 100px;
 }
 
 .setting-group small {

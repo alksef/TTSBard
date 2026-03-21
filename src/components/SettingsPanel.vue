@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { AlertTriangle, Moon, Sun, Settings, Network, Check, X, Shield, Eye, EyeOff, Loader2, Type } from 'lucide-vue-next'
+import { AlertTriangle, Moon, Sun, Settings, Network, Check, X, Shield, Eye, EyeOff, Loader2, Type, Sparkles } from 'lucide-vue-next'
 import type { Theme } from '../types/settings'
 import { useGeneralSettings, useWindowsSettings, useLoggingSettings } from '../composables/useAppSettings'
 import { debugLog } from '../utils/debug'
+import SettingsAiPanel from './SettingsAiPanel.vue'
 
 // ============================================================================
 // Tab State
 // ============================================================================
-type Tab = 'general' | 'editor' | 'network'
+type Tab = 'general' | 'editor' | 'network' | 'ai'
 const activeTab = ref<Tab>('general')
 
 // Get settings from composables
@@ -578,6 +579,10 @@ watch(loggingSettings, (newSettings) => {
         <Network :size="18" />
         <span>Сеть</span>
       </button>
+      <button :class="{ active: activeTab === 'ai' }" @click="activeTab = 'ai'">
+        <Sparkles :size="18" />
+        <span>AI</span>
+      </button>
     </div>
 
     <!-- General Tab Content -->
@@ -865,6 +870,11 @@ watch(loggingSettings, (newSettings) => {
           </div>
         </section>
       </div>
+    </div>
+
+    <!-- AI Tab Content -->
+    <div v-show="activeTab === 'ai'" class="tab-content">
+      <SettingsAiPanel />
     </div>
 </div>
 </template>
