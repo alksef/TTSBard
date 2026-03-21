@@ -583,26 +583,6 @@ watch(loggingSettings, (newSettings) => {
     <!-- General Tab Content -->
     <div v-show="activeTab === 'general'" class="tab-content">
       <section class="settings-section">
-        <h2>Общие настройки</h2>
-
-        <div class="setting-row">
-          <label class="setting-label checkbox-label">
-            <input
-              :checked="excludeFromCapture"
-              type="checkbox"
-              class="checkbox-input"
-              @change="toggleExcludeFromCapture"
-            />
-            <span>Скрыть от записи/захвата экрана</span>
-          </label>
-          <span class="setting-hint">Скрывает все окна от OBS, Game Bar и других средств записи</span>
-          <span class="setting-warning"><AlertTriangle :size="14" /> Требуется перезапуск приложения для применения настройки</span>
-        </div>
-      </section>
-
-      <section class="settings-section">
-        <h2>Внешний вид</h2>
-
         <div class="theme-selector">
           <label
             class="theme-option"
@@ -635,8 +615,22 @@ watch(loggingSettings, (newSettings) => {
       </section>
 
       <section class="settings-section">
-        <h2>Логирование</h2>
+        <div class="setting-row">
+          <label class="setting-label checkbox-label">
+            <input
+              :checked="excludeFromCapture"
+              type="checkbox"
+              class="checkbox-input"
+              @change="toggleExcludeFromCapture"
+            />
+            <span>Скрыть от записи/захвата экрана</span>
+          </label>
+          <span class="setting-hint">Скрывает все окна от OBS, Game Bar и других средств записи</span>
+          <span class="setting-warning"><AlertTriangle :size="14" /> Требуется перезапуск приложения для применения настройки</span>
+        </div>
+      </section>
 
+      <section class="settings-section">
         <div class="setting-row">
           <label class="setting-label checkbox-label">
             <input
@@ -674,8 +668,6 @@ watch(loggingSettings, (newSettings) => {
     <!-- Editor Tab Content -->
     <div v-show="activeTab === 'editor'" class="tab-content">
       <section class="settings-section">
-        <h2>Редактор</h2>
-
         <div class="setting-row">
           <label class="setting-label checkbox-label">
             <input
