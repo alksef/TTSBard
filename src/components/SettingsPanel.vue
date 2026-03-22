@@ -3,7 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { AlertTriangle, Moon, Sun, Settings, Network, Check, X, Shield, Eye, EyeOff, Loader2, Type, Sparkles } from 'lucide-vue-next'
 import type { Theme } from '../types/settings'
-import { useGeneralSettings, useWindowsSettings, useLoggingSettings } from '../composables/useAppSettings'
+import { useGeneralSettings, useWindowsSettings, useLoggingSettings, useEditorSettings } from '../composables/useAppSettings'
 import { debugLog } from '../utils/debug'
 import SettingsAiPanel from './SettingsAiPanel.vue'
 
@@ -17,6 +17,7 @@ const activeTab = ref<Tab>('general')
 const generalSettings = useGeneralSettings()
 const windowsSettings = useWindowsSettings()
 const loggingSettings = useLoggingSettings()
+const editorSettings = useEditorSettings()
 
 const errorMessage = ref<string | null>(null)
 let errorTimeout: number | null = null
@@ -455,7 +456,7 @@ onUnmounted(() => {
 
 // Computed properties for template bindings
 const excludeFromCapture = computed(() => windowsSettings.value?.global.exclude_from_capture ?? false)
-const quickEditorEnabled = computed(() => generalSettings.value?.quick_editor_enabled ?? false)
+const quickEditorEnabled = computed(() => editorSettings.value?.quick ?? false)
 const loggingEnabled = computed(() => localLoggingEnabled.value)
 
 /**
@@ -492,11 +493,12 @@ async function toggleExcludeFromCapture() {
 
 async function toggleQuickEditor() {
   try {
-    const newValue = !(generalSettings.value?.quick_editor_enabled ?? false)
-    await invoke('set_quick_editor_enabled', { value: newValue })
+    const newValue = !(editorSettings.value?.quick ?? false)
+    await invoke('set_editor_quick', { value: newValue })
     showError('Настройка сохранена')
   } catch (e) {
-    showError('Ошибка переключения быстрого редактора: ' + (e as Error).message)
+    const errorMessage = e instanceof Error ? e.message : String(e)
+    showError('Ошибка переключения быстрого редактора: ' + errorMessage)
   }
 }
 
@@ -539,6 +541,11 @@ function showError(message: string) {
 watch(generalSettings, (newSettings) => {
   if (!newSettings) return
   debugLog('[SettingsPanel] General settings updated from composable:', newSettings)
+}, { immediate: true })
+
+watch(editorSettings, (newSettings) => {
+  if (!newSettings) return
+  debugLog('[SettingsPanel] Editor settings updated from composable:', newSettings)
 }, { immediate: true })
 
 watch(windowsSettings, (newSettings) => {

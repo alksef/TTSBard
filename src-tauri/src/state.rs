@@ -1,6 +1,6 @@
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
 use tokio::sync::broadcast;
@@ -10,6 +10,7 @@ use crate::preprocessor::TextPreprocessor;
 use crate::telegram::TelegramClient;
 use crate::webview::WebViewSettings;
 use crate::config::TwitchSettings;
+use crate::ai::AiProvider;
 use tauri::{AppHandle, Manager};
 use cpal::traits::{HostTrait, DeviceTrait};
 use tracing::{info, warn, debug};
@@ -116,6 +117,12 @@ pub struct AppState {
     /// Флаги префиксов из текущего TTS запроса
     prefix_skip_twitch: Arc<Mutex<bool>>,
     prefix_skip_webview: Arc<Mutex<bool>>,
+
+    /// Cached AI client for text correction
+    pub ai_client: Arc<Mutex<Option<Arc<AiProvider>>>>,
+
+    /// Hash of current AI settings (for cache invalidation)
+    pub ai_settings_hash: Arc<AtomicU64>,
 }
 
 impl AppState {
@@ -153,6 +160,8 @@ impl AppState {
             cached_devices: Arc::new(RwLock::new(HashMap::new())),
             prefix_skip_twitch: Arc::new(Mutex::new(false)),
             prefix_skip_webview: Arc::new(Mutex::new(false)),
+            ai_client: Arc::new(Mutex::new(None)),
+            ai_settings_hash: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -559,6 +568,61 @@ impl AppState {
     pub fn clear_prefix_flags(&self) {
         *self.prefix_skip_twitch.lock() = false;
         *self.prefix_skip_webview.lock() = false;
+    }
+
+    // ========== AI Client Caching ==========
+
+    /// Get cached AI client or create if needed/invalidated
+    ///
+    /// This method checks if the cached client is still valid by comparing
+    /// the hash of current AI settings with the stored hash. If they match,
+    /// the cached client is returned. Otherwise, a new client is created.
+    ///
+    /// # Arguments
+    /// * `ai_settings` - Current AI settings
+    /// * `network_settings` - Current network settings (for proxy configuration)
+    ///
+    /// # Returns
+    /// Arc<AiProvider> - The cached or newly created AI client
+    ///
+    /// # Errors
+    /// Returns String if client creation fails
+    pub fn get_or_create_ai_client(
+        &self,
+        ai_settings: &crate::config::AiSettings,
+        network_settings: &crate::config::NetworkSettings,
+    ) -> Result<Arc<AiProvider>, String> {
+        let current_hash = crate::ai::hash_ai_settings(ai_settings);
+
+        // Check if cache is valid
+        if self.ai_settings_hash.load(std::sync::atomic::Ordering::Relaxed) == current_hash {
+            if let Some(client) = self.ai_client.lock().as_ref() {
+                debug!("Using cached AI client (hash: {})", current_hash);
+                return Ok(client.clone());
+            }
+        }
+
+        // Create new client
+        debug!("Creating new AI client (hash: {})", current_hash);
+        let client = crate::ai::create_ai_client(ai_settings, network_settings)
+            .map_err(|e| format!("Failed to create AI client: {}", e))?;
+        let client = Arc::new(client);
+
+        // Update cache
+        *self.ai_client.lock() = Some(client.clone());
+        self.ai_settings_hash.store(current_hash, std::sync::atomic::Ordering::Relaxed);
+
+        Ok(client)
+    }
+
+    /// Invalidate AI client cache
+    ///
+    /// Call this when AI settings change to force recreation of the client
+    /// on the next request.
+    pub fn invalidate_ai_client(&self) {
+        debug!("Invalidating AI client cache");
+        self.ai_client.lock().take();
+        self.ai_settings_hash.store(0, std::sync::atomic::Ordering::Relaxed);
     }
 }
 

@@ -412,7 +412,6 @@ impl From<WindowsSettingsDto> for WindowsSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeneralSettingsDto {
     pub hotkey_enabled: bool,
-    pub quick_editor_enabled: bool,
     pub interception_enabled: bool,
     pub enter_closes_disabled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -427,7 +426,6 @@ impl GeneralSettingsDto {
     ) -> Self {
         Self {
             hotkey_enabled: config.hotkey_enabled,
-            quick_editor_enabled: config.quick_editor_enabled,
             interception_enabled,
             enter_closes_disabled,
             theme: Some(match config.theme {
@@ -473,6 +471,17 @@ impl PreprocessorSettingsDto {
 pub type SoundBindingDto = SoundBinding;
 
 // ============================================================================
+// Editor Settings DTO
+// ============================================================================
+
+/// Editor settings DTO
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EditorSettingsDto {
+    pub quick: bool,
+    pub ai: bool,
+}
+
+// ============================================================================
 // AI Settings DTO
 // ============================================================================
 
@@ -508,6 +517,12 @@ pub struct AiOpenAiSettingsDto {
     pub api_key: Option<String>,
     #[serde(default)]
     pub use_proxy: bool,
+    #[serde(default = "default_openai_model_dto")]
+    pub model: String,
+}
+
+fn default_openai_model_dto() -> String {
+    "gpt-4o-mini".to_string()
 }
 
 impl From<crate::config::AiOpenAiSettings> for AiOpenAiSettingsDto {
@@ -515,6 +530,7 @@ impl From<crate::config::AiOpenAiSettings> for AiOpenAiSettingsDto {
         Self {
             api_key: s.api_key,
             use_proxy: s.use_proxy,
+            model: s.model,
         }
     }
 }
@@ -524,6 +540,7 @@ impl From<AiOpenAiSettingsDto> for crate::config::AiOpenAiSettings {
         Self {
             api_key: dto.api_key,
             use_proxy: dto.use_proxy,
+            model: dto.model,
         }
     }
 }
@@ -532,14 +549,21 @@ impl From<AiOpenAiSettingsDto> for crate::config::AiOpenAiSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiZAiSettingsDto {
     pub url: Option<String>,
-    pub token: Option<String>,
+    pub api_key: Option<String>,
+    #[serde(default = "default_zai_model_dto")]
+    pub model: String,
+}
+
+fn default_zai_model_dto() -> String {
+    "glm-4.5".to_string()
 }
 
 impl From<crate::config::AiZAiSettings> for AiZAiSettingsDto {
     fn from(s: crate::config::AiZAiSettings) -> Self {
         Self {
             url: s.url,
-            token: s.token,
+            api_key: s.api_key,
+            model: s.model,
         }
     }
 }
@@ -548,7 +572,8 @@ impl From<AiZAiSettingsDto> for crate::config::AiZAiSettings {
     fn from(dto: AiZAiSettingsDto) -> Self {
         Self {
             url: dto.url,
-            token: dto.token,
+            api_key: dto.api_key,
+            model: dto.model,
         }
     }
 }
@@ -560,6 +585,12 @@ pub struct AiSettingsDto {
     pub openai: AiOpenAiSettingsDto,
     pub zai: AiZAiSettingsDto,
     pub prompt: String,
+    #[serde(default = "default_ai_timeout_dto")]
+    pub timeout: u64,
+}
+
+fn default_ai_timeout_dto() -> u64 {
+    20
 }
 
 impl From<crate::config::AiSettings> for AiSettingsDto {
@@ -569,6 +600,7 @@ impl From<crate::config::AiSettings> for AiSettingsDto {
             openai: s.openai.into(),
             zai: s.zai.into(),
             prompt: s.prompt,
+            timeout: s.timeout,
         }
     }
 }
@@ -580,6 +612,7 @@ impl From<AiSettingsDto> for crate::config::AiSettings {
             openai: dto.openai.into(),
             zai: dto.zai.into(),
             prompt: dto.prompt,
+            timeout: dto.timeout,
         }
     }
 }
@@ -615,6 +648,8 @@ pub struct AppSettingsDto {
     pub audio: AudioSettingsDto,
     /// General settings
     pub general: GeneralSettingsDto,
+    /// Editor settings
+    pub editor: EditorSettingsDto,
     /// Logging settings
     pub logging: LoggingSettingsDto,
     /// Preprocessor settings
@@ -639,6 +674,10 @@ impl AppSettingsDto {
                 params.interception_enabled,
                 params.enter_closes_disabled,
             ),
+            editor: EditorSettingsDto {
+                quick: params.config.editor.quick,
+                ai: params.config.editor.ai,
+            },
             logging: params.config.logging.clone(),
             preprocessor: PreprocessorSettingsDto::from_preprocessor(params.preprocessor),
             soundpanel_bindings: params.soundpanel_bindings,

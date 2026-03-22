@@ -2,18 +2,50 @@
 import { ref, computed, onMounted, onUnmounted as vueOnUnmounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, UnlistenFn } from '@tauri-apps/api/event'
-import { useGeneralSettings } from '../composables/useAppSettings'
+import { useEditorSettings, useAiSettings } from '../composables/useAppSettings'
 import { debugLog, debugError } from '../utils/debug'
+import { Sparkles } from 'lucide-vue-next'
 
 const text = ref('')
+const isCorrecting = ref(false)
 const replacements = ref<Map<string, string>>(new Map())
 const usernames = ref<Map<string, string>>(new Map())
 
 // Get settings from composable
-const generalSettings = useGeneralSettings()
+const editorSettings = useEditorSettings()
+const aiSettings = useAiSettings()
 
 // Computed property for template
-const quickEditorEnabled = computed(() => generalSettings.value?.quick_editor_enabled ?? false)
+const quickEditorEnabled = computed(() => editorSettings.value?.quick ?? false)
+
+// Computed: Check if AI correction is enabled in editor
+const aiEditorEnabled = computed(() => editorSettings.value?.ai ?? false)
+
+// Computed: Check if current AI provider has API key configured
+const isProviderConfigured = computed(() => {
+  const provider = aiSettings.value?.provider
+  const hasKey = provider === 'openai'
+    ? !!aiSettings.value?.openai?.api_key
+    : provider === 'zai'
+      ? !!aiSettings.value?.zai?.api_key
+      : false
+
+  // Debug logging to diagnose issues
+  debugLog('[InputPanel] AI provider check:', {
+    provider,
+    hasOpenaiKey: !!aiSettings.value?.openai?.api_key,
+    hasZaiKey: !!aiSettings.value?.zai?.api_key,
+    isProviderConfigured: hasKey
+  })
+
+  return hasKey
+})
+
+// Computed: Check if AI button should be enabled (manual correction)
+// Requires only provider to be configured, not the auto-correction setting
+const isAiButtonEnabled = computed(() => {
+  return isProviderConfigured.value
+})
 
 let unlistenSettings: UnlistenFn | null = null
 
@@ -46,12 +78,12 @@ onMounted(async () => {
 })
 
 // Watch for settings changes from composable
-watch(generalSettings, (newSettings) => {
+watch(editorSettings, (newSettings) => {
   if (!newSettings) return;
 
-  debugLog('[InputPanel] General settings updated from composable:', newSettings);
+  debugLog('[InputPanel] Editor settings updated from composable:', newSettings);
 
-  // Update quick editor enabled from general settings
+  // Update quick editor enabled from editor settings
   // This will be used in handleEnter
 }, { immediate: true })
 
@@ -80,11 +112,24 @@ async function speak() {
   }
 }
 
+async function correctText() {
+  if (!text.value.trim()) return
+  isCorrecting.value = true
+  try {
+    const corrected = await invoke<string>('correct_text', { text: text.value })
+    text.value = corrected
+  } catch (e) {
+    debugError('[InputPanel] Correction failed:', e)
+  } finally {
+    isCorrecting.value = false
+  }
+}
+
 async function handleEnter() {
   debugLog('[InputPanel] Enter pressed, text:', text.value)
 
   // Get quick editor enabled from composable
-  const quickEditorEnabledValue = generalSettings.value?.quick_editor_enabled ?? false
+  const quickEditorEnabledValue = editorSettings.value?.quick ?? false
 
   // If quick editor is enabled and text is empty - do nothing
   if (quickEditorEnabledValue && !text.value.trim()) {
@@ -105,7 +150,7 @@ async function handleEnter() {
 
 async function handleEsc() {
   // Get quick editor enabled from composable
-  const quickEditorEnabledValue = generalSettings.value?.quick_editor_enabled ?? false
+  const quickEditorEnabledValue = editorSettings.value?.quick ?? false
 
   // Hide window if quick editor is enabled (fire and forget)
   if (quickEditorEnabledValue) {
@@ -168,18 +213,33 @@ function handleSpace(event: KeyboardEvent) {
 <template>
   <div class="input-panel">
     <div class="input-group">
-      <textarea
-        v-model="text"
-        lang="ru"
-        placeholder="Введите текст для озвучивания..."
-        rows="10"
-        class="text-input"
-        @keydown.prevent.enter="handleEnter"
-        @keydown.esc="handleEsc"
-        @keydown.space="handleSpace"
-      />
+      <div class="textarea-wrapper">
+        <textarea
+          v-model="text"
+          lang="ru"
+          placeholder="Введите текст для озвучивания..."
+          rows="10"
+          class="text-input"
+          @keydown.prevent.enter="handleEnter"
+          @keydown.esc="handleEsc"
+          @keydown.space="handleSpace"
+        />
+        <button
+          class="correct-button"
+          :class="{ loading: isCorrecting }"
+          :disabled="isCorrecting || !text.trim() || !isAiButtonEnabled"
+          @click="correctText"
+          title="Корректировать текст с помощью AI"
+        >
+          <Sparkles :size="16" />
+          <span>AI</span>
+        </button>
+      </div>
       <div v-if="quickEditorEnabled" class="quick-editor-hint">
         Режим быстрого редактора
+      </div>
+      <div v-if="aiEditorEnabled" class="ai-editor-hint">
+        AI
       </div>
     </div>
   </div>
@@ -195,7 +255,13 @@ function handleSpace(event: KeyboardEvent) {
 }
 
 .input-group {
+  position: relative;
   margin-bottom: 1.6rem;
+}
+
+.textarea-wrapper {
+  position: relative;
+  margin-bottom: 0.5rem;
 }
 
 .text-input {
@@ -244,5 +310,52 @@ function handleSpace(event: KeyboardEvent) {
   color: var(--color-text-secondary);
   opacity: 0.7;
   text-align: center;
+}
+
+.ai-editor-hint {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--color-accent);
+  opacity: 0.8;
+  text-align: center;
+  font-weight: 600;
+}
+
+.correct-button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  position: absolute;
+  bottom: 0.6rem;
+  right: 0.5rem;
+  z-index: 10;
+  padding: 0.5rem 1rem;
+  background: var(--color-accent, #6366f1);
+  color: var(--color-text-on-accent, #ffffff);
+  border: none;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.correct-button:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.correct-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: #6b7280;
+}
+
+.correct-button.loading {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 </style>

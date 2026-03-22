@@ -95,6 +95,50 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
         text
     };
 
+    // === STAGE 2.5: AI Text Correction (if enabled) ===
+    let text = {
+        // Load settings to check if AI is enabled
+        let settings_manager = SettingsManager::new()
+            .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+
+        let settings = settings_manager.load()
+            .map_err(|e| format!("Failed to load settings: {}", e))?;
+
+        if settings.editor.ai {
+            // Get or create cached AI client
+            match state.get_or_create_ai_client(&settings.ai, &settings.tts.network) {
+                Ok(client) => {
+                    // Apply AI correction (async)
+                    match client.correct(&text, &settings.ai.prompt).await {
+                        Ok(corrected) => {
+                            if corrected != text {
+                                tracing::info!(
+                                    original = text.len(),
+                                    corrected = corrected.len(),
+                                    "AI correction applied"
+                                );
+                            }
+                            corrected
+                        }
+                        Err(e) => {
+                            // Fallback to original on error (fault-tolerant)
+                            tracing::warn!("AI correction failed, using original text: {}", e);
+                            text
+                        }
+                    }
+                }
+                Err(e) => {
+                    // AI client not available, skip correction
+                    tracing::warn!("AI client not available, skipping correction: {}", e);
+                    text
+                }
+            }
+        } else {
+            text
+        }
+    };
+    tracing::debug!(text, "Text after AI correction stage");
+
     // === STAGE 3: Numbers to text ===
     let text = crate::preprocessor::process_numbers(&text);
     debug!(text, "Final text for TTS");
@@ -769,26 +813,26 @@ pub fn has_api_key(state: State<'_, AppState>) -> bool {
 
 /// Set quick editor enabled
 #[tauri::command]
-pub fn set_quick_editor_enabled(
+pub fn set_editor_quick(
     value: bool,
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>
-) -> Result<(), String> {
-    settings_manager.set_quick_editor_enabled(value)
+) -> Result<bool, String> {
+    settings_manager.set_editor_quick(value)
         .map_err(|e| format!("Failed to save settings: {}", e))?;
 
     // Emit event to notify frontend
     let _ = app_handle.emit("settings-changed", ());
 
-    Ok(())
+    Ok(value)
 }
 
 /// Get quick editor enabled
 #[tauri::command]
-pub fn get_quick_editor_enabled(
+pub fn get_editor_quick(
     settings_manager: State<'_, SettingsManager>
 ) -> bool {
-    settings_manager.get_quick_editor_enabled()
+    settings_manager.get_editor_quick()
 }
 
 // ============================================================================

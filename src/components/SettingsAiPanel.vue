@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { ref, watch, computed } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { Eye, EyeOff, Cloud, Server } from 'lucide-vue-next';
-import { useAiSettings } from '../composables/useAppSettings';
+import { useAiSettings, useEditorSettings } from '../composables/useAppSettings';
 import type { AiProviderType } from '../types/settings';
 import { debugLog, debugError } from '../utils/debug';
 
@@ -21,6 +21,10 @@ const providers = ref<Record<AiProviderType, AiProviderState>>({
 
 // Get settings from composable
 const aiSettings = useAiSettings();
+const editorSettings = useEditorSettings();
+
+// AI enabled state (local ref for immediate UI feedback)
+const aiEnabled = ref(false);
 
 // Global prompt
 const globalPrompt = ref('');
@@ -32,8 +36,32 @@ const showOpenaiKey = ref(false);
 
 // Z.ai settings
 const zaiUrl = ref('');
-const zaiToken = ref('');
-const showZaiToken = ref(false);
+const zaiApiKey = ref('');
+const showZaiApiKey = ref(false);
+
+// Computed: Check if current provider has API key configured
+const isCurrentProviderConfigured = computed(() => {
+  if (activeProvider.value === 'openai') {
+    return openaiApiKey.value.trim().length > 0;
+  } else if (activeProvider.value === 'zai') {
+    return zaiApiKey.value.trim().length > 0;
+  }
+  return false;
+});
+
+// Watch for provider configuration changes to auto-disable AI
+watch(isCurrentProviderConfigured, async (configured, prevConfigured) => {
+  // Auto-disable AI if provider becomes unconfigured
+  if (!configured && prevConfigured && aiEnabled.value) {
+    debugLog('[AI] Provider became unconfigured, disabling AI correction');
+    aiEnabled.value = false;
+    try {
+      await invoke('set_editor_ai', { enabled: false });
+    } catch (e) {
+      debugError('[AI] Failed to disable AI:', e);
+    }
+  }
+});
 
 // Error state
 const statusMessage = ref('');
@@ -117,20 +145,20 @@ async function toggleOpenAiUseProxy() {
 async function saveZaiSettings() {
   debugLog('[AI] Saving Z.ai settings...');
 
-  // Validate URL and token
+  // Validate URL and API key
   if (!zaiUrl.value.trim()) {
     showError('URL не может быть пустым');
     return;
   }
 
-  if (!zaiToken.value.trim()) {
-    showError('Токен не может быть пустым');
+  if (!zaiApiKey.value.trim()) {
+    showError('Ключ API не может быть пустым');
     return;
   }
 
   try {
     await invoke('set_ai_zai_url', { url: zaiUrl.value });
-    await invoke('set_ai_zai_token', { token: zaiToken.value });
+    await invoke('set_ai_zai_api_key', { apiKey: zaiApiKey.value });
     providers.value.zai.configured = true;
     debugLog('[AI] Z.ai settings saved successfully');
     showSuccess('Настройки сохранены');
@@ -151,8 +179,31 @@ async function setActiveProvider(provider: AiProviderType) {
   }
 }
 
+async function saveAiEnabled() {
+  try {
+    await invoke('set_editor_ai', { enabled: aiEnabled.value });
+    debugLog('[SettingsAiPanel] Editor AI enabled saved:', aiEnabled.value);
+    // Successfully saved - settings will reload via settings-changed event
+  } catch (e) {
+    debugError('[SettingsAiPanel] Failed to save editor AI enabled:', e);
+    // Revert on error
+    aiEnabled.value = !aiEnabled.value;
+  }
+}
+
 // Watch for settings changes from composable
-watch(aiSettings, (newSettings) => {
+watch(editorSettings, (newSettings) => {
+  if (!newSettings) return;
+
+  debugLog('[AI] Editor settings updated from composable:', newSettings);
+
+  // Update AI enabled state from editor settings
+  if (newSettings.ai !== undefined) {
+    aiEnabled.value = newSettings.ai;
+  }
+}, { immediate: true, deep: true });
+
+watch(aiSettings, async (newSettings) => {
   if (!newSettings) return;
 
   debugLog('[AI] Settings updated from composable:', newSettings);
@@ -160,7 +211,24 @@ watch(aiSettings, (newSettings) => {
   // Update provider
   if (newSettings.provider) {
     debugLog('[AI] Setting activeProvider to:', newSettings.provider);
+    const prevProvider = activeProvider.value;
     activeProvider.value = newSettings.provider;
+
+    // Check if new provider is configured
+    const configured = newSettings.provider === 'openai'
+      ? !!newSettings.openai?.api_key
+      : !!newSettings.zai?.api_key;
+
+    // Auto-disable AI if switching to unconfigured provider
+    if (!configured && aiEnabled.value && prevProvider !== newSettings.provider) {
+      debugLog('[AI] Provider not configured, disabling AI correction');
+      aiEnabled.value = false;
+      try {
+        await invoke('set_editor_ai', { enabled: false });
+      } catch (e) {
+        debugError('[AI] Failed to disable AI:', e);
+      }
+    }
   }
 
   // Update global prompt
@@ -184,8 +252,8 @@ watch(aiSettings, (newSettings) => {
     if (newSettings.zai.url) {
       zaiUrl.value = newSettings.zai.url;
     }
-    if (newSettings.zai.token) {
-      zaiToken.value = newSettings.zai.token;
+    if (newSettings.zai.api_key) {
+      zaiApiKey.value = newSettings.zai.api_key;
       providers.value.zai.configured = true;
     }
   }
@@ -201,16 +269,36 @@ watch(aiSettings, (newSettings) => {
       </div>
     </Transition>
 
+    <!-- AI Enable Section -->
+    <div class="ai-enable-section">
+      <label class="setting-label checkbox-label">
+        <input
+          type="checkbox"
+          v-model="aiEnabled"
+          @change="saveAiEnabled"
+          class="checkbox-input"
+          :disabled="!isCurrentProviderConfigured"
+        />
+        <span>Применять AI коррекцию автоматически</span>
+      </label>
+      <span v-if="!isCurrentProviderConfigured" class="setting-hint warning">
+        ⚠️ Сначала настройте API ключ выбранного провайдера
+      </span>
+      <span v-else class="setting-hint">
+        Текст будет корректироваться перед отправкой на TTS
+      </span>
+    </div>
+
     <!-- Global Prompt Section -->
     <div class="global-prompt-section">
       <div class="prompt-header">
-        <h3 class="prompt-title">Глобальный промпт</h3>
+        <h3 class="prompt-title">Промт</h3>
       </div>
       <div class="prompt-content">
         <textarea
           v-model="globalPrompt"
           class="prompt-textarea"
-          placeholder="Введите глобальный промпт для AI..."
+          placeholder="Ты - корректор русского текста для TTS. Исправь орфографию, раскладку (ghbdtn→привет), замени числа на слова. Выведи только исправленный текст."
           rows="4"
         ></textarea>
         <div class="button-row">
@@ -223,6 +311,66 @@ watch(aiSettings, (newSettings) => {
 
     <!-- Provider Cards -->
     <div class="provider-cards">
+      <!-- Z.ai Provider -->
+      <div
+        class="provider-card"
+        :class="{ active: activeProvider === 'zai' }"
+      >
+        <div class="card-header">
+          <input
+            type="radio"
+            :checked="activeProvider === 'zai'"
+            @change="setActiveProvider('zai')"
+            @click.stop
+          />
+          <Server :size="18" class="provider-icon" />
+          <span class="card-title" @click="toggleProvider('zai')">Z.ai</span>
+          <span class="expand-icon" @click="toggleProvider('zai')">{{ providers.zai.expanded ? '▼' : '▶' }}</span>
+        </div>
+
+        <div v-if="providers.zai.expanded" class="card-content">
+          <!-- URL -->
+          <div class="setting-group">
+            <div class="zai-form-row">
+              <label>URL:</label>
+              <input
+                v-model="zaiUrl"
+                type="text"
+                class="zai-input"
+              />
+            </div>
+          </div>
+
+          <!-- API Key -->
+          <div class="setting-group">
+            <div class="zai-form-row">
+              <label>Ключ API:</label>
+              <div class="input-with-toggle">
+                <input
+                  v-model="zaiApiKey"
+                  :type="showZaiApiKey ? 'text' : 'password'"
+                  class="text-input"
+                />
+                <button
+                  type="button"
+                  class="toggle-icon-button"
+                  @click="showZaiApiKey = !showZaiApiKey"
+                  :title="showZaiApiKey ? 'Скрыть' : 'Показать'"
+                >
+                  <Eye v-if="!showZaiApiKey" :size="18" />
+                  <EyeOff v-else :size="18" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Buttons Row -->
+          <div class="button-row">
+            <button @click="saveZaiSettings" class="save-button-inline">Сохранить</button>
+          </div>
+        </div>
+      </div>
+
       <!-- OpenAI Provider -->
       <div
         class="provider-card"
@@ -283,68 +431,6 @@ watch(aiSettings, (newSettings) => {
           </div>
         </div>
       </div>
-
-      <!-- Z.ai Provider -->
-      <div
-        class="provider-card"
-        :class="{ active: activeProvider === 'zai' }"
-      >
-        <div class="card-header">
-          <input
-            type="radio"
-            :checked="activeProvider === 'zai'"
-            @change="setActiveProvider('zai')"
-            @click.stop
-          />
-          <Server :size="18" class="provider-icon" />
-          <span class="card-title" @click="toggleProvider('zai')">Z.ai</span>
-          <span class="expand-icon" @click="toggleProvider('zai')">{{ providers.zai.expanded ? '▼' : '▶' }}</span>
-        </div>
-
-        <div v-if="providers.zai.expanded" class="card-content">
-          <!-- URL -->
-          <div class="setting-group">
-            <div class="zai-form-row">
-              <label>URL:</label>
-              <input
-                v-model="zaiUrl"
-                type="text"
-                placeholder="https://api.Z.ai/v1"
-                class="zai-input"
-              />
-            </div>
-          </div>
-
-          <!-- API Key -->
-          <div class="setting-group">
-            <div class="zai-form-row">
-              <label>Ключ API:</label>
-              <div class="input-with-toggle">
-                <input
-                  v-model="zaiToken"
-                  :type="showZaiToken ? 'text' : 'password'"
-                  class="text-input"
-                  placeholder="sk-ant-..."
-                />
-                <button
-                  type="button"
-                  class="toggle-icon-button"
-                  @click="showZaiToken = !showZaiToken"
-                  :title="showZaiToken ? 'Скрыть' : 'Показать'"
-                >
-                  <Eye v-if="!showZaiToken" :size="18" />
-                  <EyeOff v-else :size="18" />
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Buttons Row -->
-          <div class="button-row">
-            <button @click="saveZaiSettings" class="save-button-inline">Сохранить</button>
-          </div>
-        </div>
-      </div>
     </div>
   </div>
 </template>
@@ -353,6 +439,60 @@ watch(aiSettings, (newSettings) => {
 .ai-panel {
   max-width: 900px;
   margin: 0 auto;
+}
+
+/* AI Enable Section */
+.ai-enable-section {
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-bg-field);
+  backdrop-filter: blur(8px);
+  padding: 16px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.setting-label {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.checkbox-input {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: var(--color-accent);
+}
+
+.checkbox-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.setting-label:has(.checkbox-input:disabled) {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.setting-hint {
+  display: block;
+  margin-top: 0.4rem;
+  margin-left: 2.4rem;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+.setting-hint.warning {
+  color: #f59e0b;
 }
 
 /* Global Prompt Section */

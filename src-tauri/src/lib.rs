@@ -1,4 +1,5 @@
 mod assets;
+mod ai;
 mod commands;
 mod audio;
 mod config;
@@ -30,10 +31,10 @@ use tracing_subscriber::{fmt, prelude::*, Registry, EnvFilter};
 use tracing_appender::non_blocking;
 use std::path::PathBuf;
 use anyhow::Context;
-use commands::{speak_text, get_tts_provider, set_tts_provider, get_local_tts_url, set_local_tts_url, get_openai_api_key, set_openai_api_key, get_openai_voice, set_openai_voice, apply_openai_proxy_settings, get_interception, set_interception, has_api_key, get_floating_appearance, set_floating_opacity, set_floating_bg_color, set_clickthrough, is_clickthrough_enabled, is_enter_closes_disabled, toggle_interception, toggle_floating_window, show_floating_window_cmd, hide_floating_window_cmd, is_floating_window_visible, quit_app, get_hotkey_enabled, set_hotkey_enabled, get_global_exclude_from_capture, set_global_exclude_from_capture, open_file_dialog, get_output_devices, get_virtual_mic_devices, get_audio_settings, set_speaker_device, set_speaker_enabled, set_speaker_volume, set_virtual_mic_device, enable_virtual_mic, disable_virtual_mic, set_virtual_mic_volume, test_audio_device, set_quick_editor_enabled, get_quick_editor_enabled, update_theme, hide_main_window, close_floating_window, close_soundpanel_window};
+use commands::{speak_text, get_tts_provider, set_tts_provider, get_local_tts_url, set_local_tts_url, get_openai_api_key, set_openai_api_key, get_openai_voice, set_openai_voice, apply_openai_proxy_settings, get_interception, set_interception, has_api_key, get_floating_appearance, set_floating_opacity, set_floating_bg_color, set_clickthrough, is_clickthrough_enabled, is_enter_closes_disabled, toggle_interception, toggle_floating_window, show_floating_window_cmd, hide_floating_window_cmd, is_floating_window_visible, quit_app, get_hotkey_enabled, set_hotkey_enabled, get_global_exclude_from_capture, set_global_exclude_from_capture, open_file_dialog, get_output_devices, get_virtual_mic_devices, get_audio_settings, set_speaker_device, set_speaker_enabled, set_speaker_volume, set_virtual_mic_device, enable_virtual_mic, disable_virtual_mic, set_virtual_mic_volume, test_audio_device, set_editor_quick, get_editor_quick, update_theme, hide_main_window, close_floating_window, close_soundpanel_window};
 use commands::logging::{get_logging_settings, save_logging_settings};
 use commands::telegram::{telegram_init, telegram_request_code, telegram_sign_in, telegram_sign_out, telegram_get_status, telegram_get_user, telegram_auto_restore};
-use commands::ai::{set_ai_provider, set_ai_prompt, set_ai_openai_api_key, set_ai_openai_use_proxy, set_ai_zai_url, set_ai_zai_token};
+use commands::ai::{set_ai_provider, set_ai_prompt, set_ai_openai_api_key, set_ai_openai_use_proxy, set_ai_zai_url, set_ai_zai_api_key, correct_text, set_editor_ai, get_editor_ai, set_ai_openai_model, get_ai_openai_model, set_ai_zai_model, get_ai_zai_model};
 use soundpanel::{sp_get_bindings, sp_add_binding, sp_remove_binding, sp_test_sound, sp_is_supported_format, sp_get_floating_appearance, sp_set_floating_opacity, sp_set_floating_bg_color, sp_set_floating_clickthrough, sp_is_floating_clickthrough_enabled};
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -78,7 +79,10 @@ pub fn run() {
     }
 
     // Build env filter with per-module directives
-    let default_level = if settings.logging.enabled {
+    // In dev mode, default to TRACE level; in release mode, respect settings
+    let default_level = if cfg!(debug_assertions) {
+        Level::TRACE  // Show all logs in dev mode
+    } else if settings.logging.enabled {
         match settings.logging.level.as_str() {
             "error" => Level::ERROR,
             "warn" => Level::WARN,
@@ -112,25 +116,30 @@ pub fn run() {
     // WorkerGuard must live for the entire program duration.
     // We use Box::leak to prevent it from being dropped, which would stop logging.
     // This is a small memory leak (a few bytes) that is acceptable for a desktop app.
-    let _guard: &'static mut non_blocking::WorkerGuard = if cfg!(debug_assertions) && settings.logging.enabled {
-        // Debug mode + enabled: console and file with non-blocking writer
-        let log_file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(log_dir.join("ttsbard.log"))
-            .expect("Failed to open log file");
+    let _guard: &'static mut non_blocking::WorkerGuard = if cfg!(debug_assertions) {
+        // Debug mode: always log to console, optionally to file
+        let (non_blocking_file, guard) = if settings.logging.enabled {
+            let log_file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log_dir.join("ttsbard.log"))
+                .expect("Failed to open log file");
 
-        // Add session separator for readability
-        use std::io::Write;
-        let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
-        writeln!(
-            &log_file,
-            "\n====== New session: {} | Version: {} ======\n",
-            timestamp,
-            env!("CARGO_PKG_VERSION")
-        ).ok();
+            // Add session separator for readability
+            use std::io::Write;
+            let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
+            writeln!(
+                &log_file,
+                "\n====== New session: {} | Version: {} ======\n",
+                timestamp,
+                env!("CARGO_PKG_VERSION")
+            ).ok();
 
-        let (non_blocking_file, guard) = non_blocking(log_file);
+            non_blocking(log_file)
+        } else {
+            non_blocking(std::io::sink())
+        };
+
         let leaked_guard = Box::leak(Box::new(guard));
 
         tracing::subscriber::set_global_default(
@@ -246,9 +255,9 @@ pub fn run() {
             // Global settings commands
             get_global_exclude_from_capture,
             set_global_exclude_from_capture,
-            // Quick editor commands
-            get_quick_editor_enabled,
-            set_quick_editor_enabled,
+            // Editor commands
+            get_editor_quick,
+            set_editor_quick,
             // Theme commands
             update_theme,
             hide_main_window,
@@ -336,7 +345,14 @@ pub fn run() {
             set_ai_openai_api_key,
             set_ai_openai_use_proxy,
             set_ai_zai_url,
-            set_ai_zai_token,
+            set_ai_zai_api_key,
+            correct_text,
+            set_editor_ai,
+            get_editor_ai,
+            set_ai_openai_model,
+            get_ai_openai_model,
+            set_ai_zai_model,
+            get_ai_zai_model,
             // Unified settings commands
             commands::get_all_app_settings,
             commands::is_backend_ready,
