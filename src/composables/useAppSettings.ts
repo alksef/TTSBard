@@ -268,3 +268,8 @@ export function useAiSettings(): ComputedRef<AppSettingsDto['ai'] | undefined> {
   const { settings } = useAppSettings()
   return computed(() => settings.value?.ai)
 }
+
+export function useEditorSettings(): ComputedRef<AppSettingsDto['editor'] | undefined> {
+  const { settings } = useAppSettings()
+  return computed(() => settings.value?.editor)
+}

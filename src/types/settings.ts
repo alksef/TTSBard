@@ -161,7 +161,6 @@ export type Theme = 'dark' | 'light'
 
 export interface GeneralSettingsDto {
   hotkey_enabled: boolean
-  quick_editor_enabled: boolean
   interception_enabled: boolean
   enter_closes_disabled: boolean
   theme?: Theme
@@ -174,6 +173,15 @@ export interface GeneralSettingsDto {
 export interface PreprocessorSettingsDto {
   enabled: boolean
   replacements_count: number
+}
+
+// ============================================================================
+// Editor Settings Types
+// ============================================================================
+
+export interface EditorSettingsDto {
+  quick: boolean
+  ai: boolean
 }
 
 // ============================================================================
@@ -190,11 +198,13 @@ export type AiProviderType = (typeof AiProviderType)[keyof typeof AiProviderType
 export interface AiOpenAiSettingsDto {
   api_key?: string
   use_proxy?: boolean
+  model?: string
 }
 
 export interface AiZAiSettingsDto {
   url?: string
-  token?: string
+  api_key?: string
+  model: string
 }
 
 // Z.ai (Anthropic-compatible AI provider)
@@ -224,6 +234,7 @@ export interface AppSettingsDto {
   logging: LoggingSettingsDto
   preprocessor: PreprocessorSettingsDto
   soundpanel_bindings: SoundBinding[]
+  editor: EditorSettingsDto
   ai: AiSettingsDto
 }
 

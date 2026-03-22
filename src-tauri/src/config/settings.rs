@@ -349,6 +349,18 @@ pub enum Theme {
 
 fn default_theme() -> Theme { Theme::Dark }
 
+// ==================== Editor Settings ====================
+
+/// Editor settings for quick and AI editor modes
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+#[serde(default)]
+pub struct EditorSettings {
+    #[serde(default)]
+    pub quick: bool,
+    #[serde(default)]
+    pub ai: bool,
+}
+
 // ==================== AI Settings ====================
 
 /// AI provider type for text correction
@@ -366,13 +378,25 @@ pub struct AiOpenAiSettings {
     pub api_key: Option<String>,
     #[serde(default)]
     pub use_proxy: bool,
+    #[serde(default = "default_openai_model")]
+    pub model: String,
+}
+
+fn default_openai_model() -> String {
+    "gpt-4o-mini".to_string()
 }
 
 /// Z.ai settings (Anthropic-compatible) for AI text correction
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct AiZAiSettings {
     pub url: Option<String>,
-    pub token: Option<String>,
+    pub api_key: Option<String>,
+    #[serde(default = "default_zai_model")]
+    pub model: String,
+}
+
+fn default_zai_model() -> String {
+    "glm-4.5".to_string()
 }
 
 /// AI settings for text correction
@@ -386,10 +410,23 @@ pub struct AiSettings {
     pub zai: AiZAiSettings,
     #[serde(default = "default_ai_prompt")]
     pub prompt: String,
+    #[serde(default = "default_ai_timeout")]
+    pub timeout: u64,
 }
 
 fn default_ai_prompt() -> String {
-    "Correct grammar, spelling, and punctuation errors in the following text. Maintain the original tone and style.".to_string()
+    "Ты - корректор русского текста для TTS (текст-в-речь). Исправь текст следуя правилам:
+
+1. Исправь орфографические и пунктуационные ошибки
+2. Замени все числа на их словесную форму (123 -> \"сто двадцать три\", 15.5 -> \"пятнадцать целых пять десятых\")
+3. Исправь ошибки раскладки (ghbdtn -> привет, rfr ltkf -> как дела)
+4. Удали лишние пробелы и символы
+
+ВАЖНО: Выведи ТОЛЬКО исправленный текст, без объяснений и комментариев.".to_string()
+}
+
+fn default_ai_timeout() -> u64 {
+    20
 }
 
 impl Default for AiSettings {
@@ -399,6 +436,7 @@ impl Default for AiSettings {
             openai: AiOpenAiSettings::default(),
             zai: AiZAiSettings::default(),
             prompt: default_ai_prompt(),
+            timeout: default_ai_timeout(),
         }
     }
 }
@@ -413,7 +451,7 @@ pub struct AppSettings {
     #[serde(default)]
     pub hotkey_enabled: bool,
     #[serde(default)]
-    pub quick_editor_enabled: bool,
+    pub editor: EditorSettings,
     #[serde(default = "default_theme")]
     pub theme: Theme,
     pub twitch: TwitchSettings,
@@ -430,7 +468,7 @@ impl Default for AppSettings {
             audio: AudioSettings::default(),
             tts: TtsSettings::default(),
             hotkey_enabled: true,
-            quick_editor_enabled: false,
+            editor: EditorSettings::default(),
             theme: Theme::Dark,
             twitch: TwitchSettings::default(),
             webview: WebViewServerSettings::default(),
@@ -772,16 +810,6 @@ impl SettingsManager {
         self.cache.read().hotkey_enabled
     }
 
-    /// Set quick editor enabled
-    pub fn set_quick_editor_enabled(&self, enabled: bool) -> Result<()> {
-        self.update_field("/quick_editor_enabled", &enabled)
-    }
-
-    /// Get quick editor enabled
-    pub fn get_quick_editor_enabled(&self) -> bool {
-        self.cache.read().quick_editor_enabled
-    }
-
     // ========== Twitch Settings ==========
 
     /// Set Twitch settings
@@ -976,7 +1004,29 @@ impl SettingsManager {
 
     /// Get theme
     pub fn get_theme(&self) -> Theme {
-        self.cache.read().theme.clone()
+        self.cache.read().theme
+    }
+
+    // ========== Editor Settings ==========
+
+    /// Set quick editor enabled state
+    pub fn set_editor_quick(&self, enabled: bool) -> Result<()> {
+        self.update_field("/editor/quick", &enabled)
+    }
+
+    /// Get quick editor enabled state
+    pub fn get_editor_quick(&self) -> bool {
+        self.cache.read().editor.quick
+    }
+
+    /// Set AI correction in editor enabled state
+    pub fn set_editor_ai(&self, enabled: bool) -> Result<()> {
+        self.update_field("/editor/ai", &enabled)
+    }
+
+    /// Get AI correction in editor enabled state
+    pub fn get_editor_ai(&self) -> bool {
+        self.cache.read().editor.ai
     }
 
     // ========== AI Settings ==========
@@ -1031,13 +1081,33 @@ impl SettingsManager {
         self.cache.read().ai.zai.url.clone()
     }
 
-    /// Set Z.ai token
-    pub fn set_ai_zai_token(&self, token: Option<String>) -> Result<()> {
-        self.update_field("/ai/zai/token", &token)
+    /// Set Z.ai API key
+    pub fn set_ai_zai_api_key(&self, api_key: Option<String>) -> Result<()> {
+        self.update_field("/ai/zai/api_key", &api_key)
     }
 
-    /// Get Z.ai token
-    pub fn get_ai_zai_token(&self) -> Option<String> {
-        self.cache.read().ai.zai.token.clone()
+    /// Get Z.ai API key
+    pub fn get_ai_zai_api_key(&self) -> Option<String> {
+        self.cache.read().ai.zai.api_key.clone()
+    }
+
+    /// Get Z.ai model
+    pub fn get_ai_zai_model(&self) -> String {
+        self.cache.read().ai.zai.model.clone()
+    }
+
+    /// Set OpenAI model for AI text correction
+    pub fn set_ai_openai_model(&self, model: String) -> Result<()> {
+        self.update_field("/ai/openai/model", &model)
+    }
+
+    /// Get OpenAI model for AI text correction
+    pub fn get_ai_openai_model(&self) -> String {
+        self.cache.read().ai.openai.model.clone()
+    }
+
+    /// Set Z.ai model for AI text correction
+    pub fn set_ai_zai_model(&self, model: String) -> Result<()> {
+        self.update_field("/ai/zai/model", &model)
     }
 }
