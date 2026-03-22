@@ -221,7 +221,7 @@ onUnmounted(() => {
     <!-- Error/Info Message Display -->
     <div v-if="errorMessage" class="message-box" :class="{
       error: errorMessage.includes('Failed') || errorMessage.includes('failed') || errorMessage.includes('Error') || errorMessage.includes('Ошибка'),
-      success: errorMessage.includes('saved') || errorMessage.includes('сохранен') || errorMessage.includes('валид') || errorMessage.includes('Подключено') || errorMessage.includes('Перезапуск') || errorMessage.includes('Переподключение'),
+      success: errorMessage.includes('saved') || errorMessage.includes('сохранен') || errorMessage.includes('валид') || errorMessage.includes('Подключено') || errorMessage.includes('Подключение к Twitch') || errorMessage.includes('Перезапуск') || errorMessage.includes('Переподключение'),
       info: errorMessage.includes('Отключено') || errorMessage.includes('disconnect') || errorMessage.includes('Stopped') || errorMessage.includes('Disconnected')
     }">
       {{ errorMessage }}
@@ -396,9 +396,9 @@ h2 {
 }
 
 .status-indicator.connecting {
-  color: var(--warning-text-bright);
-  background: var(--warning-bg-weak);
-  border-color: var(--warning-border);
+  color: var(--success-text-bright);
+  background: var(--success-bg-weak);
+  border-color: var(--success-border);
 }
 
 .status-indicator.error {

@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
-import { Eye, EyeOff, Cloud, Server } from 'lucide-vue-next';
+import { Cloud, Server } from 'lucide-vue-next';
 import { useAiSettings, useEditorSettings } from '../composables/useAppSettings';
 import type { AiProviderType } from '../types/settings';
 import { debugLog, debugError } from '../utils/debug';
+import InputWithToggle from './shared/InputWithToggle.vue';
+import StatusMessage from './shared/StatusMessage.vue';
+import ProviderCard from './shared/ProviderCard.vue';
 
 interface AiProviderState {
   type: AiProviderType;
@@ -32,12 +35,14 @@ const globalPrompt = ref('');
 // OpenAI settings
 const openaiApiKey = ref('');
 const openaiUseProxy = ref(false);
-const showOpenaiKey = ref(false);
 
 // Z.ai settings
 const zaiUrl = ref('');
 const zaiApiKey = ref('');
-const showZaiApiKey = ref(false);
+
+// Status message
+const statusMessage = ref('');
+const statusType = ref<'success' | 'error'>('error');
 
 // Computed: Check if current provider has API key configured
 const isCurrentProviderConfigured = computed(() => {
@@ -63,19 +68,10 @@ watch(isCurrentProviderConfigured, async (configured, prevConfigured) => {
   }
 });
 
-// Error state
-const statusMessage = ref('');
-const statusType = ref<'success' | 'error'>('error');
-let statusTimeout: ReturnType<typeof setTimeout> | null = null;
-
 // Methods
 function showStatus(message: string, type: 'success' | 'error' = 'error') {
   statusMessage.value = message;
   statusType.value = type;
-  if (statusTimeout) clearTimeout(statusTimeout);
-  statusTimeout = setTimeout(() => {
-    statusMessage.value = '';
-  }, 3000);
 }
 
 function showError(message: string) {
@@ -258,16 +254,20 @@ watch(aiSettings, async (newSettings) => {
     }
   }
 }, { immediate: true, deep: true });
+
+function dismissStatus() {
+  statusMessage.value = '';
+}
 </script>
 
 <template>
   <div class="ai-panel">
     <!-- Status Message -->
-    <Transition name="fade-slide">
-      <div v-if="statusMessage" class="status-message" :class="statusType">
-        <span>{{ statusMessage }}</span>
-      </div>
-    </Transition>
+    <StatusMessage
+      :message="statusMessage"
+      :type="statusType"
+      @dismiss="dismissStatus"
+    />
 
     <!-- AI Enable Section -->
     <div class="ai-enable-section">
@@ -312,23 +312,15 @@ watch(aiSettings, async (newSettings) => {
     <!-- Provider Cards -->
     <div class="provider-cards">
       <!-- Z.ai Provider -->
-      <div
-        class="provider-card"
-        :class="{ active: activeProvider === 'zai' }"
+      <ProviderCard
+        title="Z.ai"
+        :icon="Server"
+        :active="activeProvider === 'zai'"
+        :expanded="providers.zai.expanded"
+        @select="setActiveProvider('zai')"
+        @toggle="toggleProvider('zai')"
       >
-        <div class="card-header">
-          <input
-            type="radio"
-            :checked="activeProvider === 'zai'"
-            @change="setActiveProvider('zai')"
-            @click.stop
-          />
-          <Server :size="18" class="provider-icon" />
-          <span class="card-title" @click="toggleProvider('zai')">Z.ai</span>
-          <span class="expand-icon" @click="toggleProvider('zai')">{{ providers.zai.expanded ? '▼' : '▶' }}</span>
-        </div>
-
-        <div v-if="providers.zai.expanded" class="card-content">
+        <div class="card-content-inner">
           <!-- URL -->
           <div class="setting-group">
             <div class="zai-form-row">
@@ -345,72 +337,42 @@ watch(aiSettings, async (newSettings) => {
           <div class="setting-group">
             <div class="zai-form-row">
               <label>Ключ API:</label>
-              <div class="input-with-toggle">
-                <input
-                  v-model="zaiApiKey"
-                  :type="showZaiApiKey ? 'text' : 'password'"
-                  class="text-input"
-                />
-                <button
-                  type="button"
-                  class="toggle-icon-button"
-                  @click="showZaiApiKey = !showZaiApiKey"
-                  :title="showZaiApiKey ? 'Скрыть' : 'Показать'"
-                >
-                  <Eye v-if="!showZaiApiKey" :size="18" />
-                  <EyeOff v-else :size="18" />
-                </button>
-              </div>
+              <InputWithToggle
+                v-model="zaiApiKey"
+                type="password"
+                class="zai-input-wide"
+              />
             </div>
           </div>
 
           <!-- Buttons Row -->
           <div class="button-row">
-            <button @click="saveZaiSettings" class="save-button-inline">Сохранить</button>
+            <button @click="saveZaiSettings" class="save-button-inline zai-save-button">Сохранить</button>
           </div>
         </div>
-      </div>
+      </ProviderCard>
 
       <!-- OpenAI Provider -->
-      <div
-        class="provider-card"
-        :class="{ active: activeProvider === 'openai' }"
+      <ProviderCard
+        title="OpenAI"
+        :icon="Cloud"
+        :active="activeProvider === 'openai'"
+        :expanded="providers.openai.expanded"
+        @select="setActiveProvider('openai')"
+        @toggle="toggleProvider('openai')"
       >
-        <div class="card-header">
-          <input
-            type="radio"
-            :checked="activeProvider === 'openai'"
-            @change="setActiveProvider('openai')"
-            @click.stop
-          />
-          <Cloud :size="18" class="provider-icon" />
-          <span class="card-title" @click="toggleProvider('openai')">OpenAI</span>
-          <span class="expand-icon" @click="toggleProvider('openai')">{{ providers.openai.expanded ? '▼' : '▶' }}</span>
-        </div>
-
-        <div v-if="providers.openai.expanded" class="card-content">
+        <div class="card-content-inner">
           <!-- API Key -->
           <div class="setting-group">
             <div class="openai-api-row">
               <label>Ключ API:</label>
-              <div class="input-with-toggle">
-                <input
-                  v-model="openaiApiKey"
-                  :type="showOpenaiKey ? 'text' : 'password'"
-                  class="text-input"
-                  placeholder="sk-..."
-                />
-                <button
-                  type="button"
-                  class="toggle-icon-button"
-                  @click="showOpenaiKey = !showOpenaiKey"
-                  :title="showOpenaiKey ? 'Скрыть' : 'Показать'"
-                >
-                  <Eye v-if="!showOpenaiKey" :size="18" />
-                  <EyeOff v-else :size="18" />
-                </button>
-              </div>
-              <button @click="saveOpenAiSettings" class="save-settings-button openai-save-button">Сохранить</button>
+              <InputWithToggle
+                v-model="openaiApiKey"
+                type="password"
+                placeholder="sk-..."
+                class="openai-input-wide"
+              />
+              <button @click="saveOpenAiSettings" class="save-settings-button">Сохранить</button>
             </div>
           </div>
 
@@ -424,13 +386,13 @@ watch(aiSettings, async (newSettings) => {
                 @change="toggleOpenAiUseProxy"
                 class="proxy-checkbox"
               />
-              <label for="ai-openai-use-proxy" class="proxy-checkbox-label openai-proxy-label">
+              <label for="ai-openai-use-proxy" class="proxy-checkbox-label">
                 Использовать SOCKS5
               </label>
             </div>
           </div>
         </div>
-      </div>
+      </ProviderCard>
     </div>
   </div>
 </template>
@@ -448,7 +410,7 @@ watch(aiSettings, async (newSettings) => {
   background: var(--color-bg-field);
   backdrop-filter: blur(8px);
   padding: 16px;
-  margin-bottom: 16px;
+  margin-bottom: 24px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -502,7 +464,7 @@ watch(aiSettings, async (newSettings) => {
   background: var(--color-bg-field);
   backdrop-filter: blur(8px);
   padding: 16px;
-  margin-bottom: 16px;
+  margin-bottom: 24px;
 }
 
 .prompt-header {
@@ -566,9 +528,6 @@ watch(aiSettings, async (newSettings) => {
   font-weight: 600;
   font-size: 14px;
   transition: all 0.2s;
-}
-
-.save-button-inline {
   background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
   color: var(--color-text-white);
 }
@@ -586,56 +545,11 @@ watch(aiSettings, async (newSettings) => {
 .provider-cards {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 24px;
 }
 
-.provider-card {
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  background: var(--color-bg-field);
-  backdrop-filter: blur(8px);
-  transition: all 0.2s ease;
-}
-
-.provider-card.active {
-  border-color: var(--card-active-border);
-  background: var(--card-active-bg);
-}
-
-.card-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  user-select: none;
-}
-
-.provider-icon {
-  color: var(--color-accent);
-  flex-shrink: 0;
-}
-
-.card-header:hover {
-  background: var(--color-border-weak);
-}
-
-.card-title {
-  font-weight: 600;
-  font-size: 1.1rem;
-  color: var(--color-text-primary);
-  cursor: pointer;
-}
-
-.expand-icon {
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  cursor: pointer;
-  margin-left: auto;
-}
-
-.card-content {
-  padding: 0 16px 8px;
-  border-top: 1px solid var(--color-border);
+.card-content-inner {
+  padding-top: 8px;
 }
 
 .setting-group {
@@ -649,7 +563,6 @@ watch(aiSettings, async (newSettings) => {
 
 .setting-group label {
   display: block;
-  margin-bottom: 8px;
   color: var(--color-text-primary);
   font-size: 14px;
 }
@@ -690,37 +603,6 @@ watch(aiSettings, async (newSettings) => {
   filter: brightness(1.06);
 }
 
-/* Input with toggle icon button */
-.input-with-toggle {
-  position: relative;
-  flex: 1;
-}
-
-.input-with-toggle input {
-  width: 100%;
-  padding-right: 40px; /* Space for the button */
-}
-
-.input-with-toggle .toggle-icon-button {
-  position: absolute;
-  right: 8px;
-  top: 40%;
-  transform: translateY(-50%);
-  padding: 6px;
-  border: none;
-  cursor: pointer;
-  color: var(--color-text-secondary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: color 0.2s;
-  background: transparent !important;
-}
-
-.input-with-toggle .toggle-icon-button:hover {
-  color: var(--color-accent);
-}
-
 .save-settings-button {
   padding: 0.6rem 1.2rem;
   background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
@@ -759,7 +641,7 @@ watch(aiSettings, async (newSettings) => {
   color: var(--color-text-primary);
 }
 
-.setting-group .openai-proxy-label {
+.setting-group .proxy-checkbox-label {
   margin-bottom: 0;
 }
 
@@ -778,14 +660,13 @@ watch(aiSettings, async (newSettings) => {
   font-weight: 500;
 }
 
-.openai-api-row .input-with-toggle {
+.openai-input-wide {
   flex: 1;
   min-width: 200px;
 }
 
-.openai-api-row .openai-save-button {
+.openai-api-row .save-settings-button {
   flex-shrink: 0;
-  margin-bottom: 8px;
   padding: 0.6rem 1.2rem !important;
 }
 
@@ -804,7 +685,7 @@ watch(aiSettings, async (newSettings) => {
   min-width: 60px;
 }
 
-.zai-form-row .zai-input {
+.zai-input {
   flex: 1;
   padding: 8px 12px;
   border: 1px solid var(--color-border-strong);
@@ -815,68 +696,26 @@ watch(aiSettings, async (newSettings) => {
   font-family: var(--font-mono);
   transition: all 0.15s ease;
   min-width: 0;
+  box-sizing: border-box;
 }
 
-.zai-form-row .zai-input:hover {
+.zai-input:hover {
   background: var(--color-bg-field-hover);
   border-color: var(--color-border-strong);
 }
 
-.zai-form-row .zai-input:focus {
+.zai-input:focus {
   outline: none;
   border-color: var(--color-accent);
   box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
-.zai-form-row .input-with-toggle {
+.zai-input-wide {
   flex: 1;
   min-width: 200px;
 }
 
-/* Status Message - fixed bubble at top */
-.status-message {
-  position: fixed;
-  top: 20px;
-  left: calc(50% + 100px);
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0.4rem 0.75rem;
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 500;
-  z-index: 1000;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(10px);
-  white-space: nowrap;
-}
-
-.status-message.success {
-  background: var(--success-bg);
-  border: 1px solid var(--success-bg);
-  color: var(--success-text);
-}
-
-.status-message.error {
-  background: var(--danger-bg);
-  border: 1px solid var(--danger-bg);
-  border-left: 4px solid var(--danger-gradient-start);
-  color: var(--danger-text);
-}
-
-/* Fade-slide transition for status bubble */
-.fade-slide-enter-active,
-.fade-slide-leave-active {
-  transition: all 0.3s ease;
-}
-
-.fade-slide-enter-from {
-  opacity: 0;
-  transform: translateX(-50%) translateY(-20px);
-}
-
-.fade-slide-leave-to {
-  opacity: 0;
+.zai-save-button {
+  margin-bottom: 8px;
 }
 </style>
