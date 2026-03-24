@@ -312,6 +312,8 @@ pub struct WebViewSettingsDto {
     pub start_on_boot: bool,
     pub port: u16,
     pub bind_address: String,
+    pub access_token: Option<String>,
+    pub upnp_enabled: bool,
 }
 
 impl From<WebViewSettings> for WebViewSettingsDto {
@@ -321,6 +323,8 @@ impl From<WebViewSettings> for WebViewSettingsDto {
             start_on_boot: s.start_on_boot,
             port: s.port,
             bind_address: s.bind_address,
+            access_token: s.access_token,
+            upnp_enabled: s.upnp_enabled,
         }
     }
 }
@@ -332,6 +336,8 @@ impl From<WebViewSettingsDto> for WebViewSettings {
             start_on_boot: dto.start_on_boot,
             port: dto.port,
             bind_address: dto.bind_address,
+            access_token: dto.access_token,
+            upnp_enabled: dto.upnp_enabled,
         }
     }
 }

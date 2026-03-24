@@ -223,7 +223,7 @@ pub fn set_proxy_url(
         return Err("Proxy URL must start with socks5://, socks4://, http://, or https://".to_string());
     }
 
-    settings_manager.set_proxy_url(url, proxy_type)
+    settings_manager.set_proxy_url(url)
         .map_err(|e| format!("Failed to save proxy settings: {}", e))?;
 
     info!("Proxy URL updated successfully");

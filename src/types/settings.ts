@@ -81,6 +81,8 @@ export interface WebViewSettingsDto {
   start_on_boot: boolean
   port: number
   bind_address: string
+  access_token?: string
+  upnp_enabled: boolean
 }
 
 // ============================================================================

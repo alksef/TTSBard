@@ -268,45 +268,11 @@ impl TwitchSettings {
         Ok(())
     }
 
-    /// Get IRC token with oauth: prefix
-    #[allow(dead_code)]
-    pub fn irc_token(&self) -> String {
-        if self.token.starts_with("oauth:") {
-            self.token.clone()
-        } else {
-            format!("oauth:{}", self.token)
-        }
-    }
 }
 
 // ==================== WebView Settings ====================
-
-/// WebView server settings
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct WebViewServerSettings {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default)]
-    pub start_on_boot: bool,
-    #[serde(default = "default_webview_port")]
-    pub port: u16,
-    #[serde(default = "default_webview_bind_address")]
-    pub bind_address: String,
-}
-
-fn default_webview_port() -> u16 { 10100 }
-fn default_webview_bind_address() -> String { "0.0.0.0".to_string() }
-
-impl Default for WebViewServerSettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            start_on_boot: false,
-            port: 10100,
-            bind_address: "0.0.0.0".to_string(),
-        }
-    }
-}
+// WebView server settings are defined in webview module and re-exported here
+use crate::webview::WebViewSettings;
 
 // ==================== Logging Settings ====================
 
@@ -455,7 +421,8 @@ pub struct AppSettings {
     #[serde(default = "default_theme")]
     pub theme: Theme,
     pub twitch: TwitchSettings,
-    pub webview: WebViewServerSettings,
+    #[serde(default)]
+    pub webview: WebViewSettings,
     #[serde(default)]
     pub logging: LoggingSettings,
     #[serde(default)]
@@ -471,7 +438,7 @@ impl Default for AppSettings {
             editor: EditorSettings::default(),
             theme: Theme::Dark,
             twitch: TwitchSettings::default(),
-            webview: WebViewServerSettings::default(),
+            webview: WebViewSettings::default(),
             logging: LoggingSettings::default(),
             ai: AiSettings::default(),
         }
@@ -826,12 +793,7 @@ impl SettingsManager {
 
     // ========== WebView Settings ==========
 
-    /// Set WebView enabled
-    pub fn set_webview_enabled(&self, enabled: bool) -> Result<()> {
-        self.update_field("/webview/enabled", &enabled)
-    }
-
-    /// Get WebView enabled
+    /// Get WebView enabled (runtime state, not persisted to config)
     pub fn get_webview_enabled(&self) -> bool {
         self.cache.read().webview.enabled
     }
@@ -865,6 +827,26 @@ impl SettingsManager {
     /// Get WebView bind address
     pub fn get_webview_bind_address(&self) -> String {
         self.cache.read().webview.bind_address.clone()
+    }
+
+    /// Set WebView access token
+    pub fn set_webview_access_token(&self, token: Option<String>) -> Result<()> {
+        self.update_field("/webview/access_token", &token)
+    }
+
+    /// Get WebView access token
+    pub fn get_webview_access_token(&self) -> Option<String> {
+        self.cache.read().webview.access_token.clone()
+    }
+
+    /// Set WebView UPnP enabled
+    pub fn set_webview_upnp_enabled(&self, enabled: bool) -> Result<()> {
+        self.update_field("/webview/upnp_enabled", &enabled)
+    }
+
+    /// Get WebView UPnP enabled
+    pub fn get_webview_upnp_enabled(&self) -> bool {
+        self.cache.read().webview.upnp_enabled
     }
 
     // ========== Logging Settings ==========
@@ -911,13 +893,11 @@ impl SettingsManager {
 
     // ========== Legacy methods (deprecated) ==========
 
-    /// Set proxy URL and type (legacy, use set_socks5_proxy_url instead)
+    /// Set proxy URL (legacy, use set_socks5_proxy_url instead)
     ///
     /// # Arguments
     /// * `url` - Proxy URL (e.g., socks5://host:port)
-    /// * `proxy_type` - Type of proxy (ignored, always SOCKS5)
-    #[allow(unused_variables)]
-    pub fn set_proxy_url(&self, url: String, proxy_type: ProxyType) -> Result<()> {
+    pub fn set_proxy_url(&self, url: String) -> Result<()> {
         // Migrate to new structure
         self.set_socks5_proxy_url(url)
     }

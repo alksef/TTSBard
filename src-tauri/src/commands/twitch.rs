@@ -65,7 +65,6 @@ pub async fn save_twitch_settings(
 #[tauri::command]
 pub async fn connect_twitch(
     state: State<'_, AppState>,
-    app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
     tracing::info!("Connect command received");
 
@@ -78,20 +77,10 @@ pub async fn connect_twitch(
     }
     drop(settings);
 
-    // Обновляем enabled и клонируем настройки для сохранения
+    // Обновляем только runtime state (НЕ сохраняем в конфиг)
     let mut s = state.twitch_settings.write().await;
     s.enabled = true;
-    let settings_to_save = s.clone();
     drop(s);
-
-    // Получаем SettingsManager один раз и сохраняем в файл
-    let settings_manager = app_handle.try_state::<SettingsManager>();
-    if let Some(manager) = settings_manager {
-        manager.set_twitch_settings(&settings_to_save)
-            .map_err(|e| format!("Failed to save Twitch settings: {}", e))?;
-    }
-
-    // AppState уже обновлен (enabled=true), файл синхронизирован
 
     // Отправляем событие подключения
     state.send_twitch_event(crate::events::TwitchEvent::Restart);
@@ -103,24 +92,13 @@ pub async fn connect_twitch(
 #[tauri::command]
 pub async fn disconnect_twitch(
     state: State<'_, AppState>,
-    app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
     tracing::info!("Disconnect command received");
 
-    // Обновляем enabled и клонируем настройки для сохранения
+    // Обновляем только runtime state (НЕ сохраняем в конфиг)
     let mut s = state.twitch_settings.write().await;
     s.enabled = false;
-    let settings_to_save = s.clone();
     drop(s);
-
-    // Получаем SettingsManager один раз и сохраняем в файл
-    let settings_manager = app_handle.try_state::<SettingsManager>();
-    if let Some(manager) = settings_manager {
-        manager.set_twitch_settings(&settings_to_save)
-            .map_err(|e| format!("Failed to save Twitch settings: {}", e))?;
-    }
-
-    // AppState уже обновлен (enabled=false), файл синхронизирован
 
     // Отправляем событие отключения
     state.send_twitch_event(crate::events::TwitchEvent::Stop);

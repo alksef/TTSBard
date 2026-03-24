@@ -2,20 +2,33 @@ use super::{
     templates::{default_css, default_html},
     WebViewSettings,
 };
+use crate::webview::security::{is_local_network, validate_token};
+use super::upnp::UpnpManager;
 use axum::{
-    extract::State,
-    http::header,
+    extract::{ConnectInfo, Query, State},
+    http::{header, HeaderMap, StatusCode},
     response::{sse::Event, IntoResponse, Sse},
     routing::get,
     Router,
 };
 use futures::Stream;
+use serde::Deserialize;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 
 pub type SseSender = broadcast::Sender<String>;
+
+const AUTH_COOKIE_NAME: &str = "webview_auth";
+
+// Server state type
+#[derive(Clone)]
+pub struct ServerState {
+    pub sse_tx: SseSender,
+    pub templates: TemplateCache,
+    pub access_token: Option<String>,
+}
 
 #[derive(Clone)]
 pub struct TemplateCache {
@@ -77,7 +90,6 @@ impl TemplateCache {
         })
     }
 
-    #[allow(dead_code)]
     pub async fn reload(&self) -> Result<(), anyhow::Error> {
         let config_dir = dirs::config_dir()
             .ok_or_else(|| anyhow::anyhow!("Failed to get config dir"))?
@@ -114,15 +126,25 @@ pub struct WebViewServer {
     pub settings: Arc<RwLock<WebViewSettings>>,
     pub sse_tx: SseSender,
     pub templates: TemplateCache,
+    pub upnp_manager: Option<Arc<UpnpManager>>,
 }
 
 impl WebViewServer {
     pub async fn new(settings: Arc<RwLock<WebViewSettings>>) -> Result<Self, anyhow::Error> {
         let templates = TemplateCache::new().await?;
+        let s = settings.read().await;
+        let port = s.port;
+        drop(s);
+
+        // Always create UPnP manager (will be toggled dynamically)
+        tracing::info!("Creating UPnP manager for port {}", port);
+        let upnp_manager = Some(Arc::new(UpnpManager::new(port)));
+
         Ok(Self {
             settings,
             sse_tx: broadcast::channel(100).0,
             templates,
+            upnp_manager,
         })
     }
 
@@ -133,12 +155,31 @@ impl WebViewServer {
         } else {
             format!("{}:{}", settings.bind_address, settings.port)
         };
+
+        let access_token = settings.access_token.clone();
+        let upnp_enabled = settings.upnp_enabled;
         drop(settings);
+
+        // Forward UPnP port if enabled
+        if upnp_enabled {
+            if let Some(manager) = &self.upnp_manager {
+                if let Err(e) = manager.forward() {
+                    tracing::warn!(error = %e, "UPnP port forwarding failed, continuing anyway");
+                }
+            }
+        }
+
+        let state = ServerState {
+            sse_tx: self.sse_tx.clone(),
+            templates: self.templates.clone(),
+            access_token,
+        };
 
         let app = Router::new()
             .route("/", get(index))
+            .route("/auth", get(auth_handler))
             .route("/sse", get(sse_handler))
-            .with_state((self.sse_tx.clone(), self.templates.clone()));
+            .with_state(state);
 
         let socket_addr: SocketAddr = addr.parse()
             .map_err(|e| format!("Invalid address {}: {}", addr, e))?;
@@ -156,7 +197,7 @@ impl WebViewServer {
             })?;
 
         tracing::info!(addr = %addr, "WebView server started");
-        axum::serve(listener, app).await?;
+        axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
         Ok(())
     }
 
@@ -165,12 +206,91 @@ impl WebViewServer {
             tracing::debug!(error = %e, "Failed to broadcast (no receivers)");
         }
     }
+
+    /// Stop the server and clean up resources (including UPnP)
+    pub fn stop(&self) {
+        tracing::info!("Stopping WebViewServer and cleaning up resources");
+        if let Some(manager) = &self.upnp_manager {
+            tracing::info!("Removing UPnP port mapping on server stop");
+            manager.remove();
+        }
+    }
+
+    /// Toggle UPnP port forwarding dynamically without server restart
+    pub fn toggle_upnp(&self, enabled: bool) {
+        if let Some(manager) = &self.upnp_manager {
+            if enabled {
+                tracing::info!("Enabling UPnP port forwarding");
+                if let Err(e) = manager.forward() {
+                    tracing::warn!(error = %e, "Failed to enable UPnP port forwarding");
+                }
+            } else {
+                tracing::info!("Disabling UPnP port forwarding");
+                manager.remove();
+            }
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct AuthQuery {
+    token: Option<String>,
+}
+
+// Helper function to extract cookie from headers
+fn get_cookie_from_headers(headers: &HeaderMap, name: &str) -> Option<String> {
+    let cookie_header = headers.get("cookie")?.to_str().ok()?;
+    cookie_header
+        .split(';')
+        .find_map(|pair| {
+            let mut parts = pair.trim().splitn(2, '=');
+            if parts.next()? == name {
+                parts.next().map(|s| s.to_string())
+            } else {
+                None
+            }
+        })
+}
+
+async fn auth_handler(
+    Query(params): Query<AuthQuery>,
+    State(state): State<ServerState>,
+) -> impl IntoResponse {
+    if validate_token(params.token.as_deref(), state.access_token.as_deref()) {
+        // Return Set-Cookie header with the token
+        let cookie_value = state.access_token.as_ref()
+            .map(|token| format!("{}={}; HttpOnly; Path=/; SameSite=Lax", AUTH_COOKIE_NAME, token))
+            .unwrap_or_default();
+
+        let mut response = (StatusCode::OK, "Авторизация успешна").into_response();
+        if let Ok(cookie_header) = cookie_value.parse() {
+            response.headers_mut().insert(header::SET_COOKIE, cookie_header);
+        }
+        response
+    } else {
+        (StatusCode::UNAUTHORIZED, "Неверный токен").into_response()
+    }
 }
 
 async fn sse_handler(
-    State((sse_tx, _templates)): State<(SseSender, TemplateCache)>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let rx = sse_tx.subscribe();
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    State(state): State<ServerState>,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, StatusCode> {
+    // Check authentication
+    let is_auth = if is_local_network(addr.ip()) {
+        true
+    } else {
+        let cookie_token = get_cookie_from_headers(&headers, AUTH_COOKIE_NAME);
+        validate_token(cookie_token.as_deref(), state.access_token.as_deref())
+    };
+
+    if !is_auth {
+        tracing::warn!(addr = %addr.ip(), "Unauthorized SSE connection attempt");
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let rx = state.sse_tx.subscribe();
 
     let stream = futures::stream::unfold(rx, move |mut rx| async move {
         match rx.recv().await {
@@ -182,15 +302,55 @@ async fn sse_handler(
         }
     });
 
-    Sse::new(stream).keep_alive(
+    Ok(Sse::new(stream).keep_alive(
         axum::response::sse::KeepAlive::new()
             .interval(std::time::Duration::from_secs(10))
-    )
+    ))
 }
 
 async fn index(
-    State((_sse_tx, templates)): State<(SseSender, TemplateCache)>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Query(params): Query<AuthQuery>,
+    headers: HeaderMap,
+    State(state): State<ServerState>,
 ) -> impl IntoResponse {
-    let rendered = templates.get_rendered().await;
-    ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], rendered).into_response()
+    // Check authentication
+    let is_auth = if is_local_network(addr.ip()) {
+        true
+    } else {
+        // First check cookie
+        let cookie_token = get_cookie_from_headers(&headers, AUTH_COOKIE_NAME);
+        let cookie_valid = validate_token(cookie_token.as_deref(), state.access_token.as_deref());
+
+        // If cookie invalid, check query parameter token
+        if cookie_valid {
+            true
+        } else {
+            validate_token(params.token.as_deref(), state.access_token.as_deref())
+        }
+    };
+
+    if !is_auth {
+        tracing::warn!(addr = %addr.ip(), "Unauthorized page access attempt");
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+
+    // If token provided via query and is valid, set cookie for future requests
+    let response = if params.token.is_some()
+        && validate_token(params.token.as_deref(), state.access_token.as_deref())
+    {
+        let cookie_value = state.access_token.as_ref()
+            .map(|token| format!("{}={}; HttpOnly; Path=/; SameSite=Lax", AUTH_COOKIE_NAME, token))
+            .unwrap_or_default();
+
+        let mut resp = ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], state.templates.get_rendered().await).into_response();
+        if let Ok(cookie_header) = cookie_value.parse() {
+            resp.headers_mut().insert(header::SET_COOKIE, cookie_header);
+        }
+        resp
+    } else {
+        ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], state.templates.get_rendered().await).into_response()
+    };
+
+    response
 }
