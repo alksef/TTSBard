@@ -60,6 +60,18 @@ pub fn quit_app(app_handle: AppHandle) -> Result<(), String> {
         }
     }
 
+    // Notify WebView server to shut down and clean up UPnP
+    if let Some(state) = app_handle.try_state::<AppState>() {
+        if let Some(tx) = state.webview_event_sender.lock().as_ref() {
+            info!("Sending quit event to WebView server");
+            let _ = tx.send(crate::events::AppEvent::Quit);
+
+            // Give the server time to clean up UPnP port mapping
+            info!("Waiting for WebView server cleanup...");
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+    }
+
     // Emit cleanup event if needed
     let _ = app_handle.emit("app-exit", ());
     // Exit the application cleanly - let Tauri handle cleanup

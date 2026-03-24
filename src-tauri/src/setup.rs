@@ -55,6 +55,8 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
         start_on_boot: settings.webview.start_on_boot,
         port: settings.webview.port,
         bind_address: settings.webview.bind_address.clone(),
+        access_token: settings.webview.access_token.clone(),
+        upnp_enabled: settings.webview.upnp_enabled,
     };
 
     // Load hotkey_enabled setting into AppState
@@ -333,6 +335,29 @@ fn init_webview_server(app_state: &AppState, app_handle: AppHandle) {
                 app_handle,
                 webview_rx,
             ).await;
+        });
+    });
+
+    // Auto-start WebView if configured
+    let app_state_autostart = app_state.clone();
+    thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .thread_stack_size(8 * 1024 * 1024)
+            .enable_all()
+            .build()
+            .expect("Failed to create WebView autostart runtime");
+
+        rt.block_on(async move {
+            let settings = app_state_autostart.webview_settings.read().await;
+            if settings.start_on_boot && !settings.enabled {
+                info!("[WEBVIEW] Auto-starting on boot (start_on_boot=true)");
+                drop(settings);
+                // Set enabled to true to start the server
+                let mut s = app_state_autostart.webview_settings.write().await;
+                s.enabled = true;
+                drop(s);
+                info!("[WEBVIEW] Auto-start enabled");
+            }
         });
     });
 }

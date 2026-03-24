@@ -21,20 +21,13 @@ pub async fn run_webview_server(
     loop {
         // Check current settings
         let settings = webview_settings.read().await;
-        let mut enabled = settings.enabled;
-        let start_on_boot = settings.start_on_boot;
+        let enabled = settings.enabled;
         let bind_address = settings.bind_address.clone();
         let port = settings.port;
         drop(settings);
 
-        // Auto-start on boot if configured
-        if start_on_boot && !enabled {
-            info!("[WEBVIEW] Auto-starting server on boot (start_on_boot=true)");
-            let mut s = webview_settings.write().await;
-            s.enabled = true;
-            enabled = true;
-            drop(s);
-        }
+        // Note: start_on_boot only applies to initial app startup via setup.rs
+        // We don't auto-start here to avoid conflicts with manual stop/start
 
         if enabled {
             info!("[WEBVIEW] ========================================");
@@ -98,6 +91,10 @@ pub async fn run_webview_server(
                     info!("[WEBVIEW]   Still enabled: {}", still_enabled);
                     info!("[WEBVIEW]   Same port: {}", same_port);
                     info!("[WEBVIEW] ========================================");
+
+                    // Stop server and clean up UPnP
+                    server.stop();
+
                     server_handle.abort();
                     server_running = false;
                 } else {
@@ -106,6 +103,16 @@ pub async fn run_webview_server(
                         Ok(event) => {
                             info!("[WEBVIEW] 📨 Event received: {:?}", std::mem::discriminant(&event));
                             match event {
+                                AppEvent::Quit => {
+                                    info!("[WEBVIEW] ⚠ Quit event received, shutting down server...");
+
+                                    // Stop server and clean up UPnP
+                                    server.stop();
+
+                                    server_handle.abort();
+                                    info!("[WEBVIEW] Server shut down for quit");
+                                    return;
+                                }
                                 AppEvent::TextSentToTts(text) => {
                                     let preview = text.chars().take(50).collect::<String>();
                                     info!("[WEBVIEW] 📤 Broadcasting to SSE clients: '{}'...", preview);
@@ -113,6 +120,10 @@ pub async fn run_webview_server(
                                 }
                                 AppEvent::RestartWebViewServer => {
                                     info!("[WEBVIEW] ⚠ Restart event received, stopping server...");
+
+                                    // Stop server and clean up UPnP
+                                    server.stop();
+
                                     server_handle.abort();
                                     // Wait a bit for the server to fully shut down
                                     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -128,6 +139,10 @@ pub async fn run_webview_server(
                                             error!("[WEBVIEW] ❌ Failed to reload templates: {}", e);
                                         }
                                     }
+                                }
+                                AppEvent::ToggleUpnp(enabled) => {
+                                    info!("[WEBVIEW] 🔄 Toggling UPnP: {}", enabled);
+                                    server.toggle_upnp(enabled);
                                 }
                                 _ => {
                                     info!("[WEBVIEW] ℹ️  Ignoring event: {:?}", std::mem::discriminant(&event));
@@ -153,6 +168,10 @@ pub async fn run_webview_server(
             // Wait for enable or restart event
             loop {
                 match webview_rx.recv_timeout(std::time::Duration::from_secs(2)) {
+                    Ok(AppEvent::Quit) => {
+                        info!("[WEBVIEW] ⚠ Quit event received (server disabled)");
+                        return;
+                    }
                     Ok(AppEvent::RestartWebViewServer) => {
                         info!("[WEBVIEW] ⚠ Restart event received, exiting disabled state");
                         break;

@@ -53,6 +53,13 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2"
 tower-http = { version = "0.5", features = ["fs", "cors"] }
 
+# WebView security
+subtle = "2.6"
+uuid = { version = "1.11", features = ["v4", "serde"] }
+
+# UPnP port forwarding
+igd = "0.12"
+
 # Telegram client
 # Using fork with MTProxy support from https://github.com/alksef/grammers-mtproxy
 grammers-client = { git = "https://github.com/alksef/grammers-mtproxy", branch = "master", features = ["proxy"] }

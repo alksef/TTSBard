@@ -315,6 +315,14 @@ pub fn run() {
             commands::webview::open_template_folder,
             commands::webview::send_test_message,
             commands::webview::reload_templates,
+            // WebView security commands
+            commands::webview::generate_webview_token,
+            commands::webview::get_webview_token,
+            commands::webview::copy_webview_token,
+            commands::webview::regenerate_webview_token,
+            commands::webview::set_webview_upnp_enabled,
+            commands::webview::get_webview_upnp_enabled,
+            commands::webview::get_external_ip,
             // Twitch commands
             commands::twitch::get_twitch_settings,
             commands::twitch::save_twitch_settings,

@@ -2,7 +2,8 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { Copy, RotateCw, Play, Square, AlertTriangle } from 'lucide-vue-next'
+import { confirm } from '@tauri-apps/plugin-dialog'
+import { Copy, RotateCw, Play, Square, AlertTriangle, Globe } from 'lucide-vue-next'
 import { useWebViewSettings } from '../composables/useAppSettings'
 import { debugLog, debugError } from '../utils/debug'
 
@@ -14,21 +15,47 @@ const settings = ref({
   start_on_boot: false,
   port: 10100,
   bind_address: '0.0.0.0',
+  access_token: null as string | null,
+  upnp_enabled: false,
 })
 
 const localIp = ref('192.168.1.100')
+const externalIp = ref<string | null>(null)
+const maskedToken = ref<string | null>(null)
 const errorMessage = ref<string | null>(null)
 const testMessage = ref('')
+const displayUrl = ref('')
 let errorTimeout: number | null = null
 let unlisten: (() => void) | null = null
 
-const url = computed(() => {
-  return `http://${localIp.value}:${settings.value.port}`
+function updateDisplayUrl() {
+  const host = settings.value.bind_address === '127.0.0.1' ? '127.0.0.1' : localIp.value
+  displayUrl.value = `http://${host}:${settings.value.port}`
+}
+
+const externalUrl = computed(() => {
+  if (!externalIp.value || !settings.value.access_token) return ''
+  return `http://${externalIp.value}:${settings.value.port}/?token=${settings.value.access_token}`
+})
+
+const externalDisplay = computed(() => {
+  return externalUrl.value || 'Нажмите кнопку справа для получения внешнего URL'
+})
+
+const hasToken = computed(() => {
+  return !!settings.value.access_token
 })
 
 const isPortValid = computed(() => {
   const port = settings.value.port
   return port >= 1024 && port <= 65535
+})
+
+// Track saved bind address for UPnP availability (based on saved settings, not current UI selection)
+const savedBindAddress = ref('0.0.0.0')
+
+const isUpnpAvailable = computed(() => {
+  return savedBindAddress.value === '0.0.0.0'
 })
 
 async function save() {
@@ -79,6 +106,7 @@ async function saveServerSettings() {
   try {
     debugLog('[WebView] Saving server settings')
     const result = await invoke<string>('save_webview_settings', { settings: settings.value })
+    updateDisplayUrl()
     showError(result)
   } catch (e) {
     debugError('[WebView] Failed to save server settings:', e)
@@ -95,8 +123,79 @@ async function refreshIp() {
 }
 
 function copyUrl() {
-  navigator.clipboard.writeText(url.value)
-  showError('URL copied to clipboard!')
+  navigator.clipboard.writeText(displayUrl.value)
+  showError('URL скопирован')
+}
+
+// ==================== Security Functions ====================
+
+async function loadToken() {
+  try {
+    maskedToken.value = await invoke<string | null>('get_webview_token')
+  } catch (e) {
+    debugError('[WebView] Failed to load token:', e)
+  }
+}
+
+async function copyToken() {
+  try {
+    const token = await invoke<string>('copy_webview_token')
+    await navigator.clipboard.writeText(token)
+    showError('Токен скопирован в буфер обмена')
+  } catch (e) {
+    showError('Ошибка: ' + (e as Error).message)
+  }
+}
+
+async function saveUpnpEnabled() {
+  try {
+    await invoke<string>('set_webview_upnp_enabled', { enabled: settings.value.upnp_enabled })
+    // Show colored message based on UPnP state
+    if (settings.value.upnp_enabled) {
+      showError('UPnP включён')
+    } else {
+      showError('UPnP выключен')
+    }
+  } catch (e) {
+    showError('Ошибка: ' + (e as Error).message)
+  }
+}
+
+async function regenerateAccessToken() {
+  const confirmed = await confirm('Сделает старую ссылку недействительной и перезапустит сервер. Продолжить?', {
+    title: 'Подтверждение',
+    kind: 'warning'
+  })
+  if (!confirmed) return
+  try {
+    await invoke('regenerate_webview_token')
+    // Reset external IP so user needs to request it again
+    externalIp.value = null
+    showError('Токен перегенерирован. Сервер перезапускается...')
+  } catch (e) {
+    showError('Ошибка: ' + (e as Error).message)
+  }
+}
+
+async function showExternalUrl() {
+  try {
+    externalIp.value = await invoke<string>('get_external_ip')
+  } catch (e) {
+    showError('Не удалось получить внешний IP: ' + (e as Error).message)
+  }
+}
+
+async function copyExternalUrl() {
+  if (!externalUrl.value) {
+    showError('Сначала получите внешний IP и токен')
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(externalUrl.value)
+    showError('Внешний URL скопирован')
+  } catch (e) {
+    showError('Ошибка: ' + (e as Error).message)
+  }
 }
 
 async function openTemplateFolder() {
@@ -141,6 +240,8 @@ function showError(message: string) {
 
 onMounted(async () => {
   await refreshIp()
+  await loadToken()
+  updateDisplayUrl()
 
   // Listen for webview server errors
   unlisten = await listen<string>('webview-server-error', (event) => {
@@ -152,12 +253,17 @@ onMounted(async () => {
 watch(webviewSettingsFromComposable, (newSettings) => {
   if (!newSettings) return;
 
+  // Update saved bind address for UPnP availability check
+  savedBindAddress.value = newSettings.bind_address
+
   // Update local state
   settings.value = {
     enabled: newSettings.enabled,
     start_on_boot: newSettings.start_on_boot,
     port: newSettings.port,
     bind_address: newSettings.bind_address,
+    access_token: (newSettings as any).access_token || null,
+    upnp_enabled: (newSettings as any).upnp_enabled || false,
   };
 }, { immediate: true, deep: true })
 
@@ -178,9 +284,9 @@ onUnmounted(() => {
     <!-- Error/Info Message Display -->
     <div v-if="errorMessage" class="message-box" :class="{
       error: errorMessage.includes('Failed') || errorMessage.includes('Error') || errorMessage.includes('ошибка') || errorMessage.includes('Ошибка') || errorMessage.includes('не удалось'),
-      success: errorMessage.includes('запущен') || errorMessage.includes('перезапущен') || errorMessage.includes('сохранен') || errorMessage.includes('successful') || errorMessage.includes('Saved') || errorMessage.includes('отправлено') || errorMessage.includes('обновлены'),
-      info: errorMessage.includes('Тест') || errorMessage.includes('Testing') || errorMessage.includes('остан'),
-      warning: errorMessage.includes('F5') || errorMessage.includes('OBS')
+      success: errorMessage.includes('запущен') || errorMessage.includes('перезапущен') || errorMessage.includes('сохранен') || errorMessage.includes('successful') || errorMessage.includes('Saved') || errorMessage.includes('отправлено') || errorMessage.includes('обновлены') || errorMessage.includes('Токен скопирован') || errorMessage.includes('UPnP включён') || errorMessage.includes('перезапускается'),
+      info: errorMessage.includes('Тест') || errorMessage.includes('Testing') || errorMessage.includes('остан') || errorMessage.includes('URL скопирован') || errorMessage.includes('UPnP выключен'),
+      warning: errorMessage.includes('F5') || errorMessage.includes('OBS') || errorMessage.includes('Перезапустите сервер')
     }">
       {{ errorMessage }}
     </div>
@@ -218,10 +324,10 @@ onUnmounted(() => {
         </label>
       </div>
 
-      <div class="setting-row">
+      <div class="setting-row" style="margin-bottom: 8px;">
         <label>Адрес:</label>
         <div class="address-inputs">
-          <select v-model="settings.bind_address" class="address-bind">
+          <select v-model="settings.bind_address" class="address-bind" :disabled="settings.enabled">
             <option value="0.0.0.0">0.0.0.0 (all interfaces)</option>
             <option value="127.0.0.1">127.0.0.1 (local only)</option>
           </select>
@@ -232,27 +338,24 @@ onUnmounted(() => {
             max="65535"
             class="address-port"
             :class="{ 'input-error': !isPortValid }"
+            :disabled="settings.enabled"
             placeholder="10100"
           />
+          <button @click="saveServerSettings" class="save-button-inline" :disabled="settings.enabled">Сохранить</button>
         </div>
         <span v-if="!isPortValid" class="error-text">Порт должен быть от 1024 до 65535</span>
       </div>
+    </section>
 
-      <div class="setting-row">
-        <label>OBS URL:</label>
+    <section class="settings-section">
+      <h2>URL</h2>
+      <div class="setting-row" style="margin-bottom: 8px;">
         <div class="url-display">
-          <code class="url-code">{{ url }}</code>
-          <button @click="copyUrl" class="icon-button" title="Copy URL">
+          <label class="url-code">{{ displayUrl }}</label>
+          <button @click="copyUrl" class="icon-button" title="Копировать URL">
             <Copy :size="16" />
           </button>
-          <button @click="refreshIp" class="icon-button" title="Refresh IP">
-            <RotateCw :size="16" />
-          </button>
         </div>
-      </div>
-
-      <div class="setting-row save-row">
-        <button @click="saveServerSettings" class="save-button-inline">Сохранить</button>
       </div>
     </section>
 
@@ -271,7 +374,7 @@ onUnmounted(() => {
 
     <section class="settings-section">
       <h2>Тест</h2>
-      <div class="setting-row">
+      <div class="setting-row" style="margin-bottom: 8px;">
         <input
           type="text"
           v-model="testMessage"
@@ -282,6 +385,51 @@ onUnmounted(() => {
         <button @click="sendTest" class="test-button" :disabled="!settings.enabled || !testMessage">
           Отправить
         </button>
+      </div>
+    </section>
+
+    <section class="settings-section" :class="{ 'section-disabled': !isUpnpAvailable }">
+      <h2>Внешнее подключение</h2>
+
+      <!-- Warning for local address -->
+      <div v-if="!isUpnpAvailable" class="external-access-warning">
+        <AlertTriangle :size="14" />
+        <span>Внешнее подключение недоступно при локальном адресе сервера (127.0.0.1). Выберите 0.0.0.0 для доступа из сети.</span>
+      </div>
+
+      <!-- External URL display (shows full URL with token if available) -->
+      <div class="setting-row setting-row-full" v-if="hasToken">
+        <div class="url-display url-display-full">
+          <label class="url-code url-code-wide">{{ externalDisplay }}</label>
+          <button @click="copyExternalUrl" class="icon-button" title="Копировать внешний URL" :disabled="!isUpnpAvailable || !externalUrl">
+            <Copy :size="16" />
+          </button>
+          <button @click="showExternalUrl" class="icon-button" title="Обновить внешний IP" :disabled="!isUpnpAvailable">
+            <Globe :size="16" />
+          </button>
+        </div>
+      </div>
+
+      <!-- Token access -->
+      <div class="setting-row">
+        <label>Токен доступа:</label>
+        <div class="url-display url-display-expand">
+          <label class="url-code url-code-expand">{{ settings.access_token || 'Не сгенерирован' }}</label>
+          <button @click="copyToken" class="icon-button" title="Копировать токен" :disabled="!hasToken || !isUpnpAvailable">
+            <Copy :size="16" />
+          </button>
+        </div>
+        <button @click="regenerateAccessToken" class="icon-button danger-button" title="Перегенерировать токен доступа" :disabled="!isUpnpAvailable">
+          <RotateCw :size="16" />
+        </button>
+      </div>
+
+      <!-- UPnP status -->
+      <div class="setting-row" style="margin-bottom: 8px;">
+        <label class="checkbox-label" :class="{ disabled: !isUpnpAvailable }" title="UPnP автоматически открывает порт на роутере для внешнего доступа. Доступно только при 0.0.0.0">
+          <input type="checkbox" v-model="settings.upnp_enabled" @change="saveUpnpEnabled" :disabled="!isUpnpAvailable" />
+          <span>Включить UPnP (автоматический проброс порта)</span>
+        </label>
       </div>
     </section>
   </div>
@@ -361,6 +509,28 @@ h2 {
   border-radius: 12px;
   backdrop-filter: blur(8px);
   font-size: 0.95rem;
+}
+
+.settings-section.section-disabled {
+  opacity: 0.7;
+}
+
+.settings-section.section-disabled .external-access-warning {
+  opacity: 1;
+}
+
+.external-access-warning {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 1rem;
+  background: var(--warning-bg-weak);
+  border: 1px solid var(--warning-border);
+  border-radius: 8px;
+  font-size: 0.85rem;
+  color: var(--warning-text-bright);
+  line-height: 1.4;
 }
 
 .section-header {
@@ -487,6 +657,15 @@ h2 {
   cursor: pointer;
 }
 
+.checkbox-label.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.checkbox-label.disabled input[type="checkbox"] {
+  cursor: not-allowed;
+}
+
 .setting-hint {
   font-size: 0.85rem;
   color: var(--color-text-secondary);
@@ -604,29 +783,60 @@ h2 {
 }
 
 .url-display {
-  flex: 1;
+  flex: 0;
   display: flex;
-  gap: 0.5rem;
+  gap: 0;
   align-items: center;
-  min-width: 300px;
+  width: auto;
+}
+
+.url-display-full {
+  flex: 1;
+  width: 100%;
+}
+
+.url-display-expand {
+  width: 60%;
 }
 
 .url-code {
-  flex: 0.8;
-  padding: 0.5rem 0.75rem;
+  display: inline-flex !important;
+  align-items: center;
+  flex: 0;
+  width: 280px !important;
+  min-width: 250px !important;
+  height: 38px;
+  padding: 0 0.75rem;
   background: var(--color-bg-field);
   border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
+  border-radius: 10px 0 0 10px;
+  border-right: none;
   font-family: var(--font-mono);
   font-size: 13px;
   color: var(--color-text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  box-sizing: border-box;
+  cursor: text;
+  user-select: text;
+}
+
+.url-code-wide {
+  flex: 1 !important;
+  width: auto !important;
+  min-width: 300px !important;
+}
+
+.url-code-expand {
+  flex: 1 !important;
+  width: auto !important;
 }
 
 .icon-button {
-  padding: 0.5rem;
+  padding: 0;
+  width: 38px;
+  height: 38px;
   background: var(--color-bg-field-hover);
   border: 1px solid var(--color-border-strong);
   border-radius: 10px;
@@ -636,6 +846,7 @@ h2 {
   display: flex;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
 }
 
 .icon-button:hover {
@@ -733,6 +944,13 @@ h2 {
   transform: translateY(0);
 }
 
+.save-button-inline:disabled {
+  background: var(--color-border);
+  color: var(--color-text-secondary);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .setting-warning {
   display: flex;
   align-items: center;
@@ -740,5 +958,84 @@ h2 {
   margin-top: 0.5rem;
   font-size: 0.82rem;
   color: var(--warning-text-bright);
+}
+
+.token-code {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 10px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 200px;
+}
+
+.danger-button {
+  background: var(--danger-bg-weak);
+  border-color: var(--danger-border);
+  color: var(--danger-text-bright);
+}
+
+.danger-button:hover {
+  background: var(--danger-bg-hover);
+  border-color: var(--danger-border-strong);
+}
+
+.icon-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.icon-button:disabled:hover {
+  background: var(--color-bg-field-hover);
+  border-color: var(--color-border-strong);
+}
+
+.url-display .icon-button {
+  width: 38px;
+  height: 38px;
+  border-radius: 0;
+  border-left: 1px solid var(--color-border-strong);
+}
+
+.url-display .icon-button:only-child {
+  border-radius: 0 10px 10px 0;
+  border-left: none;
+}
+
+/* URL display with multiple buttons */
+.url-display:not(.url-display-full) .icon-button:last-child {
+  border-radius: 0 10px 10px 0;
+}
+
+/* URL display full with 2 buttons - only last has right border radius */
+.url-display-full .icon-button:last-child {
+  border-radius: 0 10px 10px 0;
+}
+
+.icon-button.danger-button {
+  background: var(--danger-bg-weak);
+  border-color: var(--danger-border);
+  color: var(--danger-text-bright);
+}
+
+.icon-button.danger-button:hover {
+  background: var(--danger-bg-hover);
+  border-color: var(--danger-border-strong);
+}
+
+.icon-button.secondary {
+  background: var(--info-bg-weak);
+  border-color: var(--info-border);
+}
+
+.icon-button.secondary:hover {
+  background: var(--btn-accent-bg);
+  border-color: var(--card-active-border);
 }
 </style>

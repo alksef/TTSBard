@@ -55,8 +55,12 @@ pub enum AppEvent {
     RestartWebViewServer,
     /// Перезагрузить шаблоны WebView (без перезапуска сервера)
     ReloadWebViewTemplates,
+    /// Включить/выключить UPnP (без перезапуска сервера)
+    ToggleUpnp(bool),
     /// Изменение статуса подключения Twitch
     TwitchStatusChanged(TwitchConnectionStatus),
+    /// Завершение работы приложения
+    Quit,
 }
 
 /// События для управления Twitch клиентом
@@ -118,7 +122,9 @@ impl AppEvent {
             AppEvent::WebViewServerError(_) => "webview-server-error",
             AppEvent::RestartWebViewServer => "restart-webview-server",
             AppEvent::ReloadWebViewTemplates => "reload-webview-templates",
+            AppEvent::ToggleUpnp(_) => "toggle-upnp",
             AppEvent::TwitchStatusChanged(_) => "twitch-status-changed",
+            AppEvent::Quit => "app-quit",
         }
     }
 }
