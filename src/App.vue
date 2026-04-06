@@ -12,6 +12,7 @@ import WebViewPanel from './components/WebViewPanel.vue'
 import TwitchPanel from './components/TwitchPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import ErrorToasts from './components/ErrorToasts.vue'
+import MinimalModeButton from './components/MinimalModeButton.vue'
 import { useTelegramAuth, TELEGRAM_AUTH_KEY } from './composables/useTelegramAuth'
 import { provideAppSettings } from './composables/useAppSettings'
 import { debugLog } from './utils/debug'
@@ -19,6 +20,17 @@ import { debugLog } from './utils/debug'
 type Panel = 'info' | 'input' | 'tts' | 'floating' | 'soundpanel' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'settings'
 
 const currentPanel = ref<Panel>('input')
+
+const isMinimalMode = ref(false)
+
+function handleMinimalModeChange(minimal: boolean) {
+  isMinimalMode.value = minimal
+  if (minimal) {
+    currentPanel.value = 'input'
+  }
+}
+
+provide('isMinimalMode', isMinimalMode)
 
 // Create and provide app settings context
 const appSettings = provideAppSettings()
@@ -106,9 +118,9 @@ onMounted(async () => {
 
     <!-- Main app content -->
     <template v-else>
-      <Sidebar :current-panel="currentPanel" @set-panel="setPanel" />
+      <Sidebar v-if="!isMinimalMode" :current-panel="currentPanel" @set-panel="setPanel" />
 
-      <main class="main-content">
+      <main class="main-content" :class="{ 'minimal-content': isMinimalMode }">
         <InfoPanel v-show="currentPanel === 'info'" />
         <InputPanel v-show="currentPanel === 'input'" />
         <TtsPanel v-show="currentPanel === 'tts'" />
@@ -120,6 +132,9 @@ onMounted(async () => {
         <TwitchPanel v-show="currentPanel === 'twitch'" />
         <SettingsPanel v-show="currentPanel === 'settings'" />
       </main>
+
+      <!-- Minimal mode toggle button -->
+      <MinimalModeButton @minimal-mode-changed="handleMinimalModeChange" />
 
       <!-- Global error toasts -->
       <ErrorToasts />
@@ -137,6 +152,11 @@ onMounted(async () => {
     var(--app-gradient-line),
     var(--app-gradient-glow),
     var(--app-gradient-bg);
+  transition: all 0.3s ease;
+}
+
+.app-container.minimal-mode {
+  transition: all 0.3s ease;
 }
 
 .main-content {
@@ -146,6 +166,11 @@ onMounted(async () => {
   padding: 1.625rem 1.5rem 3rem;
   overflow-y: auto;
   border-left: 1px solid var(--color-border);
+  transition: all 0.3s ease;
+}
+
+.main-content.minimal-content {
+  padding: 1rem !important;
 }
 
 .main-content::before {
