@@ -30,6 +30,9 @@ pub mod proxy;
 // AI commands
 pub mod ai;
 
+// Window commands
+pub mod window;
+
 /// Quit the application
 #[tauri::command]
 pub fn quit_app(app_handle: AppHandle) -> Result<(), String> {

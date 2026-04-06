@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted as vueOnUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted as vueOnUnmounted, watch, inject, type Ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, UnlistenFn } from '@tauri-apps/api/event'
 import { useEditorSettings, useAiSettings } from '../composables/useAppSettings'
@@ -10,6 +10,7 @@ const text = ref('')
 const isCorrecting = ref(false)
 const replacements = ref<Map<string, string>>(new Map())
 const usernames = ref<Map<string, string>>(new Map())
+const isMinimalMode = inject<Ref<boolean>>('isMinimalMode', ref(false))
 
 // Get settings from composable
 const editorSettings = useEditorSettings()
@@ -211,7 +212,7 @@ function handleSpace(event: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="input-panel">
+  <div class="input-panel" :class="{ 'minimal-panel': isMinimalMode }">
     <div class="input-group">
       <div class="textarea-wrapper">
         <textarea
@@ -220,11 +221,13 @@ function handleSpace(event: KeyboardEvent) {
           placeholder="Введите текст для озвучивания..."
           rows="10"
           class="text-input"
+          :class="{ 'minimal-input': isMinimalMode }"
           @keydown.prevent.enter="handleEnter"
           @keydown.esc="handleEsc"
           @keydown.space="handleSpace"
         />
         <button
+          v-if="!isMinimalMode"
           class="correct-button"
           :class="{ loading: isCorrecting }"
           :disabled="isCorrecting || !text.trim() || !isAiButtonEnabled"
@@ -252,6 +255,12 @@ function handleSpace(event: KeyboardEvent) {
   max-width: 1120px;
   margin: 0;
   padding: 0.2rem 0 2rem;
+  transition: all 0.3s ease;
+}
+
+.input-panel.minimal-panel {
+  padding: 0 !important;
+  max-width: none !important;
 }
 
 .input-group {
@@ -302,6 +311,11 @@ function handleSpace(event: KeyboardEvent) {
     min-height: 280px;
     padding: 1rem 1.05rem;
   }
+}
+
+.text-input.minimal-input {
+  min-height: 280px !important;
+  padding: 1rem !important;
 }
 
 .quick-editor-hint {
