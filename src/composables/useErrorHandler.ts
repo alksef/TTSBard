@@ -37,6 +37,7 @@ const DEFAULT_DURATION = 3000 // 3 секунды по умолчанию
 // Shared state (singleton) - один экземпляр для всех компонентов
 const errors = ref<ErrorMessage[]>([])
 let errorIdCounter = 0
+const activeTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
 
 /**
  * Composable для унифицированной обработки ошибок
@@ -65,9 +66,11 @@ export function useErrorHandler() {
 
     // Автоматически удалить ошибку после duration (если не 0)
     if (error.duration && error.duration > 0) {
-      setTimeout(() => {
+      const timerId = setTimeout(() => {
+        activeTimeouts.delete(id)
         removeError(id)
       }, error.duration)
+      activeTimeouts.set(id, timerId)
     }
 
     return id
@@ -77,6 +80,12 @@ export function useErrorHandler() {
    * Удалить ошибку из списка
    */
   function removeError(id: string): void {
+    const timerId = activeTimeouts.get(id)
+    if (timerId !== undefined) {
+      clearTimeout(timerId)
+      activeTimeouts.delete(id)
+    }
+
     const index = errors.value.findIndex(e => e.id === id)
     if (index !== -1) {
       errors.value.splice(index, 1)
@@ -87,6 +96,10 @@ export function useErrorHandler() {
    * Очистить все ошибки
    */
   function clearAllErrors(): void {
+    for (const timerId of activeTimeouts.values()) {
+      clearTimeout(timerId)
+    }
+    activeTimeouts.clear()
     errors.value = []
   }
 

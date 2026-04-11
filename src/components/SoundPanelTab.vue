@@ -232,8 +232,8 @@ onMounted(async () => {
   })
 
   onUnmounted(() => {
-    unlistenAppearance()
-    unlistenBindings()
+    unlistenAppearance?.()
+    unlistenBindings?.()
   })
 })
 

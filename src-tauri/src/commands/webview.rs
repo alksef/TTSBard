@@ -328,8 +328,9 @@ pub async fn get_external_ip() -> Result<String, String> {
         "https://ifconfig.me",
     ];
 
+    let client = reqwest::Client::new();
     for url in sources {
-        match reqwest::get(url).await {
+        match client.get(url).send().await {
             Ok(resp) => {
                 if let Ok(ip) = resp.text().await {
                     let ip = ip.trim().to_string();

@@ -186,9 +186,6 @@ pub async fn test_proxy(
 pub fn get_proxy_settings(
     settings_manager: State<'_, SettingsManager>,
 ) -> Result<ProxySettingsDto, String> {
-    let _settings = settings_manager.load()
-        .map_err(|e| format!("Failed to load settings: {}", e))?;
-
     let proxy_url = settings_manager.get_proxy_url();
     let proxy_type = settings_manager.get_proxy_type();
 
