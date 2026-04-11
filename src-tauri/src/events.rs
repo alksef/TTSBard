@@ -59,7 +59,6 @@ pub enum TwitchEvent {
     /// Перезапустить клиент (изменены настройки)
     Restart,
     /// Остановить клиент
-    #[allow(dead_code)]
     Stop,
     /// Отправить сообщение
     SendMessage(String),

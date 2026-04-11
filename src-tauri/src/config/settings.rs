@@ -522,7 +522,6 @@ pub struct SettingsManager {
     cache: Arc<RwLock<AppSettings>>,
 }
 
-#[allow(dead_code)]
 impl SettingsManager {
     /// Create a new SettingsManager with initialized cache
     pub fn new() -> Result<Self> {
@@ -611,16 +610,6 @@ impl SettingsManager {
         *self.cache.write() = settings.clone();
 
         info!("Settings saved and cache updated");
-        Ok(())
-    }
-
-    /// Reload settings from disk and update cache
-    ///
-    /// Use this to refresh the cache if settings were modified externally
-    pub fn reload(&self) -> Result<()> {
-        let settings = Self::load_from_disk(&self.config_dir)?;
-        *self.cache.write() = settings;
-        info!("Settings reloaded from disk");
         Ok(())
     }
 
@@ -727,19 +716,9 @@ impl SettingsManager {
         self.update_field("/audio/speaker_device", &device_id)
     }
 
-    /// Get speaker device
-    pub fn get_speaker_device(&self) -> Option<String> {
-        self.cache.read().audio.speaker_device.clone()
-    }
-
     /// Set speaker enabled
     pub fn set_speaker_enabled(&self, enabled: bool) -> Result<()> {
         self.update_field("/audio/speaker_enabled", &enabled)
-    }
-
-    /// Get speaker enabled
-    pub fn get_speaker_enabled(&self) -> bool {
-        self.cache.read().audio.speaker_enabled
     }
 
     /// Set speaker volume
@@ -748,30 +727,15 @@ impl SettingsManager {
         self.update_field("/audio/speaker_volume", &validated)
     }
 
-    /// Get speaker volume
-    pub fn get_speaker_volume(&self) -> u8 {
-        self.cache.read().audio.speaker_volume
-    }
-
     /// Set virtual mic device
     pub fn set_virtual_mic_device(&self, device_id: Option<String>) -> Result<()> {
         self.update_field("/audio/virtual_mic_device", &device_id)
-    }
-
-    /// Get virtual mic device
-    pub fn get_virtual_mic_device(&self) -> Option<String> {
-        self.cache.read().audio.virtual_mic_device.clone()
     }
 
     /// Set virtual mic volume
     pub fn set_virtual_mic_volume(&self, volume: u8) -> Result<()> {
         let validated = validate_volume(volume);
         self.update_field("/audio/virtual_mic_volume", &validated)
-    }
-
-    /// Get virtual mic volume
-    pub fn get_virtual_mic_volume(&self) -> u8 {
-        self.cache.read().audio.virtual_mic_volume
     }
 
     // ========== TTS Settings ==========
@@ -789,11 +753,6 @@ impl SettingsManager {
     /// Set OpenAI API key
     pub fn set_openai_api_key(&self, api_key: Option<String>) -> Result<()> {
         self.update_field("/tts/openai/api_key", &api_key)
-    }
-
-    /// Get OpenAI API key
-    pub fn get_openai_api_key(&self) -> Option<String> {
-        self.cache.read().tts.openai.api_key.clone()
     }
 
     /// Set OpenAI voice
@@ -867,24 +826,12 @@ impl SettingsManager {
         self.update_field("/tts/fish/format", &format)
     }
 
-    pub fn get_fish_audio_format(&self) -> String {
-        self.cache.read().tts.fish.format.clone()
-    }
-
     pub fn set_fish_audio_temperature(&self, temperature: f32) -> Result<()> {
         self.update_field("/tts/fish/temperature", &temperature)
     }
 
-    pub fn get_fish_audio_temperature(&self) -> f32 {
-        self.cache.read().tts.fish.temperature
-    }
-
     pub fn set_fish_audio_sample_rate(&self, sample_rate: u32) -> Result<()> {
         self.update_field("/tts/fish/sample_rate", &sample_rate)
-    }
-
-    pub fn get_fish_audio_sample_rate(&self) -> u32 {
-        self.cache.read().tts.fish.sample_rate
     }
 
     pub fn set_fish_audio_use_proxy(&self, enabled: bool) -> Result<()> {
@@ -916,27 +863,13 @@ impl SettingsManager {
         self.save(&app_settings)
     }
 
-    /// Get Twitch settings
-    pub fn get_twitch_settings(&self) -> TwitchSettings {
-        self.cache.read().twitch.clone()
-    }
-
     // ========== WebView Settings ==========
-
-    /// Get WebView enabled (runtime state, not persisted to config)
-    pub fn get_webview_enabled(&self) -> bool {
-        self.cache.read().webview.enabled
-    }
 
     /// Set WebView start on boot
     pub fn set_webview_start_on_boot(&self, start: bool) -> Result<()> {
         self.update_field("/webview/start_on_boot", &start)
     }
 
-    /// Get WebView start on boot
-    pub fn get_webview_start_on_boot(&self) -> bool {
-        self.cache.read().webview.start_on_boot
-    }
 
     /// Set WebView port
     pub fn set_webview_port(&self, port: u16) -> Result<()> {
@@ -944,29 +877,16 @@ impl SettingsManager {
         self.update_field("/webview/port", &validated)
     }
 
-    /// Get WebView port
-    pub fn get_webview_port(&self) -> u16 {
-        self.cache.read().webview.port
-    }
 
     /// Set WebView bind address
     pub fn set_webview_bind_address(&self, address: String) -> Result<()> {
         self.update_field("/webview/bind_address", &address)
     }
 
-    /// Get WebView bind address
-    pub fn get_webview_bind_address(&self) -> String {
-        self.cache.read().webview.bind_address.clone()
-    }
 
     /// Set WebView access token
     pub fn set_webview_access_token(&self, token: Option<String>) -> Result<()> {
         self.update_field("/webview/access_token", &token)
-    }
-
-    /// Get WebView access token
-    pub fn get_webview_access_token(&self) -> Option<String> {
-        self.cache.read().webview.access_token.clone()
     }
 
     /// Set WebView UPnP enabled
@@ -974,10 +894,6 @@ impl SettingsManager {
         self.update_field("/webview/upnp_enabled", &enabled)
     }
 
-    /// Get WebView UPnP enabled
-    pub fn get_webview_upnp_enabled(&self) -> bool {
-        self.cache.read().webview.upnp_enabled
-    }
 
     // ========== Logging Settings ==========
 
@@ -1052,13 +968,6 @@ impl SettingsManager {
         self.update_field("/tts/openai/use_proxy", &enabled)
     }
 
-    /// Get OpenAI use proxy flag
-    ///
-    /// Returns whether OpenAI is configured to use the unified proxy.
-    pub fn get_openai_use_proxy(&self) -> bool {
-        self.cache.read().tts.openai.use_proxy
-    }
-
     /// Set Telegram proxy mode
     ///
     /// Updates the /tts/telegram/proxy_mode field.
@@ -1067,13 +976,6 @@ impl SettingsManager {
     /// * `mode` - Proxy mode for Telegram (None, Socks5, MtProxy)
     pub fn set_telegram_proxy_mode(&self, mode: ProxyMode) -> Result<()> {
         self.update_field("/tts/telegram/proxy_mode", &mode)
-    }
-
-    /// Get Telegram proxy mode
-    ///
-    /// Returns the cached Telegram proxy mode.
-    pub fn get_telegram_proxy_mode(&self) -> ProxyMode {
-        self.cache.read().tts.telegram.proxy_mode.clone()
     }
 
     // ========== MTProxy Settings ==========
@@ -1098,23 +1000,12 @@ impl SettingsManager {
         self.save(&settings)
     }
 
-    /// Get MTProxy settings
-    ///
-    /// Returns the cached MTProxy settings.
-    pub fn get_mtproxy_settings(&self) -> MtProxySettings {
-        self.cache.read().tts.network.mtproxy.clone()
-    }
 
     // ========== Theme Settings ==========
 
     /// Set theme
     pub fn set_theme(&self, theme: Theme) -> Result<()> {
         self.update_field("/theme", &theme)
-    }
-
-    /// Get theme
-    pub fn get_theme(&self) -> Theme {
-        self.cache.read().theme
     }
 
     // ========== Editor Settings ==========
@@ -1146,19 +1037,9 @@ impl SettingsManager {
         self.update_field("/ai/provider", &provider)
     }
 
-    /// Get AI provider
-    pub fn get_ai_provider(&self) -> AiProviderType {
-        self.cache.read().ai.provider.clone()
-    }
-
     /// Set AI global prompt
     pub fn set_ai_prompt(&self, prompt: String) -> Result<()> {
         self.update_field("/ai/prompt", &prompt)
-    }
-
-    /// Get AI global prompt
-    pub fn get_ai_prompt(&self) -> String {
-        self.cache.read().ai.prompt.clone()
     }
 
     /// Set OpenAI API key for AI text correction
@@ -1166,19 +1047,9 @@ impl SettingsManager {
         self.update_field("/ai/openai/api_key", &key)
     }
 
-    /// Get OpenAI API key for AI text correction
-    pub fn get_ai_openai_api_key(&self) -> Option<String> {
-        self.cache.read().ai.openai.api_key.clone()
-    }
-
     /// Set OpenAI use proxy for AI text correction
     pub fn set_ai_openai_use_proxy(&self, enabled: bool) -> Result<()> {
         self.update_field("/ai/openai/use_proxy", &enabled)
-    }
-
-    /// Get OpenAI use proxy for AI text correction
-    pub fn get_ai_openai_use_proxy(&self) -> bool {
-        self.cache.read().ai.openai.use_proxy
     }
 
     /// Set Z.ai URL
@@ -1186,19 +1057,9 @@ impl SettingsManager {
         self.update_field("/ai/zai/url", &url)
     }
 
-    /// Get Z.ai URL
-    pub fn get_ai_zai_url(&self) -> Option<String> {
-        self.cache.read().ai.zai.url.clone()
-    }
-
     /// Set Z.ai API key
     pub fn set_ai_zai_api_key(&self, api_key: Option<String>) -> Result<()> {
         self.update_field("/ai/zai/api_key", &api_key)
-    }
-
-    /// Get Z.ai API key
-    pub fn get_ai_zai_api_key(&self) -> Option<String> {
-        self.cache.read().ai.zai.api_key.clone()
     }
 
     /// Get Z.ai model

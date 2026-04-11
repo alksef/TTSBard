@@ -34,13 +34,6 @@ impl OperationResult {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn error(message: impl Into<String>) -> Self {
-        Self {
-            success: false,
-            message: message.into(),
-        }
-    }
 }
 
 /// Результат TTS операции

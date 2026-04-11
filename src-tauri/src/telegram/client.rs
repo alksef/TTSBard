@@ -222,12 +222,6 @@ impl TelegramClient {
         }
     }
 
-    /// Инициализация клиента
-    #[allow(dead_code)]
-    pub async fn init(&self, api_id: u32, api_hash: String, phone: String) -> Result<OperationResult, String> {
-        self.init_with_proxy(api_id, api_hash, phone, None).await
-    }
-
     /// Инициализация клиента с поддержкой прокси
     pub async fn init_with_proxy(&self, api_id: u32, api_hash: String, phone: String, proxy_url: Option<String>) -> Result<OperationResult, String> {
         // Determine proxy mode from URL
@@ -579,7 +573,6 @@ impl TelegramClient {
     }
 
     /// Инициализация с существующей сессией (без phone/api_hash)
-    #[allow(dead_code)]
     pub async fn init_empty(&self, api_id: u32) -> Result<OperationResult, String> {
         self.init_empty_with_proxy(api_id, None).await
     }

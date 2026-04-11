@@ -18,22 +18,7 @@ pub struct TwitchSettings {
 }
 
 
-/// Валидация настроек Twitch
-#[allow(dead_code)]
 impl TwitchSettings {
-    pub fn is_valid(&self) -> Result<(), String> {
-        if self.username.is_empty() {
-            return Err("Username cannot be empty".to_string());
-        }
-        if self.token.is_empty() {
-            return Err("Token cannot be empty".to_string());
-        }
-        if self.channel.is_empty() {
-            return Err("Channel cannot be empty".to_string());
-        }
-        Ok(())
-    }
-
     /// Возвращает токен с префиксом oauth: для IRC
     pub fn irc_token(&self) -> String {
         if self.token.starts_with("oauth:") {

@@ -337,12 +337,4 @@ impl TtsEngine for FishTts {
 
         Ok(audio_data)
     }
-
-    fn is_configured(&self) -> bool {
-        !self.api_key.is_empty() && !self.reference_id.is_empty()
-    }
-
-    fn name(&self) -> &str {
-        "FishAudio"
-    }
 }

@@ -17,7 +17,6 @@ use std::collections::hash_map::DefaultHasher;
 
 /// Errors that can occur during AI text correction
 #[derive(Debug, thiserror::Error)]
-#[allow(dead_code)]  // Some variants kept for API compatibility
 pub enum AiError {
     /// API key or credentials not configured
     #[error("AI not configured: {0}")]
@@ -57,11 +56,6 @@ pub enum AiError {
     /// Invalid input parameters
     #[error("Invalid input: {0}")]
     InvalidInput(String),
-
-    /// Unknown error
-    #[error("Unknown AI error: {0}")]
-    #[allow(dead_code)]
-    Unknown(String),
 }
 
 // ============================================================================

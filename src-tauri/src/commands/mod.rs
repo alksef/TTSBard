@@ -722,15 +722,6 @@ pub fn toggle_interception(state: State<'_, AppState>) -> Result<bool, String> {
     Ok(new_value)
 }
 
-/// Validate API key format
-#[tauri::command]
-#[allow(dead_code)]
-pub async fn check_api_key(key: String) -> Result<bool, String> {
-    // Simple validation: OpenAI keys start with "sk-" and are longer than 20 characters
-    let is_valid = key.starts_with("sk-") && key.len() > 20;
-    Ok(is_valid)
-}
-
 /// Get hotkey enabled setting
 #[tauri::command]
 pub fn get_hotkey_enabled(

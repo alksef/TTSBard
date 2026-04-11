@@ -36,15 +36,12 @@ pub fn validate_port(port: u16) -> Result<u16, ConfigError> {
 #[derive(Debug, Clone)]
 pub enum ConfigError {
     Port(String),
-    #[allow(dead_code)]
-    Color(String),
 }
 
 impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ConfigError::Port(msg) => write!(f, "Invalid port: {}", msg),
-            ConfigError::Color(msg) => write!(f, "Invalid color: {}", msg),
         }
     }
 }

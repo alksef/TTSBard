@@ -225,7 +225,6 @@ impl TwitchClient {
     }
 
     /// Возвращает текущий статус
-    #[allow(dead_code)]
     pub async fn status(&self) -> TwitchStatus {
         self.status.lock().await.clone()
     }

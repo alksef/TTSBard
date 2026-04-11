@@ -1,5 +1,5 @@
 use crate::tts::engine::TtsEngine;
-use crate::telegram::{TelegramClient, TtsResult};
+use crate::telegram::TelegramClient;
 use crate::events::EventSender;
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -26,13 +26,6 @@ impl SileroTts {
 
     pub fn with_event_tx(mut self, event_tx: EventSender) -> Self {
         self.event_tx = Some(event_tx);
-        self
-    }
-
-    #[allow(dead_code)]
-    pub fn with_client(mut self, client: Arc<Mutex<Option<TelegramClient>>>) -> Self {
-        self.client = Some(client);
-        self.configured = true;
         self
     }
 
@@ -92,42 +85,5 @@ impl TtsEngine for SileroTts {
             .ok_or_else(|| "No audio path returned".to_string())?;
 
         std::fs::read(&audio_path).map_err(|e| format!("Failed to read audio file: {}", e))
-    }
-
-    fn is_configured(&self) -> bool {
-        self.configured
-    }
-
-    fn name(&self) -> &str {
-        "Silero"
-    }
-}
-
-/// Расширение для SileroTts с дополнительными методами для работы с файлами
-impl SileroTts {
-    /// Синтезировать речь и вернуть путь к файлу (вместо байтов)
-    #[allow(dead_code)]
-    pub async fn synthesize_to_file(&self, text: &str) -> Result<TtsResult, String> {
-        if !self.configured {
-            return Ok(TtsResult::error(
-                "Silero TTS is not configured. Please connect to Telegram first.".to_string(),
-            ));
-        }
-
-        let client_arc = self
-            .client
-            .as_ref()
-            .ok_or_else(|| "Telegram client not set".to_string())?;
-
-        // Извлекаем Option<TelegramClient> из Arc<Mutex<Option<TelegramClient>>>
-        let client_guard = client_arc.lock().await;
-        let client = client_guard
-            .as_ref()
-            .ok_or_else(|| "Telegram client not initialized. Please connect to Telegram first.".to_string())?;
-
-        let result = crate::telegram::SileroTtsBot::synthesize(client, text).await?;
-        drop(client_guard);
-
-        Ok(result)
     }
 }
