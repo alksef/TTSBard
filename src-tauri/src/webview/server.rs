@@ -245,7 +245,7 @@ fn get_cookie_from_headers(headers: &HeaderMap, name: &str) -> Option<String> {
         .find_map(|pair| {
             let mut parts = pair.trim().splitn(2, '=');
             if parts.next()? == name {
-                parts.next().map(|s| s.to_string())
+                parts.next().map(|s| urlencoding::decode(s).unwrap_or(s.into()).into_owned())
             } else {
                 None
             }
