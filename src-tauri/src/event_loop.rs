@@ -5,7 +5,7 @@
 
 use crate::events::{AppEvent, InputLayout, TwitchEvent};
 use crate::state::AppState;
-use crate::floating::{show_floating_window, hide_floating_window, update_floating_text, update_floating_title, update_soundpanel_appearance};
+use crate::soundpanel_window::update_soundpanel_appearance;
 use tauri::{AppHandle, Manager};
 use tracing::{debug, error, info};
 
@@ -49,23 +49,11 @@ impl EventHandler {
             AppEvent::TtsError(err) => {
                 error!(error = %err, "TTS error");
             }
-            AppEvent::ShowFloatingWindow => {
-                self.process_show_floating_window();
-            }
-            AppEvent::HideFloatingWindow => {
-                self.process_hide_floating_window();
-            }
             AppEvent::ShowMainWindow => {
                 self.process_show_main_window();
             }
-            AppEvent::UpdateFloatingText(text) => {
-                self.process_update_floating_text(text);
-            }
             AppEvent::UpdateTrayIcon(is_intercepting) => {
                 self.process_update_tray_icon(is_intercepting);
-            }
-            AppEvent::FloatingAppearanceChanged => {
-                debug!("Floating window appearance changed");
             }
             AppEvent::ClickthroughChanged(enabled) => {
                 self.process_clickthrough_changed(enabled);
@@ -88,9 +76,6 @@ impl EventHandler {
             }
             AppEvent::TtsProviderChanged(provider) => {
                 debug!(?provider, "[EVENT] TTS provider changed");
-            }
-            AppEvent::EnterClosesDisabled(disabled) => {
-                debug!(disabled, "[EVENT] Enter closes disabled");
             }
             AppEvent::WebViewServerError(error) => {
                 error!(error = %error, "[EVENT] WebView server error");
@@ -128,12 +113,6 @@ impl EventHandler {
     /// Process layout changed event
     fn process_layout_changed(&self, layout: InputLayout) {
         debug!(?layout, "Layout changed");
-        let layout_str = match layout {
-            InputLayout::English => "EN",
-            InputLayout::Russian => "RU",
-        };
-        let text = self.state.get_current_text();
-        let _ = update_floating_title(&self.app_handle, layout_str, &text);
         match layout {
             InputLayout::English => debug!("Current layout: English (EN)"),
             InputLayout::Russian => debug!("Current layout: Russian (RU)"),
@@ -195,30 +174,6 @@ impl EventHandler {
         self.state.clear_prefix_flags();
     }
 
-    /// Process show floating window event
-    fn process_show_floating_window(&self) {
-        debug!("[EVENT] ShowFloatingWindow event received");
-        match show_floating_window(&self.app_handle) {
-            Ok(_) => debug!("[EVENT] Floating window shown successfully"),
-            Err(e) => error!(error = %e, "[EVENT] Failed to show floating window"),
-        }
-        // Clear text when showing window
-        self.state.clear_text();
-        // Update UI with empty text and current layout
-        let layout = match self.state.get_current_layout() {
-            InputLayout::English => "EN",
-            InputLayout::Russian => "RU",
-        };
-        let _ = update_floating_text(&self.app_handle, "");
-        let _ = update_floating_title(&self.app_handle, layout, "");
-    }
-
-    /// Process hide floating window event
-    fn process_hide_floating_window(&self) {
-        debug!("Hide floating window");
-        let _ = hide_floating_window(&self.app_handle, &self.state);
-    }
-
     /// Process show main window event
     fn process_show_main_window(&self) {
         debug!("Show main window");
@@ -226,18 +181,6 @@ impl EventHandler {
             let _ = window.show();
             let _ = window.set_focus();
         }
-    }
-
-    /// Process update floating text event
-    fn process_update_floating_text(&self, text: String) {
-        debug!(text = %text, "Update floating text");
-        let _ = update_floating_text(&self.app_handle, &text);
-        // Also update title
-        let layout = match self.state.get_current_layout() {
-            InputLayout::English => "EN",
-            InputLayout::Russian => "RU",
-        };
-        let _ = update_floating_title(&self.app_handle, layout, &text);
     }
 
     /// Process update tray icon event

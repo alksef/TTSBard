@@ -1,7 +1,7 @@
 use crate::state::AppState;
 use crate::events::AppEvent;
-use crate::config::{SettingsManager, WindowsManager, is_valid_hex_color, AppSettingsDto, Theme};
-use crate::floating::{show_floating_window, hide_floating_window, hide_soundpanel_window};
+use crate::config::{SettingsManager, WindowsManager, AppSettingsDto, Theme};
+use crate::soundpanel_window::{hide_soundpanel_window};
 use crate::tts::{TtsProviderType, TtsProvider};
 use crate::audio::{AudioPlayer, OutputConfig};
 use crate::commands::telegram::TelegramState;
@@ -47,18 +47,6 @@ pub fn quit_app(app_handle: AppHandle) -> Result<(), String> {
                 let y = pos.y;
                 info!(x, y, "Saving main window position");
                 let _ = windows_manager.set_main_position(Some(x), Some(y));
-            }
-        }
-
-        // Сохраняем позицию плавающего окна (если оно было показано)
-        if let Some(floating_window) = app_handle.get_webview_window("floating") {
-            if let Ok(true) = floating_window.is_visible() {
-                if let Ok(pos) = floating_window.outer_position() {
-                    let x = pos.x;
-                    let y = pos.y;
-                    info!(x, y, "Saving floating window position");
-                    let _ = windows_manager.set_floating_position(Some(x), Some(y));
-                }
             }
         }
     }
@@ -509,145 +497,6 @@ pub async fn check_api_key(key: String) -> Result<bool, String> {
     Ok(is_valid)
 }
 
-/// Get floating window appearance settings
-#[tauri::command]
-pub fn get_floating_appearance(
-    windows_manager: State<'_, WindowsManager>
-) -> (u8, String) {
-    let opacity = windows_manager.get_floating_opacity();
-    let color = windows_manager.get_floating_bg_color();
-    (opacity, color)
-}
-
-/// Set floating window opacity
-#[tauri::command]
-pub fn set_floating_opacity(
-    value: u8,
-    app_handle: AppHandle,
-    windows_manager: State<'_, WindowsManager>
-) -> Result<(), String> {
-    // Save to config
-    windows_manager.set_floating_opacity(value)
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
-
-    // Emit event to update window
-    if let Some(state) = app_handle.try_state::<AppState>() {
-        state.emit_event(AppEvent::FloatingAppearanceChanged);
-    }
-
-    Ok(())
-}
-
-/// Set floating window background color
-#[tauri::command]
-pub fn set_floating_bg_color(
-    color: String,
-    app_handle: AppHandle,
-    windows_manager: State<'_, WindowsManager>
-) -> Result<(), String> {
-    // Validate hex color format
-    if !is_valid_hex_color(&color) {
-        return Err("Invalid color format. Use #RRGGBB".to_string());
-    }
-
-    // Save to config
-    windows_manager.set_floating_bg_color(color)
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
-
-    // Emit event to update window
-    if let Some(state) = app_handle.try_state::<AppState>() {
-        state.emit_event(AppEvent::FloatingAppearanceChanged);
-    }
-
-    Ok(())
-}
-
-/// Toggle clickthrough mode for floating window
-#[tauri::command]
-pub fn set_clickthrough(
-    app_handle: AppHandle,
-    windows_manager: State<'_, WindowsManager>,
-    enabled: bool
-) -> Result<bool, String> {
-    // Save to config
-    windows_manager.set_floating_clickthrough(enabled)
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
-
-    // Apply to window
-    if let Some(window) = app_handle.get_webview_window("floating") {
-        window.set_ignore_cursor_events(enabled)
-            .map_err(|e| format!("Failed to set clickthrough: {}", e))?;
-    }
-
-    Ok(enabled)
-}
-
-/// Get current clickthrough state
-#[tauri::command]
-pub fn is_clickthrough_enabled(
-    windows_manager: State<'_, WindowsManager>
-) -> bool {
-    windows_manager.get_floating_clickthrough()
-}
-
-/// Get current Enter closes disabled state (F6 mode)
-#[tauri::command]
-pub fn is_enter_closes_disabled(state: State<'_, AppState>) -> bool {
-    state.is_enter_closes_disabled()
-}
-
-/// Toggle floating window visibility (show if hidden, hide if visible)
-#[tauri::command]
-pub fn toggle_floating_window(
-    app_handle: AppHandle,
-    app_state: State<'_, AppState>,
-) -> Result<bool, String> {
-    let is_visible = app_handle.get_webview_window("floating")
-        .and_then(|w| w.is_visible().ok())
-        .unwrap_or(false);
-
-    if is_visible {
-        // Window is visible - hide it
-        hide_floating_window(&app_handle, &app_state)
-            .map_err(|e| format!("Failed to hide window: {}", e))?;
-        Ok(false)
-    } else {
-        // Window is hidden or doesn't exist - show it
-        show_floating_window(&app_handle)
-            .map_err(|e| format!("Failed to show window: {}", e))?;
-        Ok(true)
-    }
-}
-
-/// Show floating window
-#[tauri::command]
-pub fn show_floating_window_cmd(
-    app_handle: AppHandle,
-) -> Result<(), String> {
-    show_floating_window(&app_handle)
-        .map_err(|e| format!("Failed to show window: {}", e))?;
-    Ok(())
-}
-
-/// Hide floating window
-#[tauri::command]
-pub fn hide_floating_window_cmd(
-    app_handle: AppHandle,
-    app_state: State<'_, AppState>,
-) -> Result<(), String> {
-    hide_floating_window(&app_handle, &app_state)
-        .map_err(|e| format!("Failed to hide window: {}", e))?;
-    Ok(())
-}
-
-/// Check if floating window is currently visible
-#[tauri::command]
-pub fn is_floating_window_visible(app_handle: AppHandle) -> bool {
-    app_handle.get_webview_window("floating")
-        .and_then(|w| w.is_visible().ok())
-        .unwrap_or(false)
-}
-
 /// Get hotkey enabled setting
 #[tauri::command]
 pub fn get_hotkey_enabled(
@@ -883,22 +732,6 @@ pub fn hide_main_window(app_handle: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Close floating window and stop interception
-#[tauri::command]
-pub fn close_floating_window(
-    app_handle: AppHandle,
-    app_state: State<'_, AppState>,
-) -> Result<(), String> {
-    // Останавливаем перехват
-    app_state.set_interception_enabled(false);
-
-    // Скрываем окно (сбрасывает F6 режим, сохраняет позицию)
-    hide_floating_window(&app_handle, &app_state)
-        .map_err(|e| format!("Failed to hide window: {}", e))?;
-
-    Ok(())
-}
-
 /// Close soundpanel window and stop interception
 #[tauri::command]
 pub fn close_soundpanel_window(
@@ -954,7 +787,6 @@ pub async fn get_all_app_settings(
         .map_err(|e| format!("Failed to load windows settings: {}", e))?;
 
     let interception_enabled = app_state.is_interception_enabled();
-    let enter_closes_disabled = app_state.is_enter_closes_disabled();
     let preprocessor = app_state.get_preprocessor();
 
     // Load soundpanel bindings from state
@@ -968,7 +800,6 @@ pub async fn get_all_app_settings(
             twitch_settings: &twitch_settings,
             windows_settings: &windows_settings,
             interception_enabled,
-            enter_closes_disabled,
             preprocessor: preprocessor.as_ref(),
             soundpanel_bindings,
         }

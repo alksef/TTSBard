@@ -42,7 +42,6 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
     info!(tts_provider = ?settings.tts.provider, hotkey_enabled = settings.hotkey_enabled, "Settings loaded");
 
     let windows = windows_manager.load()?;
-    info!(floating_opacity = windows.floating.opacity, floating_clickthrough = windows.floating.clickthrough, "Windows settings");
 
     // Load Twitch settings into AppState
     info!("Loading Twitch settings...");
@@ -84,7 +83,7 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
     });
 
     // Setup SoundPanel event system
-    use crate::floating::{show_soundpanel_window, hide_soundpanel_window, emit_soundpanel_no_binding, update_soundpanel_appearance};
+    use crate::soundpanel_window::{show_soundpanel_window, hide_soundpanel_window, emit_soundpanel_no_binding, update_soundpanel_appearance};
     use crate::soundpanel::{load_bindings, load_appearance};
 
     let (soundpanel_tx, soundpanel_rx) = mpsc::channel::<AppEvent>();
@@ -300,14 +299,10 @@ fn init_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
 
 /// Initialize keyboard hooks
 fn init_hooks(
-    app_state: &AppState,
+    _app_state: &AppState,
     soundpanel_state: &SoundPanelState,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use crate::hook::initialize_text_interception_hook;
     use crate::soundpanel::initialize_soundpanel_hook;
-
-    let _hook_handle = initialize_text_interception_hook(app_state.clone());
-    info!("Keyboard hook initialized");
 
     let _soundpanel_hook_handle = initialize_soundpanel_hook(soundpanel_state.clone());
     info!("[SOUNDPANEL] Keyboard hook initialized");

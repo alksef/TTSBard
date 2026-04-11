@@ -17,19 +17,6 @@ pub struct WindowPosition {
     pub y: Option<i32>,
 }
 
-/// Floating window settings
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct FloatingWindowSettings {
-    pub x: Option<i32>,
-    pub y: Option<i32>,
-    #[serde(default = "default_floating_opacity")]
-    pub opacity: u8,
-    #[serde(default = "default_floating_bg_color")]
-    pub bg_color: String,
-    #[serde(default)]
-    pub clickthrough: bool,
-}
-
 /// Sound panel window settings
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SoundPanelWindowSettings {
@@ -56,28 +43,12 @@ pub struct WindowsSettings {
     #[serde(default)]
     pub global: GlobalSettings,
     pub main: WindowPosition,
-    pub floating: FloatingWindowSettings,
     pub soundpanel: SoundPanelWindowSettings,
 }
 
 // Default functions
-fn default_floating_opacity() -> u8 { 90 }
-fn default_floating_bg_color() -> String { "#1e1e1e".to_string() }
 fn default_soundpanel_opacity() -> u8 { 90 }
 fn default_soundpanel_bg_color() -> String { "#2a2a2a".to_string() }
-
-
-impl Default for FloatingWindowSettings {
-    fn default() -> Self {
-        Self {
-            x: None,
-            y: None,
-            opacity: 90,
-            bg_color: "#1e1e1e".to_string(),
-            clickthrough: false,
-        }
-    }
-}
 
 impl Default for SoundPanelWindowSettings {
     fn default() -> Self {
@@ -96,14 +67,9 @@ impl WindowsSettings {
     /// Validate all settings and fix invalid values
     pub fn validate(&mut self) {
         // Validate opacity
-        self.floating.opacity = validate_opacity(self.floating.opacity);
         self.soundpanel.opacity = validate_opacity(self.soundpanel.opacity);
 
         // Validate colors
-        if !is_valid_hex_color(&self.floating.bg_color) {
-            tracing::warn!(bg_color = ?self.floating.bg_color, "Invalid floating bg_color, using default");
-            self.floating.bg_color = "#1e1e1e".to_string();
-        }
         if !is_valid_hex_color(&self.soundpanel.bg_color) {
             tracing::warn!(bg_color = ?self.soundpanel.bg_color, "Invalid soundpanel bg_color, using default");
             self.soundpanel.bg_color = "#2a2a2a".to_string();
@@ -186,69 +152,6 @@ impl WindowsManager {
         self.load()
             .map(|s| (s.main.x, s.main.y))
             .unwrap_or((None, None))
-    }
-
-    // ========== Floating Window ==========
-
-    /// Set floating window position
-    pub fn set_floating_position(&self, x: Option<i32>, y: Option<i32>) -> Result<()> {
-        let mut settings = self.load()?;
-        settings.floating.x = x;
-        settings.floating.y = y;
-        self.save(&settings)
-    }
-
-    /// Get floating window position
-    pub fn get_floating_position(&self) -> (Option<i32>, Option<i32>) {
-        self.load()
-            .map(|s| (s.floating.x, s.floating.y))
-            .unwrap_or((None, None))
-    }
-
-    /// Set floating window opacity
-    pub fn set_floating_opacity(&self, opacity: u8) -> Result<()> {
-        let mut settings = self.load()?;
-        settings.floating.opacity = validate_opacity(opacity);
-        self.save(&settings)
-    }
-
-    /// Get floating window opacity
-    pub fn get_floating_opacity(&self) -> u8 {
-        self.load()
-            .map(|s| s.floating.opacity)
-            .unwrap_or(90)
-    }
-
-    /// Set floating window background color
-    pub fn set_floating_bg_color(&self, color: String) -> Result<()> {
-        let mut settings = self.load()?;
-        if is_valid_hex_color(&color) {
-            settings.floating.bg_color = color;
-            self.save(&settings)
-        } else {
-            Err(anyhow::anyhow!("Invalid hex color format"))
-        }
-    }
-
-    /// Get floating window background color
-    pub fn get_floating_bg_color(&self) -> String {
-        self.load()
-            .map(|s| s.floating.bg_color)
-            .unwrap_or_else(|_| "#1e1e1e".to_string())
-    }
-
-    /// Set floating window clickthrough
-    pub fn set_floating_clickthrough(&self, clickthrough: bool) -> Result<()> {
-        let mut settings = self.load()?;
-        settings.floating.clickthrough = clickthrough;
-        self.save(&settings)
-    }
-
-    /// Get floating window clickthrough
-    pub fn get_floating_clickthrough(&self) -> bool {
-        self.load()
-            .map(|s| s.floating.clickthrough)
-            .unwrap_or(false)
     }
 
     // ========== Sound Panel Window ==========

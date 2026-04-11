@@ -23,18 +23,10 @@ pub enum AppEvent {
     TtsStatusChanged(TtsStatus),
     /// Ошибка TTS
     TtsError(String),
-    /// Показать плавающее окно
-    ShowFloatingWindow,
-    /// Скрыть плавающее окно
-    HideFloatingWindow,
     /// Показать главное окно
     ShowMainWindow,
-    /// Обновить текст в плавающем окне
-    UpdateFloatingText(String),
     /// Обновить иконку в системном трее
     UpdateTrayIcon(bool),
-    /// Изменение внешнего вида плавающего окна
-    FloatingAppearanceChanged,
     /// Изменение clickthrough режима
     ClickthroughChanged(bool),
     /// Показать floating окно звуковой панели
@@ -47,8 +39,6 @@ pub enum AppEvent {
     SoundPanelAppearanceChanged,
     /// Изменение TTS провайдера
     TtsProviderChanged(TtsProviderType),
-    /// Изменение режима закрытия по Enter (F6 mode)
-    EnterClosesDisabled(bool),
     /// Ошибка запуска WebView сервера
     WebViewServerError(String),
     /// Перезапустить WebView сервер (изменились настройки)
@@ -106,19 +96,14 @@ impl AppEvent {
             AppEvent::TextSentToTts(_) => "text-sent-to-tts",
             AppEvent::TtsStatusChanged(_) => "tts-status-changed",
             AppEvent::TtsError(_) => "tts-error",
-            AppEvent::ShowFloatingWindow => "show-floating-window",
-            AppEvent::HideFloatingWindow => "hide-floating-window",
             AppEvent::ShowMainWindow => "show-main-window",
-            AppEvent::UpdateFloatingText(_) => "update-floating-text",
             AppEvent::UpdateTrayIcon(_) => "update-tray-icon",
-            AppEvent::FloatingAppearanceChanged => "floating-appearance-changed",
             AppEvent::ClickthroughChanged(_) => "clickthrough-changed",
             AppEvent::ShowSoundPanelWindow => "show-soundpanel-window",
             AppEvent::HideSoundPanelWindow => "hide-soundpanel-window",
             AppEvent::SoundPanelNoBinding(_) => "soundpanel-no-binding",
             AppEvent::SoundPanelAppearanceChanged => "soundpanel-appearance-changed",
             AppEvent::TtsProviderChanged(_) => "tts-provider-changed",
-            AppEvent::EnterClosesDisabled(_) => "enter-closes-disabled",
             AppEvent::WebViewServerError(_) => "webview-server-error",
             AppEvent::RestartWebViewServer => "restart-webview-server",
             AppEvent::ReloadWebViewTemplates => "reload-webview-templates",

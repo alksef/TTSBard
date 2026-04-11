@@ -122,11 +122,6 @@ export function createAppSettings(): AppSettingsContext {
       reload()
     })
 
-    const unlistenFloatingAppearance = await listen('floating-appearance-changed', () => {
-      debugLog('[useAppSettings] Floating appearance changed, reloading settings')
-      reload()
-    })
-
     // Listen for soundpanel bindings changes
     const unlistenSoundpanelBindings = await listen('soundpanel-bindings-changed', () => {
       debugLog('[useAppSettings] SoundPanel bindings changed, reloading settings')
@@ -141,7 +136,6 @@ export function createAppSettings(): AppSettingsContext {
       unlistenReady()
       unlistenSettingsChanged()
       unlistenTtsProvider()
-      unlistenFloatingAppearance()
       unlistenSoundpanelBindings()
     }
   }

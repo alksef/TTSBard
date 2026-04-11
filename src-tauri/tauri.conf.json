@@ -21,21 +21,6 @@
         "visible": false
       },
       {
-        "label": "floating",
-        "url": "src-floating/index.html",
-        "title": "Floating Display",
-        "width": 600,
-        "height": 100,
-        "decorations": false,
-        "transparent": true,
-        "alwaysOnTop": true,
-        "skipTaskbar": true,
-        "resizable": false,
-        "visible": false,
-        "focus": false,
-        "hiddenTitle": true
-      },
-      {
         "label": "soundpanel",
         "url": "src-soundpanel/index.html",
         "title": "",
