@@ -33,8 +33,12 @@ const hasMore = computed(() => models.value.length < total.value);
 async function loadImages() {
   for (const model of models.value) {
     if (model.cover_image && !imageUrls.value.has(model.id)) {
-      const url = await fetchFishImage(model.cover_image);
-      imageUrls.value.set(model.id, url);
+      try {
+        const url = await fetchFishImage(model.cover_image);
+        imageUrls.value.set(model.id, url);
+      } catch {
+        imageUrls.value.set(model.id, undefined);
+      }
     }
   }
 }

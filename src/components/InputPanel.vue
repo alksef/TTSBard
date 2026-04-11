@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted as vueOnUnmounted, watch, inject, type Ref } from 'vue'
+import { ref, computed, onMounted, onUnmounted as vueOnUnmounted, inject, type Ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, UnlistenFn } from '@tauri-apps/api/event'
 import { useEditorSettings, useAiSettings } from '../composables/useAppSettings'
@@ -77,16 +77,6 @@ onMounted(async () => {
     debugError('[InputPanel] Failed to load preprocessor data:', e)
   }
 })
-
-// Watch for settings changes from composable
-watch(editorSettings, (newSettings) => {
-  if (!newSettings) return;
-
-  debugLog('[InputPanel] Editor settings updated from composable:', newSettings);
-
-  // Update quick editor enabled from editor settings
-  // This will be used in handleEnter
-}, { immediate: true })
 
 vueOnUnmounted(() => {
   if (unlistenSettings) {

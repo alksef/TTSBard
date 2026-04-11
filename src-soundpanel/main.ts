@@ -7,9 +7,8 @@ const instance = app.mount('#app')
 
 // Listen for "no binding" events from backend
 listen('no-binding', (event) => {
-  // Access the component's exposed showNoBinding method
-  const component = instance as any
-  if (component && component.showNoBinding) {
+  const component = instance as { showNoBinding?: (key: string) => void }
+  if (component?.showNoBinding) {
     component.showNoBinding(event.payload as string)
   }
 })
