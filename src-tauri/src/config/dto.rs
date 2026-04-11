@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use crate::tts::TtsProviderType;
 use crate::webview::WebViewSettings;
 use crate::config::{TwitchSettings, AudioSettings, LoggingSettings, AppSettings as ConfigAppSettings, HotkeySettings, Hotkey, HotkeyModifier};
-use crate::config::settings::{OpenAiSettings, LocalTtsSettings, TelegramTtsSettings, TtsSettings, ProxySettings, NetworkSettings, Socks5Settings, MtProxySettings, ProxyType, ProxyMode};
+use crate::config::settings::{OpenAiSettings, LocalTtsSettings, TelegramTtsSettings, TtsSettings, ProxySettings, NetworkSettings, Socks5Settings, MtProxySettings, ProxyType, ProxyMode, FishAudioSettings};
+use crate::tts::VoiceModel;
 use crate::config::windows::{WindowsSettings, SoundPanelWindowSettings, GlobalSettings, WindowPosition};
 use crate::soundpanel::SoundBinding;
 
@@ -236,6 +237,89 @@ impl From<LocalTtsSettingsDto> for LocalTtsSettings {
     }
 }
 
+/// DTO голосовой модели Fish Audio
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VoiceModelDto {
+    pub id: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub cover_image: Option<String>,
+    pub languages: Vec<String>,
+    pub author_nickname: Option<String>,
+}
+
+impl From<VoiceModel> for VoiceModelDto {
+    fn from(v: VoiceModel) -> Self {
+        Self {
+            id: v.id,
+            title: v.title,
+            description: v.description,
+            cover_image: v.cover_image,
+            languages: v.languages,
+            author_nickname: v.author_nickname,
+        }
+    }
+}
+
+impl From<VoiceModelDto> for VoiceModel {
+    fn from(dto: VoiceModelDto) -> Self {
+        Self {
+            id: dto.id,
+            title: dto.title,
+            description: dto.description,
+            cover_image: dto.cover_image,
+            languages: dto.languages,
+            author_nickname: dto.author_nickname,
+        }
+    }
+}
+
+/// Fish Audio TTS settings DTO
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FishAudioSettingsDto {
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub voices: Vec<VoiceModelDto>,
+    #[serde(default)]
+    pub reference_id: String,
+    #[serde(default)]
+    pub format: String,
+    #[serde(default)]
+    pub temperature: f32,
+    #[serde(default)]
+    pub sample_rate: u32,
+    #[serde(default)]
+    pub use_proxy: bool,
+}
+
+impl From<FishAudioSettings> for FishAudioSettingsDto {
+    fn from(s: FishAudioSettings) -> Self {
+        Self {
+            api_key: s.api_key,
+            voices: s.voices.into_iter().map(|v| v.into()).collect(),
+            reference_id: s.reference_id,
+            format: s.format,
+            temperature: s.temperature,
+            sample_rate: s.sample_rate,
+            use_proxy: s.use_proxy,
+        }
+    }
+}
+
+impl From<FishAudioSettingsDto> for FishAudioSettings {
+    fn from(dto: FishAudioSettingsDto) -> Self {
+        Self {
+            api_key: dto.api_key,
+            voices: dto.voices.into_iter().map(|v| v.into()).collect(),
+            reference_id: dto.reference_id,
+            format: dto.format,
+            temperature: dto.temperature,
+            sample_rate: dto.sample_rate,
+            use_proxy: dto.use_proxy,
+        }
+    }
+}
+
 /// Telegram TTS settings DTO
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelegramTtsSettingsDto {
@@ -273,6 +357,8 @@ pub struct TtsSettingsDto {
     pub provider: TtsProviderType,
     pub openai: OpenAiSettingsDto,
     pub local: LocalTtsSettingsDto,
+    #[serde(default)]
+    pub fish: FishAudioSettingsDto,
     pub telegram: TelegramTtsSettingsDto,
     pub network: NetworkSettingsDto,
 }
@@ -283,6 +369,7 @@ impl From<TtsSettings> for TtsSettingsDto {
             provider: s.provider,
             openai: s.openai.into(),
             local: s.local.into(),
+            fish: s.fish.into(),
             telegram: s.telegram.into(),
             network: s.network.into(),
         }
@@ -295,6 +382,7 @@ impl From<TtsSettingsDto> for TtsSettings {
             provider: dto.provider,
             openai: dto.openai.into(),
             local: dto.local.into(),
+            fish: dto.fish.into(),
             telegram: dto.telegram.into(),
             network: dto.network.into(),
         }

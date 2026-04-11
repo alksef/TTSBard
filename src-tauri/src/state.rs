@@ -5,7 +5,7 @@ use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
 use tokio::sync::broadcast;
 use crate::events::{AppEvent, InputLayout, TwitchEvent, TwitchEventSender};
-use crate::tts::{TtsProvider, TtsProviderType, openai::OpenAiTts, local::LocalTts, silero::SileroTts};
+use crate::tts::{TtsProvider, TtsProviderType, openai::OpenAiTts, local::LocalTts, silero::SileroTts, fish::FishTts};
 use crate::preprocessor::TextPreprocessor;
 use crate::telegram::TelegramClient;
 use crate::webview::WebViewSettings;
@@ -40,6 +40,12 @@ pub struct TtsConfig {
     pub openai_voice: String,
     /// Unified proxy URL (socks5://, socks4://, http://user:pass@host:port)
     pub openai_proxy_url: Option<String>,
+    pub fish_api_key: Option<String>,
+    pub fish_reference_id: String,
+    pub fish_proxy_url: Option<String>,
+    pub fish_format: String,
+    pub fish_temperature: f32,
+    pub fish_sample_rate: u32,
     pub local_url: String,
 }
 
@@ -50,6 +56,12 @@ impl Default for TtsConfig {
             openai_key: None,
             openai_voice: "alloy".to_string(),
             openai_proxy_url: None,
+            fish_api_key: None,
+            fish_reference_id: String::new(),
+            fish_proxy_url: None,
+            fish_format: "mp3".to_string(),
+            fish_temperature: 0.7,
+            fish_sample_rate: 44100,
             local_url: "http://127.0.0.1:8124".to_string(),
         }
     }
@@ -70,9 +82,11 @@ pub struct AppState {
     pub hotkey_enabled: Arc<Mutex<bool>>,
 
     /// Текущий текст из плавающего окна
+    #[allow(dead_code)]
     pub current_text: Arc<Mutex<String>>,
 
     /// Текущая раскладка (EN/RU)
+    #[allow(dead_code)]
     pub current_layout: Arc<Mutex<InputLayout>>,
 
     /// Унифицированная конфигурация TTS ( RwLock для эффективного чтения)
@@ -235,30 +249,37 @@ impl AppState {
         self.hotkey_recording_in_progress.store(recording, std::sync::atomic::Ordering::Relaxed);
     }
 
+    #[allow(dead_code)]
     pub fn get_current_text(&self) -> String {
         self.current_text.lock().clone()
     }
 
+    #[allow(dead_code)]
     pub fn set_current_text(&self, text: String) {
         *self.current_text.lock() = text;
     }
 
+    #[allow(dead_code)]
     pub fn append_text(&self, ch: char) {
         self.current_text.lock().push(ch);
     }
 
+    #[allow(dead_code)]
     pub fn remove_last_char(&self) {
         self.current_text.lock().pop();
     }
 
+    #[allow(dead_code)]
     pub fn clear_text(&self) {
         self.current_text.lock().clear();
     }
 
+    #[allow(dead_code)]
     pub fn get_current_layout(&self) -> InputLayout {
         *self.current_layout.lock()
     }
 
+    #[allow(dead_code)]
     pub fn toggle_layout(&self) -> InputLayout {
         let current = self.get_current_layout();
         let new_layout = match current {
@@ -346,6 +367,122 @@ impl AppState {
         info!("Created SileroTts with Telegram client Arc");
         *self.tts_providers.lock() = Some(TtsProvider::Silero(tts));
         info!("TTS provider set to Silero");
+    }
+
+    pub fn init_fish_audio_tts(&self, api_key: String) {
+        let mut tts = FishTts::new(api_key);
+        let config = self.tts_config.read();
+        tts.set_reference_id(config.fish_reference_id.clone());
+        tts.set_format(config.fish_format.clone());
+        tts.set_temperature(config.fish_temperature);
+        tts.set_sample_rate(config.fish_sample_rate);
+        if let Some(proxy_url) = &config.fish_proxy_url {
+            tts.set_proxy(Some(proxy_url.clone()));
+        }
+        drop(config);
+
+        if let Some(event_tx) = self.get_event_sender() {
+            tts = tts.with_event_tx(event_tx);
+        }
+
+        *self.tts_providers.lock() = Some(TtsProvider::Fish(tts));
+    }
+
+    pub fn get_fish_audio_api_key(&self) -> Option<String> {
+        self.tts_config.read().fish_api_key.clone()
+    }
+
+    pub fn set_fish_audio_api_key(&self, key: Option<String>) {
+        self.tts_config.write().fish_api_key = key;
+    }
+
+    pub fn set_fish_audio_reference_id(&self, reference_id: String) {
+        // Реинициализация провайдера если активен
+        let (api_key, proxy_url, format, temperature, sample_rate, event_tx, current_provider) = {
+            let config = self.tts_config.read();
+            let event_tx = self.get_event_sender();
+            let provider = self.tts_providers.lock().clone();
+            (
+                config.fish_api_key.clone(),
+                config.fish_proxy_url.clone(),
+                config.fish_format.clone(),
+                config.fish_temperature,
+                config.fish_sample_rate,
+                event_tx,
+                provider
+            )
+        };
+
+        if let Some(key) = api_key {
+            let mut tts = FishTts::new(key);
+            tts.set_reference_id(reference_id.clone());
+            tts.set_format(format);
+            tts.set_temperature(temperature);
+            tts.set_sample_rate(sample_rate);
+            if let Some(url) = proxy_url {
+                tts.set_proxy(Some(url));
+            }
+
+            if let Some(tx) = event_tx {
+                tts = tts.with_event_tx(tx);
+            }
+
+            if matches!(current_provider.as_ref(), Some(TtsProvider::Fish(_))) {
+                *self.tts_providers.lock() = Some(TtsProvider::Fish(tts));
+            }
+        }
+
+        self.tts_config.write().fish_reference_id = reference_id;
+    }
+
+    pub fn set_fish_audio_proxy(&self, proxy_url: Option<String>) {
+        let (api_key, reference_id, format, temperature, sample_rate, event_tx, current_provider) = {
+            let config = self.tts_config.read();
+            let event_tx = self.get_event_sender();
+            let provider = self.tts_providers.lock().clone();
+            (
+                config.fish_api_key.clone(),
+                config.fish_reference_id.clone(),
+                config.fish_format.clone(),
+                config.fish_temperature,
+                config.fish_sample_rate,
+                event_tx,
+                provider
+            )
+        };
+
+        if let Some(key) = api_key {
+            let mut tts = FishTts::new(key);
+            tts.set_reference_id(reference_id.clone());
+            tts.set_format(format);
+            tts.set_temperature(temperature);
+            tts.set_sample_rate(sample_rate);
+            if let Some(url) = &proxy_url {
+                tts.set_proxy(Some(url.clone()));
+            }
+
+            if let Some(tx) = event_tx {
+                tts = tts.with_event_tx(tx);
+            }
+
+            if matches!(current_provider.as_ref(), Some(TtsProvider::Fish(_))) {
+                *self.tts_providers.lock() = Some(TtsProvider::Fish(tts));
+            }
+        }
+
+        self.tts_config.write().fish_proxy_url = proxy_url;
+    }
+
+    pub fn set_fish_audio_format(&self, format: String) {
+        self.tts_config.write().fish_format = format;
+    }
+
+    pub fn set_fish_audio_temperature(&self, temperature: f32) {
+        self.tts_config.write().fish_temperature = temperature;
+    }
+
+    pub fn set_fish_audio_sample_rate(&self, sample_rate: u32) {
+        self.tts_config.write().fish_sample_rate = sample_rate;
     }
 
     #[allow(dead_code)]
@@ -470,6 +607,7 @@ impl AppState {
     // ========== Active Window Management (взаимное исключение хоткеев) ==========
 
     /// Получить текущее активное окно
+    #[allow(dead_code)]
     pub fn get_active_window(&self) -> ActiveWindow {
         *self.active_window.lock()
     }
@@ -481,6 +619,7 @@ impl AppState {
 
     /// Проверить, активен ли soundpanel (visible + interception_enabled)
     /// Требуется AppHandle для проверки видимости окна
+    #[allow(dead_code)]
     pub fn is_soundpanel_active(&self, app_handle: &AppHandle) -> bool {
         if self.get_active_window() != ActiveWindow::SoundPanel {
             return false;

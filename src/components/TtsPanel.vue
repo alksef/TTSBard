@@ -2,8 +2,8 @@
 import { ref, onMounted, onUnmounted, watch, inject } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { useTtsSettings } from '../composables/useAppSettings';
-import type { TtsProviderType } from '../types/settings';
+import { useTtsSettings, useAppSettings } from '../composables/useAppSettings';
+import type { TtsProviderType, VoiceModel } from '../types/settings';
 import { debugLog, debugError } from '../utils/debug';
 import { TELEGRAM_AUTH_KEY, type UseTelegramAuthReturn } from '../composables/useTelegramAuth';
 import TelegramAuthModal from './TelegramAuthModal.vue';
@@ -11,6 +11,7 @@ import StatusMessage from './shared/StatusMessage.vue';
 import TtsSileroCard from './tts/TtsSileroCard.vue';
 import TtsLocalCard from './tts/TtsLocalCard.vue';
 import TtsOpenAICard from './tts/TtsOpenAICard.vue';
+import TtsFishAudioCard from './tts/TtsFishAudioCard.vue';
 
 interface TtsProviderState {
   type: TtsProviderType;
@@ -24,10 +25,12 @@ const providers = ref<Record<TtsProviderType, TtsProviderState>>({
   openai: { type: 'openai', configured: false, expanded: false },
   silero: { type: 'silero', configured: false, expanded: false },
   local: { type: 'local', configured: false, expanded: false },
+  fish: { type: 'fish', configured: false, expanded: false },
 });
 
 // Get settings from composable
 const ttsSettings = useTtsSettings();
+const { reload: reloadSettings } = useAppSettings();
 
 // OpenAI settings
 const openaiApiKey = ref('');
@@ -37,6 +40,15 @@ const openaiUseProxy = ref(false);
 
 // local TTS settings
 const localTtsUrl = ref('http://127.0.0.1:8124');
+
+// Fish Audio settings
+const fishAudioApiKey = ref('');
+const fishAudioReferenceId = ref('');
+const fishAudioVoices = ref<VoiceModel[]>([]);
+const fishAudioFormat = ref('mp3');
+const fishAudioTemperature = ref(0.7);
+const fishAudioSampleRate = ref(44100);
+const fishAudioUseProxy = ref(false);
 
 // Telegram auth
 const showTelegramModal = ref(false);
@@ -155,6 +167,79 @@ async function saveLocalTtsUrl(url: string) {
     showSuccess('URL сохранён');
   } catch (error) {
     showError(error as string);
+  }
+}
+
+async function saveFishAudioSettings(data: { apiKey: string; format: string; temperature: number; sampleRate: number }) {
+  debugLog('[TTS] Saving Fish Audio settings...');
+
+  if (!data.apiKey.trim()) {
+    showError('API Key не может быть пустым');
+    return;
+  }
+
+  try {
+    // Save all settings
+    await invoke('set_fish_audio_api_key', { key: data.apiKey });
+    await invoke('set_fish_audio_format', { format: data.format });
+    await invoke('set_fish_audio_temperature', { temperature: data.temperature });
+    await invoke('set_fish_audio_sample_rate', { sampleRate: data.sampleRate });
+
+    providers.value.fish.configured = true;
+    await reloadSettings();
+    debugLog('[TTS] Fish Audio settings saved successfully');
+    showSuccess('Настройки сохранены');
+  } catch (error) {
+    debugError('[TTS] Failed to save Fish Audio settings:', error);
+    showError(error as string);
+  }
+}
+
+async function saveFishAudioReferenceId(referenceId: string) {
+  try {
+    await invoke('set_fish_audio_reference_id', { referenceId });
+  } catch (error) {
+    showError(error as string);
+  }
+}
+
+async function addFishAudioVoice(model: VoiceModel) {
+  try {
+    await invoke('add_fish_audio_voice', { voice: model });
+    await reloadSettings();
+    showSuccess('Голосовая модель добавлена');
+  } catch (error) {
+    showError(error as string);
+  }
+}
+
+async function removeFishAudioVoice(voiceId: string) {
+  try {
+    await invoke('remove_fish_audio_voice', { voiceId });
+    await reloadSettings();
+    showSuccess('Голосовая модель удалена');
+  } catch (error) {
+    showError(error as string);
+  }
+}
+
+async function selectFishAudioVoice(voiceId: string) {
+  await saveFishAudioReferenceId(voiceId);
+  await reloadSettings();
+}
+
+async function toggleFishAudioUseProxy(enabled: boolean) {
+  try {
+    await invoke('set_fish_audio_use_proxy', { enabled });
+
+    if (activeProvider.value === 'fish') {
+      await invoke('apply_fish_audio_proxy_settings');
+    }
+
+    showSuccess(enabled ? 'Прокси включён' : 'Прокси выключен');
+  } catch (error) {
+    showError(error as string);
+    throw error;
   }
 }
 
@@ -292,6 +377,31 @@ watch(ttsSettings, (newSettings) => {
     localTtsUrl.value = newSettings.local.url;
     providers.value.local.configured = newSettings.local.url.length > 0;
   }
+
+  if (newSettings.fish) {
+    if (newSettings.fish.api_key) {
+      fishAudioApiKey.value = newSettings.fish.api_key;
+      providers.value.fish.configured = true;
+    }
+    if (newSettings.fish.reference_id) {
+      fishAudioReferenceId.value = newSettings.fish.reference_id;
+    }
+    if (newSettings.fish.voices) {
+      fishAudioVoices.value = newSettings.fish.voices;
+    }
+    if (newSettings.fish.format) {
+      fishAudioFormat.value = newSettings.fish.format;
+    }
+    if (newSettings.fish.temperature !== undefined) {
+      fishAudioTemperature.value = newSettings.fish.temperature;
+    }
+    if (newSettings.fish.sample_rate) {
+      fishAudioSampleRate.value = newSettings.fish.sample_rate;
+    }
+    if (newSettings.fish.use_proxy !== undefined) {
+      fishAudioUseProxy.value = newSettings.fish.use_proxy;
+    }
+  }
 }, { immediate: true, deep: true });
 
 // Load on mount
@@ -357,6 +467,26 @@ function dismissStatus() {
         @save-api-key="saveOpenAiApiKey"
         @voice-change="saveOpenAiVoice"
         @toggle-proxy="toggleOpenAiUseProxy"
+      />
+
+      <!-- Fish Audio Provider -->
+      <TtsFishAudioCard
+        :active="activeProvider === 'fish'"
+        :expanded="providers.fish.expanded"
+        :api-key="fishAudioApiKey"
+        :reference-id="fishAudioReferenceId"
+        :voices="fishAudioVoices"
+        :format="fishAudioFormat"
+        :temperature="fishAudioTemperature"
+        :sample-rate="fishAudioSampleRate"
+        :use-proxy="fishAudioUseProxy"
+        @select="setActiveProvider('fish')"
+        @toggle="toggleProvider('fish')"
+        @save-all="saveFishAudioSettings"
+        @select-voice="selectFishAudioVoice"
+        @add-voice="addFishAudioVoice"
+        @remove-voice="removeFishAudioVoice"
+        @toggle-proxy="toggleFishAudioUseProxy"
       />
 
       <!-- Local Provider -->

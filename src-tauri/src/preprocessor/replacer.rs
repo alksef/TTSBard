@@ -192,6 +192,7 @@ impl TextPreprocessor {
 
     /// Check if text ends with a replaceable pattern and return the replacement
     /// Returns Some((original_pattern, replacement_value)) or None
+    #[allow(dead_code)]
     pub fn check_and_replace_end(&self, text: &str) -> Option<(String, String)> {
         // Check for \word pattern at end
         if let Some(caps) = REPLACEMENT_PATTERN_END.captures(text) {

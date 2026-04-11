@@ -27,11 +27,12 @@ export interface HotkeySettingsDto {
 // ============================================================================
 
 // Rust enum uses #[serde(rename_all = "lowercase")]
-// So JSON returns: "openai", "silero", "local"
+// So JSON returns: "openai", "silero", "local", "fish"
 export const TtsProviderType = {
   OpenAi: 'openai',
   Silero: 'silero',
-  Local: 'local'
+  Local: 'local',
+  Fish: 'fish'
 } as const
 
 export type TtsProviderType = (typeof TtsProviderType)[keyof typeof TtsProviderType]
@@ -46,6 +47,26 @@ export interface OpenAiSettingsDto {
 
 export interface LocalTtsSettingsDto {
   url: string
+}
+
+/// Голосовая модель Fish Audio
+export interface VoiceModel {
+  id: string
+  title: string
+  description?: string
+  cover_image?: string
+  languages: string[]
+  author_nickname?: string
+}
+
+export interface FishAudioSettingsDto {
+  api_key?: string
+  voices: VoiceModel[]
+  reference_id: string
+  format: string
+  temperature: number
+  sample_rate: number
+  use_proxy?: boolean
 }
 
 export interface TelegramTtsSettingsDto {
@@ -73,6 +94,7 @@ export interface TtsSettingsDto {
   provider: TtsProviderType
   openai: OpenAiSettingsDto
   local: LocalTtsSettingsDto
+  fish: FishAudioSettingsDto
   telegram: TelegramTtsSettingsDto
   network: NetworkSettingsDto
 }

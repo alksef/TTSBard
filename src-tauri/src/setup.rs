@@ -190,6 +190,15 @@ fn init_tts_provider(
         info!("OpenAI API key loaded for UI");
     }
 
+    // Always load Fish Audio API key if available (for UI display)
+    if let Some(ref api_key) = settings.tts.fish.api_key {
+        app_state.set_fish_audio_api_key(Some(api_key.clone()));
+        app_state.set_fish_audio_format(settings.tts.fish.format.clone());
+        app_state.set_fish_audio_temperature(settings.tts.fish.temperature);
+        app_state.set_fish_audio_sample_rate(settings.tts.fish.sample_rate);
+        info!("Fish Audio API key loaded for UI");
+    }
+
     match settings.tts.provider {
         TtsProviderType::OpenAi => {
             if let Some(ref api_key) = settings.tts.openai.api_key {
@@ -215,6 +224,26 @@ fn init_tts_provider(
             app_state.set_local_tts_url(url.clone());
             app_state.init_local_tts(url);
             info!("Local TTS initialized");
+        }
+        TtsProviderType::Fish => {
+            if let Some(ref api_key) = settings.tts.fish.api_key {
+                let api_key_str: String = api_key.clone();
+                app_state.set_fish_audio_api_key(Some(api_key_str.clone()));
+                app_state.set_fish_audio_format(settings.tts.fish.format.clone());
+                app_state.set_fish_audio_temperature(settings.tts.fish.temperature);
+                app_state.set_fish_audio_sample_rate(settings.tts.fish.sample_rate);
+                info!("Fish Audio API key loaded");
+                app_state.init_fish_audio_tts(api_key_str.clone());
+                app_state.set_fish_audio_reference_id(settings.tts.fish.reference_id.clone());
+
+                if settings.tts.fish.use_proxy {
+                    if let Some(ref proxy_url) = settings.tts.network.proxy.proxy_url {
+                        app_state.set_fish_audio_proxy(Some(proxy_url.clone()));
+                    }
+                }
+            } else {
+                warn!("Fish Audio selected but no API key found");
+            }
         }
     }
 }
