@@ -53,21 +53,15 @@ const localSampleRate = ref(props.sampleRate);
 const isSaving = ref(false);
 
 // Синхронизация при изменении пропов извне
-watch(() => props.apiKey, (newValue) => {
-  localApiKey.value = newValue;
-});
-
-watch(() => props.format, (newValue) => {
-  localFormat.value = newValue;
-});
-
-watch(() => props.temperature, (newValue) => {
-  localTemperature.value = newValue;
-});
-
-watch(() => props.sampleRate, (newValue) => {
-  localSampleRate.value = newValue;
-});
+watch(
+  [() => props.apiKey, () => props.format, () => props.temperature, () => props.sampleRate],
+  ([apiKey, format, temperature, sampleRate]) => {
+    localApiKey.value = apiKey;
+    localFormat.value = format;
+    localTemperature.value = temperature;
+    localSampleRate.value = sampleRate;
+  }
+);
 
 const audioFormats = [
   { value: 'mp3', label: 'MP3' },

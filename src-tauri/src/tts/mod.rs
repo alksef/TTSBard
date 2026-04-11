@@ -2,6 +2,7 @@ pub mod engine;
 pub mod fish;
 pub mod local;
 pub mod openai;
+pub mod proxy_utils;
 pub mod silero;
 
 // Реэкспорт VoiceModel для использования в других модулях

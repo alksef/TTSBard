@@ -1,11 +1,12 @@
 use reqwest::Client;
 use serde::Serialize;
 use crate::tts::engine::TtsEngine;
+use crate::tts::proxy_utils;
 use crate::events::EventSender;
 use crate::config::DEFAULT_TTS_TIMEOUT_SECS;
 use async_trait::async_trait;
 use std::time::{Duration, Instant};
-use tracing::{debug, info, error};
+use tracing::{debug, error};
 
 #[derive(Debug, Serialize)]
 struct TtsRequest {
@@ -55,49 +56,7 @@ impl OpenAiTts {
 
     fn build_client(&self) -> Result<Client, String> {
         let timeout = Duration::from_secs(self.timeout_secs);
-
-        if let Some(proxy_url) = &self.proxy_url {
-            // Parse proxy URL to determine type
-            let proxy = self.parse_proxy_url(proxy_url)?;
-
-            info!(proxy_url = %proxy_url, "Using proxy");
-            Client::builder()
-                .proxy(proxy)
-                .timeout(timeout)
-                .build()
-                .map_err(|e| {
-                    error!(error = %e, "Failed to build client with proxy");
-                    format!("Failed to build client with proxy: {}", e)
-                })
-        } else {
-            info!("Direct connection (no proxy)");
-            Client::builder()
-                .timeout(timeout)
-                .build()
-                .map_err(|e| {
-                    error!(error = %e, "Failed to build client");
-                    format!("Failed to build client: {}", e)
-                })
-        }
-    }
-
-    /// Parse proxy URL and create appropriate reqwest::Proxy
-    fn parse_proxy_url(&self, url: &str) -> Result<reqwest::Proxy, String> {
-        // Validate URL scheme
-        let (scheme, _rest) = url.split_once("://")
-            .ok_or_else(|| "Invalid proxy URL: missing scheme".to_string())?;
-
-        // Supported schemes by reqwest: socks5, socks5h, socks4, socks4a, http, https
-        let scheme_lower = scheme.to_lowercase();
-        if !matches!(scheme_lower.as_str(), "socks5" | "socks5h" | "socks4" | "socks4a" | "http" | "https") {
-            return Err(format!("Unsupported proxy URL scheme: {}", scheme));
-        }
-
-        reqwest::Proxy::all(url)
-            .map_err(|e| {
-                error!(error = %e, proxy_url = %url, scheme = %scheme, "Failed to create proxy");
-                format!("Failed to create {} proxy: {}", scheme, e)
-            })
+        proxy_utils::build_client_with_proxy(self.proxy_url.as_deref(), timeout)
     }
 }
 

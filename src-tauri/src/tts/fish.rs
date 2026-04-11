@@ -1,11 +1,12 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use crate::tts::engine::TtsEngine;
+use crate::tts::proxy_utils;
 use crate::events::EventSender;
 use crate::config::DEFAULT_TTS_TIMEOUT_SECS;
 use async_trait::async_trait;
 use std::time::Duration;
-use tracing::{info, error, debug};
+use tracing::debug;
 use base64::Engine;
 
 /// Модель голоса из Fish Audio API
@@ -133,27 +134,7 @@ impl FishTts {
 
         let timeout = Duration::from_secs(30);
 
-        let client = if let Some(proxy_url) = proxy_url {
-            debug!(proxy_url, "Building HTTP client with proxy");
-            let proxy = Self::parse_proxy_url(proxy_url)?;
-            Client::builder()
-                .proxy(proxy)
-                .timeout(timeout)
-                .build()
-                .map_err(|e| {
-                    error!(error = %e, "Failed to build HTTP client with proxy");
-                    format!("Failed to build client with proxy '{}': {}", proxy_url, e)
-                })?
-        } else {
-            debug!("Building HTTP client without proxy");
-            Client::builder()
-                .timeout(timeout)
-                .build()
-                .map_err(|e| {
-                    error!(error = %e, "Failed to build HTTP client");
-                    format!("Failed to build HTTP client: {}", e)
-                })?
-        };
+        let client = proxy_utils::build_client_with_proxy(proxy_url, timeout)?;
 
         let response = client
             .get(image_url)
@@ -206,19 +187,7 @@ impl FishTts {
     ) -> Result<(i32, Vec<VoiceModel>), String> {
         let timeout = Duration::from_secs(30);
 
-        let client = if let Some(proxy_url) = proxy_url {
-            let proxy = Self::parse_proxy_url(proxy_url)?;
-            Client::builder()
-                .proxy(proxy)
-                .timeout(timeout)
-                .build()
-                .map_err(|e| format!("Failed to build client with proxy: {}", e))?
-        } else {
-            Client::builder()
-                .timeout(timeout)
-                .build()
-                .map_err(|e| format!("Failed to build client: {}", e))?
-        };
+        let client = proxy_utils::build_client_with_proxy(proxy_url, timeout)?;
 
         let mut request = client
             .get("https://api.fish.audio/model")
@@ -254,37 +223,9 @@ impl FishTts {
         Ok((models_response.total, models))
     }
 
-    fn parse_proxy_url(url: &str) -> Result<reqwest::Proxy, String> {
-        let (scheme, _rest) = url.split_once("://")
-            .ok_or_else(|| "Invalid proxy URL: missing scheme".to_string())?;
-
-        let scheme_lower = scheme.to_lowercase();
-        if !matches!(scheme_lower.as_str(), "socks5" | "socks5h" | "socks4" | "socks4a" | "http" | "https") {
-            return Err(format!("Unsupported proxy URL scheme: {}", scheme));
-        }
-
-        reqwest::Proxy::all(url)
-            .map_err(|e| format!("Failed to create {} proxy: {}", scheme, e))
-    }
-
     fn build_client(&self) -> Result<Client, String> {
         let timeout = Duration::from_secs(self.timeout_secs);
-
-        if let Some(proxy_url) = &self.proxy_url {
-            let proxy = Self::parse_proxy_url(proxy_url)?;
-            info!(proxy_url = %proxy_url, "Using proxy");
-            Client::builder()
-                .proxy(proxy)
-                .timeout(timeout)
-                .build()
-                .map_err(|e| format!("Failed to build client with proxy: {}", e))
-        } else {
-            info!("Direct connection (no proxy)");
-            Client::builder()
-                .timeout(timeout)
-                .build()
-                .map_err(|e| format!("Failed to build client: {}", e))
-        }
+        proxy_utils::build_client_with_proxy(self.proxy_url.as_deref(), timeout)
     }
 }
 
