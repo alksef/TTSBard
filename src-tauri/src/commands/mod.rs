@@ -1011,3 +1011,98 @@ pub async fn confirm_backend_ready(
 
     Ok(())
 }
+
+// ============================================================================
+// Hotkey Commands
+// ============================================================================
+
+use crate::config::{HotkeySettings, Hotkey};
+
+/// Get all hotkey settings
+#[tauri::command]
+pub async fn get_hotkey_settings(
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<HotkeySettings, String> {
+    settings_manager.get_hotkey_settings()
+        .map_err(|e| e.to_string())
+}
+
+/// Set a hotkey
+///
+/// # Arguments
+/// * `name` - Either "main_window" or "sound_panel"
+/// * `hotkey` - The new hotkey configuration
+#[tauri::command]
+pub async fn set_hotkey(
+    name: String,
+    hotkey: Hotkey,
+    settings_manager: State<'_, SettingsManager>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    // 1. Валидация
+    let _shortcut = hotkey.to_shortcut()
+        .map_err(|e| format!("Invalid hotkey: {}", e))?;
+
+    // 2. Проверка конфликтов с другими хоткеями
+    let settings = settings_manager.load()
+        .map_err(|e| format!("Failed to load settings: {}", e))?;
+
+    if name == "main_window" && hotkey == settings.hotkeys.sound_panel {
+        return Err("Этот хоткей уже используется для звуковой панели".to_string());
+    }
+    if name == "sound_panel" && hotkey == settings.hotkeys.main_window {
+        return Err("Этот хоткей уже используется для главного окна".to_string());
+    }
+
+    // 3. Сохранение настроек
+    settings_manager.set_hotkey(&name, &hotkey)
+        .map_err(|e| format!("Failed to save hotkey: {}", e))?;
+
+    // 4. Перерегистрация хоткеев
+    crate::hotkeys::reregister_hotkeys(&app_handle)
+        .map_err(|e| format!("Failed to re-register hotkeys: {}", e))?;
+
+    Ok(())
+}
+
+/// Reset a hotkey to its default value
+///
+/// # Arguments
+/// * `name` - Either "main_window" or "sound_panel"
+#[tauri::command]
+pub async fn reset_hotkey_to_default(
+    name: String,
+    settings_manager: State<'_, SettingsManager>,
+    app_handle: AppHandle,
+) -> Result<Hotkey, String> {
+    let default = settings_manager.reset_hotkey_to_default(&name)
+        .map_err(|e| format!("Failed to reset hotkey: {}", e))?;
+
+    // Re-register hotkeys
+    crate::hotkeys::reregister_hotkeys(&app_handle)
+        .map_err(|e| format!("Failed to re-register hotkeys: {}", e))?;
+
+    Ok(default)
+}
+
+/// Unregister all hotkeys (temporarily, for hotkey recording)
+#[tauri::command]
+pub async fn unregister_hotkeys(app_handle: AppHandle) -> Result<(), String> {
+    crate::hotkeys::unregister_all_hotkeys(&app_handle)
+        .map_err(|e| e.to_string())
+}
+
+/// Re-register all hotkeys (restore after hotkey recording or cancellation)
+#[tauri::command]
+pub async fn reregister_hotkeys_cmd(app_handle: AppHandle) -> Result<(), String> {
+    crate::hotkeys::reregister_hotkeys(&app_handle)
+        .map_err(|e| e.to_string())
+}
+
+/// Set hotkey recording flag (prevents hotkeys from triggering during recording)
+#[tauri::command]
+pub async fn set_hotkey_recording(app_handle: AppHandle, recording: bool) {
+    if let Some(app_state) = app_handle.try_state::<AppState>() {
+        app_state.set_hotkey_recording(recording);
+    }
+}

@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use crate::tts::TtsProviderType;
 use crate::webview::WebViewSettings;
-use crate::config::{TwitchSettings, AudioSettings, LoggingSettings, AppSettings as ConfigAppSettings};
+use crate::config::{TwitchSettings, AudioSettings, LoggingSettings, AppSettings as ConfigAppSettings, HotkeySettings, Hotkey, HotkeyModifier};
 use crate::config::settings::{OpenAiSettings, LocalTtsSettings, TelegramTtsSettings, TtsSettings, ProxySettings, NetworkSettings, Socks5Settings, MtProxySettings, ProxyType, ProxyMode};
 use crate::config::windows::{WindowsSettings, FloatingWindowSettings, SoundPanelWindowSettings, GlobalSettings, WindowPosition};
 use crate::soundpanel::SoundBinding;
@@ -624,6 +624,92 @@ impl From<AiSettingsDto> for crate::config::AiSettings {
 }
 
 // ============================================================================
+// Hotkey Settings DTO
+// ============================================================================
+
+/// Hotkey modifier DTO
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HotkeyModifierDto {
+    Ctrl,
+    Shift,
+    Alt,
+    Super,
+}
+
+impl From<HotkeyModifier> for HotkeyModifierDto {
+    fn from(m: HotkeyModifier) -> Self {
+        match m {
+            HotkeyModifier::Ctrl => HotkeyModifierDto::Ctrl,
+            HotkeyModifier::Shift => HotkeyModifierDto::Shift,
+            HotkeyModifier::Alt => HotkeyModifierDto::Alt,
+            HotkeyModifier::Super => HotkeyModifierDto::Super,
+        }
+    }
+}
+
+impl From<HotkeyModifierDto> for HotkeyModifier {
+    fn from(dto: HotkeyModifierDto) -> Self {
+        match dto {
+            HotkeyModifierDto::Ctrl => HotkeyModifier::Ctrl,
+            HotkeyModifierDto::Shift => HotkeyModifier::Shift,
+            HotkeyModifierDto::Alt => HotkeyModifier::Alt,
+            HotkeyModifierDto::Super => HotkeyModifier::Super,
+        }
+    }
+}
+
+/// Hotkey DTO
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HotkeyDto {
+    pub modifiers: Vec<HotkeyModifierDto>,
+    pub key: String,
+}
+
+impl From<Hotkey> for HotkeyDto {
+    fn from(h: Hotkey) -> Self {
+        Self {
+            modifiers: h.modifiers.into_iter().map(|m| m.into()).collect(),
+            key: h.key,
+        }
+    }
+}
+
+impl From<HotkeyDto> for Hotkey {
+    fn from(dto: HotkeyDto) -> Self {
+        Self {
+            modifiers: dto.modifiers.into_iter().map(|m| m.into()).collect(),
+            key: dto.key,
+        }
+    }
+}
+
+/// Hotkey settings DTO
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HotkeySettingsDto {
+    pub main_window: HotkeyDto,
+    pub sound_panel: HotkeyDto,
+}
+
+impl From<HotkeySettings> for HotkeySettingsDto {
+    fn from(h: HotkeySettings) -> Self {
+        Self {
+            main_window: h.main_window.into(),
+            sound_panel: h.sound_panel.into(),
+        }
+    }
+}
+
+impl From<HotkeySettingsDto> for HotkeySettings {
+    fn from(dto: HotkeySettingsDto) -> Self {
+        Self {
+            main_window: dto.main_window.into(),
+            sound_panel: dto.sound_panel.into(),
+        }
+    }
+}
+
+// ============================================================================
 // Main App Settings DTO
 // ============================================================================
 
@@ -664,6 +750,8 @@ pub struct AppSettingsDto {
     pub soundpanel_bindings: Vec<SoundBindingDto>,
     /// AI settings
     pub ai: AiSettingsDto,
+    /// Hotkey settings
+    pub hotkeys: HotkeySettingsDto,
 }
 
 impl AppSettingsDto {
@@ -688,6 +776,7 @@ impl AppSettingsDto {
             preprocessor: PreprocessorSettingsDto::from_preprocessor(params.preprocessor),
             soundpanel_bindings: params.soundpanel_bindings,
             ai: params.config.ai.clone().into(),
+            hotkeys: params.config.hotkeys.clone().into(),
         }
     }
 }

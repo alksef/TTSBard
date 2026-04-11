@@ -12,6 +12,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 
 use crate::tts::TtsProviderType;
+use super::hotkeys::HotkeySettings;
 use super::validation::{validate_port, validate_volume};
 use tracing::{info, warn};
 
@@ -427,6 +428,8 @@ pub struct AppSettings {
     pub logging: LoggingSettings,
     #[serde(default)]
     pub ai: AiSettings,
+    #[serde(default)]
+    pub hotkeys: HotkeySettings,
 }
 
 impl Default for AppSettings {
@@ -441,6 +444,7 @@ impl Default for AppSettings {
             webview: WebViewSettings::default(),
             logging: LoggingSettings::default(),
             ai: AiSettings::default(),
+            hotkeys: HotkeySettings::default(),
         }
     }
 }
@@ -508,6 +512,18 @@ impl SettingsManager {
 
             let mut settings: AppSettings = serde_json::from_str(&content)
                 .context("Failed to parse settings")?;
+
+            // Migrate from old settings without hotkeys
+            let needs_migration = settings.hotkeys.main_window.key.is_empty()
+                || settings.hotkeys.sound_panel.key.is_empty();
+
+            if needs_migration {
+                info!("Migrating hotkey settings from defaults");
+                settings.hotkeys = HotkeySettings::default();
+                // Save migrated settings
+                let content = serde_json::to_string_pretty(&settings)?;
+                fs::write(&path, content)?;
+            }
 
             settings.validate();
             Ok(settings)
@@ -1089,5 +1105,41 @@ impl SettingsManager {
     /// Set Z.ai model for AI text correction
     pub fn set_ai_zai_model(&self, model: String) -> Result<()> {
         self.update_field("/ai/zai/model", &model)
+    }
+
+    // ========== Hotkey Settings ==========
+
+    /// Get all hotkey settings
+    pub fn get_hotkey_settings(&self) -> Result<super::hotkeys::HotkeySettings> {
+        Ok(self.cache.read().hotkeys.clone())
+    }
+
+    /// Set a specific hotkey
+    ///
+    /// # Arguments
+    /// * `name` - Either "main_window" or "sound_panel"
+    /// * `hotkey` - The new hotkey configuration
+    pub fn set_hotkey(&self, name: &str, hotkey: &super::hotkeys::Hotkey) -> Result<()> {
+        let mut settings = self.load()?;
+        match name {
+            "main_window" => settings.hotkeys.main_window = hotkey.clone(),
+            "sound_panel" => settings.hotkeys.sound_panel = hotkey.clone(),
+            _ => return Err(anyhow::anyhow!("Invalid hotkey name: {}", name).into()),
+        }
+        self.save(&settings)
+    }
+
+    /// Reset a hotkey to its default value
+    ///
+    /// # Arguments
+    /// * `name` - Either "main_window" or "sound_panel"
+    pub fn reset_hotkey_to_default(&self, name: &str) -> Result<super::hotkeys::Hotkey> {
+        let default = match name {
+            "main_window" => super::hotkeys::Hotkey::default_main_window(),
+            "sound_panel" => super::hotkeys::Hotkey::default_sound_panel(),
+            _ => return Err(anyhow::anyhow!("Invalid hotkey name: {}", name).into()),
+        };
+        self.set_hotkey(name, &default)?;
+        Ok(default)
     }
 }

@@ -7,6 +7,22 @@
 import type { SoundBinding } from '../types'
 
 // ============================================================================
+// Hotkey Settings Types
+// ============================================================================
+
+export type HotkeyModifier = 'ctrl' | 'shift' | 'alt' | 'super'
+
+export interface HotkeyDto {
+  modifiers: HotkeyModifier[]
+  key: string
+}
+
+export interface HotkeySettingsDto {
+  main_window: HotkeyDto
+  sound_panel: HotkeyDto
+}
+
+// ============================================================================
 // TTS Settings Types
 // ============================================================================
 
@@ -238,6 +254,7 @@ export interface AppSettingsDto {
   soundpanel_bindings: SoundBinding[]
   editor: EditorSettingsDto
   ai: AiSettingsDto
+  hotkeys: HotkeySettingsDto
 }
 
 // ============================================================================
