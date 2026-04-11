@@ -347,11 +347,17 @@ fn init_webview_server(app_state: &AppState, app_handle: AppHandle) {
     app_state.set_webview_event_sender(webview_tx);
 
     thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_multi_thread()
+        let rt = match tokio::runtime::Builder::new_multi_thread()
             .thread_stack_size(8 * 1024 * 1024)
             .enable_all()
             .build()
-            .expect("Failed to create tokio runtime for webview");
+        {
+            Ok(rt) => rt,
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to create tokio runtime for webview");
+                return;
+            }
+        };
 
         rt.block_on(async move {
             crate::servers::run_webview_server(
@@ -365,11 +371,17 @@ fn init_webview_server(app_state: &AppState, app_handle: AppHandle) {
     // Auto-start WebView if configured
     let app_state_autostart = app_state.clone();
     thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_multi_thread()
+        let rt = match tokio::runtime::Builder::new_multi_thread()
             .thread_stack_size(8 * 1024 * 1024)
             .enable_all()
             .build()
-            .expect("Failed to create WebView autostart runtime");
+        {
+            Ok(rt) => rt,
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to create WebView autostart runtime");
+                return;
+            }
+        };
 
         rt.block_on(async move {
             let settings = app_state_autostart.webview_settings.read().await;
@@ -392,11 +404,17 @@ fn init_twitch_client(app_state: &AppState, app_handle: AppHandle) {
     let twitch_rx = app_state.twitch_event_tx.subscribe();
 
     thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_multi_thread()
+        let rt = match tokio::runtime::Builder::new_multi_thread()
             .thread_stack_size(8 * 1024 * 1024)
             .enable_all()
             .build()
-            .expect("Failed to create Twitch tokio runtime");
+        {
+            Ok(rt) => rt,
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to create Twitch tokio runtime");
+                return;
+            }
+        };
 
         rt.block_on(async move {
             crate::servers::run_twitch_client(
@@ -410,11 +428,17 @@ fn init_twitch_client(app_state: &AppState, app_handle: AppHandle) {
     // Auto-start Twitch if configured
     let app_state_autostart = app_state.clone();
     thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_multi_thread()
+        let rt = match tokio::runtime::Builder::new_multi_thread()
             .thread_stack_size(8 * 1024 * 1024)
             .enable_all()
             .build()
-            .expect("Failed to create Twitch autostart runtime");
+        {
+            Ok(rt) => rt,
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to create Twitch autostart runtime");
+                return;
+            }
+        };
 
         rt.block_on(async move {
             let settings = app_state_autostart.twitch_settings.read().await;

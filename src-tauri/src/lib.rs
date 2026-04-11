@@ -109,7 +109,10 @@ pub fn run() {
             _ => Level::INFO,
         };
         let directive = format!("{}={}", module, module_level);
-        env_filter = env_filter.add_directive(directive.parse().expect("Invalid log directive"));
+        match directive.parse() {
+            Ok(d) => env_filter = env_filter.add_directive(d),
+            Err(e) => warn!(directive = %directive, error = %e, "Invalid log directive in settings, skipping"),
+        }
     }
 
     // WorkerGuard must live for the entire program duration.
@@ -118,17 +121,22 @@ pub fn run() {
     let _guard: &'static mut non_blocking::WorkerGuard = if cfg!(debug_assertions) {
         // Debug mode: always log to console, optionally to file
         let (non_blocking_file, guard) = if settings.logging.enabled {
-            let log_file = std::fs::OpenOptions::new()
+            let mut log_file: Box<dyn std::io::Write + Send> = match std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
                 .open(log_dir.join("ttsbard.log"))
-                .expect("Failed to open log file");
+            {
+                Ok(f) => Box::new(f),
+                Err(e) => {
+                    eprintln!("Failed to open log file: {}. Logging to stdout only.", e);
+                    Box::new(std::io::sink())
+                }
+            };
 
             // Add session separator for readability
-            use std::io::Write;
             let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
             writeln!(
-                &log_file,
+                &mut *log_file,
                 "\n====== New session: {} | Version: {} ======\n",
                 timestamp,
                 env!("CARGO_PKG_VERSION")
@@ -159,17 +167,22 @@ pub fn run() {
         leaked_guard
     } else if settings.logging.enabled {
         // Release mode + enabled: file only with non-blocking writer
-        let log_file = std::fs::OpenOptions::new()
+        let mut log_file: Box<dyn std::io::Write + Send> = match std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(log_dir.join("ttsbard.log"))
-            .expect("Failed to open log file");
+        {
+            Ok(f) => Box::new(f),
+            Err(e) => {
+                eprintln!("Failed to open log file: {}. Logging to stdout only.", e);
+                Box::new(std::io::sink())
+            }
+        };
 
         // Add session separator for readability
-        use std::io::Write;
         let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
         writeln!(
-            &log_file,
+            &mut *log_file,
             "\n====== New session: {} | Version: {} ======\n",
             timestamp,
             env!("CARGO_PKG_VERSION")

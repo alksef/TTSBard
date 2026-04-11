@@ -79,6 +79,12 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
         return Err("Текст не может быть пустым".to_string());
     }
 
+    // Load settings once for all stages
+    let settings_manager = SettingsManager::new()
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+    let settings = settings_manager.load()
+        .map_err(|e| format!("Failed to load settings: {}", e))?;
+
     // === STAGE 1: Parse prefixes ===
     let prefix_result = crate::preprocessor::parse_prefix(&text);
     let text = prefix_result.text;
@@ -100,13 +106,6 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
 
     // === STAGE 2.5: AI Text Correction (if enabled) ===
     let text = {
-        // Load settings to check if AI is enabled
-        let settings_manager = SettingsManager::new()
-            .map_err(|e| format!("Failed to create settings manager: {}", e))?;
-
-        let settings = settings_manager.load()
-            .map_err(|e| format!("Failed to load settings: {}", e))?;
-
         if settings.editor.ai {
             // Get or create cached AI client
             match state.get_or_create_ai_client(&settings.ai, &settings.tts.network) {
@@ -173,12 +172,8 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
     // Send message event immediately before playback (synchronized with audio)
     state.emit_event(AppEvent::TextSentToTts(text.clone()));
 
-    // Load audio settings
-    let settings_manager = SettingsManager::new()
-        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
-    let audio_settings = settings_manager.load()
-        .map(|s| s.audio)
-        .map_err(|e| format!("Failed to load audio settings: {}", e))?;
+    // Use already-loaded audio settings
+    let audio_settings = settings.audio;
 
     // Build speaker config
     let speaker_config = if audio_settings.speaker_enabled {
