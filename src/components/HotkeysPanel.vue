@@ -10,6 +10,7 @@ const recordingFor = ref<'main_window' | 'sound_panel' | null>(null)
 const errorMessage = ref<string | null>(null)
 const messageState = ref<'error' | 'success' | 'warning' | null>(null)
 const currentRecording = ref<{ modifiers: HotkeyDto['modifiers']; key: string } | null>(null)
+let messageTimeoutId: ReturnType<typeof setTimeout> | null = null
 
 // Load hotkey settings
 async function loadHotkeys() {
@@ -203,9 +204,13 @@ function showError(msg: string) {
     messageState.value = null
   }
 
-  setTimeout(() => {
+  if (messageTimeoutId !== null) {
+    clearTimeout(messageTimeoutId)
+  }
+  messageTimeoutId = setTimeout(() => {
     errorMessage.value = null
     messageState.value = null
+    messageTimeoutId = null
   }, 3000)
 }
 
@@ -215,6 +220,11 @@ onMounted(() => {
 
 // Cleanup on unmount
 onUnmounted(async () => {
+  if (messageTimeoutId !== null) {
+    clearTimeout(messageTimeoutId)
+    messageTimeoutId = null
+  }
+
   document.removeEventListener('keydown', handleKeyDown)
   document.removeEventListener('keyup', handleKeyUp)
 

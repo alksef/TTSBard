@@ -255,7 +255,7 @@ impl AppState {
     }
 
     pub fn init_openai_tts(&self, api_key: String) {
-        info!(key_prefix = %&api_key[..7], "init_openai_tts called");
+        info!(key_prefix = %&api_key[..7.min(api_key.len())], "init_openai_tts called");
         let mut tts = OpenAiTts::new(api_key);
         let config = self.tts_config.read();
         let voice = config.openai_voice.clone();
@@ -340,80 +340,60 @@ impl AppState {
         self.tts_config.write().fish_api_key = key;
     }
 
+    /// Read all Fish TTS config + provider in a single lock scope.
+    /// Returns None if fish_api_key is not set.
+    fn read_fish_config(&self) -> Option<(String, String, Option<String>, String, f32, u32, Option<std::sync::mpsc::Sender<AppEvent>>, Option<TtsProvider>)> {
+        let config = self.tts_config.read();
+        let api_key = config.fish_api_key.clone()?;
+        Some((
+            api_key,
+            config.fish_reference_id.clone(),
+            config.fish_proxy_url.clone(),
+            config.fish_format.clone(),
+            config.fish_temperature,
+            config.fish_sample_rate,
+            self.get_event_sender(),
+            self.tts_providers.lock().clone(),
+        ))
+    }
+
     pub fn set_fish_audio_reference_id(&self, reference_id: String) {
-        // Реинициализация провайдера если активен
-        let (api_key, proxy_url, format, temperature, sample_rate, event_tx, current_provider) = {
-            let config = self.tts_config.read();
-            let event_tx = self.get_event_sender();
-            let provider = self.tts_providers.lock().clone();
-            (
-                config.fish_api_key.clone(),
-                config.fish_proxy_url.clone(),
-                config.fish_format.clone(),
-                config.fish_temperature,
-                config.fish_sample_rate,
-                event_tx,
-                provider
-            )
-        };
-
-        if let Some(key) = api_key {
-            let mut tts = FishTts::new(key);
-            tts.set_reference_id(reference_id.clone());
-            tts.set_format(format);
-            tts.set_temperature(temperature);
-            tts.set_sample_rate(sample_rate);
-            if let Some(url) = proxy_url {
-                tts.set_proxy(Some(url));
-            }
-
-            if let Some(tx) = event_tx {
-                tts = tts.with_event_tx(tx);
-            }
-
+        if let Some((api_key, _old_ref_id, proxy_url, format, temperature, sample_rate, event_tx, current_provider)) = self.read_fish_config() {
             if matches!(current_provider.as_ref(), Some(TtsProvider::Fish(_))) {
+                let mut tts = FishTts::new(api_key);
+                tts.set_reference_id(reference_id.clone());
+                tts.set_format(format);
+                tts.set_temperature(temperature);
+                tts.set_sample_rate(sample_rate);
+                if let Some(url) = proxy_url {
+                    tts.set_proxy(Some(url));
+                }
+                if let Some(tx) = event_tx {
+                    tts = tts.with_event_tx(tx);
+                }
                 *self.tts_providers.lock() = Some(TtsProvider::Fish(tts));
             }
         }
-
         self.tts_config.write().fish_reference_id = reference_id;
     }
 
     pub fn set_fish_audio_proxy(&self, proxy_url: Option<String>) {
-        let (api_key, reference_id, format, temperature, sample_rate, event_tx, current_provider) = {
-            let config = self.tts_config.read();
-            let event_tx = self.get_event_sender();
-            let provider = self.tts_providers.lock().clone();
-            (
-                config.fish_api_key.clone(),
-                config.fish_reference_id.clone(),
-                config.fish_format.clone(),
-                config.fish_temperature,
-                config.fish_sample_rate,
-                event_tx,
-                provider
-            )
-        };
-
-        if let Some(key) = api_key {
-            let mut tts = FishTts::new(key);
-            tts.set_reference_id(reference_id.clone());
-            tts.set_format(format);
-            tts.set_temperature(temperature);
-            tts.set_sample_rate(sample_rate);
-            if let Some(url) = &proxy_url {
-                tts.set_proxy(Some(url.clone()));
-            }
-
-            if let Some(tx) = event_tx {
-                tts = tts.with_event_tx(tx);
-            }
-
+        if let Some((api_key, reference_id, _old_proxy, format, temperature, sample_rate, event_tx, current_provider)) = self.read_fish_config() {
             if matches!(current_provider.as_ref(), Some(TtsProvider::Fish(_))) {
+                let mut tts = FishTts::new(api_key);
+                tts.set_reference_id(reference_id);
+                tts.set_format(format);
+                tts.set_temperature(temperature);
+                tts.set_sample_rate(sample_rate);
+                if let Some(url) = &proxy_url {
+                    tts.set_proxy(Some(url.clone()));
+                }
+                if let Some(tx) = event_tx {
+                    tts = tts.with_event_tx(tx);
+                }
                 *self.tts_providers.lock() = Some(TtsProvider::Fish(tts));
             }
         }
-
         self.tts_config.write().fish_proxy_url = proxy_url;
     }
 
@@ -429,75 +409,53 @@ impl AppState {
         self.tts_config.write().fish_sample_rate = sample_rate;
     }
 
+    /// Read all OpenAI config + provider in a single lock scope.
+    /// Returns None if openai_key is not set.
+    fn read_openai_config(&self) -> Option<(String, String, Option<String>, Option<std::sync::mpsc::Sender<AppEvent>>, Option<TtsProvider>)> {
+        let config = self.tts_config.read();
+        let api_key = config.openai_key.clone()?;
+        Some((
+            api_key,
+            config.openai_voice.clone(),
+            config.openai_proxy_url.clone(),
+            self.get_event_sender(),
+            self.tts_providers.lock().clone(),
+        ))
+    }
+
     /// Set OpenAI voice (simplified with unified TtsConfig)
     pub fn set_openai_voice(&self, voice: String) {
-        // Read current config
-        let (api_key, proxy_url, event_tx, current_provider) = {
-            let config = self.tts_config.read();
-            let event_tx = self.get_event_sender();
-            let provider = self.tts_providers.lock().clone();
-            (
-                config.openai_key.clone(),
-                config.openai_proxy_url.clone(),
-                event_tx,
-                provider
-            )
-        };
-
-        // Reinitialize if needed
-        if let Some(key) = api_key {
-            let mut tts = OpenAiTts::new(key);
-            tts.set_voice(voice.clone());
-            if let Some(url) = proxy_url {
-                tts.set_proxy(Some(url));
-            }
-
-            if let Some(tx) = event_tx {
-                tts = tts.with_event_tx(tx);
-            }
-
+        if let Some((api_key, _old_voice, proxy_url, event_tx, current_provider)) = self.read_openai_config() {
             if matches!(current_provider.as_ref(), Some(TtsProvider::OpenAi(_))) {
+                let mut tts = OpenAiTts::new(api_key);
+                tts.set_voice(voice.clone());
+                if let Some(url) = proxy_url {
+                    tts.set_proxy(Some(url));
+                }
+                if let Some(tx) = event_tx {
+                    tts = tts.with_event_tx(tx);
+                }
                 *self.tts_providers.lock() = Some(TtsProvider::OpenAi(tts));
             }
         }
-
-        // Update voice setting
         self.tts_config.write().openai_voice = voice;
     }
 
     /// Set OpenAI proxy URL (simplified with unified TtsConfig)
     pub fn set_openai_proxy(&self, proxy_url: Option<String>) {
-        // Read current config
-        let (api_key, voice, event_tx, current_provider) = {
-            let config = self.tts_config.read();
-            let event_tx = self.get_event_sender();
-            let provider = self.tts_providers.lock().clone();
-            (
-                config.openai_key.clone(),
-                config.openai_voice.clone(),
-                event_tx,
-                provider
-            )
-        };
-
-        // Reinitialize if needed
-        if let Some(key) = api_key {
-            let mut tts = OpenAiTts::new(key);
-            tts.set_voice(voice.clone());
-            if let Some(url) = &proxy_url {
-                tts.set_proxy(Some(url.clone()));
-            }
-
-            if let Some(tx) = event_tx {
-                tts = tts.with_event_tx(tx);
-            }
-
+        if let Some((api_key, voice, _old_proxy, event_tx, current_provider)) = self.read_openai_config() {
             if matches!(current_provider.as_ref(), Some(TtsProvider::OpenAi(_))) {
+                let mut tts = OpenAiTts::new(api_key);
+                tts.set_voice(voice);
+                if let Some(url) = &proxy_url {
+                    tts.set_proxy(Some(url.clone()));
+                }
+                if let Some(tx) = event_tx {
+                    tts = tts.with_event_tx(tx);
+                }
                 *self.tts_providers.lock() = Some(TtsProvider::OpenAi(tts));
             }
         }
-
-        // Update proxy settings
         self.tts_config.write().openai_proxy_url = proxy_url;
     }
 
