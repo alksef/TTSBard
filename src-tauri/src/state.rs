@@ -28,8 +28,6 @@ pub enum ActiveWindow {
     /// Нет активного окна
     #[default]
     None,
-    /// Floating окно (перехват текста)
-    Floating,
     /// SoundPanel окно (звуковая панель)
     SoundPanel,
 }
@@ -85,9 +83,6 @@ pub struct AppState {
 
     /// Cached preprocessor for live replacement
     pub preprocessor: Arc<Mutex<Option<TextPreprocessor>>>,
-
-    /// Флаг: отключено ли закрытие по Enter (включено F6)
-    pub enter_closes_disabled: Arc<Mutex<bool>>,
 
     /// Активное плавающее окно (для взаимного исключения хоткеев)
     pub active_window: Arc<Mutex<ActiveWindow>>,
@@ -153,7 +148,6 @@ impl AppState {
             tts_config: Arc::new(RwLock::new(TtsConfig::default())),
             tts_providers: Arc::new(Mutex::new(None)),
             preprocessor: Arc::new(Mutex::new(None)),
-            enter_closes_disabled: Arc::new(Mutex::new(false)),
             active_window: Arc::new(Mutex::new(ActiveWindow::None)),
             webview_settings: Arc::new(tokio::sync::RwLock::new(WebViewSettings::default())),
             twitch_settings: Arc::new(tokio::sync::RwLock::new(TwitchSettings::default())),
@@ -473,27 +467,6 @@ impl AppState {
         *self.preprocessor.lock() = TextPreprocessor::load_from_files().ok();
     }
 
-    /// Check if Enter key closes is disabled (F6 mode)
-    pub fn is_enter_closes_disabled(&self) -> bool {
-        *self.enter_closes_disabled.lock()
-    }
-
-    /// Set Enter closes disabled mode (F6 mode)
-    pub fn set_enter_closes_disabled(&self, disabled: bool) {
-        *self.enter_closes_disabled.lock() = disabled;
-        self.emit_event(AppEvent::EnterClosesDisabled(disabled));
-    }
-
-    /// Toggle Enter closes disabled mode (F6 mode) - returns new state
-    pub fn toggle_enter_closes_disabled(&self) -> bool {
-        let mut val = self.enter_closes_disabled.lock();
-        *val = !*val;
-        let new_state = *val;
-        drop(val);
-        self.emit_event(AppEvent::EnterClosesDisabled(new_state));
-        new_state
-    }
-
     // ========== Active Window Management (взаимное исключение хоткеев) ==========
 
     /// Получить текущее активное окно
@@ -504,11 +477,6 @@ impl AppState {
     /// Установить активное окно
     pub fn set_active_window(&self, window: ActiveWindow) {
         *self.active_window.lock() = window;
-    }
-
-    /// Проверить, активен ли floating (видим + interception_enabled)
-    pub fn is_floating_active(&self) -> bool {
-        self.get_active_window() == ActiveWindow::Floating && self.is_interception_enabled()
     }
 
     /// Проверить, активен ли soundpanel (visible + interception_enabled)
@@ -524,16 +492,6 @@ impl AppState {
         } else {
             false
         }
-    }
-
-    /// Проверить, может ли floating быть активирован (soundpanel не активен)
-    pub fn can_activate_floating(&self, app_handle: &tauri::AppHandle) -> bool {
-        !self.is_soundpanel_active(app_handle)
-    }
-
-    /// Проверить, может ли soundpanel быть активирован (floating не активен)
-    pub fn can_activate_soundpanel(&self) -> bool {
-        !self.is_floating_active()
     }
 
     // ========== Twitch Event Management ==========

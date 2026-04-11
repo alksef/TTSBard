@@ -2,55 +2,8 @@ use crate::state::{AppState, ActiveWindow};
 use crate::soundpanel::SoundPanelState;
 use crate::config::HotkeySettings;
 use tauri::{AppHandle, Manager};
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tracing::{info, debug, error};
-
-/// Handler for text interception toggle (F1 - hardcoded, not customizable)
-fn handle_f1_toggle(
-    app_state: AppState,
-    app_handle: AppHandle,
-) {
-    debug!("Text interception hotkey triggered");
-
-    // Check if hotkey recording is in progress
-    if app_state.is_hotkey_recording() {
-        debug!(hotkey = "F1", status = "recording", "Hotkey recording in progress - ignoring");
-        return;
-    }
-
-    // Проверяем, включены ли хоткеи в настройках
-    if !app_state.is_hotkey_enabled() {
-        debug!(hotkey = "F1", status = "disabled", "Hotkey is disabled in settings");
-        return;
-    }
-
-    // Проверяем, не активен ли soundpanel (взаимное исключение)
-    if !app_state.can_activate_floating(&app_handle) {
-        debug!(hotkey = "F1", status = "blocked", reason = "soundpanel_active", "SoundPanel is active - ignoring shortcut");
-        return;
-    }
-
-    // Включить режим перехвата
-    info!(hotkey = "F1", action = "enabling_interception", "Detected - enabling interception");
-
-    // Показать плавающее окно если его нет
-    let floating_visible = app_handle.get_webview_window("floating")
-        .and_then(|w| w.is_visible().ok())
-        .unwrap_or(false);
-
-    if !floating_visible {
-        debug!(window = "floating", action = "showing", "Showing floating window");
-        if let Err(e) = crate::floating::show_floating_window(&app_handle) {
-            error!(error = %e, window = "floating", "Failed to show floating window");
-        }
-    }
-
-    // Устанавливаем floating как активное окно
-    app_state.set_active_window(ActiveWindow::Floating);
-
-    // Включаем режим перехвата
-    app_state.set_interception_enabled(true);
-}
 
 /// Handler for sound panel toggle
 fn handle_sound_panel(
@@ -68,12 +21,6 @@ fn handle_sound_panel(
     // Проверяем, включены ли хоткеи в настройках
     if !app_state.is_hotkey_enabled() {
         debug!(hotkey = "sound_panel", status = "disabled", "Hotkey is disabled in settings");
-        return;
-    }
-
-    // Проверяем, не активен ли floating (взаимное исключение)
-    if !app_state.can_activate_soundpanel() {
-        debug!(hotkey = "sound_panel", status = "blocked", reason = "floating_active", "Floating window is active - ignoring shortcut");
         return;
     }
 
@@ -169,19 +116,6 @@ pub fn register_from_settings(
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!("Registering hotkeys from settings");
 
-    // Register F1 (text interception) - hardcoded, not customizable
-    let f1_shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::F1);
-    let app_state_f1 = app_state.clone();
-    register_hotkey_internal(
-        app_handle,
-        app_state,
-        "F1 (interception)",
-        f1_shortcut,
-        move |app_handle| {
-            handle_f1_toggle(app_state_f1.clone(), app_handle);
-        },
-    )?;
-
     // Register sound panel hotkey
     let sound_panel_shortcut = hotkey_settings.sound_panel.to_shortcut()?;
     let app_state_sp = app_state.clone();
@@ -218,13 +152,7 @@ pub fn register_from_settings(
 pub fn unregister_all_hotkeys(app_handle: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     info!("Unregistering all hotkeys");
 
-    let global_shortcut = app_handle.global_shortcut();
-
-    // Unregister F1
-    let f1 = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::F1);
-    if global_shortcut.is_registered(f1) {
-        global_shortcut.unregister(f1)?;
-    }
+    let _global_shortcut = app_handle.global_shortcut();
 
     // Try to unregister common key combinations that might be in use
     // This is a best-effort approach since we don't track what's registered
@@ -257,7 +185,6 @@ pub fn initialize_hotkeys(
     register_from_settings(&settings.hotkeys, &app_state, &app_handle)?;
 
     info!(hotkey = "registration_complete", "Global shortcuts registered successfully");
-    info!(hotkey = "Ctrl+Shift+F1", description = "toggle_text_interception_mode (hardcoded)");
     info!(hotkey = %settings.hotkeys.main_window.format_display(), description = "show_main_window_with_always_on_top");
     info!(hotkey = %settings.hotkeys.sound_panel.format_display(), description = "show_soundpanel");
 

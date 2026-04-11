@@ -144,14 +144,6 @@ export interface WindowPositionDto {
   y?: number
 }
 
-export interface FloatingWindowSettingsDto {
-  x?: number
-  y?: number
-  opacity: number
-  bg_color: string
-  clickthrough: boolean
-}
-
 export interface SoundPanelWindowSettingsDto {
   x?: number
   y?: number
@@ -167,7 +159,6 @@ export interface GlobalSettingsDto {
 export interface WindowsSettingsDto {
   global: GlobalSettingsDto
   main: WindowPositionDto
-  floating: FloatingWindowSettingsDto
   soundpanel: SoundPanelWindowSettingsDto
 }
 

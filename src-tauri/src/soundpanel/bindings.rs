@@ -6,7 +6,7 @@ use crate::soundpanel::state::{SoundPanelState, SoundBinding};
 use crate::soundpanel::storage::{save_bindings, copy_sound_file, delete_sound_file};
 use crate::config::{WindowsManager, is_valid_hex_color};
 use crate::soundpanel::audio::play_audio_file;
-use crate::floating::emit_soundpanel_bindings_changed;
+use crate::soundpanel_window::emit_soundpanel_bindings_changed;
 use tauri::{AppHandle, State};
 use tracing::{debug, info};
 

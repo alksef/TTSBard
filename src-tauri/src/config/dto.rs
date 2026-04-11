@@ -8,7 +8,7 @@ use crate::tts::TtsProviderType;
 use crate::webview::WebViewSettings;
 use crate::config::{TwitchSettings, AudioSettings, LoggingSettings, AppSettings as ConfigAppSettings, HotkeySettings, Hotkey, HotkeyModifier};
 use crate::config::settings::{OpenAiSettings, LocalTtsSettings, TelegramTtsSettings, TtsSettings, ProxySettings, NetworkSettings, Socks5Settings, MtProxySettings, ProxyType, ProxyMode};
-use crate::config::windows::{WindowsSettings, FloatingWindowSettings, SoundPanelWindowSettings, GlobalSettings, WindowPosition};
+use crate::config::windows::{WindowsSettings, SoundPanelWindowSettings, GlobalSettings, WindowPosition};
 use crate::soundpanel::SoundBinding;
 
 // ============================================================================
@@ -370,9 +370,6 @@ pub type LoggingSettingsDto = LoggingSettings;
 /// Window position DTO
 pub type WindowPositionDto = WindowPosition;
 
-/// Floating window settings DTO
-pub type FloatingWindowSettingsDto = FloatingWindowSettings;
-
 /// Sound panel window settings DTO
 pub type SoundPanelWindowSettingsDto = SoundPanelWindowSettings;
 
@@ -384,7 +381,6 @@ pub type GlobalSettingsDto = GlobalSettings;
 pub struct WindowsSettingsDto {
     pub global: GlobalSettingsDto,
     pub main: WindowPositionDto,
-    pub floating: FloatingWindowSettingsDto,
     pub soundpanel: SoundPanelWindowSettingsDto,
 }
 
@@ -393,7 +389,6 @@ impl From<WindowsSettings> for WindowsSettingsDto {
         Self {
             global: s.global,
             main: s.main,
-            floating: s.floating,
             soundpanel: s.soundpanel,
         }
     }
@@ -404,7 +399,6 @@ impl From<WindowsSettingsDto> for WindowsSettings {
         Self {
             global: dto.global,
             main: dto.main,
-            floating: dto.floating,
             soundpanel: dto.soundpanel,
         }
     }
@@ -419,7 +413,6 @@ impl From<WindowsSettingsDto> for WindowsSettings {
 pub struct GeneralSettingsDto {
     pub hotkey_enabled: bool,
     pub interception_enabled: bool,
-    pub enter_closes_disabled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
 }
@@ -428,12 +421,10 @@ impl GeneralSettingsDto {
     pub fn from_config_and_state(
         config: &ConfigAppSettings,
         interception_enabled: bool,
-        enter_closes_disabled: bool,
     ) -> Self {
         Self {
             hotkey_enabled: config.hotkey_enabled,
             interception_enabled,
-            enter_closes_disabled,
             theme: Some(match config.theme {
                 crate::config::settings::Theme::Dark => "dark".to_string(),
                 crate::config::settings::Theme::Light => "light".to_string(),
@@ -720,7 +711,6 @@ pub struct AllSourcesParams<'a> {
     pub twitch_settings: &'a TwitchSettings,
     pub windows_settings: &'a WindowsSettings,
     pub interception_enabled: bool,
-    pub enter_closes_disabled: bool,
     pub preprocessor: Option<&'a crate::preprocessor::TextPreprocessor>,
     pub soundpanel_bindings: Vec<SoundBinding>,
 }
@@ -766,7 +756,6 @@ impl AppSettingsDto {
             general: GeneralSettingsDto::from_config_and_state(
                 params.config,
                 params.interception_enabled,
-                params.enter_closes_disabled,
             ),
             editor: EditorSettingsDto {
                 quick: params.config.editor.quick,
