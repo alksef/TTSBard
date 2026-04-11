@@ -27,13 +27,33 @@ const localTtsDescription = computed(() => {
   return `Обратная совместимость с TTSVoiceWizard. Запросы к ${props.url}`;
 });
 
-function handleSave() {
-  emit('save', props.url);
+let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+function emitSave(value: string) {
+  if (debounceTimer) clearTimeout(debounceTimer);
+  emit('save', value);
 }
 
-function handleUrlChange(event: Event) {
-  const target = event.target as HTMLInputElement;
-  emit('save', target.value);
+function handleUrlInput(event: Event) {
+  const value = (event.target as HTMLInputElement).value;
+  if (debounceTimer) clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(() => emit('save', value), 300);
+}
+
+function handleUrlBlur(event: Event) {
+  if (debounceTimer) clearTimeout(debounceTimer);
+  emit('save', (event.target as HTMLInputElement).value);
+}
+
+function handleUrlKeydown(event: KeyboardEvent) {
+  if (event.key === 'Enter') {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    emit('save', (event.target as HTMLInputElement).value);
+  }
+}
+
+function handleSave() {
+  emitSave(props.url);
 }
 </script>
 
@@ -53,7 +73,9 @@ function handleUrlChange(event: Event) {
           <label>URL:</label>
           <input
             :value="url"
-            @input="handleUrlChange"
+            @input="handleUrlInput"
+            @blur="handleUrlBlur"
+            @keydown="handleUrlKeydown"
             type="text"
             placeholder="http://127.0.0.1:8124"
             class="local-url-input"

@@ -27,17 +27,21 @@ const pageSize = 10;
 const error = ref<string | null>(null);
 const hasSearched = ref(false);
 const imageUrls = ref<Map<string, string | undefined>>(new Map());
+const imageLoadingStates = ref<Record<string, boolean>>({});
 
 const hasMore = computed(() => models.value.length < total.value);
 
 async function loadImages() {
   for (const model of models.value) {
     if (model.cover_image && !imageUrls.value.has(model.id)) {
+      imageLoadingStates.value[model.id] = true;
       try {
         const url = await fetchFishImage(model.cover_image);
         imageUrls.value.set(model.id, url);
       } catch {
         imageUrls.value.set(model.id, undefined);
+      } finally {
+        imageLoadingStates.value[model.id] = false;
       }
     }
   }
@@ -156,6 +160,9 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
           >
             <div v-if="getModelImageUrl(model)" class="model-cover">
               <img :src="getModelImageUrl(model)" :alt="model.title" />
+            </div>
+            <div v-else-if="imageLoadingStates[model.id]" class="model-cover model-cover-loading">
+              <Loader2 :size="20" class="spinner" />
             </div>
             <div v-else class="model-cover model-cover-placeholder">
               {{ model.title.charAt(0) }}
@@ -383,6 +390,13 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
   color: white;
   font-size: 1.5rem;
   font-weight: 600;
+}
+
+.model-cover-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-secondary);
 }
 
 .model-info {
