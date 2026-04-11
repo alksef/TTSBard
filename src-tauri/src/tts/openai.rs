@@ -49,22 +49,6 @@ impl OpenAiTts {
         self.proxy_url = proxy_url;
     }
 
-    /// Legacy method for backward compatibility - converts host/port to URL
-    #[allow(dead_code)]
-    pub fn set_proxy_legacy(&mut self, host: Option<String>, port: Option<u16>) {
-        self.proxy_url = match (host, port) {
-            (Some(h), Some(p)) => {
-                if h.trim().is_empty() {
-                    None
-                } else {
-                    Some(format!("http://{}:{}", h.trim(), p))
-                }
-            }
-            _ => None,
-        };
-    }
-
-    #[allow(dead_code)]
     pub fn get_proxy_url(&self) -> Option<&str> {
         self.proxy_url.as_deref()
     }
@@ -221,15 +205,5 @@ impl TtsEngine for OpenAiTts {
         );
 
         Ok(audio_data)
-    }
-
-    #[allow(dead_code)]
-    fn is_configured(&self) -> bool {
-        !self.api_key.is_empty() && self.api_key.starts_with("sk-")
-    }
-
-    #[allow(dead_code)]
-    fn name(&self) -> &str {
-        "OpenAI"
     }
 }

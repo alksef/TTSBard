@@ -9,15 +9,3 @@ mod player;
 
 pub use device::{get_output_devices, get_virtual_mic_devices, OutputDeviceInfo};
 pub use player::{AudioPlayer, OutputConfig};
-
-use serde::{Deserialize, Serialize};
-
-/// Информация об аудио устройстве
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
-pub struct DeviceInfo {
-    pub id: String,
-    pub name: String,
-    #[serde(default)]
-    pub is_default: bool,
-}

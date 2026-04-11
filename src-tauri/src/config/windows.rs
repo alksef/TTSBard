@@ -82,7 +82,6 @@ pub struct WindowsManager {
     config_dir: PathBuf,
 }
 
-#[allow(dead_code)]
 impl WindowsManager {
     /// Create a new WindowsManager
     pub fn new() -> Result<Self> {
@@ -145,13 +144,6 @@ impl WindowsManager {
         settings.main.x = x;
         settings.main.y = y;
         self.save(&settings)
-    }
-
-    /// Get main window position
-    pub fn get_main_position(&self) -> (Option<i32>, Option<i32>) {
-        self.load()
-            .map(|s| (s.main.x, s.main.y))
-            .unwrap_or((None, None))
     }
 
     // ========== Sound Panel Window ==========

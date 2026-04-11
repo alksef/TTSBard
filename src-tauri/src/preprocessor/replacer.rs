@@ -5,10 +5,6 @@ use std::fs;
 use std::path::Path;
 
 lazy_static::lazy_static! {
-    /// Regex to match \word pattern at end of text
-    static ref REPLACEMENT_PATTERN_END: Regex = Regex::new(r"\\(\w+)\s*$").unwrap();
-    /// Regex to match %username pattern at end of text
-    static ref USERNAME_PATTERN_END: Regex = Regex::new(r"%(\w+)\s*$").unwrap();
     /// Regex to match all \word patterns
     static ref REPLACEMENT_PATTERN_ALL: Regex = Regex::new(r"\\(\w+)").unwrap();
     /// Regex to match all %username patterns
@@ -109,7 +105,7 @@ impl ReplacementList {
     }
 
     /// Save replacements to a file (space-separated format)
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let mut content = String::new();
 
@@ -119,21 +115,6 @@ impl ReplacementList {
 
         fs::write(path, content)
             .context("Failed to write replacements file")?;
-
-        Ok(())
-    }
-
-    /// Save usernames to a file (space-separated format)
-    #[allow(dead_code)]
-    pub fn save_usernames_to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        let mut content = String::new();
-
-        for (key, value) in &self.usernames {
-            content.push_str(&format!("{} {}\n", key, value));
-        }
-
-        fs::write(path, content)
-            .context("Failed to write usernames file")?;
 
         Ok(())
     }
@@ -149,7 +130,6 @@ impl ReplacementList {
     }
 
     /// Get all replacements as map (for UI display)
-    #[allow(dead_code)]
     pub fn get_replacements_map(&self) -> &HashMap<String, String> {
         &self.replacements
     }
@@ -188,33 +168,6 @@ impl TextPreprocessor {
         }
 
         Ok(Self::new(replacement_list))
-    }
-
-    /// Check if text ends with a replaceable pattern and return the replacement
-    /// Returns Some((original_pattern, replacement_value)) or None
-    #[allow(dead_code)]
-    pub fn check_and_replace_end(&self, text: &str) -> Option<(String, String)> {
-        // Check for \word pattern at end
-        if let Some(caps) = REPLACEMENT_PATTERN_END.captures(text) {
-            let key = &caps[1];
-            if let Some(replacement) = self.replacements.get_replacement(key) {
-                let pattern = format!(r"\{}", key);
-                let result = text.replacen(&pattern, replacement, 1);
-                return Some((pattern, result));
-            }
-        }
-
-        // Check for %username pattern at end
-        if let Some(caps) = USERNAME_PATTERN_END.captures(text) {
-            let key = &caps[1];
-            if let Some(username) = self.replacements.get_username(key) {
-                let pattern = format!("%{}", key);
-                let result = text.replacen(&pattern, username, 1);
-                return Some((pattern, result));
-            }
-        }
-
-        None
     }
 
     /// Preprocess all text, replacing all \word and %username patterns
@@ -258,66 +211,11 @@ impl TextPreprocessor {
     pub fn replacements_count(&self) -> usize {
         self.replacements.get_replacements_map().len() + self.replacements.get_usernames_map().len()
     }
-
-    /// Reload replacements from files
-    #[allow(dead_code)]
-    pub fn reload(&mut self) -> Result<()> {
-        self.replacements = ReplacementList::load_from_file(super::replacements_file()?)
-            .unwrap_or_default();
-
-        let usernames_path = super::usernames_file()?;
-        if usernames_path.exists() {
-            let username_list = ReplacementList::load_usernames_from_file(&usernames_path)?;
-            for (key, value) in username_list.get_usernames_map() {
-                self.replacements.add_username(key.clone(), value.clone());
-            }
-        }
-
-        Ok(())
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_replacement_end_pattern() {
-        let text = r#"Hello \name "#;
-        let matches: Vec<_> = REPLACEMENT_PATTERN_END.find_iter(text).collect();
-        assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].as_str(), r#"\name "#);
-    }
-
-    #[test]
-    fn test_username_end_pattern() {
-        let text = "Hey %user ";
-        let matches: Vec<_> = USERNAME_PATTERN_END.find_iter(text).collect();
-        assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].as_str(), "%user ");
-    }
-
-    #[test]
-    fn test_check_and_replace_end() {
-        let mut replacements = ReplacementList::new();
-        replacements.add_replacement("name".to_string(), "Alice".to_string());
-
-        let preprocessor = TextPreprocessor::new(replacements);
-
-        let input = "Hello \\name ";
-        let result = preprocessor.check_and_replace_end(input);
-        assert_eq!(result, Some((r"\name".to_string(), "Hello Alice ".to_string())));
-    }
-
-    #[test]
-    fn test_check_and_replace_end_no_match() {
-        let replacements = ReplacementList::new();
-        let preprocessor = TextPreprocessor::new(replacements);
-
-        let input = "Hello world";
-        let result = preprocessor.check_and_replace_end(input);
-        assert_eq!(result, None);
-    }
 
     #[test]
     fn test_process_all_replacements() {

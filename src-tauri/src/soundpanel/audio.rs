@@ -109,15 +109,6 @@ pub fn is_supported_audio_format(filename: &str) -> bool {
     supported_extensions.iter().any(|ext| filename_lower.ends_with(ext))
 }
 
-/// Получить длительность аудиофайла (опционально)
-/// Возвращает длительность в секундах
-#[allow(dead_code)]
-pub fn get_audio_duration(_path: &str) -> Option<f64> {
-    // Для простоты возвращаем None
-    // В реальном коде можно использовать библиотеку symphonia для точного определения
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

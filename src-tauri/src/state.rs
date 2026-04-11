@@ -4,15 +4,13 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
 use tokio::sync::broadcast;
-use crate::events::{AppEvent, InputLayout, TwitchEvent, TwitchEventSender};
+use crate::events::{AppEvent, TwitchEvent, TwitchEventSender};
 use crate::tts::{TtsProvider, TtsProviderType, openai::OpenAiTts, local::LocalTts, silero::SileroTts, fish::FishTts};
 use crate::preprocessor::TextPreprocessor;
 use crate::telegram::TelegramClient;
 use crate::webview::WebViewSettings;
 use crate::config::TwitchSettings;
 use crate::ai::AiProvider;
-use tauri::{AppHandle, Manager};
-use cpal::traits::{HostTrait, DeviceTrait};
 use tracing::{info, warn, debug};
 
 /// NOTE: Lock ordering hierarchy is no longer needed with unified TtsConfig.
@@ -80,14 +78,6 @@ pub struct AppState {
 
     /// Включены ли хоткеи (runtime only, synced with settings.json)
     pub hotkey_enabled: Arc<Mutex<bool>>,
-
-    /// Текущий текст из плавающего окна
-    #[allow(dead_code)]
-    pub current_text: Arc<Mutex<String>>,
-
-    /// Текущая раскладка (EN/RU)
-    #[allow(dead_code)]
-    pub current_layout: Arc<Mutex<InputLayout>>,
 
     /// Унифицированная конфигурация TTS ( RwLock для эффективного чтения)
     pub tts_config: Arc<RwLock<TtsConfig>>,
@@ -157,8 +147,6 @@ impl AppState {
             webview_event_sender: Arc::new(Mutex::new(None)),
             interception_enabled: Arc::new(Mutex::new(false)),
             hotkey_enabled: Arc::new(Mutex::new(true)), // default true
-            current_text: Arc::new(Mutex::new(String::new())),
-            current_layout: Arc::new(Mutex::new(InputLayout::Russian)),
             tts_config: Arc::new(RwLock::new(TtsConfig::default())),
             tts_providers: Arc::new(Mutex::new(None)),
             preprocessor: Arc::new(Mutex::new(None)),
@@ -247,50 +235,6 @@ impl AppState {
 
     pub fn set_hotkey_recording(&self, recording: bool) {
         self.hotkey_recording_in_progress.store(recording, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    #[allow(dead_code)]
-    pub fn get_current_text(&self) -> String {
-        self.current_text.lock().clone()
-    }
-
-    #[allow(dead_code)]
-    pub fn set_current_text(&self, text: String) {
-        *self.current_text.lock() = text;
-    }
-
-    #[allow(dead_code)]
-    pub fn append_text(&self, ch: char) {
-        self.current_text.lock().push(ch);
-    }
-
-    #[allow(dead_code)]
-    pub fn remove_last_char(&self) {
-        self.current_text.lock().pop();
-    }
-
-    #[allow(dead_code)]
-    pub fn clear_text(&self) {
-        self.current_text.lock().clear();
-    }
-
-    #[allow(dead_code)]
-    pub fn get_current_layout(&self) -> InputLayout {
-        *self.current_layout.lock()
-    }
-
-    #[allow(dead_code)]
-    pub fn toggle_layout(&self) -> InputLayout {
-        let current = self.get_current_layout();
-        let new_layout = match current {
-            InputLayout::English => InputLayout::Russian,
-            InputLayout::Russian => InputLayout::English,
-        };
-
-        *self.current_layout.lock() = new_layout;
-
-        self.emit_event(AppEvent::LayoutChanged(new_layout));
-        new_layout
     }
 
     pub fn get_tts_provider_type(&self) -> TtsProviderType {
@@ -485,11 +429,6 @@ impl AppState {
         self.tts_config.write().fish_sample_rate = sample_rate;
     }
 
-    #[allow(dead_code)]
-    pub fn get_openai_voice(&self) -> String {
-        self.tts_config.read().openai_voice.clone()
-    }
-
     /// Set OpenAI voice (simplified with unified TtsConfig)
     pub fn set_openai_voice(&self, voice: String) {
         // Read current config
@@ -524,11 +463,6 @@ impl AppState {
 
         // Update voice setting
         self.tts_config.write().openai_voice = voice;
-    }
-
-    #[allow(dead_code)]
-    pub fn get_openai_proxy_url(&self) -> Option<String> {
-        self.tts_config.read().openai_proxy_url.clone()
     }
 
     /// Set OpenAI proxy URL (simplified with unified TtsConfig)
@@ -606,31 +540,9 @@ impl AppState {
 
     // ========== Active Window Management (взаимное исключение хоткеев) ==========
 
-    /// Получить текущее активное окно
-    #[allow(dead_code)]
-    pub fn get_active_window(&self) -> ActiveWindow {
-        *self.active_window.lock()
-    }
-
     /// Установить активное окно
     pub fn set_active_window(&self, window: ActiveWindow) {
         *self.active_window.lock() = window;
-    }
-
-    /// Проверить, активен ли soundpanel (visible + interception_enabled)
-    /// Требуется AppHandle для проверки видимости окна
-    #[allow(dead_code)]
-    pub fn is_soundpanel_active(&self, app_handle: &AppHandle) -> bool {
-        if self.get_active_window() != ActiveWindow::SoundPanel {
-            return false;
-        }
-
-        // Дополнительно проверяем, что окно действительно видимо
-        if let Some(window) = app_handle.get_webview_window("soundpanel") {
-            window.is_visible().unwrap_or(false)
-        } else {
-            false
-        }
     }
 
     // ========== Twitch Event Management ==========
@@ -638,25 +550,6 @@ impl AppState {
     /// Отправить событие Twitch
     pub fn send_twitch_event(&self, event: TwitchEvent) {
         let _ = self.twitch_event_tx.send(event);
-    }
-
-    /// Refresh the cached audio devices list
-    #[allow(dead_code)]
-    pub fn refresh_devices(&self) -> Result<(), String> {
-        let host = cpal::default_host();
-        let mut cache = self.cached_devices.write();
-        cache.clear();
-
-        for (index, device) in host.output_devices()
-            .map_err(|e| format!("Failed to get devices: {}", e))?
-            .enumerate()
-        {
-            // Use device index as key (matches the device_id format used by play_to_device)
-            let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
-            info!(index, device_name, "Caching device");
-            cache.insert(index.to_string(), device);
-        }
-        Ok(())
     }
 
     // ========== Prefix Flags Management ==========

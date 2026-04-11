@@ -138,15 +138,6 @@ impl SoundPanelState {
         }
     }
 
-    /// Остановить все активные воспроизведения звука
-    #[allow(dead_code)]
-    pub fn stop_all_sounds(&self) {
-        if let Ok(mut playbacks) = self.active_playbacks.lock() {
-            // Очищаем все handle - потоки завершатся самостоятельно
-            playbacks.drain(..);
-        }
-    }
-
     /// Установить отправитель событий
     pub fn set_event_sender(&self, sender: Sender<AppEvent>) {
         if let Ok(mut es) = self.event_sender.lock() {

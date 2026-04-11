@@ -248,13 +248,6 @@ impl AudioPlayer {
 
         result
     }
-
-    /// Остановить воспроизведение
-    #[allow(dead_code)]
-    pub fn stop(&mut self) {
-        debug!("Stopping playback");
-        self.stop_flag.store(true, Ordering::SeqCst);
-    }
 }
 
 impl Default for AudioPlayer {

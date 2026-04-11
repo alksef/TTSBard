@@ -39,14 +39,4 @@ impl TtsProvider {
             TtsProvider::Fish(tts) => tts.synthesize(text).await.map_err(|e| e.to_string()),
         }
     }
-
-    #[allow(dead_code)]
-    pub fn is_configured(&self) -> bool {
-        match self {
-            TtsProvider::OpenAi(tts) => tts.is_configured(),
-            TtsProvider::Local(tts) => tts.is_configured(),
-            TtsProvider::Silero(tts) => tts.is_configured(),
-            TtsProvider::Fish(tts) => tts.is_configured(),
-        }
-    }
 }

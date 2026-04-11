@@ -35,15 +35,8 @@ impl LocalTts {
     }
 
     /// Get the current server URL
-    #[allow(dead_code)]
     pub fn get_url(&self) -> &str {
         &self.server_url
-    }
-
-    /// Set the timeout for HTTP requests in seconds
-    #[allow(dead_code)]
-    pub fn set_timeout(&mut self, timeout_secs: u64) {
-        self.timeout_secs = timeout_secs;
     }
 
     /// Build an HTTP client with configured timeout
@@ -151,13 +144,5 @@ impl TtsEngine for LocalTts {
         );
 
         Ok(audio_data)
-    }
-
-    fn is_configured(&self) -> bool {
-        true // Local TTS is always available (no API key needed)
-    }
-
-    fn name(&self) -> &str {
-        "Local"
     }
 }
