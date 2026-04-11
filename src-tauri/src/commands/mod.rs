@@ -283,6 +283,16 @@ pub async fn set_tts_provider(
             state.init_local_tts(url);
             debug!("Local TTS initialized");
         }
+        TtsProviderType::Fish => {
+            info!("Initializing Fish Audio TTS");
+            let api_key = state.get_fish_audio_api_key();
+            if let Some(key) = api_key {
+                state.init_fish_audio_tts(key);
+                debug!("Fish Audio TTS initialized");
+            } else {
+                warn!("No API key found, Fish Audio TTS not initialized");
+            }
+        }
     }
 
     state.set_tts_provider_type(provider);
@@ -461,6 +471,230 @@ pub fn apply_openai_proxy_settings(
 
     // Apply proxy to state (which updates the active provider if OpenAI is active)
     state.set_openai_proxy(proxy_url);
+
+    Ok(())
+}
+
+// ========== Команды Fish Audio TTS ==========
+
+/// Get Fish Audio API key
+#[tauri::command]
+pub fn get_fish_audio_api_key(state: State<'_, AppState>) -> Option<String> {
+    state.get_fish_audio_api_key()
+}
+
+/// Set Fish Audio API key
+#[tauri::command]
+pub fn set_fish_audio_api_key(
+    state: State<'_, AppState>,
+    settings_manager: State<'_, SettingsManager>,
+    key: String,
+) -> Result<(), String> {
+    if key.is_empty() {
+        return Err("API Key не может быть пустым".into());
+    }
+
+    state.set_fish_audio_api_key(Some(key.clone()));
+    state.init_fish_audio_tts(key.clone());
+
+    settings_manager.set_fish_audio_api_key(Some(key))
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
+
+    Ok(())
+}
+
+/// Get Fish Audio reference ID (voice model ID)
+#[tauri::command]
+pub fn get_fish_audio_reference_id(
+    settings_manager: State<'_, SettingsManager>
+) -> String {
+    settings_manager.get_fish_audio_reference_id()
+}
+
+/// Set Fish Audio reference ID (voice model ID)
+#[tauri::command]
+pub fn set_fish_audio_reference_id(
+    state: State<'_, AppState>,
+    settings_manager: State<'_, SettingsManager>,
+    reference_id: String,
+) -> Result<(), String> {
+    if reference_id.trim().is_empty() {
+        return Err("Reference ID не может быть пустым".into());
+    }
+
+    settings_manager.set_fish_audio_reference_id(reference_id.clone())
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
+
+    state.set_fish_audio_reference_id(reference_id.clone());
+
+    Ok(())
+}
+
+/// Get Fish Audio saved voice models
+#[tauri::command]
+pub fn get_fish_audio_voices(
+    settings_manager: State<'_, SettingsManager>
+) -> Vec<crate::tts::VoiceModel> {
+    settings_manager.get_fish_audio_voices()
+}
+
+/// Add Fish Audio voice model to saved list
+#[tauri::command]
+pub fn add_fish_audio_voice(
+    settings_manager: State<'_, SettingsManager>,
+    voice: crate::tts::VoiceModel,
+) -> Result<(), String> {
+    info!(voice_id = %voice.id, voice_title = %voice.title, "Adding Fish Audio voice model");
+
+    if voice.id.trim().is_empty() {
+        error!("Voice ID is empty");
+        return Err("Voice ID не может быть пустым".into());
+    }
+
+    settings_manager.add_fish_audio_voice(voice.clone())
+        .map_err(|e| {
+            error!(error = %e, "Failed to add Fish Audio voice");
+            format!("Failed to add voice: {}", e)
+        })?;
+
+    info!(voice_id = %voice.id, "Fish Audio voice added successfully");
+    Ok(())
+}
+
+/// Remove Fish Audio voice model from saved list
+#[tauri::command]
+pub fn remove_fish_audio_voice(
+    settings_manager: State<'_, SettingsManager>,
+    voice_id: String,
+) -> Result<(), String> {
+    settings_manager.remove_fish_audio_voice(&voice_id)
+        .map_err(|e| format!("Failed to remove voice: {}", e))
+}
+
+/// Fetch Fish Audio models from API
+#[tauri::command]
+pub async fn fetch_fish_audio_models(
+    settings_manager: State<'_, SettingsManager>,
+    page_size: Option<u32>,
+    page_number: Option<u32>,
+    title: Option<String>,
+    language: Option<String>,
+) -> Result<(i32, Vec<crate::tts::VoiceModel>), String> {
+    let api_key = settings_manager.get_fish_audio_api_key()
+        .ok_or_else(|| "API ключ не установлен".to_string())?;
+
+    let proxy_url = if settings_manager.get_fish_audio_use_proxy() {
+        settings_manager.get_socks5_proxy_url()
+            .filter(|url| !url.is_empty())
+    } else {
+        None
+    };
+
+    let page_size = page_size.unwrap_or(10);
+    let page_number = page_number.unwrap_or(1);
+
+    crate::tts::fish::FishTts::list_models(
+        &api_key,
+        proxy_url.as_deref(),
+        page_size,
+        page_number,
+        title.as_deref(),
+        language.as_deref(),
+    ).await
+}
+
+/// Fetch Fish Audio cover image through proxy
+#[tauri::command]
+pub async fn fetch_fish_audio_image(
+    settings_manager: State<'_, SettingsManager>,
+    image_url: String,
+) -> Result<String, String> {
+    let proxy_url = if settings_manager.get_fish_audio_use_proxy() {
+        settings_manager.get_socks5_proxy_url()
+            .filter(|url| !url.is_empty())
+    } else {
+        None
+    };
+
+    crate::tts::fish::FishTts::fetch_image(
+        &image_url,
+        proxy_url.as_deref(),
+    ).await
+}
+
+/// Set Fish Audio format
+#[tauri::command]
+pub fn set_fish_audio_format(
+    state: State<'_, AppState>,
+    settings_manager: State<'_, SettingsManager>,
+    format: String,
+) -> Result<(), String> {
+    state.set_fish_audio_format(format.clone());
+    settings_manager.set_fish_audio_format(format)
+        .map_err(|e| format!("Failed to save format: {}", e))
+}
+
+/// Set Fish Audio temperature
+#[tauri::command]
+pub fn set_fish_audio_temperature(
+    state: State<'_, AppState>,
+    settings_manager: State<'_, SettingsManager>,
+    temperature: f32,
+) -> Result<(), String> {
+    if !(0.0..=1.0).contains(&temperature) {
+        return Err("Temperature must be between 0.0 and 1.0".into());
+    }
+
+    state.set_fish_audio_temperature(temperature);
+    settings_manager.set_fish_audio_temperature(temperature)
+        .map_err(|e| format!("Failed to save temperature: {}", e))
+}
+
+/// Set Fish Audio sample rate
+#[tauri::command]
+pub fn set_fish_audio_sample_rate(
+    state: State<'_, AppState>,
+    settings_manager: State<'_, SettingsManager>,
+    sample_rate: u32,
+) -> Result<(), String> {
+    if sample_rate == 0 {
+        return Err("Sample rate cannot be zero".into());
+    }
+
+    state.set_fish_audio_sample_rate(sample_rate);
+    settings_manager.set_fish_audio_sample_rate(sample_rate)
+        .map_err(|e| format!("Failed to save sample rate: {}", e))
+}
+
+/// Set Fish Audio use proxy flag
+#[tauri::command]
+pub fn set_fish_audio_use_proxy(
+    enabled: bool,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<(), String> {
+    settings_manager.set_fish_audio_use_proxy(enabled)
+        .map_err(|e| format!("Failed to save settings: {}", e))
+}
+
+/// Apply Fish Audio proxy settings from unified config to active provider
+#[tauri::command]
+pub fn apply_fish_audio_proxy_settings(
+    state: State<'_, AppState>,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<(), String> {
+    let settings = settings_manager.load()
+        .map_err(|e| format!("Failed to load settings: {}", e))?;
+
+    let proxy_url = if settings.tts.fish.use_proxy {
+        settings.tts.network.proxy.proxy_url.clone()
+    } else {
+        None
+    };
+
+    state.set_fish_audio_proxy(proxy_url);
+    state.set_fish_audio_format(settings.tts.fish.format);
+    state.set_fish_audio_temperature(settings.tts.fish.temperature);
+    state.set_fish_audio_sample_rate(settings.tts.fish.sample_rate);
 
     Ok(())
 }

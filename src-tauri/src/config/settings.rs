@@ -56,6 +56,8 @@ pub struct TtsSettings {
     pub provider: TtsProviderType,
     pub openai: OpenAiSettings,
     pub local: LocalTtsSettings,
+    #[serde(default)]
+    pub fish: FishAudioSettings,
     pub telegram: TelegramTtsSettings,
     #[serde(default)]
     pub network: NetworkSettings,
@@ -67,6 +69,7 @@ impl Default for TtsSettings {
             provider: TtsProviderType::OpenAi,
             openai: OpenAiSettings::default(),
             local: LocalTtsSettings::default(),
+            fish: FishAudioSettings::default(),
             telegram: TelegramTtsSettings::default(),
             network: NetworkSettings::default(),
         }
@@ -232,6 +235,48 @@ impl Default for OpenAiSettings {
             voice: "alloy".to_string(),
             proxy_host: None,
             proxy_port: None,
+            use_proxy: false,
+        }
+    }
+}
+
+/// Настройки Fish Audio TTS
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FishAudioSettings {
+    pub api_key: Option<String>,
+    /// Список сохранённых голосовых моделей с метаданными
+    #[serde(default)]
+    pub voices: Vec<crate::tts::VoiceModel>,
+    /// Текущий выбранный ID голосовой модели
+    #[serde(default)]
+    pub reference_id: String,
+    /// Формат аудио (mp3, wav, pcm, opus)
+    #[serde(default = "default_fish_format")]
+    pub format: String,
+    /// Температура (0.0-1.0)
+    #[serde(default = "default_fish_temperature")]
+    pub temperature: f32,
+    /// Частота дискретизации (Гц)
+    #[serde(default = "default_fish_sample_rate")]
+    pub sample_rate: u32,
+    /// Использовать унифицированный прокси из глобальных настроек
+    #[serde(default)]
+    pub use_proxy: bool,
+}
+
+fn default_fish_format() -> String { "mp3".to_string() }
+fn default_fish_temperature() -> f32 { 0.7 }
+fn default_fish_sample_rate() -> u32 { 44100 }
+
+impl Default for FishAudioSettings {
+    fn default() -> Self {
+        Self {
+            api_key: None,
+            voices: Vec::new(),
+            reference_id: String::new(),
+            format: "mp3".to_string(),
+            temperature: 0.7,
+            sample_rate: 44100,
             use_proxy: false,
         }
     }
@@ -779,6 +824,75 @@ impl SettingsManager {
     /// Get Telegram API ID
     pub fn get_telegram_api_id(&self) -> Option<i64> {
         self.cache.read().tts.telegram.api_id
+    }
+
+    // ========== Fish Audio Settings ==========
+
+    pub fn set_fish_audio_api_key(&self, api_key: Option<String>) -> Result<()> {
+        self.update_field("/tts/fish/api_key", &api_key)
+    }
+
+    pub fn get_fish_audio_api_key(&self) -> Option<String> {
+        self.cache.read().tts.fish.api_key.clone()
+    }
+
+    pub fn set_fish_audio_reference_id(&self, reference_id: String) -> Result<()> {
+        self.update_field("/tts/fish/reference_id", &reference_id)
+    }
+
+    pub fn get_fish_audio_reference_id(&self) -> String {
+        self.cache.read().tts.fish.reference_id.clone()
+    }
+
+    pub fn add_fish_audio_voice(&self, voice: crate::tts::VoiceModel) -> Result<()> {
+        let mut settings = self.load()?;
+        if !settings.tts.fish.voices.iter().any(|v| v.id == voice.id) {
+            settings.tts.fish.voices.push(voice);
+            self.save(&settings)?;
+        }
+        Ok(())
+    }
+
+    pub fn remove_fish_audio_voice(&self, voice_id: &str) -> Result<()> {
+        let mut settings = self.load()?;
+        settings.tts.fish.voices.retain(|v| v.id != voice_id);
+        self.save(&settings)
+    }
+
+    pub fn get_fish_audio_voices(&self) -> Vec<crate::tts::VoiceModel> {
+        self.cache.read().tts.fish.voices.clone()
+    }
+
+    pub fn set_fish_audio_format(&self, format: String) -> Result<()> {
+        self.update_field("/tts/fish/format", &format)
+    }
+
+    pub fn get_fish_audio_format(&self) -> String {
+        self.cache.read().tts.fish.format.clone()
+    }
+
+    pub fn set_fish_audio_temperature(&self, temperature: f32) -> Result<()> {
+        self.update_field("/tts/fish/temperature", &temperature)
+    }
+
+    pub fn get_fish_audio_temperature(&self) -> f32 {
+        self.cache.read().tts.fish.temperature
+    }
+
+    pub fn set_fish_audio_sample_rate(&self, sample_rate: u32) -> Result<()> {
+        self.update_field("/tts/fish/sample_rate", &sample_rate)
+    }
+
+    pub fn get_fish_audio_sample_rate(&self) -> u32 {
+        self.cache.read().tts.fish.sample_rate
+    }
+
+    pub fn set_fish_audio_use_proxy(&self, enabled: bool) -> Result<()> {
+        self.update_field("/tts/fish/use_proxy", &enabled)
+    }
+
+    pub fn get_fish_audio_use_proxy(&self) -> bool {
+        self.cache.read().tts.fish.use_proxy
     }
 
     // ========== Hotkey Settings ==========
