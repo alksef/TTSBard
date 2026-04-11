@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Globe, Zap, Music, Lightbulb, ClipboardPenLine } from 'lucide-vue-next';
+import { Globe, Zap, Music, Lightbulb, ClipboardPenLine, Keyboard } from 'lucide-vue-next';
 // Info panel - static content with hotkeys and presets documentation
 </script>
 
@@ -8,22 +8,30 @@ import { Globe, Zap, Music, Lightbulb, ClipboardPenLine } from 'lucide-vue-next'
     <!-- Глобальные горячие клавиши -->
     <section class="info-section">
       <h2><Globe :size="18" class="section-icon" /> Глобальные горячие клавиши</h2>
-      <div class="info-block">
-        <div class="hotkey-list">
-          <div class="hotkey-item">
-            <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F1</kbd>
-            <span>Включить режим перехвата текста / Показать плавающее окно</span>
-          </div>
-          <div class="hotkey-item">
-            <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F2</kbd>
-            <span>Показать звуковую панель</span>
-          </div>
-          <div class="hotkey-item">
-            <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F3</kbd>
-            <span>Показать главное окно (поверх всех, для фокуса)</span>
-          </div>
+
+      <h3>Фиксированные</h3>
+      <div class="hotkey-list">
+        <div class="hotkey-item">
+          <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F1</kbd>
+          <span>Включить режим перехвата текста / Показать плавающее окно</span>
         </div>
       </div>
+
+      <h3>Настраиваемые (значения по умолчанию)</h3>
+      <div class="hotkey-list">
+        <div class="hotkey-item">
+          <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F2</kbd>
+          <span>Показать звуковую панель</span>
+        </div>
+        <div class="hotkey-item">
+          <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F3</kbd>
+          <span>Показать главное окно (поверх всех, для фокуса)</span>
+        </div>
+      </div>
+
+      <p class="hint">
+        <Keyboard :size="14" /> Настройка горячих клавиш доступна в разделе «Горячие клавиши»
+      </p>
     </section>
 
     <!-- Обработка текста -->
@@ -132,7 +140,7 @@ import { Globe, Zap, Music, Lightbulb, ClipboardPenLine } from 'lucide-vue-next'
       <div class="hotkey-list">
         <div class="hotkey-item">
           <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F2</kbd>
-          <span>Показать/скрыть звуковую панель</span>
+          <span>Показать/скрыть звуковую панель (по умолчанию, настраивается)</span>
         </div>
       </div>
 

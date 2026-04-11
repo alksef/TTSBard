@@ -107,6 +107,10 @@ pub struct AppState {
     /// Backend ready flag - set to true when all initialization is complete
     pub backend_ready: Arc<AtomicBool>,
 
+    /// Hotkey recording flag - set to true when user is recording a new hotkey
+    /// When true, hotkey handlers should ignore their triggers
+    pub hotkey_recording_in_progress: Arc<AtomicBool>,
+
     /// Tokio runtime для async operations
     /// Arc позволяет клонировать AppState и сохраняет runtime живым
     pub runtime: Arc<tokio::runtime::Runtime>,
@@ -156,6 +160,7 @@ impl AppState {
             twitch_connection_status: Arc::new(Mutex::new(crate::events::TwitchConnectionStatus::Disconnected)),
             twitch_event_tx,
             backend_ready: Arc::new(AtomicBool::new(false)),
+            hotkey_recording_in_progress: Arc::new(AtomicBool::new(false)),
             runtime,
             cached_devices: Arc::new(RwLock::new(HashMap::new())),
             prefix_skip_twitch: Arc::new(Mutex::new(false)),
@@ -226,6 +231,14 @@ impl AppState {
 
     pub fn set_hotkey_enabled(&self, enabled: bool) {
         *self.hotkey_enabled.lock() = enabled;
+    }
+
+    pub fn is_hotkey_recording(&self) -> bool {
+        self.hotkey_recording_in_progress.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn set_hotkey_recording(&self, recording: bool) {
+        self.hotkey_recording_in_progress.store(recording, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn get_current_text(&self) -> String {

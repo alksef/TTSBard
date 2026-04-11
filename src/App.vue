@@ -11,13 +11,14 @@ import InfoPanel from './components/InfoPanel.vue'
 import WebViewPanel from './components/WebViewPanel.vue'
 import TwitchPanel from './components/TwitchPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
+import HotkeysPanel from './components/HotkeysPanel.vue'
 import ErrorToasts from './components/ErrorToasts.vue'
 import MinimalModeButton from './components/MinimalModeButton.vue'
 import { useTelegramAuth, TELEGRAM_AUTH_KEY } from './composables/useTelegramAuth'
 import { provideAppSettings } from './composables/useAppSettings'
 import { debugLog } from './utils/debug'
 
-type Panel = 'info' | 'input' | 'tts' | 'floating' | 'soundpanel' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'settings'
+type Panel = 'info' | 'input' | 'tts' | 'floating' | 'soundpanel' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'settings' | 'hotkeys'
 
 const currentPanel = ref<Panel>('input')
 
@@ -131,6 +132,7 @@ onMounted(async () => {
         <WebViewPanel v-show="currentPanel === 'webview'" />
         <TwitchPanel v-show="currentPanel === 'twitch'" />
         <SettingsPanel v-show="currentPanel === 'settings'" />
+        <HotkeysPanel v-show="currentPanel === 'hotkeys'" />
       </main>
 
       <!-- Minimal mode toggle button -->
