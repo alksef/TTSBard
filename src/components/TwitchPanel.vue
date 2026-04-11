@@ -324,7 +324,7 @@ onUnmounted(() => {
       <p class="help-text">
         Получите OAuth токен с:
       </p>
-      <a href="https://twitchtokengenerator.com" target="_blank" class="help-link">
+      <a href="https://twitchtokengenerator.com" target="_blank" rel="noopener noreferrer" class="help-link">
         https://twitchtokengenerator.com
       </a>
       <p class="help-text">
