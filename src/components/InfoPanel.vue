@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Globe, Zap, Music, Lightbulb, ClipboardPenLine, Keyboard } from 'lucide-vue-next';
+import { Globe, Music, Lightbulb, ClipboardPenLine, Keyboard } from 'lucide-vue-next';
 // Info panel - static content with hotkeys and presets documentation
 </script>
 
@@ -9,15 +9,6 @@ import { Globe, Zap, Music, Lightbulb, ClipboardPenLine, Keyboard } from 'lucide
     <section class="info-section">
       <h2><Globe :size="18" class="section-icon" /> Глобальные горячие клавиши</h2>
 
-      <h3>Фиксированные</h3>
-      <div class="hotkey-list">
-        <div class="hotkey-item">
-          <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F1</kbd>
-          <span>Включить режим перехвата текста / Показать плавающее окно</span>
-        </div>
-      </div>
-
-      <h3>Настраиваемые (значения по умолчанию)</h3>
       <div class="hotkey-list">
         <div class="hotkey-item">
           <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F2</kbd>
@@ -91,43 +82,6 @@ import { Globe, Zap, Music, Lightbulb, ClipboardPenLine, Keyboard } from 'lucide
       </div>
     </section>
 
-    <!-- Перехват текста -->
-    <section class="info-section">
-      <h2><Zap :size="18" class="section-icon" /> Режим перехвата текста</h2>
-      <p class="section-description">
-        Режим перехвата позволяет перехватывать ввод с клавиатуры в реальном времени
-        и отправлять текст в TTS. Активируется нажатием <code>Ctrl+Shift+F1</code>.
-      </p>
-
-      <h3>Горячие клавиши в режиме перехвата</h3>
-      <div class="hotkey-list">
-        <div class="hotkey-item">
-          <kbd>F8</kbd>
-          <span>Переключить раскладку клавиатуры (EN ↔ RU)</span>
-        </div>
-        <div class="hotkey-item">
-          <kbd>F6</kbd>
-          <span>Переключить режим: Enter не закрывает окно / Enter закрывает окно</span>
-        </div>
-        <div class="hotkey-item">
-          <kbd>Enter</kbd>
-          <span>Отправить текст в TTS (закрыть окно, если режим F6 выключен)</span>
-        </div>
-        <div class="hotkey-item">
-          <kbd>Escape</kbd>
-          <span>Очистить текст, отключить перехват, скрыть окно</span>
-        </div>
-        <div class="hotkey-item">
-          <kbd>Backspace</kbd>
-          <span>Удалить последний символ</span>
-        </div>
-        <div class="hotkey-item">
-          <kbd>Space</kbd>
-          <span>Добавить пробел</span>
-        </div>
-      </div>
-    </section>
-
     <!-- Звуковая панель -->
     <section class="info-section">
       <h2><Music :size="18" class="section-icon" /> Звуковая панель (Саунпад)</h2>
@@ -164,9 +118,6 @@ import { Globe, Zap, Music, Lightbulb, ClipboardPenLine, Keyboard } from 'lucide
         <span class="format-badge">FLAC</span>
       </div>
 
-      <p class="hint">
-        <Lightbulb :size="14" /> Звуковая панель настраивается в разделе «Звуковая панель»
-      </p>
     </section>
 
     <!-- Дополнительно -->
@@ -260,10 +211,10 @@ import { Globe, Zap, Music, Lightbulb, ClipboardPenLine, Keyboard } from 'lucide
   border: 1px solid var(--color-border-strong);
   border-bottom: 2px solid var(--color-border);
   border-radius: 6px;
-  padding: 0.3rem 0.6rem;
+  padding: 0.2rem 0.5rem;
   font-family: var(--font-mono);
   font-weight: 600;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   color: var(--color-text-primary);
   box-shadow: 0 2px 4px var(--kbd-shadow);
 }
