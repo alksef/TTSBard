@@ -180,18 +180,6 @@ impl AppState {
             }
         }
 
-        // Also send to WebView channel if it's a TextSentToTts event
-        if matches!(event, AppEvent::TextSentToTts(_)) {
-            if let Some(ref sender) = *self.webview_event_sender.lock() {
-                info!("Forwarding TextSentToTts to WebView channel");
-                match sender.send(event) {
-                    Ok(_) => info!("TextSentToTts sent to WebView successfully"),
-                    Err(e) => warn!(error = %e, "Failed to send to WebView"),
-                }
-            } else {
-                warn!("WebView sender is None");
-            }
-        }
     }
 
     pub fn get_event_sender(&self) -> Option<Sender<AppEvent>> {
