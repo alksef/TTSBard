@@ -374,21 +374,6 @@ impl AppState {
         self.tts_config.write().openai_proxy_url = proxy_url;
     }
 
-    /// Legacy method for backward compatibility - converts host/port to URL
-    pub fn set_openai_proxy_legacy(&self, host: Option<String>, port: Option<u16>) {
-        let proxy_url = match (host, port) {
-            (Some(h), Some(p)) => {
-                if h.trim().is_empty() {
-                    None
-                } else {
-                    Some(format!("http://{}:{}", h.trim(), p))
-                }
-            }
-            _ => None,
-        };
-        self.set_openai_proxy(proxy_url);
-    }
-
     pub fn get_local_tts_url(&self) -> String {
         self.tts_config.read().local_url.clone()
     }

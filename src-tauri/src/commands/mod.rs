@@ -559,11 +559,21 @@ pub fn add_fish_audio_voice(
 /// Remove Fish Audio voice model from saved list
 #[tauri::command]
 pub fn remove_fish_audio_voice(
+    state: State<'_, AppState>,
     settings_manager: State<'_, SettingsManager>,
     voice_id: String,
 ) -> Result<(), String> {
+    let reference_id = settings_manager.get_fish_audio_reference_id();
+    let was_selected = reference_id == voice_id;
+
     settings_manager.remove_fish_audio_voice(&voice_id)
-        .map_err(|e| format!("Failed to remove voice: {}", e))
+        .map_err(|e| format!("Failed to remove voice: {}", e))?;
+
+    if was_selected {
+        state.set_fish_audio_reference_id(String::new());
+    }
+
+    Ok(())
 }
 
 /// Fetch Fish Audio models from API
