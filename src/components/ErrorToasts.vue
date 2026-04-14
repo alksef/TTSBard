@@ -25,21 +25,6 @@ function getErrorClass(level: ErrorLevel): string {
       return 'error-toast'
   }
 }
-
-function getIcon(level: ErrorLevel): string {
-  switch (level) {
-    case ErrorLevel.ERROR:
-      return '❌'
-    case ErrorLevel.WARNING:
-      return '⚠️'
-    case ErrorLevel.INFO:
-      return 'ℹ️'
-    case ErrorLevel.SUCCESS:
-      return '✅'
-    default:
-      return '📋'
-  }
-}
 </script>
 
 <template>
