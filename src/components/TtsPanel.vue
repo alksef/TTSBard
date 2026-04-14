@@ -134,7 +134,7 @@ async function saveOpenAiVoice(voice: string) {
   try {
     await invoke('set_openai_voice', { voice });
     debugLog('[TTS] OpenAI voice saved successfully:', voice);
-    showError(`Голос "${voice}" сохранён`);
+    showSuccess(`Голос "${voice}" сохранён`);
   } catch (error) {
     debugError('[TTS] Failed to save OpenAI voice:', error);
     showError(error as string);
