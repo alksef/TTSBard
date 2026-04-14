@@ -12,6 +12,7 @@ use async_openai::{
         ChatCompletionRequestUserMessage,
     },
 };
+use backoff::ExponentialBackoff;
 use reqwest::Client as ReqwestClient;
 use std::time::Duration;
 use tracing::{error, info};
@@ -77,12 +78,18 @@ impl ZAiClient {
             })?;
 
         // Configure async-openai client with custom base URL for Z.ai
-        let client = Client::with_config(
+        // Disable internal retries (single attempt only)
+        let backoff = ExponentialBackoff {
+            max_elapsed_time: Some(Duration::from_secs(0)),
+            ..Default::default()
+        };
+        let client = Client::build(
+            http_client,
             OpenAIConfig::new()
                 .with_api_key(api_key)
-                .with_api_base(&url)
-        )
-        .with_http_client(http_client);
+                .with_api_base(&url),
+            backoff,
+        );
 
         Ok(Self {
             client,

@@ -11,6 +11,7 @@ use async_openai::{
         ChatCompletionRequestUserMessage,
     },
 };
+use backoff::ExponentialBackoff;
 use reqwest::Client as ReqwestClient;
 use std::time::Duration;
 use tracing::{error, info};
@@ -93,10 +94,16 @@ impl OpenAiClient {
         };
 
         // Build async-openai client with custom HTTP client
-        let client = Client::with_config(
-            OpenAIConfig::new().with_api_key(api_key)
-        )
-        .with_http_client(http_client);
+        // Disable internal retries (single attempt only)
+        let backoff = ExponentialBackoff {
+            max_elapsed_time: Some(Duration::from_secs(0)),
+            ..Default::default()
+        };
+        let client = Client::build(
+            http_client,
+            OpenAIConfig::new().with_api_key(api_key),
+            backoff,
+        );
 
         Ok(Self { client, model, timeout })
     }
