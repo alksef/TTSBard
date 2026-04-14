@@ -8,7 +8,7 @@
 
 **TTSBard** — Windows-приложение для синтеза речи (TTS) с минимальным отвлечением от работы.
 
-**Главная фича:** Нажал `Ctrl+Shift+F1` → печатает текст → Enter → текст озвучивается. Работает поверх любого приложения.
+**Главная фича:** Нажал горячую клавишу → печатает текст → Enter → текст озвучивается. Работает поверх любого приложения.
 
 **Платформа:** Windows 10/11 (требуется для WH_KEYBOARD_LL hook)
 
@@ -16,8 +16,15 @@
 | Frontend | Backend |
 |----------|---------|
 | Vue 3 + TypeScript + Vite | Rust + Tauri 2 |
-| Custom CSS | Tokio async runtime |
+| Custom CSS (dark/light theme) | Tokio async runtime |
 | Tauri API v2 | Windows API (Win32) |
+
+**Новое:**
+- **NEW TTS Provider:** Fish Audio (кастомные голосовые модели)
+- **NEW Feature:** AI-коррекция текста (OpenAI GPT-4o-mini, Z.ai GLM-4.5)
+- **NEW Component:** HotkeysPanel - кастомные горячие клавиши через UI
+- **NEW Settings:** Темы (dark/light), логирование, сетевые прокси
+- **NEW Architecture:** SSE вместо WebSocket для WebView
 
 ---
 
@@ -30,43 +37,84 @@
 | **main.rs** | ~50 | Точка входа, запуск Tauri |
 | **lib.rs** | ~150 | Инициализация, плагины, tray, события |
 | **state.rs** | ~200 | Глобальное состояние приложения |
-| **hook.rs** | ~250 | WH_KEYBOARD_LL hook для перехвата клавиш |
-| **hotkeys.rs** | ~100 | Глобальные hotkeys (Ctrl+Shift+F1/F2/F3) |
-| **floating.rs** | ~200 | Создание/управление floating window |
-| **window.rs** | ~80 | Win32 API utilities |
-| **settings.rs** | ~100 | Загрузка/сохранение настроек |
+| **setup.rs** | ~100 | Initial setup (first run) |
+| **event_loop.rs** | ~150 | Event loop для обработки событий |
+| **error.rs** | ~80 | Типы ошибок приложения |
+| **hotkeys.rs** | ~150 | Глобальные hotkeys (кастомizable) |
+| **soundpanel_window.rs** | ~200 | Окно звуковой панели |
 
 ### Модули (src-tauri/src/)
 
 | Модуль | Назначение |
 |--------|------------|
-| **tts/** | TTS провайдеры (OpenAI, Silero, Local) |
+| **tts/** | TTS провайдеры (OpenAI, Silero, Local, **Fish Audio**) |
+| **ai/** | AI-коррекция текста (OpenAI, Z.ai) |
 | **audio/** | Аудио вывод (dual output: динамики + виртуальный микрофон) |
-| **preprocessor/** | Препроцессор текста (presets: `\key`, `%username`) |
-| **webview/** | WebView сервер для OBS интеграции |
+| **preprocessor/** | Препроцессор текста (presets, numbers, prefix) |
+| **webview/** | WebView сервер (SSE, security, UPnP) |
 | **twitch/** | Twitch Chat интеграция |
 | **telegram/** | Telegram авторизация (Silero Bot) |
 | **soundpanel/** | Звуковая панель (sound board) |
-| **commands/** | Tauri команды (Rust → Frontend) |
-| **config/** | Управление конфигурацией |
+| **servers/** | Серверы (webview, twitch) |
+| **commands/** | Tauri команды (ai, logging, proxy, window, ...) |
+| **config/** | Управление конфигурацией (settings, hotkeys, dto, constants) |
+| **assets/** | Управление ресурсами приложения |
 
 ### Frontend (src/)
 
+**Главные компоненты:**
 | Компонент | Назначение |
 |-----------|------------|
-| **App.vue** | Главный компонент |
+| **App.vue** | Главный компонент (theme-aware) |
 | **Sidebar.vue** | Навигация |
-| **InputPanel.vue** | Ручной ввод текста |
-| **TtsPanel.vue** | Настройки TTS провайдеров |
-| **FloatingPanel.vue** | Настройки floating window |
-| **SoundPanelTab.vue** | Управление звуковой панелью |
+| **InputPanel.vue** | Ручной ввод текста (Quick/AI editor) |
+| **ErrorToasts.vue** | Глобальные тосты ошибок |
+| **MinimalModeButton.vue** | Кнопка минимального режима |
+
+**Подкаталоги компонентов:**
+
+**settings/** - Настройки приложения:
+- **SettingsGeneral.vue** - Общие настройки (тема, горячие клавиши)
+- **SettingsEditor.vue** - Настройки редактора (Quick/AI)
+- **SettingsNetwork.vue** - Сетевые настройки (прокси)
+
+**tts/** - TTS провайдеры:
+- **TtsOpenAICard.vue** - OpenAI TTS
+- **TtsSileroCard.vue** - Silero Bot (Telegram)
+- **TtsLocalCard.vue** - Local TTS server
+- **TtsFishAudioCard.vue** - Fish Audio TTS (NEW)
+- **FishAudioModelPicker.vue** - Выбор голосовых моделей Fish
+- **VoiceSelector.vue** - Селектор голосов
+- **TelegramConnectionStatus.vue** - Статус подключения Telegram
+
+**shared/** - Переиспользуемые компоненты:
+- **ProviderCard.vue** - Карточка провайдера
+- **InputWithToggle.vue** - Input с toggle
+- **StatusMessage.vue** - Статус сообщения
+- **TestResult.vue** - Результат теста
+
+**Прочие компоненты:**
+| Компонент | Назначение |
+|-----------|------------|
+| **TtsPanel.vue** | Панель настроек TTS |
 | **AudioPanel.vue** | Аудио вывод (dual output) |
 | **PreprocessorPanel.vue** | Пресеты для быстрого ввода |
 | **TwitchPanel.vue** | Twitch Chat настройки |
 | **WebViewPanel.vue** | WebView сервер для OBS |
 | **TelegramAuthModal.vue** | Модалка авторизации Telegram |
-| **SettingsPanel.vue** | Общие настройки |
+| **HotkeysPanel.vue** | Настройка горячих клавиш (NEW) |
+| **SettingsAiPanel.vue** | AI-коррекция настройки (NEW) |
+| **SoundPanelTab.vue** | Управление звуковой панелью |
 | **InfoPanel.vue** | Информация о приложении |
+
+### Composables (src/composables/)
+
+| Composable | Назначение |
+|------------|------------|
+| **useAppSettings.ts** | Управление настройками приложения (NEW) |
+| **useTelegramAuth.ts** | Авторизация в Telegram |
+| **useFishImage.ts** | Загрузка изображений Fish Audio (NEW) |
+| **useErrorHandler.ts** | Обработка ошибок (NEW) |
 
 ---
 
@@ -80,8 +128,9 @@
 │   (Vue App)     │   (HTML/JS)     │      (HTML/JS)          │
 │                 │                 │                         │
 │  - Settings     │  - Text Input   │  - Sound Grid           │
-│  - TTS Config   │  - Layout Show  │  - Key Bindings         │
-│  - Sound Mgr    │  - Submit       │  - Controls             │
+│  - TTS Config   │  - AI Editor    │  - Key Bindings         │
+│  - Sound Mgr    │  - Layout Show  │  - Controls             │
+│  - Hotkeys (UI)│  - Submit       │                         │
 └────────┬────────┴────────┬────────┴──────────┬──────────────┘
          │                 │                     │
          └─────────────────┴─────────────────────┘
@@ -102,14 +151,14 @@
          │    │                             │
     ┌────▼────▼─────┐               ┌──────▼──────┐
     │   Keyboard    │               │     TTS      │
-    │     Hook      │               │  (OpenAI)    │
+    │     Hook      │               │  (4 providers)│
     │ (WH_KEYBOARD) │               │   Service    │
     └───────────────┘               └─────────────┘
          │                                   │
     ┌────▼──────────────────────────────────▼────┐
     │         Windows API / System               │
     │  - Audio Output (rodio/system player)     │
-    │  - File System (appdata/config)           │
+    │  - File System (%USERPROFILE%\.config\)   │
     │  - Registry (hotkeys)                     │
     └───────────────────────────────────────────┘
 ```
@@ -125,7 +174,12 @@ User Keypress → Windows Hook → Special Key?
 
 **TTS Flow:**
 ```
-Text Ready → Get Text + API Key + Voice → Send to TTS API → Receive Audio → Play (dual output)
+Text Ready → [AI Correction] → Get Text + API Key + Voice → Send to TTS API → Receive Audio → Play (dual output)
+```
+
+**AI Correction Flow (NEW):**
+```
+Original Text → Send to AI (OpenAI/Z.ai) → Corrected Text → TTS
 ```
 
 ---
@@ -134,8 +188,8 @@ Text Ready → Get Text + API Key + Voice → Send to TTS API → Receive Audio 
 
 | Hotkey | Действие |
 |--------|----------|
-| `Ctrl+Shift+F1` | Режим перехвата текста / Floating Window |
-| `Ctrl+Shift+F2` | Звуковая панель / SoundPanel |
+| `Custom` | Режим перехвата текста / Floating Window (настраивается) |
+| `Custom` | Звуковая панель / SoundPanel (настраивается) |
 | `Ctrl+Alt+T` | Главное окно (фокус) |
 | `F8` | Переключить раскладку EN/RU (в режиме перехвата) |
 | `F6` | Toggle: Enter не закрывает окно / Enter закрывает окно |
@@ -144,23 +198,28 @@ Text Ready → Get Text + API Key + Voice → Send to TTS API → Receive Audio 
 | `Backspace` | Удалить последний символ |
 | `Space` | Добавить пробел с автозаменой пресетов |
 
+> **Новое в v0.3:** Горячие клавиши настраиваются через UI (HotkeysPanel)
+
 ---
 
 ## Где что искать (Troubleshooting)
 
 | Проблема | Смотри файл |
 |----------|-------------|
-| **Не работает перехват клавиш** | `hook.rs`, `hotkeys.rs` |
-| **Floating window не создается** | `floating.rs`, `window.rs` |
-| **TTS не озвучивает** | `tts/*.rs` (openai, silero, local) |
+| **Не работает перехват клавиш** | `hook.rs`, `hotkeys.rs`, `event_loop.rs` |
+| **Floating window не создается** | `soundpanel_window.rs`, `window.rs` |
+| **TTS не озвучивает** | `tts/*.rs` (openai, silero, local, fish) |
 | **Нет звука** | `audio/*.rs` (device, player) |
 | **SoundPanel не работает** | `soundpanel/*.rs` |
-| **Twitch не подключается** | `twitch/*.rs`, `commands/twitch.rs` |
-| **WebView не показывает текст** | `webview/*.rs` |
-| **Не работают пресеты** | `preprocessor/*.rs` |
-| **Настройки не сохраняются** | `settings.rs`, `config/*.rs` |
-| **Проблемы с UI** | `src/components/*.vue` |
+| **Twitch не подключается** | `twitch/*.rs`, `servers/twitch.rs`, `commands/twitch.rs` |
+| **WebView не показывает текст** | `webview/*.rs` (SSE) |
+| **Не работают пресеты** | `preprocessor/*.rs` (numbers, prefix, replacer) |
+| **Настройки не сохраняются** | `config/settings.rs`, `config/hotkeys.rs` |
+| **AI-коррекция не работает** | `ai/*.rs`, `commands/ai.rs` |
+| **Проблемы с UI** | `src/components/**/*.vue` |
 | **Состояние не обновляется** | `state.rs`, события в `events.rs` |
+| **Не работают hotkeys** | `hotkeys.rs`, `config/hotkeys.rs`, `HotkeysPanel.vue` |
+| **Ошибки прокси** | `tts/proxy_utils.rs`, `commands/proxy.rs`, `config/settings.rs` |
 
 ---
 
@@ -174,14 +233,18 @@ src-tauri/src/
 ├── lib.rs                     ← Orchestrator
 ├── state.rs                   ← Global state
 ├── events.rs                  ← Event definitions
-├── hook.rs                    ← Keyboard hook (WH_KEYBOARD_LL)
-├── hotkeys.rs                 ← Global hotkeys
-├── floating.rs                ← Floating window management
-├── window.rs                  ← Win32 utilities
-├── settings.rs                ← Settings persistence
+├── setup.rs                   ← Initial setup (NEW)
+├── event_loop.rs              ← Event loop (NEW)
+├── error.rs                   ← Error types (NEW)
+├── hotkeys.rs                 ← Global hotkeys (customizable)
+├── soundpanel_window.rs       ← SoundPanel window (NEW)
 │
 ├── commands/                  ← Tauri commands
 │   ├── mod.rs
+│   ├── ai.rs                  ← AI text correction (NEW)
+│   ├── logging.rs             ← Logging control (NEW)
+│   ├── proxy.rs               ← Proxy settings (NEW)
+│   ├── window.rs              ← Window control (NEW)
 │   ├── preprocessor.rs
 │   ├── telegram.rs
 │   ├── twitch.rs
@@ -192,7 +255,15 @@ src-tauri/src/
 │   ├── engine.rs              ← TTS engine abstraction
 │   ├── openai.rs              ← OpenAI TTS
 │   ├── silero.rs              ← Silero Bot (Telegram)
-│   └── local.rs               ← TTSVoiceWizard (local)
+│   ├── local.rs               ← TTSVoiceWizard (local)
+│   ├── fish.rs                ← Fish Audio TTS (NEW)
+│   └── proxy_utils.rs         ← Proxy utilities (NEW)
+│
+├── ai/                        ← AI text correction (NEW)
+│   ├── mod.rs
+│   ├── common.rs              ← Common types
+│   ├── openai.rs              ← OpenAI GPT-4o-mini
+│   └── zai.rs                 ← Z.ai GLM-4.5
 │
 ├── audio/                     ← Audio subsystem
 │   ├── mod.rs
@@ -201,13 +272,21 @@ src-tauri/src/
 │
 ├── preprocessor/              ← Text preprocessing
 │   ├── mod.rs
+│   ├── numbers.rs             ← Number to words (NEW)
+│   ├── prefix.rs              ← Prefix handling (NEW)
 │   └── replacer.rs            ← Replacement logic
 │
 ├── webview/                   ← WebView server for OBS
 │   ├── mod.rs
-│   ├── server.rs              ← HTTP/WebSocket server
-│   ├── websocket.rs           ← WebSocket handling
+│   ├── server.rs              ← HTTP/SSE server
+│   ├── security.rs            ← Security utilities (NEW)
+│   ├── upnp.rs                ← UPnP port forwarding (NEW)
 │   └── templates.rs           ← HTML templates
+│
+├── servers/                   ← Server implementations (NEW)
+│   ├── mod.rs
+│   ├── webview.rs             ← WebView server
+│   └── twitch.rs              ← Twitch server
 │
 ├── twitch/                    ← Twitch Chat
 │   ├── mod.rs
@@ -227,11 +306,17 @@ src-tauri/src/
 │   ├── audio.rs
 │   └── hook.rs
 │
-└── config/                    ← Configuration
-    ├── mod.rs
-    ├── settings.rs            ← Settings struct
-    ├── validation.rs          ← Validation
-    └── windows.rs             ← Windows-specific config
+├── config/                    ← Configuration
+│   ├── mod.rs
+│   ├── settings.rs            ← Settings struct
+│   ├── dto.rs                 ← DTO types (NEW)
+│   ├── hotkeys.rs             ← Hotkey settings (NEW)
+│   ├── constants.rs           ← Constants (NEW)
+│   ├── validation.rs          ← Validation
+│   └── windows.rs             ← Windows-specific config
+│
+└── assets/                    ← Asset management (NEW)
+    └── mod.rs
 ```
 
 ### Зависимости между модулями
@@ -243,16 +328,17 @@ src-tauri/src/
 └─────────────────────────────────────────────────────────────┘
          │         │         │         │         │
     ┌────▼───┐ ┌──▼───┐ ┌──▼────┐ ┌▼──────┐ ┌▼──────────┐
-    │ hook   │ │ state│ │events │ │tts    │ │ audio     │
+    │ hook   │ │ state│ │events │ │tts/ai │ │ audio     │
     └────┬───┘ └──┬───┘ └──┬────┘ └┬──────┘ └┴──────────┘
          │        │        │        │
     ┌────▼────┐   │   ┌────▼────┐  │
-    │floating │   │   │preproc  │  │
+    │soundpanel│   │   │preproc  │  │
     └─────────┘   │   └─────────┘  │
                   │                │
          ┌────────▼────────────────▼────────┐
          │          commands/               │
-         │  (preprocessor, telegram,        │
+         │  (ai, logging, proxy, window,    │
+         │   preprocessor, telegram,        │
          │   twitch, webview)               │
          └──────────────────────────────────┘
 ```
@@ -263,12 +349,13 @@ src-tauri/src/
 
 | Назначение | Путь |
 |------------|------|
-| Main Settings | `%USERPROFILE%\.config\tts-app\settings.json` |
+| Main Settings | `%USERPROFILE%\.config\ttsbard\settings.json` |
 | Preprocessor Replacements | `%APPDATA%\ttsbard\replacements.txt` |
 | Preprocessor Usernames | `%APPDATA%\ttsbard\usernames.txt` |
 | SoundPanel Bindings | `%APPDATA%\ttsbard\soundpanel_bindings.json` |
 | SoundPanel Appearance | `%APPDATA%\ttsbard\soundpanel_appearance.json` |
 | SoundPanel Audio Files | `%APPDATA%\ttsbard\soundpanel\` |
+| Logs (if enabled) | `%APPDATA%\ttsbard\logs\` |
 
 ---
 
@@ -295,6 +382,11 @@ pub enum AppEvent {
     // SoundPanel
     SoundPanelNoBinding(char),
 
+    // AI Correction (NEW)
+    AiCorrectionStart,
+    AiCorrectionComplete(String),
+    AiCorrectionError(String),
+
     // Misc
     FocusMain,
 }
@@ -318,8 +410,98 @@ await listen('show-floating', () => {});
 | **OpenAI** | OpenAI TTS API | API Key |
 | **Silero** | Silero Bot через Telegram | Авторизация в Telegram |
 | **Local** | TTSVoiceWizard (local server) | Локальный TTS сервер |
+| **Fish Audio** | Кастомные голосовые модели (NEW) | API Key + Voice Model |
 
 **Голоса OpenAI:** alloy, echo, fable, onyx, nova, shimmer
+
+**Fish Audio:** Кастомные голосовые модели с возможностью загрузки собственных
+
+---
+
+## AI Text Correction (NEW)
+
+| Провайдер | Модель | Описание |
+|-----------|--------|----------|
+| **OpenAI** | gpt-4o-mini | GPT-4o-mini для коррекции |
+| **Z.ai** | glm-4.5 | GLM-4.5 для коррекции |
+
+**Режимы редактора:**
+- **Quick Editor:** Быстрая коррекция без AI
+- **AI Editor:** AI-коррекция с выбранным провайдером
+
+**Возможности:**
+- Исправление орфографии и пунктуации
+- Замена чисел на слова (123 → "сто двадцать три")
+- Исправление ошибок раскладки (ghbdtn → привет)
+- Удаление лишних пробелов и символов
+
+---
+
+## Settings Structure
+
+```typescript
+{
+  // Audio settings
+  audio: {
+    speaker_device: string | null,
+    speaker_enabled: boolean,
+    speaker_volume: number (0-100),
+    virtual_mic_device: string | null,
+    virtual_mic_volume: number (0-100),
+  },
+
+  // TTS settings
+  tts: {
+    provider: "openai" | "silero" | "local" | "fish",
+    openai: { api_key, voice, use_proxy },
+    local: { url },
+    fish: { api_key, voices[], reference_id, format, temperature, sample_rate, use_proxy },
+    telegram: { api_id, proxy_mode },
+    network: {
+      proxy: { proxy_url },
+      mtproxy: { host, port, secret, dc_id },
+    },
+  },
+
+  // AI settings (NEW)
+  ai: {
+    provider: "openai" | "zai",
+    openai: { api_key, use_proxy, model },
+    zai: { url, api_key, model },
+    prompt: string,
+    timeout: number,
+  },
+
+  // Editor settings (NEW)
+  editor: {
+    quick: boolean,
+    ai: boolean,
+  },
+
+  // Theme (NEW)
+  theme: "dark" | "light",
+
+  // Hotkeys (NEW)
+  hotkeys: {
+    main_window: { key, ctrl, shift, alt },
+    sound_panel: { key, ctrl, shift, alt },
+  },
+  hotkey_enabled: boolean,
+
+  // Twitch
+  twitch: { enabled, username, token, channel, start_on_boot },
+
+  // WebView
+  webview: { port, bind_address, access_token, upnp_enabled, start_on_boot },
+
+  // Logging (NEW)
+  logging: {
+    enabled: boolean,
+    level: string,
+    module_levels: { [module: string]: string },
+  },
+}
+```
 
 ---
 
@@ -377,6 +559,20 @@ watch(() => state.opacity, async (newVal) => {
 });
 ```
 
+### 4. AI Correction Pattern (NEW)
+```typescript
+// Trigger AI correction
+const corrected = await invoke('ai_correct_text', {
+  text: originalText,
+  provider: 'openai',
+});
+
+// Listen for correction events
+await listen('ai-correction-complete', (e) => {
+  correctedText.value = e.payload;
+});
+```
+
 ---
 
 ## Build & Run
@@ -399,19 +595,22 @@ cd src-tauri && cargo build
 | Задача | Файлы |
 |--------|-------|
 | **Добавить Tauri команду** | `commands/*.rs`, добавить в `lib.rs` |
-| **Добавить Vue компонент** | `src/components/*.vue`, импортировать в нужное место |
-| **Изменить hotkeys** | `hotkeys.rs` |
+| **Добавить Vue компонент** | `src/components/**/*.vue`, импортировать в нужное место |
+| **Изменить hotkeys** | `hotkeys.rs`, `config/hotkeys.rs`, `HotkeysPanel.vue` |
 | **Добавить событие** | `events.rs`, emit через `tx.send()` |
-| **Изменить TTS** | `tts/*.rs` |
+| **Добавить TTS** | `tts/*.rs`, `tts/engine.rs` |
 | **Изменить аудио вывод** | `audio/*.rs` |
 | **Добавить пресет** | `preprocessor/*.rs` |
-| **WebView для OBS** | `webview/*.rs` |
-| **Twitch Chat** | `twitch/*.rs`, `commands/twitch.rs` |
+| **WebView для OBS** | `webview/*.rs` (SSE) |
+| **Twitch Chat** | `twitch/*.rs`, `servers/twitch.rs`, `commands/twitch.rs` |
 | **Telegram авторизация** | `telegram/*.rs`, `commands/telegram.rs` |
-| **SoundPanel** | `soundpanel/*.rs` |
-| **Настройки** | `settings.rs`, `config/*.rs` |
-| **Окна** | `floating.rs`, `window.rs` |
-| **UI** | `src/components/*.vue` |
+| **SoundPanel** | `soundpanel/*.rs`, `soundpanel_window.rs` |
+| **AI-коррекция** | `ai/*.rs`, `commands/ai.rs`, `SettingsAiPanel.vue` |
+| **Настройки** | `config/settings.rs`, `config/hotkeys.rs` |
+| **Окна** | `soundpanel_window.rs`, `window.rs` |
+| **UI (темa)** | `src/App.vue`, CSS variables |
+| **Логирование** | `commands/logging.rs`, `config/settings.rs` |
+| **Прокси** | `tts/proxy_utils.rs`, `commands/proxy.rs`, `config/settings.rs` |
 
 ---
 
@@ -427,4 +626,4 @@ cd src-tauri && cargo build
 
 ---
 
-*Последнее обновление: 2025-03-09*
+*Последнее обновление: 2026-04-15*

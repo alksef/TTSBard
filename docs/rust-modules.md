@@ -1,5 +1,8 @@
 # Rust Modules Reference
 
+**TTSBard**
+**Last Updated:** 2026-04-15
+
 ## Core Application Modules
 
 ### main.rs (~7 lines)
@@ -15,7 +18,7 @@ Prevents additional console window on Windows in release builds.
 
 ---
 
-### lib.rs (~1083 lines)
+### lib.rs (~500 lines)
 **Main orchestrator and application setup**
 
 **Key responsibilities:**
@@ -29,66 +32,59 @@ Prevents additional console window on Windows in release builds.
 - WebView server startup/management
 - Twitch client event loop
 - SoundPanel state management
+- Logging configuration with tracing
 
 **Main exports:**
 ```rust
+pub mod assets;
+pub mod ai;
 pub mod commands;
 pub mod audio;
 pub mod config;
+pub mod error;
+pub mod event_loop;
 pub mod events;
-pub mod floating;
-pub mod hook;
 pub mod hotkeys;
-pub mod state;
-pub mod tts;
-pub mod window;
+pub mod servers;
+pub mod setup;
 pub mod soundpanel;
+pub mod soundpanel_window;
+pub mod state;
 pub mod preprocessor;
 pub mod telegram;
+pub mod tts;
+pub mod window;
 pub mod webview;
 pub mod twitch;
 pub mod rate_limiter;
 pub mod thread_manager;
 ```
 
-**Tauri commands registered:**
-- `greet` - Test command
-- `speak_text` - TTS synthesis
-- `get_tts_provider`, `set_tts_provider` - Provider selection
-- `get_local_tts_url`, `set_local_tts_url` - Local TTS configuration
-- `get_openai_api_key`, `set_openai_api_key` - OpenAI API key
-- `get_openai_voice`, `set_openai_voice` - OpenAI voice
-- `get_openai_proxy`, `set_openai_proxy` - OpenAI proxy
-- `get_interception`, `set_interception`, `toggle_interception` - Interception mode
-- `has_api_key` - Check if API key is set
-- `get_floating_appearance` - Floating window appearance
-- `set_floating_opacity`, `set_floating_bg_color` - Appearance settings
-- `set_clickthrough`, `is_clickthrough_enabled` - Click-through mode
-- `is_enter_closes_disabled` - F6 mode
-- `toggle_floating_window` - Toggle floating window
-- `show_floating_window_cmd`, `hide_floating_window_cmd` - Window control
-- `is_floating_window_visible` - Check visibility
-- `quit_app` - Quit application
-- `get_hotkey_enabled`, `set_hotkey_enabled` - Hotkey settings
-- `get_global_exclude_from_capture`, `set_global_exclude_from_capture` - Global settings
-- `get_quick_editor_enabled`, `set_quick_editor_enabled` - Quick editor
-- `hide_main_window`, `close_floating_window`, `close_soundpanel_window` - Window control
-- SoundPanel commands (`sp_*` prefix)
-- Audio commands
-- Preprocessor commands
-- Telegram commands
-- WebView commands
-- Twitch commands
+**Tauri commands registered (100+ commands):**
+- TTS & Provider commands (speak_text, get/set_tts_provider, Fish Audio commands)
+- AI commands (correct_text, set_ai_provider, get/set_ai_settings)
+- Audio commands (get/set_audio_settings, test_audio_device)
+- Preprocessor commands (get/save_replacements, preview_preprocessing)
+- Telegram commands (telegram_init, telegram_sign_in, speak_text_silero)
+- WebView commands (get_webview_settings, security, UPnP commands)
+- Twitch commands (get/save_twitch_settings, connect/disconnect_twitch)
+- Logging commands (get/save_logging_settings)
+- Proxy commands (test_proxy, get/set_proxy_settings, MTProxy commands)
+- Window commands (resize_main_window, hotkey commands)
+- SoundPanel commands (sp_get_bindings, sp_test_sound, appearance commands)
+- Unified settings commands (get_all_app_settings, is_backend_ready)
 
 **Event handling:**
-- `handle_event()` - Internal event handler
+- Tracing subscriber setup with file and console output
+- Per-module log level configuration
 - Event forwarding to frontend via Tauri events
 - WebView server restart handling
 - Twitch event loop
+- System tray menu
 
 ---
 
-### state.rs (~461 lines)
+### state.rs (~495 lines)
 **Centralized application state management**
 
 **Thread-safe state using Arc<Mutex<T>> and Arc<RwLock<T>>:**
@@ -100,43 +96,41 @@ pub struct AppState {
     pub event_sender: Arc<Mutex<Option<Sender<AppEvent>>>>,
     pub webview_event_sender: Arc<Mutex<Option<Sender<AppEvent>>>>,
 
-    // Text Interception
+    // Runtime state
     pub interception_enabled: Arc<Mutex<bool>>,
-    pub current_text: Arc<Mutex<String>>,
-    pub current_layout: Arc<Mutex<InputLayout>>,
-
-    // Hotkeys
     pub hotkey_enabled: Arc<Mutex<bool>>,
+    pub hotkey_recording_in_progress: Arc<AtomicBool>,
+    pub backend_ready: Arc<AtomicBool>,
 
-    // TTS Providers
-    pub tts_provider_type: Arc<Mutex<TtsProviderType>>,
+    // TTS configuration (unified)
+    pub tts_config: Arc<RwLock<TtsConfig>>,
     pub tts_providers: Arc<Mutex<Option<TtsProvider>>>,
 
-    // OpenAI TTS
-    pub openai_api_key: Arc<Mutex<Option<String>>>,
-    pub openai_voice: Arc<Mutex<String>>,
-    pub openai_proxy_host: Arc<Mutex<Option<String>>>,
-    pub openai_proxy_port: Arc<Mutex<Option<u16>>>,
-
-    // Local TTS
-    pub local_tts_url: Arc<Mutex<String>>,
-
-    // Preprocessor
+    // Preprocessor cache
     pub preprocessor: Arc<Mutex<Option<TextPreprocessor>>>,
-
-    // F6 mode
-    pub enter_closes_disabled: Arc<Mutex<bool>>,
 
     // Active window (mutual exclusion)
     pub active_window: Arc<Mutex<ActiveWindow>>,
 
-    // WebView settings
-    pub webview_settings: Arc<RwLock<WebViewSettings>>,
-
-    // Twitch settings
-    pub twitch_settings: Arc<RwLock<TwitchSettings>>,
+    // WebView & Twitch settings
+    pub webview_settings: Arc<tokio::sync::RwLock<WebViewSettings>>,
+    pub twitch_settings: Arc<tokio::sync::RwLock<TwitchSettings>>,
     pub twitch_connection_status: Arc<Mutex<TwitchConnectionStatus>>,
     pub twitch_event_tx: TwitchEventSender,
+
+    // Tokio runtime for async operations
+    pub runtime: Arc<tokio::runtime::Runtime>,
+
+    // Cached audio devices
+    pub cached_devices: Arc<RwLock<HashMap<String, cpal::Device>>>,
+
+    // Prefix flags for TTS routing
+    prefix_skip_twitch: Arc<Mutex<bool>>,
+    prefix_skip_webview: Arc<Mutex<bool>>,
+
+    // AI client caching
+    pub ai_client: Arc<Mutex<Option<Arc<AiProvider>>>>,
+    pub ai_settings_hash: Arc<AtomicU64>,
 }
 ```
 
@@ -144,8 +138,24 @@ pub struct AppState {
 ```rust
 pub enum ActiveWindow {
     None,
-    Floating,
     SoundPanel,
+}
+```
+
+**TTS configuration (unified):**
+```rust
+pub struct TtsConfig {
+    pub provider_type: TtsProviderType,
+    pub openai_key: Option<String>,
+    pub openai_voice: String,
+    pub openai_proxy_url: Option<String>,
+    pub fish_api_key: Option<String>,
+    pub fish_reference_id: String,
+    pub fish_proxy_url: Option<String>,
+    pub fish_format: String,
+    pub fish_temperature: f32,
+    pub fish_sample_rate: u32,
+    pub local_url: String,
 }
 ```
 
@@ -154,26 +164,17 @@ pub enum ActiveWindow {
 - `emit_event()` - Emit event to all channels
 - `set_event_sender()`, `set_webview_event_sender()` - Configure event senders
 - `is_interception_enabled()`, `set_interception_enabled()` - Interception control
-- `get_current_text()`, `append_text()`, `remove_last_char()`, `clear_text()` - Text manipulation
-- `toggle_layout()` - Switch EN/RU layout
 - `get_tts_provider_type()`, `set_tts_provider_type()` - Provider management
-- `init_openai_tts()`, `init_local_tts()`, `init_silero_tts()` - Provider initialization
+- `init_openai_tts()`, `init_local_tts()`, `init_silero_tts()`, `init_fish_audio_tts()` - Provider initialization
 - `get_preprocessor()`, `reload_preprocessor()` - Preprocessor management
-- `is_enter_closes_disabled()`, `toggle_enter_closes_disabled()` - F6 mode
 - `get_active_window()`, `set_active_window()` - Active window management
-- `can_activate_floating()`, `can_activate_soundpanel()` - Mutual exclusion
 - `send_twitch_event()` - Twitch event emission
-
-**Lock ordering hierarchy (prevents deadlocks):**
-1. tts_providers
-2. openai_api_key
-3. event_sender
-4. webview_event_sender
-5. All other individual setting locks
+- `set_prefix_flags()`, `get_prefix_flags()`, `clear_prefix_flags()` - Prefix routing
+- `get_or_create_ai_client()`, `invalidate_ai_client()` - AI client caching with hash-based invalidation
 
 ---
 
-### events.rs (~150 lines)
+### events.rs (~115 lines)
 **Event system definitions**
 
 ```rust
@@ -182,13 +183,14 @@ pub enum AppEvent {
     InterceptionChanged(bool),
     LayoutChanged(InputLayout),
     TextReady(String),
+    TextSentToTts(String),
 
     // TTS
     TtsStatusChanged(TtsStatus),
     TtsError(String),
     TtsProviderChanged(TtsProviderType),
 
-    // Floating Window
+    // Floating Window (deprecated, kept for compatibility)
     ShowFloatingWindow,
     HideFloatingWindow,
     UpdateFloatingText(String),
@@ -203,9 +205,10 @@ pub enum AppEvent {
     SoundPanelAppearanceChanged,
 
     // WebView
-    TextSentToTts(String),
     WebViewServerError(String),
     RestartWebViewServer,
+    ReloadWebViewTemplates,
+    ToggleUpnp(bool),
 
     // Twitch
     TwitchStatusChanged(TwitchConnectionStatus),
@@ -215,6 +218,7 @@ pub enum AppEvent {
     UpdateTrayIcon(bool),
     EnterClosesDisabled(bool),
     FocusMain,
+    Quit,
 }
 ```
 
@@ -230,8 +234,8 @@ pub enum InputLayout {
 ```rust
 pub enum TtsStatus {
     Idle,
-    Loading,
     Speaking,
+    Error(String),
 }
 ```
 
@@ -256,30 +260,122 @@ pub enum TwitchConnectionStatus {
 
 ---
 
+### setup.rs (~600 lines)
+**Application initialization**
+
+**Key responsibilities:**
+- Settings loading and validation
+- Window initialization with saved positions
+- System tray setup with menu
+- Event system setup (MPSC channels)
+- WebView and Twitch server initialization
+- TTS provider initialization
+- SoundPanel bindings and appearance loading
+- Hotkey initialization
+
+**Key functions:**
+- `init_app()` - Main initialization function
+- `init_tts_provider()` - Initialize TTS provider from settings
+- `init_windows()` - Initialize all windows with saved positions
+- `init_tray()` - Create system tray with menu
+- `init_webview_server()` - Start WebView server thread
+- `init_twitch_client()` - Start Twitch client thread
+
+---
+
+### event_loop.rs (~250 lines)
+**Event handling and routing**
+
+**EventHandler struct:**
+```rust
+pub struct EventHandler {
+    state: AppState,
+    app_handle: AppHandle,
+}
+```
+
+**Key methods:**
+- `new()` - Create event handler
+- `handle()` - Route events to appropriate handlers
+- `process_interception_changed()` - Handle interception mode changes
+- `process_text_ready()` - Handle text ready for TTS
+- `process_text_sent_to_tts()` - Handle text sent to TTS (for WebView)
+- `process_show_main_window()` - Show main window
+- `process_update_tray_icon()` - Update tray icon
+
+---
+
+### error.rs (~89 lines)
+**Unified error handling**
+
+**Error types:**
+```rust
+#[derive(Debug, Error)]
+pub enum AppError {
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Network error: {0}")]
+    Network(String),
+
+    #[error("TTS synthesis failed: {0}")]
+    TtsFailed(String),
+
+    #[error("Audio playback error: {0}")]
+    Audio(String),
+
+    #[error("Configuration error: {0}")]
+    Config(String),
+
+    #[error("Serialization error: {0}")]
+    Serialization(#[from] serde_json::Error),
+
+    #[error("Telegram error: {0}")]
+    Telegram(String),
+
+    #[error("HTTP request error: {0}")]
+    Http(String),
+
+    #[error("{0}")]
+    Other(String),
+}
+```
+
+**Helper traits:**
+- `ErrorContext<T>` - Add context to errors
+- `OptionExt<T>` - Convert Option to Result with error context
+
+---
+
 ## TTS Module
 
-### tts/mod.rs (~46 lines)
+### tts/mod.rs (~44 lines)
 **TTS module exports and provider management**
 
 **Exports:**
 ```rust
 pub mod engine;
+pub mod fish;
 pub mod local;
 pub mod openai;
+pub mod proxy_utils;
 pub mod silero;
 
 pub use engine::TtsEngine;
+pub use fish::VoiceModel;
 ```
 
 **Provider types:**
 ```rust
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum TtsProviderType {
     #[default]
     OpenAi,
     Silero,
     Local,
+    Fish,
 }
 ```
 
@@ -289,6 +385,7 @@ pub enum TtsProvider {
     OpenAi(OpenAiTts),
     Silero(SileroTts),
     Local(LocalTts),
+    Fish(FishTts),
 }
 ```
 
@@ -314,7 +411,7 @@ All TTS providers implement this trait for unified interface.
 
 ---
 
-### tts/openai.rs (~176 lines)
+### tts/openai.rs (~185 lines)
 **OpenAI TTS provider**
 
 **Implementation:**
@@ -322,8 +419,7 @@ All TTS providers implement this trait for unified interface.
 pub struct OpenAiTts {
     api_key: String,
     voice: String,
-    proxy_host: Option<String>,
-    proxy_port: Option<u16>,
+    proxy_url: Option<String>,
     timeout_secs: u64,
     event_tx: Option<EventSender>,
 }
@@ -339,6 +435,7 @@ pub struct OpenAiTts {
 - `set_proxy()` - Configure proxy
 - `synthesize()` - Generate speech (MP3 audio)
 - `is_configured()` - Validate API key
+- `get_proxy_url()` - Get configured proxy URL
 - `build_client()` - Build HTTP client with proxy support
 
 **Request format:**
@@ -354,7 +451,7 @@ struct TtsRequest {
 
 ---
 
-### tts/silero.rs (~200 lines)
+### tts/silero.rs (~95 lines)
 **Silero Bot TTS provider (via Telegram)**
 
 **Implementation:**
@@ -379,7 +476,7 @@ pub struct SileroTts {
 
 ---
 
-### tts/local.rs (~150 lines)
+### tts/local.rs (~145 lines)
 **Local TTS provider (TTSVoiceWizard)**
 
 **Implementation:**
@@ -401,6 +498,242 @@ pub struct LocalTts {
 - `is_configured()` - Validate URL
 
 **Use case:** Offline TTS without internet connection
+
+---
+
+### tts/fish.rs (~282 lines)
+**Fish Audio TTS provider**
+
+**Voice model structure:**
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VoiceModel {
+    pub id: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub cover_image: Option<String>,
+    pub languages: Vec<String>,
+    pub author_nickname: Option<String>,
+}
+```
+
+**Implementation:**
+```rust
+pub struct FishTts {
+    api_key: String,
+    reference_id: String,
+    proxy_url: Option<String>,
+    timeout_secs: u64,
+    event_tx: Option<EventSender>,
+    format: String,
+    temperature: f32,
+    sample_rate: u32,
+}
+```
+
+**Key methods:**
+- `new(api_key)` - Create new instance
+- `set_reference_id()` - Set voice model ID
+- `set_proxy()` - Configure proxy
+- `set_format()` - Set audio format (mp3, wav, pcm, opus)
+- `set_temperature()` - Set temperature (0.0-1.0)
+- `set_sample_rate()` - Set sample rate (Hz)
+- `synthesize()` - Generate speech
+- `list_models()` - Fetch available voice models from API
+- `fetch_image()` - Fetch voice model image (returns base64 data URL)
+
+**API endpoint:** `https://api.fish.audio/v1/tts`
+
+**Configuration:**
+- Format: mp3, wav, pcm, opus
+- Temperature: 0.0-1.0 (default 0.7)
+- Sample rate: 8000-48000 Hz (default 44100)
+
+---
+
+### tts/proxy_utils.rs (~48 lines)
+**Shared proxy utilities**
+
+**Functions:**
+```rust
+pub fn parse_proxy_url(url: &str) -> Result<reqwest::Proxy, String>
+pub fn build_client_with_proxy(proxy_url: Option<&str>, timeout: Duration) -> Result<Client, String>
+```
+
+**Supported schemes:**
+- socks5://, socks5h://
+- socks4://, socks4a://
+- http://, https://
+
+**Use case:** Unified proxy configuration for all HTTP clients (TTS, AI, etc.)
+
+---
+
+## AI Module
+
+### ai/mod.rs (~173 lines)
+**AI text correction module**
+
+**Exports:**
+```rust
+pub mod common;
+pub mod openai;
+pub mod zai;
+
+pub use common::{AiClient, AiError, AiProvider};
+```
+
+**Error types:**
+```rust
+#[derive(Debug, thiserror::Error)]
+pub enum AiError {
+    #[error("AI not configured: {0}")]
+    NotConfigured(String),
+
+    #[error("Failed to build client: {0}")]
+    ClientBuild(String),
+
+    #[error("Invalid proxy: {0}")]
+    InvalidProxy(String),
+
+    #[error("Network error: {0}")]
+    Network(String),
+
+    #[error("Connection failed: {0}")]
+    Connection(String),
+
+    #[error("Request timeout: {0}")]
+    Timeout(String),
+
+    #[error("API error (status {status}): {message}")]
+    ApiError { status: u16, message: String },
+
+    #[error("Invalid response: {0}")]
+    InvalidResponse(String),
+
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
+}
+```
+
+**AI client trait:**
+```rust
+#[async_trait]
+pub trait AiClient: Send + Sync {
+    async fn correct(&self, text: &str, prompt: &str) -> Result<String, AiError>;
+}
+```
+
+**Provider enum:**
+```rust
+pub enum AiProvider {
+    OpenAi(openai::OpenAiClient),
+    ZAi(zai::ZAiClient),
+}
+```
+
+**Factory function:**
+```rust
+pub fn create_ai_client(settings: &AiSettings, network_settings: &NetworkSettings) -> Result<AiProvider, AiError>
+```
+
+**Settings hash function:**
+```rust
+pub fn hash_ai_settings(settings: &AiSettings) -> u64
+```
+Computes a hash of AI settings for cache invalidation. Hashes provider type, API keys, and proxy settings.
+
+---
+
+### ai/common.rs (~132 lines)
+**Common functionality for AI clients**
+
+**Constants:**
+```rust
+pub const DEFAULT_TEMPERATURE: f32 = 0.7;
+pub const DEFAULT_MAX_TOKENS: u32 = 4096;
+```
+
+**Validation functions:**
+```rust
+pub fn validate_correction_input(text: &str, prompt: &str) -> Result<(), AiError>
+pub fn validate_correction_result(corrected: &str, original: &str, provider_name: &str) -> Result<(), AiError>
+```
+
+**Response extraction:**
+```rust
+pub fn extract_response_content(response: &CreateChatCompletionResponse, provider_name: &str) -> Result<String, AiError>
+```
+
+**Logging:**
+```rust
+pub fn log_response_preview(content: &str, provider_name: &str)
+```
+
+---
+
+### ai/openai.rs (~205 lines)
+**OpenAI chat completions client for AI text correction**
+
+**Implementation:**
+```rust
+pub struct OpenAiClient {
+    client: Client<OpenAIConfig>,
+    model: String,
+    timeout: u64,
+}
+```
+
+**Key methods:**
+- `new(settings, network_settings)` - Create client from settings
+- `send_request()` - Send chat completion request
+- `correct()` - Correct text using AI (implements AiClient trait)
+
+**Features:**
+- Uses async-openai crate
+- Proxy support (SOCKS5, HTTP)
+- Customizable model (default: gpt-4o-mini)
+- Timeout configuration
+- Single attempt (no internal retries)
+
+**Error handling:**
+- Timeout detection
+- Connection failure detection
+- 401 (invalid API key)
+- 429 (rate limit/quota exceeded)
+
+---
+
+### ai/zai.rs (~220 lines)
+**Z.ai (OpenAI-compatible) AI client for text correction**
+
+**Implementation:**
+```rust
+pub struct ZAiClient {
+    client: Client<OpenAIConfig>,
+    model: String,
+    timeout: u64,
+}
+```
+
+**Key methods:**
+- `new(settings, network_settings)` - Create client from settings
+- `send_request()` - Send correction request to Z.ai API
+- `correct()` - Correct text using AI (implements AiClient trait)
+
+**Features:**
+- Uses async-openai crate with custom base URL
+- Compatible with Anthropic/GLM-4.5 API
+- Customizable model
+- Timeout configuration
+- No proxy support (uses Z.ai's built-in proxy)
+
+**Error handling:**
+- 404 (endpoint not found)
+- Missing field 'id' (non-OpenAI format response)
+- 429 (insufficient balance/rate limit)
+
+**Expected base URL:** `https://api.z.ai/api/paas/v4`
 
 ---
 
@@ -484,12 +817,14 @@ pub struct OutputConfig {
 
 ## Preprocessor Module
 
-### preprocessor/mod.rs (~29 lines)
+### preprocessor/mod.rs (~33 lines)
 **Text preprocessor module**
 
 **Exports:**
 ```rust
 pub use replacer::TextPreprocessor;
+pub use numbers::process_numbers;
+pub use prefix::parse_prefix;
 ```
 
 **File paths:**
@@ -503,7 +838,7 @@ pub use replacer::TextPreprocessor;
 
 ---
 
-### preprocessor/replacer.rs (~150 lines)
+### preprocessor/replacer.rs (~280 lines)
 **Text replacement logic**
 
 **Implementation:**
@@ -536,9 +871,69 @@ greeting Hello there
 
 ---
 
+### preprocessor/numbers.rs (~212 lines)
+**Number to text conversion with gender agreement**
+
+**Purpose:** Convert numbers to Russian text with grammatical gender agreement
+
+**Examples:**
+- "1 книга" → "одна книга"
+- "2 книги" → "две книги"
+- "-10 градусов" → "минус десять градусов"
+- "У меня 5 яблок" → "У меня пять яблок"
+
+**Gender detection:**
+```rust
+fn detect_gender(word: &str) -> RussianGender
+```
+Detects grammatical gender by suffix:
+- Feminine: ends with а, я, ь
+- Neuter: ends with о, е
+- Masculine: default
+
+**Number conversion:**
+```rust
+pub fn process_numbers(text: &str) -> String
+```
+Uses `russian_numbers` crate for conversion
+
+**Limitations:**
+- Numbers larger than 999,999,999,999,999,999 are clamped
+- Plural forms may not be detected correctly (heuristic limitation)
+
+---
+
+### preprocessor/prefix.rs (~131 lines)
+**Text routing prefixes**
+
+**Purpose:** Control event routing with text prefixes
+
+**Prefix syntax:**
+- "!!text" → Skip both Twitch and WebView
+- "!text" → Skip Twitch, send to WebView
+- "text" → Normal routing (both Twitch and WebView)
+
+**Result structure:**
+```rust
+pub struct PrefixResult {
+    pub text: String,
+    pub skip_twitch: bool,
+    pub skip_webview: bool,
+}
+```
+
+**Parse function:**
+```rust
+pub fn parse_prefix(text: &str) -> PrefixResult
+```
+
+**Use case:** Control where TTS text is sent (Twitch chat, WebView OBS source)
+
+---
+
 ## WebView Module
 
-### webview/mod.rs (~35 lines)
+### webview/mod.rs (~14 lines)
 **WebView server for OBS integration**
 
 **Exports:**
@@ -557,6 +952,8 @@ pub struct WebViewSettings {
     pub html_template: String,
     pub css_style: String,
     pub animation_speed: u32,
+    pub access_token: Option<String>,
+    pub upnp_enabled: bool,
 }
 ```
 
@@ -567,7 +964,7 @@ pub struct WebViewSettings {
 
 ---
 
-### webview/server.rs (~98 lines)
+### webview/server.rs (~400 lines)
 **HTTP/WebSocket server for OBS**
 
 **Implementation:**
@@ -585,14 +982,13 @@ pub struct WebViewServer {
 
 **Routes:**
 - `GET /` - Serve HTML page
-- `GET /ws` - WebSocket endpoint
+- `GET /ws` - WebSocket endpoint (with optional token auth)
 
-**Use case:** Display TTS text in OBS Studio or any browser
-
-**Integration:**
-- Receives `TextSentToTts` events
-- Broadcasts via WebSocket to connected clients
-- Supports custom HTML/CSS templates
+**Features:**
+- Token authentication (optional)
+- UPnP port forwarding (optional)
+- WebSocket broadcasting
+- Custom HTML/CSS templates
 - Typewriter animation effect
 
 ---
@@ -636,145 +1032,113 @@ pub struct WebViewServer {
 
 ---
 
-## Twitch Module
+### webview/security.rs (~89 lines)
+**WebView security module**
 
-### twitch/mod.rs (~59 lines)
-**Twitch Chat integration**
-
-**Exports:**
+**Functions:**
 ```rust
-pub use client::{TwitchClient, TwitchStatus};
+pub fn is_local_network(ip: IpAddr) -> bool
+pub fn validate_token(provided: Option<&str>, stored: Option<&str>) -> bool
 ```
 
-**Settings:**
-```rust
-pub struct TwitchSettings {
-    pub enabled: bool,
-    pub username: String,
-    pub token: String,
-    pub channel: String,
-    pub start_on_boot: bool,
-}
-```
+**Network detection:**
+Returns true for:
+- IPv4 loopback (127.0.0.0/8)
+- IPv4 private networks (192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12)
+- IPv4 link-local (169.254.0.0/16)
+- IPv6 loopback (::1)
+- IPv6 unique local (fc00::/7)
 
-**Validation:**
-- `is_valid()` - Validate settings
-- `irc_token()` - Get IRC token with `oauth:` prefix
+**Token validation:**
+- Constant-time comparison (prevents timing attacks)
+- Uses subtle crate
 
 ---
 
-### twitch/client.rs (~300 lines)
-**Twitch IRC client**
+### webview/upnp.rs (~163 lines)
+**UPnP port forwarding module**
 
-**Status enum:**
+**Implementation:**
 ```rust
-pub enum TwitchStatus {
-    Disconnected,
-    Connecting,
-    Connected,
-    Error(String),
+pub struct UpnpManager {
+    port: u16,
+    gateway: Arc<Mutex<Option<Gateway>>>,
 }
 ```
 
 **Key methods:**
-- `new()` - Create client
-- `start()` - Connect to Twitch IRC
-- `stop()` - Disconnect
-- `status()` - Get current status
-- `send_message()` - Send message to chat
-
-**IRC server:** `irc.chat.twitch.tv:6697` (TLS)
+- `new(port)` - Create UPnP manager
+- `forward()` - Forward port on router
+- `remove()` - Remove port forwarding
 
 **Features:**
-- Automatic reconnection
-- OAuth token authentication
-- Channel joining
-- Message sending
+- Automatic UPnP gateway discovery
+- Port forwarding with lease duration (1 hour)
+- Automatic cleanup on drop
+- Graceful failure if UPnP unavailable
+
+**Use case:** Automatically open external port for OBS WebView Source
 
 ---
 
-## Telegram Module
+## Servers Module
 
-### telegram/mod.rs (~8 lines)
-**Telegram integration exports**
+### servers/mod.rs (~12 lines)
+**Network server management**
 
 **Exports:**
 ```rust
-pub use client::TelegramClient;
-pub use types::{UserInfo, TtsResult, CurrentVoice, Limits};
-pub use bot::{SileroTtsBot, get_current_voice, get_limits};
+pub use webview::run_webview_server;
+pub use twitch::run_twitch_client;
 ```
 
-**Purpose:** Silero Bot integration for free TTS
+**Purpose:** Manages WebView and Twitch servers for the application. Refactored from lib.rs server threads.
 
 ---
 
-### telegram/client.rs (~200 lines)
-**Telegram client for Silero Bot**
+### servers/webview.rs (~150 lines)
+**WebView server runner**
 
-**Key methods:**
-- `new()` - Create client
-- `connect()` - Connect to Telegram
-- `disconnect()` - Disconnect
-- `is_connected()` - Check connection status
-- `get_user_info()` - Get user info
-- `get_current_voice()` - Get current voice
-- `get_limits()` - Get usage limits
-
-**Authentication:**
-- Phone number based
-- SMS/code verification
-- Session persistence
-
----
-
-### telegram/bot.rs (~150 lines)
-**Silero Bot API integration**
-
-**Bot API:**
-- `@SileroBot` Telegram bot
-- Free TTS service
-- Voice selection via bot
-- Usage limits
-
-**Key functions:**
-- `get_current_voice()` - Get current voice from bot
-- `get_limits()` - Get remaining limits
-
----
-
-### telegram/types.rs (~50 lines)
-**Telegram types**
-
-**Types:**
+**Function:**
 ```rust
-pub struct UserInfo {
-    pub first_name: String,
-    pub last_name: Option<String>,
-    pub username: Option<String>,
-}
-
-pub struct TtsResult {
-    pub audio_url: String,
-    pub voice_id: String,
-}
-
-pub struct CurrentVoice {
-    pub id: String,
-    pub name: String,
-}
-
-pub struct Limits {
-    pub remaining: u32,
-    pub reset_at: String,
-}
+pub fn run_webview_server(
+    settings: WebViewSettings,
+    event_rx: Receiver<AppEvent>,
+    state: AppState,
+) -> JoinHandle<()>
 ```
+
+**Responsibilities:**
+- Start HTTP server with WebSocket support
+- Handle WebView events (restart, reload templates, toggle UPnP)
+- Broadcast text to WebSocket clients
+- Handle UPnP port forwarding
+
+---
+
+### servers/twitch.rs (~150 lines)
+**Twitch client runner**
+
+**Function:**
+```rust
+pub fn run_twitch_client(
+    settings: TwitchSettings,
+    event_rx: TwitchEventReceiver,
+    status_tx: broadcast::Sender<TwitchConnectionStatus>,
+) -> JoinHandle<()>
+```
+
+**Responsibilities:**
+- Start Twitch IRC client
+- Handle Twitch events (restart, stop, send message)
+- Manage connection status
+- Send messages to chat
 
 ---
 
 ## Config Module
 
-### config/mod.rs (~12 lines)
+### config/mod.rs (~15 lines)
 **Configuration module exports**
 
 **Exports:**
@@ -782,16 +1146,17 @@ pub struct Limits {
 pub use settings::{SettingsManager, AudioSettings, TwitchSettings};
 pub use validation::is_valid_hex_color;
 pub use windows::WindowsManager;
+pub use dto::*;
 ```
 
 **Purpose:** Centralized configuration management
 
 ---
 
-### config/settings.rs (~300 lines)
+### config/settings.rs (~1123 lines)
 **Settings persistence**
 
-**Settings structure:**
+**Main settings structure:**
 ```rust
 pub struct Settings {
     pub tts: TtsSettings,
@@ -799,28 +1164,70 @@ pub struct Settings {
     pub twitch: TwitchSettings,
     pub webview: WebViewSettings,
     pub hotkey_enabled: bool,
-    pub quick_editor_enabled: bool,
+    pub hotkeys: HotkeySettings,
+    pub editor: EditorSettings,
+    pub theme: ThemeSettings,
+    pub logging: LoggingSettings,
 }
+```
 
+**TTS settings:**
+```rust
 pub struct TtsSettings {
     pub provider: TtsProviderType,
     pub openai: OpenAiSettings,
-    pub local: LocalSettings,
+    pub local: LocalTtsSettings,
+    pub fish: FishAudioSettings,
+    pub telegram: TelegramTtsSettings,
+    pub network: NetworkSettings,
 }
+```
 
-pub struct OpenAiSettings {
+**Fish Audio settings:**
+```rust
+pub struct FishAudioSettings {
     pub api_key: Option<String>,
-    pub voice: String,
-    pub proxy_host: Option<String>,
-    pub proxy_port: Option<u16>,
+    pub voices: Vec<VoiceModel>,
+    pub reference_id: String,
+    pub format: String,
+    pub temperature: f32,
+    pub sample_rate: u32,
+    pub use_proxy: bool,
 }
+```
 
-pub struct AudioSettings {
-    pub speaker_device: Option<String>,
-    pub speaker_enabled: bool,
-    pub speaker_volume: u8,
-    pub virtual_mic_device: Option<String>,
-    pub virtual_mic_volume: u8,
+**AI settings:**
+```rust
+pub struct AiSettings {
+    pub provider: AiProviderType,
+    pub prompt: String,
+    pub timeout: u64,
+    pub openai: AiOpenAiSettings,
+    pub zai: AiZAiSettings,
+}
+```
+
+**Editor settings:**
+```rust
+pub struct EditorSettings {
+    pub quick: bool,
+    pub ai: bool,
+}
+```
+
+**Theme settings:**
+```rust
+pub struct ThemeSettings {
+    pub theme: String,
+}
+```
+
+**Logging settings:**
+```rust
+pub struct LoggingSettings {
+    pub enabled: bool,
+    pub level: String,
+    pub module_levels: HashMap<String, String>,
 }
 ```
 
@@ -828,9 +1235,39 @@ pub struct AudioSettings {
 - `new()` - Create manager
 - `load()` - Load settings from disk
 - `save()` - Save settings to disk
+- `update_logging()` - Update logging settings atomically
 - Getter/setter methods for all settings
 
 **Storage path:** `%APPDATA%\ttsbard\settings.json`
+
+---
+
+### config/dto.rs (~700 lines)
+**Data transfer objects for unified settings loading**
+
+**Purpose:** Serialize all application settings into a single response for `get_all_app_settings` command
+
+**DTOs defined:**
+- `NetworkSettingsDto` - Network proxy settings
+- `Socks5SettingsDto` - SOCKS5 proxy settings
+- `MtProxySettingsDto` - MTProxy settings
+- `ProxySettingsDto` - Legacy proxy settings
+- `OpenAiSettingsDto` - OpenAI TTS settings
+- `LocalTtsSettingsDto` - Local TTS settings
+- `FishAudioSettingsDto` - Fish Audio TTS settings
+- `TelegramTtsSettingsDto` - Telegram TTS settings
+- `TtsSettingsDto` - TTS settings
+- `AudioSettingsDto` - Audio settings
+- `TwitchSettingsDto` - Twitch settings
+- `WebViewSettingsDto` - WebView settings
+- `HotkeySettingsDto` - Hotkey settings
+- `EditorSettingsDto` - Editor settings
+- `ThemeSettingsDto` - Theme settings
+- `LoggingSettingsDto` - Logging settings
+- `AiSettingsDto` - AI settings
+- `AiOpenAiSettingsDto` - OpenAI AI settings
+- `AiZAiSettingsDto` - Z.ai AI settings
+- `AllAppSettingsDto` - Root DTO containing all settings
 
 ---
 
@@ -843,7 +1280,7 @@ pub struct WindowsSettings {
     pub main: MainWindowSettings,
     pub floating: FloatingWindowSettings,
     pub soundpanel: SoundPanelWindowSettings,
-    pub global_exclude_from_capture: bool,
+    pub global: GlobalSettings,
 }
 ```
 
@@ -854,6 +1291,13 @@ pub struct FloatingWindowSettings {
     pub bg_color: String,
     pub clickthrough: bool,
     pub position: Option<WindowPosition>,
+}
+```
+
+**Global settings:**
+```rust
+pub struct GlobalSettings {
+    pub exclude_from_capture: bool,
 }
 ```
 
@@ -868,21 +1312,79 @@ pub struct FloatingWindowSettings {
 
 ---
 
-### config/validation.rs (~30 lines)
+### config/hotkeys.rs (~208 lines)
+**Customizable hotkey configuration**
+
+**Hotkey modifier:**
+```rust
+pub enum HotkeyModifier {
+    Ctrl,
+    Shift,
+    Alt,
+    Super,
+}
+```
+
+**Hotkey structure:**
+```rust
+pub struct Hotkey {
+    pub modifiers: Vec<HotkeyModifier>,
+    pub key: String,
+}
+```
+
+**Hotkey settings:**
+```rust
+pub struct HotkeySettings {
+    pub main_window: Hotkey,
+    pub sound_panel: Hotkey,
+}
+```
+
+**Default hotkeys:**
+- Main window: Ctrl+Shift+F3
+- Sound panel: Ctrl+Shift+F2
+
+**Methods:**
+- `to_shortcut()` - Convert to tauri_plugin_global_shortcut::Shortcut
+- `format_display()` - Format for display (e.g., "Ctrl+Shift+F3")
+- `parse_key_code()` - Parse key string to Code enum
+
+---
+
+### config/constants.rs (~23 lines)
+**Application constants**
+
+**Constants:**
+```rust
+pub const DEFAULT_FLOATING_OPACITY: u8 = 90;
+pub const DEFAULT_FLOATING_BG_COLOR: &str = "#2a2a2a";
+pub const DEFAULT_TTS_TIMEOUT_SECS: u64 = 30;
+pub const MIN_FLOATING_OPACITY: u8 = 10;
+pub const MAX_FLOATING_OPACITY: u8 = 100;
+```
+
+**Purpose:** Centralized constants to avoid magic numbers
+
+---
+
+### config/validation.rs (~75 lines)
 **Validation utilities**
 
 **Functions:**
 ```rust
 pub fn is_valid_hex_color(color: &str) -> bool
+pub fn validate_port(port: u16) -> Result<(), String>
+pub fn validate_volume(volume: u8) -> Result<(), String>
 ```
 
-**Validates:** `#RRGGBB` format
+**Validates:** `#RRGGBB` format, port ranges, volume ranges
 
 ---
 
 ## Commands Module
 
-### commands/mod.rs (~777 lines)
+### commands/mod.rs (~1200 lines)
 **Tauri command handlers (Rust → Frontend bridge)**
 
 **Submodules:**
@@ -890,12 +1392,15 @@ pub fn is_valid_hex_color(color: &str) -> bool
 - `telegram` - Telegram commands
 - `webview` - WebView commands
 - `twitch` - Twitch commands
+- `ai` - AI commands
+- `logging` - Logging commands
+- `proxy` - Proxy commands
+- `window` - Window commands
 
 **Main commands:**
 
 **TTS & Providers:**
 - `speak_text(text)` - Synthesize speech
-- `speak_text_internal()` - Internal TTS function
 - `get_tts_provider()` -> TtsProviderType
 - `set_tts_provider(provider)` - Switch provider
 - `get_local_tts_url()` -> String
@@ -904,26 +1409,29 @@ pub fn is_valid_hex_color(color: &str) -> bool
 - `set_openai_api_key(key)` - Set API key
 - `get_openai_voice()` -> String
 - `set_openai_voice(voice)` - Set voice
-- `get_openai_proxy()` -> (Option<String>, Option<u16>)
-- `set_openai_proxy(host, port)` - Set proxy
+- `apply_openai_proxy_settings()` - Apply proxy to OpenAI TTS
 - `has_api_key()` -> bool
+
+**Fish Audio commands:**
+- `get_fish_audio_api_key()` -> Option<String>
+- `set_fish_audio_api_key(key)` - Set API key
+- `get_fish_audio_reference_id()` -> String
+- `set_fish_audio_reference_id(id)` - Set voice model ID
+- `get_fish_audio_voices()` -> Vec<VoiceModel>
+- `add_fish_audio_voice(voice)` - Add voice to saved list
+- `remove_fish_audio_voice(id)` - Remove voice from saved list
+- `fetch_fish_audio_models()` - Fetch available models from API
+- `fetch_fish_audio_image(url)` -> String - Fetch voice model image
+- `set_fish_audio_format(format)` - Set audio format
+- `set_fish_audio_temperature(temp)` - Set temperature
+- `set_fish_audio_sample_rate(rate)` - Set sample rate
+- `set_fish_audio_use_proxy(enabled)` - Set proxy usage
+- `apply_fish_audio_proxy_settings()` - Apply proxy
 
 **Interception:**
 - `get_interception()` -> bool
 - `set_interception(enabled)` - Enable/disable
 - `toggle_interception()` -> bool
-
-**Floating Window:**
-- `show_floating_window_cmd()` - Show window
-- `hide_floating_window_cmd()` - Hide window
-- `toggle_floating_window()` -> bool
-- `is_floating_window_visible()` -> bool
-- `get_floating_appearance()` -> (u8, String)
-- `set_floating_opacity(value)` - Set opacity
-- `set_floating_bg_color(color)` - Set background color
-- `set_clickthrough(enabled)` - Set click-through
-- `is_clickthrough_enabled()` -> bool
-- `is_enter_closes_disabled()` -> bool (F6 mode)
 
 **Audio:**
 - `get_output_devices()` -> Vec<OutputDeviceInfo>
@@ -936,22 +1444,123 @@ pub fn is_valid_hex_color(color: &str) -> bool
 - `enable_virtual_mic()` - Enable virtual mic
 - `disable_virtual_mic()` - Disable virtual mic
 - `set_virtual_mic_volume(volume)` - Set volume
+- `test_audio_device(device_id)` - Test audio device
 
 **Global Settings:**
 - `get_hotkey_enabled()` -> bool
 - `set_hotkey_enabled(enabled)` - Enable/disable hotkeys
 - `get_global_exclude_from_capture()` -> bool
 - `set_global_exclude_from_capture(value)` - Set exclusion
-- `get_quick_editor_enabled()` -> bool
-- `set_quick_editor_enabled(value)` - Enable/disable
+- `get_editor_quick()` -> bool
+- `set_editor_quick(value)` - Enable/disable quick editor
 - `hide_main_window()` - Hide main window
-- `close_floating_window()` - Close floating
 - `close_soundpanel_window()` - Close soundpanel
 - `quit_app()` - Quit application
 - `open_file_dialog()` - File dialog (deprecated)
 
+**Theme:**
+- `update_theme(theme)` - Update application theme
+
+**Hotkey commands:**
+- `get_hotkey_settings()` -> HotkeySettings
+- `set_hotkey(action, hotkey)` - Set hotkey
+- `reset_hotkey_to_default(action)` - Reset to default
+- `unregister_hotkeys()` - Unregister all hotkeys
+- `reregister_hotkeys_cmd()` - Re-register hotkeys
+- `set_hotkey_recording(recording)` - Set recording state
+
+**Unified settings:**
+- `get_all_app_settings()` -> AllAppSettingsDto - Get all settings
+- `is_backend_ready()` -> bool - Check if backend is ready
+- `confirm_backend_ready()` - Confirm backend ready
+
 **SoundPanel (delegated):**
 - All `sp_*` commands forwarded to soundpanel module
+
+---
+
+### commands/ai.rs (~220 lines)
+**AI text correction commands**
+
+**Commands:**
+- `set_ai_provider(provider)` - Set AI provider (openai, zai)
+- `set_ai_prompt(prompt)` - Set global AI prompt
+- `set_ai_openai_api_key(key)` - Set OpenAI API key
+- `set_ai_openai_use_proxy(enabled)` - Set OpenAI proxy usage
+- `set_ai_zai_url(url)` - Set Z.ai URL
+- `set_ai_zai_api_key(key)` - Set Z.ai API key
+- `correct_text(text)` -> String - Correct text using AI
+- `set_editor_ai(enabled)` - Set AI correction in editor
+- `get_editor_ai()` -> bool - Get AI correction state
+- `set_ai_openai_model(model)` - Set OpenAI model
+- `get_ai_openai_model()` -> String - Get OpenAI model
+- `set_ai_zai_model(model)` - Set Z.ai model
+- `get_ai_zai_model()` -> String - Get Z.ai model
+
+**Features:**
+- AI client caching with hash-based invalidation
+- Automatic cache invalidation on settings change
+- Timeout and error handling
+
+---
+
+### commands/logging.rs (~62 lines)
+**Logging commands**
+
+**Commands:**
+- `get_logging_settings()` -> LoggingSettings - Get settings
+- `save_logging_settings(enabled, level)` - Save settings
+
+**Validation:**
+- Log level validation (error, warn, info, debug, trace)
+- Module level validation (lenient, accepts various formats)
+
+**Module levels:**
+```rust
+HashMap<String, String>  // module -> level
+```
+
+---
+
+### commands/proxy.rs (~500 lines)
+**Proxy management commands**
+
+**Commands:**
+- `test_proxy(proxy_type, host, port, timeout_secs)` -> TestResultDto - Test proxy connection
+- `get_proxy_settings()` -> ProxySettingsDto - Get proxy settings
+- `set_proxy_url(url)` - Set unified proxy URL
+- `set_openai_use_proxy(enabled)` - Set OpenAI proxy usage
+- `set_telegram_proxy_mode(mode)` - Set Telegram proxy mode
+- `get_telegram_proxy_status()` -> ProxyStatus - Get Telegram proxy status
+- `reconnect_telegram()` - Reconnect Telegram with new proxy
+- `get_mtproxy_settings()` -> MtProxySettingsDto - Get MTProxy settings
+- `set_mtproxy_settings(settings)` - Set MTProxy settings
+- `test_mtproxy(settings)` -> TestResultDto - Test MTProxy connection
+
+**Test result:**
+```rust
+pub struct TestResultDto {
+    pub success: bool,
+    pub latency_ms: Option<u64>,
+    pub mode: String,
+    pub error: Option<String>,
+}
+```
+
+**Proxy modes:**
+- None - Direct connection
+- Socks5 - SOCKS5 proxy
+- MtProxy - MTProxy for Telegram
+
+---
+
+### commands/window.rs (~17 lines)
+**Window commands**
+
+**Commands:**
+- `resize_main_window(width, height)` - Resize main window
+
+**Use case:** Responsive window sizing
 
 ---
 
@@ -993,7 +1602,7 @@ pub fn is_valid_hex_color(color: &str) -> bool
 
 ---
 
-### commands/webview.rs (~100 lines)
+### commands/webview.rs (~250 lines)
 **WebView commands**
 
 **Commands:**
@@ -1004,7 +1613,21 @@ pub fn is_valid_hex_color(color: &str) -> bool
 - `get_webview_start_on_boot()` -> bool - Check auto-start
 - `get_webview_port()` -> u16 - Get port
 - `get_webview_bind_address()` -> String - Get bind address
-- `get_webview_animation_speed()` -> u32 - Get animation speed
+- `open_template_folder()` - Open template folder in file manager
+- `send_test_message()` - Send test message to WebView
+- `reload_templates()` - Reload HTML/CSS templates
+- `generate_webview_token()` -> String - Generate new token
+- `get_webview_token()` -> Option<String> - Get current token
+- `copy_webview_token()` - Copy token to clipboard
+- `regenerate_webview_token()` -> Regenerate token
+- `set_webview_upnp_enabled(enabled)` - Set UPnP enabled
+- `get_webview_upnp_enabled()` -> bool - Get UPnP enabled
+- `get_external_ip()` -> String - Get external IP
+
+**Security:**
+- Token authentication for WebSocket connections
+- Constant-time token comparison
+- Local network detection
 
 ---
 
@@ -1018,6 +1641,7 @@ pub fn is_valid_hex_color(color: &str) -> bool
 - `send_twitch_test_message()` -> String - Send test message
 - `connect_twitch()` -> String - Connect
 - `disconnect_twitch()` -> String - Disconnect
+- `restart_twitch()` -> String - Restart
 - `get_twitch_status()` -> TwitchConnectionStatus - Get status
 - `get_twitch_enabled()` -> bool - Check if enabled
 - `get_twitch_username()` -> String - Get username
@@ -1064,30 +1688,28 @@ VK_F6 (0x76)      → Toggle Enter closes
 **Registered Hotkeys:**
 | Shortcut | Command | Trigger |
 |----------|---------|---------|
-| `Ctrl+Shift+F1` | toggle-intercept | Toggle interception |
 | `Ctrl+Shift+F2` | show-soundpanel | Show sound panel |
 | `Ctrl+Shift+F3` | show-main-focus | Show main window (focus) |
-| `Ctrl+Alt+T` | show-main | Show main window |
 
 **Features:**
 - Enable/disable via `hotkey_enabled` setting
 - Automatically registers on startup
 - Re-registers when setting changes
 - Respects mutual exclusion (only one floating window active)
+- Customizable hotkeys (stored in settings.json)
 
 ---
 
 ### floating.rs (~400 lines)
-**Floating window management**
+**Floating window management (deprecated)**
+
+**Note:** This module is deprecated. SoundPanel window is now used instead.
 
 **Key Functions:**
 - `show_floating_window()` - Creates/shows text input overlay
 - `hide_floating_window()` - Hides overlay
 - `update_floating_text(String)` - Updates displayed text
 - `update_floating_title(String)` - Updates title with layout indicator
-- `show_soundpanel_window()` - Shows sound panel overlay
-- `hide_soundpanel_window()` - Hides sound panel
-- `emit_soundpanel_no_binding(char)` - Emit no-binding event
 
 **Features:**
 - Position persistence per window type
@@ -1124,6 +1746,24 @@ soundpanel/
 
 ---
 
+### soundpanel_window.rs (~105 lines)
+**SoundPanel window management**
+
+**Functions:**
+- `show_soundpanel_window()` - Show sound panel window
+- `hide_soundpanel_window()` - Hide sound panel window
+- `update_soundpanel_appearance()` - Update appearance
+- `emit_soundpanel_bindings_changed()` - Emit bindings changed event
+- `emit_soundpanel_no_binding()` - Emit no-binding event
+
+**Features:**
+- Position persistence
+- Click-through mode
+- Capture protection
+- Appearance updates
+
+---
+
 ### window.rs (~100 lines)
 **Windows-specific window utilities**
 
@@ -1137,16 +1777,6 @@ soundpanel/
 - `WS_EX_TRANSPARENT` - Click-through
 - `WS_EX_NOACTIVATE` - No focus
 - `WS_EX_TOOLWINDOW` - Hide from taskbar
-
----
-
-### settings.rs (~50 lines)
-**Settings persistence (legacy)**
-
-**Note:** Most settings moved to `config/` module
-
-**Remaining functions:**
-- Legacy compatibility layer
 
 ---
 
@@ -1173,4 +1803,54 @@ soundpanel/
 
 ---
 
-*Last updated: 2025-03-09*
+### assets/ (Module)
+**Embedded audio assets**
+
+**Files:**
+- `test_sound.mp3` - Test sound for SoundPanel (1 second beep/tone)
+
+**Usage:**
+```rust
+pub static TEST_SOUND_MP3: &[u8] = include_bytes!("test_sound.mp3");
+```
+
+**Purpose:** Test audio playback without external files
+
+---
+
+## Module Summary
+
+### New modules:
+1. **ai/** - AI text correction (OpenAI, Z.ai)
+2. **commands/ai.rs** - AI commands
+3. **commands/logging.rs** - Logging commands
+4. **commands/proxy.rs** - Proxy commands
+5. **commands/window.rs** - Window commands
+6. **preprocessor/numbers.rs** - Number to text conversion
+7. **preprocessor/prefix.rs** - Text routing prefixes
+8. **servers/** - Server management (webview, twitch)
+9. **webview/security.rs** - Token authentication
+10. **webview/upnp.rs** - UPnP port forwarding
+11. **config/dto.rs** - Data transfer objects
+12. **config/hotkeys.rs** - Hotkey settings
+13. **config/constants.rs** - Constants
+14. **setup.rs** - Application setup
+15. **event_loop.rs** - Event handling
+16. **error.rs** - Error types
+17. **assets/** - Embedded assets
+18. **soundpanel_window.rs** - SoundPanel window
+19. **tts/fish.rs** - Fish Audio TTS
+20. **tts/proxy_utils.rs** - Shared proxy utilities
+
+### Updated modules:
+- **lib.rs** - Added new exports, logging configuration
+- **state.rs** - Unified TTS config, AI client caching, prefix flags
+- **events.rs** - New events (WebView, Twitch, Quit)
+- **tts/mod.rs** - Added Fish provider
+- **config/settings.rs** - Added Fish, AI, editor, theme, logging settings
+- **commands/mod.rs** - Added 100+ commands
+- **preprocessor/mod.rs** - Added numbers, prefix exports
+
+---
+
+*Last updated: 2026-04-15*

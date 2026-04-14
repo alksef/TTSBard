@@ -467,3 +467,7 @@ Is local network?
 1. **Auto-reconnection** - Built-in retry logic in JavaScript client
 2. **Graceful degradation** - Failed auth shows error message
 3. **Hot reload** - Templates reload without server restart
+
+---
+
+*Last updated: 2026-04-15*

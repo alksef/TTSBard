@@ -16,8 +16,29 @@ src/
     ├── TwitchPanel.vue             # Twitch Chat settings
     ├── WebViewPanel.vue            # WebView server for OBS
     ├── TelegramAuthModal.vue       # Telegram authorization modal
-    ├── SettingsPanel.vue           # General settings
-    └── InfoPanel.vue               # Application info
+    ├── SettingsPanel.vue           # Settings container (tabbed)
+    ├── HotkeysPanel.vue            # Hotkey configuration
+    ├── SettingsAiPanel.vue         # AI text correction settings
+    ├── ErrorToasts.vue             # Global error toast notifications
+    ├── MinimalModeButton.vue       # Minimal mode toggle for sidebar
+    ├── InfoPanel.vue               # Application info
+    ├── shared/                     # Shared reusable components
+    │   ├── ProviderCard.vue        # Reusable provider card
+    │   ├── InputWithToggle.vue     # Input with show/hide toggle
+    │   ├── StatusMessage.vue       # Status message display
+    │   └── TestResult.vue          # Test result display
+    ├── settings/                   # Settings sub-panels
+    │   ├── SettingsGeneral.vue     # General settings
+    │   ├── SettingsEditor.vue      # Editor mode settings
+    │   └── SettingsNetwork.vue     # Network/proxy settings
+    └── tts/                        # TTS provider cards
+        ├── TtsOpenAICard.vue       # OpenAI provider card
+        ├── TtsSileroCard.vue       # Silero provider card with error handling
+        ├── TtsLocalCard.vue        # Local TTS provider card
+        ├── TtsFishAudioCard.vue    # Fish Audio provider card
+        ├── FishAudioModelPicker.vue # Fish Audio voice model picker
+        ├── VoiceSelector.vue       # Voice selection component
+        └── TelegramConnectionStatus.vue # Telegram connection status
 ```
 
 ---
@@ -34,7 +55,7 @@ src/
 
 ---
 
-## Sidebar.vue (~85 lines)
+## Sidebar.vue (~120 lines)
 **Navigation sidebar**
 
 **Panels:**
@@ -46,13 +67,15 @@ src/
 - Preprocessor
 - Twitch Chat
 - WebView (OBS)
-- Settings
+- Hotkeys
+- Settings (General, Network, AI, Editor)
 - Info
 
 **Features:**
 - Panel switching
 - Active state highlighting
 - Collapsible sidebar
+- Minimal mode toggle button
 
 **State:**
 - `activePanel` - Current active panel
@@ -74,32 +97,48 @@ src/
 
 ---
 
-## TtsPanel.vue (~950 lines)
+## TtsPanel.vue (~200 lines)
 **TTS Provider Settings - управление TTS провайдерами**
 
 **Провайдеры:**
 - OpenAI TTS
 - Silero Bot (Telegram)
 - TTSVoiceWizard (Local)
+- Fish Audio (NEW in v0.3.0)
+
+**Provider Cards:**
+- Each provider uses a reusable `ProviderCard` component
+- Radio button for selecting active provider
+- Expandable card showing provider-specific settings
+- Consistent layout across all providers
 
 **OpenAI TTS Provider:**
-- **Порядок полей:** API Key → Proxy → Voice
-- **API Key** - поле ввода токена (password type)
-- **Proxy** - настройки прокси (host + port)
-- **Voice** - выбор голоса (автосохранение при смене)
-- **Единая кнопка** "Save Settings" для токена и прокси
-
-**Voices Available:**
-- alloy, echo, fable, onyx, nova, shimmer
+- API Key input with show/hide toggle
+- Voice selection dropdown
+- SOCKS5 proxy toggle
+- Save button for API key
 
 **Silero Bot Provider:**
-- Авторизация через Telegram
-- Отображение текущего голоса и лимитов
-- Кнопки обновления голоса/лимитов
+- Telegram connection status display
+- Connect/Disconnect buttons
+- Reconnect button with error handling
+- Proxy mode selection (None/SOCKS5/MTProxy)
+- Error state visualization
 
 **Local TTS Provider:**
-- URL локального TTS сервера
-- Работает без интернета
+- URL input field
+- Save button
+- Description: "Обратная совместимость с TTSVoiceWizard"
+
+**Fish Audio Provider:**
+- API Key input with show/hide toggle
+- Audio format selection (MP3/WAV/PCM/Opus)
+- Sample rate selection (8000-48000 Hz)
+- Temperature slider (0.0-1.0)
+- Voice model management (add/remove)
+- Model picker modal
+- SOCKS5 proxy toggle
+- Save button for all settings
 
 **Tauri Commands:**
 
@@ -115,17 +154,36 @@ Local:
 - `invoke('get_local_tts_url')` -> string
 - `invoke('set_local_tts_url', { url })`
 
+Fish Audio:
+- `invoke('get_fish_audio_api_key')` -> string
+- `invoke('set_fish_audio_api_key', { key })`
+- `invoke('get_fish_audio_format')` -> string
+- `invoke('set_fish_audio_format', { format })`
+- `invoke('get_fish_audio_sample_rate')` -> number
+- `invoke('set_fish_audio_sample_rate', { rate })`
+- `invoke('get_fish_audio_temperature')` -> number
+- `invoke('set_fish_audio_temperature', { temp })`
+- `invoke('get_fish_audio_voices')` -> VoiceModel[]
+- `invoke('add_fish_audio_voice', { voice })`
+- `invoke('remove_fish_audio_voice', { voiceId })`
+- `invoke('set_fish_audio_reference_id', { id })`
+- `invoke('get_fish_audio_use_proxy')` -> boolean
+- `invoke('set_fish_audio_use_proxy', { enabled })`
+- `invoke('fetch_fish_audio_models', { pageSize, pageNumber, title, language })` -> [number, VoiceModel[]]
+
 Provider:
-- `invoke('get_tts_provider')` -> 'openai' | 'silero' | 'local'
+- `invoke('get_tts_provider')` -> 'openai' | 'silero' | 'local' | 'fish'
 - `invoke('set_tts_provider', { provider })`
 
 **Events:**
 - Listens to `tts-error` event for error display
 
 **Features:**
-- Автосохранение голоса при выборе с подтверждением
-- Расширяемые карточки провайдеров
-- Радиокнопка для выбора активного провайдера
+- Reusable provider card components
+- Consistent layout across providers
+- Auto-save on voice selection
+- Error handling for Silero Bot
+- Voice model management for Fish Audio
 
 ---
 
@@ -585,14 +643,223 @@ type TelegramStatus = 'Disconnected' | 'Connecting' | 'Connected' | 'Error';
 
 ---
 
-## SettingsPanel.vue (~130 lines)
-**General settings panel**
+## SettingsPanel.vue (~200 lines)
+**Settings container with tabs**
+
+**Features:**
+- Tabbed interface for different settings categories
+- Status message display
+- Consistent layout across tabs
+
+**Tabs:**
+- General (SettingsGeneral.vue)
+- Editor (SettingsEditor.vue)
+- Network (SettingsNetwork.vue)
+- AI (SettingsAiPanel.vue)
+
+**State:**
+- `activeTab` - Currently active tab
+- `statusMessage` - Status message to display
+- `statusType` - Type of status message (success/error/info)
+
+---
+
+## HotkeysPanel.vue (~532 lines)
+**Hotkey configuration panel (NEW in v0.3.0)**
+
+**Features:**
+- Hotkey recording UI
+- Customizable hotkeys for:
+  - Main window toggle
+  - Sound panel toggle
+- Real-time hotkey capture
+- Visual feedback during recording
+- Reset to defaults
+- Hotkey validation
 
 **UI Elements:**
-- Various global settings
-- Application-wide preferences
 
-**Basic settings panel** with minimal implementation currently.
+1. **Main Window Hotkey**
+   - Display current hotkey
+   - Record button
+   - Cancel button (during recording)
+   - Reset to default button
+   - Recording state with live key capture
+
+2. **Sound Panel Hotkey**
+   - Display current hotkey
+   - Record button
+   - Cancel button (during recording)
+   - Reset to default button
+   - Recording state with live key capture
+
+**Tauri Commands:**
+- `invoke('get_hotkey_settings')` -> HotkeySettingsDto
+- `invoke('set_hotkey', { name, hotkey })`
+- `invoke('reset_hotkey_to_default', { name })` -> HotkeyDto
+- `invoke('set_hotkey_recording', { recording })`
+- `invoke('unregister_hotkeys')`
+- `invoke('reregister_hotkeys_cmd')`
+
+**Interfaces:**
+```typescript
+interface HotkeyDto {
+  modifiers: ('ctrl' | 'shift' | 'alt' | 'super')[];
+  key: string;
+}
+
+interface HotkeySettingsDto {
+  main_window: HotkeyDto;
+  sound_panel: HotkeyDto;
+}
+```
+
+**Recording Features:**
+- Captures modifiers (Ctrl, Shift, Alt, Win/Super)
+- Captures main key on keyup
+- Visual feedback with pulsing animation
+- Escape key cancels recording
+- Automatic hotkey re-registration after save
+
+**Default Hotkeys:**
+- Main Window: Ctrl+Shift+T
+- Sound Panel: Ctrl+Shift+S
+
+---
+
+## SettingsAiPanel.vue (~722 lines)
+**AI text correction settings (NEW in v0.3.0)**
+
+**Features:**
+- AI provider selection (OpenAI / Z.ai)
+- Global AI prompt editing
+- API key configuration per provider
+- Proxy settings per provider
+- Auto-disable when provider becomes unconfigured
+
+**UI Sections:**
+
+1. **AI Enable Section**
+   - Checkbox to enable AI correction
+   - Warning if provider not configured
+   - Description of AI functionality
+
+2. **Global Prompt Section**
+   - Textarea for AI prompt
+   - Save button
+   - Default prompt provided
+
+3. **Provider Cards**
+   - Z.ai Provider Card
+     - URL input
+     - API Key input with show/hide toggle
+     - Save button
+   - OpenAI Provider Card
+     - API Key input with show/hide toggle
+     - SOCKS5 proxy checkbox
+     - Save button
+
+**Tauri Commands:**
+
+General:
+- `invoke('get_ai_settings')` -> AiSettingsDto
+- `invoke('set_ai_provider', { provider })`
+- `invoke('set_ai_prompt', { prompt })`
+- `invoke('set_editor_ai', { enabled })`
+
+OpenAI:
+- `invoke('get_ai_openai_api_key')` -> string
+- `invoke('set_ai_openai_api_key', { key })`
+- `invoke('get_ai_openai_use_proxy')` -> boolean
+- `invoke('set_ai_openai_use_proxy', { enabled })`
+
+Z.ai:
+- `invoke('get_ai_zai_url')` -> string
+- `invoke('set_ai_zai_url', { url })`
+- `invoke('get_ai_zai_api_key')` -> string
+- `invoke('set_ai_zai_api_key', { apiKey })`
+
+**Interfaces:**
+```typescript
+type AiProviderType = 'openai' | 'zai';
+
+interface AiSettingsDto {
+  provider: AiProviderType;
+  prompt: string;
+  openai?: {
+    api_key: string;
+    use_proxy: boolean;
+  };
+  zai?: {
+    url: string;
+    api_key: string;
+  };
+}
+```
+
+**Features:**
+- Auto-disable AI if switching to unconfigured provider
+- Status message display
+- Uses shared ProviderCard component
+- Uses InputWithToggle for API keys
+
+---
+
+## ErrorToasts.vue (~167 lines)
+**Global error toast notifications (NEW in v0.3.0)**
+
+**Features:**
+- Global error display via Teleport
+- Multiple error levels (error, warning, info, success)
+- Auto-dismiss with configurable duration
+- Click to dismiss
+- Animated transitions
+- Stacked display
+
+**Error Levels:**
+- ERROR - Red border, error icon
+- WARNING - Orange border, warning icon
+- INFO - Green border, info icon
+- SUCCESS - Green border, success icon
+
+**State:**
+- Uses `useErrorHandler()` composable
+- Shared singleton state across all components
+
+**Styling:**
+- Fixed position (top-right)
+- Blur backdrop
+- Color-coded by level
+- Hover effects
+
+**Animations:**
+- Slide-in from right
+- Scale on leave
+- Smooth transitions
+
+---
+
+## MinimalModeButton.vue (~80 lines)
+**Minimal mode toggle for sidebar (NEW in v0.3.0)**
+
+**Features:**
+- Floating action button
+- Toggles between normal and minimal window size
+- Icon changes based on state
+- Animation during resize
+
+**Window Sizes:**
+- Normal: 800x600
+- Minimal: 450x400
+
+**Tauri Commands:**
+- `invoke('resize_main_window', { width, height })`
+
+**Styling:**
+- Fixed position (bottom-right)
+- Circular button
+- Color change when active
+- Scale animation on hover
 
 ---
 
@@ -605,6 +872,653 @@ type TelegramStatus = 'Disconnected' | 'Connecting' | 'Connected' | 'Error';
 - Description
 - Links to documentation/resources
 - Credits
+
+---
+
+## Shared Components
+
+### ProviderCard.vue (~124 lines)
+**Reusable provider card component**
+
+**Features:**
+- Radio button for selection
+- Icon display
+- Expandable content
+- Active state styling
+- Disabled state support
+
+**Props:**
+- `title: string` - Card title
+- `icon?: Component` - Icon component
+- `active?: boolean` - Is selected
+- `expanded?: boolean` - Is expanded
+- `disabled?: boolean` - Is disabled
+
+**Emits:**
+- `select` - When selected
+- `toggle` - When expanded/collapsed
+
+**Use Cases:**
+- TTS provider selection
+- AI provider selection
+- Settings provider cards
+
+---
+
+### InputWithToggle.vue (~128 lines)
+**Input field with show/hide toggle**
+
+**Features:**
+- Password/text toggle
+- Show/hide button with eye icon
+- v-model support
+- Placeholder support
+- Disabled state
+
+**Props:**
+- `modelValue: string` - Input value
+- `type?: 'text' | 'password'` - Input type
+- `placeholder?: string` - Placeholder text
+- `disabled?: boolean` - Disabled state
+- `class?: string` - CSS class
+
+**Use Cases:**
+- API key input
+- Password input
+- Secret input
+
+---
+
+### StatusMessage.vue (~161 lines)
+**Status message display with auto-hide**
+
+**Features:**
+- Fixed position display
+- Success/error/info types
+- Auto-hide with configurable delay
+- Dismissible
+- Animated transitions
+
+**Props:**
+- `message: string` - Message text
+- `type?: 'success' | 'error' | 'info'` - Message type
+- `autoHide?: boolean` - Auto-hide after delay
+- `autoHideDelay?: number` - Delay in ms
+- `dismissible?: boolean` - Show close button
+
+**Emits:**
+- `dismiss` - When dismissed
+
+**Icons:**
+- Success: Check
+- Error: AlertTriangle
+- Info: Shield
+
+---
+
+### TestResult.vue (~71 lines)
+**Test result display component**
+
+**Features:**
+- Success/error states
+- Latency display
+- Error message display
+- Fade transitions
+- Icon display
+
+**Props:**
+- `result: TestResult | null` - Test result
+
+**Interface:**
+```typescript
+interface TestResult {
+  success: boolean;
+  latency_ms: number | null;
+  mode: string;
+  error: string | null;
+}
+```
+
+**Use Cases:**
+- Proxy connection test results
+- MTProxy test results
+- Network test results
+
+---
+
+## Settings Sub-Panels
+
+### SettingsGeneral.vue (~335 lines)
+**General settings panel**
+
+**Features:**
+- Theme selection (Dark/Light)
+- Exclude from capture checkbox
+- Logging settings
+
+**UI Sections:**
+
+1. **Theme Selector**
+   - Dark theme option with moon icon
+   - Light theme option with sun icon
+   - Radio button selection
+
+2. **Exclude from Capture**
+   - Checkbox to enable/disable
+   - Description of functionality
+   - Warning about restart requirement
+
+3. **Logging Settings**
+   - Enable/disable logging
+   - Log level selection (Error/Warning/Info/Debug/Trace)
+   - Warning about restart requirement
+
+**Tauri Commands:**
+- `invoke('update_theme', { theme })`
+- `invoke('set_global_exclude_from_capture', { value })`
+- `invoke('save_logging_settings', { enabled, level })`
+
+**Uses Composables:**
+- `useGeneralSettings()`
+- `useWindowsSettings()`
+- `useLoggingSettings()`
+
+---
+
+### SettingsEditor.vue (~117 lines)
+**Editor mode settings panel**
+
+**Features:**
+- Quick editor mode toggle
+- Description of functionality
+
+**UI Elements:**
+- Checkbox for quick editor
+- Description: "При включении скрывает окно по нажатию Enter (после отправки на TTS) или Esc в поле текста"
+
+**Tauri Commands:**
+- `invoke('set_editor_quick', { value })`
+
+**Uses Composables:**
+- `useEditorSettings()`
+
+---
+
+### SettingsNetwork.vue (~777 lines)
+**Network and proxy settings panel**
+
+**Features:**
+- SOCKS5 proxy configuration
+- MTProxy configuration
+- Connection testing
+- Test result display
+
+**UI Sections:**
+
+1. **SOCKS5 Section**
+   - Host input
+   - Port input
+   - Username input (optional)
+   - Password input with toggle (optional)
+   - Test button
+   - Save button
+   - Test result display
+
+2. **MTProxy Section**
+   - Host input
+   - Port input
+   - Secret key input with toggle
+   - DC ID selection (Auto/1/2/3/4/5)
+   - Test button
+   - Save button
+   - Test result display
+
+**Tauri Commands:**
+
+SOCKS5:
+- `invoke('get_proxy_settings')` -> ProxySettings
+- `invoke('set_proxy_url', { url, proxyType })`
+- `invoke('test_proxy', { proxyType, host, port, timeoutSecs })` -> TestResult
+
+MTProxy:
+- `invoke('get_mtproxy_settings')` -> MtProxySettings
+- `invoke('set_mtproxy_settings', { host, port, secret, dcId })`
+- `invoke('test_mtproxy', { host, port, secret, dcId, timeoutSecs })` -> TestResult
+
+**Interfaces:**
+```typescript
+interface ProxySettings {
+  proxy_url: string | null;
+  proxy_type: 'socks5' | 'socks4' | 'http';
+}
+
+interface MtProxySettings {
+  host?: string;
+  port: number;
+  secret?: string;
+  dc_id?: number;
+}
+
+interface TestResult {
+  success: boolean;
+  latency_ms: number | null;
+  mode: string;
+  error: string | null;
+}
+```
+
+**Features:**
+- URL parsing for SOCKS5
+- Validation for all fields
+- Auto-clear test results after 20 seconds
+- Loading states
+- Error handling
+
+---
+
+## TTS Provider Cards
+
+### TtsOpenAICard.vue (~186 lines)
+**OpenAI TTS provider card**
+
+**Features:**
+- API Key input with show/hide toggle
+- Voice selection dropdown
+- SOCKS5 proxy toggle
+- Save button
+
+**Uses Components:**
+- `ProviderCard` - Base card
+- `InputWithToggle` - API key input
+- `VoiceSelector` - Voice selection
+
+**Props:**
+- `active?: boolean` - Is selected
+- `expanded?: boolean` - Is expanded
+- `apiKey?: string` - API key
+- `voice?: string` - Selected voice
+- `voices?: string[]` - Available voices
+- `useProxy?: boolean` - Proxy enabled
+- `loading?: boolean` - Loading state
+
+**Emits:**
+- `select` - When selected
+- `toggle` - When expanded
+- `save-api-key` - When API key saved
+- `voice-change` - When voice changed
+- `toggle-proxy` - When proxy toggled
+
+**Voices Available:**
+- alloy, echo, fable, onyx, nova, shimmer
+
+---
+
+### TtsSileroCard.vue (~85 lines)
+**Silero Bot TTS provider card with error handling**
+
+**Features:**
+- Telegram connection status display
+- Connect/Disconnect buttons
+- Reconnect button with error handling
+- Proxy mode selection (None/SOCKS5/MTProxy)
+- Error state visualization
+
+**Uses Components:**
+- `ProviderCard` - Base card
+- `TelegramConnectionStatus` - Connection status display
+
+**Props:**
+- `active?: boolean` - Is selected
+- `expanded?: boolean` - Is expanded
+- `connected?: boolean` - Is connected to Telegram
+- `telegramStatus?: object` - Telegram user info
+- `currentProxyStatus?: object` - Current proxy status
+- `errorMessage?: string` - Error message
+- `reconnecting?: boolean` - Is reconnecting
+- `proxyMode?: string` - Current proxy mode
+- `proxyModes?: array` - Available proxy modes
+
+**Emits:**
+- `select` - When selected
+- `toggle` - When expanded
+- `connect` - When connect clicked
+- `disconnect` - When disconnect clicked
+- `reconnect` - When reconnect clicked
+- `proxy-mode-change` - When proxy mode changed
+
+**Error Handling:**
+- Visual error state styling
+- Reconnect functionality
+- Proxy mode switching for reconnection
+
+---
+
+### TtsLocalCard.vue (~155 lines)
+**Local TTS provider card**
+
+**Features:**
+- URL input field
+- Save button
+- Description text
+
+**Uses Components:**
+- `ProviderCard` - Base card
+
+**Props:**
+- `active?: boolean` - Is selected
+- `expanded?: boolean` - Is expanded
+- `url?: string` - Server URL
+
+**Emits:**
+- `select` - When selected
+- `toggle` - When expanded
+- `save` - When URL saved
+
+**Default URL:**
+- `http://127.0.0.1:8124`
+
+**Description:**
+- "Обратная совместимость с TTSVoiceWizard"
+
+---
+
+### TtsFishAudioCard.vue (~569 lines)
+**Fish Audio TTS provider card**
+
+**Features:**
+- API Key input with show/hide toggle
+- Audio format selection (MP3/WAV/PCM/Opus)
+- Sample rate selection (8000-48000 Hz)
+- Temperature slider (0.0-1.0)
+- Voice model management (add/remove)
+- Model picker modal
+- SOCKS5 proxy toggle
+- Save button for all settings
+
+**Uses Components:**
+- `ProviderCard` - Base card
+- `InputWithToggle` - API key input
+- `FishAudioModelPicker` - Model picker modal
+
+**Props:**
+- `active?: boolean` - Is selected
+- `expanded?: boolean` - Is expanded
+- `apiKey?: string` - API key
+- `referenceId?: string` - Selected voice ID
+- `voices?: VoiceModel[]` - Added voices
+- `format?: string` - Audio format
+- `temperature?: number` - Temperature value
+- `sampleRate?: number` - Sample rate
+- `useProxy?: boolean` - Proxy enabled
+
+**Emits:**
+- `select` - When selected
+- `toggle` - When expanded
+- `save-all` - When all settings saved
+- `select-voice` - When voice selected
+- `add-voice` - When voice added
+- `remove-voice` - When voice removed
+- `toggle-proxy` - When proxy toggled
+
+**VoiceModel Interface:**
+```typescript
+interface VoiceModel {
+  id: string;
+  title: string;
+  languages: string[];
+  description?: string;
+  cover_image?: string;
+}
+```
+
+**Audio Formats:**
+- MP3, WAV, PCM, Opus
+
+**Sample Rates:**
+- 8000, 16000, 24000, 32000, 44100, 48000 Hz
+
+**Features:**
+- Confirmation dialog for voice removal
+- Loading state on save
+- Voice list with active state
+- Empty state when no voices added
+
+---
+
+### FishAudioModelPicker.vue (modal)
+**Fish Audio voice model picker modal**
+
+**Features:**
+- Search functionality
+- Paginated model list
+- Voice model cards with images
+- Language display
+- Load more button
+- Image loading states
+
+**Tauri Commands:**
+- `invoke('fetch_fish_audio_models', { pageSize, pageNumber, title, language })` -> [number, VoiceModel[]]
+
+**Uses Composables:**
+- `useFishImage` - Image loading from Fish Audio URLs
+
+**UI Elements:**
+- Search input with icon
+- Loading spinner
+- Model grid with cards
+- Load more button
+- Close button
+
+**Features:**
+- Infinite scroll pagination
+- Background image loading
+- Error handling
+- Empty state
+
+---
+
+### VoiceSelector.vue (~99 lines)
+**Voice selection dropdown component**
+
+**Features:**
+- Voice selection dropdown
+- Loading state
+- Customizable label
+
+**Props:**
+- `voices: string[]` - Available voices
+- `selectedVoiceId: string` - Selected voice
+- `loading?: boolean` - Loading state
+- `label?: string` - Label text (default: "Голос")
+
+**Emits:**
+- `voice-change` - When voice changed
+- `refresh` - When refresh clicked
+
+**Use Cases:**
+- OpenAI voice selection
+- Other TTS provider voice selection
+
+---
+
+### TelegramConnectionStatus.vue
+**Telegram connection status display**
+
+**Features:**
+- Connection state display
+- User info display
+- Proxy status display
+- Connect/Disconnect buttons
+- Reconnect button
+- Proxy mode selection
+- Error message display
+
+**Props:**
+- `connected?: boolean` - Connection state
+- `telegramStatus?: object` - User info
+- `currentProxyStatus?: object` - Proxy status
+- `errorMessage?: string` - Error message
+- `reconnecting?: boolean` - Reconnecting state
+- `proxyMode?: string` - Current proxy mode
+- `proxyModes?: array` - Available proxy modes
+
+**Emits:**
+- `connect` - When connect clicked
+- `disconnect` - When disconnect clicked
+- `reconnect` - When reconnect clicked
+- `proxy-mode-change` - When proxy mode changed
+
+**Proxy Modes:**
+- None
+- SOCKS5
+- MTProxy
+
+---
+
+## Composables
+
+### useTelegramAuth.ts
+**Telegram authentication composable**
+
+**State:**
+- `state: TelegramAuthState` - Auth state (idle/loading/code_required/connected/error)
+- `status: TelegramStatus | null` - Connection status
+- `errorMessage: string | null` - Error message
+- `loading: boolean` - Loading state
+- `currentVoice: CurrentVoice | null` - Current voice
+- `limits: Limits | null` - Usage limits
+
+**Computed:**
+- `isConnected` - Is connected
+- `isLoading` - Is loading
+- `needsCode` - Needs SMS code
+- `hasError` - Has error
+- `canInit` - Can initialize
+
+**Methods:**
+- `init()` - Initialize and auto-restore session
+- `getStatus()` - Get connection status
+- `requestCode(credentials)` - Request SMS code
+- `signIn(code)` - Sign in with code
+- `signOut()` - Sign out
+- `speak(text)` - Speak text via Silero TTS
+- `refreshVoice()` - Refresh current voice info
+- `refreshLimits()` - Refresh usage limits
+- `reset()` - Reset to idle state
+
+**Tauri Commands Used:**
+- `telegram_init`
+- `telegram_request_code`
+- `telegram_sign_in`
+- `telegram_sign_out`
+- `telegram_get_status`
+- `telegram_get_user`
+- `telegram_auto_restore`
+- `speak_text_silero`
+- `telegram_get_current_voice`
+- `telegram_get_limits`
+
+---
+
+### useAppSettings.ts
+**Application settings composable**
+
+**Features:**
+- Unified settings loading
+- Reactive settings state
+- Event-driven updates
+- Provide/inject pattern
+- Backend ready checking
+
+**Main Composable:**
+- `createAppSettings()` - For root component
+- `useAppSettings()` - For child components
+
+**Settings Categories:**
+- `useGeneralSettings()` - General settings
+- `useEditorSettings()` - Editor settings
+- `useAiSettings()` - AI settings
+- `useWindowsSettings()` - Window settings
+- `useLoggingSettings()` - Logging settings
+- `useNetworkSettings()` - Network settings
+- `useHotkeySettings()` - Hotkey settings
+
+**Tauri Commands:**
+- `get_all_app_settings` - Load all settings
+- `is_backend_ready` - Check backend ready
+
+**Events:**
+- Listens to `settings-changed` event
+
+**Features:**
+- Auto-reload on settings change
+- Backend ready polling
+- Error handling
+- Loading states
+
+---
+
+### useFishImage.ts
+**Fish Audio image loading composable**
+
+**Features:**
+- Load images from Fish Audio URLs
+- Convert to blob URLs
+- Caching
+- Error handling
+
+**Tauri Commands:**
+- `fetch_fish_image` - Fetch image from URL
+
+**Method:**
+- `fetchFishImage(url: string)` - Load and convert image
+
+---
+
+### useErrorHandler.ts
+**Error handling composable**
+
+**Features:**
+- Global error state (singleton)
+- Toast notifications
+- Multiple error levels
+- Auto-dismiss with configurable duration
+- Console logging
+
+**Error Levels:**
+- `ErrorLevel.INFO` - Info messages
+- `ErrorLevel.WARNING` - Warnings
+- `ErrorLevel.ERROR` - Errors
+- `ErrorLevel.SUCCESS` - Success messages
+
+**State:**
+- `errors: Ref<ErrorMessage[]>` - Array of errors
+
+**Methods:**
+- `showError(message, options)` - Show error
+- `showInfo(message, duration)` - Show info
+- `showWarning(message, duration)` - Show warning
+- `showSuccess(message, duration)` - Show success
+- `removeError(id)` - Remove specific error
+- `clearAllErrors()` - Clear all errors
+- `handleCaughtError(error, context)` - Handle caught error
+
+**Options:**
+- `level?: ErrorLevel` - Error level
+- `duration?: number` - Auto-dismiss duration (0 = no auto-dismiss)
+- `logToConsole?: boolean` - Log to console
+- `showNotification?: boolean` - Show in UI
+
+**Interface:**
+```typescript
+interface ErrorMessage {
+  id: string;
+  level: ErrorLevel;
+  message: string;
+  timestamp: number;
+  duration?: number;
+}
+```
 
 ---
 
@@ -649,6 +1563,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { open as openPath } from '@tauri-apps/plugin-opener';
+import { confirm } from '@tauri-apps/plugin-dialog';
 ```
 
 ### Invoke Pattern
@@ -712,7 +1627,18 @@ watch(state, async (newVal) => {
 - Flexbox for layout
 - Scoped styles per component
 - Responsive design considerations
-- Dark theme preference
+- Dark/Light theme support via CSS variables
+- Consistent color tokens across components
+
+**Common CSS Variables:**
+- `--color-bg-field` - Field background
+- `--color-bg-elevated` - Elevated background
+- `--color-border` - Border color
+- `--color-border-strong` - Strong border
+- `--color-text-primary` - Primary text
+- `--color-text-secondary` - Secondary text
+- `--color-accent` - Accent color
+- `--color-accent-glow` - Accent glow (focus)
 
 ---
 
@@ -729,6 +1655,7 @@ watch(state, async (newVal) => {
 3. **TTS Integration**
    - Event: `tts-error` for user feedback
    - Commands: `speak_text`, voice/API key management
+   - Provider cards for each TTS service
 
 4. **Audio Integration**
    - Commands: Audio device and volume management
@@ -745,11 +1672,22 @@ watch(state, async (newVal) => {
 7. **Telegram Integration**
    - Commands: Auth flow, Silero Bot API
    - Modal-based UI
+   - Composable for state management
 
 8. **Settings Persistence**
    - Auto-save on change
    - Load on component mount
-   - No manual save button needed
+   - Event-driven updates via `settings-changed`
+
+9. **Hotkey System**
+   - Global hotkey registration
+   - Recording mode with visual feedback
+   - Auto re-registration after changes
+
+10. **AI Text Correction**
+    - Provider selection (OpenAI/Z.ai)
+    - Prompt editing
+    - Auto-disable when unconfigured
 
 ---
 
@@ -807,6 +1745,19 @@ try {
 }
 ```
 
+### Use Composables
+```typescript
+import { useErrorHandler } from '@/composables/useErrorHandler';
+
+const { showError, showSuccess } = useErrorHandler();
+
+// Show error
+showError('Failed to load settings');
+
+// Show success
+showSuccess('Settings saved successfully');
+```
+
 ---
 
 ## Vue Component Structure
@@ -842,4 +1793,38 @@ watch(() => state.value.someProp, save);
 
 ---
 
-*Last updated: 2025-03-09*
+## Architecture Notes
+
+**Component Organization:**
+- **Flat structure** for main panels (InputPanel, TtsPanel, etc.)
+- **Subdirectories** for related components:
+  - `shared/` - Reusable components
+  - `settings/` - Settings sub-panels
+  - `tts/` - TTS provider cards
+
+**Composition Pattern:**
+- Composables for shared logic
+- Provide/inject for global state
+- Event-driven updates
+
+**Styling Strategy:**
+- CSS variables for theming
+- Scoped styles per component
+- Consistent spacing and sizing
+- Dark/light theme support
+
+**Error Handling:**
+- Global `useErrorHandler` composable
+- `ErrorToasts` component for display
+- Multiple error levels
+- Auto-dismiss functionality
+
+**Settings Management:**
+- Unified `useAppSettings` composable
+- Backend ready checking
+- Event-driven reload
+- Typed settings interfaces
+
+---
+
+*Last updated: 2026-04-15*
