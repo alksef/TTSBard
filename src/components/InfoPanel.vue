@@ -396,7 +396,7 @@ import { Globe, Music, Lightbulb, ClipboardPenLine, Keyboard } from 'lucide-vue-
 }
 
 .example-block {
-  background: var(--output-bg-dark);
+  background: var(--color-bg-field);
   padding: 1rem;
   border-radius: 8px;
   border: 1px solid var(--color-border);
