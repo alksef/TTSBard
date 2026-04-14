@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { ref, watch } from 'vue';
 import { HardDrive } from 'lucide-vue-next';
 import ProviderCard from '../shared/ProviderCard.vue';
 
@@ -23,37 +23,22 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<Emits>();
 
-const localTtsDescription = computed(() => {
-  return `Обратная совместимость с TTSVoiceWizard. Запросы к ${props.url}`;
+const inputUrl = ref(props.url);
+
+watch(() => props.url, (newUrl) => {
+  inputUrl.value = newUrl;
 });
 
-let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-function emitSave(value: string) {
-  if (debounceTimer) clearTimeout(debounceTimer);
-  emit('save', value);
-}
-
-function handleUrlInput(event: Event) {
-  const value = (event.target as HTMLInputElement).value;
-  if (debounceTimer) clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(() => emit('save', value), 300);
-}
-
-function handleUrlBlur(event: Event) {
-  if (debounceTimer) clearTimeout(debounceTimer);
-  emit('save', (event.target as HTMLInputElement).value);
-}
+const localTtsDescription = 'Обратная совместимость с TTSVoiceWizard.';
 
 function handleUrlKeydown(event: KeyboardEvent) {
   if (event.key === 'Enter') {
-    if (debounceTimer) clearTimeout(debounceTimer);
-    emit('save', (event.target as HTMLInputElement).value);
+    handleSave();
   }
 }
 
 function handleSave() {
-  emitSave(props.url);
+  emit('save', inputUrl.value);
 }
 </script>
 
@@ -72,9 +57,7 @@ function handleSave() {
         <div class="local-url-row">
           <label>URL:</label>
           <input
-            :value="url"
-            @input="handleUrlInput"
-            @blur="handleUrlBlur"
+            v-model="inputUrl"
             @keydown="handleUrlKeydown"
             type="text"
             placeholder="http://127.0.0.1:8124"

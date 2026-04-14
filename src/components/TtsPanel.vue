@@ -163,6 +163,7 @@ async function toggleOpenAiUseProxy(enabled: boolean) {
 async function saveLocalTtsUrl(url: string) {
   try {
     await invoke('set_local_tts_url', { url });
+    localTtsUrl.value = url;
     providers.value.local.configured = true;
     showSuccess('URL сохранён');
   } catch (error) {
