@@ -171,6 +171,13 @@ onMounted(async () => {
 
 .main-content.minimal-content {
   padding: 1rem !important;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  transition: none;
+}
+
+.main-content.minimal-content::-webkit-scrollbar {
+  display: none;
 }
 
 .main-content::before {
