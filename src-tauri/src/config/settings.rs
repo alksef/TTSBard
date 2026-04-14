@@ -815,6 +815,9 @@ impl SettingsManager {
     pub fn remove_fish_audio_voice(&self, voice_id: &str) -> Result<()> {
         let mut settings = self.load()?;
         settings.tts.fish.voices.retain(|v| v.id != voice_id);
+        if settings.tts.fish.reference_id == voice_id {
+            settings.tts.fish.reference_id.clear();
+        }
         self.save(&settings)
     }
 
