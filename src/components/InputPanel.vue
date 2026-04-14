@@ -50,6 +50,28 @@ const isAiButtonEnabled = computed(() => {
 
 let unlistenSettings: UnlistenFn | null = null
 
+async function reloadPreprocessorData() {
+  try {
+    debugLog('[InputPanel] Reloading preprocessor data...')
+    const data = await invoke<{
+      replacements: Record<string, string>
+      usernames: Record<string, string>
+    }>('load_preprocessor_data')
+
+    replacements.value = new Map(Object.entries(data.replacements))
+    usernames.value = new Map(Object.entries(data.usernames))
+    debugLog('[InputPanel] Reloaded replacements:', replacements.value.size, 'entries')
+    debugLog('[InputPanel] Reloaded usernames:', usernames.value.size, 'entries')
+  } catch (e) {
+    debugError('[InputPanel] Failed to reload preprocessor data:', e)
+  }
+}
+
+function onPreprocessorChanged() {
+  debugLog('[InputPanel] Preprocessor data changed event received')
+  reloadPreprocessorData()
+}
+
 onMounted(async () => {
   // Quick editor enabled is now loaded from composable via watch
 
@@ -58,30 +80,18 @@ onMounted(async () => {
     debugLog('[InputPanel] Settings changed event received')
   })
 
-  // Load preprocessor data
-  try {
-    debugLog('[InputPanel] Loading preprocessor data...')
-    const data = await invoke<{
-      replacements: Record<string, string>
-      usernames: Record<string, string>
-    }>('load_preprocessor_data')
+  // Reload preprocessor data when replacements/usernames are saved in settings
+  window.addEventListener('preprocessor-data-changed', onPreprocessorChanged)
 
-    debugLog('[InputPanel] Received data:', data)
-    replacements.value = new Map(Object.entries(data.replacements))
-    usernames.value = new Map(Object.entries(data.usernames))
-    debugLog('[InputPanel] Loaded replacements:', replacements.value.size, 'entries')
-    debugLog('[InputPanel] Loaded usernames:', usernames.value.size, 'entries')
-    debugLog('[InputPanel] Replacement keys:', Array.from(replacements.value.keys()))
-    debugLog('[InputPanel] Username keys:', Array.from(usernames.value.keys()))
-  } catch (e) {
-    debugError('[InputPanel] Failed to load preprocessor data:', e)
-  }
+  // Initial load
+  await reloadPreprocessorData()
 })
 
 vueOnUnmounted(() => {
   if (unlistenSettings) {
     unlistenSettings()
   }
+  window.removeEventListener('preprocessor-data-changed', onPreprocessorChanged)
 })
 
 async function hideMainWindow() {

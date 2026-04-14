@@ -36,6 +36,7 @@ async function saveReplacements() {
   try {
     await invoke('save_replacements', { content: replacements.value })
     debugLog('Replacements saved')
+    window.dispatchEvent(new CustomEvent('preprocessor-data-changed'))
   } catch (error) {
     debugError('Failed to save replacements:', error)
   }
@@ -46,6 +47,7 @@ async function saveUsernames() {
   try {
     await invoke('save_usernames', { content: usernames.value })
     debugLog('Usernames saved')
+    window.dispatchEvent(new CustomEvent('preprocessor-data-changed'))
   } catch (error) {
     debugError('Failed to save usernames:', error)
   }
