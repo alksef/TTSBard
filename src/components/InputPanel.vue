@@ -3,8 +3,11 @@ import { ref, computed, onMounted, onUnmounted as vueOnUnmounted, inject, type R
 import { invoke } from '@tauri-apps/api/core'
 import { listen, UnlistenFn } from '@tauri-apps/api/event'
 import { useEditorSettings, useAiSettings } from '../composables/useAppSettings'
+import { useErrorHandler } from '../composables/useErrorHandler'
 import { debugLog, debugError } from '../utils/debug'
 import { Sparkles } from 'lucide-vue-next'
+
+const { showError } = useErrorHandler()
 
 const text = ref('')
 const isCorrecting = ref(false)
@@ -110,6 +113,7 @@ async function speak() {
     await invoke('speak_text', { text: text.value })
   } catch (e) {
     debugError('[InputPanel] Failed to speak:', e)
+    showError(e as string)
   }
 }
 

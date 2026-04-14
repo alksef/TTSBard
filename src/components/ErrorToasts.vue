@@ -52,7 +52,6 @@ function getIcon(level: ErrorLevel): string {
           :class="getErrorClass(error.level)"
           @click="removeError(error.id)"
         >
-          <span class="toast-icon">{{ getIcon(error.level) }}</span>
           <span class="toast-message">{{ error.message }}</span>
           <button class="toast-close" @click.stop="removeError(error.id)">×</button>
         </div>
@@ -96,22 +95,22 @@ function getIcon(level: ErrorLevel): string {
 
 .error-toast.error {
   border-left: 4px solid var(--toast-error-border);
-  background: linear-gradient(90deg, var(--toast-error-bg) 0%, var(--toast-bg) 20%);
+  background: var(--toast-error-bg);
 }
 
 .error-toast.warning {
   border-left: 4px solid var(--toast-warning-border);
-  background: linear-gradient(90deg, var(--toast-warning-bg) 0%, var(--toast-bg) 20%);
+  background: var(--toast-warning-bg);
 }
 
 .error-toast.info {
   border-left: 4px solid var(--toast-success-border);
-  background: linear-gradient(90deg, var(--toast-success-bg) 0%, var(--toast-bg) 20%);
+  background: var(--toast-success-bg);
 }
 
 .error-toast.success {
   border-left: 4px solid var(--toast-success-border);
-  background: linear-gradient(90deg, var(--toast-success-bg) 0%, var(--toast-bg) 20%);
+  background: var(--toast-success-bg);
 }
 
 .toast-icon {

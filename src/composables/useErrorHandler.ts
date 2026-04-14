@@ -32,7 +32,7 @@ export interface ShowErrorOptions {
   showNotification?: boolean
 }
 
-const DEFAULT_DURATION = 3000 // 3 секунды по умолчанию
+const DEFAULT_DURATION = 5000 // 5 секунд по умолчанию
 
 // Shared state (singleton) - один экземпляр для всех компонентов
 const errors = ref<ErrorMessage[]>([])
