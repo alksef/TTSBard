@@ -374,26 +374,23 @@ function handleProxyChange(event: Event) {
 
 /* Reconnect button */
 .reconnect-button-fixed {
-  padding: 0.6rem 1.5rem;
+  padding: 0.6rem 1.2rem;
   margin-bottom: 8px;
-  background: var(--btn-accent-bg);
-  border: 1px solid var(--card-active-border);
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
+  border: none;
   color: var(--color-text-white);
   border-radius: 10px;
   cursor: pointer;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   transition: all 0.2s;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
   gap: 8px;
-  min-width: 180px;
 }
 
 .reconnect-button-fixed:hover:not(:disabled) {
-  background: var(--btn-accent-bg-hover);
-  border-color: var(--color-accent);
+  filter: brightness(1.06);
 }
 
 .reconnect-button-fixed:disabled {
