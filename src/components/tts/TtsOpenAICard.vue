@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref, watch } from 'vue';
 import { Cloud } from 'lucide-vue-next';
 import ProviderCard from '../shared/ProviderCard.vue';
 import InputWithToggle from '../shared/InputWithToggle.vue';
@@ -34,9 +35,15 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<Emits>();
 
+const localApiKey = ref(props.apiKey);
+
+watch(() => props.apiKey, (val) => {
+  localApiKey.value = val;
+});
+
 function handleSaveApiKey() {
-  if (!props.apiKey.trim()) return;
-  emit('save-api-key', props.apiKey);
+  if (!localApiKey.value.trim()) return;
+  emit('save-api-key', localApiKey.value);
 }
 
 function handleVoiceChange(voice: string) {
@@ -64,8 +71,7 @@ function handleProxyToggle(event: Event) {
         <div class="openai-form-row">
           <label>Ключ API:</label>
           <InputWithToggle
-            :model-value="apiKey"
-            @update:model-value="$emit('save-api-key', $event)"
+            v-model="localApiKey"
             type="password"
             placeholder="sk-..."
             class="openai-input-wide"
