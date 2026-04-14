@@ -417,3 +417,7 @@ Create a custom HTML page that connects to the SSE endpoint:
 4. **Regenerate session key** if you suspect unauthorized access
 5. **Keep software updated** - Security patches are important
 6. **Use HTTPS in production** - Consider a reverse proxy with SSL termination
+
+---
+
+*Last updated: 2026-04-15*
