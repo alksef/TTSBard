@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onUnmounted } from 'vue';
+import { computed, onUnmounted, watch } from 'vue';
 import { Check, AlertTriangle, Shield, X } from 'lucide-vue-next';
 
 interface Props {
@@ -25,11 +25,23 @@ const emit = defineEmits<Emits>();
 
 let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-if (props.autoHide && props.message) {
-  timeoutId = setTimeout(() => {
-    emit('dismiss');
-  }, props.autoHideDelay);
+function startAutoHide() {
+  if (timeoutId !== null) {
+    clearTimeout(timeoutId);
+    timeoutId = null;
+  }
+  if (props.autoHide && props.message) {
+    timeoutId = setTimeout(() => {
+      emit('dismiss');
+    }, props.autoHideDelay);
+  }
 }
+
+startAutoHide();
+
+watch(() => props.message, () => {
+  startAutoHide();
+});
 
 onUnmounted(() => {
   if (timeoutId !== null) {
