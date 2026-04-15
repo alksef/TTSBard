@@ -115,7 +115,7 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
   <div class="modal-overlay" @click.self="handleClose">
     <div class="modal-content">
       <div class="modal-header">
-        <h2>Выберите голосовую модель</h2>
+        <h2>Добавить голос</h2>
         <button @click="handleClose" class="close-button">&times;</button>
       </div>
 
@@ -140,15 +140,15 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
 
         <div v-else-if="loading && models.length === 0" class="loading-container">
           <Loader2 :size="32" class="spinner" />
-          <p>Загрузка моделей...</p>
+          <p>Загрузка голосов...</p>
         </div>
 
         <div v-else-if="!hasSearched" class="empty-state">
-          <p>Введите запрос и нажмите "Поиск" для загрузки моделей</p>
+          <p>Введите запрос и нажмите "Поиск" для загрузки</p>
         </div>
 
         <div v-else-if="models.length === 0" class="empty-state">
-          <p>Модели не найдены</p>
+          <p>Голоса не найдены</p>
         </div>
 
         <div v-else class="models-list">
