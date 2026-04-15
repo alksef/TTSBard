@@ -110,7 +110,7 @@ async function handleSaveAll() {
 async function handleRemoveVoice(voiceId: string, voiceTitle: string, event: Event) {
   event.stopPropagation();
 
-  const confirmed = await confirm(`Удалить голосовую модель "${voiceTitle}"?`, {
+  const confirmed = await confirm(`Удалить голос "${voiceTitle}"?`, {
     title: 'Подтверждение удаления',
     kind: 'warning'
   });
@@ -230,7 +230,7 @@ function handleProxyToggle(event: Event) {
       <!-- Voice Management -->
       <div class="setting-group">
         <div class="voice-header">
-          <label>Голосовые модели</label>
+          <label>Голоса</label>
           <button @click="handleOpenModelPicker" class="add-model-button">
             <Plus :size="16" />
             Добавить
@@ -264,7 +264,7 @@ function handleProxyToggle(event: Event) {
           </div>
         </div>
         <div v-else class="empty-voices">
-          Нет добавленных голосовых моделей
+          Нет добавленных голосов
         </div>
       </div>
     </div>
@@ -372,6 +372,9 @@ function handleProxyToggle(event: Event) {
 }
 
 .voice-header label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
   margin-bottom: 0;
 }
 
