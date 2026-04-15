@@ -1,4 +1,4 @@
-use crate::telegram::{TelegramClient, UserInfo, TtsResult, SileroTtsBot, CurrentVoice, Limits, get_current_voice, get_limits, ProxyStatus};
+use crate::telegram::{TelegramClient, UserInfo, TtsResult, SileroTtsBot, CurrentVoice, Limits, get_current_voice, get_limits, ProxyStatus, types::VoiceCode, bot::set_speaker};
 use crate::config::{SettingsManager, ProxyMode};
 use tauri::State;
 use std::sync::Arc;
@@ -388,4 +388,106 @@ pub async fn telegram_auto_restore(
         info!("Session exists but not authorized");
         Ok(false)
     }
+}
+
+/// Установить голос, отправив "/speaker {code}" боту
+#[tauri::command]
+pub async fn telegram_set_speaker(
+    state: State<'_, TelegramState>,
+    voice_code: String,
+) -> Result<bool, String> {
+    // 1. Валидация voice_code (не пустой)
+    if voice_code.trim().is_empty() {
+        return Err("Voice code cannot be empty".to_string());
+    }
+
+    // 2. Получить клиент из state
+    let client_guard = state.client.lock().await;
+    let client = client_guard.as_ref()
+        .ok_or_else(|| "Telegram client not initialized".to_string())?;
+
+    // 3. Вызвать bot::set_speaker()
+    set_speaker(client, &voice_code).await
+}
+
+/// Добавить голос в список сохраненных
+#[tauri::command]
+pub fn telegram_add_voice_code(
+    settings_manager: State<'_, SettingsManager>,
+    voice: VoiceCode,
+) -> Result<(), String> {
+    // 1. Проверить что voice.id не пустой
+    if voice.id.trim().is_empty() {
+        return Err("Voice ID cannot be empty".to_string());
+    }
+
+    // 2. Проверить что нет дубликатов
+    let settings = settings_manager.load()
+        .map_err(|e| format!("Failed to load settings: {}", e))?;
+
+    if settings.tts.telegram.voices.iter().any(|v| v.id == voice.id) {
+        return Err("Voice with this ID already exists".to_string());
+    }
+
+    // 3. Добавить в telegram.voices и сохранить
+    let mut settings = settings;
+    settings.tts.telegram.voices.push(voice);
+    settings_manager.save(&settings)
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
+
+    Ok(())
+}
+
+/// Удалить голос из списка сохраненных
+#[tauri::command]
+pub fn telegram_remove_voice_code(
+    settings_manager: State<'_, SettingsManager>,
+    voice_id: String,
+) -> Result<(), String> {
+    let mut settings = settings_manager.load()
+        .map_err(|e| format!("Failed to load settings: {}", e))?;
+
+    // 1. Удалить голос из telegram.voices
+    settings.tts.telegram.voices.retain(|v| v.id != voice_id);
+
+    // 2. Если это был current_voice_id - очистить
+    if settings.tts.telegram.current_voice_id == voice_id {
+        settings.tts.telegram.current_voice_id.clear();
+    }
+
+    // 3. Сохранить настройки
+    settings_manager.save(&settings)
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
+
+    Ok(())
+}
+
+/// Выбрать голос из списка
+#[tauri::command]
+pub async fn telegram_select_voice(
+    state: State<'_, TelegramState>,
+    settings_manager: State<'_, SettingsManager>,
+    voice_id: String,
+) -> Result<bool, String> {
+    // 1. Отправить "/speaker {voice_id}" боту
+    let client_guard = state.client.lock().await;
+    let client = client_guard.as_ref()
+        .ok_or_else(|| "Telegram client not initialized".to_string())?;
+
+    let success = set_speaker(client, &voice_id).await?;
+    drop(client_guard);
+
+    // 2. Если успешно - обновить current_voice_id
+    if success {
+        let mut settings = settings_manager.load()
+            .map_err(|e| format!("Failed to load settings: {}", e))?;
+
+        settings.tts.telegram.current_voice_id = voice_id.clone();
+
+        settings_manager.save(&settings)
+            .map_err(|e| format!("Failed to save settings: {}", e))?;
+    }
+
+    // 3. Вернуть результат
+    Ok(success)
 }

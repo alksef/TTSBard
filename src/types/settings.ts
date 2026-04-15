@@ -72,6 +72,13 @@ export interface FishAudioSettingsDto {
 export interface TelegramTtsSettingsDto {
   api_id?: number
   proxy_mode?: string
+  voices?: VoiceCode[]
+  current_voice_id?: string
+}
+
+export interface VoiceCode {
+  id: string
+  description?: string
 }
 
 export interface Socks5SettingsDto {

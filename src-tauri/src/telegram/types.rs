@@ -78,3 +78,10 @@ pub struct Limits {
     pub voices: String,
     pub gifs: String,
 }
+
+/// Сохраненный код голоса для Telegram TTS
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VoiceCode {
+    pub id: String,  // e.g., "rene", "hamster_clerk"
+    pub description: Option<String>,  // e.g., "Rene", "Хомяки"
+}
