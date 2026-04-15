@@ -140,10 +140,10 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
     }
 
     // Initialize TTS provider
-    init_tts_provider(&app_state, &telegram_state, settings);
+    init_tts_provider(&app_state, &telegram_state, settings.clone());
 
     // Initialize windows
-    init_windows(app, &windows, &windows_manager)?;
+    init_windows(app, &windows, &windows_manager, &settings)?;
 
     // Initialize system tray
     init_tray(app)?;
@@ -258,6 +258,7 @@ fn init_windows(
     app: &App,
     windows: &WindowsSettings,
     _windows_manager: &WindowsManager,
+    settings: &AppSettings,
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!("State initialized");
 
@@ -269,6 +270,14 @@ fn init_windows(
                 let _ = main_window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
             }
         }
+
+        // Apply theme to the Tauri window itself to ensure titlebar and OS frames match
+        let tauri_theme = match settings.theme {
+            crate::config::Theme::Light => tauri::Theme::Light,
+            crate::config::Theme::Dark => tauri::Theme::Dark,
+        };
+        let _ = main_window.set_theme(Some(tauri_theme));
+        info!(?tauri_theme, "Applied initial window theme");
     }
 
     Ok(())

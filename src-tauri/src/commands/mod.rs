@@ -945,6 +945,16 @@ pub fn update_theme(
     settings_manager.set_theme(theme)
         .map_err(|e| format!("Failed to update theme: {}", e))?;
 
+    // Set Tauri window theme to ensure OS frame and titlebar matches
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let tauri_theme = match theme {
+            Theme::Light => tauri::Theme::Light,
+            Theme::Dark => tauri::Theme::Dark,
+        };
+        let _ = window.set_theme(Some(tauri_theme));
+        info!(?tauri_theme, "Applied window theme");
+    }
+
     // Emit event to notify frontend
     let _ = app_handle.emit("settings-changed", ());
 
