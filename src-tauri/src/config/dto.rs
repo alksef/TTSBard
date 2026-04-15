@@ -325,6 +325,10 @@ impl From<FishAudioSettingsDto> for FishAudioSettings {
 pub struct TelegramTtsSettingsDto {
     pub api_id: Option<i64>,
     pub proxy_mode: String,
+    #[serde(default)]
+    pub voices: Vec<crate::telegram::types::VoiceCode>,
+    #[serde(default)]
+    pub current_voice_id: String,
 }
 
 impl From<TelegramTtsSettings> for TelegramTtsSettingsDto {
@@ -334,6 +338,8 @@ impl From<TelegramTtsSettings> for TelegramTtsSettingsDto {
             proxy_mode: serde_json::to_value(&s.proxy_mode)
                 .map(|v| v.as_str().unwrap_or("none").to_string())
                 .unwrap_or_else(|_| "none".to_string()),
+            voices: s.voices,
+            current_voice_id: s.current_voice_id,
         }
     }
 }
@@ -347,6 +353,8 @@ impl From<TelegramTtsSettingsDto> for TelegramTtsSettings {
                 "socks5" => ProxyMode::Socks5,
                 _ => ProxyMode::None,
             },
+            voices: dto.voices,
+            current_voice_id: dto.current_voice_id,
         }
     }
 }

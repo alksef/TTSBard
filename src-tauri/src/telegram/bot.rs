@@ -2,7 +2,7 @@ use super::client::TelegramClient;
 use super::types::{TtsResult, CurrentVoice, Limits};
 use grammers_session::updates::UpdatesLike;
 use std::path::PathBuf;
-use tracing::{info, error, debug, warn};
+use tracing::{info, error, debug, warn, trace};
 
 /// Имя бота Silero TTS в Telegram
 const BOT_USERNAME: &str = "silero_voice_bot";
@@ -87,7 +87,7 @@ impl SileroTtsBot {
             .await
             .map_err(|e| format!("Failed to send message: {}", e))?;
 
-        debug!(?result, "Message sent");
+        trace!(?result, "Message sent");
 
         Ok(())
     }
@@ -318,12 +318,12 @@ pub async fn get_current_voice(client: &TelegramClient) -> Result<Option<Current
 
     info!("Getting current voice from bot");
 
-    // 1. Отправляем /speaker
-    send_speaker_command(client).await?;
+    // 1. Отправляем /speaker и получаем ID сообщения
+    let sent_message_id = send_speaker_command(client).await?;
 
-    info!("/speaker sent, waiting for text response");
+    info!(sent_message_id, "/speaker sent, waiting for text response");
 
-    // 2. Ждем текстовое сообщение (не меню, не голос)
+    // 2. Ждем текстовое сообщение (ответ на наше сообщение)
     let start_time = std::time::Instant::now();
     let total_timeout = std::time::Duration::from_secs(60);  // 1 минута
 
@@ -344,8 +344,12 @@ pub async fn get_current_voice(client: &TelegramClient) -> Result<Option<Current
 
         match tokio::time::timeout(remaining, updates.recv()).await {
             Ok(Some(update_like)) => {
+                // Логируем все incoming updates для отладки
+                trace!(?update_like, "Received update");
+
                 // Проверяем, есть ли текстовое сообщение с информацией о голосе
-                if let Some(voice_info) = extract_voice_info_from_update(&update_like) {
+                // Передаем expected_msg_id чтобы проверить что это ответ на наше сообщение
+                if let Some(voice_info) = extract_voice_info_from_update(&update_like, sent_message_id) {
                     info!(voice_info.name, voice_info.id, "Voice info found");
                     return Ok(Some(voice_info));  // Нашли - возвращаем Some
                 }
@@ -363,7 +367,8 @@ pub async fn get_current_voice(client: &TelegramClient) -> Result<Option<Current
 }
 
 /// Отправить команду /speaker боту
-async fn send_speaker_command(client: &TelegramClient) -> Result<(), String> {
+/// Возвращает ID отправленного сообщения
+async fn send_speaker_command(client: &TelegramClient) -> Result<i32, String> {
     info!("Sending /speaker to bot");
 
     let client_inner = client.client.lock().await;
@@ -388,25 +393,58 @@ async fn send_speaker_command(client: &TelegramClient) -> Result<(), String> {
         .await
         .map_err(|e| format!("Failed to send message: {}", e))?;
 
-    debug!(?result, "Message sent");
+    let msg_id = result.id();
+    trace!(msg_id, "Message sent");
 
-    Ok(())
+    Ok(msg_id)
 }
 
 /// Извлечь информацию о текущем голосе из текстового сообщения
 /// Парсит: "Выбранный голос: /speaker hamster_clerk\nНаходится в паке: Хомяки"
+/// Проверяет что сообщение является ответом на сообщение с expected_msg_id
 #[allow(clippy::collapsible_match)]
-fn extract_voice_info_from_update(update_like: &UpdatesLike) -> Option<CurrentVoice> {
+fn extract_voice_info_from_update(update_like: &UpdatesLike, expected_msg_id: i32) -> Option<CurrentVoice> {
     if let UpdatesLike::Updates(updates_enum) = update_like {
         if let grammers_tl_types::enums::Updates::Updates(u) = updates_enum {
             for update in &u.updates {
                 if let grammers_tl_types::enums::Update::NewMessage(msg) = update {
                     if let grammers_tl_types::enums::Message::Message(m) = &msg.message {
-                        // Ищем текстовое сообщение (без медиа, без меню)
-                        if m.media.is_none() && m.reply_markup.is_none() {
+                        // Игнорируем исходящие сообщения (наши собственные)
+                        if m.out {
+                            trace!("Skipping outgoing message");
+                            continue;
+                        }
+
+                        // Проверяем что это ответ на наше сообщение
+                        match &m.reply_to {
+                            Some(grammers_tl_types::enums::MessageReplyHeader::Header(h)) if h.reply_to_msg_id == Some(expected_msg_id) => {
+                                // Это ответ на наше сообщение - обрабатываем
+                            }
+                            _ => {
+                                // Не ответ на наше сообщение - пропускаем
+                                trace!(
+                                    has_reply_to = m.reply_to.is_some(),
+                                    expected = expected_msg_id,
+                                    "Skipping message - not a reply to our message"
+                                );
+                                continue;
+                            }
+                        }
+
+                        trace!(
+                            has_media = m.media.is_some(),
+                            has_reply_markup = m.reply_markup.is_some(),
+                            text_len = m.message.len(),
+                            "Processing reply to our message"
+                        );
+
+                        // Ищем текстовое сообщение (без медиа)
+                        // reply_markup может быть (инлайн-кнопки бота)
+                        if m.media.is_none() {
                             // В TL типе Message текст находится в поле message
                             let text = &m.message;
                             if !text.is_empty() {
+                                trace!(text, "Attempting to parse voice info");
                                 // Парсим текст
                                 if let Some(voice) = parse_voice_info(text) {
                                     return Some(voice);
@@ -424,7 +462,7 @@ fn extract_voice_info_from_update(update_like: &UpdatesLike) -> Option<CurrentVo
 /// Парсит текст ответа бота для получения информации о голосе
 /// Формат: "Выбранный голос: /speaker hamster_clerk\nНаходится в паке: Хомяки"
 fn parse_voice_info(text: &str) -> Option<CurrentVoice> {
-    debug!(text, "Parsing text");
+    trace!(text, "Parsing text");
 
     // Ищем строки с ключевыми словами
     let mut voice_id: Option<String> = None;
@@ -460,7 +498,7 @@ fn parse_voice_info(text: &str) -> Option<CurrentVoice> {
 
     // Возвращаем результат если нашли оба поля
     if let (Some(id), Some(name)) = (voice_id, voice_name) {
-        debug!(id, name, "Parsed voice info");
+        trace!(id, name, "Parsed voice info");
         Some(CurrentVoice { name, id })
     } else {
         warn!("Failed to parse voice info from text");
@@ -546,7 +584,7 @@ async fn send_limits_command(client: &TelegramClient) -> Result<(), String> {
         .await
         .map_err(|e| format!("Failed to send message: {}", e))?;
 
-    debug!(?result, "Message sent");
+    trace!(?result, "Message sent");
 
     Ok(())
 }
@@ -582,7 +620,7 @@ fn extract_limits_info_from_update(update_like: &UpdatesLike) -> Option<Limits> 
 /// Парсит текст ответа бота для получения информации о лимитах
 /// Формат: "🔓 Открытые голоса: 0 / 666 символов;" и "🪩 Кружки/гифки: 0 / 10 сообщений;"
 fn parse_limits_info(text: &str) -> Option<Limits> {
-    debug!(text, "Parsing text");
+    trace!(text, "Parsing text");
 
     let mut voices: Option<String> = None;
     let mut gifs: Option<String> = None;
@@ -635,7 +673,7 @@ fn parse_limits_info(text: &str) -> Option<Limits> {
 
     // Возвращаем результат если нашли оба поля
     if let (Some(voices_val), Some(gifs_val)) = (voices, gifs) {
-        debug!(voices_val, gifs_val, "Parsed limits info");
+        trace!(voices_val, gifs_val, "Parsed limits info");
         Some(Limits {
             voices: voices_val,
             gifs: gifs_val,
@@ -655,4 +693,344 @@ impl FindWhitespace for &str {
     fn find_whitespace(&self) -> Option<usize> {
         self.chars().position(|c| c.is_whitespace())
     }
+}
+
+/// Отправить "/speaker {code}" боту и дождаться текстового ответа
+/// Возвращает true если успешно, иначе ошибку
+pub async fn set_speaker(client: &TelegramClient, voice_code: &str) -> Result<bool, String> {
+    use tokio::sync::mpsc::UnboundedReceiver;
+
+    info!("Setting speaker to '{}'", voice_code);
+
+    // 1. Сначала получаем receiver для updates, чтобы не пропустить ответ
+    let mut updates_opt = client.updates.lock().await;
+    let updates: &mut UnboundedReceiver<UpdatesLike> = updates_opt
+        .as_mut()
+        .ok_or_else(|| "Updates channel not initialized".to_string())?;
+
+    trace!("Updates receiver locked, ready to send command");
+
+    // 2. Отправить "/speaker {code}" и получить ID сообщения
+    let sent_message_id = send_speaker_command_with_code(client, voice_code).await?;
+
+    info!("Waiting for bot response to msg_id={}", sent_message_id);
+
+    // 3. Ждем текстовое сообщение (ответ на наше сообщение)
+    let start_time = std::time::Instant::now();
+    let total_timeout = std::time::Duration::from_secs(30);  // 30 секунд
+
+    loop {
+
+        // Проверяем общий таймаут
+        let elapsed = start_time.elapsed();
+        if elapsed >= total_timeout {
+            warn!("Timeout (30s) waiting for set_speaker response");
+            return Err("Timeout waiting for speaker change response".to_string());
+        }
+
+        let remaining = total_timeout.saturating_sub(elapsed);
+
+        match tokio::time::timeout(remaining, updates.recv()).await {
+            Ok(Some(update_like)) => {
+                trace!("Received update while waiting for set_speaker response");
+                // Проверяем, есть ли текстовое сообщение с ответом на наше сообщение
+                if let Some(result) = extract_set_speaker_response_from_update(&update_like, sent_message_id) {
+                    info!("Set speaker response: {}", result);
+                    if result {
+                        return Ok(true);
+                    } else {
+                        return Err("Invalid voice code".to_string());
+                    }
+                }
+            }
+            Ok(None) => {
+                warn!("Updates channel closed");
+                return Err("Updates channel closed".to_string());
+            }
+            Err(_) => {
+                // Таймаут одной итерации - продолжаем ждать
+                continue;
+            }
+        }
+    }
+}
+
+/// Отправить команду "/speaker {code}" боту
+/// Возвращает ID отправленного сообщения
+async fn send_speaker_command_with_code(client: &TelegramClient, voice_code: &str) -> Result<i32, String> {
+    info!("Sending /speaker {} to bot", voice_code);
+
+    let client_inner = client.client.lock().await;
+    let client_inner = client_inner
+        .as_ref()
+        .ok_or_else(|| "Client not initialized".to_string())?;
+
+    // Разрешаем username бота
+    let bot = client_inner
+        .resolve_username(BOT_USERNAME)
+        .await
+        .map_err(|e| format!("Failed to resolve bot: {}", e))?
+        .ok_or_else(|| "Bot not found".to_string())?;
+
+    debug!(username = ?bot.username(), "Bot resolved");
+
+    // Формируем команду
+    let command = format!("/speaker {}", voice_code);
+    trace!("Sending command: '{}'", command);
+
+    // Отправляем сообщение
+    let bot_ref = bot.to_ref().await
+        .ok_or_else(|| "Failed to get bot peer ref".to_string())?;
+    let result = client_inner
+        .send_message(bot_ref, command)
+        .await
+        .map_err(|e| format!("Failed to send message: {}", e))?;
+
+    let msg_id = result.id();
+    info!(msg_id, "Sent /speaker {} msg_id={}, waiting for text response", voice_code, msg_id);
+
+    Ok(msg_id)
+}
+
+/// Извлечь ответ об установке спикера из текстового сообщения
+/// Проверяет что сообщение является ответом на сообщение с expected_msg_id
+fn extract_set_speaker_response_from_update(update_like: &UpdatesLike, expected_msg_id: i32) -> Option<bool> {
+    trace!("Extracting set_speaker response, expected_msg_id={}", expected_msg_id);
+
+    match update_like {
+        // UpdatesLike::Updates - enum с массивом updates
+        UpdatesLike::Updates(updates_enum) => {
+            trace!("Processing UpdatesLike::Updates, variant: {:?}", std::mem::discriminant(updates_enum));
+            match updates_enum {
+                grammers_tl_types::enums::Updates::Updates(u) => {
+                    trace!("Processing updates enum, {} updates", u.updates.len());
+                    for (idx, update) in u.updates.iter().enumerate() {
+                        trace!("Update[{}]: checking type", idx);
+
+                        // Паттерн-матчинг для всех типов Update которые могут содержать текст
+                        match update {
+                            // NewMessage - обычное сообщение
+                            grammers_tl_types::enums::Update::NewMessage(msg) => {
+                                trace!("Update[{}]: is NewMessage", idx);
+                                if let Some(result) = process_message(&msg.message, expected_msg_id, idx) {
+                                    return Some(result);
+                                }
+                            }
+
+                            // NewChannelMessage - сообщение в канале/супергруппе
+                            grammers_tl_types::enums::Update::NewChannelMessage(msg) => {
+                                trace!("Update[{}]: is NewChannelMessage", idx);
+                                if let Some(result) = process_message(&msg.message, expected_msg_id, idx) {
+                                    return Some(result);
+                                }
+                            }
+
+                            // EditMessage - редактированное сообщение
+                            grammers_tl_types::enums::Update::EditMessage(msg) => {
+                                trace!("Update[{}]: is EditMessage", idx);
+                                if let Some(result) = process_message(&msg.message, expected_msg_id, idx) {
+                                    return Some(result);
+                                }
+                            }
+
+                            // EditChannelMessage - редактированное сообщение в канале
+                            grammers_tl_types::enums::Update::EditChannelMessage(msg) => {
+                                trace!("Update[{}]: is EditChannelMessage", idx);
+                                if let Some(result) = process_message(&msg.message, expected_msg_id, idx) {
+                                    return Some(result);
+                                }
+                            }
+
+                            // Other types - логируем детально для отладки
+                            other => {
+                                // Подробное логирование unhandled types
+                                trace!("Update[{}]: is unhandled type: {:?}, full data: {:?}", idx, std::mem::discriminant(other), other);
+                            }
+                        }
+                    }
+                }
+                grammers_tl_types::enums::Updates::UpdateShortMessage(msg) => {
+                    trace!("Processing Updates::UpdateShortMessage");
+                    trace!("UpdateShortMessage: out={}, message='{}', reply_to={:?}",
+                        msg.out, msg.message, msg.reply_to);
+
+                    // Игнорируем исходящие сообщения
+                    if msg.out {
+                        trace!("Skipping outgoing UpdateShortMessage");
+                        return None;
+                    }
+
+                    // Проверяем что это ответ на наше сообщение
+                    let is_reply_to_our_msg = match &msg.reply_to {
+                        Some(grammers_tl_types::enums::MessageReplyHeader::Header(h))
+                            if h.reply_to_msg_id == Some(expected_msg_id) => {
+                            trace!("UpdateShortMessage IS a reply to our message (expected_msg_id={})", expected_msg_id);
+                            true
+                        }
+                        _ => {
+                            trace!("UpdateShortMessage is NOT a reply to our message, reply_to={:?}, expected_msg_id={}",
+                                msg.reply_to.as_ref().and_then(|h| {
+                                    if let grammers_tl_types::enums::MessageReplyHeader::Header(header) = h {
+                                        header.reply_to_msg_id
+                                    } else {
+                                        None
+                                    }
+                                }), expected_msg_id);
+                            false
+                        }
+                    };
+
+                    if is_reply_to_our_msg && !msg.message.is_empty() {
+                        trace!("Parsing text from UpdateShortMessage: '{}'", msg.message);
+                        let result = parse_message_text_with_validation(&msg.message);
+                        return Some(result);
+                    }
+                }
+                grammers_tl_types::enums::Updates::UpdateShortChatMessage(msg) => {
+                    trace!("Processing Updates::UpdateShortChatMessage");
+                    trace!("UpdateShortChatMessage: out={}, message='{}'", msg.out, msg.message);
+
+                    // Игнорируем исходящие сообщения
+                    if msg.out {
+                        trace!("Skipping outgoing UpdateShortChatMessage");
+                        return None;
+                    }
+
+                    // UpdateShortChatMessage не содержит reply_to, поэтому проверяем по другому
+                    // Для простоты просто парсим текст
+                    if !msg.message.is_empty() {
+                        trace!("Parsing text from UpdateShortChatMessage: '{}'", msg.message);
+                        let result = parse_message_text_with_validation(&msg.message);
+                        return Some(result);
+                    }
+                }
+                other => {
+                    trace!("Updates is not Updates::Updates, UpdateShortMessage, or UpdateShortChatMessage, it's: {:?}", std::mem::discriminant(other));
+                    trace!("Full data: {:?}", other);
+                }
+            }
+        }
+
+        // Other variants
+        other => {
+            trace!("Unhandled UpdatesLike variant: {:?}", std::mem::discriminant(other));
+            trace!("Full data: {:?}", other);
+        }
+    }
+
+    trace!("No valid set_speaker response found in this update");
+    None
+}
+
+/// Обработать Message enum (используется для NewMessage, EditMessage и т.д.)
+fn process_message(message: &grammers_tl_types::enums::Message, expected_msg_id: i32, idx: usize) -> Option<bool> {
+    match message {
+        grammers_tl_types::enums::Message::Message(m) => {
+            trace!("Update[{}]: is Message, out={}, msg_id={}", idx, m.out, m.id);
+
+            // Игнорируем исходящие сообщения (наши собственные)
+            if m.out {
+                trace!("Skipping outgoing message msg_id={}", m.id);
+                return None;
+            }
+
+            trace!("Processing incoming message msg_id={}, has_reply_to={}",
+                m.id, m.reply_to.is_some());
+
+            // Проверяем что это ответ на наше сообщение
+            match &m.reply_to {
+                Some(grammers_tl_types::enums::MessageReplyHeader::Header(h)) if h.reply_to_msg_id == Some(expected_msg_id) => {
+                    trace!("Message IS a reply to our message (expected_msg_id={})", expected_msg_id);
+                    // Это ответ на наше сообщение - обрабатываем
+                }
+                other => {
+                    // Не ответ на наше сообщение - пропускаем
+                    let reply_to_id = other.as_ref().and_then(|h| {
+                        if let grammers_tl_types::enums::MessageReplyHeader::Header(header) = h {
+                            header.reply_to_msg_id
+                        } else {
+                            None
+                        }
+                    });
+                    trace!("Skipping message - not a reply to our message, reply_to={:?}, expected_msg_id={}",
+                        reply_to_id, expected_msg_id);
+                    return None;
+                }
+            }
+
+            trace!("Message has_media={}, message_len={}", m.media.is_some(), m.message.len());
+
+            // Ищем текстовое сообщение (без медиа)
+            // reply_markup может быть (инлайн-кнопки бота)
+            if m.media.is_none() {
+                let text = &m.message;
+                if !text.is_empty() {
+                    trace!("Parsing text from reply: '{}'", text);
+                    // Парсим ответ
+                    return Some(parse_message_text_with_validation(text));
+                } else {
+                    trace!("Reply message has empty text, continuing");
+                }
+            } else {
+                trace!("Reply message has media, skipping");
+            }
+        }
+        other => {
+            trace!("Update[{}]: Message variant is not Message, it's {:?}", idx, std::mem::discriminant(other));
+        }
+    }
+    None
+}
+
+/// Спарсить текст сообщения с валидацией
+fn parse_message_text_with_validation(text: &str) -> bool {
+    trace!("Parsing text: '{}'", text);
+    match parse_set_speaker_response(text) {
+        Ok(result) => {
+            info!("Successfully parsed set_speaker response: result={}", result);
+            result
+        }
+        Err(_) => {
+            trace!("Failed to parse as known response format, checking for invalid voice error");
+            // Для ошибки "Invalid voice code" возвращаем false
+            if text.contains("Указан неверный голос")
+                || text.contains("Вказано невірний голос") {
+                info!("Detected 'invalid voice' error in response");
+                false
+            } else {
+                trace!("Unknown response format, continuing to wait");
+                // Неизвестный формат - возвращаем false чтобы caller продолжил ждать
+                false
+            }
+        }
+    }
+}
+
+/// Парсит текст ответа бота для set_speaker
+/// Возвращает Ok(true) если успешно, Err если неверный код
+fn parse_set_speaker_response(text: &str) -> Result<bool, String> {
+    trace!("Parsing set_speaker response text: '{}'", text);
+
+    // Проверить варианты успешного ответа
+    if text.contains("Успешно выбран спикер")
+        || text.contains("Успішно обрано спікера")
+        || text.contains("Successfully selected speaker") {
+        trace!("Matched success pattern 'Успешно выбран спикер'");
+        return Ok(true);
+    }
+
+    if text.contains("Успешно выбран тот же самый спикер")
+        || text.contains("Успішно обрано того самого спікера") {
+        trace!("Matched success pattern 'Успешно выбран тот же самый спикер'");
+        return Ok(true);
+    }
+
+    if text.contains("Указан неверный голос")
+        || text.contains("Вказано невірний голос") {
+        trace!("Matched error pattern 'Указан неверный голос'");
+        return Err("Invalid voice code".to_string());
+    }
+
+    trace!("No pattern matched, returning unknown format error");
+    Err("Unknown response format".to_string())
 }

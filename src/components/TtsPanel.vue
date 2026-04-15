@@ -58,7 +58,16 @@ const {
   isConnected: telegramConnected,
   errorMessage: telegramErrorMessage,
   hasError: telegramHasError,
-  signOut: signOutTelegram
+  signOut: signOutTelegram,
+  currentVoice: telegramCurrentVoice,
+  savedVoices: telegramSavedVoices,
+  voiceLoading: telegramVoiceLoading,
+  voiceError: telegramVoiceError,
+  addVoiceCode: addTelegramVoiceCode,
+  removeVoiceCode: removeTelegramVoiceCode,
+  selectVoice: selectTelegramVoice,
+  loadSavedVoices: loadTelegramSavedVoices,
+  autoRefreshVoice: autoRefreshTelegramVoice,
 } = telegramAuth;
 
 // silero error state
@@ -319,16 +328,59 @@ async function reconnectTelegram() {
   }
 }
 
+// Voice management handlers
+async function handleRefreshVoice() {
+  try {
+    await autoRefreshTelegramVoice();
+    showSuccess('Текущий голос обновлен');
+  } catch (error) {
+    showError(error as string);
+  }
+}
+
+async function handleAddVoice(data: { code: string; description?: string }, callback: (success: boolean, error?: string) => void) {
+  try {
+    await addTelegramVoiceCode(data);
+    showSuccess('Голос добавлен');
+    callback(true);
+  } catch (error) {
+    const errorMsg = error as string;
+    // Ошибка уже покажется в диалоге, не дублируем
+    callback(false, errorMsg);
+  }
+}
+
+async function handleRemoveVoice(id: string) {
+  try {
+    await removeTelegramVoiceCode(id);
+    showSuccess('Голос удалён');
+  } catch (error) {
+    showError(error as string);
+  }
+}
+
+async function handleSelectVoice(id: string) {
+  try {
+    await selectTelegramVoice(id);
+    showSuccess('Голос выбран');
+  } catch (error) {
+    showError(error as string);
+  }
+}
+
 // Watch for Telegram errors
 watch([telegramErrorMessage, telegramHasError], () => {
   handleSileroError();
 });
 
 // Clear silero error when successfully connected
-watch(telegramConnected, (newValue) => {
+watch(telegramConnected, async (newValue) => {
   if (newValue) {
     sileroError.value = null;
     loadTelegramProxyStatus();
+    // Load saved voices and auto-refresh
+    await loadTelegramSavedVoices();
+    await autoRefreshTelegramVoice();
   } else {
     currentTelegramProxyStatus.value = null;
   }
@@ -447,12 +499,20 @@ function dismissStatus() {
         :reconnecting="reconnectingTelegram"
         :proxy-mode="telegramProxyMode"
         :proxy-modes="telegramProxyModes"
+        :current-voice="telegramCurrentVoice"
+        :saved-voices="telegramSavedVoices"
+        :voice-loading="telegramVoiceLoading"
+        :voice-error="telegramVoiceError"
         @select="setActiveProvider('silero')"
         @toggle="toggleProvider('silero')"
         @connect="openTelegramModal"
         @disconnect="handleSignOut"
         @reconnect="reconnectTelegram"
         @proxy-mode-change="setTelegramProxyMode"
+        @refresh-voice="handleRefreshVoice"
+        @add-voice="handleAddVoice"
+        @remove-voice="handleRemoveVoice"
+        @select-voice="handleSelectVoice"
       />
 
       <!-- OpenAI Provider -->

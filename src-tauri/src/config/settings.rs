@@ -102,6 +102,12 @@ pub struct TelegramTtsSettings {
     pub api_id: Option<i64>,
     #[serde(default)]
     pub proxy_mode: ProxyMode,
+    /// Список сохраненных кодов голосов
+    #[serde(default)]
+    pub voices: Vec<crate::telegram::types::VoiceCode>,
+    /// Текущий выбранный ID голоса
+    #[serde(default)]
+    pub current_voice_id: String,
 }
 
 /// Proxy mode for Telegram connection

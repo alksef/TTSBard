@@ -305,6 +305,10 @@ pub fn run() {
             commands::telegram::speak_text_silero,
             commands::telegram::telegram_get_current_voice,
             commands::telegram::telegram_get_limits,
+            commands::telegram::telegram_set_speaker,
+            commands::telegram::telegram_add_voice_code,
+            commands::telegram::telegram_remove_voice_code,
+            commands::telegram::telegram_select_voice,
             // WebView commands
             commands::webview::get_webview_settings,
             commands::webview::save_webview_settings,

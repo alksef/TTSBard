@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { debugLog, debugError } from '../utils/debug'
+import type { VoiceCode } from '../types/settings'
 
 export type TelegramAuthState = 'idle' | 'loading' | 'code_required' | 'connected' | 'error'
 
@@ -42,6 +43,9 @@ export function useTelegramAuth() {
   const loading = ref(false)
   const currentVoice = ref<CurrentVoice | null>(null)
   const limits = ref<Limits | null>(null)
+  const savedVoices = ref<VoiceCode[]>([])
+  const voiceLoading = ref(false)
+  const voiceError = ref<string | null>(null)
 
   // Computed properties
   const isConnected = computed(() => state.value === 'connected')
@@ -269,6 +273,122 @@ export function useTelegramAuth() {
     errorMessage.value = null
   }
 
+  // Load saved voices from settings
+  async function loadSavedVoices() {
+    try {
+      debugLog('[TELEGRAM VOICES] Loading saved voices')
+      const settings = await invoke<any>('get_all_app_settings')
+      savedVoices.value = settings.tts.telegram.voices || []
+      debugLog('[TELEGRAM VOICES] Saved voices loaded:', savedVoices.value.length)
+    } catch (error) {
+      debugError('[TELEGRAM VOICES] Failed to load saved voices:', error)
+    }
+  }
+
+  // Add voice code
+  async function addVoiceCode(data: { code: string; description?: string }) {
+    voiceLoading.value = true
+    voiceError.value = null
+
+    try {
+      debugLog('[TELEGRAM VOICES] Adding voice code:', data.code)
+
+      // 1. Отправить "/speaker {code}" боту
+      const success = await invoke<boolean>('telegram_set_speaker', { voiceCode: data.code })
+
+      if (success) {
+        debugLog('[TELEGRAM VOICES] Speaker set successfully, getting voice info')
+
+        // 2. Получить информацию о голосе
+        const voice = await invoke<CurrentVoice>('telegram_get_current_voice')
+
+        if (voice) {
+          // 3. Добавить в сохраненные с описанием
+          const voiceCode: VoiceCode = {
+            id: voice.id,
+            description: data.description
+          }
+          await invoke('telegram_add_voice_code', { voice: voiceCode })
+
+          await loadSavedVoices()
+          await refreshVoice()
+
+          debugLog('[TELEGRAM VOICES] Voice added successfully')
+        } else {
+          throw new Error('Не удалось получить информацию о голосе')
+        }
+      } else {
+        // Бот вернул false - значит неверный код голоса
+        throw new Error('Указан неверный голос. Проверьте код и попробуйте снова.')
+      }
+    } catch (error) {
+      debugError('[TELEGRAM VOICES] Failed to add voice code:', error)
+      voiceError.value = error as string
+      throw error
+    } finally {
+      voiceLoading.value = false
+    }
+  }
+
+  // Remove voice code
+  async function removeVoiceCode(id: string) {
+    try {
+      debugLog('[TELEGRAM VOICES] Removing voice:', id)
+      await invoke('telegram_remove_voice_code', { voiceId: id })
+      await loadSavedVoices()
+      debugLog('[TELEGRAM VOICES] Voice removed successfully')
+    } catch (error) {
+      debugError('[TELEGRAM VOICES] Failed to remove voice:', error)
+      throw error
+    }
+  }
+
+  // Select voice
+  async function selectVoice(id: string) {
+    voiceLoading.value = true
+    voiceError.value = null
+
+    try {
+      debugLog('[TELEGRAM VOICES] Selecting voice:', id)
+      const success = await invoke<boolean>('telegram_select_voice', { voiceId: id })
+
+      if (success) {
+        await refreshVoice()
+        debugLog('[TELEGRAM VOICES] Voice selected successfully')
+      } else {
+        throw new Error('Не удалось выбрать голос')
+      }
+    } catch (error) {
+      debugError('[TELEGRAM VOICES] Failed to select voice:', error)
+      voiceError.value = error as string
+      throw error
+    } finally {
+      voiceLoading.value = false
+    }
+  }
+
+  // Auto-refresh voice on connect
+  async function autoRefreshVoice() {
+    try {
+      const voice = await refreshVoice()
+
+      if (voice) {
+        // Проверить есть ли голос в списке
+        const exists = savedVoices.value.some(v => v.id === voice.id)
+
+        if (!exists) {
+          // Авто-добавить новый голос
+          const voiceCode: VoiceCode = { id: voice.id }
+          await invoke('telegram_add_voice_code', { voice: voiceCode })
+          await loadSavedVoices()
+          debugLog('[TELEGRAM VOICES] Auto-added new voice:', voice)
+        }
+      }
+    } catch (error) {
+      debugError('[TELEGRAM VOICES] Auto-refresh voice failed:', error)
+    }
+  }
+
   return {
     // State
     state,
@@ -277,6 +397,9 @@ export function useTelegramAuth() {
     loading,
     currentVoice,
     limits,
+    savedVoices,
+    voiceLoading,
+    voiceError,
 
     // Computed
     isConnected,
@@ -295,6 +418,11 @@ export function useTelegramAuth() {
     refreshVoice,
     refreshLimits,
     reset,
+    loadSavedVoices,
+    addVoiceCode,
+    removeVoiceCode,
+    selectVoice,
+    autoRefreshVoice,
   }
 }
 
