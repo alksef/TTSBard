@@ -498,7 +498,7 @@ watch(audioSettingsFromComposable, (newSettings) => {
   background: var(--color-bg-field);
   border: 1px solid var(--color-border);
   border-radius: 12px;
-  padding: 1.35rem 1.5rem;
+  padding: 12px 16px;
   backdrop-filter: blur(8px);
 }
 
