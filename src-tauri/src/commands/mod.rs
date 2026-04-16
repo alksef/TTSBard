@@ -175,20 +175,62 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
     // Use already-loaded audio settings
     let audio_settings = settings.audio;
 
-    // Build speaker config
+    // === Apply audio effects if enabled ===
+    let effects = if settings.audio_effects.enabled {
+        Some(crate::audio::AudioEffects::new(
+            settings.audio_effects.pitch,
+            settings.audio_effects.speed,
+            settings.audio_effects.volume,
+        ))
+    } else {
+        None
+    };
+
+    let audio_data = match &effects {
+        Some(eff) => {
+            let original_len = audio_data.len();
+            match crate::audio::apply_effects(audio_data, eff) {
+                Ok(processed) => {
+                    debug!(original = original_len, processed = processed.len(), "Audio effects applied");
+                    processed
+                }
+                Err(e) => {
+                    error!(error = %e, "Failed to apply audio effects");
+                    return Err(format!("Не удалось применить аудио эффекты: {}", e));
+                }
+            }
+        }
+        None => audio_data,
+    };
+
+    let effects_volume = effects.as_ref().map(|e| e.volume_factor());
+
+    // Build speaker config (combine base volume with effects volume)
     let speaker_config = if audio_settings.speaker_enabled {
+        let base_volume = audio_settings.speaker_volume as f32 / 100.0;
+        let final_volume = match effects_volume {
+            Some(ev) => base_volume * ev,
+            None => base_volume,
+        };
         Some(OutputConfig {
             device_id: audio_settings.speaker_device,
-            volume: audio_settings.speaker_volume as f32 / 100.0,
+            volume: final_volume,
         })
     } else {
         None
     };
 
-    // Build virtual mic config
-    let virtual_mic_config = audio_settings.virtual_mic_device.map(|device_id| OutputConfig {
-        device_id: Some(device_id),
-        volume: audio_settings.virtual_mic_volume as f32 / 100.0,
+    // Build virtual mic config (combine base volume with effects volume)
+    let virtual_mic_config = audio_settings.virtual_mic_device.map(|device_id| {
+        let base_volume = audio_settings.virtual_mic_volume as f32 / 100.0;
+        let final_volume = match effects_volume {
+            Some(ev) => base_volume * ev,
+            None => base_volume,
+        };
+        OutputConfig {
+            device_id: Some(device_id),
+            volume: final_volume,
+        }
     });
 
     // Check at least one output is enabled
@@ -863,6 +905,58 @@ pub fn test_audio_device(device_id: Option<String>, volume: u8) -> Result<(), St
 
     info!("Test sound playback completed");
     Ok(())
+}
+
+// ============================================================================
+// Audio Effects commands
+// ============================================================================
+
+/// Get audio effects settings
+#[tauri::command]
+pub fn get_audio_effects(
+    settings_manager: State<'_, SettingsManager>
+) -> crate::config::AudioEffectsSettings {
+    settings_manager.get_audio_effects()
+}
+
+/// Set audio effects enabled
+#[tauri::command]
+pub fn set_audio_effects_enabled(
+    enabled: bool,
+    settings_manager: State<'_, SettingsManager>
+) -> Result<(), String> {
+    settings_manager.set_audio_effects_enabled(enabled)
+        .map_err(|e| e.to_string())
+}
+
+/// Set audio effects pitch
+#[tauri::command]
+pub fn set_audio_effects_pitch(
+    pitch: i16,
+    settings_manager: State<'_, SettingsManager>
+) -> Result<(), String> {
+    settings_manager.set_audio_effects_pitch(pitch)
+        .map_err(|e| e.to_string())
+}
+
+/// Set audio effects speed
+#[tauri::command]
+pub fn set_audio_effects_speed(
+    speed: i16,
+    settings_manager: State<'_, SettingsManager>
+) -> Result<(), String> {
+    settings_manager.set_audio_effects_speed(speed)
+        .map_err(|e| e.to_string())
+}
+
+/// Set audio effects volume
+#[tauri::command]
+pub fn set_audio_effects_volume(
+    volume: i16,
+    settings_manager: State<'_, SettingsManager>
+) -> Result<(), String> {
+    settings_manager.set_audio_effects_volume(volume)
+        .map_err(|e| e.to_string())
 }
 
 // ============================================================================

@@ -43,8 +43,12 @@ base64 = "0.22"
 hex = "0.4"
 urlencoding = "2.1"
 dirs = "5"
-rodio = { version = "0.19", features = ["symphonia-mp3"] }
+rodio = { version = "0.19", features = ["symphonia-mp3", "symphonia-wav"] }
 cpal = "0.15"
+rubato = "0.14"
+pitch_shift = "1.0"
+symphonia = { version = "0.5", features = ["mp3", "wav"] }
+lewton = "0.10"
 image = "0.25"
 regex = "1"
 lazy_static = "1.4"

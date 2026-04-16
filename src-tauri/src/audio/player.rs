@@ -192,9 +192,13 @@ impl AudioPlayer {
         let (_stream, stream_handle) = rodio::OutputStream::try_from_device(&device)
             .map_err(|e| format!("Failed to create output stream: {}", e))?;
 
-        // Декодируем MP3 из байтов (Note: Clone is necessary here because Cursor takes ownership
-        // and rodio::Decoder requires 'static. Arc sharing between threads happens before this point.)
-        let cursor = Cursor::new(mp3_data.to_vec());  // One-time clone per thread
+        // Определяем формат по первым байтам (MP3: 0xFF 0xFB/0xFA, WAV: "RIFF")
+        let is_wav = mp3_data.len() > 4 && &mp3_data[0..4] == b"RIFF";
+        let format_name = if is_wav { "WAV" } else { "MP3" };
+        debug!("Detected {} format, decoding with rodio::Decoder", format_name);
+
+        // Декодируем аудио (rodio автоматически определяет формат)
+        let cursor = Cursor::new(mp3_data.to_vec());
         let source = rodio::Decoder::new(cursor)
             .map_err(|e| format!("Failed to decode audio: {}", e))?;
 

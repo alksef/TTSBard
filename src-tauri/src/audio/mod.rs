@@ -5,7 +5,9 @@
 //! - Виртуальный микрофон (virtual mic) для трансляции в другие приложения
 
 mod device;
+pub mod effects;
 mod player;
 
 pub use device::{get_output_devices, get_virtual_mic_devices, OutputDeviceInfo};
+pub use effects::{AudioEffects, apply_effects};
 pub use player::{AudioPlayer, OutputConfig};

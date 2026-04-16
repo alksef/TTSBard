@@ -47,6 +47,37 @@ impl Default for AudioSettings {
     }
 }
 
+// ==================== Audio Effects Settings ====================
+
+/// Audio post-processing effects settings
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AudioEffectsSettings {
+    #[serde(default = "default_effects_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_pitch")]
+    pub pitch: i16,  // -100 to +100 (проценты)
+    #[serde(default = "default_speed")]
+    pub speed: i16,  // -100 to +100 (проценты)
+    #[serde(default = "default_volume")]
+    pub volume: i16, // 0 to 200 (проценты, 100 = норма)
+}
+
+fn default_effects_enabled() -> bool { false }
+fn default_pitch() -> i16 { 0 }
+fn default_speed() -> i16 { 0 }
+fn default_volume() -> i16 { 100 }
+
+impl Default for AudioEffectsSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            pitch: 0,
+            speed: 0,
+            volume: 100,
+        }
+    }
+}
+
 // ==================== TTS Settings ====================
 
 /// TTS provider settings
@@ -467,6 +498,8 @@ pub struct AppSettings {
     pub audio: AudioSettings,
     pub tts: TtsSettings,
     #[serde(default)]
+    pub audio_effects: AudioEffectsSettings,
+    #[serde(default)]
     pub hotkey_enabled: bool,
     #[serde(default)]
     pub editor: EditorSettings,
@@ -488,6 +521,7 @@ impl Default for AppSettings {
         Self {
             audio: AudioSettings::default(),
             tts: TtsSettings::default(),
+            audio_effects: AudioEffectsSettings::default(),
             hotkey_enabled: true,
             editor: EditorSettings::default(),
             theme: Theme::Dark,
@@ -1089,6 +1123,36 @@ impl SettingsManager {
     /// Set Z.ai model for AI text correction
     pub fn set_ai_zai_model(&self, model: String) -> Result<()> {
         self.update_field("/ai/zai/model", &model)
+    }
+
+    // ========== Audio Effects Settings ==========
+
+    /// Get audio effects settings
+    pub fn get_audio_effects(&self) -> AudioEffectsSettings {
+        self.cache.read().audio_effects.clone()
+    }
+
+    /// Set audio effects enabled
+    pub fn set_audio_effects_enabled(&self, enabled: bool) -> Result<()> {
+        self.update_field("/audio_effects/enabled", &enabled)
+    }
+
+    /// Set audio effects pitch
+    pub fn set_audio_effects_pitch(&self, pitch: i16) -> Result<()> {
+        let validated = pitch.clamp(-100, 100);
+        self.update_field("/audio_effects/pitch", &validated)
+    }
+
+    /// Set audio effects speed
+    pub fn set_audio_effects_speed(&self, speed: i16) -> Result<()> {
+        let validated = speed.clamp(-100, 100);
+        self.update_field("/audio_effects/speed", &validated)
+    }
+
+    /// Set audio effects volume
+    pub fn set_audio_effects_volume(&self, volume: i16) -> Result<()> {
+        let validated = volume.clamp(0, 200);
+        self.update_field("/audio_effects/volume", &validated)
     }
 
     // ========== Hotkey Settings ==========
