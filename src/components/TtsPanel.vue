@@ -12,6 +12,7 @@ import TtsSileroCard from './tts/TtsSileroCard.vue';
 import TtsLocalCard from './tts/TtsLocalCard.vue';
 import TtsOpenAICard from './tts/TtsOpenAICard.vue';
 import TtsFishAudioCard from './tts/TtsFishAudioCard.vue';
+import AudioEffectsPanel from './tts/AudioEffectsPanel.vue';
 
 interface TtsProviderState {
   type: TtsProviderType;
@@ -89,6 +90,14 @@ const currentTelegramProxyStatus = ref<{
   mode: string
   proxy_url: string | null
 } | null>(null);
+
+// Audio effects state
+const audioEffects = ref({
+  enabled: false,
+  pitch: 0,
+  speed: 0,
+  volume: 100,
+});
 
 // Error state
 const statusMessage = ref('');
@@ -328,6 +337,42 @@ async function reconnectTelegram() {
   }
 }
 
+// Audio effects handlers
+async function loadAudioEffects() {
+  try {
+    const effects = await invoke<{
+      enabled: boolean;
+      pitch: number;
+      speed: number;
+      volume: number;
+    }>('get_audio_effects');
+    audioEffects.value = effects;
+    debugLog('[TTS] Audio effects loaded:', effects);
+  } catch (error) {
+    debugError('[TTS] Failed to load audio effects:', error);
+  }
+}
+
+function handleAudioEffectsToggle(enabled: boolean) {
+  audioEffects.value.enabled = enabled;
+  debugLog('[TTS] Audio effects toggled:', enabled);
+}
+
+function handleAudioEffectsPitch(value: number) {
+  audioEffects.value.pitch = value;
+  debugLog('[TTS] Audio effects pitch changed:', value);
+}
+
+function handleAudioEffectsSpeed(value: number) {
+  audioEffects.value.speed = value;
+  debugLog('[TTS] Audio effects speed changed:', value);
+}
+
+function handleAudioEffectsVolume(value: number) {
+  audioEffects.value.volume = value;
+  debugLog('[TTS] Audio effects volume changed:', value);
+}
+
 // Voice management handlers
 async function handleRefreshVoice() {
   try {
@@ -462,6 +507,7 @@ onMounted(async () => {
   unlistenTtsError = await listen('tts-error', (event) => {
     showError(event.payload as string);
   });
+  await loadAudioEffects();
 });
 
 onUnmounted(() => {
@@ -561,6 +607,20 @@ function dismissStatus() {
       />
     </div>
 
+    <!-- Audio Effects Section -->
+    <div class="audio-effects-section">
+      <AudioEffectsPanel
+        :enabled="audioEffects.enabled"
+        :pitch="audioEffects.pitch"
+        :speed="audioEffects.speed"
+        :volume="audioEffects.volume"
+        @toggle="handleAudioEffectsToggle"
+        @update:pitch="handleAudioEffectsPitch"
+        @update:speed="handleAudioEffectsSpeed"
+        @update:volume="handleAudioEffectsVolume"
+      />
+    </div>
+
     <!-- Telegram Auth Modal -->
     <TelegramAuthModal v-model="showTelegramModal" />
   </div>
@@ -575,6 +635,10 @@ function dismissStatus() {
 .provider-cards {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 12px;
+}
+
+.audio-effects-section {
+  margin-top: 24px;
 }
 </style>

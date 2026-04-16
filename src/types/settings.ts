@@ -155,6 +155,17 @@ export interface AudioSettingsDto {
 }
 
 // ============================================================================
+// Audio Effects Settings Types
+// ============================================================================
+
+export interface AudioEffectsSettingsDto {
+  enabled: boolean
+  pitch: number  // -100 to +100
+  speed: number  // -100 to +100
+  volume: number // 0 to 200
+}
+
+// ============================================================================
 // Logging Settings Types
 // ============================================================================
 
@@ -268,6 +279,7 @@ export interface AppSettingsDto {
   twitch: TwitchSettingsDto
   windows: WindowsSettingsDto
   audio: AudioSettingsDto
+  audio_effects?: AudioEffectsSettingsDto
   general: GeneralSettingsDto
   logging: LoggingSettingsDto
   preprocessor: PreprocessorSettingsDto

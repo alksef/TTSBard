@@ -545,7 +545,7 @@ function dismissStatus() {
 .provider-cards {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 12px;
 }
 
 .card-content-inner {
