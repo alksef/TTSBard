@@ -345,9 +345,9 @@ fn apply_speed(
                     }
                     chunk_count += 1;
                 }
-                Err(e) => {
+                Err(_e) => {
                     #[cfg(debug_assertions)]
-                    tracing::debug!("Rubato process error: {}", e);
+                    tracing::debug!("Rubato process error");
                 }
             }
         }
@@ -407,9 +407,9 @@ fn apply_speed(
                     }
                     chunk_count += 1;
                 }
-                Err(e) => {
+                Err(_e) => {
                     #[cfg(debug_assertions)]
-                    tracing::debug!("Rubato process error (final chunk): {}", e);
+                    tracing::debug!("Rubato process error (final chunk)");
                 }
             }
 
@@ -430,18 +430,18 @@ fn apply_speed(
 
     // Trim excess samples from zero-padding artifacts
     // Zero-padding in final chunks can add extra silence at the end
-    for ch in 0..channels {
-        if resampled[ch].len() > expected_output {
-            resampled[ch].truncate(expected_output);
+    for channel in resampled.iter_mut() {
+        if channel.len() > expected_output {
+            channel.truncate(expected_output);
         }
     }
 
     // Interleave back
     let max_len = resampled.iter().map(|v| v.len()).max().unwrap_or(0);
     let mut result = Vec::with_capacity(max_len * channels);
-    for i in 0..max_len {
-        for ch in 0..channels {
-            result.push(resampled[ch].get(i).copied().unwrap_or(0.0));
+    for sample_idx in 0..max_len {
+        for channel in &resampled {
+            result.push(channel.get(sample_idx).copied().unwrap_or(0.0));
         }
     }
 
@@ -555,7 +555,7 @@ fn apply_fade_out(samples: &mut [f32], fade_samples: usize, channels: usize) {
 ///
 /// # Arguments
 /// * `aggressive` - If true, uses shorter tail for zero-padding cleanup (after speed).
-///                  If false, preserves longer tail for speech natural decay (after pitch).
+///   If false, preserves longer tail for speech natural decay (after pitch).
 fn trim_silence(samples: &[f32], channels: usize, sample_rate: u32, aggressive: bool) -> Vec<f32> {
     // Aggressive mode: short tail for zero-padding artifacts
     // Conservative mode: longer tail to preserve speech endings (fricatives, breaths)
@@ -565,9 +565,9 @@ fn trim_silence(samples: &[f32], channels: usize, sample_rate: u32, aggressive: 
         (0.005, 50u32, 30u32)  // Long tail + slow fade for speech preservation
     };
 
-    let tail_samples = (sample_rate as u32 * tail_ms / 1000) as usize * channels;
-    let fade_samples = (sample_rate as u32 * fade_ms / 1000) as usize * channels;
-    let min_silence_samples = (sample_rate as u32 * 20 / 1000) as usize * channels; // 20ms minimum silence
+    let tail_samples = (sample_rate * tail_ms / 1000) as usize * channels;
+    let fade_samples = (sample_rate * fade_ms / 1000) as usize * channels;
+    let min_silence_samples = (sample_rate * 20 / 1000) as usize * channels; // 20ms minimum silence
 
     if samples.len() < min_silence_samples {
         return samples.to_vec();
@@ -636,7 +636,7 @@ fn encode_wav(samples: &[f32], sample_rate: u32, channels: usize) -> Result<Vec<
     let data_size = i16_samples.len() * 2; // 2 bytes per i16 sample
     let file_size = 36 + data_size; // RIFF header size + data
 
-    let mut wav_data = Vec::with_capacity(file_size as usize);
+    let mut wav_data = Vec::with_capacity(file_size);
     let mut cursor = Cursor::new(&mut wav_data);
 
     // RIFF header

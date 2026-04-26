@@ -1172,7 +1172,7 @@ impl SettingsManager {
         match name {
             "main_window" => settings.hotkeys.main_window = hotkey.clone(),
             "sound_panel" => settings.hotkeys.sound_panel = hotkey.clone(),
-            _ => return Err(anyhow::anyhow!("Invalid hotkey name: {}", name).into()),
+            _ => return Err(anyhow::anyhow!("Invalid hotkey name: {}", name)),
         }
         self.save(&settings)
     }
@@ -1185,7 +1185,7 @@ impl SettingsManager {
         let default = match name {
             "main_window" => super::hotkeys::Hotkey::default_main_window(),
             "sound_panel" => super::hotkeys::Hotkey::default_sound_panel(),
-            _ => return Err(anyhow::anyhow!("Invalid hotkey name: {}", name).into()),
+            _ => return Err(anyhow::anyhow!("Invalid hotkey name: {}", name)),
         };
         self.set_hotkey(name, &default)?;
         Ok(default)
