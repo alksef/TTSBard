@@ -69,7 +69,7 @@ igd = "0.12"
 # Using fork with MTProxy support from https://github.com/alksef/grammers-mtproxy
 grammers-client = { git = "https://github.com/alksef/grammers-mtproxy", branch = "master", features = ["proxy"] }
 grammers-session = { git = "https://github.com/alksef/grammers-mtproxy", branch = "master" }
-grammers-mtsender = { git = "https://github.com/alksef/grammers-mtproxy", branch = "master", features = ["proxy"] }
+grammers-mtsender = { git = "https://github.com/alksef/grammers-mtproxy", branch = "master", features = ["proxy", "mtproxy"] }
 grammers-tl-types = { git = "https://github.com/alksef/grammers-mtproxy", branch = "master" }
 
 # Time utilities
