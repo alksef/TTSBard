@@ -3,17 +3,17 @@
 //! Manages all application settings stored in settings.json
 
 use anyhow::{Context, Result};
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use parking_lot::RwLock;
 
-use crate::tts::TtsProviderType;
 use super::hotkeys::HotkeySettings;
 use super::validation::{validate_port, validate_volume};
+use crate::tts::TtsProviderType;
 use tracing::{info, warn};
 
 // ==================== Audio Settings ====================
@@ -31,9 +31,15 @@ pub struct AudioSettings {
     pub virtual_mic_volume: u8,
 }
 
-fn default_speaker_enabled() -> bool { true }
-fn default_speaker_volume() -> u8 { 80 }
-fn default_virtual_mic_volume() -> u8 { 100 }
+fn default_speaker_enabled() -> bool {
+    true
+}
+fn default_speaker_volume() -> u8 {
+    80
+}
+fn default_virtual_mic_volume() -> u8 {
+    100
+}
 
 impl Default for AudioSettings {
     fn default() -> Self {
@@ -55,17 +61,25 @@ pub struct AudioEffectsSettings {
     #[serde(default = "default_effects_enabled")]
     pub enabled: bool,
     #[serde(default = "default_pitch")]
-    pub pitch: i16,  // -100 to +100 (проценты)
+    pub pitch: i16, // -100 to +100 (проценты)
     #[serde(default = "default_speed")]
-    pub speed: i16,  // -100 to +100 (проценты)
+    pub speed: i16, // -100 to +100 (проценты)
     #[serde(default = "default_volume")]
     pub volume: i16, // 0 to 200 (проценты, 100 = норма)
 }
 
-fn default_effects_enabled() -> bool { false }
-fn default_pitch() -> i16 { 0 }
-fn default_speed() -> i16 { 0 }
-fn default_volume() -> i16 { 100 }
+fn default_effects_enabled() -> bool {
+    false
+}
+fn default_pitch() -> i16 {
+    0
+}
+fn default_speed() -> i16 {
+    0
+}
+fn default_volume() -> i16 {
+    100
+}
 
 impl Default for AudioEffectsSettings {
     fn default() -> Self {
@@ -117,7 +131,9 @@ pub struct LocalTtsSettings {
     pub url: String,
 }
 
-fn default_local_tts_url() -> String { "http://127.0.0.1:8124".to_string() }
+fn default_local_tts_url() -> String {
+    "http://127.0.0.1:8124".to_string()
+}
 
 impl Default for LocalTtsSettings {
     fn default() -> Self {
@@ -191,7 +207,9 @@ pub struct MtProxySettings {
     pub dc_id: Option<i32>,
 }
 
-fn default_mtproxy_port() -> u16 { 8888 }
+fn default_mtproxy_port() -> u16 {
+    8888
+}
 
 impl Default for MtProxySettings {
     fn default() -> Self {
@@ -263,7 +281,9 @@ pub struct OpenAiSettings {
     pub use_proxy: bool,
 }
 
-fn default_openai_voice() -> String { "alloy".to_string() }
+fn default_openai_voice() -> String {
+    "alloy".to_string()
+}
 
 impl Default for OpenAiSettings {
     fn default() -> Self {
@@ -301,9 +321,15 @@ pub struct FishAudioSettings {
     pub use_proxy: bool,
 }
 
-fn default_fish_format() -> String { "mp3".to_string() }
-fn default_fish_temperature() -> f32 { 0.7 }
-fn default_fish_sample_rate() -> u32 { 44100 }
+fn default_fish_format() -> String {
+    "mp3".to_string()
+}
+fn default_fish_temperature() -> f32 {
+    0.7
+}
+fn default_fish_sample_rate() -> u32 {
+    44100
+}
 
 impl Default for FishAudioSettings {
     fn default() -> Self {
@@ -350,7 +376,6 @@ impl TwitchSettings {
         }
         Ok(())
     }
-
 }
 
 // ==================== WebView Settings ====================
@@ -372,8 +397,12 @@ pub struct LoggingSettings {
     pub module_levels: HashMap<String, String>,
 }
 
-fn default_logging_enabled() -> bool { false }
-fn default_logging_level() -> String { "info".to_string() }
+fn default_logging_enabled() -> bool {
+    false
+}
+fn default_logging_level() -> String {
+    "info".to_string()
+}
 
 impl Default for LoggingSettings {
     fn default() -> Self {
@@ -396,7 +425,9 @@ pub enum Theme {
     Light,
 }
 
-fn default_theme() -> Theme { Theme::Dark }
+fn default_theme() -> Theme {
+    Theme::Dark
+}
 
 // ==================== Editor Settings ====================
 
@@ -408,6 +439,8 @@ pub struct EditorSettings {
     pub quick: bool,
     #[serde(default)]
     pub ai: bool,
+    #[serde(default)]
+    pub ai_completion: bool,
 }
 
 // ==================== AI Settings ====================
@@ -569,8 +602,7 @@ impl SettingsManager {
             .context("Failed to get config dir")?
             .join("ttsbard");
 
-        fs::create_dir_all(&config_dir)
-            .context("Failed to create config dir")?;
+        fs::create_dir_all(&config_dir).context("Failed to create config dir")?;
 
         // Load settings initially and cache them
         let settings = Self::load_from_disk(&config_dir)?;
@@ -591,11 +623,10 @@ impl SettingsManager {
         let path = config_dir.join("settings.json");
 
         if path.exists() {
-            let content = fs::read_to_string(&path)
-                .context("Failed to read settings file")?;
+            let content = fs::read_to_string(&path).context("Failed to read settings file")?;
 
-            let mut settings: AppSettings = serde_json::from_str(&content)
-                .context("Failed to parse settings")?;
+            let mut settings: AppSettings =
+                serde_json::from_str(&content).context("Failed to parse settings")?;
 
             // Migrate from old settings without hotkeys
             let needs_migration = settings.hotkeys.main_window.key.is_empty()
@@ -615,10 +646,9 @@ impl SettingsManager {
             info!("Settings file not found, creating with defaults");
             let settings = AppSettings::default();
             // Save defaults to disk for next time
-            let content = serde_json::to_string_pretty(&settings)
-                .context("Failed to serialize settings")?;
-            fs::write(&path, content)
-                .context("Failed to write settings file")?;
+            let content =
+                serde_json::to_string_pretty(&settings).context("Failed to serialize settings")?;
+            fs::write(&path, content).context("Failed to write settings file")?;
             Ok(settings)
         }
     }
@@ -640,11 +670,10 @@ impl SettingsManager {
     pub fn save(&self, settings: &AppSettings) -> Result<()> {
         let path = self.settings_path();
 
-        let content = serde_json::to_string_pretty(settings)
-            .context("Failed to serialize settings")?;
+        let content =
+            serde_json::to_string_pretty(settings).context("Failed to serialize settings")?;
 
-        fs::write(&path, content)
-            .context("Failed to write settings file")?;
+        fs::write(&path, content).context("Failed to write settings file")?;
 
         // Update cache after successful disk write
         *self.cache.write() = settings.clone();
@@ -677,10 +706,8 @@ impl SettingsManager {
 
         // Read existing JSON or create default
         let mut json_value = if path.exists() {
-            let content = fs::read_to_string(&path)
-                .context("Failed to read settings file")?;
-            serde_json::from_str(&content)
-                .context("Failed to parse settings JSON")?
+            let content = fs::read_to_string(&path).context("Failed to read settings file")?;
+            serde_json::from_str(&content).context("Failed to parse settings JSON")?
         } else {
             // Create default settings as JSON
             serde_json::to_value(AppSettings::default())
@@ -704,8 +731,7 @@ impl SettingsManager {
 
             if is_last {
                 // Update the final field
-                let json_val = serde_json::to_value(value)
-                    .context("Failed to serialize value")?;
+                let json_val = serde_json::to_value(value).context("Failed to serialize value")?;
                 match current {
                     Value::Object(map) => {
                         map.insert(part.to_string(), json_val);
@@ -720,10 +746,9 @@ impl SettingsManager {
             } else {
                 // Navigate deeper
                 current = match current {
-                    Value::Object(map) => {
-                        map.entry(part.to_string())
-                            .or_insert_with(|| Value::Object(serde_json::Map::new()))
-                    }
+                    Value::Object(map) => map
+                        .entry(part.to_string())
+                        .or_insert_with(|| Value::Object(serde_json::Map::new())),
                     _ => {
                         return Err(anyhow::anyhow!(
                             "Cannot navigate through non-object at field '{}'",
@@ -738,12 +763,11 @@ impl SettingsManager {
         let content = serde_json::to_string_pretty(&json_value)
             .context("Failed to serialize updated settings")?;
 
-        fs::write(&path, &content)
-            .context("Failed to write settings file")?;
+        fs::write(&path, &content).context("Failed to write settings file")?;
 
         // Update cache after successful disk write
-        let settings: AppSettings = serde_json::from_str(&content)
-            .context("Failed to parse updated settings")?;
+        let settings: AppSettings =
+            serde_json::from_str(&content).context("Failed to parse updated settings")?;
         *self.cache.write() = settings;
 
         Ok(())
@@ -913,19 +937,16 @@ impl SettingsManager {
         self.update_field("/webview/start_on_boot", &start)
     }
 
-
     /// Set WebView port
     pub fn set_webview_port(&self, port: u16) -> Result<()> {
         let validated = validate_port(port).map_err(|e| anyhow::anyhow!(e))?;
         self.update_field("/webview/port", &validated)
     }
 
-
     /// Set WebView bind address
     pub fn set_webview_bind_address(&self, address: String) -> Result<()> {
         self.update_field("/webview/bind_address", &address)
     }
-
 
     /// Set WebView access token
     pub fn set_webview_access_token(&self, token: Option<String>) -> Result<()> {
@@ -936,7 +957,6 @@ impl SettingsManager {
     pub fn set_webview_upnp_enabled(&self, enabled: bool) -> Result<()> {
         self.update_field("/webview/upnp_enabled", &enabled)
     }
-
 
     // ========== Logging Settings ==========
 
@@ -1032,7 +1052,13 @@ impl SettingsManager {
     /// * `port` - MTProxy server port
     /// * `secret` - MTProxy secret key (hex or base64 encoded)
     /// * `dc_id` - Optional DC ID (data center ID)
-    pub fn set_mtproxy_settings(&self, host: Option<String>, port: u16, secret: Option<String>, dc_id: Option<i32>) -> Result<()> {
+    pub fn set_mtproxy_settings(
+        &self,
+        host: Option<String>,
+        port: u16,
+        secret: Option<String>,
+        dc_id: Option<i32>,
+    ) -> Result<()> {
         let mut settings = self.load()?;
         settings.tts.network.mtproxy = MtProxySettings {
             host,
@@ -1042,7 +1068,6 @@ impl SettingsManager {
         };
         self.save(&settings)
     }
-
 
     // ========== Theme Settings ==========
 
@@ -1071,6 +1096,16 @@ impl SettingsManager {
     /// Get AI correction in editor enabled state
     pub fn get_editor_ai(&self) -> bool {
         self.cache.read().editor.ai
+    }
+
+    /// Set AI completion in editor enabled state
+    pub fn set_editor_ai_completion(&self, enabled: bool) -> Result<()> {
+        self.update_field("/editor/ai_completion", &enabled)
+    }
+
+    /// Get AI completion in editor enabled state
+    pub fn get_editor_ai_completion(&self) -> bool {
+        self.cache.read().editor.ai_completion
     }
 
     // ========== AI Settings ==========

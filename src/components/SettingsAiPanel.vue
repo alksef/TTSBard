@@ -28,6 +28,7 @@ const editorSettings = useEditorSettings();
 
 // AI enabled state (local ref for immediate UI feedback)
 const aiEnabled = ref(false);
+const aiCompletionEnabled = ref(false);
 
 // Global prompt
 const globalPrompt = ref('');
@@ -179,11 +180,19 @@ async function saveAiEnabled() {
   try {
     await invoke('set_editor_ai', { enabled: aiEnabled.value });
     debugLog('[SettingsAiPanel] Editor AI enabled saved:', aiEnabled.value);
-    // Successfully saved - settings will reload via settings-changed event
   } catch (e) {
     debugError('[SettingsAiPanel] Failed to save editor AI enabled:', e);
-    // Revert on error
     aiEnabled.value = !aiEnabled.value;
+  }
+}
+
+async function saveAiCompletionEnabled() {
+  try {
+    await invoke('set_editor_ai_completion', { enabled: aiCompletionEnabled.value });
+    debugLog('[SettingsAiPanel] AI completion saved:', aiCompletionEnabled.value);
+  } catch (e) {
+    debugError('[SettingsAiPanel] Failed to save AI completion:', e);
+    aiCompletionEnabled.value = !aiCompletionEnabled.value;
   }
 }
 
@@ -196,6 +205,9 @@ watch(editorSettings, (newSettings) => {
   // Update AI enabled state from editor settings
   if (newSettings.ai !== undefined) {
     aiEnabled.value = newSettings.ai;
+  }
+  if (newSettings.ai_completion !== undefined) {
+    aiCompletionEnabled.value = newSettings.ai_completion;
   }
 }, { immediate: true, deep: true });
 
@@ -286,6 +298,26 @@ function dismissStatus() {
       </span>
       <span v-else class="setting-hint">
         Текст будет корректироваться перед отправкой на TTS
+      </span>
+    </div>
+
+    <!-- AI Completion Section -->
+    <div class="ai-enable-section">
+      <label class="setting-label checkbox-label">
+        <input
+          type="checkbox"
+          v-model="aiCompletionEnabled"
+          @change="saveAiCompletionEnabled"
+          class="checkbox-input"
+          :disabled="!isCurrentProviderConfigured"
+        />
+        <span>AI-продолжение текста (автодополнение)</span>
+      </label>
+      <span v-if="!isCurrentProviderConfigured" class="setting-hint warning">
+        ⚠️ Сначала настройте API ключ выбранного провайдера
+      </span>
+      <span v-else class="setting-hint">
+        AI будет предлагать продолжение текста в редакторе
       </span>
     </div>
 

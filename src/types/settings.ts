@@ -231,6 +231,7 @@ export interface PreprocessorSettingsDto {
 export interface EditorSettingsDto {
   quick: boolean
   ai: boolean
+  ai_completion: boolean
 }
 
 // ============================================================================

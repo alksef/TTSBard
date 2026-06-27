@@ -13,6 +13,7 @@ mod soundpanel;
 mod soundpanel_window;
 mod state;
 mod preprocessor;
+mod history;
 mod telegram;
 mod tts;
 mod window;
@@ -21,6 +22,7 @@ mod twitch;
 mod rate_limiter;
 mod thread_manager;
 
+use std::sync::Arc;
 use state::AppState;
 use commands::telegram::TelegramState;
 use config::{SettingsManager, WindowsManager};
@@ -33,7 +35,7 @@ use anyhow::Context;
 use commands::{speak_text, get_tts_provider, set_tts_provider, get_local_tts_url, set_local_tts_url, get_openai_api_key, set_openai_api_key, get_openai_voice, set_openai_voice, apply_openai_proxy_settings, get_interception, set_interception, has_api_key, toggle_interception, quit_app, get_hotkey_enabled, set_hotkey_enabled, get_global_exclude_from_capture, set_global_exclude_from_capture, open_file_dialog, get_output_devices, get_virtual_mic_devices, get_audio_settings, set_speaker_device, set_speaker_enabled, set_speaker_volume, set_virtual_mic_device, enable_virtual_mic, disable_virtual_mic, set_virtual_mic_volume, test_audio_device, get_audio_effects, set_audio_effects_enabled, set_audio_effects_pitch, set_audio_effects_speed, set_audio_effects_volume, set_editor_quick, get_editor_quick, update_theme, hide_main_window, close_soundpanel_window, window::resize_main_window, get_hotkey_settings, set_hotkey, reset_hotkey_to_default, unregister_hotkeys, reregister_hotkeys_cmd, set_hotkey_recording};
 use commands::logging::{get_logging_settings, save_logging_settings};
 use commands::telegram::{telegram_init, telegram_request_code, telegram_sign_in, telegram_sign_out, telegram_get_status, telegram_get_user, telegram_auto_restore};
-use commands::ai::{set_ai_provider, set_ai_prompt, set_ai_openai_api_key, set_ai_openai_use_proxy, set_ai_zai_url, set_ai_zai_api_key, correct_text, set_editor_ai, get_editor_ai, set_ai_openai_model, get_ai_openai_model, set_ai_zai_model, get_ai_zai_model};
+use commands::ai::{set_ai_provider, set_ai_prompt, set_ai_openai_api_key, set_ai_openai_use_proxy, set_ai_zai_url, set_ai_zai_api_key, correct_text, set_editor_ai, get_editor_ai, set_editor_ai_completion, get_editor_ai_completion, get_ai_completion, set_ai_openai_model, get_ai_openai_model, set_ai_zai_model, get_ai_zai_model};
 use soundpanel::{sp_get_bindings, sp_add_binding, sp_remove_binding, sp_test_sound, sp_is_supported_format, sp_get_floating_appearance, sp_set_floating_opacity, sp_set_floating_bg_color, sp_set_floating_clickthrough, sp_is_floating_clickthrough_enabled};
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -226,6 +228,12 @@ pub fn run() {
 
     let soundpanel_state = soundpanel::SoundPanelState::new(appdata_path);
 
+    let (history_path, ngram_path) = history::history_paths()
+        .expect("Failed to resolve history paths");
+    let history_state = commands::history::HistoryState(
+        Arc::new(history::HistoryManager::new(history_path, ngram_path))
+    );
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -235,6 +243,7 @@ pub fn run() {
         .manage(settings_manager)
         .manage(windows_manager)
         .manage(soundpanel_state)
+        .manage(history_state)
         .invoke_handler(tauri::generate_handler![
             greet,
             speak_text,
@@ -260,6 +269,11 @@ pub fn run() {
             // Editor commands
             get_editor_quick,
             set_editor_quick,
+            // History commands
+            commands::history::get_history_suggestions,
+            commands::history::record_history,
+            commands::history::clear_history,
+            commands::history::get_phrase_completion,
             // Theme commands
             update_theme,
             hide_main_window,
@@ -368,6 +382,9 @@ pub fn run() {
             correct_text,
             set_editor_ai,
             get_editor_ai,
+            set_editor_ai_completion,
+            get_editor_ai_completion,
+            get_ai_completion,
             set_ai_openai_model,
             get_ai_openai_model,
             set_ai_zai_model,

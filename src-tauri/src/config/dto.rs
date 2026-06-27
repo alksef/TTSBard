@@ -3,14 +3,22 @@
 //! This module defines DTOs for the `get_all_app_settings` command.
 //! These structures serialize all application settings into a single response.
 
-use serde::{Deserialize, Serialize};
-use crate::tts::TtsProviderType;
-use crate::webview::WebViewSettings;
-use crate::config::{TwitchSettings, AudioSettings, LoggingSettings, AppSettings as ConfigAppSettings, HotkeySettings, Hotkey, HotkeyModifier};
-use crate::config::settings::{OpenAiSettings, LocalTtsSettings, TelegramTtsSettings, TtsSettings, ProxySettings, NetworkSettings, Socks5Settings, MtProxySettings, ProxyType, ProxyMode, FishAudioSettings};
-use crate::tts::VoiceModel;
-use crate::config::windows::{WindowsSettings, SoundPanelWindowSettings, GlobalSettings, WindowPosition};
+use crate::config::settings::{
+    FishAudioSettings, LocalTtsSettings, MtProxySettings, NetworkSettings, OpenAiSettings,
+    ProxyMode, ProxySettings, ProxyType, Socks5Settings, TelegramTtsSettings, TtsSettings,
+};
+use crate::config::windows::{
+    GlobalSettings, SoundPanelWindowSettings, WindowPosition, WindowsSettings,
+};
+use crate::config::{
+    AppSettings as ConfigAppSettings, AudioSettings, Hotkey, HotkeyModifier, HotkeySettings,
+    LoggingSettings, TwitchSettings,
+};
 use crate::soundpanel::SoundBinding;
+use crate::tts::TtsProviderType;
+use crate::tts::VoiceModel;
+use crate::webview::WebViewSettings;
+use serde::{Deserialize, Serialize};
 
 // ============================================================================
 // Network Settings DTO
@@ -514,10 +522,7 @@ pub struct GeneralSettingsDto {
 }
 
 impl GeneralSettingsDto {
-    pub fn from_config_and_state(
-        config: &ConfigAppSettings,
-        interception_enabled: bool,
-    ) -> Self {
+    pub fn from_config_and_state(config: &ConfigAppSettings, interception_enabled: bool) -> Self {
         Self {
             hotkey_enabled: config.hotkey_enabled,
             interception_enabled,
@@ -572,6 +577,7 @@ pub type SoundBindingDto = SoundBinding;
 pub struct EditorSettingsDto {
     pub quick: bool,
     pub ai: bool,
+    pub ai_completion: bool,
 }
 
 // ============================================================================
@@ -856,6 +862,7 @@ impl AppSettingsDto {
             editor: EditorSettingsDto {
                 quick: params.config.editor.quick,
                 ai: params.config.editor.ai,
+                ai_completion: params.config.editor.ai_completion,
             },
             logging: params.config.logging.clone(),
             preprocessor: PreprocessorSettingsDto::from_preprocessor(params.preprocessor),

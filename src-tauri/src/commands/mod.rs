@@ -30,6 +30,9 @@ pub mod proxy;
 // AI commands
 pub mod ai;
 
+// History commands
+pub mod history;
+
 // Window commands
 pub mod window;
 

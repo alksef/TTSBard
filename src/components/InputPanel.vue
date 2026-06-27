@@ -6,6 +6,7 @@ import { useEditorSettings, useAiSettings } from '../composables/useAppSettings'
 import { useErrorHandler } from '../composables/useErrorHandler'
 import { debugLog, debugError } from '../utils/debug'
 import { Sparkles } from 'lucide-vue-next'
+import TtsEditor from './editor/TtsEditor.vue'
 
 const { showError } = useErrorHandler()
 
@@ -105,12 +106,21 @@ async function hideMainWindow() {
   }
 }
 
+async function recordHistory() {
+  try {
+    await invoke('record_history', { text: text.value })
+  } catch {
+    // silently fail
+  }
+}
+
 async function speak() {
   if (!text.value.trim()) return
 
   try {
     debugLog('[InputPanel] Speaking:', text.value)
     await invoke('speak_text', { text: text.value })
+    recordHistory()
   } catch (e) {
     debugError('[InputPanel] Failed to speak:', e)
     showError(e as string)
@@ -163,72 +173,30 @@ async function handleEsc() {
   }
 }
 
-function handleSpace(event: KeyboardEvent) {
-  const currentValue = text.value
-  debugLog('[InputPanel] Space pressed, current text:', currentValue)
-  debugLog('[InputPanel] Text length:', currentValue.length)
+const replacementsRecord = computed(() => {
+  const obj: Record<string, string> = {}
+  replacements.value.forEach((v, k) => { obj[k] = v })
+  return obj
+})
 
-  // Check for \word pattern at end (supports unicode including cyrillic)
-  const replacementMatch = currentValue.match(/\\([^\s]+)$/)
-  debugLog('[InputPanel] Replacement match:', replacementMatch)
-
-  if (replacementMatch) {
-    const key = replacementMatch[1]
-    debugLog('[InputPanel] Replacement key:', key)
-    const replacement = replacements.value.get(key)
-    debugLog('[InputPanel] Found replacement:', replacement)
-
-    if (replacement) {
-      const pattern = `\\${key}`
-      debugLog('[InputPanel] Pattern to replace:', pattern)
-      const newValue = currentValue.replace(pattern, replacement) + ' '
-      debugLog('[InputPanel] New value:', newValue)
-      text.value = newValue
-      event.preventDefault()
-      return
-    } else {
-      debugLog('[InputPanel] No replacement found for key:', key)
-    }
-  }
-
-  // Check for %username pattern at end (supports unicode including cyrillic)
-  const usernameMatch = currentValue.match(/%([^\s]+)$/)
-  debugLog('[InputPanel] Username match:', usernameMatch)
-
-  if (usernameMatch) {
-    const key = usernameMatch[1]
-    debugLog('[InputPanel] Username key:', key)
-    const username = usernames.value.get(key)
-    debugLog('[InputPanel] Found username:', username)
-
-    if (username) {
-      const pattern = `%${key}`
-      debugLog('[InputPanel] Pattern to replace:', pattern)
-      const newValue = currentValue.replace(pattern, username) + ' '
-      debugLog('[InputPanel] New value:', newValue)
-      text.value = newValue
-      event.preventDefault()
-    } else {
-      debugLog('[InputPanel] No username found for key:', key)
-    }
-  }
-}
+const usernamesRecord = computed(() => {
+  const obj: Record<string, string> = {}
+  usernames.value.forEach((v, k) => { obj[k] = v })
+  return obj
+})
 </script>
 
 <template>
   <div class="input-panel" :class="{ 'minimal-panel': isMinimalMode }">
     <div class="input-group">
-      <div class="textarea-wrapper">
-        <textarea
+      <div class="textarea-wrapper" :class="{ 'minimal-wrapper': isMinimalMode }">
+        <TtsEditor
           v-model="text"
-          lang="ru"
-          placeholder="Введите текст для озвучивания..."
-          rows="10"
-          class="text-input"
-          :class="{ 'minimal-input': isMinimalMode }"
-          @keydown.prevent.enter="handleEnter"
-          @keydown.esc="handleEsc"
-          @keydown.space="handleSpace"
+          :placeholder="'Введите текст для озвучивания...'"
+          :replacements="replacementsRecord"
+          :usernames="usernamesRecord"
+          @enter="handleEnter"
+          @esc="handleEsc"
         />
         <button
           v-if="!isMinimalMode"
@@ -277,49 +245,18 @@ function handleSpace(event: KeyboardEvent) {
   margin-bottom: 0.5rem;
 }
 
-.text-input {
-  width: 100%;
-  min-height: 340px;
-  padding: 1.35rem 1.45rem;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 18px;
-  background: var(--input-bg-strong);
-  color: var(--color-text-primary);
-  box-shadow: 0 2px 16px rgba(var(--rgb-black), 0.03);
-  font-family: inherit;
-  font-size: 1rem;
-  line-height: 1.6;
-  resize: vertical;
-  transition: all 0.2s ease;
+.textarea-wrapper.minimal-wrapper :deep(.cm-editor) {
+  min-height: 280px;
 }
 
-.text-input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 
-    0 8px 24px rgba(var(--rgb-black), 0.04),
-    0 0 0 3px var(--focus-glow);
-}
-
-.text-input::placeholder {
-  color: var(--color-text-muted);
-  font-size: clamp(1.1rem, 2vw, 1.35rem);
+.textarea-wrapper.minimal-wrapper :deep(.cm-scroller) {
+  min-height: 280px !important;
 }
 
 @media (max-width: 960px) {
   .input-panel {
     padding-bottom: 1.5rem;
   }
-
-  .text-input {
-    min-height: 280px;
-    padding: 1rem 1.05rem;
-  }
-}
-
-.text-input.minimal-input {
-  min-height: 280px !important;
-  padding: 1rem !important;
 }
 
 .quick-editor-hint {

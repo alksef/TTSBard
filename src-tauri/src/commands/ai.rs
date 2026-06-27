@@ -176,6 +176,67 @@ pub fn get_editor_ai(
     settings_manager.get_editor_ai()
 }
 
+/// Set AI completion in editor enabled state
+#[tauri::command]
+pub fn set_editor_ai_completion(
+    app_handle: tauri::AppHandle,
+    settings_manager: State<'_, SettingsManager>,
+    enabled: bool,
+) -> Result<(), String> {
+    settings_manager.set_editor_ai_completion(enabled)
+        .map_err(|e| format!("Failed to save: {}", e))?;
+    let _ = app_handle.emit("settings-changed", ());
+    Ok(())
+}
+
+/// Get AI completion in editor enabled state
+#[tauri::command]
+pub fn get_editor_ai_completion(
+    settings_manager: State<'_, SettingsManager>,
+) -> bool {
+    settings_manager.get_editor_ai_completion()
+}
+
+/// Complete text using AI
+///
+/// Sends the context to the configured AI provider for continuation.
+/// Returns a short continuation of the given text.
+#[tauri::command]
+pub async fn get_ai_completion(
+    settings_manager: State<'_, SettingsManager>,
+    state: State<'_, AppState>,
+    context: String,
+) -> Result<String, String> {
+    let settings = settings_manager.load()
+        .map_err(|e| format!("Failed to load settings: {}", e))?;
+
+    if !settings.editor.ai_completion {
+        return Ok(String::new());
+    }
+
+    let has_key = match settings.ai.provider {
+        crate::config::AiProviderType::OpenAi => settings.ai.openai.api_key.is_some(),
+        crate::config::AiProviderType::ZAi => settings.ai.zai.api_key.is_some(),
+    };
+    if !has_key {
+        return Ok(String::new());
+    }
+
+    let client = state.get_or_create_ai_client(&settings.ai, &settings.tts.network)
+        .map_err(|e| format!("AI client error: {}", e))?;
+
+    let prompt = "Ты помощник для завершения текста. Пользователь написал часть текста. \
+        Продолжи его одним-двумя словами или короткой фразой (максимум 5 слов). \
+        Отвечай только продолжением, без пояснений. Пиши на том же языке, что и контекст.";
+
+    let completion = client.correct(&context, prompt)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let trimmed = completion.trim().to_string();
+    Ok(trimmed)
+}
+
 /// Set OpenAI model for AI text correction
 #[tauri::command]
 pub fn set_ai_openai_model(
