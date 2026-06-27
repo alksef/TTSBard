@@ -21,6 +21,22 @@ All subagents should be launched using the **glm-4.** model (use `model: "sonnet
 
 **Rationale:** Direct edits are faster and provide immediate feedback for simple changes. Subagents add overhead but excel at complex, parallel, or exploratory work.
 
+## Implementation Workflow (Claude → DeepSeek)
+
+**Claude does NOT write implementation code.** Claude's role is planning and review only.
+
+Workflow:
+1. Claude researches the problem (codebase, web search via Perplexity) and produces a detailed implementation plan.
+2. The plan is written to `docs/deepseek/plan/` (one file per task/feature).
+3. **DeepSeek writes the code** from the plan — this saves Claude tokens.
+4. Claude may review the result (via `code-review-changes` skill), but does not author the implementation.
+
+When the user asks to "implement", "add", "fix", or "write" a feature, Claude should:
+- Form a plan in `docs/deepseek/plan/` instead of editing source files directly.
+- Only do direct edits for trivial/non-implementation tasks (typos, docs, config tweaks unrelated to feature code).
+
+Use `docs/stage/` for research/analysis notes and option comparisons that feed into plans.
+
 ## Research and Problem Solving
 
 Use MCP Perplexity tools for web search:
