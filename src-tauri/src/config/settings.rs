@@ -628,9 +628,15 @@ impl SettingsManager {
             let mut settings: AppSettings =
                 serde_json::from_str(&content).context("Failed to parse settings")?;
 
-            // Migrate from old settings without hotkeys
+            // Migrate from old settings missing hotkey fields.
+            // Новые playback-поля (pause/stop/repeat) уже заполнены дефолтом
+            // при десериализации благодаря #[serde(default)] на HotkeySettings,
+            // но старый файл нужно дописать, чтобы он стал консистентным.
             let needs_migration = settings.hotkeys.main_window.key.is_empty()
-                || settings.hotkeys.sound_panel.key.is_empty();
+                || settings.hotkeys.sound_panel.key.is_empty()
+                || settings.hotkeys.playback_pause.key.is_empty()
+                || settings.hotkeys.playback_stop.key.is_empty()
+                || settings.hotkeys.playback_repeat.key.is_empty();
 
             if needs_migration {
                 info!("Migrating hotkey settings from defaults");

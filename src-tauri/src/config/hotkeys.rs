@@ -23,7 +23,13 @@ pub struct Hotkey {
 }
 
 /// All configurable hotkeys
+///
+/// `#[serde(default)]` на каждом поле позволяет читать старые `settings.json`,
+/// в которых отсутствуют новые playback-поля: недостающие поля заполняются
+/// из `Default`. Без этого добавление нового поля ломает загрузку на старых
+/// конфигах (strict serde падает с "missing field").
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
 pub struct HotkeySettings {
     pub main_window: Hotkey,
     pub sound_panel: Hotkey,
@@ -35,26 +41,11 @@ pub struct HotkeySettings {
 impl Default for HotkeySettings {
     fn default() -> Self {
         Self {
-            main_window: Hotkey {
-                modifiers: vec![HotkeyModifier::Ctrl, HotkeyModifier::Shift],
-                key: "F3".to_string(),
-            },
-            sound_panel: Hotkey {
-                modifiers: vec![HotkeyModifier::Ctrl, HotkeyModifier::Shift],
-                key: "F2".to_string(),
-            },
-            playback_pause: Hotkey {
-                modifiers: vec![HotkeyModifier::Ctrl, HotkeyModifier::Shift],
-                key: "F4".to_string(),
-            },
-            playback_stop: Hotkey {
-                modifiers: vec![HotkeyModifier::Ctrl, HotkeyModifier::Shift],
-                key: "F5".to_string(),
-            },
-            playback_repeat: Hotkey {
-                modifiers: vec![HotkeyModifier::Ctrl, HotkeyModifier::Shift],
-                key: "F6".to_string(),
-            },
+            main_window: Hotkey::default_main_window(),
+            sound_panel: Hotkey::default_sound_panel(),
+            playback_pause: Hotkey::default_playback_pause(),
+            playback_stop: Hotkey::default_playback_stop(),
+            playback_repeat: Hotkey::default_playback_repeat(),
         }
     }
 }
@@ -250,5 +241,25 @@ mod tests {
         let sound = Hotkey::default_sound_panel();
         assert_eq!(sound.key, "F2");
         assert_eq!(sound.modifiers.len(), 2);
+    }
+
+    /// Регрессия на "Failed to parse settings: missing field `playback_pause`":
+    /// старый settings.json (до plan 74) содержит только main_window и sound_panel.
+    /// Десериализация должна проходить, а недостающие playback-поля — заполняться
+    /// дефолтом (F4/F5/F6), не ломая загрузку приложения.
+    #[test]
+    fn test_hotkey_settings_backwards_compatible_without_playback_fields() {
+        let old_json = r#"{
+            "main_window": { "modifiers": ["ctrl", "shift"], "key": "F3" },
+            "sound_panel": { "modifiers": ["ctrl", "alt"], "key": "P" }
+        }"#;
+        let settings: HotkeySettings = serde_json::from_str(old_json).unwrap();
+        // Сохранённые значения не должны затираться.
+        assert_eq!(settings.main_window.key, "F3");
+        assert_eq!(settings.sound_panel.key, "P");
+        // Недостающие playback-поля берутся из Default.
+        assert_eq!(settings.playback_pause.key, "F4");
+        assert_eq!(settings.playback_stop.key, "F5");
+        assert_eq!(settings.playback_repeat.key, "F6");
     }
 }
