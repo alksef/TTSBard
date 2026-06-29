@@ -62,6 +62,25 @@ Detailed rules in `.claude/rules/`:
 - code-review.md - code review process
 - code-review-changes.md - review only changed code
 
+## Build Scripts (Windows)
+
+Сборка приложения — через PowerShell-скрипты в `scripts/` (Tauri + Vite + Cargo):
+
+- `scripts/build.ps1 -Mode debug` — debug-сборка (`tauri build --debug`): runnable
+  `src-tauri/target/debug/ttsbard.exe`, **без** инсталляторов. Быстро, для проверки.
+- `scripts/build.ps1 -Mode release` (по умолчанию) — полная релизная сборка: exe +
+  инсталляторы (`src-tauri/target/release/bundle/{nsis,msi}/`).
+- `-Clean` — очистить `src-tauri/target/` и `dist/` перед сборкой.
+- `scripts/build-debug.bat` / `scripts/build-release.bat` — обёртки для двойного клика.
+
+Скрипт проверяет toolchain (node/npm/cargo), ставит npm-зависимости при отсутствии,
+после сборки показывает пути и размеры артефактов.
+Для быстрых проверок без полного билда см. skill `build-validation`
+(`cargo check` / `vue-tsc --noEmit`).
+
+> Примечание: `build.ps1` сохранён как **UTF-8 с BOM** — требование PS 5.1 для
+> кириллицы. При правках скрипта не удаляйте BOM.
+
 ## Skills
 Available skills in `.claude/skills/`:
 - css-development - CSS conventions, variables, theming
