@@ -1,4 +1,4 @@
-use crate::history::{HistoryEntry, HistoryManager, PhraseSuggestion};
+use crate::history::{HistoryEntry, HistoryManager, PhraseEntry, PhraseSuggestion};
 use std::sync::Arc;
 use tauri::State;
 
@@ -36,4 +36,32 @@ pub fn record_history(text: String, history_state: State<'_, HistoryState>) {
 pub fn clear_history(history_state: State<'_, HistoryState>) {
     let manager = &history_state.0;
     manager.clear();
+}
+
+#[tauri::command]
+pub fn get_phrase_history(
+    filter: Option<String>,
+    limit: Option<usize>,
+    history_state: State<'_, HistoryState>,
+) -> Result<Vec<PhraseEntry>, String> {
+    let limit = limit.unwrap_or(100);
+    let manager = &history_state.0;
+    Ok(manager.get_phrases(filter.as_deref(), limit))
+}
+
+#[tauri::command]
+pub fn delete_phrase_history(
+    id: String,
+    history_state: State<'_, HistoryState>,
+) -> Result<(), String> {
+    let manager = &history_state.0;
+    manager.delete_phrase(&id);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn clear_phrase_history(history_state: State<'_, HistoryState>) -> Result<(), String> {
+    let manager = &history_state.0;
+    manager.clear_phrases();
+    Ok(())
 }

@@ -229,11 +229,11 @@ pub fn run() {
 
     let soundpanel_state = soundpanel::SoundPanelState::new(appdata_path);
 
-    let (history_path, ngram_path) = history::history_paths()
+    let (history_path, ngram_path, phrase_path) = history::history_paths()
         .expect("Failed to resolve history paths");
-    let history_state = commands::history::HistoryState(
-        Arc::new(history::HistoryManager::new(history_path, ngram_path))
-    );
+    let history_manager = Arc::new(history::HistoryManager::new(history_path, ngram_path, phrase_path));
+    *app_state.history_manager.lock() = Some(history_manager.clone());
+    let history_state = commands::history::HistoryState(history_manager);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -275,6 +275,9 @@ pub fn run() {
             commands::history::record_history,
             commands::history::clear_history,
             commands::history::get_phrase_completion,
+            commands::history::get_phrase_history,
+            commands::history::delete_phrase_history,
+            commands::history::clear_phrase_history,
             // Theme commands
             update_theme,
             hide_main_window,

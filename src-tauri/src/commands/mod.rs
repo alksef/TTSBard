@@ -253,6 +253,11 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
             warn!("Playback queue full, phrase dropped: {}", text);
             return Err("Очередь воспроизведения переполнена. Попробуйте позже.".to_string());
         }
+        // Запись фразы в единое хранилище (HistoryManager) — ровно 1× на отправку.
+        // Доступ через AppState.history_manager (хранится там же, где playback_manager).
+        if let Some(hm) = state.history_manager.lock().as_ref() {
+            hm.record_phrase(&text);
+        }
     } else {
         return Err("Плеер не инициализирован".to_string());
     }

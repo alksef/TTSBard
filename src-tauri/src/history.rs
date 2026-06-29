@@ -6,9 +6,19 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
+const PHRASE_HISTORY_SIZE: usize = 200;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryEntry {
     pub word: String,
+    pub count: u32,
+    pub last_used: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PhraseEntry {
+    pub id: String,
+    pub text: String,
     pub count: u32,
     pub last_used: i64,
 }
@@ -38,8 +48,10 @@ pub struct PhraseSuggestion {
 pub struct HistoryManager {
     path: PathBuf,
     ngram_path: PathBuf,
+    phrase_path: PathBuf,
     data: RwLock<HistoryData>,
     ngrams: RwLock<NgramData>,
+    phrases: RwLock<Vec<PhraseEntry>>,
 }
 
 fn clean_token(token: &str) -> String {
@@ -59,8 +71,16 @@ fn spawn_save(path: PathBuf, ngram_path: PathBuf, data: HistoryData, ngrams: Ngr
     });
 }
 
+fn spawn_save_phrases(path: PathBuf, phrases: Vec<PhraseEntry>) {
+    std::thread::spawn(move || {
+        if let Ok(content) = serde_json::to_string_pretty(&phrases) {
+            let _ = fs::write(&path, content);
+        }
+    });
+}
+
 impl HistoryManager {
-    pub fn new(path: PathBuf, ngram_path: PathBuf) -> Self {
+    pub fn new(path: PathBuf, ngram_path: PathBuf, phrase_path: PathBuf) -> Self {
         let _ = fs::create_dir_all(path.parent().unwrap_or(&path));
 
         let data = fs::read_to_string(&path)
@@ -73,11 +93,18 @@ impl HistoryManager {
             .and_then(|c| serde_json::from_str::<NgramData>(&c).ok())
             .unwrap_or_default();
 
+        let phrases = fs::read_to_string(&phrase_path)
+            .ok()
+            .and_then(|c| serde_json::from_str::<Vec<PhraseEntry>>(&c).ok())
+            .unwrap_or_default();
+
         HistoryManager {
             path,
             ngram_path,
+            phrase_path,
             data: RwLock::new(data),
             ngrams: RwLock::new(ngrams),
+            phrases: RwLock::new(phrases),
         }
     }
 
@@ -217,6 +244,88 @@ impl HistoryManager {
         drop(ngrams);
         spawn_save(path, ngram_path, data_snapshot, ngrams_snapshot);
     }
+
+    pub fn record_phrase(&self, text: &str) {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        let trimmed_lower = trimmed.to_lowercase();
+        let now = Utc::now().timestamp();
+
+        let mut phrases = self.phrases.write();
+
+        if let Some(existing) = phrases
+            .iter_mut()
+            .find(|e| e.text.trim().to_lowercase() == trimmed_lower)
+        {
+            existing.count += 1;
+            existing.last_used = now;
+        } else {
+            phrases.push(PhraseEntry {
+                id: uuid::Uuid::new_v4().to_string(),
+                text: trimmed.to_string(),
+                count: 1,
+                last_used: now,
+            });
+        }
+
+        while phrases.len() > PHRASE_HISTORY_SIZE {
+            if let Some(oldest_pos) = phrases
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, e)| e.last_used)
+                .map(|(i, _)| i)
+            {
+                phrases.remove(oldest_pos);
+            } else {
+                break;
+            }
+        }
+
+        let path = self.phrase_path.clone();
+        let snapshot = phrases.clone();
+        drop(phrases);
+        spawn_save_phrases(path, snapshot);
+    }
+
+    pub fn get_phrases(&self, filter: Option<&str>, limit: usize) -> Vec<PhraseEntry> {
+        let phrases = self.phrases.read();
+        let mut results: Vec<PhraseEntry> = if let Some(f) = filter {
+            let f_lower = f.to_lowercase();
+            phrases
+                .iter()
+                .filter(|e| e.text.to_lowercase().contains(&f_lower))
+                .cloned()
+                .collect()
+        } else {
+            phrases.clone()
+        };
+
+        results.sort_by(|a, b| b.last_used.cmp(&a.last_used));
+        results.truncate(limit);
+        results
+    }
+
+    pub fn delete_phrase(&self, id: &str) {
+        let mut phrases = self.phrases.write();
+        phrases.retain(|e| e.id != id);
+
+        let path = self.phrase_path.clone();
+        let snapshot = phrases.clone();
+        drop(phrases);
+        spawn_save_phrases(path, snapshot);
+    }
+
+    pub fn clear_phrases(&self) {
+        let mut phrases = self.phrases.write();
+        phrases.clear();
+
+        let path = self.phrase_path.clone();
+        let snapshot = phrases.clone();
+        drop(phrases);
+        spawn_save_phrases(path, snapshot);
+    }
 }
 
 impl Default for HistoryData {
@@ -227,10 +336,14 @@ impl Default for HistoryData {
     }
 }
 
-pub fn history_paths() -> Result<(PathBuf, PathBuf)> {
+pub fn history_paths() -> Result<(PathBuf, PathBuf, PathBuf)> {
     let dir = dirs::config_dir()
         .context("Failed to get config dir")?
         .join("ttsbard");
     fs::create_dir_all(&dir).context("Failed to create ttsbard dir")?;
-    Ok((dir.join("input_history.json"), dir.join("ngrams.json")))
+    Ok((
+        dir.join("input_history.json"),
+        dir.join("ngrams.json"),
+        dir.join("phrase_history.json"),
+    ))
 }

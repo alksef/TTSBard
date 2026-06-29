@@ -90,6 +90,13 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
         event_tx.clone(),
         crate::playback::AudioOutputsConfig { speaker: initial_speaker, mic: initial_mic },
         Some(app_state.inner().cached_devices.clone()),
+        app_state
+            .inner()
+            .history_manager
+            .lock()
+            .as_ref()
+            .cloned()
+            .expect("HistoryManager not initialized before PlaybackManager"),
     ));
     *app_state.inner().playback_manager.lock() = Some(pb_manager.clone());
     app.manage(PlaybackState(pb_manager));

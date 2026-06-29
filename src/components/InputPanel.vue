@@ -7,6 +7,7 @@ import { useErrorHandler } from '../composables/useErrorHandler'
 import { debugLog, debugError } from '../utils/debug'
 import { Sparkles } from 'lucide-vue-next'
 import TtsEditor from './editor/TtsEditor.vue'
+import PhraseHistoryList from './PhraseHistoryList.vue'
 
 const { showError } = useErrorHandler()
 
@@ -173,6 +174,14 @@ async function handleEsc() {
   }
 }
 
+function selectPhrase(newText: string) {
+  const currentText = text.value
+  if (currentText.trim() && currentText !== newText) {
+    if (!confirm('Заменить текущий текст на выбранную фразу?')) return
+  }
+  text.value = newText
+}
+
 const replacementsRecord = computed(() => {
   const obj: Record<string, string> = {}
   replacements.value.forEach((v, k) => { obj[k] = v })
@@ -198,6 +207,7 @@ const usernamesRecord = computed(() => {
           @enter="handleEnter"
           @esc="handleEsc"
         />
+        <PhraseHistoryList @select="selectPhrase" />
         <button
           v-if="!isMinimalMode"
           class="correct-button"

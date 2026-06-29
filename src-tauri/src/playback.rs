@@ -1,5 +1,5 @@
 use crate::audio::{open_sink_on_device, resolve_output_device, OutputConfig};
-use chrono::Utc;
+use crate::history::HistoryManager;
 use parking_lot::RwLock;
 use rodio::{OutputStream, Sink};
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,6 @@ use tauri::{AppHandle, Emitter};
 use tracing::{info, warn};
 
 const AUDIO_CACHE_SIZE: usize = 20;
-const PHRASE_HISTORY_SIZE: usize = 5;
 const MAX_QUEUE: usize = 50;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -31,18 +30,11 @@ pub struct QueuedPhrase {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PhraseEntry {
-    pub id: String,
-    pub text: String,
-    pub timestamp: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlaybackStateDto {
     pub status: PlaybackStatus,
     pub current: Option<String>,
     pub queue: Vec<String>,
-    pub recent: Vec<PhraseEntry>,
+    pub recent: Vec<crate::history::PhraseEntry>,
 }
 
 /// Динамическая конфигурация аудиовыходов — обновляется в runtime.
@@ -65,17 +57,14 @@ struct Shared {
     status: PlaybackStatus,
     current: Option<QueuedPhrase>,
     queue: VecDeque<QueuedPhrase>,
-    phrase_history: VecDeque<PhraseEntry>,
     audio_cache: VecDeque<(String, Arc<[u8]>)>,
 }
 
 pub struct PlaybackManager {
     cmd_tx: mpsc::Sender<Cmd>,
     state: Arc<RwLock<Shared>>,
-    /// Динамическая конфигурация аудиовыходов (обновляется `update_audio_config`)
     pub audio_config: Arc<RwLock<AudioOutputsConfig>>,
-    // Примечание: кеш устройств НЕ хранится в структуре — он передаётся в
-    // фоновый поток (`thread_loop`) через замыкание `th_devices` и живёт там.
+    history: Arc<HistoryManager>,
 }
 
 impl PlaybackManager {
@@ -84,13 +73,13 @@ impl PlaybackManager {
         internal_ev: mpsc::Sender<crate::events::AppEvent>,
         initial_audio: AudioOutputsConfig,
         cached_devices: Option<Arc<RwLock<HashMap<String, cpal::Device>>>>,
+        history: Arc<HistoryManager>,
     ) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel();
         let state = Arc::new(RwLock::new(Shared {
             status: PlaybackStatus::Idle,
             current: None,
             queue: VecDeque::new(),
-            phrase_history: VecDeque::with_capacity(PHRASE_HISTORY_SIZE),
             audio_cache: VecDeque::with_capacity(AUDIO_CACHE_SIZE),
         }));
         let audio_config = Arc::new(RwLock::new(initial_audio));
@@ -116,6 +105,7 @@ impl PlaybackManager {
             cmd_tx,
             state,
             audio_config,
+            history,
         }
     }
 
@@ -348,22 +338,8 @@ impl PlaybackManager {
         s.current = Some(phrase.clone());
         drop(s);
 
-        self.add_history(&id, &text);
         let _ = self.cmd_tx.send(Cmd::Enqueue(phrase));
         true
-    }
-
-    fn add_history(&self, id: &str, text: &str) {
-        let mut s = self.state.write();
-        s.phrase_history.retain(|e| e.id != id);
-        s.phrase_history.push_back(PhraseEntry {
-            id: id.to_string(),
-            text: text.to_string(),
-            timestamp: Utc::now().timestamp(),
-        });
-        while s.phrase_history.len() > PHRASE_HISTORY_SIZE {
-            s.phrase_history.pop_front();
-        }
     }
 
     pub fn pause(&self) -> bool {
@@ -401,15 +377,15 @@ impl PlaybackManager {
     }
 
     pub fn replay_from_cache(&self, id: &str) {
-        // Один read-lock: ищем и аудио в кеше, и текст в истории атомарно.
-        let replay = {
+        let replay: Option<(String, Arc<[u8]>, String)> = {
             let s = self.state.read();
             let audio = s.audio_cache.iter().find(|(i, _)| i == id).cloned();
             let text = s
-                .phrase_history
+                .current
                 .iter()
-                .find(|e| e.id == id)
-                .map(|e| e.text.clone());
+                .chain(s.queue.iter())
+                .find(|q| q.id == id)
+                .map(|q| q.text.clone());
             match (audio, text) {
                 (Some((orig_id, data)), Some(text)) => Some((orig_id, data, text)),
                 _ => None,
@@ -428,7 +404,6 @@ impl PlaybackManager {
             s.current = Some(next.clone());
             let audio = next.audio.clone();
             drop(s);
-            self.add_history(&id, &text);
             let _ = self
                 .cmd_tx
                 .send(Cmd::Enqueue(QueuedPhrase { id, text, audio }));
@@ -444,7 +419,7 @@ impl PlaybackManager {
             status: s.status.clone(),
             current: s.current.as_ref().map(|p| p.text.clone()),
             queue: s.queue.iter().map(|p| p.text.clone()).collect(),
-            recent: s.phrase_history.iter().rev().cloned().collect(),
+            recent: self.history.get_phrases(None, 5),
         }
     }
 }

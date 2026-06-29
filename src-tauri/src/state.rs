@@ -132,6 +132,9 @@ pub struct AppState {
 
     /// Playback manager for queue/pause/resume
     pub playback_manager: Arc<Mutex<Option<Arc<crate::playback::PlaybackManager>>>>,
+
+    /// History manager (word/ngram/phrase history)
+    pub history_manager: Arc<Mutex<Option<Arc<crate::history::HistoryManager>>>>,
 }
 
 impl AppState {
@@ -172,6 +175,7 @@ impl AppState {
             prefix_skip_webview: Arc::new(Mutex::new(false)),
             ai_client: Arc::new(Mutex::new(None)),
             ai_settings_hash: Arc::new(AtomicU64::new(0)),
+            history_manager: Arc::new(Mutex::new(None)),
         }
     }
 
