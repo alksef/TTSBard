@@ -136,7 +136,16 @@ impl PlaybackManager {
         let mut stopped = false;
 
         loop {
-            match cmd_rx.recv_timeout(Duration::from_millis(100)) {
+            let cmd = if playing && !stopped {
+                cmd_rx.recv_timeout(Duration::from_millis(50))
+            } else {
+                match cmd_rx.recv() {
+                    Ok(c) => Ok(c),
+                    Err(_) => Err(RecvTimeoutError::Disconnected),
+                }
+            };
+
+            match cmd {
                 Ok(Cmd::Enqueue(phrase)) => {
                     if playing {
                         continue;
