@@ -37,6 +37,13 @@ When the user asks to "implement", "add", "fix", or "write" a feature, Claude sh
 
 Use `docs/stage/` for research/analysis notes and option comparisons that feed into plans.
 
+### Iteration loop (task → DeepSeek → review)
+
+DeepSeek runs **non-interactively from Claude's Bash tool** via `opencode run`
+(no user clicks needed). Full mechanism, paths, and the "never trust DeepSeek's
+`[x]` checklist" rule: **see [`docs/deepseek/WORKFLOW.md`](docs/deepseek/WORKFLOW.md).**
+Iteration task-files live in `docs/deepseek/tasks/`, verdicts in `docs/deepseek/reviews/`.
+
 ## Research and Problem Solving
 
 Use MCP Perplexity tools for web search:
