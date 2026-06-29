@@ -1,11 +1,9 @@
-use crate::audio::OutputConfig;
+use crate::audio::{open_sink_on_device, resolve_output_device, OutputConfig};
 use chrono::Utc;
-use cpal::traits::HostTrait;
 use parking_lot::RwLock;
-use rodio::{Decoder, OutputStream, Sink};
+use rodio::{OutputStream, Sink};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
-use std::io::Cursor;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::Arc;
 use std::thread;
@@ -69,39 +67,6 @@ struct Shared {
     queue: VecDeque<QueuedPhrase>,
     phrase_history: VecDeque<PhraseEntry>,
     audio_cache: VecDeque<(String, Arc<[u8]>)>,
-}
-
-fn play_to_device(
-    data: &[u8],
-    handle: &rodio::OutputStreamHandle,
-    volume: f32,
-) -> Result<Sink, String> {
-    let sink = Sink::try_new(handle).map_err(|e| format!("Sink: {}", e))?;
-    let cursor = Cursor::new(data.to_vec());
-    let source = Decoder::new(cursor).map_err(|e| format!("Decode: {}", e))?;
-    sink.set_volume(volume);
-    sink.append(source);
-    Ok(sink)
-}
-
-fn resolve_device(
-    id: &Option<String>,
-    cached: &Option<Arc<RwLock<HashMap<String, cpal::Device>>>>,
-) -> Option<cpal::Device> {
-    let host = cpal::default_host();
-    match id {
-        Some(dev_id) => {
-            if let Some(cache) = cached {
-                let c = cache.read();
-                if let Some(d) = c.get(dev_id) {
-                    return Some(d.clone());
-                }
-            }
-            let idx: usize = dev_id.parse().ok()?;
-            host.output_devices().ok()?.into_iter().nth(idx)
-        }
-        None => host.default_output_device(),
-    }
 }
 
 pub struct PlaybackManager {
@@ -183,22 +148,34 @@ impl PlaybackManager {
                     let audio = phrase.audio.clone();
 
                     if let Some(ref c) = cfg.speaker {
-                        if let Some(dev) = resolve_device(&c.device_id, &cached_devices) {
-                            if let Ok((s, h)) = OutputStream::try_from_device(&dev) {
-                                if let Ok(sink) = play_to_device(&audio, &h, c.volume) {
+                        match resolve_output_device(&c.device_id, &cached_devices) {
+                            Ok(dev) => match open_sink_on_device(&dev, &audio, c.volume) {
+                                Ok((s, sink)) => {
                                     sink_spk = Some(sink);
                                     _stream_spk = Some(s);
                                 }
+                                Err(e) => {
+                                    warn!(target = "playback", error = %e, "speaker open_sink failed")
+                                }
+                            },
+                            Err(e) => {
+                                warn!(target = "playback", error = %e, "speaker device resolve failed")
                             }
                         }
                     }
                     if let Some(ref c) = cfg.mic {
-                        if let Some(dev) = resolve_device(&c.device_id, &cached_devices) {
-                            if let Ok((s, h)) = OutputStream::try_from_device(&dev) {
-                                if let Ok(sink) = play_to_device(&audio, &h, c.volume) {
+                        match resolve_output_device(&c.device_id, &cached_devices) {
+                            Ok(dev) => match open_sink_on_device(&dev, &audio, c.volume) {
+                                Ok((s, sink)) => {
                                     sink_mic = Some(sink);
                                     _stream_mic = Some(s);
                                 }
+                                Err(e) => {
+                                    warn!(target = "playback", error = %e, "mic open_sink failed")
+                                }
+                            },
+                            Err(e) => {
+                                warn!(target = "playback", error = %e, "mic device resolve failed")
                             }
                         }
                     }

@@ -9,5 +9,5 @@ pub mod effects;
 mod player;
 
 pub use device::{get_output_devices, get_virtual_mic_devices, OutputDeviceInfo};
-pub use effects::{AudioEffects, apply_effects};
-pub use player::{AudioPlayer, OutputConfig};
+pub use effects::{apply_effects, AudioEffects};
+pub use player::{open_sink_on_device, resolve_output_device, AudioPlayer, OutputConfig};

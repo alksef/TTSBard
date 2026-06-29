@@ -4,20 +4,91 @@
 //! Uses Arc for efficient data sharing between multiple outputs
 
 use cpal::traits::{DeviceTrait, HostTrait};
+use parking_lot::RwLock;
+use rodio::{Decoder, OutputStream, Sink};
+use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
-use parking_lot::RwLock;
-use std::collections::HashMap;
 use tracing::{debug, error, info};
 
 /// Конфигурация вывода звука
 #[derive(Clone, Debug)]
 pub struct OutputConfig {
-    pub device_id: Option<String>,  // None = устройство по умолчанию
-    pub volume: f32,                // 0.0 - 1.0
+    pub device_id: Option<String>, // None = устройство по умолчанию
+    pub volume: f32,               // 0.0 - 1.0
+}
+
+/// Резолв device_id (строка-индекс или None=default) в cpal::Device с кешем.
+/// Возвращает Result с человекочитаемой ошибкой.
+pub fn resolve_output_device(
+    device_id: &Option<String>,
+    cached: &Option<Arc<RwLock<HashMap<String, cpal::Device>>>>,
+) -> Result<cpal::Device, String> {
+    match device_id {
+        Some(dev_id) => {
+            if let Some(cache) = cached {
+                let c = cache.read();
+                if let Some(device) = c.get(dev_id) {
+                    let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+                    debug!(device_name = %device_name, "Using cached device");
+                    let device_clone = device.clone();
+                    drop(c);
+                    return Ok(device_clone);
+                }
+                drop(c);
+            }
+            let host = cpal::default_host();
+            let devices = host
+                .output_devices()
+                .map_err(|e| format!("Failed to get output devices: {}", e))?;
+            let index: usize = dev_id
+                .parse()
+                .map_err(|_| format!("Invalid device ID: {}", dev_id))?;
+            devices
+                .into_iter()
+                .nth(index)
+                .ok_or_else(|| format!("Device not found: {}", dev_id))
+        }
+        None => {
+            let host = cpal::default_host();
+            host.default_output_device()
+                .ok_or_else(|| "No default output device".to_string())
+        }
+    }
+}
+
+/// Создаёт OutputStream + Sink на устройстве, декодирует data (MP3/WAV auto),
+/// выставляет volume, append source. Возвращает (OutputStream, Sink).
+/// НЕ ждёт завершения, НЕ трогает потоки — чистая синхронная операция.
+pub fn open_sink_on_device(
+    device: &cpal::Device,
+    data: &[u8],
+    volume: f32,
+) -> Result<(OutputStream, Sink), String> {
+    let (_stream, stream_handle) = OutputStream::try_from_device(device)
+        .map_err(|e| format!("Failed to create output stream: {}", e))?;
+
+    let is_wav = data.len() > 4 && &data[0..4] == b"RIFF";
+    let format_name = if is_wav { "WAV" } else { "MP3" };
+    debug!(
+        "Detected {} format, decoding with rodio::Decoder",
+        format_name
+    );
+
+    let cursor = Cursor::new(data.to_vec());
+    let source = Decoder::new(cursor).map_err(|e| format!("Failed to decode audio: {}", e))?;
+
+    let sink =
+        Sink::try_new(&stream_handle).map_err(|e| format!("Failed to create sink: {}", e))?;
+
+    sink.set_volume(volume);
+    debug!(volume = volume, "Volume set");
+
+    sink.append(source);
+    Ok((_stream, sink))
 }
 
 /// Аудио плеер с поддержкой dual output
@@ -76,8 +147,7 @@ impl AudioPlayer {
         // Сбрасываем флаг остановки для нового воспроизведения
         self.stop_flag.store(false, Ordering::SeqCst);
 
-        info!(data_size = mp3_data.len(),
-            "Starting dual output playback");
+        info!(data_size = mp3_data.len(), "Starting dual output playback");
 
         // Проверяем, что хотя бы один вывод включен
         if speaker_config.is_none() && virtual_mic_config.is_none() {
@@ -87,8 +157,11 @@ impl AudioPlayer {
         // Получаем конфигурацию громкости для логирования
         let speaker_vol = speaker_config.as_ref().map(|c| c.volume).unwrap_or(0.0);
         let mic_vol = virtual_mic_config.as_ref().map(|c| c.volume).unwrap_or(0.0);
-        debug!(speaker_volume = speaker_vol * 100.0, virtual_mic_volume = mic_vol * 100.0,
-            "Volume configuration");
+        debug!(
+            speaker_volume = speaker_vol * 100.0,
+            virtual_mic_volume = mic_vol * 100.0,
+            "Volume configuration"
+        );
 
         // Use Arc to share audio data efficiently (Arc<[u8]> instead of Arc<Vec<u8>> for better cache efficiency)
         let shared_data: Arc<[u8]> = mp3_data.into();
@@ -99,12 +172,14 @@ impl AudioPlayer {
         // Запускаем воспроизведение на динамике
         if let Some(config) = speaker_config {
             let stop_flag = self.stop_flag.clone();
-            let data = Arc::clone(&shared_data);  // Cheap Arc clone, not Vec clone
+            let data = Arc::clone(&shared_data); // Cheap Arc clone, not Vec clone
             let devices_cache = cached_devices.clone();
 
             let handle = thread::spawn(move || {
                 debug!("Speaker thread started");
-                if let Err(e) = Self::play_to_device(stop_flag, data, config, "Speaker", devices_cache) {
+                if let Err(e) =
+                    Self::play_to_device(stop_flag, data, config, "Speaker", devices_cache)
+                {
                     error!(error = %e, "Speaker playback error");
                 }
                 debug!("Speaker thread finished");
@@ -115,12 +190,14 @@ impl AudioPlayer {
         // Запускаем воспроизведение на виртуальном микрофоне
         if let Some(config) = virtual_mic_config {
             let stop_flag = self.stop_flag.clone();
-            let data = Arc::clone(&shared_data);  // Cheap Arc clone, not Vec clone
+            let data = Arc::clone(&shared_data); // Cheap Arc clone, not Vec clone
             let devices_cache = cached_devices.clone();
 
             let handle = thread::spawn(move || {
                 debug!("Virtual mic thread started");
-                if let Err(e) = Self::play_to_device(stop_flag, data, config, "Virtual Mic", devices_cache) {
+                if let Err(e) =
+                    Self::play_to_device(stop_flag, data, config, "Virtual Mic", devices_cache)
+                {
                     error!(error = %e, "Virtual mic playback error");
                 }
                 debug!("Virtual mic thread finished");
@@ -137,84 +214,19 @@ impl AudioPlayer {
     /// Воспроизвести на конкретном устройстве (в отдельном потоке)
     fn play_to_device(
         stop_flag: Arc<AtomicBool>,
-        mp3_data: Arc<[u8]>,  // Use Arc<[u8]> instead of Arc<Vec<u8>> for better cache efficiency
+        mp3_data: Arc<[u8]>,
         config: OutputConfig,
         device_label: &str,
         cached_devices: Option<Arc<RwLock<HashMap<String, cpal::Device>>>>,
     ) -> Result<(), String> {
-        // Получаем устройство
-        let device = if let Some(device_id) = &config.device_id {
-            // Try to use cached devices first
-            if let Some(cache) = cached_devices {
-                let cached = cache.read();
-                if let Some(device) = cached.get(device_id) {
-                    let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
-                    debug!(device_label = %device_label, device_name = %device_name,
-                        "Using cached device");
-                    let device_clone = device.clone();
-                    drop(cached);
-                    device_clone
-                } else {
-                    drop(cached);
-                    // Fallback to enumeration if device not in cache
-                    let host = cpal::default_host();
-                    let devices = host.output_devices()
-                        .map_err(|e| format!("Failed to get output devices: {}", e))?;
-                    let index: usize = device_id.parse()
-                        .map_err(|_| format!("Invalid device ID: {}", device_id))?;
-                    devices.into_iter()
-                        .nth(index)
-                        .ok_or_else(|| format!("Device not found: {}", device_id))?
-                }
-            } else {
-                // No cache, enumerate devices
-                let host = cpal::default_host();
-                let devices = host.output_devices()
-                    .map_err(|e| format!("Failed to get output devices: {}", e))?;
-                let index: usize = device_id.parse()
-                    .map_err(|_| format!("Invalid device ID: {}", device_id))?;
-                devices.into_iter()
-                    .nth(index)
-                    .ok_or_else(|| format!("Device not found: {}", device_id))?
-            }
-        } else {
-            // Устройство по умолчанию
-            let host = cpal::default_host();
-            host.default_output_device()
-                .ok_or_else(|| "No default output device".to_string())?
-        };
+        let device = resolve_output_device(&config.device_id, &cached_devices)?;
 
         let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
         info!(device_label = %device_label, device_name = %device_name,
             "Playing on device");
 
-        // Создаём выходной поток
-        let (_stream, stream_handle) = rodio::OutputStream::try_from_device(&device)
-            .map_err(|e| format!("Failed to create output stream: {}", e))?;
+        let (_stream, sink) = open_sink_on_device(&device, &mp3_data, config.volume)?;
 
-        // Определяем формат по первым байтам (MP3: 0xFF 0xFB/0xFA, WAV: "RIFF")
-        let is_wav = mp3_data.len() > 4 && &mp3_data[0..4] == b"RIFF";
-        let format_name = if is_wav { "WAV" } else { "MP3" };
-        debug!("Detected {} format, decoding with rodio::Decoder", format_name);
-
-        // Декодируем аудио (rodio автоматически определяет формат)
-        let cursor = Cursor::new(mp3_data.to_vec());
-        let source = rodio::Decoder::new(cursor)
-            .map_err(|e| format!("Failed to decode audio: {}", e))?;
-
-        // Создаём sink
-        let sink = rodio::Sink::try_new(&stream_handle)
-            .map_err(|e| format!("Failed to create sink: {}", e))?;
-
-        // Применяем громкость
-        sink.set_volume(config.volume);
-        debug!(device_label = %device_label, volume = config.volume,
-            "Volume set");
-
-        // Воспроизводим
-        sink.append(source);
-
-        // Ждём окончания воспроизведения или остановки
         while !sink.empty() {
             if stop_flag.load(Ordering::SeqCst) {
                 debug!(device_label = %device_label,
