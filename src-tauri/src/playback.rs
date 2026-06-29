@@ -74,7 +74,8 @@ pub struct PlaybackManager {
     state: Arc<RwLock<Shared>>,
     /// Динамическая конфигурация аудиовыходов (обновляется `update_audio_config`)
     pub audio_config: Arc<RwLock<AudioOutputsConfig>>,
-    _cached_devices: Option<Arc<RwLock<HashMap<String, cpal::Device>>>>,
+    // Примечание: кеш устройств НЕ хранится в структуре — он передаётся в
+    // фоновый поток (`thread_loop`) через замыкание `th_devices` и живёт там.
 }
 
 impl PlaybackManager {
@@ -115,7 +116,6 @@ impl PlaybackManager {
             cmd_tx,
             state,
             audio_config,
-            _cached_devices: cached_devices,
         }
     }
 
@@ -392,21 +392,22 @@ impl PlaybackManager {
     }
 
     pub fn replay_from_cache(&self, id: &str) {
-        let entry = {
+        // Один read-lock: ищем и аудио в кеше, и текст в истории атомарно.
+        let replay = {
             let s = self.state.read();
-            s.audio_cache.iter().find(|(i, _)| i == id).cloned()
-        };
-        if let Some((orig_id, data)) = entry {
-            let text = {
-                let s = self.state.read();
-                s.phrase_history
-                    .iter()
-                    .find(|e| e.id == id)
-                    .map(|e| e.text.clone())
-            };
-            if let Some(text) = text {
-                self.enqueue(orig_id, text, data.to_vec());
+            let audio = s.audio_cache.iter().find(|(i, _)| i == id).cloned();
+            let text = s
+                .phrase_history
+                .iter()
+                .find(|e| e.id == id)
+                .map(|e| e.text.clone());
+            match (audio, text) {
+                (Some((orig_id, data)), Some(text)) => Some((orig_id, data, text)),
+                _ => None,
             }
+        };
+        if let Some((orig_id, data, text)) = replay {
+            self.enqueue(orig_id, text, data.to_vec());
         }
     }
 

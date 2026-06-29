@@ -1,7 +1,13 @@
 //! Audio Player
 //!
-//! Плеер с поддержкой воспроизведения на два устройства одновременно
-//! Uses Arc for efficient data sharing between multiple outputs
+//! Общие функции воспроизведения: [`resolve_output_device`] (резолв id→Device с
+//! кешем) и [`open_sink_on_device`] (OutputStream+Sink+WAV/MP3-детект+volume).
+//! Используются и `PlaybackManager` (основной путь, plan 74), и `AudioPlayer`.
+//!
+//! `AudioPlayer` — блокирующий плеер для тестового звука (`test_audio_device`):
+//! запускает фоновые потоки dual-output со stop_flag и join. Основной путь
+//! воспроизведения фраз идёт через `playback::PlaybackManager`, который хранит
+//! Sink и поддерживает очередь/pause/resume/seek.
 
 use cpal::traits::{DeviceTrait, HostTrait};
 use parking_lot::RwLock;
