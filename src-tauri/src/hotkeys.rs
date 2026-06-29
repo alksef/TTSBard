@@ -67,8 +67,12 @@ fn handle_playback_pause(app_handle: AppHandle) {
         let pb = &state.inner().0;
         let st = pb.get_state();
         match st.status {
-            crate::playback::PlaybackStatus::Playing => pb.pause(),
-            crate::playback::PlaybackStatus::Paused => pb.resume(),
+            crate::playback::PlaybackStatus::Playing => {
+                let _ = pb.pause();
+            }
+            crate::playback::PlaybackStatus::Paused => {
+                let _ = pb.resume();
+            }
             _ => {}
         }
     }
@@ -76,13 +80,13 @@ fn handle_playback_pause(app_handle: AppHandle) {
 
 fn handle_playback_stop(app_handle: AppHandle) {
     if let Some(state) = app_handle.try_state::<PlaybackState>() {
-        state.inner().0.stop();
+        let _ = state.inner().0.stop();
     }
 }
 
 fn handle_playback_repeat(app_handle: AppHandle) {
     if let Some(state) = app_handle.try_state::<PlaybackState>() {
-        state.inner().0.repeat();
+        let _ = state.inner().0.repeat();
     }
 }
 

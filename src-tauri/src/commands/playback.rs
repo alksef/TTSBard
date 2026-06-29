@@ -7,29 +7,41 @@ pub struct PlaybackState(pub Arc<PlaybackManager>);
 #[tauri::command]
 pub fn playback_pause(playback: State<'_, PlaybackState>) -> Result<(), String> {
     let pb = &playback.inner().0;
-    pb.pause();
-    Ok(())
+    if pb.pause() {
+        Ok(())
+    } else {
+        Err("Нечего приостановить (воспроизведение не активно)".to_string())
+    }
 }
 
 #[tauri::command]
 pub fn playback_resume(playback: State<'_, PlaybackState>) -> Result<(), String> {
     let pb = &playback.inner().0;
-    pb.resume();
-    Ok(())
+    if pb.resume() {
+        Ok(())
+    } else {
+        Err("Нечего возобновить (воспроизведение не приостановлено)".to_string())
+    }
 }
 
 #[tauri::command]
 pub fn playback_stop(playback: State<'_, PlaybackState>) -> Result<(), String> {
     let pb = &playback.inner().0;
-    pb.stop();
-    Ok(())
+    if pb.stop() {
+        Ok(())
+    } else {
+        Err("Нечего остановить (воспроизведение не активно)".to_string())
+    }
 }
 
 #[tauri::command]
 pub fn playback_repeat(playback: State<'_, PlaybackState>) -> Result<(), String> {
     let pb = &playback.inner().0;
-    pb.repeat();
-    Ok(())
+    if pb.repeat() {
+        Ok(())
+    } else {
+        Err("Нечего повторить (воспроизведение не активно)".to_string())
+    }
 }
 
 #[tauri::command]

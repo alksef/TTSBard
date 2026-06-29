@@ -357,23 +357,38 @@ impl PlaybackManager {
         }
     }
 
-    pub fn pause(&self) {
+    pub fn pause(&self) -> bool {
         if self.state.read().current.is_none() {
-            return;
+            return false;
         }
         let _ = self.cmd_tx.send(Cmd::Pause);
+        true
     }
 
-    pub fn resume(&self) {
+    pub fn resume(&self) -> bool {
+        let s = self.state.read();
+        if s.current.is_none() || s.status != PlaybackStatus::Paused {
+            return false;
+        }
+        drop(s);
         let _ = self.cmd_tx.send(Cmd::Resume);
+        true
     }
 
-    pub fn stop(&self) {
+    pub fn stop(&self) -> bool {
+        if self.state.read().current.is_none() {
+            return false;
+        }
         let _ = self.cmd_tx.send(Cmd::Stop);
+        true
     }
 
-    pub fn repeat(&self) {
+    pub fn repeat(&self) -> bool {
+        if self.state.read().current.is_none() {
+            return false;
+        }
         let _ = self.cmd_tx.send(Cmd::Repeat);
+        true
     }
 
     pub fn replay_from_cache(&self, id: &str) {
