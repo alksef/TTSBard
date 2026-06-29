@@ -15,11 +15,18 @@ pub struct HistoryEntry {
     pub last_used: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PhraseEntry {
+    // #[serde(default)] на каждом поле + Default на структуре — backwards-compatibility:
+    // при добавлении новых полей старые phrase_history.json продолжат десериализоваться
+    // (урок playback_pause / HotkeySettings, commit 704be39).
+    #[serde(default)]
     pub id: String,
+    #[serde(default)]
     pub text: String,
+    #[serde(default)]
     pub count: u32,
+    #[serde(default)]
     pub last_used: i64,
 }
 
@@ -245,6 +252,9 @@ impl HistoryManager {
         spawn_save(path, ngram_path, data_snapshot, ngrams_snapshot);
     }
 
+    // Контракт нормализации фраз: храним text.trim(); дедупликация и поиск —
+    // case-insensitive по подстроке (to_lowercase()). См. также get_phrases.
+    // Не менять без обновления обоих методов — это сломает дедупликацию/поиск.
     pub fn record_phrase(&self, text: &str) {
         let trimmed = text.trim();
         if trimmed.is_empty() {

@@ -2,6 +2,7 @@
 import { ref, watch, onUnmounted } from 'vue'
 import { Search, X, Trash2, ChevronDown, ChevronRight } from 'lucide-vue-next'
 import { usePhraseHistory, type PhraseEntry } from '../composables/usePhraseHistory'
+import { debugError } from '../utils/debug'
 
 const emit = defineEmits<{
   select: [text: string]
@@ -13,6 +14,8 @@ const isExpanded = ref(false)
 const filter = ref('')
 const phrases = ref<PhraseEntry[]>([])
 const filterDebounced = ref('')
+// Текст ошибки последней операции; пусто = нет ошибки. Без модалок — краткая строка в UI.
+const loadError = ref('')
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -26,7 +29,11 @@ watch(filter, (val) => {
 async function loadPhrases() {
   try {
     phrases.value = await list(filterDebounced.value || undefined, 100)
-  } finally {}
+    loadError.value = ''
+  } catch (e) {
+    debugError('[PhraseHistory] Failed to load phrases:', e)
+    loadError.value = 'Ошибка загрузки истории'
+  }
 }
 
 watch(filterDebounced, () => {
@@ -48,8 +55,10 @@ function selectPhrase(phrase: PhraseEntry) {
 async function removePhrase(id: string) {
   try {
     await remove(id)
-  } finally {
     await loadPhrases()
+  } catch (e) {
+    debugError('[PhraseHistory] Failed to remove phrase:', e)
+    loadError.value = 'Не удалось удалить фразу'
   }
 }
 
@@ -57,8 +66,11 @@ async function clearAll() {
   if (!confirm('Удалить всю историю фраз?')) return
   try {
     await clear()
-  } finally {
     phrases.value = []
+    loadError.value = ''
+  } catch (e) {
+    debugError('[PhraseHistory] Failed to clear phrases:', e)
+    loadError.value = 'Не удалось очистить историю'
   }
 }
 
@@ -102,6 +114,8 @@ onUnmounted(() => {
       </div>
 
       <div v-if="isLoading" class="loading">Загрузка...</div>
+
+      <div v-else-if="loadError" class="error">{{ loadError }}</div>
 
       <div v-else-if="phrases.length === 0" class="empty">
         {{ filter ? 'Ничего не найдено' : 'История пуста' }}
@@ -234,6 +248,14 @@ onUnmounted(() => {
   text-align: center;
   font-size: 0.82rem;
   color: var(--color-text-muted);
+  font-family: var(--font-mono);
+}
+
+.error {
+  padding: 1rem;
+  text-align: center;
+  font-size: 0.82rem;
+  color: var(--color-danger);
   font-family: var(--font-mono);
 }
 

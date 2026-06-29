@@ -47,3 +47,30 @@ verdict round 1 (`docs/deepseek/reviews/review-plan-75-round1-2026-06-30.md`)
 ## Объём
 Малый: правки в одном Vue-компоненте + комментарий/тест в `history.rs`. По WORKFLOW —
 через DeepSeek (task-файл + round), либо прямая правка (тривиально) на усмотрение.
+
+## Статус выполнения (2026-06-30, по итогам review-018)
+
+Сделано прямыми правками (тривиально, в рамках плана):
+- ✅ `PhraseHistoryList.vue`: `catch` + `debugError` в `loadPhrases`/`removePhrase`/
+  `clearAll`; добавлена UI-индикация ошибки (`loadError` + класс `.error`, без модалок).
+- ✅ `usePhraseHistory.ts`: `list`/`remove`/`clear` больше не проглатывают ошибки молча —
+  `list` пробрасывает (чтобы отличить пустой список от сбоя IPC), `remove`/`clear`
+  пробрасывают для индикации в вызывающем компоненте.
+- ✅ `history.rs`: `#[serde(default)]` + `Default` на `PhraseEntry` (backwards-compatibility,
+  CRITICAL замечание 4, урок `playback_pause`); комментарий контракта нормализации над
+  `record_phrase`.
+- ✅ `commands/history.rs`: валидация пустого `id` в `delete_phrase_history` (MINOR).
+- ✅ `npx vue-tsc --noEmit` — 0 ошибок. `cargo check` — pending.
+
+Осталось для DeepSeek (нетривиально, не делать наспех — риск сломать стабильную подсистему):
+- ⏳ **CRITICAL замечание 3** — race condition в `spawn_save_phrases` (одновременная запись
+  в `phrase_history.json` из нескольких detached threads). Тот же паттерн `spawn_save`
+  используется и для `HistoryData`/`NgramData` — править надо **оба** единообразно
+  (debounce/batch ИЛИ `Arc<Mutex<()>>` write-guard ИЛИ единый writer-thread через channel).
+  Это изменение паттерна персистентности всего `HistoryManager` — вынести в отдельный task-файл
+  для DeepSeek + round ревью. НЕ править напрямую.
+- ⏳ **SECURITY** (review-018): валидация размера фразы в `record_phrase` (`MAX_PHRASE_LENGTH`),
+  ограничение длины `filter` в `get_phrases`. Мелкие, можно объединить с task-файлом выше.
+
+Остальные OPTIMIZE (VecDeque, lazy loading, кэш to_lowercase) — сознательно отложены: для
+n=200 записей текущая O(n) приемлема, преждевременная оптимизация без профилирования.

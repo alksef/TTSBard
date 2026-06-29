@@ -54,6 +54,9 @@ pub fn delete_phrase_history(
     id: String,
     history_state: State<'_, HistoryState>,
 ) -> Result<(), String> {
+    if id.trim().is_empty() {
+        return Err("Phrase id cannot be empty".to_string());
+    }
     let manager = &history_state.0;
     manager.delete_phrase(&id);
     Ok(())
