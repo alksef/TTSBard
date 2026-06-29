@@ -33,6 +33,20 @@
         "resizable": false,
         "visible": false,
         "hiddenTitle": true
+      },
+      {
+        "label": "playback-control",
+        "url": "src-playback/index.html",
+        "title": "Управление",
+        "width": 350,
+        "height": 400,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "visible": false,
+        "hiddenTitle": true
       }
     ],
     "security": {

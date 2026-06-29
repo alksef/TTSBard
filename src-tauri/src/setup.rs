@@ -22,8 +22,10 @@ use crate::events::AppEvent;
 use crate::config::{SettingsManager, WindowsManager, AppSettings, WindowsSettings};
 use crate::soundpanel::SoundPanelState;
 use crate::commands::telegram::TelegramState;
+use crate::commands::playback::PlaybackState;
 use crate::tts::TtsProviderType;
 use crate::event_loop::EventHandler;
+use std::sync::Arc;
 
 /// Initialize the application (called from Tauri's setup callback)
 ///
@@ -62,12 +64,35 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
     info!("Loading hotkey_enabled setting...");
     *app_state.inner().hotkey_enabled.lock() = settings.hotkey_enabled;
 
-    // Setup event system
+    // Setup event system (must be before PlaybackManager)
     let app_handle = app.handle().clone();
     let app_state_for_events = app_state.inner().clone();
     let (event_tx, event_rx) = mpsc::channel::<AppEvent>();
 
     app_state_for_events.set_event_sender(event_tx.clone());
+
+    // Initialize PlaybackManager
+    let app_handle_pb = app.handle().clone();
+    let initial_speaker = if settings.audio.speaker_enabled {
+        Some(crate::audio::OutputConfig {
+            device_id: settings.audio.speaker_device.clone(),
+            volume: settings.audio.speaker_volume as f32 / 100.0,
+        })
+    } else {
+        None
+    };
+    let initial_mic = settings.audio.virtual_mic_device.clone().map(|dev_id| crate::audio::OutputConfig {
+        device_id: Some(dev_id),
+        volume: settings.audio.virtual_mic_volume as f32 / 100.0,
+    });
+    let pb_manager = Arc::new(crate::playback::PlaybackManager::new(
+        app_handle_pb,
+        event_tx.clone(),
+        crate::playback::AudioOutputsConfig { speaker: initial_speaker, mic: initial_mic },
+        Some(app_state.inner().cached_devices.clone()),
+    ));
+    *app_state.inner().playback_manager.lock() = Some(pb_manager.clone());
+    app.manage(PlaybackState(pb_manager));
     info!("Event sender configured in AppState");
 
     thread::spawn(move || {
@@ -280,6 +305,14 @@ fn init_windows(
         info!(?tauri_theme, "Applied initial window theme");
     }
 
+    if let Some(pb_window) = app.get_webview_window("playback-control") {
+        let tauri_theme = match settings.theme {
+            crate::config::Theme::Light => tauri::Theme::Light,
+            crate::config::Theme::Dark => tauri::Theme::Dark,
+        };
+        let _ = pb_window.set_theme(Some(tauri_theme));
+    }
+
     Ok(())
 }
 
@@ -480,6 +513,15 @@ fn init_window_protection(app: &App, windows_manager: &WindowsManager) {
             match set_window_exclude_from_capture(hwnd.0 as isize, exclude_from_capture) {
                 Ok(_) => info!(exclude_from_capture, "Main window exclude from capture applied"),
                 Err(e) => error!(error = %e, "Failed to apply exclude from capture to main window"),
+            }
+        }
+    }
+
+    if let Some(pb_window) = app.get_webview_window("playback-control") {
+        if let Ok(hwnd) = pb_window.hwnd() {
+            match set_window_exclude_from_capture(hwnd.0 as isize, exclude_from_capture) {
+                Ok(_) => info!(exclude_from_capture, "Playback window exclude from capture applied"),
+                Err(e) => error!(error = %e, "Failed to apply exclude from capture to playback window"),
             }
         }
     }

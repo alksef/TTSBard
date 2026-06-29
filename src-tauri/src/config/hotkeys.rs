@@ -27,6 +27,9 @@ pub struct Hotkey {
 pub struct HotkeySettings {
     pub main_window: Hotkey,
     pub sound_panel: Hotkey,
+    pub playback_pause: Hotkey,
+    pub playback_stop: Hotkey,
+    pub playback_repeat: Hotkey,
 }
 
 impl Default for HotkeySettings {
@@ -39,6 +42,18 @@ impl Default for HotkeySettings {
             sound_panel: Hotkey {
                 modifiers: vec![HotkeyModifier::Ctrl, HotkeyModifier::Shift],
                 key: "F2".to_string(),
+            },
+            playback_pause: Hotkey {
+                modifiers: vec![HotkeyModifier::Ctrl, HotkeyModifier::Shift],
+                key: "F4".to_string(),
+            },
+            playback_stop: Hotkey {
+                modifiers: vec![HotkeyModifier::Ctrl, HotkeyModifier::Shift],
+                key: "F5".to_string(),
+            },
+            playback_repeat: Hotkey {
+                modifiers: vec![HotkeyModifier::Ctrl, HotkeyModifier::Shift],
+                key: "F6".to_string(),
             },
         }
     }
@@ -61,6 +76,30 @@ impl Hotkey {
         }
     }
 
+    /// Create a hotkey with Ctrl+Shift+F4 (playback pause/resume default)
+    pub fn default_playback_pause() -> Self {
+        Self {
+            modifiers: vec![HotkeyModifier::Ctrl, HotkeyModifier::Shift],
+            key: "F4".to_string(),
+        }
+    }
+
+    /// Create a hotkey with Ctrl+Shift+F5 (playback stop default)
+    pub fn default_playback_stop() -> Self {
+        Self {
+            modifiers: vec![HotkeyModifier::Ctrl, HotkeyModifier::Shift],
+            key: "F5".to_string(),
+        }
+    }
+
+    /// Create a hotkey with Ctrl+Shift+F6 (playback repeat default)
+    pub fn default_playback_repeat() -> Self {
+        Self {
+            modifiers: vec![HotkeyModifier::Ctrl, HotkeyModifier::Shift],
+            key: "F6".to_string(),
+        }
+    }
+
     /// Convert to tauri_plugin_global_shortcut::Shortcut
     pub fn to_shortcut(&self) -> Result<Shortcut, String> {
         let mut modifiers = Modifiers::empty();
@@ -74,19 +113,27 @@ impl Hotkey {
         }
         let code = parse_key_code(&self.key)?;
         Ok(Shortcut::new(
-            if modifiers.is_empty() { None } else { Some(modifiers) },
-            code
+            if modifiers.is_empty() {
+                None
+            } else {
+                Some(modifiers)
+            },
+            code,
         ))
     }
 
     /// Format hotkey for display (e.g., "Ctrl+Shift+F3")
     pub fn format_display(&self) -> String {
-        let mods: Vec<&str> = self.modifiers.iter().map(|m| match m {
-            HotkeyModifier::Ctrl => "Ctrl",
-            HotkeyModifier::Shift => "Shift",
-            HotkeyModifier::Alt => "Alt",
-            HotkeyModifier::Super => "Win",
-        }).collect();
+        let mods: Vec<&str> = self
+            .modifiers
+            .iter()
+            .map(|m| match m {
+                HotkeyModifier::Ctrl => "Ctrl",
+                HotkeyModifier::Shift => "Shift",
+                HotkeyModifier::Alt => "Alt",
+                HotkeyModifier::Super => "Win",
+            })
+            .collect();
         if mods.is_empty() {
             self.key.clone()
         } else {

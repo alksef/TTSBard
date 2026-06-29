@@ -1,0 +1,448 @@
+use crate::audio::OutputConfig;
+use chrono::Utc;
+use cpal::traits::HostTrait;
+use parking_lot::RwLock;
+use rodio::{Decoder, OutputStream, Sink};
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, VecDeque};
+use std::io::Cursor;
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
+use tauri::{AppHandle, Emitter};
+use tracing::{info, warn};
+
+const AUDIO_CACHE_SIZE: usize = 20;
+const PHRASE_HISTORY_SIZE: usize = 5;
+const MAX_QUEUE: usize = 50;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum PlaybackStatus {
+    Idle,
+    Playing,
+    Paused,
+    Stopped,
+}
+
+#[derive(Debug, Clone)]
+pub struct QueuedPhrase {
+    pub id: String,
+    pub text: String,
+    pub audio: Arc<[u8]>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PhraseEntry {
+    pub id: String,
+    pub text: String,
+    pub timestamp: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlaybackStateDto {
+    pub status: PlaybackStatus,
+    pub current: Option<String>,
+    pub queue: Vec<String>,
+    pub recent: Vec<PhraseEntry>,
+}
+
+/// Динамическая конфигурация аудиовыходов — обновляется в runtime.
+/// Хранится в `Arc<RwLock<>>` и читается потоком на каждый Enqueue.
+#[derive(Clone)]
+pub struct AudioOutputsConfig {
+    pub speaker: Option<OutputConfig>,
+    pub mic: Option<OutputConfig>,
+}
+
+enum Cmd {
+    Enqueue(QueuedPhrase),
+    Pause,
+    Resume,
+    Stop,
+    Repeat,
+}
+
+struct Shared {
+    status: PlaybackStatus,
+    current: Option<QueuedPhrase>,
+    queue: VecDeque<QueuedPhrase>,
+    phrase_history: VecDeque<PhraseEntry>,
+    audio_cache: VecDeque<(String, Arc<[u8]>)>,
+}
+
+fn play_to_device(
+    data: &[u8],
+    handle: &rodio::OutputStreamHandle,
+    volume: f32,
+) -> Result<Sink, String> {
+    let sink = Sink::try_new(handle).map_err(|e| format!("Sink: {}", e))?;
+    let cursor = Cursor::new(data.to_vec());
+    let source = Decoder::new(cursor).map_err(|e| format!("Decode: {}", e))?;
+    sink.set_volume(volume);
+    sink.append(source);
+    Ok(sink)
+}
+
+fn resolve_device(
+    id: &Option<String>,
+    cached: &Option<Arc<RwLock<HashMap<String, cpal::Device>>>>,
+) -> Option<cpal::Device> {
+    let host = cpal::default_host();
+    match id {
+        Some(dev_id) => {
+            if let Some(cache) = cached {
+                let c = cache.read();
+                if let Some(d) = c.get(dev_id) {
+                    return Some(d.clone());
+                }
+            }
+            let idx: usize = dev_id.parse().ok()?;
+            host.output_devices().ok()?.into_iter().nth(idx)
+        }
+        None => host.default_output_device(),
+    }
+}
+
+pub struct PlaybackManager {
+    cmd_tx: mpsc::Sender<Cmd>,
+    state: Arc<RwLock<Shared>>,
+    /// Динамическая конфигурация аудиовыходов (обновляется `update_audio_config`)
+    pub audio_config: Arc<RwLock<AudioOutputsConfig>>,
+    _cached_devices: Option<Arc<RwLock<HashMap<String, cpal::Device>>>>,
+}
+
+impl PlaybackManager {
+    pub fn new(
+        app_handle: AppHandle,
+        internal_ev: mpsc::Sender<crate::events::AppEvent>,
+        initial_audio: AudioOutputsConfig,
+        cached_devices: Option<Arc<RwLock<HashMap<String, cpal::Device>>>>,
+    ) -> Self {
+        let (cmd_tx, cmd_rx) = mpsc::channel();
+        let state = Arc::new(RwLock::new(Shared {
+            status: PlaybackStatus::Idle,
+            current: None,
+            queue: VecDeque::new(),
+            phrase_history: VecDeque::with_capacity(PHRASE_HISTORY_SIZE),
+            audio_cache: VecDeque::with_capacity(AUDIO_CACHE_SIZE),
+        }));
+        let audio_config = Arc::new(RwLock::new(initial_audio));
+
+        let th_state = Arc::clone(&state);
+        let th_audio = Arc::clone(&audio_config);
+        let th_devices = cached_devices.clone();
+        let th_cmd_tx = cmd_tx.clone();
+
+        thread::spawn(move || {
+            Self::thread_loop(
+                cmd_rx,
+                th_cmd_tx,
+                app_handle,
+                internal_ev,
+                th_state,
+                th_audio,
+                th_devices,
+            );
+        });
+
+        PlaybackManager {
+            cmd_tx,
+            state,
+            audio_config,
+            _cached_devices: cached_devices,
+        }
+    }
+
+    fn thread_loop(
+        cmd_rx: Receiver<Cmd>,
+        cmd_tx: mpsc::Sender<Cmd>,
+        app: AppHandle,
+        internal_ev: mpsc::Sender<crate::events::AppEvent>,
+        state: Arc<RwLock<Shared>>,
+        audio_config: Arc<RwLock<AudioOutputsConfig>>,
+        cached_devices: Option<Arc<RwLock<HashMap<String, cpal::Device>>>>,
+    ) {
+        let mut sink_spk: Option<Sink> = None;
+        let mut sink_mic: Option<Sink> = None;
+        let mut _stream_spk: Option<OutputStream> = None;
+        let mut _stream_mic: Option<OutputStream> = None;
+        let mut playing = false;
+        let mut stopped = false;
+
+        loop {
+            match cmd_rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(Cmd::Enqueue(phrase)) => {
+                    if playing {
+                        continue;
+                    }
+                    stopped = false;
+
+                    // Читаем актуальную конфигурацию на каждый Enqueue (C1-дыра)
+                    let cfg = audio_config.read().clone();
+                    let audio = phrase.audio.clone();
+
+                    if let Some(ref c) = cfg.speaker {
+                        if let Some(dev) = resolve_device(&c.device_id, &cached_devices) {
+                            if let Ok((s, h)) = OutputStream::try_from_device(&dev) {
+                                if let Ok(sink) = play_to_device(&audio, &h, c.volume) {
+                                    sink_spk = Some(sink);
+                                    _stream_spk = Some(s);
+                                }
+                            }
+                        }
+                    }
+                    if let Some(ref c) = cfg.mic {
+                        if let Some(dev) = resolve_device(&c.device_id, &cached_devices) {
+                            if let Ok((s, h)) = OutputStream::try_from_device(&dev) {
+                                if let Ok(sink) = play_to_device(&audio, &h, c.volume) {
+                                    sink_mic = Some(sink);
+                                    _stream_mic = Some(s);
+                                }
+                            }
+                        }
+                    }
+
+                    if sink_spk.is_some() || sink_mic.is_some() {
+                        playing = true;
+                        state.write().status = PlaybackStatus::Playing;
+                        let _ = internal_ev.send(crate::events::AppEvent::PlaybackStarted {
+                            text_id: phrase.id.clone(),
+                            text: phrase.text.clone(),
+                        });
+                        let _ = app.emit(
+                            "playback-started",
+                            serde_json::json!({
+                                "text_id": phrase.id,
+                                "text": phrase.text,
+                            }),
+                        );
+                    }
+                }
+                Ok(Cmd::Pause) => {
+                    if sink_spk.is_none() && sink_mic.is_none() {
+                        continue;
+                    }
+                    if let Some(ref s) = sink_spk {
+                        s.pause();
+                    }
+                    if let Some(ref s) = sink_mic {
+                        s.pause();
+                    }
+                    state.write().status = PlaybackStatus::Paused;
+                    let _ = internal_ev.send(crate::events::AppEvent::PlaybackPaused);
+                    let _ = app.emit("playback-paused", ());
+                }
+                Ok(Cmd::Resume) => {
+                    if sink_spk.is_none() && sink_mic.is_none() {
+                        continue;
+                    }
+                    if let Some(ref s) = sink_spk {
+                        s.play();
+                    }
+                    if let Some(ref s) = sink_mic {
+                        s.play();
+                    }
+                    state.write().status = PlaybackStatus::Playing;
+                    let _ = internal_ev.send(crate::events::AppEvent::PlaybackResumed);
+                    let _ = app.emit("playback-resumed", ());
+                }
+                Ok(Cmd::Stop) => {
+                    sink_spk.take();
+                    sink_mic.take();
+                    _stream_spk.take();
+                    _stream_mic.take();
+                    playing = false;
+                    stopped = true;
+                    state.write().status = PlaybackStatus::Stopped;
+                    let _ = internal_ev.send(crate::events::AppEvent::PlaybackStopped);
+                    let _ = app.emit("playback-stopped", ());
+                }
+                Ok(Cmd::Repeat) => {
+                    if sink_spk.is_none() && sink_mic.is_none() {
+                        warn!("Repeat: nothing playing");
+                        continue;
+                    }
+                    let was_paused = sink_spk.as_ref().map(|s| s.is_paused()).unwrap_or(false)
+                        || sink_mic.as_ref().map(|s| s.is_paused()).unwrap_or(false);
+                    let seek_ok = sink_spk
+                        .as_ref()
+                        .map(|s| s.try_seek(Duration::ZERO).is_ok())
+                        .unwrap_or(true)
+                        && sink_mic
+                            .as_ref()
+                            .map(|s| s.try_seek(Duration::ZERO).is_ok())
+                            .unwrap_or(true);
+                    if !seek_ok {
+                        // fallback: re-enqueue from cache (M9)
+                        let phrase = state.read().current.clone();
+                        if let Some(p) = phrase {
+                            let _ = cmd_tx.send(Cmd::Stop);
+                            let _ = cmd_tx.send(Cmd::Enqueue(p));
+                        }
+                    } else {
+                        if let Some(ref s) = sink_spk {
+                            s.play();
+                        }
+                        if let Some(ref s) = sink_mic {
+                            s.play();
+                        }
+                        if was_paused {
+                            state.write().status = PlaybackStatus::Playing;
+                            let _ = internal_ev.send(crate::events::AppEvent::PlaybackResumed);
+                            let _ = app.emit("playback-resumed", ());
+                        }
+                        playing = true;
+                        stopped = false;
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => break,
+            }
+
+            if playing && !stopped {
+                let spk_done = sink_spk.as_ref().map(|s| s.empty()).unwrap_or(true);
+                let mic_done = sink_mic.as_ref().map(|s| s.empty()).unwrap_or(true);
+                let paused = sink_spk.as_ref().map(|s| s.is_paused()).unwrap_or(false)
+                    || sink_mic.as_ref().map(|s| s.is_paused()).unwrap_or(false);
+
+                if !paused && spk_done && mic_done {
+                    playing = false;
+                    sink_spk.take();
+                    sink_mic.take();
+                    _stream_spk.take();
+                    _stream_mic.take();
+                    state.write().status = PlaybackStatus::Idle;
+                    let _ = internal_ev.send(crate::events::AppEvent::PlaybackFinished);
+                    let _ = app.emit("queue-changed", ());
+                }
+            }
+        }
+
+        info!("Playback thread ended");
+    }
+
+    /// Обновить динамическую конфигурацию аудиовыходов (C1-дыра).
+    /// Вызывается из `speak_text_internal` перед/после `enqueue`.
+    pub fn update_audio_config(&self, speaker: Option<OutputConfig>, mic: Option<OutputConfig>) {
+        *self.audio_config.write() = AudioOutputsConfig { speaker, mic };
+    }
+
+    /// Добавить фразу в очередь. Возвращает `true` если фраза принята, `false` если очередь полна.
+    pub fn enqueue(&self, id: String, text: String, audio: Vec<u8>) -> bool {
+        let arc_audio: Arc<[u8]> = audio.into();
+        let mut s = self.state.write();
+
+        s.audio_cache
+            .push_back((id.clone(), Arc::clone(&arc_audio)));
+        if s.audio_cache.len() > AUDIO_CACHE_SIZE {
+            s.audio_cache.pop_front();
+        }
+
+        if s.current.is_some()
+            && (s.status == PlaybackStatus::Playing || s.status == PlaybackStatus::Paused)
+        {
+            if s.queue.len() < MAX_QUEUE {
+                s.queue.push_back(QueuedPhrase {
+                    id,
+                    text,
+                    audio: arc_audio,
+                });
+                return true;
+            }
+            warn!("Playback queue full ({MAX_QUEUE}), phrase dropped");
+            return false;
+        }
+
+        let phrase = QueuedPhrase {
+            id: id.clone(),
+            text: text.clone(),
+            audio: arc_audio,
+        };
+        s.current = Some(phrase.clone());
+        drop(s);
+
+        self.add_history(&id, &text);
+        let _ = self.cmd_tx.send(Cmd::Enqueue(phrase));
+        true
+    }
+
+    fn add_history(&self, id: &str, text: &str) {
+        let mut s = self.state.write();
+        s.phrase_history.retain(|e| e.id != id);
+        s.phrase_history.push_back(PhraseEntry {
+            id: id.to_string(),
+            text: text.to_string(),
+            timestamp: Utc::now().timestamp(),
+        });
+        while s.phrase_history.len() > PHRASE_HISTORY_SIZE {
+            s.phrase_history.pop_front();
+        }
+    }
+
+    pub fn pause(&self) {
+        if self.state.read().current.is_none() {
+            return;
+        }
+        let _ = self.cmd_tx.send(Cmd::Pause);
+    }
+
+    pub fn resume(&self) {
+        let _ = self.cmd_tx.send(Cmd::Resume);
+    }
+
+    pub fn stop(&self) {
+        let _ = self.cmd_tx.send(Cmd::Stop);
+    }
+
+    pub fn repeat(&self) {
+        let _ = self.cmd_tx.send(Cmd::Repeat);
+    }
+
+    pub fn replay_from_cache(&self, id: &str) {
+        let entry = {
+            let s = self.state.read();
+            s.audio_cache.iter().find(|(i, _)| i == id).cloned()
+        };
+        if let Some((orig_id, data)) = entry {
+            let text = {
+                let s = self.state.read();
+                s.phrase_history
+                    .iter()
+                    .find(|e| e.id == id)
+                    .map(|e| e.text.clone())
+            };
+            if let Some(text) = text {
+                self.enqueue(orig_id, text, data.to_vec());
+            }
+        }
+    }
+
+    pub fn on_playback_finished(&self) {
+        let mut s = self.state.write();
+        if let Some(next) = s.queue.pop_front() {
+            let id = next.id.clone();
+            let text = next.text.clone();
+            s.current = Some(next.clone());
+            let audio = next.audio.clone();
+            drop(s);
+            self.add_history(&id, &text);
+            let _ = self
+                .cmd_tx
+                .send(Cmd::Enqueue(QueuedPhrase { id, text, audio }));
+        } else {
+            s.current = None;
+            s.status = PlaybackStatus::Idle;
+        }
+    }
+
+    pub fn get_state(&self) -> PlaybackStateDto {
+        let s = self.state.read();
+        PlaybackStateDto {
+            status: s.status.clone(),
+            current: s.current.as_ref().map(|p| p.text.clone()),
+            queue: s.queue.iter().map(|p| p.text.clone()).collect(),
+            recent: s.phrase_history.iter().rev().cloned().collect(),
+        }
+    }
+}

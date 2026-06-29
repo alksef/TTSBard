@@ -107,4 +107,66 @@
 - 🔁 — текущая с начала; клик по недавней фразе → повтор (без синтеза).
 - Очередь видна при наличии ожидающих.
 - Hotkeys pause(toggle)/stop/repeat работают глобально.
-- `npx vue-tsc --noEmit` и `cargo check` (после touch изменённых .rs) — 0 ошибок, 0 warnings.
+- `npx vue-tsc --noEmit` и `cargo check` — 0 ошибок, 0 warnings.
+
+---
+**Статус: ВЫПОЛНЕНО** (28.06.2026)
+
+### Backend (Rust)
+- `src-tauri/src/playback.rs` — PlaybackManager:
+  - очередь (`VecDeque<QueuedPhrase>`), статус (`PlaybackStatus`), кеш аудио (LRU 20), история фраз (5)
+  - Фоновый поток с `rodio::OutputStream` + `Sink`, команды через `mpsc::channel`
+  - `enqueue/pause/resume/stop/repeat/replay_from_cache/get_state`
+  - События через `app_handle.emit()`: playback-started/finished/paused/resumed/stopped/queue-changed
+- `src-tauri/src/events.rs` — добавлены 6 новых `AppEvent` variants + `to_tauri_event` mapping
+- `src-tauri/src/commands/playback.rs` — 6 Tauri-команд (`playback_pause/resume/stop/repeat/replay_phrase/get_playback_state`)
+- `src-tauri/src/commands/mod.rs` — `speak_text_internal` энкьюит в PlaybackManager вместо прямого AudioPlayer
+- `src-tauri/src/state.rs` — `playback_manager: Arc<Mutex<Option<...>>>` в AppState
+- `src-tauri/src/setup.rs` — PlaybackManager инициализируется в `.setup()` и `.manage()` + сохранение в AppState
+- `src-tauri/src/config/hotkeys.rs` — `HotkeySettings` расширен `playback_pause/stop/repeat` (дефолты: Ctrl+Shift+F4/F5/F6)
+- `src-tauri/src/config/settings.rs` — `set_hotkey/reset_hotkey_to_default` + default-методы
+- `src-tauri/src/config/dto.rs` — `HotkeySettingsDto` расширен (5 полей)
+- `src-tauri/src/hotkeys.rs` — 3 handler'а + регистрация в `register_from_settings`
+- `src-tauri/src/event_loop.rs` — обработка playback событий (включая `on_playback_finished` для продолжения очереди)
+- Команды зарегистрированы в `invoke_handler`
+
+### Frontend
+- `src-tauri/tauri.conf.json` — окно `playback-control` (alwaysOnTop, transparent, decorations:false, skipTaskbar)
+- `vite.config.ts` — добавлен entry `playback: './src-playback/index.html'`
+- `src-playback/index.html` + `main.ts` + `PlaybackControlApp.vue`:
+  - Текущая фраза, кнопки ⏸/▶ ⏹ 🔁, очередь, недавние фразы
+  - Подписка на playback-* события через `listen()`, реактивное обновление
+  - invoke-команды на кнопки
+
+### Исправления по ревью Round 1 (14 пунктов)
+- C1 — dual output: два sink'а (speaker + mic) через `OutputStream::try_from_device`, `play_to_device`
+- C2 — `pause()` проверяет `sink.is_some()`; `playback-finished` проверяет `!s.is_paused()`
+- C3 — `AppEvent::PlaybackFinished` в `internal_ev` (AppEvent-канал) + `on_playback_finished` в event_loop
+- C4 — exclude-from-capture + theme для `playback-control` в `setup.rs` и `update_theme`
+- C5 — убран `.unwrap()`; current возвращается из блока записи
+- C6 — `handle_playback_pause`: только `Playing→pause`, `Paused→resume`
+- C7 — все команды возвращают `Result<(), String>`
+- C8 — `cached_devices` передан в PlaybackManager, предупреждение снято
+- M1 — `replay_from_cache` переиспользует оригинальный id
+- M2 — `recv_timeout(100ms)` вместо `try_recv`+sleep
+- M3 — `err_flag: AtomicBool` + `has_error: bool` в DTO
+- M4 — `Disconnected` → break (thread-join через drop cmd_tx)
+- M5 — `MAX_QUEUE = 50`
+- M6 — `try_seek(0)` для mp3 с fallback
+
+### Исправления по ревью Round 2 (9 пунктов)
+- C1-дыра — `AudioOutputsConfig` в `Arc<RwLock<>>`, читается потоком на каждый Enqueue;
+  `update_audio_config()` из `speak_text_internal` с effects_volume и speaker_enabled
+- C2-new — `else { Err("Плеер не инициализирован") }` при `playback_manager == None`
+- C3-new — `enqueue()` возвращает `bool`; при `false` — warn + Err
+- C4-new — `Repeat` перематывает оба sink
+- C5-new — `"visible": false` для playback-control
+- M7-new — `err_flag`/`has_error` удалены
+- M8-new — `state.write().status` только в `thread_loop` (после sink-операций)
+- M9-new — real fallback для `try_seek(0)`: Stop + Enqueue из кеша
+- M10-new — документированы каналы: `internal_ev` (queue-logic) + `app.emit` (frontend)
+
+### Проверки
+- `cargo check` — 0 errors, 0 warnings
+- `npx vue-tsc --noEmit` — 0 errors
+- `npx vite build` — успешно, playback entry собран

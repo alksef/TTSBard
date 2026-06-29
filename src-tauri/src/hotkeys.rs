@@ -1,26 +1,32 @@
-use crate::state::{AppState, ActiveWindow};
-use crate::soundpanel::SoundPanelState;
+use crate::commands::playback::PlaybackState;
 use crate::config::HotkeySettings;
+use crate::soundpanel::SoundPanelState;
+use crate::state::{ActiveWindow, AppState};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
-use tracing::{info, debug, error};
+use tracing::{debug, error, info};
 
 /// Handler for sound panel toggle
-fn handle_sound_panel(
-    app_state: AppState,
-    app_handle: AppHandle,
-) {
+fn handle_sound_panel(app_state: AppState, app_handle: AppHandle) {
     debug!("Sound panel hotkey triggered");
 
     // Check if hotkey recording is in progress
     if app_state.is_hotkey_recording() {
-        debug!(hotkey = "sound_panel", status = "recording", "Hotkey recording in progress - ignoring");
+        debug!(
+            hotkey = "sound_panel",
+            status = "recording",
+            "Hotkey recording in progress - ignoring"
+        );
         return;
     }
 
     // Проверяем, включены ли хоткеи в настройках
     if !app_state.is_hotkey_enabled() {
-        debug!(hotkey = "sound_panel", status = "disabled", "Hotkey is disabled in settings");
+        debug!(
+            hotkey = "sound_panel",
+            status = "disabled",
+            "Hotkey is disabled in settings"
+        );
         return;
     }
 
@@ -28,16 +34,55 @@ fn handle_sound_panel(
     app_state.set_active_window(ActiveWindow::SoundPanel);
 
     // Показать звуковую панель
-    info!(window = "soundpanel", action = "showing", "Showing soundpanel");
+    info!(
+        window = "soundpanel",
+        action = "showing",
+        "Showing soundpanel"
+    );
 
     // Emit event to show soundpanel window (handled in lib.rs)
     if let Some(sp_state) = app_handle.try_state::<SoundPanelState>() {
-        debug!(window = "soundpanel", status = "state_found", "SoundPanel state found, setting interception_enabled=true");
+        debug!(
+            window = "soundpanel",
+            status = "state_found",
+            "SoundPanel state found, setting interception_enabled=true"
+        );
         sp_state.set_interception_enabled(true);
-        debug!(event = "ShowSoundPanelWindow", "Emitting ShowSoundPanelWindow event");
+        debug!(
+            event = "ShowSoundPanelWindow",
+            "Emitting ShowSoundPanelWindow event"
+        );
         sp_state.emit_event(crate::events::AppEvent::ShowSoundPanelWindow);
     } else {
-        error!(window = "soundpanel", error = "state_not_found", "ERROR: SoundPanel state not found");
+        error!(
+            window = "soundpanel",
+            error = "state_not_found",
+            "ERROR: SoundPanel state not found"
+        );
+    }
+}
+
+fn handle_playback_pause(app_handle: AppHandle) {
+    if let Some(state) = app_handle.try_state::<PlaybackState>() {
+        let pb = &state.inner().0;
+        let st = pb.get_state();
+        match st.status {
+            crate::playback::PlaybackStatus::Playing => pb.pause(),
+            crate::playback::PlaybackStatus::Paused => pb.resume(),
+            _ => {}
+        }
+    }
+}
+
+fn handle_playback_stop(app_handle: AppHandle) {
+    if let Some(state) = app_handle.try_state::<PlaybackState>() {
+        state.inner().0.stop();
+    }
+}
+
+fn handle_playback_repeat(app_handle: AppHandle) {
+    if let Some(state) = app_handle.try_state::<PlaybackState>() {
+        state.inner().0.repeat();
     }
 }
 
@@ -48,18 +93,31 @@ fn handle_main_window(app_handle: AppHandle) {
     // Check if hotkey recording is in progress
     if let Some(app_state) = app_handle.try_state::<AppState>() {
         if app_state.is_hotkey_recording() {
-            debug!(hotkey = "main_window", status = "recording", "Hotkey recording in progress - ignoring");
+            debug!(
+                hotkey = "main_window",
+                status = "recording",
+                "Hotkey recording in progress - ignoring"
+            );
             return;
         }
     }
 
     // Показать главное окно
-    info!(hotkey = "main_window", window = "main", action = "showing", "Detected - showing main window");
+    info!(
+        hotkey = "main_window",
+        window = "main",
+        action = "showing",
+        "Detected - showing main window"
+    );
 
     if let Some(window) = app_handle.get_webview_window("main") {
         // Проверяем, если окно уже в фокусе - игнорируем
         if let Ok(true) = window.is_focused() {
-            debug!(window = "main", status = "already_focused", "Main window already focused - ignoring");
+            debug!(
+                window = "main",
+                status = "already_focused",
+                "Main window already focused - ignoring"
+            );
             return;
         }
 
@@ -75,7 +133,12 @@ fn handle_main_window(app_handle: AppHandle) {
         // Сфокусировать окно
         let _ = window.set_focus();
 
-        info!(window = "main", status = "shown_and_focused", note = "always_on_top_will_be_removed_on_focus_loss", "Main window shown and focused");
+        info!(
+            window = "main",
+            status = "shown_and_focused",
+            note = "always_on_top_will_be_removed_on_focus_loss",
+            "Main window shown and focused"
+        );
     }
 }
 
@@ -139,6 +202,36 @@ pub fn register_from_settings(
         handle_main_window,
     )?;
 
+    // Register playback pause hotkey
+    let playback_pause_shortcut = hotkey_settings.playback_pause.to_shortcut()?;
+    register_hotkey_internal(
+        app_handle,
+        app_state,
+        "playback_pause",
+        playback_pause_shortcut,
+        handle_playback_pause,
+    )?;
+
+    // Register playback stop hotkey
+    let playback_stop_shortcut = hotkey_settings.playback_stop.to_shortcut()?;
+    register_hotkey_internal(
+        app_handle,
+        app_state,
+        "playback_stop",
+        playback_stop_shortcut,
+        handle_playback_stop,
+    )?;
+
+    // Register playback repeat hotkey
+    let playback_repeat_shortcut = hotkey_settings.playback_repeat.to_shortcut()?;
+    register_hotkey_internal(
+        app_handle,
+        app_state,
+        "playback_repeat",
+        playback_repeat_shortcut,
+        handle_playback_repeat,
+    )?;
+
     info!(
         main_window = %hotkey_settings.main_window.format_display(),
         sound_panel = %hotkey_settings.sound_panel.format_display(),
@@ -169,13 +262,17 @@ pub fn initialize_hotkeys(
     app_state: AppState,
     app_handle: AppHandle,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    info!(hotkey = "initializing", "Initializing global shortcuts from settings");
+    info!(
+        hotkey = "initializing",
+        "Initializing global shortcuts from settings"
+    );
 
     // Load hotkey settings
     let settings_manager = crate::config::SettingsManager::new()
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
-    let settings = settings_manager.load()
+    let settings = settings_manager
+        .load()
         .map_err(|e| format!("Failed to load settings: {}", e))?;
 
     // Unregister any existing hotkeys
@@ -184,7 +281,10 @@ pub fn initialize_hotkeys(
     // Register hotkeys from settings
     register_from_settings(&settings.hotkeys, &app_state, &app_handle)?;
 
-    info!(hotkey = "registration_complete", "Global shortcuts registered successfully");
+    info!(
+        hotkey = "registration_complete",
+        "Global shortcuts registered successfully"
+    );
     info!(hotkey = %settings.hotkeys.main_window.format_display(), description = "show_main_window_with_always_on_top");
     info!(hotkey = %settings.hotkeys.sound_panel.format_display(), description = "show_soundpanel");
 
@@ -206,7 +306,8 @@ pub fn reregister_hotkeys(app_handle: &AppHandle) -> Result<(), Box<dyn std::err
     let settings_manager = crate::config::SettingsManager::new()
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
-    let settings = settings_manager.load()
+    let settings = settings_manager
+        .load()
         .map_err(|e| format!("Failed to load settings: {}", e))?;
 
     // Unregister all hotkeys
@@ -226,7 +327,11 @@ pub fn initialize_hotkeys(
     _app_state: AppState,
     _app_handle: AppHandle,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    info!(platform = "non-windows", status = "supported", "Global shortcuts are supported on all platforms");
+    info!(
+        platform = "non-windows",
+        status = "supported",
+        "Global shortcuts are supported on all platforms"
+    );
     Ok(())
 }
 

@@ -92,6 +92,27 @@ impl EventHandler {
             AppEvent::TwitchStatusChanged(status) => {
                 debug!(?status, "[EVENT] Twitch status changed");
             }
+            AppEvent::PlaybackStarted { .. } => {
+                debug!("[EVENT] Playback started");
+            }
+            AppEvent::PlaybackFinished => {
+                debug!("[EVENT] Playback finished");
+                if let Some(pb) = self.state.playback_manager.lock().as_ref() {
+                    pb.on_playback_finished();
+                }
+            }
+            AppEvent::PlaybackPaused => {
+                debug!("[EVENT] Playback paused");
+            }
+            AppEvent::PlaybackResumed => {
+                debug!("[EVENT] Playback resumed");
+            }
+            AppEvent::PlaybackStopped => {
+                debug!("[EVENT] Playback stopped");
+            }
+            AppEvent::QueueChanged => {
+                debug!("[EVENT] Queue changed");
+            }
             AppEvent::Quit => {
                 info!("[EVENT] Quit event received - WebView server should handle cleanup");
             }

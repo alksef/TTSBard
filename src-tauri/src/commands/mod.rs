@@ -3,7 +3,7 @@ use crate::events::AppEvent;
 use crate::config::{SettingsManager, WindowsManager, AppSettingsDto, Theme};
 use crate::soundpanel_window::{hide_soundpanel_window};
 use crate::tts::{TtsProviderType, TtsProvider};
-use crate::audio::{AudioPlayer, OutputConfig};
+use crate::audio::OutputConfig;
 use crate::commands::telegram::TelegramState;
 use tauri::{State, AppHandle, Manager, Emitter};
 use std::sync::Arc;
@@ -32,6 +32,9 @@ pub mod ai;
 
 // History commands
 pub mod history;
+
+// Playback commands
+pub mod playback;
 
 // Window commands
 pub mod window;
@@ -241,12 +244,18 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
         return Err("Аудиовывод и виртуальный микрофон выключены. Включите хотя бы один вывод.".to_string());
     }
 
-    // Play audio with dual output support (use cached devices if available)
-    let mut player = AudioPlayer::new();
-    let cached_devices = Some(state.cached_devices.clone());
-    player.play_mp3_async_dual(audio_data, speaker_config, virtual_mic_config, cached_devices)?;
-
-    info!("TTS completed successfully");
+    // Enqueue to PlaybackManager (handles queue, pause/resume, cache)
+    if let Some(pb) = state.playback_manager.lock().as_ref() {
+        // Передаём актуальную конфигурацию аудио (C1-дыра: effects_volume, speaker_enabled dynamic)
+        pb.update_audio_config(speaker_config, virtual_mic_config);
+        let phrase_id = uuid::Uuid::new_v4().to_string();
+        if !pb.enqueue(phrase_id, text.clone(), audio_data) {
+            warn!("Playback queue full, phrase dropped: {}", text);
+            return Err("Очередь воспроизведения переполнена. Попробуйте позже.".to_string());
+        }
+    } else {
+        return Err("Плеер не инициализирован".to_string());
+    }
 
     Ok(())
 }
@@ -1043,14 +1052,16 @@ pub fn update_theme(
         .map_err(|e| format!("Failed to update theme: {}", e))?;
 
     // Set Tauri window theme to ensure OS frame and titlebar matches
-    if let Some(window) = app_handle.get_webview_window("main") {
-        let tauri_theme = match theme {
-            Theme::Light => tauri::Theme::Light,
-            Theme::Dark => tauri::Theme::Dark,
-        };
-        let _ = window.set_theme(Some(tauri_theme));
-        info!(?tauri_theme, "Applied window theme");
+    let tauri_theme = match theme {
+        Theme::Light => tauri::Theme::Light,
+        Theme::Dark => tauri::Theme::Dark,
+    };
+    for label in &["main", "playback-control"] {
+        if let Some(window) = app_handle.get_webview_window(label) {
+            let _ = window.set_theme(Some(tauri_theme));
+        }
     }
+    info!(?tauri_theme, "Applied window theme");
 
     // Emit event to notify frontend
     let _ = app_handle.emit("settings-changed", ());

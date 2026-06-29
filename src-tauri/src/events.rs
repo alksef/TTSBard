@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::tts::TtsProviderType;
+use serde::{Deserialize, Serialize};
 use std::sync::mpsc::Sender;
 use tokio::sync::broadcast;
 
@@ -49,6 +49,18 @@ pub enum AppEvent {
     ToggleUpnp(bool),
     /// Изменение статуса подключения Twitch
     TwitchStatusChanged(TwitchConnectionStatus),
+    /// Воспроизведение началось
+    PlaybackStarted { text_id: String, text: String },
+    /// Воспроизведение фразы завершено
+    PlaybackFinished,
+    /// Воспроизведение приостановлено
+    PlaybackPaused,
+    /// Воспроизведение возобновлено
+    PlaybackResumed,
+    /// Воспроизведение остановлено
+    PlaybackStopped,
+    /// Очередь изменилась
+    QueueChanged,
     /// Завершение работы приложения
     Quit,
 }
@@ -108,6 +120,12 @@ impl AppEvent {
             AppEvent::ReloadWebViewTemplates => "reload-webview-templates",
             AppEvent::ToggleUpnp(_) => "toggle-upnp",
             AppEvent::TwitchStatusChanged(_) => "twitch-status-changed",
+            AppEvent::PlaybackStarted { .. } => "playback-started",
+            AppEvent::PlaybackFinished => "playback-finished",
+            AppEvent::PlaybackPaused => "playback-paused",
+            AppEvent::PlaybackResumed => "playback-resumed",
+            AppEvent::PlaybackStopped => "playback-stopped",
+            AppEvent::QueueChanged => "queue-changed",
             AppEvent::Quit => "app-quit",
         }
     }

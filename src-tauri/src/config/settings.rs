@@ -1207,6 +1207,9 @@ impl SettingsManager {
         match name {
             "main_window" => settings.hotkeys.main_window = hotkey.clone(),
             "sound_panel" => settings.hotkeys.sound_panel = hotkey.clone(),
+            "playback_pause" => settings.hotkeys.playback_pause = hotkey.clone(),
+            "playback_stop" => settings.hotkeys.playback_stop = hotkey.clone(),
+            "playback_repeat" => settings.hotkeys.playback_repeat = hotkey.clone(),
             _ => return Err(anyhow::anyhow!("Invalid hotkey name: {}", name)),
         }
         self.save(&settings)
@@ -1220,6 +1223,9 @@ impl SettingsManager {
         let default = match name {
             "main_window" => super::hotkeys::Hotkey::default_main_window(),
             "sound_panel" => super::hotkeys::Hotkey::default_sound_panel(),
+            "playback_pause" => super::hotkeys::Hotkey::default_playback_pause(),
+            "playback_stop" => super::hotkeys::Hotkey::default_playback_stop(),
+            "playback_repeat" => super::hotkeys::Hotkey::default_playback_repeat(),
             _ => return Err(anyhow::anyhow!("Invalid hotkey name: {}", name)),
         };
         self.set_hotkey(name, &default)?;

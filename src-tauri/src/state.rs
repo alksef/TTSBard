@@ -1,17 +1,20 @@
-use std::sync::mpsc::Sender;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64};
-use parking_lot::{Mutex, RwLock};
-use std::collections::HashMap;
-use tokio::sync::broadcast;
+use crate::ai::AiProvider;
+use crate::config::TwitchSettings;
 use crate::events::{AppEvent, TwitchEvent, TwitchEventSender};
-use crate::tts::{TtsProvider, TtsProviderType, openai::OpenAiTts, local::LocalTts, silero::SileroTts, fish::FishTts};
 use crate::preprocessor::TextPreprocessor;
 use crate::telegram::TelegramClient;
+use crate::tts::{
+    fish::FishTts, local::LocalTts, openai::OpenAiTts, silero::SileroTts, TtsProvider,
+    TtsProviderType,
+};
 use crate::webview::WebViewSettings;
-use crate::config::TwitchSettings;
-use crate::ai::AiProvider;
-use tracing::{info, warn, debug};
+use parking_lot::{Mutex, RwLock};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::mpsc::Sender;
+use std::sync::Arc;
+use tokio::sync::broadcast;
+use tracing::{debug, info, warn};
 
 /// NOTE: Lock ordering hierarchy is no longer needed with unified TtsConfig.
 /// The RwLock on tts_config provides efficient concurrent access.
@@ -126,6 +129,9 @@ pub struct AppState {
 
     /// Hash of current AI settings (for cache invalidation)
     pub ai_settings_hash: Arc<AtomicU64>,
+
+    /// Playback manager for queue/pause/resume
+    pub playback_manager: Arc<Mutex<Option<Arc<crate::playback::PlaybackManager>>>>,
 }
 
 impl AppState {
@@ -139,7 +145,7 @@ impl AppState {
                 .thread_stack_size(8 * 1024 * 1024)
                 .enable_all()
                 .build()
-                .expect("Failed to create tokio runtime")
+                .expect("Failed to create tokio runtime"),
         );
 
         Self {
@@ -153,9 +159,12 @@ impl AppState {
             active_window: Arc::new(Mutex::new(ActiveWindow::None)),
             webview_settings: Arc::new(tokio::sync::RwLock::new(WebViewSettings::default())),
             twitch_settings: Arc::new(tokio::sync::RwLock::new(TwitchSettings::default())),
-            twitch_connection_status: Arc::new(Mutex::new(crate::events::TwitchConnectionStatus::Disconnected)),
+            twitch_connection_status: Arc::new(Mutex::new(
+                crate::events::TwitchConnectionStatus::Disconnected,
+            )),
             twitch_event_tx,
             backend_ready: Arc::new(AtomicBool::new(false)),
+            playback_manager: Arc::new(Mutex::new(None)),
             hotkey_recording_in_progress: Arc::new(AtomicBool::new(false)),
             runtime,
             cached_devices: Arc::new(RwLock::new(HashMap::new())),
@@ -179,7 +188,6 @@ impl AppState {
                 Err(e) => warn!(error = %e, "Failed to send event to main channel"),
             }
         }
-
     }
 
     pub fn get_event_sender(&self) -> Option<Sender<AppEvent>> {
@@ -218,11 +226,13 @@ impl AppState {
     }
 
     pub fn is_hotkey_recording(&self) -> bool {
-        self.hotkey_recording_in_progress.load(std::sync::atomic::Ordering::Relaxed)
+        self.hotkey_recording_in_progress
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn set_hotkey_recording(&self, recording: bool) {
-        self.hotkey_recording_in_progress.store(recording, std::sync::atomic::Ordering::Relaxed);
+        self.hotkey_recording_in_progress
+            .store(recording, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn get_tts_provider_type(&self) -> TtsProviderType {
@@ -281,7 +291,10 @@ impl AppState {
         info!("TTS provider set to Local");
     }
 
-    pub fn init_silero_tts(&self, telegram_client_arc: Arc<tokio::sync::Mutex<Option<TelegramClient>>>) {
+    pub fn init_silero_tts(
+        &self,
+        telegram_client_arc: Arc<tokio::sync::Mutex<Option<TelegramClient>>>,
+    ) {
         info!("Initializing Silero TTS...");
 
         // Создаём SileroTts с Arc на Telegram клиент
@@ -456,7 +469,11 @@ impl AppState {
         let current_hash = crate::ai::hash_ai_settings(ai_settings);
 
         // Check if cache is valid
-        if self.ai_settings_hash.load(std::sync::atomic::Ordering::Relaxed) == current_hash {
+        if self
+            .ai_settings_hash
+            .load(std::sync::atomic::Ordering::Relaxed)
+            == current_hash
+        {
             if let Some(client) = self.ai_client.lock().as_ref() {
                 debug!("Using cached AI client (hash: {})", current_hash);
                 return Ok(client.clone());
@@ -471,7 +488,8 @@ impl AppState {
 
         // Update cache
         *self.ai_client.lock() = Some(client.clone());
-        self.ai_settings_hash.store(current_hash, std::sync::atomic::Ordering::Relaxed);
+        self.ai_settings_hash
+            .store(current_hash, std::sync::atomic::Ordering::Relaxed);
 
         Ok(client)
     }
@@ -483,7 +501,8 @@ impl AppState {
     pub fn invalidate_ai_client(&self) {
         debug!("Invalidating AI client cache");
         self.ai_client.lock().take();
-        self.ai_settings_hash.store(0, std::sync::atomic::Ordering::Relaxed);
+        self.ai_settings_hash
+            .store(0, std::sync::atomic::Ordering::Relaxed);
     }
 }
 

@@ -782,6 +782,9 @@ impl From<HotkeyDto> for Hotkey {
 pub struct HotkeySettingsDto {
     pub main_window: HotkeyDto,
     pub sound_panel: HotkeyDto,
+    pub playback_pause: HotkeyDto,
+    pub playback_stop: HotkeyDto,
+    pub playback_repeat: HotkeyDto,
 }
 
 impl From<HotkeySettings> for HotkeySettingsDto {
@@ -789,6 +792,9 @@ impl From<HotkeySettings> for HotkeySettingsDto {
         Self {
             main_window: h.main_window.into(),
             sound_panel: h.sound_panel.into(),
+            playback_pause: h.playback_pause.into(),
+            playback_stop: h.playback_stop.into(),
+            playback_repeat: h.playback_repeat.into(),
         }
     }
 }
@@ -798,6 +804,9 @@ impl From<HotkeySettingsDto> for HotkeySettings {
         Self {
             main_window: dto.main_window.into(),
             sound_panel: dto.sound_panel.into(),
+            playback_pause: dto.playback_pause.into(),
+            playback_stop: dto.playback_stop.into(),
+            playback_repeat: dto.playback_repeat.into(),
         }
     }
 }

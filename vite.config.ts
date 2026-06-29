@@ -36,7 +36,8 @@ export default defineConfig(async () => ({
     rollupOptions: {
       input: {
         main: './index.html',
-        soundpanel: './src-soundpanel/index.html'
+        soundpanel: './src-soundpanel/index.html',
+        playback: './src-playback/index.html'
       }
     }
   }

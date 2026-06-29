@@ -14,6 +14,7 @@ mod soundpanel_window;
 mod state;
 mod preprocessor;
 mod history;
+pub mod playback;
 mod telegram;
 mod tts;
 mod window;
@@ -417,6 +418,13 @@ pub fn run() {
             unregister_hotkeys,
             reregister_hotkeys_cmd,
             set_hotkey_recording,
+            // Playback commands
+            commands::playback::playback_pause,
+            commands::playback::playback_resume,
+            commands::playback::playback_stop,
+            commands::playback::playback_repeat,
+            commands::playback::replay_phrase,
+            commands::playback::get_playback_state,
         ])
         .setup({
             let settings_clone = settings.clone();
