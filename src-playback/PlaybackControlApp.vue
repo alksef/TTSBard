@@ -1,8 +1,25 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+
+const opacity = ref(94)
+const bgColor = ref('#10131a')
+
+function hexToRgba(hex: string, alpha: number): string {
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+const overlayStyle = computed(() => {
+  const base = hexToRgba(bgColor.value, opacity.value / 100)
+  return {
+    backgroundColor: base,
+  }
+})
 
 interface PlaybackStateDto {
   status: 'Idle' | 'Playing' | 'Paused' | 'Stopped'
@@ -53,6 +70,15 @@ async function closeWindow() {
 }
 
 onMounted(async () => {
+  // Load appearance settings
+  try {
+    const [loadedOpacity, loadedColor] = await invoke<[number, string]>('pc_get_appearance')
+    opacity.value = loadedOpacity
+    bgColor.value = loadedColor
+  } catch {
+    // silent
+  }
+
   await fetchState()
 
   unlisteners = [
@@ -63,6 +89,15 @@ onMounted(async () => {
     await listen('playback-stopped', () => fetchState()),
     await listen('queue-changed', () => fetchState()),
     await listen('refresh-state', () => fetchState()),
+    await listen('playback-appearance-update', async () => {
+      try {
+        const [newOpacity, newColor] = await invoke<[number, string]>('pc_get_appearance')
+        opacity.value = newOpacity
+        bgColor.value = newColor
+      } catch {
+        // silent
+      }
+    }),
   ]
 })
 
@@ -77,7 +112,7 @@ const pauseIcon = () =>
 </script>
 
 <template>
-  <div class="playback-window">
+  <div class="playback-window" :style="overlayStyle">
     <div class="window-header" data-tauri-drag-region>
       <span class="title">Управление</span>
       <span class="status-badge" :class="state.status.toLowerCase()">

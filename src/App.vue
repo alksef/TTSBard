@@ -4,6 +4,7 @@ import Sidebar from './components/Sidebar.vue'
 import InputPanel from './components/InputPanel.vue'
 import TtsPanel from './components/TtsPanel.vue'
 import SoundPanelTab from './components/SoundPanelTab.vue'
+import PlaybackTab from './components/PlaybackTab.vue'
 import AudioPanel from './components/AudioPanel.vue'
 import PreprocessorPanel from './components/PreprocessorPanel.vue'
 import InfoPanel from './components/InfoPanel.vue'
@@ -17,7 +18,7 @@ import { useTelegramAuth, TELEGRAM_AUTH_KEY } from './composables/useTelegramAut
 import { provideAppSettings } from './composables/useAppSettings'
 import { debugLog } from './utils/debug'
 
-type Panel = 'info' | 'input' | 'tts' | 'soundpanel' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'settings' | 'hotkeys'
+type Panel = 'info' | 'input' | 'tts' | 'soundpanel' | 'playback' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'settings' | 'hotkeys'
 
 const currentPanel = ref<Panel>('input')
 
@@ -128,6 +129,7 @@ onMounted(async () => {
         <InputPanel v-show="currentPanel === 'input'" />
         <TtsPanel v-show="currentPanel === 'tts'" />
         <SoundPanelTab v-show="currentPanel === 'soundpanel'" />
+        <PlaybackTab v-show="currentPanel === 'playback'" />
         <AudioPanel v-show="currentPanel === 'audio'" />
         <PreprocessorPanel v-show="currentPanel === 'preprocessor'" />
         <WebViewPanel v-show="currentPanel === 'webview'" />

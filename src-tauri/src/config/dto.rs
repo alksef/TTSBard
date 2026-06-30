@@ -8,7 +8,8 @@ use crate::config::settings::{
     ProxyMode, ProxySettings, ProxyType, Socks5Settings, TelegramTtsSettings, TtsSettings,
 };
 use crate::config::windows::{
-    GlobalSettings, SoundPanelWindowSettings, WindowPosition, WindowsSettings,
+    GlobalSettings, PlaybackWindowSettings, SoundPanelWindowSettings, WindowPosition,
+    WindowsSettings,
 };
 use crate::config::{
     AppSettings as ConfigAppSettings, AudioSettings, Hotkey, HotkeyModifier, HotkeySettings,
@@ -477,6 +478,9 @@ pub type WindowPositionDto = WindowPosition;
 /// Sound panel window settings DTO
 pub type SoundPanelWindowSettingsDto = SoundPanelWindowSettings;
 
+/// Playback control window settings DTO
+pub type PlaybackWindowSettingsDto = PlaybackWindowSettings;
+
 /// Global settings DTO
 pub type GlobalSettingsDto = GlobalSettings;
 
@@ -486,6 +490,7 @@ pub struct WindowsSettingsDto {
     pub global: GlobalSettingsDto,
     pub main: WindowPositionDto,
     pub soundpanel: SoundPanelWindowSettingsDto,
+    pub playback: PlaybackWindowSettingsDto,
 }
 
 impl From<WindowsSettings> for WindowsSettingsDto {
@@ -494,6 +499,7 @@ impl From<WindowsSettings> for WindowsSettingsDto {
             global: s.global,
             main: s.main,
             soundpanel: s.soundpanel,
+            playback: s.playback,
         }
     }
 }
@@ -504,6 +510,7 @@ impl From<WindowsSettingsDto> for WindowsSettings {
             global: dto.global,
             main: dto.main,
             soundpanel: dto.soundpanel,
+            playback: dto.playback,
         }
     }
 }
@@ -519,6 +526,7 @@ pub struct GeneralSettingsDto {
     pub interception_enabled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
+    pub show_playback_on_start: bool,
 }
 
 impl GeneralSettingsDto {
@@ -530,6 +538,7 @@ impl GeneralSettingsDto {
                 crate::config::settings::Theme::Dark => "dark".to_string(),
                 crate::config::settings::Theme::Light => "light".to_string(),
             }),
+            show_playback_on_start: config.show_playback_on_start,
         }
     }
 }
@@ -795,6 +804,7 @@ pub struct HotkeySettingsDto {
     pub playback_pause: HotkeyDto,
     pub playback_stop: HotkeyDto,
     pub playback_repeat: HotkeyDto,
+    pub playback_control_window: HotkeyDto,
 }
 
 impl From<HotkeySettings> for HotkeySettingsDto {
@@ -805,6 +815,7 @@ impl From<HotkeySettings> for HotkeySettingsDto {
             playback_pause: h.playback_pause.into(),
             playback_stop: h.playback_stop.into(),
             playback_repeat: h.playback_repeat.into(),
+            playback_control_window: h.playback_control_window.into(),
         }
     }
 }
@@ -817,6 +828,7 @@ impl From<HotkeySettingsDto> for HotkeySettings {
             playback_pause: dto.playback_pause.into(),
             playback_stop: dto.playback_stop.into(),
             playback_repeat: dto.playback_repeat.into(),
+            playback_control_window: dto.playback_control_window.into(),
         }
     }
 }

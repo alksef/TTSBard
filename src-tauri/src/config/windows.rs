@@ -10,8 +10,7 @@ use std::path::PathBuf;
 use super::validation::{is_valid_hex_color, validate_opacity};
 
 /// Main window position
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct WindowPosition {
     pub x: Option<i32>,
     pub y: Option<i32>,
@@ -30,6 +29,19 @@ pub struct SoundPanelWindowSettings {
     pub clickthrough: bool,
 }
 
+/// Playback control window settings
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PlaybackWindowSettings {
+    #[serde(default)]
+    pub x: Option<i32>,
+    #[serde(default)]
+    pub y: Option<i32>,
+    #[serde(default = "default_playback_opacity")]
+    pub opacity: u8,
+    #[serde(default = "default_playback_bg_color")]
+    pub bg_color: String,
+}
+
 /// Global settings that apply to all windows
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct GlobalSettings {
@@ -44,11 +56,23 @@ pub struct WindowsSettings {
     pub global: GlobalSettings,
     pub main: WindowPosition,
     pub soundpanel: SoundPanelWindowSettings,
+    #[serde(default)]
+    pub playback: PlaybackWindowSettings,
 }
 
 // Default functions
-fn default_soundpanel_opacity() -> u8 { 90 }
-fn default_soundpanel_bg_color() -> String { "#2a2a2a".to_string() }
+fn default_soundpanel_opacity() -> u8 {
+    90
+}
+fn default_soundpanel_bg_color() -> String {
+    "#2a2a2a".to_string()
+}
+fn default_playback_opacity() -> u8 {
+    94
+}
+fn default_playback_bg_color() -> String {
+    "#10131a".to_string()
+}
 
 impl Default for SoundPanelWindowSettings {
     fn default() -> Self {
@@ -62,17 +86,32 @@ impl Default for SoundPanelWindowSettings {
     }
 }
 
+impl Default for PlaybackWindowSettings {
+    fn default() -> Self {
+        Self {
+            x: None,
+            y: None,
+            opacity: 94,
+            bg_color: "#10131a".to_string(),
+        }
+    }
+}
 
 impl WindowsSettings {
     /// Validate all settings and fix invalid values
     pub fn validate(&mut self) {
         // Validate opacity
         self.soundpanel.opacity = validate_opacity(self.soundpanel.opacity);
+        self.playback.opacity = validate_opacity(self.playback.opacity);
 
         // Validate colors
         if !is_valid_hex_color(&self.soundpanel.bg_color) {
             tracing::warn!(bg_color = ?self.soundpanel.bg_color, "Invalid soundpanel bg_color, using default");
             self.soundpanel.bg_color = "#2a2a2a".to_string();
+        }
+        if !is_valid_hex_color(&self.playback.bg_color) {
+            tracing::warn!(bg_color = ?self.playback.bg_color, "Invalid playback bg_color, using default");
+            self.playback.bg_color = "#10131a".to_string();
         }
     }
 }
@@ -89,8 +128,7 @@ impl WindowsManager {
             .context("Failed to get config dir")?
             .join("ttsbard");
 
-        fs::create_dir_all(&config_dir)
-            .context("Failed to create config dir")?;
+        fs::create_dir_all(&config_dir).context("Failed to create config dir")?;
 
         Ok(Self { config_dir })
     }
@@ -105,11 +143,11 @@ impl WindowsManager {
         let path = self.settings_path();
 
         if path.exists() {
-            let content = fs::read_to_string(&path)
-                .context("Failed to read windows settings file")?;
+            let content =
+                fs::read_to_string(&path).context("Failed to read windows settings file")?;
 
-            let mut settings: WindowsSettings = serde_json::from_str(&content)
-                .context("Failed to parse windows settings")?;
+            let mut settings: WindowsSettings =
+                serde_json::from_str(&content).context("Failed to parse windows settings")?;
 
             settings.validate();
             Ok(settings)
@@ -129,8 +167,7 @@ impl WindowsManager {
         let content = serde_json::to_string_pretty(settings)
             .context("Failed to serialize windows settings")?;
 
-        fs::write(&path, content)
-            .context("Failed to write windows settings file")?;
+        fs::write(&path, content).context("Failed to write windows settings file")?;
 
         tracing::info!("Settings saved");
         Ok(())
@@ -172,9 +209,7 @@ impl WindowsManager {
 
     /// Get soundpanel opacity
     pub fn get_soundpanel_opacity(&self) -> u8 {
-        self.load()
-            .map(|s| s.soundpanel.opacity)
-            .unwrap_or(90)
+        self.load().map(|s| s.soundpanel.opacity).unwrap_or(90)
     }
 
     /// Set soundpanel background color
@@ -207,6 +242,53 @@ impl WindowsManager {
         self.load()
             .map(|s| s.soundpanel.clickthrough)
             .unwrap_or(false)
+    }
+
+    // ========== Playback Control Window ==========
+
+    /// Set playback window position
+    pub fn set_playback_position(&self, x: Option<i32>, y: Option<i32>) -> Result<()> {
+        let mut settings = self.load()?;
+        settings.playback.x = x;
+        settings.playback.y = y;
+        self.save(&settings)
+    }
+
+    /// Get playback window position
+    pub fn get_playback_position(&self) -> (Option<i32>, Option<i32>) {
+        self.load()
+            .map(|s| (s.playback.x, s.playback.y))
+            .unwrap_or((None, None))
+    }
+
+    /// Set playback opacity
+    pub fn set_playback_opacity(&self, opacity: u8) -> Result<()> {
+        let mut settings = self.load()?;
+        settings.playback.opacity = validate_opacity(opacity);
+        self.save(&settings)
+    }
+
+    /// Get playback opacity
+    pub fn get_playback_opacity(&self) -> u8 {
+        self.load().map(|s| s.playback.opacity).unwrap_or(94)
+    }
+
+    /// Set playback background color
+    pub fn set_playback_bg_color(&self, color: String) -> Result<()> {
+        let mut settings = self.load()?;
+        if is_valid_hex_color(&color) {
+            settings.playback.bg_color = color;
+            self.save(&settings)
+        } else {
+            Err(anyhow::anyhow!("Invalid hex color format"))
+        }
+    }
+
+    /// Get playback background color
+    pub fn get_playback_bg_color(&self) -> String {
+        self.load()
+            .map(|s| s.playback.bg_color)
+            .unwrap_or_else(|_| "#10131a".to_string())
     }
 
     // ========== Global Settings ==========

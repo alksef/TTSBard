@@ -35,6 +35,7 @@ pub mod history;
 
 // Playback commands
 pub mod playback;
+pub mod playback_window;
 
 // Window commands
 pub mod window;

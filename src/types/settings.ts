@@ -196,6 +196,13 @@ export interface SoundPanelWindowSettingsDto {
   clickthrough: boolean
 }
 
+export interface PlaybackWindowSettingsDto {
+  x?: number
+  y?: number
+  opacity: number
+  bg_color: string
+}
+
 export interface GlobalSettingsDto {
   exclude_from_capture: boolean
 }
@@ -204,6 +211,7 @@ export interface WindowsSettingsDto {
   global: GlobalSettingsDto
   main: WindowPositionDto
   soundpanel: SoundPanelWindowSettingsDto
+  playback: PlaybackWindowSettingsDto
 }
 
 // ============================================================================
