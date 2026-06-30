@@ -131,21 +131,21 @@ async function hideMainWindow() {
   }
 }
 
-async function recordHistory() {
+async function recordHistory(textToRecord: string) {
   try {
-    await invoke('record_history', { text: text.value })
+    await invoke('record_history', { text: textToRecord })
   } catch {
     // silently fail
   }
 }
 
-async function speak() {
-  if (!text.value.trim()) return
+async function speak(textToSend: string) {
+  if (!textToSend.trim()) return
 
   try {
-    debugLog('[InputPanel] Speaking:', text.value)
-    await invoke('speak_text', { text: text.value })
-    recordHistory()
+    debugLog('[InputPanel] Speaking:', textToSend)
+    await invoke('speak_text', { text: textToSend })
+    recordHistory(textToSend)
   } catch (e) {
     debugError('[InputPanel] Failed to speak:', e)
     showError(e as string)
@@ -180,26 +180,23 @@ async function completeText() {
 }
 
 async function handleEnter() {
-  debugLog('[InputPanel] Enter pressed, text:', text.value)
+  const currentText = text.value
+  const senderTabId = activeId.value
 
-  // Get quick editor enabled from composable
+  if (!currentText.trim()) return
+
   const quickEditorEnabledValue = editorSettings.value?.quick ?? false
+  if (quickEditorEnabledValue && !currentText.trim()) return
 
-  // If quick editor is enabled and text is empty - do nothing
-  if (quickEditorEnabledValue && !text.value.trim()) {
-    return
-  }
-
-  // In quick editor mode, start TTS in background without waiting
   if (quickEditorEnabledValue) {
-    speak() // Fire and forget - don't await
-    // Очистка активного таба через computed-прокси — корректно для multi-tab.
-    text.value = ''
+    speak(currentText)
+    const tab = tabs.value.find(t => t.id === senderTabId)
+    if (tab) tab.text = ''
     await hideMainWindow()
   } else {
-    // Normal mode - wait for TTS to complete
-    await speak()
-    text.value = ''
+    await speak(currentText)
+    const tab = tabs.value.find(t => t.id === senderTabId)
+    if (tab) tab.text = ''
   }
 }
 
