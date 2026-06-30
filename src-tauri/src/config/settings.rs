@@ -560,6 +560,9 @@ pub struct AppSettings {
     pub ai: AiSettings,
     #[serde(default)]
     pub hotkeys: HotkeySettings,
+    /// Показывать окно управления воспроизведением при запуске
+    #[serde(default)]
+    pub show_playback_on_start: bool,
 }
 
 impl Default for AppSettings {
@@ -576,6 +579,7 @@ impl Default for AppSettings {
             logging: LoggingSettings::default(),
             ai: AiSettings::default(),
             hotkeys: HotkeySettings::default(),
+            show_playback_on_start: false,
         }
     }
 }
@@ -649,7 +653,8 @@ impl SettingsManager {
                 || settings.hotkeys.sound_panel.key.is_empty()
                 || settings.hotkeys.playback_pause.key.is_empty()
                 || settings.hotkeys.playback_stop.key.is_empty()
-                || settings.hotkeys.playback_repeat.key.is_empty();
+                || settings.hotkeys.playback_repeat.key.is_empty()
+                || settings.hotkeys.playback_control_window.key.is_empty();
 
             if needs_migration {
                 info!("Migrating hotkey settings from defaults");
@@ -1249,6 +1254,7 @@ impl SettingsManager {
             "playback_pause" => settings.hotkeys.playback_pause = hotkey.clone(),
             "playback_stop" => settings.hotkeys.playback_stop = hotkey.clone(),
             "playback_repeat" => settings.hotkeys.playback_repeat = hotkey.clone(),
+            "playback_control_window" => settings.hotkeys.playback_control_window = hotkey.clone(),
             _ => return Err(anyhow::anyhow!("Invalid hotkey name: {}", name)),
         }
         self.save(&settings)
@@ -1265,9 +1271,22 @@ impl SettingsManager {
             "playback_pause" => super::hotkeys::Hotkey::default_playback_pause(),
             "playback_stop" => super::hotkeys::Hotkey::default_playback_stop(),
             "playback_repeat" => super::hotkeys::Hotkey::default_playback_repeat(),
+            "playback_control_window" => super::hotkeys::Hotkey::default_playback_control_window(),
             _ => return Err(anyhow::anyhow!("Invalid hotkey name: {}", name)),
         };
         self.set_hotkey(name, &default)?;
         Ok(default)
+    }
+
+    // ========== Playback Control Window Settings ==========
+
+    /// Get show playback control window on start
+    pub fn get_show_playback_on_start(&self) -> bool {
+        self.cache.read().show_playback_on_start
+    }
+
+    /// Set show playback control window on start
+    pub fn set_show_playback_on_start(&self, value: bool) -> Result<()> {
+        self.update_field("/show_playback_on_start", &value)
     }
 }

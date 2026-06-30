@@ -36,6 +36,7 @@ pub struct HotkeySettings {
     pub playback_pause: Hotkey,
     pub playback_stop: Hotkey,
     pub playback_repeat: Hotkey,
+    pub playback_control_window: Hotkey,
 }
 
 impl Default for HotkeySettings {
@@ -46,6 +47,7 @@ impl Default for HotkeySettings {
             playback_pause: Hotkey::default_playback_pause(),
             playback_stop: Hotkey::default_playback_stop(),
             playback_repeat: Hotkey::default_playback_repeat(),
+            playback_control_window: Hotkey::default_playback_control_window(),
         }
     }
 }
@@ -88,6 +90,14 @@ impl Hotkey {
         Self {
             modifiers: vec![HotkeyModifier::Ctrl, HotkeyModifier::Shift],
             key: "F6".to_string(),
+        }
+    }
+
+    /// Create a hotkey with Ctrl+Shift+F7 (playback control window default)
+    pub fn default_playback_control_window() -> Self {
+        Self {
+            modifiers: vec![HotkeyModifier::Ctrl, HotkeyModifier::Shift],
+            key: "F7".to_string(),
         }
     }
 

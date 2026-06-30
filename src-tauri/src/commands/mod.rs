@@ -1343,3 +1343,35 @@ pub async fn set_hotkey_recording(app_handle: AppHandle, recording: bool) {
         app_state.set_hotkey_recording(recording);
     }
 }
+
+/// Toggle playback control window visibility
+#[tauri::command]
+pub fn toggle_playback_control_window(app_handle: AppHandle) -> Result<(), String> {
+    if let Some(window) = app_handle.get_webview_window("playback-control") {
+        if window.is_visible().unwrap_or(false) {
+            crate::playback_window::hide_playback_window(&app_handle).map_err(|e| e.to_string())
+        } else {
+            crate::playback_window::show_playback_window(&app_handle).map_err(|e| e.to_string())
+        }
+    } else {
+        Err("playback-control window not found".to_string())
+    }
+}
+
+/// Set show playback control window on start
+#[tauri::command]
+pub fn set_show_playback_on_start(
+    value: bool,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<(), String> {
+    settings_manager.set_show_playback_on_start(value)
+        .map_err(|e| format!("Failed to save settings: {}", e))
+}
+
+/// Get show playback control window on start
+#[tauri::command]
+pub fn get_show_playback_on_start(
+    settings_manager: State<'_, SettingsManager>,
+) -> bool {
+    settings_manager.get_show_playback_on_start()
+}

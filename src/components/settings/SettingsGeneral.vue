@@ -5,6 +5,8 @@ import { AlertTriangle, Moon, Sun } from 'lucide-vue-next';
 import type { Theme } from '../../types/settings';
 import { useGeneralSettings, useWindowsSettings, useLoggingSettings } from '../../composables/useAppSettings';
 
+const showPlaybackOnStart = ref(false);
+
 // Get settings from composables
 const generalSettings = useGeneralSettings();
 const windowsSettings = useWindowsSettings();
@@ -84,9 +86,21 @@ async function onLoggingLevelChange(event: Event) {
   }
 }
 
+async function toggleShowPlaybackOnStart() {
+  try {
+    const newValue = !showPlaybackOnStart.value;
+    showPlaybackOnStart.value = newValue;
+    await invoke('set_show_playback_on_start', { value: newValue });
+  } catch (e) {
+    showPlaybackOnStart.value = !showPlaybackOnStart.value;
+    showError('Ошибка сохранения настройки: ' + (e as Error).message);
+  }
+}
+
 // Watch for settings changes from composables
 watch(generalSettings, (newSettings) => {
   if (!newSettings) return;
+  showPlaybackOnStart.value = newSettings.show_playback_on_start ?? false;
 }, { immediate: true });
 
 watch(windowsSettings, (newSettings) => {
@@ -132,6 +146,22 @@ watch(loggingSettings, (newSettings) => {
           <Sun :size="16" />
           <span>Светлая</span>
         </label>
+      </div>
+    </section>
+
+    <!-- Exclude from Capture -->
+    <section class="settings-section">
+      <div class="setting-row">
+        <label class="setting-label checkbox-label">
+          <input
+            :checked="showPlaybackOnStart"
+            @change="toggleShowPlaybackOnStart"
+            type="checkbox"
+            class="checkbox-input"
+          />
+          <span>Показывать окно управления при запуске</span>
+        </label>
+        <span class="setting-hint">Автоматически открывает окно очереди воспроизведения при старте приложения</span>
       </div>
     </section>
 

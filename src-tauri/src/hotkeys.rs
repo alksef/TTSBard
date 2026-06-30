@@ -90,6 +90,12 @@ fn handle_playback_repeat(app_handle: AppHandle) {
     }
 }
 
+fn handle_playback_control_window(app_handle: AppHandle) {
+    if let Some(sp_state) = app_handle.try_state::<SoundPanelState>() {
+        sp_state.emit_event(crate::events::AppEvent::ShowPlaybackControlWindow);
+    }
+}
+
 /// Handler for main window focus
 fn handle_main_window(app_handle: AppHandle) {
     debug!("Main window hotkey triggered");
@@ -234,6 +240,16 @@ pub fn register_from_settings(
         "playback_repeat",
         playback_repeat_shortcut,
         handle_playback_repeat,
+    )?;
+
+    // Register playback control window hotkey
+    let playback_control_shortcut = hotkey_settings.playback_control_window.to_shortcut()?;
+    register_hotkey_internal(
+        app_handle,
+        app_state,
+        "playback_control_window",
+        playback_control_shortcut,
+        handle_playback_control_window,
     )?;
 
     info!(

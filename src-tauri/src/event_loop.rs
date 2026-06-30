@@ -110,6 +110,12 @@ impl EventHandler {
             AppEvent::PlaybackStopped => {
                 debug!("[EVENT] Playback stopped");
             }
+            AppEvent::ShowPlaybackControlWindow => {
+                debug!("[EVENT] ShowPlaybackControlWindow event received");
+            }
+            AppEvent::HidePlaybackControlWindow => {
+                debug!("[EVENT] HidePlaybackControlWindow event received");
+            }
             AppEvent::QueueChanged => {
                 debug!("[EVENT] Queue changed");
             }

@@ -116,6 +116,7 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
 
     // Setup SoundPanel event system
     use crate::soundpanel_window::{show_soundpanel_window, hide_soundpanel_window, emit_soundpanel_no_binding, update_soundpanel_appearance};
+    use crate::playback_window::{show_playback_window, hide_playback_window};
     use crate::soundpanel::{load_bindings, load_appearance};
 
     let (soundpanel_tx, soundpanel_rx) = mpsc::channel::<AppEvent>();
@@ -147,6 +148,14 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
                     let _ = update_soundpanel_appearance(&app_handle_for_soundpanel);
                 }
                 AppEvent::TtsProviderChanged(_) => {}
+                AppEvent::ShowPlaybackControlWindow => {
+                    info!("[PLAYBACK] Show playback control window");
+                    let _ = show_playback_window(&app_handle_for_soundpanel);
+                }
+                AppEvent::HidePlaybackControlWindow => {
+                    info!("[PLAYBACK] Hide playback control window");
+                    let _ = hide_playback_window(&app_handle_for_soundpanel);
+                }
                 _ => {}
             }
         }
@@ -204,6 +213,11 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
     if let Some(main_window) = app.get_webview_window("main") {
         let _ = main_window.show();
         info!("Main window shown");
+    }
+
+    // Auto-show playback control window on start if setting enabled
+    if settings.show_playback_on_start {
+        let _ = crate::playback_window::show_playback_window(app.handle());
     }
 
     info!("Setup complete - hotkeys will be registered when window gains focus");
@@ -559,15 +573,6 @@ fn init_window_protection(app: &App, windows_manager: &WindowsManager) {
             match set_window_exclude_from_capture(hwnd.0 as isize, exclude_from_capture) {
                 Ok(_) => info!(exclude_from_capture, "Main window exclude from capture applied"),
                 Err(e) => error!(error = %e, "Failed to apply exclude from capture to main window"),
-            }
-        }
-    }
-
-    if let Some(pb_window) = app.get_webview_window("playback-control") {
-        if let Ok(hwnd) = pb_window.hwnd() {
-            match set_window_exclude_from_capture(hwnd.0 as isize, exclude_from_capture) {
-                Ok(_) => info!(exclude_from_capture, "Playback window exclude from capture applied"),
-                Err(e) => error!(error = %e, "Failed to apply exclude from capture to playback window"),
             }
         }
     }

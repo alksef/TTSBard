@@ -20,6 +20,10 @@ export interface HotkeyDto {
 export interface HotkeySettingsDto {
   main_window: HotkeyDto
   sound_panel: HotkeyDto
+  playback_pause: HotkeyDto
+  playback_stop: HotkeyDto
+  playback_repeat: HotkeyDto
+  playback_control_window: HotkeyDto
 }
 
 // ============================================================================
@@ -213,6 +217,7 @@ export interface GeneralSettingsDto {
   interception_enabled: boolean
   enter_closes_disabled: boolean
   theme?: Theme
+  show_playback_on_start: boolean
 }
 
 // ============================================================================

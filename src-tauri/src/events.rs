@@ -37,6 +37,10 @@ pub enum AppEvent {
     SoundPanelNoBinding(char),
     /// Изменение внешнего вида звуковой панели
     SoundPanelAppearanceChanged,
+    /// Показать окно управления воспроизведением
+    ShowPlaybackControlWindow,
+    /// Скрыть окно управления воспроизведением
+    HidePlaybackControlWindow,
     /// Изменение TTS провайдера
     TtsProviderChanged(TtsProviderType),
     /// Ошибка запуска WebView сервера
@@ -114,6 +118,8 @@ impl AppEvent {
             AppEvent::HideSoundPanelWindow => "hide-soundpanel-window",
             AppEvent::SoundPanelNoBinding(_) => "soundpanel-no-binding",
             AppEvent::SoundPanelAppearanceChanged => "soundpanel-appearance-changed",
+            AppEvent::ShowPlaybackControlWindow => "show-playback-control-window",
+            AppEvent::HidePlaybackControlWindow => "hide-playback-control-window",
             AppEvent::TtsProviderChanged(_) => "tts-provider-changed",
             AppEvent::WebViewServerError(_) => "webview-server-error",
             AppEvent::RestartWebViewServer => "restart-webview-server",
