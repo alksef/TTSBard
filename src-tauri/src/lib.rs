@@ -14,6 +14,7 @@ mod soundpanel_window;
 mod state;
 mod preprocessor;
 mod history;
+mod spellcheck;
 pub mod playback;
 mod telegram;
 mod tts;
@@ -432,6 +433,8 @@ pub fn run() {
             commands::playback::playback_repeat,
             commands::playback::replay_phrase,
             commands::playback::get_playback_state,
+            // Spellcheck command
+            commands::spellcheck::spellcheck,
         ])
         .setup({
             let settings_clone = settings.clone();

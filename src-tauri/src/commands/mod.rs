@@ -39,6 +39,9 @@ pub mod playback;
 // Window commands
 pub mod window;
 
+// Spellcheck commands
+pub mod spellcheck;
+
 /// Quit the application
 #[tauri::command]
 pub fn quit_app(app_handle: AppHandle) -> Result<(), String> {

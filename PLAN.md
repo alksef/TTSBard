@@ -111,6 +111,16 @@
 «программирование» (4/4 точных). 5µs/слово, загрузка 437ms, 3.5MB словарь, без паников.
 **Fallback (nuspell-wasm) не нужен.** → план 81 на подходе A (нативный Rust бэкенд).
 
+## Отложенные MINOR-замечания → править после ВСЕХ реализаций (задача #13)
+Собрать в один task-файл для DeepSeek после планов 77-81:
+- **plan 79 review:** `completeText` использует `isCorrecting` → pulse на correct-button, а не на меню (отдельная индикация для «дописать»).
+- **review-018 (план 75/76):**
+  - `relativeTime` в `PhraseHistoryList.vue:65-73` → вынести в `utils/time.ts` (дублирование).
+  - debounceTimer defensive check (`debounceTimer = null` после clearTimeout).
+  - (уже сделано: проверка пустого id в delete_phrase_history, контракт нормализации, PhraseEntry serde-default).
+- **review-019 / OPTIMIZE (по возможности):** VecDeque для phrases, lazy loading — отложено (n=200 приемлемо), править только если тривиально.
+- **CRITICAL 3 + SECURITY из review-018** (race spawn_save_phrases, валидация размера фразы/filter) — это НЕ MINOR, отдельная нетривиальная задача для DeepSeek (см. ниже).
+
 ## Что осталось сделать DeepSeek (из review-018, нетривиально)
 - **CRITICAL 3:** race в `spawn_save_phrases` (+ тот же паттерн для HistoryData/NgramData) —
   debounce/batch ИЛИ `Arc<Mutex<()>>` ИЛИ writer-thread. Отдельный task-файл + round.

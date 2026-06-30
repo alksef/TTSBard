@@ -174,6 +174,9 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
     // Initialize TTS provider
     init_tts_provider(&app_state, &telegram_state, settings.clone());
 
+    // Initialize offline spellcheck
+    init_spellcheck(app, &app_state);
+
     // Initialize windows
     init_windows(app, &windows, &windows_manager, &settings)?;
 
@@ -283,6 +286,42 @@ fn init_tts_provider(
             }
         }
     }
+}
+
+/// Initialize offline spellcheck (spellbook + Hunspell dictionary)
+fn init_spellcheck(app: &App, app_state: &AppState) {
+    let res_dir = match app.path().resource_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            warn!(error = %e, "[spellcheck] resource_dir() failed (spellcheck disabled)");
+            return;
+        }
+    };
+
+    let dict_dir = res_dir.join("resources").join("dict");
+    let aff_path = dict_dir.join("ru.aff");
+    let dic_path = dict_dir.join("ru.dic");
+
+    if !aff_path.exists() {
+        warn!(path = %aff_path.display(), "[spellcheck] ru.aff not found (spellcheck disabled)");
+        return;
+    }
+    if !dic_path.exists() {
+        warn!(path = %dic_path.display(), "[spellcheck] ru.dic not found (spellcheck disabled)");
+        return;
+    }
+
+    info!(
+        aff = %aff_path.display(),
+        dic = %dic_path.display(),
+        "[spellcheck] loading dictionary..."
+    );
+
+    let manager = Arc::new(crate::spellcheck::SpellcheckManager::new(aff_path, dic_path));
+    let spellcheck_state = crate::commands::spellcheck::SpellcheckState(manager.clone());
+    *app_state.spellcheck_manager.lock() = Some(manager);
+    app.manage(spellcheck_state);
+    info!("[spellcheck] initialized");
 }
 
 /// Initialize application windows

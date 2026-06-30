@@ -40,7 +40,7 @@ fn trigram_key(w1: &str, w2: &str) -> String {
     format!("{}||{}", w1, w2)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct HistoryData {
     pub entries: Vec<HistoryEntry>,
 }
@@ -335,14 +335,6 @@ impl HistoryManager {
         let snapshot = phrases.clone();
         drop(phrases);
         spawn_save_phrases(path, snapshot);
-    }
-}
-
-impl Default for HistoryData {
-    fn default() -> Self {
-        HistoryData {
-            entries: Vec::new(),
-        }
     }
 }
 
