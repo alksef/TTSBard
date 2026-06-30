@@ -8,6 +8,7 @@ import { debugLog, debugError } from '../utils/debug'
 import { Sparkles } from 'lucide-vue-next'
 import TtsEditor from './editor/TtsEditor.vue'
 import PhraseHistoryList from './PhraseHistoryList.vue'
+import EditorMenu from './editor/EditorMenu.vue'
 import { useEditorTabs } from '../composables/useEditorTabs'
 import EditorTabs from './editor/EditorTabs.vue'
 
@@ -34,6 +35,7 @@ async function onSelect(id: string) {
 }
 
 const isCorrecting = ref(false)
+const showHistory = ref(true)
 const replacements = ref<Map<string, string>>(new Map())
 const usernames = ref<Map<string, string>>(new Map())
 const isMinimalMode = inject<Ref<boolean>>('isMinimalMode', ref(false))
@@ -162,6 +164,20 @@ async function correctText() {
   }
 }
 
+async function completeText() {
+  if (!text.value.trim()) return
+  isCorrecting.value = true
+  try {
+    const addition = await invoke<string>('get_ai_completion', { context: text.value })
+    if (addition) text.value = `${text.value} ${addition}`.trim()
+  } catch (e) {
+    debugError('[InputPanel] AI completion failed:', e)
+    showError('Не удалось дописать текст')
+  } finally {
+    isCorrecting.value = false
+  }
+}
+
 async function handleEnter() {
   debugLog('[InputPanel] Enter pressed, text:', text.value)
 
@@ -238,7 +254,15 @@ const usernamesRecord = computed(() => {
           @enter="handleEnter"
           @esc="handleEsc"
         />
-        <PhraseHistoryList @select="selectPhrase" />
+        <PhraseHistoryList v-if="showHistory" @select="selectPhrase" />
+        <EditorMenu
+          v-if="!isMinimalMode"
+          :is-ai-enabled="isAiButtonEnabled"
+          :has-text="!!text.trim()"
+          @correct="correctText"
+          @complete="completeText"
+          @toggle-history="showHistory = !showHistory"
+        />
         <button
           v-if="!isMinimalMode"
           class="correct-button"
