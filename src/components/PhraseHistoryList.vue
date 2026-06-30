@@ -2,6 +2,7 @@
 import { ref, watch, onUnmounted } from 'vue'
 import { Search, X, Trash2, ChevronDown, ChevronRight } from 'lucide-vue-next'
 import { usePhraseHistory, type PhraseEntry } from '../composables/usePhraseHistory'
+import { relativeTime } from '../utils/time'
 import { debugError } from '../utils/debug'
 
 const emit = defineEmits<{
@@ -20,7 +21,10 @@ const loadError = ref('')
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
 watch(filter, (val) => {
-  if (debounceTimer) clearTimeout(debounceTimer)
+  if (debounceTimer) {
+    clearTimeout(debounceTimer)
+    debounceTimer = null
+  }
   debounceTimer = setTimeout(() => {
     filterDebounced.value = val
   }, 300)
@@ -74,18 +78,11 @@ async function clearAll() {
   }
 }
 
-function relativeTime(ts: number): string {
-  const now = Date.now() / 1000
-  const diff = now - ts
-  if (diff < 60) return 'сейчас'
-  if (diff < 3600) return `${Math.floor(diff / 60)}м`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}ч`
-  if (diff < 604800) return `${Math.floor(diff / 86400)}д`
-  return new Date(ts * 1000).toLocaleDateString()
-}
-
 onUnmounted(() => {
-  if (debounceTimer) clearTimeout(debounceTimer)
+  if (debounceTimer) {
+    clearTimeout(debounceTimer)
+    debounceTimer = null
+  }
 })
 </script>
 

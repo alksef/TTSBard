@@ -35,6 +35,7 @@ async function onSelect(id: string) {
 }
 
 const isCorrecting = ref(false)
+const isCompleting = ref(false)
 const showHistory = ref(true)
 const replacements = ref<Map<string, string>>(new Map())
 const usernames = ref<Map<string, string>>(new Map())
@@ -166,7 +167,7 @@ async function correctText() {
 
 async function completeText() {
   if (!text.value.trim()) return
-  isCorrecting.value = true
+  isCompleting.value = true
   try {
     const addition = await invoke<string>('get_ai_completion', { context: text.value })
     if (addition) text.value = `${text.value} ${addition}`.trim()
@@ -174,7 +175,7 @@ async function completeText() {
     debugError('[InputPanel] AI completion failed:', e)
     showError('Не удалось дописать текст')
   } finally {
-    isCorrecting.value = false
+    isCompleting.value = false
   }
 }
 
@@ -266,8 +267,8 @@ const usernamesRecord = computed(() => {
         <button
           v-if="!isMinimalMode"
           class="correct-button"
-          :class="{ loading: isCorrecting }"
-          :disabled="isCorrecting || !text.trim() || !isAiButtonEnabled"
+          :class="{ loading: isCorrecting || isCompleting }"
+          :disabled="isCorrecting || isCompleting || !text.trim() || !isAiButtonEnabled"
           @click="correctText"
           title="Корректировать текст с помощью AI"
         >

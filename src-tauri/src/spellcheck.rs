@@ -97,25 +97,20 @@ impl SpellcheckManager {
             }
         }
 
-        // Phase 4: merge cached + new results in original order
-        // We allocated results with cached items; now interleave new items
-        // Rebuild: easier to just re-collect in correct order
-        let mut final_results: Vec<Option<SpellResult>> = vec![None; words.len()];
-
-        // Fill cached results
-        {
-            let cache = self.cache.read();
-            for (i, w) in words.iter().enumerate() {
-                if let Some(r) = cache.get(w) {
-                    final_results[i] = Some(r.clone());
-                }
-            }
-            // All should be filled now since we wrote new ones to cache
-            for (idx, r) in &new_results {
-                final_results[*idx] = Some(r.clone());
+        // Phase 4: merge cached (Phase 1) + new (Phase 2) in original word order
+        let mut final_results: Vec<SpellResult> = Vec::with_capacity(words.len());
+        let mut ni = 0;
+        let mut ri = 0;
+        for i in 0..words.len() {
+            if ni < to_check.len() && to_check[ni] == i {
+                final_results.push(new_results[ni].1.clone());
+                ni += 1;
+            } else {
+                final_results.push(results[ri].clone());
+                ri += 1;
             }
         }
 
-        final_results.into_iter().map(|r| r.unwrap()).collect()
+        final_results
     }
 }
