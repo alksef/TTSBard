@@ -1,5 +1,5 @@
 use crate::audio::{open_sink_on_device, resolve_output_device, OutputConfig};
-use crate::history::HistoryManager;
+use chrono::Utc;
 use parking_lot::RwLock;
 use rodio::{OutputStream, Sink};
 use serde::{Deserialize, Serialize};
@@ -29,12 +29,27 @@ pub struct QueuedPhrase {
     pub audio: Arc<[u8]>,
 }
 
+#[derive(Clone)]
+struct CachedPhrase {
+    id: String,
+    text: String,
+    audio: Arc<[u8]>,
+    timestamp: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecentPhrase {
+    pub id: String,
+    pub text: String,
+    pub timestamp: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlaybackStateDto {
     pub status: PlaybackStatus,
     pub current: Option<String>,
     pub queue: Vec<String>,
-    pub recent: Vec<crate::history::PhraseEntry>,
+    pub recent: Vec<RecentPhrase>,
 }
 
 /// Динамическая конфигурация аудиовыходов — обновляется в runtime.
@@ -57,14 +72,13 @@ struct Shared {
     status: PlaybackStatus,
     current: Option<QueuedPhrase>,
     queue: VecDeque<QueuedPhrase>,
-    audio_cache: VecDeque<(String, Arc<[u8]>)>,
+    audio_cache: VecDeque<CachedPhrase>,
 }
 
 pub struct PlaybackManager {
     cmd_tx: mpsc::Sender<Cmd>,
     state: Arc<RwLock<Shared>>,
     pub audio_config: Arc<RwLock<AudioOutputsConfig>>,
-    history: Arc<HistoryManager>,
 }
 
 impl PlaybackManager {
@@ -73,7 +87,6 @@ impl PlaybackManager {
         internal_ev: mpsc::Sender<crate::events::AppEvent>,
         initial_audio: AudioOutputsConfig,
         cached_devices: Option<Arc<RwLock<HashMap<String, cpal::Device>>>>,
-        history: Arc<HistoryManager>,
     ) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel();
         let state = Arc::new(RwLock::new(Shared {
@@ -105,7 +118,6 @@ impl PlaybackManager {
             cmd_tx,
             state,
             audio_config,
-            history,
         }
     }
 
@@ -309,8 +321,13 @@ impl PlaybackManager {
         let arc_audio: Arc<[u8]> = audio.into();
         let mut s = self.state.write();
 
-        s.audio_cache
-            .push_back((id.clone(), Arc::clone(&arc_audio)));
+        let ts = Utc::now().timestamp();
+        s.audio_cache.push_back(CachedPhrase {
+            id: id.clone(),
+            text: text.clone(),
+            audio: Arc::clone(&arc_audio),
+            timestamp: ts,
+        });
         if s.audio_cache.len() > AUDIO_CACHE_SIZE {
             s.audio_cache.pop_front();
         }
@@ -377,22 +394,15 @@ impl PlaybackManager {
     }
 
     pub fn replay_from_cache(&self, id: &str) {
-        let replay: Option<(String, Arc<[u8]>, String)> = {
+        let replay: Option<(String, String, Arc<[u8]>)> = {
             let s = self.state.read();
-            let audio = s.audio_cache.iter().find(|(i, _)| i == id).cloned();
-            let text = s
-                .current
+            s.audio_cache
                 .iter()
-                .chain(s.queue.iter())
-                .find(|q| q.id == id)
-                .map(|q| q.text.clone());
-            match (audio, text) {
-                (Some((orig_id, data)), Some(text)) => Some((orig_id, data, text)),
-                _ => None,
-            }
+                .find(|c| c.id == id)
+                .map(|c| (c.id.clone(), c.text.clone(), Arc::clone(&c.audio)))
         };
-        if let Some((orig_id, data, text)) = replay {
-            self.enqueue(orig_id, text, data.to_vec());
+        if let Some((id, text, audio)) = replay {
+            self.enqueue(id, text, audio.to_vec());
         }
     }
 
@@ -419,7 +429,17 @@ impl PlaybackManager {
             status: s.status.clone(),
             current: s.current.as_ref().map(|p| p.text.clone()),
             queue: s.queue.iter().map(|p| p.text.clone()).collect(),
-            recent: self.history.get_phrases(None, 5),
+            recent: s
+                .audio_cache
+                .iter()
+                .rev()
+                .take(5)
+                .map(|c| RecentPhrase {
+                    id: c.id.clone(),
+                    text: c.text.clone(),
+                    timestamp: c.timestamp,
+                })
+                .collect(),
         }
     }
 }
