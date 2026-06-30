@@ -578,6 +578,16 @@ pub struct EditorSettingsDto {
     pub quick: bool,
     pub ai: bool,
     pub ai_completion: bool,
+    pub spellcheck_enabled: bool,
+    pub spellcheck_source: SpellSourceDto,
+}
+
+/// Spell check source DTO
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SpellSourceDto {
+    Online,
+    Offline,
 }
 
 // ============================================================================
@@ -872,6 +882,11 @@ impl AppSettingsDto {
                 quick: params.config.editor.quick,
                 ai: params.config.editor.ai,
                 ai_completion: params.config.editor.ai_completion,
+                spellcheck_enabled: params.config.editor.spellcheck_enabled,
+                spellcheck_source: match params.config.editor.spellcheck_source {
+                    crate::config::SpellSource::Online => SpellSourceDto::Online,
+                    crate::config::SpellSource::Offline => SpellSourceDto::Offline,
+                },
             },
             logging: params.config.logging.clone(),
             preprocessor: PreprocessorSettingsDto::from_preprocessor(params.preprocessor),

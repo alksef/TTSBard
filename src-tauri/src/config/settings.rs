@@ -431,6 +431,15 @@ fn default_theme() -> Theme {
 
 // ==================== Editor Settings ====================
 
+/// Spell check source
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SpellSource {
+    Online,
+    #[default]
+    Offline,
+}
+
 /// Editor settings for quick and AI editor modes
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 #[serde(default)]
@@ -441,6 +450,10 @@ pub struct EditorSettings {
     pub ai: bool,
     #[serde(default)]
     pub ai_completion: bool,
+    #[serde(default)]
+    pub spellcheck_enabled: bool,
+    #[serde(default)]
+    pub spellcheck_source: SpellSource,
 }
 
 // ==================== AI Settings ====================
@@ -1112,6 +1125,26 @@ impl SettingsManager {
     /// Get AI completion in editor enabled state
     pub fn get_editor_ai_completion(&self) -> bool {
         self.cache.read().editor.ai_completion
+    }
+
+    /// Set spellcheck enabled state
+    pub fn set_editor_spellcheck_enabled(&self, enabled: bool) -> Result<()> {
+        self.update_field("/editor/spellcheck_enabled", &enabled)
+    }
+
+    /// Get spellcheck enabled state
+    pub fn get_editor_spellcheck_enabled(&self) -> bool {
+        self.cache.read().editor.spellcheck_enabled
+    }
+
+    /// Set spellcheck source
+    pub fn set_editor_spellcheck_source(&self, source: SpellSource) -> Result<()> {
+        self.update_field("/editor/spellcheck_source", &source)
+    }
+
+    /// Get spellcheck source
+    pub fn get_editor_spellcheck_source(&self) -> SpellSource {
+        self.cache.read().editor.spellcheck_source.clone()
     }
 
     // ========== AI Settings ==========

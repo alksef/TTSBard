@@ -14,6 +14,8 @@ import { invoke } from '@tauri-apps/api/core'
 import type { Suggestion } from '../../composables/useInputHistory'
 import type { PhraseSuggestion } from '../../composables/useTextCompletion'
 import { useEditorSettings } from '../../composables/useAppSettings'
+import { createSpellLinter } from './spellLinter'
+import { useSpellcheck } from '../../composables/useSpellcheck'
 
 const props = withDefaults(
   defineProps<{
@@ -40,6 +42,8 @@ const view = shallowRef<EditorView | null>(null)
 const isExternalUpdate = ref(false)
 
 const editorSettings = useEditorSettings()
+const { checkWords, enabled } = useSpellcheck()
+const spellLinter = createSpellLinter(checkWords, () => enabled.value)
 
 const rep = ref(props.replacements)
 const usr = ref(props.usernames)
@@ -112,6 +116,13 @@ const ttsTheme = EditorView.theme({
   },
   '.cm-tooltip-autocomplete ul li': {
     color: 'var(--color-text-secondary)',
+  },
+  '.cm-lintRange': {
+    textDecoration: 'underline wavy var(--color-danger)',
+    textUnderlineOffset: '3px',
+  },
+  '.cm-diagnosticText': {
+    color: 'var(--color-danger)',
   },
 })
 
@@ -277,6 +288,7 @@ function createState() {
     doc: props.modelValue,
     extensions: [
       ttsTheme,
+      spellLinter,
       EditorView.lineWrapping,
       EditorState.readOnly.of(false),
       createKeymap(),

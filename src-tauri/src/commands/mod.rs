@@ -1,6 +1,6 @@
 use crate::state::AppState;
 use crate::events::AppEvent;
-use crate::config::{SettingsManager, WindowsManager, AppSettingsDto, Theme};
+use crate::config::{SettingsManager, WindowsManager, AppSettingsDto, Theme, SpellSource};
 use crate::soundpanel_window::{hide_soundpanel_window};
 use crate::tts::{TtsProviderType, TtsProvider};
 use crate::audio::OutputConfig;
@@ -1038,6 +1038,56 @@ pub fn get_editor_quick(
     settings_manager: State<'_, SettingsManager>
 ) -> bool {
     settings_manager.get_editor_quick()
+}
+
+// ============================================================================
+// Spellcheck commands
+// ============================================================================
+
+/// Set spellcheck enabled
+#[tauri::command]
+pub fn set_editor_spellcheck_enabled(
+    value: bool,
+    app_handle: AppHandle,
+    settings_manager: State<'_, SettingsManager>
+) -> Result<bool, String> {
+    settings_manager.set_editor_spellcheck_enabled(value)
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
+
+    let _ = app_handle.emit("settings-changed", ());
+
+    Ok(value)
+}
+
+/// Get spellcheck enabled
+#[tauri::command]
+pub fn get_editor_spellcheck_enabled(
+    settings_manager: State<'_, SettingsManager>
+) -> bool {
+    settings_manager.get_editor_spellcheck_enabled()
+}
+
+/// Set spellcheck source
+#[tauri::command]
+pub fn set_editor_spellcheck_source(
+    value: SpellSource,
+    app_handle: AppHandle,
+    settings_manager: State<'_, SettingsManager>
+) -> Result<SpellSource, String> {
+    settings_manager.set_editor_spellcheck_source(value.clone())
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
+
+    let _ = app_handle.emit("settings-changed", ());
+
+    Ok(value)
+}
+
+/// Get spellcheck source
+#[tauri::command]
+pub fn get_editor_spellcheck_source(
+    settings_manager: State<'_, SettingsManager>
+) -> SpellSource {
+    settings_manager.get_editor_spellcheck_source()
 }
 
 // ============================================================================

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted as vueOnUnmounted, inject, type Ref } from 'vue'
+import { ref, computed, onMounted, onUnmounted as vueOnUnmounted, inject, nextTick, type Ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, UnlistenFn } from '@tauri-apps/api/event'
 import { useEditorSettings, useAiSettings } from '../composables/useAppSettings'
@@ -8,10 +8,31 @@ import { debugLog, debugError } from '../utils/debug'
 import { Sparkles } from 'lucide-vue-next'
 import TtsEditor from './editor/TtsEditor.vue'
 import PhraseHistoryList from './PhraseHistoryList.vue'
+import { useEditorTabs } from '../composables/useEditorTabs'
+import EditorTabs from './editor/EditorTabs.vue'
 
 const { showError } = useErrorHandler()
+const { tabs, activeId, active, create: createTab, close: closeTab, select: selectTab, rename: renameTab } = useEditorTabs()
 
-const text = ref('')
+const text = computed<string>({
+  get: () => active.value.text,
+  set: (v) => { active.value.text = v },
+})
+
+const editorRef = ref<InstanceType<typeof TtsEditor> | null>(null)
+
+async function onCreate() {
+  createTab()
+  await nextTick()
+  editorRef.value?.focus()
+}
+
+async function onSelect(id: string) {
+  selectTab(id)
+  await nextTick()
+  editorRef.value?.focus()
+}
+
 const isCorrecting = ref(false)
 const replacements = ref<Map<string, string>>(new Map())
 const usernames = ref<Map<string, string>>(new Map())
@@ -155,6 +176,7 @@ async function handleEnter() {
   // In quick editor mode, start TTS in background without waiting
   if (quickEditorEnabledValue) {
     speak() // Fire and forget - don't await
+    // Очистка активного таба через computed-прокси — корректно для multi-tab.
     text.value = ''
     await hideMainWindow()
   } else {
@@ -199,7 +221,16 @@ const usernamesRecord = computed(() => {
   <div class="input-panel" :class="{ 'minimal-panel': isMinimalMode }">
     <div class="input-group">
       <div class="textarea-wrapper" :class="{ 'minimal-wrapper': isMinimalMode }">
+        <EditorTabs
+          :tabs="tabs"
+          :active-id="activeId"
+          @create="onCreate"
+          @close="closeTab"
+          @select="onSelect"
+          @rename="renameTab"
+        />
         <TtsEditor
+          ref="editorRef"
           v-model="text"
           :placeholder="'Введите текст для озвучивания...'"
           :replacements="replacementsRecord"

@@ -232,6 +232,8 @@ export interface EditorSettingsDto {
   quick: boolean
   ai: boolean
   ai_completion: boolean
+  spellcheck_enabled: boolean
+  spellcheck_source: 'online' | 'offline'
 }
 
 // ============================================================================
