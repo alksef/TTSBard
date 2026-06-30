@@ -53,7 +53,8 @@ watch(() => props.usernames, (v) => { usr.value = v }, { immediate: true })
 const ttsTheme = EditorView.theme({
   '&': {
     border: '1px solid var(--color-border-strong)',
-    borderRadius: '18px',
+    // Верхние углы без скругления — сочетается со строкой табов сверху.
+    borderRadius: '0 0 18px 18px',
     background: 'var(--input-bg-strong)',
     boxShadow: '0 2px 16px rgba(var(--rgb-black), 0.03)',
     minHeight: '340px',
