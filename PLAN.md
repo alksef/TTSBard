@@ -121,6 +121,13 @@
 - **review-019 / OPTIMIZE (по возможности):** VecDeque для phrases, lazy loading — отложено (n=200 приемлемо), править только если тривиально.
 - **CRITICAL 3 + SECURITY из review-018** (race spawn_save_phrases, валидация размера фразы/filter) — это НЕ MINOR, отдельная нетривиальная задача для DeepSeek (см. ниже).
 
+## Доработки после визуального теста (планы 82-84)
+- ✅ **82** — убрать верхнее скругление поля под табами (`borderRadius: '0 0 18px 18px'`).
+- ✅ **83** — quick-editor очищает таб-отправитель (захват currentText+senderTabId синхронно).
+- ✅ **84** — окно управления: show-функция по образцу soundpanel + хоткей Ctrl+Shift+F7
+  + настройка «показывать при запуске». Решает белый квадрат (capture/тема после show).
+- Все три реализованы через DeepSeek, ревью APPROVED, сборка 0/0/0. Runtime-проверка в процессе.
+
 ## Что осталось сделать DeepSeek (из review-018, нетривиально)
 - **CRITICAL 3:** race в `spawn_save_phrases` (+ тот же паттерн для HistoryData/NgramData) —
   debounce/batch ИЛИ `Arc<Mutex<()>>` ИЛИ writer-thread. Отдельный task-файл + round.

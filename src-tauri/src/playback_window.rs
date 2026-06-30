@@ -1,5 +1,5 @@
 use crate::config::WindowsManager;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tracing::{debug, info};
 
 /// Show playback-control window (like soundpanel show, but without clickthrough)
@@ -12,6 +12,9 @@ pub fn show_playback_window(app_handle: &AppHandle) -> tauri::Result<()> {
     if let Some(window) = app_handle.get_webview_window("playback-control") {
         window.show()?;
         window.set_focus()?;
+
+        // Request state refresh so the window shows current playback status immediately
+        let _ = window.emit("refresh-state", ());
 
         #[cfg(windows)]
         {

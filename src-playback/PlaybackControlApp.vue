@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 
 interface PlaybackStateDto {
   status: 'Idle' | 'Playing' | 'Paused' | 'Stopped'
@@ -47,6 +48,10 @@ function doReplay(id: string) {
   invoke('replay_phrase', { id })
 }
 
+async function closeWindow() {
+  await getCurrentWindow().hide()
+}
+
 onMounted(async () => {
   await fetchState()
 
@@ -57,6 +62,7 @@ onMounted(async () => {
     await listen('playback-resumed', () => fetchState()),
     await listen('playback-stopped', () => fetchState()),
     await listen('queue-changed', () => fetchState()),
+    await listen('refresh-state', () => fetchState()),
   ]
 })
 
@@ -77,6 +83,7 @@ const pauseIcon = () =>
       <span class="status-badge" :class="state.status.toLowerCase()">
         {{ state.status }}
       </span>
+      <button class="close-btn" @click="closeWindow" title="Закрыть">✕</button>
     </div>
 
     <!-- Current Phrase -->
@@ -223,6 +230,27 @@ body {
 }
 
 .status-badge.stopped {
+  background: rgba(255, 111, 105, 0.2);
+  color: #ff6f69;
+}
+
+.close-btn {
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.close-btn:hover {
   background: rgba(255, 111, 105, 0.2);
   color: #ff6f69;
 }

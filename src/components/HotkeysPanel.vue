@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { Keyboard, RotateCcw, AppWindow, Music } from 'lucide-vue-next'
+import { Keyboard, RotateCcw, AppWindow, Music, MonitorPlay } from 'lucide-vue-next'
 import type { HotkeyDto, HotkeySettingsDto } from '../types/settings'
 
 const isLoading = ref(false)
 const hotkeys = ref<HotkeySettingsDto | null>(null)
-const recordingFor = ref<'main_window' | 'sound_panel' | null>(null)
+const recordingFor = ref<'main_window' | 'sound_panel' | 'playback_control_window' | null>(null)
 const errorMessage = ref<string | null>(null)
 const messageState = ref<'error' | 'success' | 'warning' | null>(null)
 const currentRecording = ref<{ modifiers: HotkeyDto['modifiers']; key: string } | null>(null)
@@ -25,7 +25,7 @@ async function loadHotkeys() {
 }
 
 // Start recording a hotkey
-async function startRecording(name: 'main_window' | 'sound_panel') {
+async function startRecording(name: 'main_window' | 'sound_panel' | 'playback_control_window') {
   try {
     // Устанавливаем флаг записи (блокирует выполнение хоткеев)
     await invoke('set_hotkey_recording', { recording: true })
@@ -131,6 +131,8 @@ async function saveHotkey(name: string, hotkey: HotkeyDto) {
         hotkeys.value.main_window = hotkey
       } else if (name === 'sound_panel') {
         hotkeys.value.sound_panel = hotkey
+      } else if (name === 'playback_control_window') {
+        hotkeys.value.playback_control_window = hotkey
       }
     }
     // set_hotkey уже вызывает reregister_hotkeys внутри
@@ -160,6 +162,8 @@ async function resetToDefault(name: string) {
         hotkeys.value.main_window = defaultHotkey
       } else if (name === 'sound_panel') {
         hotkeys.value.sound_panel = defaultHotkey
+      } else if (name === 'playback_control_window') {
+        hotkeys.value.playback_control_window = defaultHotkey
       }
     }
     showError('Сброшено к значению по умолчанию')
@@ -333,6 +337,52 @@ onUnmounted(async () => {
 
           <button
             @click="resetToDefault('sound_panel')"
+            class="reset-btn"
+            title="Сбросить к умолчанию"
+          >
+            <RotateCcw :size="14" />
+          </button>
+        </div>
+      </div>
+
+      <!-- Playback Control Window Hotkey -->
+      <div class="hotkey-row">
+        <div class="hotkey-label">
+          <MonitorPlay :size="16" />
+          <span>Управление воспроизведением</span>
+        </div>
+        <div class="hotkey-actions">
+          <span v-if="hotkeys && !recordingFor" class="hotkey-value">
+            {{ formatHotkey(hotkeys.playback_control_window) }}
+          </span>
+          <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+
+          <!-- Recording state -->
+          <div v-if="recordingFor === 'playback_control_window' && currentRecording" class="hotkey-value recording">
+            {{ formatCurrentRecording() }}
+          </div>
+
+          <button
+            @click="startRecording('playback_control_window')"
+            :disabled="recordingFor !== null || isLoading"
+            class="record-btn"
+            :class="{ recording: recordingFor === 'playback_control_window' }"
+          >
+            <Keyboard :size="14" />
+            {{ recordingFor === 'playback_control_window' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+          </button>
+
+          <button
+            v-if="recordingFor === 'playback_control_window'"
+            @click="cancelRecording"
+            class="cancel-btn"
+            title="Отмена (Esc)"
+          >
+            ✕
+          </button>
+
+          <button
+            @click="resetToDefault('playback_control_window')"
             class="reset-btn"
             title="Сбросить к умолчанию"
           >
