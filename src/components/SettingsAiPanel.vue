@@ -29,6 +29,8 @@ const editorSettings = useEditorSettings();
 // AI enabled state (local ref for immediate UI feedback)
 const aiEnabled = ref(false);
 const aiCompletionEnabled = ref(false);
+// Offline spellcheck (не зависит от AI-провайдера — локальный движок spellbook)
+const spellcheckEnabled = ref(false);
 
 // Global prompt
 const globalPrompt = ref('');
@@ -196,6 +198,16 @@ async function saveAiCompletionEnabled() {
   }
 }
 
+async function saveSpellcheckEnabled() {
+  try {
+    await invoke('set_editor_spellcheck_enabled', { enabled: spellcheckEnabled.value });
+    debugLog('[SettingsAiPanel] Spellcheck saved:', spellcheckEnabled.value);
+  } catch (e) {
+    debugError('[SettingsAiPanel] Failed to save spellcheck:', e);
+    spellcheckEnabled.value = !spellcheckEnabled.value;
+  }
+}
+
 // Watch for settings changes from composable
 watch(editorSettings, (newSettings) => {
   if (!newSettings) return;
@@ -208,6 +220,9 @@ watch(editorSettings, (newSettings) => {
   }
   if (newSettings.ai_completion !== undefined) {
     aiCompletionEnabled.value = newSettings.ai_completion;
+  }
+  if (newSettings.spellcheck_enabled !== undefined) {
+    spellcheckEnabled.value = newSettings.spellcheck_enabled;
   }
 }, { immediate: true, deep: true });
 
@@ -318,6 +333,22 @@ function dismissStatus() {
       </span>
       <span v-else class="setting-hint">
         AI будет предлагать продолжение текста в редакторе
+      </span>
+    </div>
+
+    <!-- Offline Spellcheck Section -->
+    <div class="ai-enable-section">
+      <label class="setting-label checkbox-label">
+        <input
+          type="checkbox"
+          v-model="spellcheckEnabled"
+          @change="saveSpellcheckEnabled"
+          class="checkbox-input"
+        />
+        <span>Проверка орфографии (офлайн)</span>
+      </label>
+      <span class="setting-hint">
+        Подчёркивает ошибки и предлагает варианты исправления. Работает без сети (локальный словарь)
       </span>
     </div>
 
