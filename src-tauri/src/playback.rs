@@ -322,6 +322,10 @@ impl PlaybackManager {
         let mut s = self.state.write();
 
         let ts = Utc::now().timestamp();
+        // Дедуп по id: если фраза уже в кеше (например, при replay_from_cache передаётся
+        // тот же id) — обновить, а не добавлять дубликат (иначе replay плодит копии в «Недавних»).
+        // Обычный speak_text каждый раз создаёт новый id → дедуп его не затрагивает.
+        s.audio_cache.retain(|c| c.id != id);
         s.audio_cache.push_back(CachedPhrase {
             id: id.clone(),
             text: text.clone(),
