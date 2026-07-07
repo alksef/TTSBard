@@ -7,7 +7,7 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tracing::{debug, error, info};
 
 /// Handler for sound panel toggle
-fn handle_sound_panel(app_state: AppState, app_handle: AppHandle) {
+pub fn handle_sound_panel(app_state: AppState, app_handle: AppHandle) {
     debug!("Sound panel hotkey triggered");
 
     // Check if hotkey recording is in progress
@@ -52,7 +52,7 @@ fn handle_sound_panel(app_state: AppState, app_handle: AppHandle) {
     }
 }
 
-fn handle_playback_pause(app_handle: AppHandle) {
+pub fn handle_playback_pause(app_handle: AppHandle) {
     if let Some(state) = app_handle.try_state::<PlaybackState>() {
         let pb = &state.inner().0;
         let st = pb.get_state();
@@ -68,26 +68,26 @@ fn handle_playback_pause(app_handle: AppHandle) {
     }
 }
 
-fn handle_playback_stop(app_handle: AppHandle) {
+pub fn handle_playback_stop(app_handle: AppHandle) {
     if let Some(state) = app_handle.try_state::<PlaybackState>() {
         let _ = state.inner().0.stop();
     }
 }
 
-fn handle_playback_repeat(app_handle: AppHandle) {
+pub fn handle_playback_repeat(app_handle: AppHandle) {
     if let Some(state) = app_handle.try_state::<PlaybackState>() {
         let _ = state.inner().0.repeat();
     }
 }
 
-fn handle_playback_control_window(app_handle: AppHandle) {
+pub fn handle_playback_control_window(app_handle: AppHandle) {
     if let Some(sp_state) = app_handle.try_state::<SoundPanelState>() {
         sp_state.emit_event(crate::events::AppEvent::ShowPlaybackControlWindow);
     }
 }
 
 /// Handler for main window focus
-fn handle_main_window(app_handle: AppHandle) {
+pub fn handle_main_window(app_handle: AppHandle) {
     debug!("Main window hotkey triggered");
 
     // Check if hotkey recording is in progress
@@ -139,6 +139,37 @@ fn handle_main_window(app_handle: AppHandle) {
             note = "always_on_top_will_be_removed_on_focus_loss",
             "Main window shown and focused"
         );
+    }
+}
+
+/// Unified action runner for Intercept bindings.
+/// Dispatches a string action to the corresponding handler.
+pub fn run_action(app_handle: &AppHandle, action: &str) {
+    match action {
+        "show_main_window" => {
+            handle_main_window(app_handle.clone());
+        }
+        "show_soundpanel_window" => {
+            if let Some(app_state) = app_handle.try_state::<AppState>() {
+                let inner = app_state.inner().clone();
+                handle_sound_panel(inner, app_handle.clone());
+            }
+        }
+        "show_playback_control_window" => {
+            handle_playback_control_window(app_handle.clone());
+        }
+        "playback_pause" => {
+            handle_playback_pause(app_handle.clone());
+        }
+        "playback_stop" => {
+            handle_playback_stop(app_handle.clone());
+        }
+        "playback_repeat" => {
+            handle_playback_repeat(app_handle.clone());
+        }
+        other => {
+            tracing::warn!(action = other, "Unknown intercept action");
+        }
     }
 }
 

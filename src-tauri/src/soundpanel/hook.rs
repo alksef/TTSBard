@@ -1,12 +1,13 @@
 //! Sound Panel Keyboard Hook
 //!
-//! Low-level keyboard hook для звуковой панели.
-//! A-Z/Escape теперь обрабатываются самим окном через DOM keydown.
-//! Этот hook больше не перехватывает клавиши — pass-through для всех.
+//! Low-level keyboard hook для звуковой панели и Intercept-режима.
+//! A-Z/Escape обрабатываются самим окном через DOM keydown.
+//! Intercept (NumPad/F-keys) обрабатывается здесь.
 
 use crate::soundpanel::state::SoundPanelState;
 use std::sync::Arc;
 use std::thread::JoinHandle;
+use tauri::AppHandle;
 use tracing::{debug, error, info};
 
 #[cfg(target_os = "windows")]
@@ -15,21 +16,15 @@ use windows::{
     Win32::UI::WindowsAndMessaging::*,
 };
 
-// Virtual Key codes (зарезервированы для ЧАСТИ B / Intercept)
-#[allow(dead_code)]
-const VK_ESCAPE: u32 = 0x1B;
-#[allow(dead_code)]
-const VK_A: u32 = 0x41;
-#[allow(dead_code)]
-const VK_Z: u32 = 0x5A;
-
 /// Safe storage for soundpanel hook state using OnceLock
-/// Windows keyboard hooks run on the same thread that created them,
-/// but we use OnceLock for Rust safety guarantees.
 #[cfg(target_os = "windows")]
 static SP_HOOK_STATE: std::sync::OnceLock<Arc<SoundPanelState>> = std::sync::OnceLock::new();
 
-/// Low-level keyboard hook procedure для звуковой панели
+/// Safe storage for AppHandle (needed to call run_action from proc)
+#[cfg(target_os = "windows")]
+static APP_HANDLE: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
+
+/// Low-level keyboard hook procedure: pass-through + Intercept mode
 #[cfg(target_os = "windows")]
 unsafe extern "system" fn soundpanel_keyboard_proc(
     n_code: i32,
@@ -38,21 +33,31 @@ unsafe extern "system" fn soundpanel_keyboard_proc(
 ) -> LRESULT {
     if n_code >= 0 {
         let kb_struct = *(l_param.0 as *const KBDLLHOOKSTRUCT);
-        let _vk_code = kb_struct.vkCode;
+        let vk_code = kb_struct.vkCode;
 
         match w_param.0 as u32 {
             WM_KEYDOWN | WM_SYSKEYDOWN => {
-                // Безопасное получение состояния через OnceLock
                 if let Some(state) = SP_HOOK_STATE.get() {
-                    // Работаем только когда включён режим звуковой панели
-                    let enabled = state.is_interception_enabled();
-                    if !enabled {
-                        // Тихий режим когда перехват выключен
+                    let intercept = state.get_intercept();
+                    if !intercept.enabled {
                         return CallNextHookEx(HHOOK::default(), n_code, w_param, l_param);
                     }
 
-                    // Перехват включён — pass-through для всех клавиш
-                    // (A-Z/Escape теперь обрабатываются самим окном через DOM keydown)
+                    if let Some(key_name) = crate::soundpanel::intercept::vk_to_name(vk_code) {
+                        if let Some(binding) = intercept.bindings.iter().find(|b| b.key == key_name)
+                        {
+                            if let Some(app_handle) = APP_HANDLE.get() {
+                                debug!(
+                                    vk_code,
+                                    key = key_name,
+                                    action = binding.action,
+                                    "Intercept: running action"
+                                );
+                                crate::hotkeys::run_action(app_handle, &binding.action);
+                                return LRESULT(1);
+                            }
+                        }
+                    }
                 } else {
                     error!("SP_HOOK_STATE not initialized");
                 }
@@ -65,7 +70,7 @@ unsafe extern "system" fn soundpanel_keyboard_proc(
 }
 
 /// Инициализировать keyboard hook для звуковой панели
-pub fn initialize_soundpanel_hook(state: SoundPanelState) -> JoinHandle<()> {
+pub fn initialize_soundpanel_hook(state: SoundPanelState, app_handle: AppHandle) -> JoinHandle<()> {
     info!("initialize_soundpanel_hook called");
 
     std::thread::spawn(move || unsafe {
@@ -73,13 +78,18 @@ pub fn initialize_soundpanel_hook(state: SoundPanelState) -> JoinHandle<()> {
         {
             debug!("Thread started, setting up hook");
 
-            // Безопасно сохраняем состояние в OnceLock
             let state_arc = Arc::new(state);
             if SP_HOOK_STATE.set(state_arc.clone()).is_err() {
                 error!("SP_HOOK_STATE already initialized");
                 return;
             }
             debug!("SP_HOOK_STATE set safely");
+
+            if APP_HANDLE.set(app_handle).is_err() {
+                error!("APP_HANDLE already initialized");
+                return;
+            }
+            debug!("APP_HANDLE set safely");
 
             let module_handle = GetModuleHandleW(PCWSTR::null()).unwrap();
             debug!("Got module handle");
@@ -104,7 +114,6 @@ pub fn initialize_soundpanel_hook(state: SoundPanelState) -> JoinHandle<()> {
 
             info!("Keyboard hook initialized successfully, starting message pump");
 
-            // Message pump для поддержания хука активным
             let mut msg: MSG = std::mem::zeroed();
             let mut msg_count = 0u32;
             while GetMessageW(&mut msg, HWND::default(), 0, 0).into() {

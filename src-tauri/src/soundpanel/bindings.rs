@@ -5,6 +5,7 @@
 use crate::config::{is_valid_hex_color, WindowsManager};
 use crate::events::AppEvent;
 use crate::soundpanel::audio::play_audio_file;
+use crate::soundpanel::intercept::InterceptSettings;
 use crate::soundpanel::state::{SoundBinding, SoundPanelState};
 use crate::soundpanel::storage::{copy_sound_file, delete_sound_file, save_bindings};
 use crate::soundpanel_window::emit_soundpanel_bindings_changed;
@@ -214,4 +215,41 @@ pub fn sp_play_binding(key: String, app_handle: AppHandle) -> Result<(), String>
     } else {
         Err(format!("No binding for key {}", key_char))
     }
+}
+
+/// Получить настройки перехвата
+#[tauri::command]
+pub fn get_intercept_settings(state: State<'_, SoundPanelState>) -> InterceptSettings {
+    state.get_intercept()
+}
+
+/// Включить/выключить перехват
+#[tauri::command]
+pub fn set_intercept_enabled(
+    enabled: bool,
+    state: State<'_, SoundPanelState>,
+) -> Result<(), String> {
+    state.set_intercept_enabled(enabled);
+    Ok(())
+}
+
+/// Установить биндинг перехвата
+#[tauri::command]
+pub fn set_intercept_binding(
+    key: String,
+    action: String,
+    state: State<'_, SoundPanelState>,
+) -> Result<(), String> {
+    state.set_intercept_binding(key, action);
+    Ok(())
+}
+
+/// Очистить биндинг перехвата
+#[tauri::command]
+pub fn clear_intercept_binding(
+    key: String,
+    state: State<'_, SoundPanelState>,
+) -> Result<(), String> {
+    state.clear_intercept_binding(key);
+    Ok(())
 }

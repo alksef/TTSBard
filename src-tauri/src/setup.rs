@@ -186,7 +186,7 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
     init_tray(app)?;
 
     // Initialize hooks
-    init_hooks(&app_state, &soundpanel_state)?;
+    init_hooks(&app_state, &soundpanel_state, app.handle().clone())?;
 
     // Initialize WebView server
     init_webview_server(&app_state, app.handle().clone());
@@ -430,10 +430,11 @@ fn init_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
 fn init_hooks(
     _app_state: &AppState,
     soundpanel_state: &SoundPanelState,
+    app_handle: AppHandle,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::soundpanel::initialize_soundpanel_hook;
 
-    let _soundpanel_hook_handle = initialize_soundpanel_hook(soundpanel_state.clone());
+    let _soundpanel_hook_handle = initialize_soundpanel_hook(soundpanel_state.clone(), app_handle);
     info!("[SOUNDPANEL] Keyboard hook initialized");
 
     Ok(())

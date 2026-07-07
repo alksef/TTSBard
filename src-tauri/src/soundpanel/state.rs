@@ -6,6 +6,7 @@ use crate::config::{
     DEFAULT_FLOATING_BG_COLOR, DEFAULT_FLOATING_OPACITY, MAX_FLOATING_OPACITY, MIN_FLOATING_OPACITY,
 };
 use crate::events::AppEvent;
+use crate::soundpanel::intercept::InterceptSettings;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
@@ -50,6 +51,9 @@ pub struct SoundPanelState {
     /// Пропускает ли floating окно клики
     pub floating_clickthrough: Arc<Mutex<bool>>,
 
+    /// Intercept-настройки (NumPad/F-keys → actions, persisted)
+    pub intercept: Arc<Mutex<InterceptSettings>>,
+
     /// Активные воспроизведения звука (thread handles)
     active_playbacks: Arc<Mutex<Vec<JoinHandle<()>>>>,
 }
@@ -57,6 +61,7 @@ pub struct SoundPanelState {
 impl SoundPanelState {
     /// Создать новое состояние звуковой панели
     pub fn new(appdata_path: String) -> Self {
+        let intercept = crate::soundpanel::intercept::load(&appdata_path);
         Self {
             interception_enabled: Arc::new(Mutex::new(false)),
             bindings: Arc::new(Mutex::new(HashMap::new())),
@@ -65,11 +70,13 @@ impl SoundPanelState {
             floating_opacity: Arc::new(Mutex::new(DEFAULT_FLOATING_OPACITY)),
             floating_bg_color: Arc::new(Mutex::new(DEFAULT_FLOATING_BG_COLOR.to_string())),
             floating_clickthrough: Arc::new(Mutex::new(false)),
+            intercept: Arc::new(Mutex::new(intercept)),
             active_playbacks: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
     /// Проверить, включен ли режим перехвата
+    #[allow(dead_code)]
     pub fn is_interception_enabled(&self) -> bool {
         self.interception_enabled
             .lock()
@@ -270,6 +277,58 @@ impl SoundPanelState {
                 target = "soundpanel::state",
                 "Failed to lock floating_clickthrough"
             );
+        }
+    }
+
+    /// Получить настройки перехвата (clone)
+    pub fn get_intercept(&self) -> InterceptSettings {
+        self.intercept.lock().map(|v| v.clone()).unwrap_or_default()
+    }
+
+    /// Включить/выключить перехват (persist + emit)
+    pub fn set_intercept_enabled(&self, enabled: bool) {
+        let appdata_path = self.appdata_path.lock().unwrap().clone();
+        if let Ok(mut val) = self.intercept.lock() {
+            val.enabled = enabled;
+            let settings = val.clone();
+            drop(val);
+            let _ = crate::soundpanel::intercept::save(&appdata_path, &settings);
+            self.emit_event(AppEvent::InterceptionChanged(enabled));
+        } else {
+            error!(target = "soundpanel::state", "Failed to lock intercept");
+        }
+    }
+
+    /// Установить биндинг перехвата (persist)
+    pub fn set_intercept_binding(&self, key: String, action: String) {
+        let appdata_path = self.appdata_path.lock().unwrap().clone();
+        if let Ok(mut val) = self.intercept.lock() {
+            val.bindings.retain(|b| b.key != key);
+            val.bindings
+                .push(crate::soundpanel::intercept::InterceptBinding {
+                    key: key.clone(),
+                    action: action.clone(),
+                });
+            let settings = val.clone();
+            drop(val);
+            let _ = crate::soundpanel::intercept::save(&appdata_path, &settings);
+            info!(key = key, action = action, "Intercept binding set");
+        } else {
+            error!(target = "soundpanel::state", "Failed to lock intercept");
+        }
+    }
+
+    /// Очистить биндинг перехвата (persist)
+    pub fn clear_intercept_binding(&self, key: String) {
+        let appdata_path = self.appdata_path.lock().unwrap().clone();
+        if let Ok(mut val) = self.intercept.lock() {
+            val.bindings.retain(|b| b.key != key);
+            let settings = val.clone();
+            drop(val);
+            let _ = crate::soundpanel::intercept::save(&appdata_path, &settings);
+            info!(key = key, "Intercept binding cleared");
+        } else {
+            error!(target = "soundpanel::state", "Failed to lock intercept");
         }
     }
 }
