@@ -34,24 +34,14 @@ fn handle_sound_panel(app_state: AppState, app_handle: AppHandle) {
     app_state.set_active_window(ActiveWindow::SoundPanel);
 
     // Показать звуковую панель
-    info!(
+    debug!(
         window = "soundpanel",
         action = "showing",
         "Showing soundpanel"
     );
 
-    // Emit event to show soundpanel window (handled in lib.rs)
+    // Emit event to show soundpanel window
     if let Some(sp_state) = app_handle.try_state::<SoundPanelState>() {
-        debug!(
-            window = "soundpanel",
-            status = "state_found",
-            "SoundPanel state found, setting interception_enabled=true"
-        );
-        sp_state.set_interception_enabled(true);
-        debug!(
-            event = "ShowSoundPanelWindow",
-            "Emitting ShowSoundPanelWindow event"
-        );
         sp_state.emit_event(crate::events::AppEvent::ShowSoundPanelWindow);
     } else {
         error!(

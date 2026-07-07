@@ -6,11 +6,11 @@
 //! NOTE: Appearance settings are now stored in windows.json (via WindowsManager)
 //! The old soundpanel_appearance.json file is no longer used.
 
+use crate::config::WindowsManager;
+use crate::soundpanel::state::{SoundBinding, SoundPanelState};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use crate::soundpanel::state::{SoundPanelState, SoundBinding};
-use crate::config::WindowsManager;
-use serde::{Serialize, Deserialize};
 use tracing::{debug, info};
 
 const BINDINGS_FILE: &str = "soundpanel_bindings.json";
@@ -25,7 +25,9 @@ pub struct SoundPanelAppearance {
     pub clickthrough: bool,
 }
 
-fn default_clickthrough() -> bool { false }
+fn default_clickthrough() -> bool {
+    false
+}
 
 impl Default for SoundPanelAppearance {
     fn default() -> Self {
@@ -52,8 +54,8 @@ pub fn load_bindings(state: &SoundPanelState) -> Result<Vec<SoundBinding>, Strin
     let content = fs::read_to_string(&file_path)
         .map_err(|e| format!("Failed to read bindings file: {}", e))?;
 
-    let bindings: Vec<SoundBinding> = serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse bindings: {}", e))?;
+    let bindings: Vec<SoundBinding> =
+        serde_json::from_str(&content).map_err(|e| format!("Failed to parse bindings: {}", e))?;
 
     info!(count = bindings.len(), "Loaded bindings");
 
@@ -77,8 +79,7 @@ pub fn save_bindings(state: &SoundPanelState) -> Result<(), String> {
     let json = serde_json::to_string_pretty(&bindings)
         .map_err(|e| format!("Failed to serialize bindings: {}", e))?;
 
-    fs::write(&file_path, json)
-        .map_err(|e| format!("Failed to write bindings file: {}", e))?;
+    fs::write(&file_path, json).map_err(|e| format!("Failed to write bindings file: {}", e))?;
 
     info!("Bindings saved successfully");
     Ok(())
@@ -99,7 +100,8 @@ pub fn copy_sound_file(source_path: &str, appdata_path: &str) -> Result<String, 
 
     // Получить имя файла
     let source = PathBuf::from(source_path);
-    let filename = source.file_name()
+    let filename = source
+        .file_name()
         .and_then(|n| n.to_str())
         .ok_or("Invalid filename")?;
 
@@ -107,10 +109,10 @@ pub fn copy_sound_file(source_path: &str, appdata_path: &str) -> Result<String, 
     let dest_path = generate_unique_path(&soundpanel_dir, filename);
 
     // Скопировать файл
-    fs::copy(&source, &dest_path)
-        .map_err(|e| format!("Failed to copy sound file: {}", e))?;
+    fs::copy(&source, &dest_path).map_err(|e| format!("Failed to copy sound file: {}", e))?;
 
-    let final_filename = dest_path.file_name()
+    let final_filename = dest_path
+        .file_name()
         .and_then(|n| n.to_str())
         .unwrap()
         .to_string();
@@ -126,8 +128,7 @@ pub fn delete_sound_file(filename: &str, appdata_path: &str) -> Result<(), Strin
     let file_path = soundpanel_dir.join(filename);
 
     if file_path.exists() {
-        fs::remove_file(&file_path)
-            .map_err(|e| format!("Failed to delete sound file: {}", e))?;
+        fs::remove_file(&file_path).map_err(|e| format!("Failed to delete sound file: {}", e))?;
         debug!(?file_path, "Deleted sound file");
     }
 
@@ -163,7 +164,10 @@ fn generate_unique_path(dir: &Path, filename: &str) -> PathBuf {
 }
 
 /// Загрузить настройки внешнего вида из windows.json
-pub fn load_appearance(state: &SoundPanelState, windows_manager: &WindowsManager) -> Result<SoundPanelAppearance, String> {
+pub fn load_appearance(
+    state: &SoundPanelState,
+    windows_manager: &WindowsManager,
+) -> Result<SoundPanelAppearance, String> {
     debug!("Loading appearance from windows.json");
 
     // Load from WindowsManager
@@ -171,12 +175,7 @@ pub fn load_appearance(state: &SoundPanelState, windows_manager: &WindowsManager
     let bg_color = windows_manager.get_soundpanel_bg_color();
     let clickthrough = windows_manager.get_soundpanel_clickthrough();
 
-    info!(
-        opacity,
-        bg_color,
-        clickthrough,
-        "Loaded appearance"
-    );
+    info!(opacity, bg_color, clickthrough, "Loaded appearance");
 
     // Применить к состоянию
     state.set_floating_opacity(opacity);

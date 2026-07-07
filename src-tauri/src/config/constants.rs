@@ -3,7 +3,6 @@
 //! Централизованное хранилище констант приложения.
 //! Избегает дублирования magic numbers и значений по умолчанию.
 
-
 /// Прозрачность floating окна по умолчанию (10-100)
 pub const DEFAULT_FLOATING_OPACITY: u8 = 90;
 
@@ -18,5 +17,3 @@ pub const MIN_FLOATING_OPACITY: u8 = 10;
 
 /// Максимальная прозрачность floating окна
 pub const MAX_FLOATING_OPACITY: u8 = 100;
-
-

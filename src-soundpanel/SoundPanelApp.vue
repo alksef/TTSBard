@@ -94,6 +94,27 @@ function handleTransparencyChange(event: Event) {
   changeTransparency(parseFloat(target.value))
 }
 
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    closeWindow()
+    return
+  }
+  if (e.ctrlKey || e.shiftKey || e.altKey || e.metaKey) {
+    return
+  }
+  const key = e.key.toUpperCase()
+  if (!/^[A-Z]$/.test(key)) {
+    return
+  }
+  const b = bindings.value.find(x => x.key === key)
+  if (b) {
+    e.preventDefault()
+    invoke('sp_play_binding', { key }).then(() => closeWindow())
+  } else {
+    showNoBinding(key)
+  }
+}
+
 // Expose function to be called from main.ts
 defineExpose({
   showNoBinding
@@ -144,9 +165,12 @@ onMounted(async () => {
   })
   console.log('[SoundPanel] Registered bindings changed listener')
 
+  window.addEventListener('keydown', onKeydown)
+
   onUnmounted(() => {
     unlisten()
     unlistenBindings()
+    window.removeEventListener('keydown', onKeydown)
     if (messageTimeout !== null) {
       clearTimeout(messageTimeout)
     }

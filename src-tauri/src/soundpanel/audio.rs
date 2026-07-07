@@ -96,17 +96,11 @@ fn play_with_fallback(_path: &str) {
 pub fn is_supported_audio_format(filename: &str) -> bool {
     let filename_lower = filename.to_lowercase();
 
-    let supported_extensions = [
-        ".mp3",
-        ".wav",
-        ".ogg",
-        ".flac",
-        ".m4a",
-        ".aac",
-        ".wma",
-    ];
+    let supported_extensions = [".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac", ".wma"];
 
-    supported_extensions.iter().any(|ext| filename_lower.ends_with(ext))
+    supported_extensions
+        .iter()
+        .any(|ext| filename_lower.ends_with(ext))
 }
 
 #[cfg(test)]

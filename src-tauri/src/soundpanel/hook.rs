@@ -1,26 +1,27 @@
 //! Sound Panel Keyboard Hook
 //!
-//! Отдельный low-level keyboard hook для звуковой панели.
-//! Перехватывает клавиши A-Z для воспроизведения звуков.
+//! Low-level keyboard hook для звуковой панели.
+//! A-Z/Escape теперь обрабатываются самим окном через DOM keydown.
+//! Этот hook больше не перехватывает клавиши — pass-through для всех.
 
 use crate::soundpanel::state::SoundPanelState;
-use crate::events::AppEvent;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use tracing::{debug, error, info};
 
 #[cfg(target_os = "windows")]
 use windows::{
-    core::*,
-    Win32::Foundation::*,
+    core::*, Win32::Foundation::*, Win32::System::LibraryLoader::*,
     Win32::UI::WindowsAndMessaging::*,
-    Win32::System::LibraryLoader::*,
 };
 
-// Virtual Key codes
-const VK_ESCAPE: u32 = 0x1B;  // Escape
-const VK_A: u32 = 0x41;       // A
-const VK_Z: u32 = 0x5A;       // Z
+// Virtual Key codes (зарезервированы для ЧАСТИ B / Intercept)
+#[allow(dead_code)]
+const VK_ESCAPE: u32 = 0x1B;
+#[allow(dead_code)]
+const VK_A: u32 = 0x41;
+#[allow(dead_code)]
+const VK_Z: u32 = 0x5A;
 
 /// Safe storage for soundpanel hook state using OnceLock
 /// Windows keyboard hooks run on the same thread that created them,
@@ -37,7 +38,7 @@ unsafe extern "system" fn soundpanel_keyboard_proc(
 ) -> LRESULT {
     if n_code >= 0 {
         let kb_struct = *(l_param.0 as *const KBDLLHOOKSTRUCT);
-        let vk_code = kb_struct.vkCode;
+        let _vk_code = kb_struct.vkCode;
 
         match w_param.0 as u32 {
             WM_KEYDOWN | WM_SYSKEYDOWN => {
@@ -50,46 +51,8 @@ unsafe extern "system" fn soundpanel_keyboard_proc(
                         return CallNextHookEx(HHOOK::default(), n_code, w_param, l_param);
                     }
 
-                    // Логируем только когда перехват включен
-                    debug!(
-                        vk_code = format!("0x{:X}", vk_code),
-                        interception_enabled = true,
-                        "KeyDown"
-                    );
-
-                    match vk_code {
-                        VK_ESCAPE => {
-                            // Escape - закрыть панель
-                            info!("ESC pressed - hiding panel");
-                            state.set_interception_enabled(false);
-                            state.emit_event(AppEvent::HideSoundPanelWindow);
-                            return LRESULT(1); // Блокируем клавишу
-                        }
-                        _ => {
-                            // Проверяем A-Z
-                            if (VK_A..=VK_Z).contains(&vk_code) {
-                                let key_char = (b'A' + (vk_code - VK_A) as u8) as char;
-                                debug!(key = %key_char, "A-Z key pressed");
-
-                                // Ищем привязку
-                                if let Some(binding) = state.get_binding(key_char) {
-                                    // Привязка найдена - воспроизводим звук
-                                    debug!(description = binding.description, "Binding found");
-                                    state.play_sound(&binding);
-                                    state.set_interception_enabled(false);
-                                    state.emit_event(AppEvent::HideSoundPanelWindow);
-                                    return LRESULT(1); // Блокируем клавишу
-                                } else {
-                                    // Нет привязки - показываем сообщение
-                                    debug!(key = %key_char, "No binding found");
-                                    state.emit_event(AppEvent::SoundPanelNoBinding(key_char));
-                                    return LRESULT(1); // Блокируем клавишу
-                                }
-                            } else {
-                                debug!("Not A-Z key, passing through");
-                            }
-                        }
-                    }
+                    // Перехват включён — pass-through для всех клавиш
+                    // (A-Z/Escape теперь обрабатываются самим окном через DOM keydown)
                 } else {
                     error!("SP_HOOK_STATE not initialized");
                 }
@@ -132,7 +95,7 @@ pub fn initialize_soundpanel_hook(state: SoundPanelState) -> JoinHandle<()> {
                 Ok(h) => {
                     info!("SetWindowsHookExW SUCCESS");
                     h
-                },
+                }
                 Err(e) => {
                     error!(error = %e, "Failed to set keyboard hook");
                     return;
