@@ -111,7 +111,7 @@ const sidebarGroups: SidebarGroup[] = [
   {
     buttons: [
       { id: 'hotkeys', label: 'Горячие клавиши', icon: Keyboard },
-      { id: 'intercept', label: 'Перехват', icon: Crosshair },
+      { id: 'intercept', label: 'Перехват клавиш', icon: Crosshair },
       { id: 'settings', label: 'Настройки', icon: Settings }
     ]
   }

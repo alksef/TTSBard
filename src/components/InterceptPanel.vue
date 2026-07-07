@@ -154,9 +154,16 @@ function showError(msg: string) {
 
 onMounted(async () => {
   await loadSettings()
-  unlisten = await listen<boolean>('interception-changed', (event) => {
-    if (settings.value) {
-      settings.value.enabled = event.payload
+  // Payload приходит как весь AppEvent enum ({"InterceptionChanged": <bool>}),
+  // а НЕ как чистый bool. Извлекаем реальное значение, иначе toggle «залипает»
+  // во включённом виде (объект всегда truthy).
+  unlisten = await listen<unknown>('interception-changed', (event) => {
+    if (!settings.value) return
+    const payload = event.payload as { InterceptionChanged?: boolean } | boolean | null
+    if (typeof payload === 'boolean') {
+      settings.value.enabled = payload
+    } else if (payload && typeof payload.InterceptionChanged === 'boolean') {
+      settings.value.enabled = payload.InterceptionChanged
     }
   })
 })
