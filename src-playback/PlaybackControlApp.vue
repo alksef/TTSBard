@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, watch, nextTick, onMounted, onUnmounted, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { LogicalSize } from '@tauri-apps/api/dpi'
 
 const opacity = ref(94)
 const bgColor = ref('#10131a')
@@ -20,6 +21,25 @@ const overlayStyle = computed(() => {
     backgroundColor: base,
   }
 })
+
+const MIN_H = 150
+const MAX_H = 600
+
+const playbackCard = ref<HTMLDivElement | null>(null)
+
+async function resizeToFit() {
+  await nextTick()
+  await new Promise<number>(resolve => requestAnimationFrame(resolve))
+  const card = playbackCard.value
+  if (!card) return
+  const contentHeight = card.offsetHeight
+  const clamped = Math.max(MIN_H, Math.min(MAX_H, contentHeight))
+  const win = getCurrentWindow()
+  const factor = await win.scaleFactor()
+  const currentLogicalH = (await win.outerSize()).height / factor
+  if (Math.abs(currentLogicalH - clamped) < 1) return
+  await win.setSize(new LogicalSize(350, clamped))
+}
 
 interface PlaybackStateDto {
   status: 'Idle' | 'Playing' | 'Paused' | 'Stopped'
@@ -70,7 +90,6 @@ async function closeWindow() {
 }
 
 onMounted(async () => {
-  // Load appearance settings
   try {
     const [loadedOpacity, loadedColor] = await invoke<[number, string]>('pc_get_appearance')
     opacity.value = loadedOpacity
@@ -80,6 +99,8 @@ onMounted(async () => {
   }
 
   await fetchState()
+
+  await resizeToFit()
 
   unlisteners = [
     await listen('playback-started', () => fetchState()),
@@ -94,12 +115,15 @@ onMounted(async () => {
         const [newOpacity, newColor] = await invoke<[number, string]>('pc_get_appearance')
         opacity.value = newOpacity
         bgColor.value = newColor
+        await resizeToFit()
       } catch {
         // silent
       }
     }),
   ]
 })
+
+watch(() => state.value, () => { resizeToFit() }, { deep: true })
 
 onUnmounted(() => {
   unlisteners.forEach((u) => u())
@@ -112,7 +136,7 @@ const pauseIcon = () =>
 </script>
 
 <template>
-  <div class="playback-window" :style="overlayStyle">
+  <div ref="playbackCard" class="playback-window" :style="overlayStyle">
     <div class="window-header" data-tauri-drag-region>
       <span class="title">Управление</span>
       <span class="status-badge" :class="state.status.toLowerCase()">
@@ -208,12 +232,18 @@ const pauseIcon = () =>
   box-sizing: border-box;
 }
 
+html, body {
+  height: 100vh;
+  margin: 0;
+}
+
 body {
   font-family: 'Manrope', 'Segoe UI', sans-serif;
   background: transparent;
   color: var(--text);
   user-select: none;
   overflow: hidden;
+  display: flex;
 }
 </style>
 
@@ -227,6 +257,8 @@ body {
   flex-direction: column;
   gap: 12px;
   min-height: 150px;
+  width: 100%;
+  height: 100%;
 }
 
 .window-header {
