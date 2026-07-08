@@ -15,6 +15,7 @@ mod playback_window;
 mod state;
 mod preprocessor;
 mod history;
+mod tabs;
 mod spellcheck;
 pub mod playback;
 mod telegram;
@@ -39,8 +40,8 @@ use commands::{speak_text, get_tts_provider, set_tts_provider, get_local_tts_url
 use commands::playback_window::{pc_get_appearance, pc_set_opacity, pc_set_bg_color};
 use commands::logging::{get_logging_settings, save_logging_settings};
 use commands::telegram::{telegram_init, telegram_request_code, telegram_sign_in, telegram_sign_out, telegram_get_status, telegram_get_user, telegram_auto_restore};
-use commands::ai::{set_ai_provider, set_ai_prompt, set_ai_openai_api_key, set_ai_openai_use_proxy, set_ai_zai_url, set_ai_zai_api_key, correct_text, set_editor_ai, get_editor_ai, set_editor_ai_completion, get_editor_ai_completion, get_ai_completion, set_ai_openai_model, get_ai_openai_model, set_ai_zai_model, get_ai_zai_model};
-use soundpanel::{sp_get_bindings, sp_add_binding, sp_remove_binding, sp_test_sound, sp_is_supported_format, sp_get_floating_appearance, sp_set_floating_opacity, sp_set_floating_bg_color, sp_set_floating_clickthrough, sp_is_floating_clickthrough_enabled, sp_play_binding, get_intercept_settings, set_intercept_enabled, set_intercept_binding, clear_intercept_binding};
+use commands::ai::{set_ai_provider, set_ai_prompt, set_ai_openai_api_key, set_ai_openai_use_proxy, set_ai_zai_url, set_ai_zai_api_key, correct_text, set_editor_ai, get_editor_ai, set_editor_ai_completion, get_editor_ai_completion, get_ai_completion, set_ai_openai_model, get_ai_openai_model, set_ai_zai_model, get_ai_zai_model, set_ai_deepseek_api_key, set_ai_deepseek_model, set_ai_deepseek_use_proxy, get_ai_deepseek_model, ai_check_grammar};
+use soundpanel::{sp_get_bindings, sp_add_binding, sp_remove_binding, sp_test_sound, sp_is_supported_format, sp_get_floating_appearance, sp_set_floating_opacity, sp_set_floating_bg_color, sp_set_floating_clickthrough, sp_is_floating_clickthrough_enabled, sp_play_binding, get_intercept_settings, set_intercept_enabled, set_intercept_binding, clear_intercept_binding, sp_get_sets, sp_get_active_set, sp_set_active_set, sp_add_set, sp_rename_set, sp_remove_set};
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -238,6 +239,10 @@ pub fn run() {
     *app_state.history_manager.lock() = Some(history_manager.clone());
     let history_state = commands::history::HistoryState(history_manager);
 
+    let tabs_path = tabs::tabs_path().expect("Failed to resolve tabs path");
+    let tab_manager = Arc::new(tabs::TabManager::new(tabs_path));
+    let tabs_state = commands::tabs::TabsState(tab_manager);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -248,6 +253,7 @@ pub fn run() {
         .manage(windows_manager)
         .manage(soundpanel_state)
         .manage(history_state)
+        .manage(tabs_state)
         .invoke_handler(tauri::generate_handler![
             greet,
             speak_text,
@@ -285,6 +291,9 @@ pub fn run() {
             commands::history::get_phrase_history,
             commands::history::delete_phrase_history,
             commands::history::clear_phrase_history,
+            // Tab persistence commands
+            commands::tabs::get_tabs,
+            commands::tabs::save_tabs,
             // Theme commands
             update_theme,
             hide_main_window,
@@ -300,6 +309,12 @@ pub fn run() {
             sp_set_floating_clickthrough,
             sp_is_floating_clickthrough_enabled,
             sp_play_binding,
+            sp_get_sets,
+            sp_get_active_set,
+            sp_set_active_set,
+            sp_add_set,
+            sp_rename_set,
+            sp_remove_set,
             get_intercept_settings,
             set_intercept_enabled,
             set_intercept_binding,
@@ -405,6 +420,11 @@ pub fn run() {
             get_ai_openai_model,
             set_ai_zai_model,
             get_ai_zai_model,
+            set_ai_deepseek_api_key,
+            set_ai_deepseek_model,
+            set_ai_deepseek_use_proxy,
+            get_ai_deepseek_model,
+            ai_check_grammar,
             // Fish Audio commands
             commands::get_fish_audio_api_key,
             commands::set_fish_audio_api_key,

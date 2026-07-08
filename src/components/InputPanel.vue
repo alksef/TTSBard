@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted as vueOnUnmounted, inject, nextTick, type Ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, UnlistenFn } from '@tauri-apps/api/event'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useEditorSettings, useAiSettings } from '../composables/useAppSettings'
 import { useErrorHandler } from '../composables/useErrorHandler'
 import { debugLog, debugError } from '../utils/debug'
@@ -13,7 +14,7 @@ import { useEditorTabs } from '../composables/useEditorTabs'
 import EditorTabs from './editor/EditorTabs.vue'
 
 const { showError } = useErrorHandler()
-const { tabs, activeId, active, create: createTab, close: closeTab, select: selectTab, rename: renameTab } = useEditorTabs()
+const { tabs, activeId, active, create: createTab, close: closeTab, select: selectTab, rename: renameTab, init: initTabs, flushSave: flushTabsSave } = useEditorTabs()
 
 const text = computed<string>({
   get: () => active.value.text,
@@ -36,6 +37,7 @@ async function onSelect(id: string) {
 
 const isCorrecting = ref(false)
 const isCompleting = ref(false)
+const isCheckingGrammar = ref(false)
 const showHistory = ref(true)
 const replacements = ref<Map<string, string>>(new Map())
 const usernames = ref<Map<string, string>>(new Map())
@@ -58,13 +60,15 @@ const isProviderConfigured = computed(() => {
     ? !!aiSettings.value?.openai?.api_key
     : provider === 'zai'
       ? !!aiSettings.value?.zai?.api_key
-      : false
+      : provider === 'deepseek'
+        ? !!aiSettings.value?.deepseek?.api_key
+        : false
 
-  // Debug logging to diagnose issues
   debugLog('[InputPanel] AI provider check:', {
     provider,
     hasOpenaiKey: !!aiSettings.value?.openai?.api_key,
     hasZaiKey: !!aiSettings.value?.zai?.api_key,
+    hasDeepSeekKey: !!aiSettings.value?.deepseek?.api_key,
     isProviderConfigured: hasKey
   })
 
@@ -102,7 +106,7 @@ function onPreprocessorChanged() {
 }
 
 onMounted(async () => {
-  // Quick editor enabled is now loaded from composable via watch
+  await initTabs()
 
   // Listen for settings changes (kept for other potential settings)
   unlistenSettings = await listen('settings-changed', async () => {
@@ -114,9 +118,31 @@ onMounted(async () => {
 
   // Initial load
   await reloadPreprocessorData()
+
+  // Flush tabs to disk when the main window is closed.
+  // NOTE: the backend (lib.rs on_window_event) handles CloseRequested for "main"
+  // by prevent_close() + hide() (minimize to tray). We must NOT call
+  // preventDefault()/destroy() here — that would destroy the window instead of
+  // hiding it to tray, breaking the tray behavior. We only flush tabs; the
+  // backend's own handler still runs and hides the window.
+  let unlistenClose: (() => void) | undefined
+  const currentWindow = getCurrentWindow()
+  const closeHandler = async () => {
+    await flushTabsSave()
+  }
+  const unlistenResult = await currentWindow.onCloseRequested(closeHandler)
+  if (typeof unlistenResult === 'function') {
+    unlistenClose = unlistenResult
+  }
+
+  vueOnUnmounted(() => {
+    if (unlistenClose) unlistenClose()
+  })
 })
 
-vueOnUnmounted(() => {
+
+vueOnUnmounted(async () => {
+  await flushTabsSave()
   if (unlistenSettings) {
     unlistenSettings()
   }
@@ -176,6 +202,21 @@ async function completeText() {
     showError('Не удалось дописать текст')
   } finally {
     isCompleting.value = false
+  }
+}
+
+async function checkGrammar() {
+  if (!text.value.trim()) return
+  isCheckingGrammar.value = true
+  try {
+    const corrected = await invoke<string>('ai_check_grammar', { text: text.value })
+    text.value = corrected
+    debugLog('[InputPanel] Grammar check done')
+  } catch (e) {
+    debugError('[InputPanel] Grammar check failed:', e)
+    showError('Не удалось проверить грамматику')
+  } finally {
+    isCheckingGrammar.value = false
   }
 }
 
@@ -259,13 +300,14 @@ const usernamesRecord = computed(() => {
           :has-text="!!text.trim()"
           @correct="correctText"
           @complete="completeText"
+          @grammar="checkGrammar"
           @toggle-history="showHistory = !showHistory"
         />
         <button
           v-if="!isMinimalMode"
           class="correct-button"
-          :class="{ loading: isCorrecting || isCompleting }"
-          :disabled="isCorrecting || isCompleting || !text.trim() || !isAiButtonEnabled"
+          :class="{ loading: isCorrecting || isCompleting || isCheckingGrammar }"
+          :disabled="isCorrecting || isCompleting || isCheckingGrammar || !text.trim() || !isAiButtonEnabled"
           @click="correctText"
           title="Корректировать текст с помощью AI"
         >
