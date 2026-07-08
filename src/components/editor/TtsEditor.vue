@@ -222,6 +222,36 @@ const hybridSource: CompletionSource = async (context: CompletionContext) => {
   }
 }
 
+const presetSource: CompletionSource = (context: CompletionContext) => {
+  const before = context.matchBefore(/\\[^\s\\]*|%[^\s%]*/)
+  if (!before) return null
+
+  const prefix = before.text
+  const isUsername = prefix.startsWith('%')
+  const keyPart = prefix.slice(1).toLowerCase()
+  const map: Record<string, string> = isUsername ? usr.value : rep.value
+
+  const entries = Object.entries(map).filter(([k]) =>
+    k.toLowerCase().startsWith(keyPart)
+  )
+  if (entries.length === 0) return null
+
+  return {
+    from: before.from,
+    options: entries.map(([k, v]) => ({
+      label: isUsername ? `%${k}` : `\\${k}`,
+      detail: `→ ${v}`,
+      apply: (view: EditorView, _completion: Completion, from: number, to: number) => {
+        const insert = v + ' '
+        view.dispatch({
+          changes: { from, to, insert },
+          selection: { anchor: from + insert.length },
+        })
+      },
+    })),
+  }
+}
+
 function createKeymap() {
   return keymap.of([
     {
@@ -295,7 +325,7 @@ function createState() {
       EditorState.readOnly.of(false),
       createKeymap(),
       autocompletion({
-        override: [hybridSource],
+        override: [hybridSource, presetSource],
         closeOnBlur: true,
         selectOnOpen: false,
         icons: true,
