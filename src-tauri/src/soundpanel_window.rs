@@ -32,6 +32,7 @@ pub fn show_soundpanel_window(app_handle: &AppHandle) -> tauri::Result<()> {
 
         window.show()?;
         window.set_focus()?;
+        let _ = emit_soundpanel_bindings_changed(app_handle);
 
         let sp_state = app_handle.state::<SoundPanelState>();
         let had_clickthrough = sp_state.is_floating_clickthrough_enabled();

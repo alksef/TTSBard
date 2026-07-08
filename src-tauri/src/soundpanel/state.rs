@@ -60,13 +60,8 @@ impl SoundSets {
 
     /// Найти индекс активного набора, с fallback на 0
     pub fn find_active_index(&self) -> usize {
-        if !self.active_set_id.is_empty() {
-            if let Some(idx) = self.sets.iter().position(|s| s.id == self.active_set_id) {
-                return idx;
-            }
-        }
-        if self.sets.is_empty() {
-            0
+        if let Some(idx) = self.sets.iter().position(|s| s.id == self.active_set_id) {
+            idx
         } else {
             0
         }
@@ -494,6 +489,59 @@ mod tests {
     fn test_find_active_empty() {
         let sets = SoundSets::default();
         assert!(sets.find_active().is_none());
+    }
+
+    #[test]
+    fn test_find_active_index_not_first() {
+        let sets = SoundSets {
+            active_set_id: "set2".into(),
+            sets: vec![
+                SoundSet {
+                    id: "set1".into(),
+                    name: "First".into(),
+                    bindings: vec![],
+                },
+                SoundSet {
+                    id: "set2".into(),
+                    name: "Second".into(),
+                    bindings: vec![],
+                },
+            ],
+        };
+        assert_eq!(sets.find_active_index(), 1);
+    }
+
+    #[test]
+    fn test_find_active_index_invalid_falls_back_to_zero() {
+        let sets = SoundSets {
+            active_set_id: "bogus".into(),
+            sets: vec![SoundSet {
+                id: "set1".into(),
+                name: "First".into(),
+                bindings: vec![],
+            }],
+        };
+        assert_eq!(sets.find_active_index(), 0);
+    }
+
+    #[test]
+    fn test_find_active_index_empty_active_set_id_returns_zero() {
+        let sets = SoundSets {
+            active_set_id: String::new(),
+            sets: vec![
+                SoundSet {
+                    id: "set1".into(),
+                    name: "First".into(),
+                    bindings: vec![],
+                },
+                SoundSet {
+                    id: "set2".into(),
+                    name: "Second".into(),
+                    bindings: vec![],
+                },
+            ],
+        };
+        assert_eq!(sets.find_active_index(), 0);
     }
 
     #[test]
