@@ -1,6 +1,7 @@
 import { linter, type Diagnostic } from '@codemirror/lint'
 import type { EditorView } from '@codemirror/view'
 import type { SpellResult } from '../../types/spell'
+import { debugError } from '../../utils/debug'
 
 const WORD_RE = /[a-zа-яё][a-zа-яё-]*/giu
 
@@ -18,7 +19,8 @@ export function createSpellLinter(checkWords: SpellCheckFn, enabled: () => boole
     let results: SpellResult[]
     try {
       results = await checkWords(words)
-    } catch {
+    } catch (e) {
+      debugError('[spellLinter] checkWords failed:', e)
       return []
     }
     const diagnostics: Diagnostic[] = []

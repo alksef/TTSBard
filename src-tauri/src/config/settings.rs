@@ -441,7 +441,7 @@ pub enum SpellSource {
 }
 
 /// Editor settings for quick and AI editor modes
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct EditorSettings {
     #[serde(default)]
@@ -454,6 +454,18 @@ pub struct EditorSettings {
     pub spellcheck_enabled: bool,
     #[serde(default)]
     pub spellcheck_source: SpellSource,
+}
+
+impl Default for EditorSettings {
+    fn default() -> Self {
+        Self {
+            quick: false,
+            ai: false,
+            ai_completion: false,
+            spellcheck_enabled: true,
+            spellcheck_source: SpellSource::Offline,
+        }
+    }
 }
 
 // ==================== AI Settings ====================

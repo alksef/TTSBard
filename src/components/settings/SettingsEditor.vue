@@ -13,6 +13,19 @@ const emit = defineEmits<{
 
 const quickEditorEnabled = computed(() => editorSettings.value?.quick ?? false);
 
+const spellcheckEnabled = computed(() => editorSettings.value?.spellcheck_enabled ?? true)
+
+async function toggleSpellcheck() {
+  try {
+    const newValue = !(editorSettings.value?.spellcheck_enabled ?? true)
+    await invoke('set_editor_spellcheck_enabled', { enabled: newValue })
+    emit('show-message', 'Настройка сохранена')
+  } catch (e) {
+    const errorMessage = e instanceof Error ? e.message : String(e)
+    emit('show-message', 'Ошибка переключения орфографии: ' + errorMessage)
+  }
+}
+
 async function toggleQuickEditor() {
   try {
     const newValue = !(editorSettings.value?.quick ?? false);
@@ -47,7 +60,22 @@ watch(editorSettings, (newSettings) => {
           При включении скрывает окно по нажатию <code>Enter</code> (после отправки на TTS) или <code>Esc</code> в поле текста
         </span>
       </div>
-    </section>
+
+      <div class="setting-row">
+        <label class="setting-label checkbox-label">
+          <input
+            :checked="spellcheckEnabled"
+            type="checkbox"
+            class="checkbox-input"
+            @change="toggleSpellcheck"
+          />
+          <span>Проверка орфографии (офлайн)</span>
+        </label>
+        <span class="setting-hint">
+          Подчёркивает ошибки и предлагает варианты исправления. Работает без сети (локальный словарь)
+        </span>
+      </div>
+      </section>
   </div>
 </template>
 
