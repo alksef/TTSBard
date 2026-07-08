@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 const AUDIO_CACHE_SIZE: usize = 20;
 const MAX_QUEUE: usize = 50;
@@ -149,6 +149,7 @@ impl PlaybackManager {
 
             match cmd {
                 Ok(Cmd::Enqueue(phrase)) => {
+                    info!(target: "playback", text=%phrase.text, "Enqueue received");
                     if playing {
                         continue;
                     }
@@ -191,6 +192,7 @@ impl PlaybackManager {
                         }
                     }
 
+                    info!(target: "playback", has_spk=sink_spk.is_some(), has_mic=sink_mic.is_some(), "Playback start check");
                     if sink_spk.is_some() || sink_mic.is_some() {
                         playing = true;
                         state.write().status = PlaybackStatus::Playing;
@@ -205,6 +207,9 @@ impl PlaybackManager {
                                 "text": phrase.text,
                             }),
                         );
+                        info!(target: "playback", "PlaybackStarted emitted");
+                    } else {
+                        warn!(target: "playback", "No output sink — playback NOT started (speaker+mic both failed)");
                     }
                 }
                 Ok(Cmd::Pause) => {
@@ -295,12 +300,14 @@ impl PlaybackManager {
                     || sink_mic.as_ref().map(|s| s.is_paused()).unwrap_or(false);
 
                 if !paused && spk_done && mic_done {
+                    debug!(target: "playback", "Sinks drained, playing=false");
                     playing = false;
                     sink_spk.take();
                     sink_mic.take();
                     _stream_spk.take();
                     _stream_mic.take();
                     state.write().status = PlaybackStatus::Idle;
+                    info!(target: "playback", "PlaybackFinished, playing reset");
                     let _ = internal_ev.send(crate::events::AppEvent::PlaybackFinished);
                     let _ = app.emit("queue-changed", ());
                 }

@@ -1,6 +1,7 @@
 use crate::playback::{PlaybackManager, PlaybackStateDto};
 use std::sync::Arc;
 use tauri::State;
+use tracing::debug;
 
 pub struct PlaybackState(pub Arc<PlaybackManager>);
 
@@ -54,5 +55,7 @@ pub fn replay_phrase(id: String, playback: State<'_, PlaybackState>) -> Result<(
 #[tauri::command]
 pub fn get_playback_state(playback: State<'_, PlaybackState>) -> PlaybackStateDto {
     let pb = &playback.inner().0;
-    pb.get_state()
+    let dto = pb.get_state();
+    debug!(target: "playback", status=?dto.status, current=dto.current.is_some(), recent=dto.recent.len(), "get_playback_state");
+    dto
 }

@@ -256,7 +256,10 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
         // Передаём актуальную конфигурацию аудио (C1-дыра: effects_volume, speaker_enabled dynamic)
         pb.update_audio_config(speaker_config, virtual_mic_config);
         let phrase_id = uuid::Uuid::new_v4().to_string();
-        if !pb.enqueue(phrase_id, text.clone(), audio_data) {
+        info!(target: "playback", "Enqueueing phrase to PlaybackManager");
+        let enqueued = pb.enqueue(phrase_id, text.clone(), audio_data);
+        info!(target: "playback", enqueued, "enqueue result");
+        if !enqueued {
             warn!("Playback queue full, phrase dropped: {}", text);
             return Err("Очередь воспроизведения переполнена. Попробуйте позже.".to_string());
         }
