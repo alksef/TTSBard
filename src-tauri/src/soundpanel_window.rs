@@ -19,7 +19,6 @@ pub fn show_soundpanel_window(app_handle: &AppHandle) -> tauri::Result<()> {
             "Window exists, showing"
         );
 
-        // Применяем сохранённую позицию
         let windows_manager = app_handle.state::<WindowsManager>();
         let (saved_x, saved_y) = windows_manager.get_soundpanel_position();
 
@@ -35,7 +34,6 @@ pub fn show_soundpanel_window(app_handle: &AppHandle) -> tauri::Result<()> {
         window.set_focus()?;
 
         let sp_state = app_handle.state::<SoundPanelState>();
-        // Снимаем clickthrough на время активности панели, чтобы окно получало keydown
         let had_clickthrough = sp_state.is_floating_clickthrough_enabled();
         debug!(
             window_type = "soundpanel",
@@ -43,7 +41,6 @@ pub fn show_soundpanel_window(app_handle: &AppHandle) -> tauri::Result<()> {
         );
         let _ = window.set_ignore_cursor_events(false);
 
-        // Применяем защиту от захвата ПОСЛЕ показа окна
         #[cfg(windows)]
         {
             use crate::window::set_window_exclude_from_capture;
@@ -60,7 +57,6 @@ pub fn show_soundpanel_window(app_handle: &AppHandle) -> tauri::Result<()> {
         return Ok(());
     }
 
-    // Окно создано Tauri из конфига, просто показываем
     Err(tauri::Error::WindowNotFound)
 }
 
@@ -78,7 +74,6 @@ pub fn update_soundpanel_appearance(app_handle: &AppHandle) -> tauri::Result<()>
             event = "appearance-update",
             "SoundPanel window exists, sending appearance-update event"
         );
-        // Эмитим событие для обновления UI
         window.emit("soundpanel-appearance-update", ())?;
         info!(
             window_type = "soundpanel",
@@ -95,27 +90,39 @@ pub fn update_soundpanel_appearance(app_handle: &AppHandle) -> tauri::Result<()>
     Ok(())
 }
 
-/// Emit event to soundpanel window when bindings change
+/// Emit event when bindings change (broadcast to both main and soundpanel windows)
 pub fn emit_soundpanel_bindings_changed(app_handle: &AppHandle) -> tauri::Result<()> {
+    let payload = ();
+
+    // Emit to soundpanel window
     if let Some(window) = app_handle.get_webview_window("soundpanel") {
         info!(
             window_type = "soundpanel",
             status = "exists",
             event = "bindings-changed",
-            "Sending bindings-changed event"
+            "Sending bindings-changed event to soundpanel window"
         );
-        window.emit("soundpanel-bindings-changed", ())?;
+        window.emit("soundpanel-bindings-changed", payload)?;
     }
+
+    // Also emit to main window so SoundPanelTab updates
+    if let Some(window) = app_handle.get_webview_window("main") {
+        info!(
+            window_type = "main",
+            event = "bindings-changed",
+            "Sending bindings-changed event to main window"
+        );
+        window.emit("soundpanel-bindings-changed", payload)?;
+    }
+
     Ok(())
 }
 
 /// Hide soundpanel floating window
 pub fn hide_soundpanel_window(app_handle: &AppHandle, app_state: &AppState) -> tauri::Result<()> {
-    // Сбрасываем активное окно (взаимное исключение хоткеев)
     app_state.set_active_window(crate::state::ActiveWindow::None);
 
     if let Some(window) = app_handle.get_webview_window("soundpanel") {
-        // Сохраняем текущую позицию перед скрытием
         if let Some(manager) = app_handle.try_state::<WindowsManager>() {
             if let Ok(outer_pos) = window.outer_position() {
                 let x = outer_pos.x;
@@ -132,7 +139,6 @@ pub fn hide_soundpanel_window(app_handle: &AppHandle, app_state: &AppState) -> t
         }
         window.hide()?;
 
-        // Восстанавливаем clickthrough из состояния после скрытия
         if let Some(sp_state) = app_handle.try_state::<SoundPanelState>() {
             if sp_state.is_floating_clickthrough_enabled() {
                 debug!(

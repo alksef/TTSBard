@@ -41,3 +41,20 @@ export interface SoundBinding {
   filename: string
   original_path?: string
 }
+
+/**
+ * Sound Panel set (group of bindings)
+ */
+export interface SoundSet {
+  id: string
+  name: string
+  bindings: SoundBinding[]
+}
+
+/**
+ * Sound Panel all sets with active set ID
+ */
+export interface SoundSets {
+  active_set_id: string
+  sets: SoundSet[]
+}

@@ -8,11 +8,11 @@ use crate::config::{
 use crate::events::AppEvent;
 use crate::soundpanel::intercept::InterceptSettings;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use tracing::{debug, error, info};
+use uuid::Uuid;
 
 /// Привязка звука к клавише
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,14 +27,60 @@ pub struct SoundBinding {
     pub original_path: Option<String>,
 }
 
+/// Набор звуков (Set) — группа привязок A-Z
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SoundSet {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub bindings: Vec<SoundBinding>,
+}
+
+/// Контейнер всех наборов + ID активного набора
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SoundSets {
+    #[serde(default)]
+    pub active_set_id: String,
+    #[serde(default)]
+    pub sets: Vec<SoundSet>,
+}
+
+impl SoundSets {
+    /// Найти активный набор по active_set_id, с fallback на первый
+    pub fn find_active(&self) -> Option<&SoundSet> {
+        if !self.active_set_id.is_empty() {
+            if let Some(set) = self.sets.iter().find(|s| s.id == self.active_set_id) {
+                return Some(set);
+            }
+        }
+        self.sets.first()
+    }
+
+    /// Найти индекс активного набора, с fallback на 0
+    pub fn find_active_index(&self) -> usize {
+        if !self.active_set_id.is_empty() {
+            if let Some(idx) = self.sets.iter().position(|s| s.id == self.active_set_id) {
+                return idx;
+            }
+        }
+        if self.sets.is_empty() {
+            0
+        } else {
+            0
+        }
+    }
+}
+
 /// Состояние звуковой панели
 #[derive(Clone)]
 pub struct SoundPanelState {
     /// Включен ли режим перехвата для звуковой панели
     pub interception_enabled: Arc<Mutex<bool>>,
 
-    /// Привязки клавиш к звукам (key -> binding)
-    pub bindings: Arc<Mutex<HashMap<char, SoundBinding>>>,
+    /// Наборы звуков (Set), каждый со своими привязками
+    pub sets: Arc<Mutex<SoundSets>>,
 
     /// Отправитель событий для MPSC канала
     pub event_sender: Arc<Mutex<Option<Sender<AppEvent>>>>,
@@ -58,13 +104,17 @@ pub struct SoundPanelState {
     active_playbacks: Arc<Mutex<Vec<JoinHandle<()>>>>,
 }
 
+fn gen_set_id() -> String {
+    Uuid::new_v4().to_string()
+}
+
 impl SoundPanelState {
     /// Создать новое состояние звуковой панели
     pub fn new(appdata_path: String) -> Self {
         let intercept = crate::soundpanel::intercept::load(&appdata_path);
         Self {
             interception_enabled: Arc::new(Mutex::new(false)),
-            bindings: Arc::new(Mutex::new(HashMap::new())),
+            sets: Arc::new(Mutex::new(SoundSets::default())),
             event_sender: Arc::new(Mutex::new(None)),
             appdata_path: Arc::new(Mutex::new(appdata_path)),
             floating_opacity: Arc::new(Mutex::new(DEFAULT_FLOATING_OPACITY)),
@@ -96,40 +146,133 @@ impl SoundPanelState {
         }
     }
 
-    /// Получить привязку по клавише
+    /// Получить привязку по клавише из активного набора
     pub fn get_binding(&self, key: char) -> Option<SoundBinding> {
-        self.bindings.lock().ok().and_then(|b| b.get(&key).cloned())
+        self.sets.lock().ok().and_then(|sets| {
+            sets.find_active()
+                .and_then(|active| active.bindings.iter().find(|b| b.key == key).cloned())
+        })
     }
 
-    /// Добавить привязку
+    /// Добавить привязку в активный набор
     pub fn add_binding(&self, binding: SoundBinding) {
-        if let Ok(mut bindings) = self.bindings.lock() {
-            bindings.insert(binding.key, binding.clone());
+        if let Ok(mut sets) = self.sets.lock() {
+            let idx = sets.find_active_index();
+            if let Some(active) = sets.sets.get_mut(idx) {
+                active.bindings.retain(|b| b.key != binding.key);
+                active.bindings.push(binding);
+            }
         } else {
-            error!(target = "soundpanel::state", "Failed to lock bindings");
+            error!(target = "soundpanel::state", "Failed to lock sets");
         }
     }
 
-    /// Удалить привязку
+    /// Удалить привязку из активного набора
     pub fn remove_binding(&self, key: char) {
-        if let Ok(mut bindings) = self.bindings.lock() {
-            bindings.remove(&key);
+        if let Ok(mut sets) = self.sets.lock() {
+            let idx = sets.find_active_index();
+            if let Some(active) = sets.sets.get_mut(idx) {
+                active.bindings.retain(|b| b.key != key);
+            }
         } else {
-            error!(target = "soundpanel::state", "Failed to lock bindings");
+            error!(target = "soundpanel::state", "Failed to lock sets");
         }
     }
 
-    /// Получить все привязки
+    /// Получить все привязки активного набора (отсортированные)
     pub fn get_all_bindings(&self) -> Vec<SoundBinding> {
-        self.bindings
+        self.sets
             .lock()
             .ok()
-            .map(|b| {
-                let mut bindings: Vec<_> = b.values().cloned().collect();
-                bindings.sort_by(|a, b| a.key.cmp(&b.key));
-                bindings
+            .and_then(|sets| {
+                sets.find_active().map(|active| {
+                    let mut bindings: Vec<_> = active.bindings.clone();
+                    bindings.sort_by(|a, b| a.key.cmp(&b.key));
+                    bindings
+                })
             })
             .unwrap_or_default()
+    }
+
+    /// Получить все наборы (клон)
+    pub fn get_sets(&self) -> SoundSets {
+        self.sets.lock().map(|s| s.clone()).unwrap_or_default()
+    }
+
+    /// Получить активный набор (клон, с fallback на пустой)
+    pub fn get_active_set(&self) -> SoundSet {
+        self.sets
+            .lock()
+            .ok()
+            .and_then(|sets| sets.find_active().cloned())
+            .unwrap_or_default()
+    }
+
+    /// Сменить активный набор по ID
+    pub fn set_active_set(&self, id: &str) {
+        if let Ok(mut sets) = self.sets.lock() {
+            if sets.sets.iter().any(|s| s.id == id) {
+                sets.active_set_id = id.to_string();
+            }
+        } else {
+            error!(target = "soundpanel::state", "Failed to lock sets");
+        }
+    }
+
+    /// Создать новый набор и сделать его активным
+    pub fn add_set(&self, name: &str) -> Result<SoundSet, String> {
+        let mut sets = self.sets.lock().map_err(|e| format!("Lock error: {}", e))?;
+        let id = gen_set_id();
+        let set = SoundSet {
+            id,
+            name: name.to_string(),
+            bindings: Vec::new(),
+        };
+        let result = set.clone();
+        sets.sets.push(set);
+        sets.active_set_id = result.id.clone();
+        Ok(result)
+    }
+
+    /// Переименовать набор
+    pub fn rename_set(&self, id: &str, name: &str) -> Result<(), String> {
+        let mut sets = self.sets.lock().map_err(|e| format!("Lock error: {}", e))?;
+        if let Some(set) = sets.sets.iter_mut().find(|s| s.id == id) {
+            set.name = name.to_string();
+        }
+        Ok(())
+    }
+
+    /// Удалить набор. Если удалён активный — переключить на соседний/первый.
+    pub fn remove_set(&self, id: &str) -> Result<(), String> {
+        let mut sets = self.sets.lock().map_err(|e| format!("Lock error: {}", e))?;
+
+        let target_idx = sets.sets.iter().position(|s| s.id == id);
+        if let Some(idx) = target_idx {
+            sets.sets.remove(idx);
+
+            if sets.active_set_id == id {
+                let new_active = if idx < sets.sets.len() {
+                    sets.sets[idx].id.clone()
+                } else if idx > 0 && !sets.sets.is_empty() {
+                    let new_idx = idx.saturating_sub(1).min(sets.sets.len() - 1);
+                    sets.sets[new_idx].id.clone()
+                } else {
+                    String::new()
+                };
+                sets.active_set_id = new_active;
+            }
+        }
+        Ok(())
+    }
+
+    /// Целиком заменить наборы (для загрузки из хранилища)
+    pub fn replace_sets(&self, new_sets: SoundSets) {
+        if let Ok(mut sets) = self.sets.lock() {
+            *sets = new_sets;
+        } else {
+            error!(target = "soundpanel::state", "Failed to lock sets");
+        }
     }
 
     /// Воспроизвести звук по привязке
@@ -139,15 +282,12 @@ impl SoundPanelState {
 
         info!(target = "soundpanel", key = %binding.key, path = ?sound_path, "Playing sound");
 
-        // Запустить воспроизведение в отдельном потоке и отслеживать handle
         let handle = std::thread::spawn(move || {
             super::audio::play_audio_file(&sound_path);
         });
 
-        // Сохранить handle и очистить завершённые потоки
         if let Ok(mut playbacks) = self.active_playbacks.lock() {
             playbacks.push(handle);
-            // Удаляем завершённые потоки для предотвращения утечки памяти
             playbacks.retain(|h| !h.is_finished());
         }
     }
@@ -212,7 +352,6 @@ impl SoundPanelState {
             );
             return;
         }
-        // Emit event AFTER releasing the mutex to prevent potential deadlock
         debug!(
             target = "soundpanel::state",
             "Emitting SoundPanelAppearanceChanged event"
@@ -243,7 +382,6 @@ impl SoundPanelState {
             );
             return;
         }
-        // Emit event AFTER releasing the mutex to prevent potential deadlock
         debug!(
             target = "soundpanel::state",
             "Emitting SoundPanelAppearanceChanged event"
@@ -330,5 +468,57 @@ impl SoundPanelState {
         } else {
             error!(target = "soundpanel::state", "Failed to lock intercept");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_find_active_fallback() {
+        let sets = SoundSets {
+            active_set_id: "bogus".into(),
+            sets: vec![SoundSet {
+                id: "set1".into(),
+                name: "First".into(),
+                bindings: vec![],
+            }],
+        };
+        let active = sets.find_active();
+        assert!(active.is_some());
+        assert_eq!(active.unwrap().id, "set1");
+    }
+
+    #[test]
+    fn test_find_active_empty() {
+        let sets = SoundSets::default();
+        assert!(sets.find_active().is_none());
+    }
+
+    #[test]
+    fn test_migration_vec_to_sets() {
+        let old_json = r#"[
+            {"key":"A","description":"test a","filename":"a.mp3","original_path":null},
+            {"key":"B","description":"test b","filename":"b.mp3","original_path":"D:\\b.mp3"}
+        ]"#;
+
+        let old_bindings: Vec<SoundBinding> = serde_json::from_str(old_json).unwrap();
+        assert_eq!(old_bindings.len(), 2);
+
+        let id = gen_set_id();
+        let sets = SoundSets {
+            active_set_id: id.clone(),
+            sets: vec![SoundSet {
+                id,
+                name: "Основной".into(),
+                bindings: old_bindings,
+            }],
+        };
+
+        let active = sets.find_active().unwrap();
+        assert_eq!(active.name, "Основной");
+        assert_eq!(active.bindings.len(), 2);
+        assert_eq!(active.bindings[0].key, 'A');
     }
 }

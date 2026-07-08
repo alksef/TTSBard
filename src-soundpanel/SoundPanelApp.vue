@@ -10,16 +10,25 @@ interface SoundBinding {
   filename: string
 }
 
+interface SoundSet {
+  id: string
+  name: string
+  bindings: SoundBinding[]
+}
+
+interface SoundSets {
+  active_set_id: string
+  sets: SoundSet[]
+}
+
 const noBindingMessage = ref<string | null>(null)
 let messageTimeout: number | null = null
 
-// Appearance settings
 const opacity = ref(90)
 const bgColor = ref('#2a2a2a')
 const clickthroughEnabled = ref(false)
 const showTransparencyControl = ref(false)
 
-// Bindings list
 interface Binding {
   key: string
   description: string
@@ -27,7 +36,10 @@ interface Binding {
 
 const bindings = ref<Binding[]>([])
 
-// Unified styling - прозрачность и цвет для всего окна
+const activeSetId = ref<string>('')
+const activeSetName = ref<string>('')
+const sets = ref<SoundSet[]>([])
+
 const overlayStyle = computed(() => {
   const base = hexToRgba(bgColor.value, opacity.value / 100)
   return {
@@ -53,6 +65,37 @@ async function loadBindings() {
   } catch (e) {
     console.error('[SoundPanel] Failed to load bindings:', e)
   }
+}
+
+async function loadSets() {
+  try {
+    const result = await invoke<SoundSets>('sp_get_sets')
+    sets.value = result.sets || []
+    activeSetId.value = result.active_set_id || ''
+    const active = sets.value.find(s => s.id === activeSetId.value)
+    activeSetName.value = active ? active.name : ''
+  } catch (e) {
+    console.error('[SoundPanel] Failed to load sets:', e)
+  }
+}
+
+function getNextSetIdx(): number {
+  const idx = sets.value.findIndex(s => s.id === activeSetId.value)
+  if (idx < 0) return 0
+  return (idx + 1) % sets.value.length
+}
+
+function getPrevSetIdx(): number {
+  const idx = sets.value.findIndex(s => s.id === activeSetId.value)
+  if (idx < 0) return 0
+  return (idx - 1 + sets.value.length) % sets.value.length
+}
+
+async function cycleSet(direction: 'next' | 'prev') {
+  if (sets.value.length <= 1) return
+  const idx = direction === 'next' ? getNextSetIdx() : getPrevSetIdx()
+  const newId = sets.value[idx].id
+  await invoke('sp_set_active_set', { id: newId })
 }
 
 function showNoBinding(key: string) {
@@ -115,16 +158,14 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-// Expose function to be called from main.ts
 defineExpose({
   showNoBinding
 })
 
 onMounted(async () => {
-  // Load bindings
+  await loadSets()
   await loadBindings()
 
-  // Load appearance settings
   try {
     const [loadedOpacity, loadedColor] = await invoke<[number, string]>('sp_get_floating_appearance')
     console.log('[SoundPanel] Loaded appearance:', { opacity: loadedOpacity, color: loadedColor })
@@ -134,21 +175,18 @@ onMounted(async () => {
     console.error('Failed to load appearance:', e)
   }
 
-  // Load clickthrough state
   try {
     clickthroughEnabled.value = await invoke<boolean>('sp_is_floating_clickthrough_enabled')
   } catch (e) {
     console.error('Failed to load clickthrough:', e)
   }
 
-  // Listen for appearance updates
   const unlisten = await listen('soundpanel-appearance-update', async () => {
     console.log('[SoundPanel] Appearance update event received')
     const [newOpacity, newColor] = await invoke<[number, string]>('sp_get_floating_appearance')
     console.log('[SoundPanel] New appearance:', { opacity: newOpacity, color: newColor })
     opacity.value = newOpacity
     bgColor.value = newColor
-    // Also reload clickthrough state
     try {
       clickthroughEnabled.value = await invoke<boolean>('sp_is_floating_clickthrough_enabled')
     } catch (e) {
@@ -158,18 +196,26 @@ onMounted(async () => {
   })
   console.log('[SoundPanel] Registered appearance update listener')
 
-  // Listen for bindings changes
   const unlistenBindings = await listen('soundpanel-bindings-changed', async () => {
     console.log('[SoundPanel] Bindings changed event received, reloading')
+    await loadSets()
     await loadBindings()
   })
   console.log('[SoundPanel] Registered bindings changed listener')
+
+  const unlistenActiveSet = await listen('soundpanel-active-set-changed', async () => {
+    console.log('[SoundPanel] Active set changed event received, reloading')
+    await loadSets()
+    await loadBindings()
+  })
+  console.log('[SoundPanel] Registered active set changed listener')
 
   window.addEventListener('keydown', onKeydown)
 
   onUnmounted(() => {
     unlisten()
     unlistenBindings()
+    unlistenActiveSet()
     window.removeEventListener('keydown', onKeydown)
     if (messageTimeout !== null) {
       clearTimeout(messageTimeout)
@@ -180,10 +226,24 @@ onMounted(async () => {
 
 <template>
   <div class="overlay" :style="overlayStyle">
-    <!-- Title Bar - всегда активен для кликов -->
     <div class="title-bar">
       <div class="title-left">
         <span class="title">SoundPanel</span>
+        <div v-if="sets.length > 0" class="set-selector">
+          <button
+            v-if="sets.length > 1"
+            class="set-arrow"
+            @click="cycleSet('prev')"
+            title="Предыдущий набор"
+          >&#9664;</button>
+          <span class="set-name">{{ activeSetName || 'SoundPanel' }}</span>
+          <button
+            v-if="sets.length > 1"
+            class="set-arrow"
+            @click="cycleSet('next')"
+            title="Следующий набор"
+          >&#9654;</button>
+        </div>
       </div>
       <div class="buttons">
         <button
@@ -221,14 +281,11 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- Content - пропускает клики когда включён clickthrough -->
     <div class="content" :class="{ 'clickthrough': clickthroughEnabled }">
-      <!-- Сообщение об отсутствии привязки -->
       <div v-if="noBindingMessage" class="no-binding-message">
         {{ noBindingMessage }}
       </div>
 
-      <!-- Список привязок или сообщение по умолчанию -->
       <div v-else class="content-inner">
         <div v-if="bindings.length > 0" class="bindings-list">
           <div class="bindings-grid">
@@ -282,7 +339,6 @@ body {
   overflow: hidden;
 }
 
-/* Скрыть скроллбар WebView2 */
 ::-webkit-scrollbar {
   display: none;
 }
@@ -298,7 +354,6 @@ body {
   overflow: hidden;
 }
 
-/* Title Bar - всегда активен */
 .title-bar {
   height: 32px;
   display: flex;
@@ -319,6 +374,44 @@ body {
   font-size: 13px;
   font-weight: 500;
   opacity: 0.9;
+  color: white;
+}
+
+.set-selector {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  -webkit-app-region: no-drag;
+}
+
+.set-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: white;
+  opacity: 0.85;
+  min-width: 60px;
+  text-align: center;
+}
+
+.set-arrow {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.7);
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  padding: 0;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.set-arrow:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.4);
   color: white;
 }
 
@@ -384,7 +477,6 @@ button.active {
   cursor: pointer;
 }
 
-/* Content */
 .content {
   flex: 1;
   display: flex;
@@ -393,7 +485,6 @@ button.active {
   -webkit-app-region: no-drag;
 }
 
-/* Clickthrough mode - пропускает клики */
 .content.clickthrough {
   pointer-events: none;
 }

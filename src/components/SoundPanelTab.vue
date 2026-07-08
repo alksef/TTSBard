@@ -1,28 +1,26 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { open, confirm } from '@tauri-apps/plugin-dialog'
 import { Trash2, Plus, Folder, Play } from 'lucide-vue-next'
-import type { SoundBinding } from '../types'
+import type { SoundBinding, SoundSets, SoundSet } from '../types'
 import { useAppSettings } from '../composables/useAppSettings'
 import { debugLog, debugError } from '../utils/debug'
 
-const { settings: appSettings, reload: reloadSettings } = useAppSettings()
+const { settings: appSettings } = useAppSettings()
 
 const bindings = ref<SoundBinding[]>([])
 const errorMessage = ref<string | null>(null)
 const showAddDialog = ref(false)
 const isLoading = ref(false)
 
-// Форма добавления
 const newKey = ref('A')
 const newDescription = ref('')
 const newFilePath = ref('')
 const isTesting = ref(false)
 const isSaving = ref(false)
 
-// Настройки внешнего вида floating окна
 const opacity = ref(90)
 const bgColor = ref('#2a2a2a')
 const clickthroughEnabled = ref(false)
@@ -37,10 +35,100 @@ function hexToRgba(hex: string, opacity: number): string {
   return `rgba(${r}, ${g}, ${b}, ${opacity})`
 }
 
-// Доступные клавиши A-Z
 const availableKeys = Array.from({ length: 26 }, (_, i) =>
   String.fromCharCode(65 + i)
 )
+
+// ---- Sets management ----
+const sets = ref<SoundSet[]>([])
+const activeSetId = ref<string>('')
+const editingSetId = ref<string | null>(null)
+const editingSetName = ref('')
+const editingInputRef = ref<HTMLInputElement | null>(null)
+
+async function loadSets() {
+  try {
+    const result = await invoke<SoundSets>('sp_get_sets')
+    sets.value = result.sets || []
+    activeSetId.value = result.active_set_id || ''
+    debugLog('[SoundPanelTab] Loaded sets:', sets.value.length, 'active:', activeSetId.value)
+  } catch (e) {
+    debugError('[SoundPanelTab] Failed to load sets:', e)
+  }
+}
+
+async function switchSet(id: string) {
+  if (id === activeSetId.value) return
+  try {
+    await invoke('sp_set_active_set', { id })
+    activeSetId.value = id
+    await loadBindings()
+  } catch (e) {
+    showError('Ошибка переключения набора: ' + (e as Error).message)
+  }
+}
+
+async function addSet() {
+  const name = prompt('Имя набора:')
+  if (!name || !name.trim()) return
+  try {
+    const created = await invoke<SoundSet>('sp_add_set', { name: name.trim() })
+    await loadSets()
+    activeSetId.value = created.id
+    bindings.value = []
+  } catch (e) {
+    showError('Ошибка создания набора: ' + (e as Error).message)
+  }
+}
+
+function startRename(set: SoundSet) {
+  editingSetId.value = set.id
+  editingSetName.value = set.name
+  nextTick(() => {
+    editingInputRef.value?.focus()
+    editingInputRef.value?.select()
+  })
+}
+
+async function saveRename(id: string) {
+  const name = editingSetName.value.trim()
+  editingSetId.value = null
+  if (!name || !name.trim()) return
+  try {
+    await invoke('sp_rename_set', { id, name })
+    await loadSets()
+  } catch (e) {
+    showError('Ошибка переименования: ' + (e as Error).message)
+  }
+}
+
+function cancelRename() {
+  editingSetId.value = null
+}
+
+function onRenameKeydown(e: KeyboardEvent, id: string) {
+  if (e.key === 'Enter') saveRename(id)
+  if (e.key === 'Escape') cancelRename()
+}
+
+async function removeSet(id: string) {
+  const set = sets.value.find(s => s.id === id)
+  const name = set ? `"${set.name}"` : id
+  const confirmed = await confirm(`Удалить набор ${name}? Аудиофайлы останутся.`, {
+    title: 'Удалить набор',
+    kind: 'warning'
+  })
+  if (!confirmed) return
+  try {
+    await invoke('sp_remove_set', { id })
+    await loadSets()
+    await loadBindings()
+  } catch (e) {
+    showError('Ошибка удаления набора: ' + (e as Error).message)
+  }
+}
+
+// ---- Bindings management ----
 
 async function loadBindings() {
   try {
@@ -128,7 +216,6 @@ async function browseFile() {
     debugLog('[browseFile] Dialog result:', filePath)
 
     if (filePath) {
-      // open возвращает строку или null
       const pathStr = typeof filePath === 'string' ? filePath : String(filePath)
       debugLog('[browseFile] Selected path:', pathStr)
       newFilePath.value = pathStr
@@ -198,50 +285,44 @@ async function saveClickthrough() {
 }
 
 onMounted(async () => {
-  // Initialize data from unified config
-  if (appSettings.value) {
-    // Load bindings from unified config
-    bindings.value = appSettings.value.soundpanel_bindings || []
-    debugLog('[SoundPanelTab] Loaded bindings from unified config:', bindings.value.length)
+  await loadSets()
+  await loadBindings()
 
-    // Load appearance settings from unified config (windows.soundpanel)
+  if (appSettings.value) {
     opacity.value = appSettings.value.windows.soundpanel.opacity
     bgColor.value = appSettings.value.windows.soundpanel.bg_color
     clickthroughEnabled.value = appSettings.value.windows.soundpanel.clickthrough
     debugLog('[SoundPanelTab] Loaded appearance from unified config:', { opacity: opacity.value, bgColor: bgColor.value, clickthrough: clickthroughEnabled.value })
   } else {
-    // Fallback: load directly if appSettings is not available
-    console.warn('[SoundPanelTab] appSettings not available, loading directly')
-    loadBindings()
     await loadAppearanceSettings()
   }
 
-  // Слушаем события обновления внешнего вида
   const unlistenAppearance = await listen('soundpanel-appearance-update', () => {
     loadAppearanceSettings()
   })
 
-  // Слушаем события обновления биндингов
   const unlistenBindings = await listen('soundpanel-bindings-changed', async () => {
     debugLog('[SoundPanelTab] Bindings changed event, reloading')
-    await reloadSettings()
-    // Update local bindings from reloaded settings
-    if (appSettings.value) {
-      bindings.value = appSettings.value.soundpanel_bindings || []
-    }
+    await loadSets()
+    await loadBindings()
+  })
+
+  const unlistenActiveSet = await listen('soundpanel-active-set-changed', async () => {
+    debugLog('[SoundPanelTab] Active set changed event, reloading')
+    await loadSets()
+    await loadBindings()
   })
 
   onUnmounted(() => {
     unlistenAppearance?.()
     unlistenBindings?.()
+    unlistenActiveSet?.()
   })
 })
 
-// Watch for settings changes (e.g., from reload)
 watch(() => appSettings.value, (newSettings) => {
   if (newSettings) {
-    debugLog('[SoundPanelTab] Settings changed, updating local state')
-    bindings.value = newSettings.soundpanel_bindings || []
+    debugLog('[SoundPanelTab] Settings changed, updating appearance')
     opacity.value = newSettings.windows.soundpanel.opacity
     bgColor.value = newSettings.windows.soundpanel.bg_color
     clickthroughEnabled.value = newSettings.windows.soundpanel.clickthrough
@@ -251,12 +332,10 @@ watch(() => appSettings.value, (newSettings) => {
 
 <template>
   <div class="sound-panel-tab">
-    <!-- Сообщения -->
     <div v-if="errorMessage" class="message error-message">
       {{ errorMessage }}
     </div>
 
-    <!-- Описание -->
     <section class="info-section">
       <p>
         Нажмите <code>Ctrl+Shift+F2</code> для быстрого доступа к звуковой панели.
@@ -265,6 +344,43 @@ watch(() => appSettings.value, (newSettings) => {
       <p class="hint">
         Поддерживаемые форматы: MP3, WAV, OGG, FLAC
       </p>
+    </section>
+
+    <!-- Sets tabs -->
+    <section class="sets-section">
+      <div class="sets-tabs">
+        <div
+          v-for="set in sets"
+          :key="set.id"
+          class="set-tab"
+          :class="{ active: set.id === activeSetId }"
+          @click="switchSet(set.id)"
+          @dblclick="startRename(set)"
+          :title="'Двойной клик для переименования'"
+        >
+          <span v-if="editingSetId !== set.id" class="set-name">
+            {{ set.name }}
+            <button
+              v-if="sets.length > 1"
+              class="set-remove-btn"
+              @click.stop="removeSet(set.id)"
+              title="Удалить набор"
+            >&times;</button>
+          </span>
+          <input
+            v-else
+            ref="editingInputRef"
+            v-model="editingSetName"
+            class="set-rename-input"
+            maxlength="50"
+            @blur="saveRename(set.id)"
+            @keydown="onRenameKeydown($event, set.id)"
+          />
+        </div>
+        <button class="set-tab add-set-btn" @click="addSet" title="Новый набор">
+          <Plus :size="14" />
+        </button>
+      </div>
     </section>
 
     <!-- Загрузка -->
@@ -484,7 +600,7 @@ watch(() => appSettings.value, (newSettings) => {
 
 .info-section {
   padding: 12px 16px;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
   background: var(--color-bg-field);
   border: 1px solid var(--color-border);
   border-left: 4px solid var(--color-accent);
@@ -511,6 +627,95 @@ watch(() => appSettings.value, (newSettings) => {
 .hint {
   font-size: 0.85rem;
   color: var(--color-text-secondary);
+}
+
+/* Sets tabs */
+.sets-section {
+  margin-bottom: 1rem;
+}
+
+.sets-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.set-tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
+  border-radius: 8px 8px 0 0;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--color-text-secondary);
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.set-tab:hover {
+  background: var(--color-bg-field-hover);
+  color: var(--color-text-primary);
+}
+
+.set-tab.active {
+  background: var(--color-accent);
+  color: var(--color-text-white);
+  border-color: var(--color-accent-strong);
+}
+
+.set-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.set-remove-btn {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  border: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+  margin: 0;
+  transition: color 0.15s, background 0.15s;
+}
+
+.set-remove-btn:hover {
+  color: var(--color-text-white);
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.set-rename-input {
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  color: var(--color-text-white);
+  font-size: 0.9rem;
+  padding: 2px 6px;
+  width: 120px;
+  outline: none;
+}
+
+.add-set-btn {
+  border-radius: 8px 8px 0 0;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .actions-section {

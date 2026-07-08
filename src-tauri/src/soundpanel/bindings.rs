@@ -6,20 +6,20 @@ use crate::config::{is_valid_hex_color, WindowsManager};
 use crate::events::AppEvent;
 use crate::soundpanel::audio::play_audio_file;
 use crate::soundpanel::intercept::InterceptSettings;
-use crate::soundpanel::state::{SoundBinding, SoundPanelState};
-use crate::soundpanel::storage::{copy_sound_file, delete_sound_file, save_bindings};
+use crate::soundpanel::state::{SoundBinding, SoundPanelState, SoundSet, SoundSets};
+use crate::soundpanel::storage::{copy_sound_file, delete_sound_file, save_sets};
 use crate::soundpanel_window::emit_soundpanel_bindings_changed;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tracing::{debug, info};
 
-/// Получить все привязки звуковой панели
+/// Получить все привязки звуковой панели (активный набор)
 #[tauri::command]
 pub fn sp_get_bindings(state: State<'_, SoundPanelState>) -> Result<Vec<SoundBinding>, String> {
     debug!("Get bindings command");
     Ok(state.get_all_bindings())
 }
 
-/// Добавить новую привязку
+/// Добавить новую привязку в активный набор
 ///
 /// # Аргументы
 /// * `key` - Клавиша (A-Z)
@@ -35,14 +35,12 @@ pub fn sp_add_binding(
 ) -> Result<SoundBinding, String> {
     info!(key, description, "Add binding");
 
-    // Валидация клавиши: только A-Z
     let key_char = key.to_uppercase().chars().next().ok_or("Key is empty")?;
 
     if !key_char.is_ascii_alphabetic() || !key_char.is_ascii_uppercase() {
         return Err("Key must be A-Z".to_string());
     }
 
-    // Проверка: клавиша уже занята
     if let Some(existing) = state.get_binding(key_char) {
         return Err(format!(
             "Key {} is already bound to '{}'",
@@ -50,7 +48,6 @@ pub fn sp_add_binding(
         ));
     }
 
-    // Копировать файл в папку soundpanel
     let appdata_path = state.appdata_path.lock().unwrap().clone();
     let filename = copy_sound_file(&file_path, &appdata_path)?;
 
@@ -61,20 +58,16 @@ pub fn sp_add_binding(
         original_path: Some(file_path),
     };
 
-    // Добавить в состояние
     state.add_binding(binding.clone());
+    save_sets(&state)?;
 
-    // Сохранить в JSON
-    save_bindings(&state)?;
-
-    // Notify soundpanel window to reload bindings
     let _ = emit_soundpanel_bindings_changed(&app_handle);
 
     info!("Binding added successfully");
     Ok(binding)
 }
 
-/// Удалить привязку по клавише
+/// Удалить привязку по клавише из активного набора
 #[tauri::command]
 pub fn sp_remove_binding(
     key: String,
@@ -85,20 +78,14 @@ pub fn sp_remove_binding(
 
     let key_char = key.chars().next().ok_or("Key is empty")?;
 
-    // Получить привязку для удаления файла
     if let Some(binding) = state.get_binding(key_char) {
-        // Удалить файл звук
         let appdata_path = state.appdata_path.lock().unwrap().clone();
         let _ = delete_sound_file(&binding.filename, &appdata_path);
     }
 
-    // Удалить из состояния
     state.remove_binding(key_char);
+    save_sets(&state)?;
 
-    // Сохранить изменения
-    save_bindings(&state)?;
-
-    // Notify soundpanel window to reload bindings
     let _ = emit_soundpanel_bindings_changed(&app_handle);
 
     info!("Binding removed successfully");
@@ -112,7 +99,6 @@ pub fn sp_remove_binding(
 pub fn sp_test_sound(file_path: String) -> Result<(), String> {
     info!(file_path, "Test sound");
 
-    // Проверить существование файла
     if !std::path::Path::new(&file_path).exists() {
         return Err("File not found".to_string());
     }
@@ -148,7 +134,6 @@ pub fn sp_set_floating_opacity(
 ) -> Result<(), String> {
     info!(value, "Setting opacity");
     state.set_floating_opacity(value);
-    // Сохраняем в windows.json
     windows_manager
         .set_soundpanel_opacity(value)
         .map_err(|e| format!("Failed to save settings: {}", e))?;
@@ -162,13 +147,11 @@ pub fn sp_set_floating_bg_color(
     state: State<'_, SoundPanelState>,
     windows_manager: State<'_, WindowsManager>,
 ) -> Result<(), String> {
-    // Валидация hex цвета
     if !is_valid_hex_color(&color) {
         return Err("Invalid color format. Use #RRGGBB".to_string());
     }
     info!(color, "Setting bg color");
     state.set_floating_bg_color(color.clone());
-    // Сохраняем в windows.json
     windows_manager
         .set_soundpanel_bg_color(color)
         .map_err(|e| format!("Failed to save settings: {}", e))?;
@@ -184,7 +167,6 @@ pub fn sp_set_floating_clickthrough(
 ) -> Result<(), String> {
     info!(enabled, "Setting clickthrough");
     state.set_floating_clickthrough(enabled);
-    // Сохраняем в windows.json
     windows_manager
         .set_soundpanel_clickthrough(enabled)
         .map_err(|e| format!("Failed to save settings: {}", e))?;
@@ -251,5 +233,87 @@ pub fn clear_intercept_binding(
     state: State<'_, SoundPanelState>,
 ) -> Result<(), String> {
     state.clear_intercept_binding(key);
+    Ok(())
+}
+
+// ---- Set management commands ----
+
+/// Получить все наборы звуков
+#[tauri::command]
+pub fn sp_get_sets(state: State<'_, SoundPanelState>) -> Result<SoundSets, String> {
+    Ok(state.get_sets())
+}
+
+/// Получить активный набор
+#[tauri::command]
+pub fn sp_get_active_set(state: State<'_, SoundPanelState>) -> Result<SoundSet, String> {
+    Ok(state.get_active_set())
+}
+
+/// Сменить активный набор
+#[tauri::command]
+pub fn sp_set_active_set(
+    id: String,
+    app_handle: AppHandle,
+    state: State<'_, SoundPanelState>,
+) -> Result<(), String> {
+    info!(set_id = %id, "Setting active set");
+    state.set_active_set(&id);
+    save_sets(&state)?;
+
+    let _ = emit_soundpanel_bindings_changed(&app_handle);
+    let _ = app_handle.emit("soundpanel-active-set-changed", &id);
+
+    Ok(())
+}
+
+/// Создать новый набор
+#[tauri::command]
+pub fn sp_add_set(
+    name: String,
+    app_handle: AppHandle,
+    state: State<'_, SoundPanelState>,
+) -> Result<SoundSet, String> {
+    info!(name, "Adding set");
+    let set = state.add_set(&name)?;
+    save_sets(&state)?;
+
+    let _ = emit_soundpanel_bindings_changed(&app_handle);
+    let _ = app_handle.emit("soundpanel-active-set-changed", &set.id);
+
+    Ok(set)
+}
+
+/// Переименовать набор
+#[tauri::command]
+pub fn sp_rename_set(
+    id: String,
+    name: String,
+    app_handle: AppHandle,
+    state: State<'_, SoundPanelState>,
+) -> Result<(), String> {
+    info!(set_id = %id, name, "Renaming set");
+    state.rename_set(&id, &name)?;
+    save_sets(&state)?;
+
+    let _ = emit_soundpanel_bindings_changed(&app_handle);
+
+    Ok(())
+}
+
+/// Удалить набор
+#[tauri::command]
+pub fn sp_remove_set(
+    id: String,
+    app_handle: AppHandle,
+    state: State<'_, SoundPanelState>,
+) -> Result<(), String> {
+    info!(set_id = %id, "Removing set");
+    state.remove_set(&id)?;
+    save_sets(&state)?;
+
+    let _ = emit_soundpanel_bindings_changed(&app_handle);
+    let _ = app_handle.emit("soundpanel-active-set-changed", "");
+
     Ok(())
 }
