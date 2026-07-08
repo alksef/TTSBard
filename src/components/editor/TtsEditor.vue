@@ -16,6 +16,7 @@ import type { PhraseSuggestion } from '../../composables/useTextCompletion'
 import { useEditorSettings } from '../../composables/useAppSettings'
 import { createSpellLinter } from './spellLinter'
 import { useSpellcheck } from '../../composables/useSpellcheck'
+import { debounceAsync } from '../../utils/debounce'
 
 const props = withDefaults(
   defineProps<{
@@ -128,6 +129,21 @@ const ttsTheme = EditorView.theme({
   },
 })
 
+const AI_COMPLETION_DEBOUNCE_MS = 700
+const AI_MIN_CONTEXT_LENGTH = 8
+const AI_MIN_CONTEXT_WORDS = 2
+
+const debouncedAiComplete = debounceAsync(
+  async (context: string): Promise<string | null> => {
+    try {
+      return await invoke<string>('get_ai_completion', { context })
+    } catch {
+      return null
+    }
+  },
+  AI_COMPLETION_DEBOUNCE_MS
+)
+
 const hybridSource: CompletionSource = async (context: CompletionContext) => {
   const word = context.matchBefore(/[\wа-яёА-ЯЁ]*/)
   if (!word || (word.from === word.to && !context.explicit)) return null
@@ -186,30 +202,28 @@ const hybridSource: CompletionSource = async (context: CompletionContext) => {
   }
 
   const aiEnabled = editorSettings.value?.ai_completion ?? false
-  if (aiEnabled && contextWords) {
-    try {
-      const aiResult = await invoke<string>('get_ai_completion', {
-        context: beforeCursor,
-      })
-      if (aiResult) {
-        const words = aiResult.split(/\s+/).slice(0, 3).join(' ')
-        if (words) {
-          const insertText = words + ' '
-          options.push({
-            label: `✨ ${words}`,
-            type: 'class',
-            detail: 'AI',
-            apply: (view: EditorView) => {
-              view.dispatch({
-                changes: { from: cursorPos, insert: insertText },
-                selection: { anchor: cursorPos + insertText.length },
-              })
-            },
-          })
-        }
+  const meetsAiThreshold =
+    contextWords &&
+    contextWords.split(/\s+/).length >= AI_MIN_CONTEXT_WORDS &&
+    beforeCursor.trim().length >= AI_MIN_CONTEXT_LENGTH
+  if (aiEnabled && meetsAiThreshold) {
+    const aiResult = await debouncedAiComplete(beforeCursor)
+    if (aiResult) {
+      const words = aiResult.split(/\s+/).slice(0, 3).join(' ')
+      if (words) {
+        const insertText = words + ' '
+        options.push({
+          label: `✨ ${words}`,
+          type: 'class',
+          detail: 'AI',
+          apply: (view: EditorView) => {
+            view.dispatch({
+              changes: { from: cursorPos, insert: insertText },
+              selection: { anchor: cursorPos + insertText.length },
+            })
+          },
+        })
       }
-    } catch {
-      // layer 2 failed
     }
   }
 
