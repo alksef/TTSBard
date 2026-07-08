@@ -7,6 +7,8 @@ import { debugError } from '../utils/debug'
 
 const emit = defineEmits<{
   select: [text: string]
+  append: [text: string]
+  replace: [text: string]
 }>()
 
 const { list, remove, clear, isLoading } = usePhraseHistory()
@@ -54,6 +56,14 @@ function toggleExpand() {
 
 function selectPhrase(phrase: PhraseEntry) {
   emit('select', phrase.text)
+}
+
+function appendPhrase(phrase: PhraseEntry) {
+  emit('append', phrase.text)
+}
+
+function replacePhraseAction(phrase: PhraseEntry) {
+  emit('replace', phrase.text)
 }
 
 async function removePhrase(id: string) {
@@ -132,6 +142,20 @@ onUnmounted(() => {
               <span class="phrase-time">{{ relativeTime(phrase.last_used) }}</span>
             </div>
           </div>
+          <button
+            class="phrase-action-btn"
+            @click.stop="replacePhraseAction(phrase)"
+            title="Заменить текущий текст"
+          >
+            ↻
+          </button>
+          <button
+            class="phrase-action-btn"
+            @click.stop="appendPhrase(phrase)"
+            title="Добавить в конец"
+          >
+            +
+          </button>
           <button
             class="remove-phrase"
             @click.stop="removePhrase(phrase.id)"
@@ -310,6 +334,31 @@ onUnmounted(() => {
 
 .phrase-time {
   color: var(--color-text-muted);
+}
+
+.phrase-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0.2rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease;
+  flex-shrink: 0;
+}
+
+.phrase-item:hover .phrase-action-btn {
+  opacity: 1;
+}
+
+.phrase-action-btn:hover {
+  color: var(--color-accent);
 }
 
 .remove-phrase {

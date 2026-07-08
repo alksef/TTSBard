@@ -251,7 +251,17 @@ async function handleEsc() {
   }
 }
 
-function selectPhrase(newText: string) {
+function appendPhrase(newText: string) {
+  const currentText = text.value
+  if (!currentText.trim()) {
+    text.value = newText
+    return
+  }
+  const sep = currentText.endsWith(' ') ? '' : ' '
+  text.value = currentText + sep + newText
+}
+
+function replacePhrase(newText: string) {
   const currentText = text.value
   if (currentText.trim() && currentText !== newText) {
     if (!confirm('Заменить текущий текст на выбранную фразу?')) return
@@ -293,7 +303,12 @@ const usernamesRecord = computed(() => {
           @enter="handleEnter"
           @esc="handleEsc"
         />
-        <PhraseHistoryList v-if="showHistory" @select="selectPhrase" />
+        <PhraseHistoryList
+          v-if="showHistory"
+          @select="appendPhrase"
+          @append="appendPhrase"
+          @replace="replacePhrase"
+        />
         <EditorMenu
           v-if="!isMinimalMode"
           :is-ai-enabled="isAiButtonEnabled"
