@@ -33,6 +33,9 @@ pub mod ai;
 // History commands
 pub mod history;
 
+// Tab commands
+pub mod tabs;
+
 // Playback commands
 pub mod playback;
 pub mod playback_window;

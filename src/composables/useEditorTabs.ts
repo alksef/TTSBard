@@ -1,4 +1,5 @@
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 
 export interface EditorTab {
   id: string
@@ -16,6 +17,7 @@ function genId(): string {
 export function useEditorTabs() {
   const tabs = ref<EditorTab[]>([{ id: genId(), title: 'Текст 1', text: '' }])
   const activeId = ref<string>(tabs.value[0].id)
+  const isHydrated = ref(false)
 
   const active = computed<EditorTab>({
     get: () => {
@@ -74,5 +76,50 @@ export function useEditorTabs() {
     if (t) t.title = title
   }
 
-  return { tabs, activeId, active, create, close, select, rename }
+  async function init() {
+    if (isHydrated.value) return
+    try {
+      const data = await invoke<{ active_id: string; tabs: EditorTab[] }>('get_tabs')
+      if (data.tabs && data.tabs.length > 0) {
+        tabs.value = data.tabs
+        const activeExists = data.tabs.some(t => t.id === data.active_id)
+        activeId.value = activeExists ? data.active_id : data.tabs[0].id
+      }
+    } catch {
+      // backend unavailable — work in-memory (graceful)
+    } finally {
+      isHydrated.value = true
+    }
+  }
+
+  let saveTimer: ReturnType<typeof setTimeout> | null = null
+
+  function scheduleSave() {
+    if (!isHydrated.value) return
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = setTimeout(doSave, 500)
+  }
+
+  async function doSave() {
+    try {
+      await invoke('save_tabs', {
+        data: { active_id: activeId.value, tabs: tabs.value },
+      })
+    } catch {
+      // graceful
+    }
+  }
+
+  async function flushSave() {
+    if (saveTimer) {
+      clearTimeout(saveTimer)
+      saveTimer = null
+    }
+    await doSave()
+  }
+
+  watch(tabs, scheduleSave, { deep: true })
+  watch(activeId, scheduleSave)
+
+  return { tabs, activeId, active, create, close, select, rename, init, flushSave }
 }

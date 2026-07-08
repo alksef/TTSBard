@@ -41,7 +41,7 @@ function cancelRename() {
 </script>
 
 <template>
-  <div class="editor-tabs" title="Рабочие черновики (не сохраняются)">
+  <div class="editor-tabs" title="Рабочие вкладки">
     <div class="tabs-scroll">
       <div
         v-for="tab in tabs"
