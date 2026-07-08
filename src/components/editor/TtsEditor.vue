@@ -76,6 +76,7 @@ const ttsTheme = EditorView.theme({
   },
   '.cm-content': {
     padding: '1.35rem 1.45rem',
+    minHeight: '100%',
     caretColor: 'var(--color-text-primary)',
     fontFamily: 'var(--font-mono)',
     fontSize: '1rem',
@@ -348,7 +349,7 @@ defineExpose({ focus })
 </script>
 
 <template>
-  <div ref="editorRef" class="tts-editor" />
+  <div ref="editorRef" class="tts-editor" @click="view?.focus()" />
 </template>
 
 <style scoped>
