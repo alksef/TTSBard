@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, watch, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { Search, X, Trash2, ChevronDown, ChevronRight } from 'lucide-vue-next'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { usePhraseHistory, type PhraseEntry } from '../composables/usePhraseHistory'
 import { relativeTime } from '../utils/time'
 import { debugError } from '../utils/debug'
@@ -21,6 +22,8 @@ const filterDebounced = ref('')
 const loadError = ref('')
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
+let unlistenTextSent: UnlistenFn | null = null
+let reloadDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
 watch(filter, (val) => {
   if (debounceTimer) {
@@ -88,10 +91,31 @@ async function clearAll() {
   }
 }
 
+onMounted(async () => {
+  unlistenTextSent = await listen('text-sent-to-tts', () => {
+    if (!isExpanded.value) return
+    if (reloadDebounceTimer) {
+      clearTimeout(reloadDebounceTimer)
+    }
+    reloadDebounceTimer = setTimeout(() => {
+      loadPhrases()
+      reloadDebounceTimer = null
+    }, 300)
+  })
+})
+
 onUnmounted(() => {
   if (debounceTimer) {
     clearTimeout(debounceTimer)
     debounceTimer = null
+  }
+  if (reloadDebounceTimer) {
+    clearTimeout(reloadDebounceTimer)
+    reloadDebounceTimer = null
+  }
+  if (unlistenTextSent) {
+    unlistenTextSent()
+    unlistenTextSent = null
   }
 })
 </script>
