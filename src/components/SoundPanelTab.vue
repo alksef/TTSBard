@@ -55,8 +55,10 @@ async function loadSets() {
     const result = await invoke<SoundSets>('sp_get_sets')
     sets.value = result.sets || []
     activeSetId.value = result.active_set_id || ''
+    console.log('[SoundPanelTab] loadSets result:', result.sets?.length, 'sets, active:', result.active_set_id)
     debugLog('[SoundPanelTab] Loaded sets:', sets.value.length, 'active:', activeSetId.value)
   } catch (e) {
+    console.error('[SoundPanelTab] loadSets FAILED:', e)
     debugError('[SoundPanelTab] Failed to load sets:', e)
   }
 }
@@ -151,8 +153,11 @@ async function removeSet(id: string) {
 async function loadBindings() {
   try {
     isLoading.value = true
-    bindings.value = await invoke<SoundBinding[]>('sp_get_bindings')
+    const loaded = await invoke<SoundBinding[]>('sp_get_bindings')
+    bindings.value = loaded
+    console.log('[SoundPanelTab] loadBindings result:', loaded?.length, 'bindings')
   } catch (e) {
+    console.error('[SoundPanelTab] loadBindings FAILED:', e)
     showError('Ошибка загрузки привязок: ' + (e as Error).message)
   } finally {
     isLoading.value = false
@@ -316,6 +321,7 @@ async function saveStayVisible() {
 }
 
 onMounted(async () => {
+  console.log('[SoundPanelTab] onMounted: loading sets + bindings')
   await loadSets()
   await loadBindings()
 
