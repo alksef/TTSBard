@@ -310,18 +310,17 @@ const usernamesRecord = computed(() => {
           @replace="replacePhrase"
         />
         <EditorMenu
-          v-if="!isMinimalMode"
           :is-ai-enabled="isAiButtonEnabled"
           :has-text="!!text.trim()"
+          :compact="isMinimalMode"
           @correct="correctText"
           @complete="completeText"
           @grammar="checkGrammar"
           @toggle-history="showHistory = !showHistory"
         />
         <button
-          v-if="!isMinimalMode"
           class="correct-button"
-          :class="{ loading: isCorrecting || isCompleting || isCheckingGrammar }"
+          :class="{ loading: isCorrecting || isCompleting || isCheckingGrammar, 'minimal-mode': isMinimalMode }"
           :disabled="isCorrecting || isCompleting || isCheckingGrammar || !text.trim() || !isAiButtonEnabled"
           @click="correctText"
           title="Корректировать текст с помощью AI"
@@ -427,6 +426,20 @@ const usernamesRecord = computed(() => {
 
 .correct-button.loading {
   animation: pulse 1.5s ease-in-out infinite;
+}
+
+/* Minimal mode: compact + translucent so it overlaps the text less;
+   fully visible on hover/focus. */
+.correct-button.minimal-mode {
+  opacity: 0.4;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.8rem;
+  transition: opacity 0.15s ease, filter 0.15s ease;
+}
+
+.correct-button.minimal-mode:hover:not(:disabled),
+.correct-button.minimal-mode:focus-visible:not(:disabled) {
+  opacity: 1;
 }
 
 @keyframes pulse {

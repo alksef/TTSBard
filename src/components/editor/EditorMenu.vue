@@ -12,6 +12,7 @@ const emit = defineEmits<{
 defineProps<{
   isAiEnabled: boolean
   hasText: boolean
+  compact?: boolean
 }>()
 
 const open = ref(false)
@@ -60,6 +61,7 @@ function run(fn: () => void) { close(); fn() }
   <div class="editor-menu" data-editor-menu>
     <button
       class="menu-trigger"
+      :class="{ compact }"
       :aria-expanded="open"
       aria-haspopup="true"
       title="Меню редактора"
@@ -127,6 +129,19 @@ function run(fn: () => void) { close(); fn() }
 .menu-trigger:hover {
   background: var(--color-accent);
   color: var(--color-text-on-accent, #ffffff);
+}
+
+/* Compact (minimal) mode: translucent so it overlaps text less, full on hover. */
+.menu-trigger.compact {
+  opacity: 0.4;
+  width: 28px;
+  height: 28px;
+  transition: opacity 0.15s ease;
+}
+
+.menu-trigger.compact:hover,
+.menu-trigger.compact:focus-visible {
+  opacity: 1;
 }
 
 .menu-dropdown {
