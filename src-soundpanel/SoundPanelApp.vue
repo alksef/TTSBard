@@ -137,6 +137,14 @@ function handleTransparencyChange(event: Event) {
   changeTransparency(parseFloat(target.value))
 }
 
+function codeToLetter(code: string): string | null {
+  if (code.length === 4 && code.startsWith('Key')) {
+    const letter = code[3].toUpperCase()
+    if (letter >= 'A' && letter <= 'Z') return letter
+  }
+  return null
+}
+
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     closeWindow()
@@ -145,10 +153,8 @@ function onKeydown(e: KeyboardEvent) {
   if (e.ctrlKey || e.shiftKey || e.altKey || e.metaKey) {
     return
   }
-  const key = e.key.toUpperCase()
-  if (!/^[A-Z]$/.test(key)) {
-    return
-  }
+  const key = codeToLetter(e.code)
+  if (!key) return
   const b = bindings.value.find(x => x.key === key)
   if (b) {
     e.preventDefault()
