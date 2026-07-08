@@ -1,6 +1,7 @@
-//! OpenAI chat completions client for AI text correction
+//! DeepSeek (OpenAI-compatible) AI client for text correction
 //!
-//! Implements the AiClient trait using async-openai library with proxy support.
+//! This module implements a client for DeepSeek's OpenAI-compatible API.
+//! Uses async-openai crate with fixed base URL.
 
 use async_openai::{
     Client,
@@ -20,30 +21,36 @@ use crate::config::{AiSettings, NetworkSettings};
 use super::{AiClient, AiError};
 use super::common as ai_common;
 
+const DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com/v1";
+
 // ============================================================================
-// OpenAI Client
+// DeepSeekClient
 // ============================================================================
 
-/// OpenAI chat completions client using async-openai
-pub struct OpenAiClient {
+/// DeepSeek (OpenAI-compatible) client for text correction
+pub struct DeepSeekClient {
     client: Client<OpenAIConfig>,
     model: String,
     timeout: u64,
 }
 
-impl OpenAiClient {
-    /// Create a new OpenAI client from settings
+impl DeepSeekClient {
+    /// Create a new DeepSeek client from settings
+    ///
+    /// # Errors
+    ///
+    /// Returns `AiError::NotConfigured` if API key is not set.
     pub fn new(settings: &AiSettings, network_settings: &NetworkSettings) -> Result<Self, AiError> {
-        let api_key = settings.openai.api_key
+        let api_key = settings.deepseek.api_key
             .as_ref()
-            .ok_or_else(|| AiError::NotConfigured("OpenAI API key not set".to_string()))?
+            .ok_or_else(|| AiError::NotConfigured("DeepSeek API key not set".to_string()))?
             .clone();
 
-        let model = settings.openai.model.clone();
+        let model = settings.deepseek.model.clone();
         let timeout = settings.timeout;
 
         // Create HTTP client with proxy if needed
-        let http_client = if settings.openai.use_proxy {
+        let http_client = if settings.deepseek.use_proxy {
             let proxy_url = network_settings.proxy.proxy_url
                 .as_ref()
                 .ok_or_else(|| AiError::InvalidProxy("Proxy enabled but URL not set".to_string()))?
@@ -52,10 +59,9 @@ impl OpenAiClient {
             info!(
                 model = &model,
                 proxy_url = %proxy_url,
-                "OpenAiClient created with proxy"
+                "DeepSeekClient created with proxy"
             );
 
-            // Parse proxy URL to determine type
             let (scheme, _rest) = proxy_url.split_once("://")
                 .ok_or_else(|| AiError::InvalidProxy("Invalid proxy URL: missing scheme".to_string()))?;
 
@@ -72,7 +78,7 @@ impl OpenAiClient {
 
             ReqwestClient::builder()
                 .proxy(proxy)
-                .timeout(Duration::from_secs(settings.timeout))
+                .timeout(Duration::from_secs(timeout))
                 .build()
                 .map_err(|e| {
                     error!(error = %e, "Failed to build client with proxy");
@@ -81,34 +87,40 @@ impl OpenAiClient {
         } else {
             info!(
                 model = &model,
-                "OpenAiClient created (direct connection)"
+                base_url = DEEPSEEK_BASE_URL,
+                "DeepSeekClient created (direct connection)"
             );
 
             ReqwestClient::builder()
-                .timeout(Duration::from_secs(settings.timeout))
+                .timeout(Duration::from_secs(timeout))
                 .build()
                 .map_err(|e| {
-                    error!(error = %e, "Failed to build client");
-                    AiError::ClientBuild(format!("Failed to build client: {}", e))
+                    error!(error = %e, "Failed to build HTTP client");
+                    AiError::ClientBuild(format!("Failed to build HTTP client: {}", e))
                 })?
         };
 
-        // Build async-openai client with custom HTTP client
-        // Disable internal retries (single attempt only)
+        // Build async-openai client with DeepSeek base URL
         let backoff = ExponentialBackoff {
             max_elapsed_time: Some(Duration::from_secs(0)),
             ..Default::default()
         };
         let client = Client::build(
             http_client,
-            OpenAIConfig::new().with_api_key(api_key),
+            OpenAIConfig::new()
+                .with_api_key(api_key)
+                .with_api_base(DEEPSEEK_BASE_URL),
             backoff,
         );
 
-        Ok(Self { client, model, timeout })
+        Ok(Self {
+            client,
+            model,
+            timeout,
+        })
     }
 
-    /// Send chat completion request to OpenAI API
+    /// Send correction request to DeepSeek API
     async fn send_request(&self, text: &str, prompt: &str) -> Result<String, AiError> {
         let request = CreateChatCompletionRequestArgs::default()
             .model(&self.model)
@@ -126,7 +138,7 @@ impl OpenAiClient {
             text_length = text.len(),
             prompt_length = prompt.len(),
             timeout_secs = self.timeout,
-            "Sending OpenAI correction request"
+            "Sending DeepSeek correction request"
         );
 
         let response = self.client
@@ -137,25 +149,30 @@ impl OpenAiClient {
                 let error_msg = e.to_string();
                 error!(
                     error = %error_msg,
-                    error_type = "openai_api_error",
-                    "OpenAI API request failed"
+                    error_type = "deepseek_api_error",
+                    "DeepSeek API request failed"
                 );
 
-                // Parse error message for better error handling
                 if error_msg.contains("timeout") || error_msg.contains("timed out") {
-                    error!(timeout_secs = self.timeout, "OpenAI request timeout");
-                    AiError::Timeout(format!("OpenAI timeout ({}s). Check internet or proxy settings.", self.timeout))
+                    error!(timeout_secs = self.timeout, "DeepSeek request timeout");
+                    AiError::Timeout(format!("DeepSeek timeout ({}s). Check internet or proxy settings.", self.timeout))
                 } else if error_msg.contains("connect") || error_msg.contains("connection") {
-                    error!("OpenAI connection failed");
-                    AiError::Connection(format!("OpenAI connection failed: {}", e))
+                    error!("DeepSeek connection failed");
+                    AiError::Connection(format!("DeepSeek connection failed: {}", e))
                 } else if error_msg.contains("401") || error_msg.contains("unauthorized") {
-                    error!("OpenAI authentication failed (401)");
-                    AiError::NotConfigured("OpenAI API key is invalid or missing".to_string())
+                    error!("DeepSeek authentication failed (401)");
+                    AiError::NotConfigured("DeepSeek API key is invalid or missing".to_string())
+                } else if error_msg.contains("402") || error_msg.contains("Insufficient Balance") {
+                    error!("DeepSeek insufficient balance (402)");
+                    AiError::ApiError {
+                        status: 402,
+                        message: "Insufficient balance. Please top up your DeepSeek account.".to_string(),
+                    }
                 } else if error_msg.contains("429") {
-                    error!("OpenAI rate limit or quota exceeded (429)");
+                    error!("DeepSeek rate limit exceeded (429)");
                     AiError::ApiError {
                         status: 429,
-                        message: "Rate limit exceeded or quota exceeded. Please check your OpenAI account.".to_string(),
+                        message: "Rate limit exceeded. Please try again later.".to_string(),
                     }
                 } else {
                     AiError::Network(format!("Failed to send request: {}", e))
@@ -164,48 +181,26 @@ impl OpenAiClient {
 
         info!(
             choices_count = response.choices.len(),
-            "OpenAI response received"
+            model = ?response.model,
+            "DeepSeek response received"
         );
 
-        let content = ai_common::extract_response_content(&response, "OpenAI")?;
-        ai_common::log_response_preview(&content, "OpenAI");
+        let content = ai_common::extract_response_content(&response, "DeepSeek")?;
+        ai_common::log_response_preview(&content, "DeepSeek");
 
         Ok(content)
     }
 }
 
 #[async_trait::async_trait]
-impl AiClient for OpenAiClient {
+impl AiClient for DeepSeekClient {
     async fn correct(&self, text: &str, prompt: &str) -> Result<String, AiError> {
         ai_common::validate_correction_input(text, prompt)?;
 
         let corrected = self.send_request(text, prompt).await?;
 
-        ai_common::validate_correction_result(&corrected, text, "OpenAI")?;
+        ai_common::validate_correction_result(&corrected, text, "DeepSeek")?;
 
         Ok(corrected)
-    }
-}
-
-// ============================================================================
-// Tests
-// ============================================================================
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_openai_client_has_model_field() {
-        // This test verifies that OpenAiClient has the expected fields.
-        // OpenAiClient = { client: Client<OpenAIConfig>, model: String, timeout: u64 }.
-        // The `timeout` field was always present but the original assertion omitted it,
-        // making the test brittle (it only passed when struct padding happened to align).
-        assert_eq!(
-            std::mem::size_of::<OpenAiClient>(),
-            std::mem::size_of::<Client<OpenAIConfig>>()
-                + std::mem::size_of::<String>()
-                + std::mem::size_of::<u64>()
-        );
     }
 }

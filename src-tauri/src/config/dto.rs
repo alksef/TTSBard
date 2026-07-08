@@ -609,6 +609,7 @@ pub enum SpellSourceDto {
 pub enum AiProviderTypeDto {
     OpenAi,
     ZAi,
+    DeepSeek,
 }
 
 impl From<crate::config::AiProviderType> for AiProviderTypeDto {
@@ -616,6 +617,7 @@ impl From<crate::config::AiProviderType> for AiProviderTypeDto {
         match t {
             crate::config::AiProviderType::OpenAi => AiProviderTypeDto::OpenAi,
             crate::config::AiProviderType::ZAi => AiProviderTypeDto::ZAi,
+            crate::config::AiProviderType::DeepSeek => AiProviderTypeDto::DeepSeek,
         }
     }
 }
@@ -625,6 +627,7 @@ impl From<AiProviderTypeDto> for crate::config::AiProviderType {
         match dto {
             AiProviderTypeDto::OpenAi => crate::config::AiProviderType::OpenAi,
             AiProviderTypeDto::ZAi => crate::config::AiProviderType::ZAi,
+            AiProviderTypeDto::DeepSeek => crate::config::AiProviderType::DeepSeek,
         }
     }
 }
@@ -696,12 +699,48 @@ impl From<AiZAiSettingsDto> for crate::config::AiZAiSettings {
     }
 }
 
+/// DeepSeek AI settings DTO
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AiDeepSeekSettingsDto {
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub use_proxy: bool,
+    #[serde(default = "default_deepseek_model_dto")]
+    pub model: String,
+}
+
+fn default_deepseek_model_dto() -> String {
+    "deepseek-chat".to_string()
+}
+
+impl From<crate::config::AiDeepSeekSettings> for AiDeepSeekSettingsDto {
+    fn from(s: crate::config::AiDeepSeekSettings) -> Self {
+        Self {
+            api_key: s.api_key,
+            use_proxy: s.use_proxy,
+            model: s.model,
+        }
+    }
+}
+
+impl From<AiDeepSeekSettingsDto> for crate::config::AiDeepSeekSettings {
+    fn from(dto: AiDeepSeekSettingsDto) -> Self {
+        Self {
+            api_key: dto.api_key,
+            use_proxy: dto.use_proxy,
+            model: dto.model,
+        }
+    }
+}
+
 /// AI settings DTO
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiSettingsDto {
     pub provider: AiProviderTypeDto,
     pub openai: AiOpenAiSettingsDto,
     pub zai: AiZAiSettingsDto,
+    #[serde(default)]
+    pub deepseek: AiDeepSeekSettingsDto,
     pub prompt: String,
     #[serde(default = "default_ai_timeout_dto")]
     pub timeout: u64,
@@ -717,6 +756,7 @@ impl From<crate::config::AiSettings> for AiSettingsDto {
             provider: s.provider.into(),
             openai: s.openai.into(),
             zai: s.zai.into(),
+            deepseek: s.deepseek.into(),
             prompt: s.prompt,
             timeout: s.timeout,
         }
@@ -729,6 +769,7 @@ impl From<AiSettingsDto> for crate::config::AiSettings {
             provider: dto.provider.into(),
             openai: dto.openai.into(),
             zai: dto.zai.into(),
+            deepseek: dto.deepseek.into(),
             prompt: dto.prompt,
             timeout: dto.timeout,
         }

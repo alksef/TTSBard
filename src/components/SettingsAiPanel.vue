@@ -20,6 +20,7 @@ const activeProvider = ref<AiProviderType>('openai');
 const providers = ref<Record<AiProviderType, AiProviderState>>({
   openai: { type: 'openai', configured: false, expanded: false },
   zai: { type: 'zai', configured: false, expanded: false },
+  deepseek: { type: 'deepseek', configured: false, expanded: false },
 });
 
 // Get settings from composable
@@ -43,6 +44,10 @@ const openaiUseProxy = ref(false);
 const zaiUrl = ref('');
 const zaiApiKey = ref('');
 
+// DeepSeek settings
+const deepseekApiKey = ref('');
+const deepseekUseProxy = ref(false);
+
 // Status message
 const statusMessage = ref('');
 const statusType = ref<'success' | 'error'>('error');
@@ -53,6 +58,8 @@ const isCurrentProviderConfigured = computed(() => {
     return openaiApiKey.value.trim().length > 0;
   } else if (activeProvider.value === 'zai') {
     return zaiApiKey.value.trim().length > 0;
+  } else if (activeProvider.value === 'deepseek') {
+    return deepseekApiKey.value.trim().length > 0;
   }
   return false;
 });
@@ -167,6 +174,37 @@ async function saveZaiSettings() {
   }
 }
 
+async function saveDeepSeekSettings() {
+  debugLog('[AI] Saving DeepSeek settings...');
+
+  if (!deepseekApiKey.value.trim()) {
+    showError('Ключ API не может быть пустым');
+    return;
+  }
+
+  try {
+    await invoke('set_ai_deepseek_api_key', { key: deepseekApiKey.value });
+    providers.value.deepseek.configured = true;
+    debugLog('[AI] DeepSeek settings saved successfully');
+    showSuccess('Настройки сохранены');
+  } catch (error) {
+    debugError('[AI] Failed to save DeepSeek settings:', error);
+    showError(error as string);
+  }
+}
+
+async function toggleDeepSeekUseProxy() {
+  try {
+    await invoke('set_ai_deepseek_use_proxy', { enabled: deepseekUseProxy.value });
+    debugLog('[AI] DeepSeek use proxy toggled:', deepseekUseProxy.value);
+    showSuccess(deepseekUseProxy.value ? 'Прокси включён' : 'Прокси выключен');
+  } catch (error) {
+    debugError('[AI] Failed to toggle DeepSeek proxy:', error);
+    showError(error as string);
+    deepseekUseProxy.value = !deepseekUseProxy.value;
+  }
+}
+
 async function setActiveProvider(provider: AiProviderType) {
   try {
     await invoke('set_ai_provider', { provider });
@@ -240,7 +278,9 @@ watch(aiSettings, async (newSettings) => {
     // Check if new provider is configured
     const configured = newSettings.provider === 'openai'
       ? !!newSettings.openai?.api_key
-      : !!newSettings.zai?.api_key;
+      : newSettings.provider === 'zai'
+        ? !!newSettings.zai?.api_key
+        : !!newSettings.deepseek?.api_key;
 
     // Auto-disable AI if switching to unconfigured provider
     if (!configured && aiEnabled.value && prevProvider !== newSettings.provider) {
@@ -278,6 +318,17 @@ watch(aiSettings, async (newSettings) => {
     if (newSettings.zai.api_key) {
       zaiApiKey.value = newSettings.zai.api_key;
       providers.value.zai.configured = true;
+    }
+  }
+
+  // Update DeepSeek settings
+  if (newSettings.deepseek) {
+    if (newSettings.deepseek.api_key) {
+      deepseekApiKey.value = newSettings.deepseek.api_key;
+      providers.value.deepseek.configured = true;
+    }
+    if (newSettings.deepseek.use_proxy !== undefined) {
+      deepseekUseProxy.value = newSettings.deepseek.use_proxy;
     }
   }
 }, { immediate: true, deep: true });
@@ -450,6 +501,48 @@ function dismissStatus() {
                 class="proxy-checkbox"
               />
               <label for="ai-openai-use-proxy" class="proxy-checkbox-label">
+                Использовать SOCKS5
+              </label>
+            </div>
+          </div>
+        </div>
+      </ProviderCard>
+
+      <!-- DeepSeek Provider -->
+      <ProviderCard
+        title="DeepSeek"
+        :icon="Cloud"
+        :active="activeProvider === 'deepseek'"
+        :expanded="providers.deepseek.expanded"
+        @select="setActiveProvider('deepseek')"
+        @toggle="toggleProvider('deepseek')"
+      >
+        <div class="card-content-inner">
+          <!-- API Key -->
+          <div class="setting-group">
+            <div class="openai-api-row">
+              <label>Ключ API:</label>
+              <InputWithToggle
+                v-model="deepseekApiKey"
+                type="password"
+                placeholder="sk-..."
+                class="openai-input-wide"
+              />
+              <button @click="saveDeepSeekSettings" class="save-settings-button">Сохранить</button>
+            </div>
+          </div>
+
+          <!-- Proxy -->
+          <div class="setting-group">
+            <div class="proxy-checkbox-container">
+              <input
+                id="ai-deepseek-use-proxy"
+                type="checkbox"
+                v-model="deepseekUseProxy"
+                @change="toggleDeepSeekUseProxy"
+                class="proxy-checkbox"
+              />
+              <label for="ai-deepseek-use-proxy" class="proxy-checkbox-label">
                 Использовать SOCKS5
               </label>
             </div>

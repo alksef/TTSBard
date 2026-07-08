@@ -5,6 +5,7 @@ import { MoreHorizontal } from 'lucide-vue-next'
 const emit = defineEmits<{
   correct: []
   complete: []
+  grammar: []
   'toggle-history': []
 }>()
 
@@ -81,6 +82,13 @@ function run(fn: () => void) { close(); fn() }
         @click="run(() => emit('complete'))"
       >
         AI: дописать
+      </button>
+      <button
+        class="menu-item"
+        :disabled="!hasText || !isAiEnabled"
+        @click="run(() => emit('grammar'))"
+      >
+        AI: грамматика
       </button>
       <div class="menu-separator" />
       <button

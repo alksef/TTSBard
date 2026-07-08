@@ -465,6 +465,7 @@ pub enum AiProviderType {
     #[default]
     OpenAi,
     ZAi,
+    DeepSeek,
 }
 
 /// OpenAI settings for AI text correction
@@ -494,6 +495,34 @@ fn default_zai_model() -> String {
     "glm-4.5".to_string()
 }
 
+/// DeepSeek settings (OpenAI-compatible) for AI text correction
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AiDeepSeekSettings {
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub use_proxy: bool,
+    #[serde(default = "default_deepseek_model")]
+    pub model: String,
+}
+
+fn default_deepseek_model() -> String {
+    "deepseek-chat".to_string()
+}
+
+/// Explicit Default: `#[derive(Default)]` would give `model = ""` (the `serde(default = ...)`
+/// attribute only applies during deserialization, not to `Default::default()`). Since `deepseek`
+/// is `#[serde(default)]` inside `AiSettings`, an old config without it goes through
+/// `AiDeepSeekSettings::default()` — which must yield the real default model, not empty.
+impl Default for AiDeepSeekSettings {
+    fn default() -> Self {
+        Self {
+            api_key: None,
+            use_proxy: false,
+            model: default_deepseek_model(),
+        }
+    }
+}
+
 /// AI settings for text correction
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AiSettings {
@@ -503,6 +532,8 @@ pub struct AiSettings {
     pub openai: AiOpenAiSettings,
     #[serde(default)]
     pub zai: AiZAiSettings,
+    #[serde(default)]
+    pub deepseek: AiDeepSeekSettings,
     #[serde(default = "default_ai_prompt")]
     pub prompt: String,
     #[serde(default = "default_ai_timeout")]
@@ -530,6 +561,7 @@ impl Default for AiSettings {
             provider: AiProviderType::OpenAi,
             openai: AiOpenAiSettings::default(),
             zai: AiZAiSettings::default(),
+            deepseek: AiDeepSeekSettings::default(),
             prompt: default_ai_prompt(),
             timeout: default_ai_timeout(),
         }
@@ -1204,6 +1236,26 @@ impl SettingsManager {
         self.update_field("/ai/zai/model", &model)
     }
 
+    /// Set DeepSeek API key for AI text correction
+    pub fn set_ai_deepseek_api_key(&self, key: Option<String>) -> Result<()> {
+        self.update_field("/ai/deepseek/api_key", &key)
+    }
+
+    /// Set DeepSeek use proxy for AI text correction
+    pub fn set_ai_deepseek_use_proxy(&self, enabled: bool) -> Result<()> {
+        self.update_field("/ai/deepseek/use_proxy", &enabled)
+    }
+
+    /// Get DeepSeek model
+    pub fn get_ai_deepseek_model(&self) -> String {
+        self.cache.read().ai.deepseek.model.clone()
+    }
+
+    /// Set DeepSeek model for AI text correction
+    pub fn set_ai_deepseek_model(&self, model: String) -> Result<()> {
+        self.update_field("/ai/deepseek/model", &model)
+    }
+
     // ========== Audio Effects Settings ==========
 
     /// Get audio effects settings
@@ -1288,5 +1340,65 @@ impl SettingsManager {
     /// Set show playback control window on start
     pub fn set_show_playback_on_start(&self, value: bool) -> Result<()> {
         self.update_field("/show_playback_on_start", &value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Backwards-compatibility: an old settings.json written BEFORE the `deepseek`
+    /// provider existed must still deserialize (the `deepseek` field is absent).
+    /// This is the #[serde(default)] contract — same lesson as playback_pause /
+    /// PhraseEntry. If this test fails, old configs panic on load.
+    #[test]
+    fn ai_settings_deserializes_without_deepseek_field() {
+        // Old-format JSON: only openai/zai, no deepseek field.
+        let old_json = r#"{
+            "provider": "openai",
+            "openai": { "api_key": "sk-test", "use_proxy": false, "model": "gpt-4o-mini" },
+            "zai": { "url": null, "api_key": null, "model": "glm-4.5" },
+            "prompt": "test prompt",
+            "timeout": 20
+        }"#;
+        let settings: AiSettings = serde_json::from_str(old_json)
+            .expect("old AiSettings (without deepseek) must deserialize");
+        // deepseek falls back to default
+        assert_eq!(settings.deepseek.model, "deepseek-chat");
+        assert!(settings.deepseek.api_key.is_none());
+        assert_eq!(settings.provider, AiProviderType::OpenAi);
+    }
+
+    /// Round-trip: AiSettings with deepseek set must serialize + deserialize back.
+    #[test]
+    fn ai_settings_deepseek_round_trip() {
+        let original = AiSettings {
+            provider: AiProviderType::DeepSeek,
+            openai: AiOpenAiSettings::default(),
+            zai: AiZAiSettings::default(),
+            deepseek: AiDeepSeekSettings {
+                api_key: Some("sk-deepseek".into()),
+                use_proxy: true,
+                model: "deepseek-chat".into(),
+            },
+            prompt: default_ai_prompt(),
+            timeout: default_ai_timeout(),
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let back: AiSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.provider, AiProviderType::DeepSeek);
+        assert_eq!(back.deepseek.api_key.as_deref(), Some("sk-deepseek"));
+        assert!(back.deepseek.use_proxy);
+    }
+
+    /// Provider type serde must use lowercase (frontend sends "deepseek").
+    #[test]
+    fn ai_provider_type_serde_lowercase() {
+        assert_eq!(
+            serde_json::to_string(&AiProviderType::DeepSeek).unwrap(),
+            "\"deepseek\""
+        );
+        let p: AiProviderType = serde_json::from_str("\"deepseek\"").unwrap();
+        assert_eq!(p, AiProviderType::DeepSeek);
     }
 }

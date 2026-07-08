@@ -16,6 +16,7 @@ pub fn set_ai_provider(
     let provider_enum = match provider.as_str() {
         "openai" => crate::config::AiProviderType::OpenAi,
         "zai" => crate::config::AiProviderType::ZAi,
+        "deepseek" => crate::config::AiProviderType::DeepSeek,
         _ => return Err("Invalid provider".into()),
     };
     settings_manager.set_ai_provider(provider_enum)
@@ -217,6 +218,7 @@ pub async fn get_ai_completion(
     let has_key = match settings.ai.provider {
         crate::config::AiProviderType::OpenAi => settings.ai.openai.api_key.is_some(),
         crate::config::AiProviderType::ZAi => settings.ai.zai.api_key.is_some(),
+        crate::config::AiProviderType::DeepSeek => settings.ai.deepseek.api_key.is_some(),
     };
     if !has_key {
         return Ok(String::new());
@@ -277,4 +279,85 @@ pub fn get_ai_zai_model(
     settings_manager: State<'_, SettingsManager>,
 ) -> String {
     settings_manager.get_ai_zai_model()
+}
+
+/// Set DeepSeek API key for AI text correction
+#[tauri::command]
+pub fn set_ai_deepseek_api_key(
+    settings_manager: State<'_, SettingsManager>,
+    state: State<'_, AppState>,
+    key: String,
+) -> Result<(), String> {
+    if key.trim().is_empty() {
+        return Err("API key cannot be empty".into());
+    }
+    settings_manager.set_ai_deepseek_api_key(Some(key))
+        .map_err(|e| format!("Failed to save DeepSeek API key: {}", e))?;
+
+    state.invalidate_ai_client();
+
+    Ok(())
+}
+
+/// Set DeepSeek model for AI text correction
+#[tauri::command]
+pub fn set_ai_deepseek_model(
+    settings_manager: State<'_, SettingsManager>,
+    model: String,
+) -> Result<(), String> {
+    if model.trim().is_empty() {
+        return Err("Model cannot be empty".into());
+    }
+    settings_manager.set_ai_deepseek_model(model)
+        .map_err(|e| format!("Failed to save DeepSeek model: {}", e))
+}
+
+/// Set DeepSeek use proxy for AI text correction
+#[tauri::command]
+pub fn set_ai_deepseek_use_proxy(
+    settings_manager: State<'_, SettingsManager>,
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<(), String> {
+    settings_manager.set_ai_deepseek_use_proxy(enabled)
+        .map_err(|e| format!("Failed to save DeepSeek proxy setting: {}", e))?;
+
+    state.invalidate_ai_client();
+
+    Ok(())
+}
+
+/// Get DeepSeek model for AI text correction
+#[tauri::command]
+pub fn get_ai_deepseek_model(
+    settings_manager: State<'_, SettingsManager>,
+) -> String {
+    settings_manager.get_ai_deepseek_model()
+}
+
+const MAX_GRAMMAR_TEXT_LEN: usize = 10_000;
+
+const GRAMMAR_PROMPT: &str = "Проверь орфографию и грамматику русского текста. \
+    Исправь ошибки, сохранив смысл, стиль и регистр. Верни только исправленный текст \
+    без пояснений. Если ошибок нет — верни текст как есть.";
+
+/// Check grammar using AI provider
+///
+/// Sends the given text (selection or full text) to the configured AI provider
+/// for grammar and spelling correction. Uses a dedicated prompt focused on
+/// grammar only (vs. the TTS-focused default prompt used by correct_text).
+#[tauri::command]
+pub async fn ai_check_grammar(
+    settings_manager: State<'_, SettingsManager>,
+    state: State<'_, AppState>,
+    text: String,
+) -> Result<String, String> {
+    if text.len() > MAX_GRAMMAR_TEXT_LEN {
+        return Err(format!("Text too long (max {} chars)", MAX_GRAMMAR_TEXT_LEN));
+    }
+    let settings = settings_manager.load().map_err(|e| format!("Failed to load settings: {}", e))?;
+    let client = state.get_or_create_ai_client(&settings.ai, &settings.tts.network)
+        .map_err(|e| format!("AI client error: {}", e))?;
+    let result = client.correct(&text, GRAMMAR_PROMPT).await.map_err(|e| e.to_string())?;
+    Ok(result)
 }

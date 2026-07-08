@@ -255,7 +255,8 @@ export interface EditorSettingsDto {
 
 export const AiProviderType = {
   OpenAi: 'openai',
-  ZAi: 'zai'  // Z.ai (capital Z)
+  ZAi: 'zai',  // Z.ai (capital Z)
+  DeepSeek: 'deepseek',
 } as const
 
 export type AiProviderType = (typeof AiProviderType)[keyof typeof AiProviderType]
@@ -272,12 +273,19 @@ export interface AiZAiSettingsDto {
   model: string
 }
 
+export interface AiDeepSeekSettingsDto {
+  api_key?: string
+  use_proxy?: boolean
+  model: string
+}
+
 // Z.ai (Anthropic-compatible AI provider)
 
 export interface AiSettingsDto {
   provider: AiProviderType
   openai: AiOpenAiSettingsDto
   zai: AiZAiSettingsDto
+  deepseek: AiDeepSeekSettingsDto
   prompt: string
 }
 
