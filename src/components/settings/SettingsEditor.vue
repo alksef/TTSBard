@@ -18,7 +18,7 @@ const spellcheckEnabled = computed(() => editorSettings.value?.spellcheck_enable
 async function toggleSpellcheck() {
   try {
     const newValue = !(editorSettings.value?.spellcheck_enabled ?? true)
-    await invoke('set_editor_spellcheck_enabled', { enabled: newValue })
+    await invoke('set_editor_spellcheck_enabled', { value: newValue })
     emit('show-message', 'Настройка сохранена')
   } catch (e) {
     const errorMessage = e instanceof Error ? e.message : String(e)
