@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, shallowRef } from 'vue'
 import { EditorView, keymap } from '@codemirror/view'
-import { EditorState } from '@codemirror/state'
+import { EditorState, Annotation } from '@codemirror/state'
 import { defaultKeymap, historyKeymap } from '@codemirror/commands'
 import {
   autocompletion,
@@ -39,7 +39,7 @@ const emit = defineEmits<{
 
 const editorRef = ref<HTMLDivElement>()
 const view = shallowRef<EditorView | null>(null)
-const isExternalUpdate = ref(false)
+const ExternalUpdate = Annotation.define<boolean>()
 
 const editorSettings = useEditorSettings()
 const { checkWords, enabled } = useSpellcheck()
@@ -301,9 +301,10 @@ function createState() {
         defaultKeymap: true,
       }),
       EditorView.updateListener.of((update) => {
-        if (update.docChanged && !isExternalUpdate.value) {
-          emit('update:modelValue', update.state.doc.toString())
-        }
+        if (!update.docChanged) return
+        const isExternal = update.transactions.some(tr => tr.annotation(ExternalUpdate) !== undefined)
+        if (isExternal) return
+        emit('update:modelValue', update.state.doc.toString())
       }),
       EditorView.theme({
         '&': { height: 'auto' },
@@ -332,18 +333,10 @@ watch(() => props.modelValue, (newVal) => {
   if (!v) return
   const currentDoc = v.state.doc.toString()
   if (newVal !== currentDoc) {
-    isExternalUpdate.value = true
-    try {
-      v.dispatch({
-        changes: {
-          from: 0,
-          to: currentDoc.length,
-          insert: newVal,
-        },
-      })
-    } finally {
-      isExternalUpdate.value = false
-    }
+    v.dispatch({
+      changes: { from: 0, to: currentDoc.length, insert: newVal },
+      annotations: ExternalUpdate.of(true),
+    })
   }
 })
 
