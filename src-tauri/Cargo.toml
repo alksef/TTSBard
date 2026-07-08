@@ -1,7 +1,7 @@
 [package]
 name = "ttsbard"
 version = "0.3.0-dev"
-description = "A TTS application with Tauri"
+description = "Fast text-to-speech for communication and streaming — for people with speech limitations and streamers"
 authors = ["you"]
 edition = "2021"
 

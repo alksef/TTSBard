@@ -132,3 +132,80 @@
 - **CRITICAL 3:** race в `spawn_save_phrases` (+ тот же паттерн для HistoryData/NgramData) —
   debounce/batch ИЛИ `Arc<Mutex<()>>` ИЛИ writer-thread. Отдельный task-файл + round.
 - **SECURITY:** валидация размера фразы (`MAX_PHRASE_LENGTH`) + длины `filter`. Объединить.
+
+---
+
+## Сессия 2026-07-08: stages 12-16 → планы 92-95
+
+**Запрос:** 4 направления доработок (persist вкладок; оценка хранилища истории; редизайн
+саундпанели; AI в проекте) + переописание проекта. Автономно: stages → план → DeepSeek.
+
+### Решения пользователя (развилки)
+1. **Табы persist** → отдельный `tabs.json` (HistoryManager-стиль), НЕ settings.json/localStorage.
+2. **История** → **остаться на JSON** (SQLite — оверкилл при ≤200 фраз; roadmap зафиксирован).
+3. **SoundPanel** → **гибрид**: наборы-вкладки (Sets) в основном окне + быстрые правки в окне вызова.
+4. **AI** → фокус: токен-бенчмарк + карта фичей + AI-орфография (вместо онлайн API). DeepSeek-цена
+   делает AI практически бесплатным ($0.004/1000 запросов) — деньги НЕ аргумент, риски = латентность
+   + приватность.
+5. **Проект** → двойное позиционирование (люди с ограничениями речи + стримеры), толерантный язык,
+   история из интервью со стримером aleksa.
+
+### Stage-файлы (research, готовы)
+| Stage | Файл | Суть | Решение |
+|---|---|---|---|
+| 12 | `12-editor-tabs-persistence.md` | persist вкладок | `tabs.json` + новый `TabManager` |
+| 13 | `13-history-storage-json-vs-sqlite.md` | JSON vs SQLite | **остаться на JSON** |
+| 14 | `14-soundpanel-sets-and-inline-editing.md` | саундпанель | гибрид (Sets + inline-редактирование) |
+| 15 | `15-ai-features-map-and-token-benchmark.md` | AI карта + бенчмарк | DeepSeek-провайдер + AI-грамматика (гибрид с hunspell) |
+| 16 | `16-project-repositioning.md` | README/позиционирование | двойное позиционирование, aleksa |
+
+### Планы (РЕАЛИЗОВАНЫ + верифицированы, 2026-07-08)
+| План | Stage | Суть | Статус | Верификация |
+|---|---|---|---|---|
+| **92** | 12 | Persist вкладок (`tabs.json` + TabManager) | ✅ APPROVED | cargo 0/0, tabs 5/5 |
+| **93** | 15 | DeepSeek-провайдер + AI-грамматика | ✅ APPROVED | cargo 0/0, settings 3/3 |
+| **94** | 14-A | Саундпанель — наборы (Sets) | ✅ APPROVED | cargo 0/0, soundpanel 6/6 |
+| **95** | 16 | Переописание README/PROBLEMS | ✅ done (прямые правки) | docs, Cargo.toml |
+
+**Итог сборки:** `cargo check` 0 ошибок/0 warnings; `cargo test --lib` **72/72 passed**;
+`vue-tsc --noEmit` 0 ошибок; `cargo clippy` чист.
+
+### Цикл DeepSeek — что поймано ревью/тестами (не чекбоксами DeepSeek)
+Правило WORKFLOW.md подтвердилось: DeepSeek `[x]` поверхностно верны, но ревью+тесты находили
+реальные баги каждый план:
+- **92 (CRITICAL):** close-handler DeepSeek звал `destroy()` → ломал tray-поведение (бэкенд делает
+  `prevent_close + hide`). Фикс Claude: handler только flush, без destroy.
+- **92 (test-race):** тесты делили temp-path (per-PID) → гонка. Фикс: AtomicU64 path.
+- **93 (CRITICAL):** `AiDeepSeekSettings::default()` давал `model=""` (derive(Default) + serde-fn) →
+  DeepSeek-клиент упал бы у новых/старых конфигов. Поймано тестом миграции. Фикс: явный impl Default.
+- **94:** чисто от DeepSeek (6 тестов миграции он добавил сам, все зелёные).
+- **pre-existing:** `test_openai_client_has_model_field` не учитывал поле `timeout` — хрупкий
+  структурный тест, падал независимо от планов. Фикс: `+ sizeof::<u64>()`.
+
+Отчёты ревью: `docs/deepseek/reviews/9{2,3,4}-round1-claude-review.md`.
+
+### Осталось (runtime, требует ручного/GUI теста — не автоматизируется)
+- **92:** создать 2 вкладки + текст → закрыть (в трей) → реальный выход → рестарт → восстановление.
+- **93:** реальный вызов DeepSeek API (тестовый ключ локально) — `correct_text`/`get_ai_completion`/
+  `ai_check_grammar`. AI-грамматика сейчас по всему тексту (selection — будущий план).
+- **94:** создать 2 набора → переключить в основном окне → selector в окне вызова циклит → A играет
+  звук активного набора → синхронизация через события. Миграция старого `soundpanel_bindings.json`.
+
+### Порядок запуска (DeepSeek) — выполнен
+- ~~92 и 93 — независимо~~ (сделаны последовательно: 92 → 93 → 94 → 95).
+- ~~94 — после 92/93~~ ✅. ~~95 — последним~~ ✅.
+
+### Будущие планы (не сформированы — отметить)
+- **14-B / ~96:** SoundPanel inline-редактирование (drag-drop + режим редактирования в окне вызова).
+  Spike drag-drop подтверждён (`onDragDropEvent.payload.paths`, `dragDropEnabled:true`). После 94.
+- **~97:** AI перефразирование (prompt-вариант `correct`, малый). После 93.
+- **SQLite roadmap:** если история > 2000 фраз / FTS / теги — отдельный stage (stage 13 зафиксировал
+  триггеры).
+- **Авто-озвучка чата (Twitch AI-сводка):** отдельное направление (не сейчас).
+
+### Тестовый ключ DeepSeek
+`sk-41451e4ea05a4e75b616ade7df5e36f0` — **только локальный тест**, НЕ коммитить. Для плана 93.
+
+### EditorMenu — ✅ существует
+`src/components/editor/EditorMenu.vue` реализован (эмитает `correct`/`complete`/`toggle-history`).
+⇒ План 93 (AI-грамматика) интегрируется пунктом в EditorMenu — зависимости удовлетворены.
