@@ -13,6 +13,9 @@ const { settings: appSettings } = useAppSettings()
 const bindings = ref<SoundBinding[]>([])
 const errorMessage = ref<string | null>(null)
 const showAddDialog = ref(false)
+const showAddSetDialog = ref(false)
+const newSetName = ref('')
+const addSetInputRef = ref<HTMLInputElement | null>(null)
 const isLoading = ref(false)
 
 const newKey = ref('A')
@@ -68,17 +71,31 @@ async function switchSet(id: string) {
   }
 }
 
-async function addSet() {
-  const name = prompt('Имя набора:')
-  if (!name || !name.trim()) return
+function addSet() {
+  newSetName.value = ''
+  showAddSetDialog.value = true
+  nextTick(() => {
+    addSetInputRef.value?.focus()
+  })
+}
+
+async function confirmAddSet() {
+  const name = newSetName.value.trim()
+  if (!name) return
   try {
-    const created = await invoke<SoundSet>('sp_add_set', { name: name.trim() })
+    const created = await invoke<SoundSet>('sp_add_set', { name })
     await loadSets()
     activeSetId.value = created.id
     bindings.value = []
+    showAddSetDialog.value = false
   } catch (e) {
     showError('Ошибка создания набора: ' + (e as Error).message)
   }
+}
+
+function closeAddSetDialog() {
+  showAddSetDialog.value = false
+  newSetName.value = ''
 }
 
 function startRename(set: SoundSet) {
@@ -553,6 +570,34 @@ watch(() => appSettings.value, (newSettings) => {
             :class="{ saving: isSaving }"
           >
             {{ isSaving ? 'Добавление...' : 'Добавить' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showAddSetDialog" class="dialog-overlay" @click="closeAddSetDialog">
+      <div class="dialog" @click.stop>
+        <h2>Новый набор звуков</h2>
+        <div class="form-group">
+          <input
+            ref="addSetInputRef"
+            v-model="newSetName"
+            type="text"
+            placeholder="Имя набора"
+            maxlength="50"
+            class="text-input"
+            @keydown.enter="confirmAddSet"
+            @keydown.esc="closeAddSetDialog"
+          />
+        </div>
+        <div class="dialog-actions">
+          <button @click="closeAddSetDialog" class="cancel-button">Отмена</button>
+          <button
+            @click="confirmAddSet"
+            :disabled="!newSetName.trim()"
+            class="save-button"
+          >
+            Создать
           </button>
         </div>
       </div>
