@@ -194,6 +194,7 @@ export interface SoundPanelWindowSettingsDto {
   opacity: number
   bg_color: string
   clickthrough: boolean
+  stay_visible: boolean
 }
 
 export interface PlaybackWindowSettingsDto {

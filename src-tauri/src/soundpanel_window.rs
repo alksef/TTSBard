@@ -35,12 +35,12 @@ pub fn show_soundpanel_window(app_handle: &AppHandle) -> tauri::Result<()> {
         let _ = emit_soundpanel_bindings_changed(app_handle);
 
         let sp_state = app_handle.state::<SoundPanelState>();
-        let had_clickthrough = sp_state.is_floating_clickthrough_enabled();
+        let clickthrough = sp_state.is_floating_clickthrough_enabled();
         debug!(
             window_type = "soundpanel",
-            had_clickthrough, "Disabling clickthrough for active panel"
+            clickthrough, "Respecting clickthrough for active panel"
         );
-        let _ = window.set_ignore_cursor_events(false);
+        let _ = window.set_ignore_cursor_events(clickthrough);
 
         #[cfg(windows)]
         {

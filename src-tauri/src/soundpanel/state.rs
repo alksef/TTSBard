@@ -95,6 +95,9 @@ pub struct SoundPanelState {
     /// Intercept-настройки (NumPad/F-keys → actions, persisted)
     pub intercept: Arc<Mutex<InterceptSettings>>,
 
+    /// Оставлять ли плавающее окно видимым после воспроизведения звука
+    pub stay_visible: Arc<Mutex<bool>>,
+
     /// Активные воспроизведения звука (thread handles)
     active_playbacks: Arc<Mutex<Vec<JoinHandle<()>>>>,
 }
@@ -116,6 +119,7 @@ impl SoundPanelState {
             floating_bg_color: Arc::new(Mutex::new(DEFAULT_FLOATING_BG_COLOR.to_string())),
             floating_clickthrough: Arc::new(Mutex::new(false)),
             intercept: Arc::new(Mutex::new(intercept)),
+            stay_visible: Arc::new(Mutex::new(false)),
             active_playbacks: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -410,6 +414,20 @@ impl SoundPanelState {
                 target = "soundpanel::state",
                 "Failed to lock floating_clickthrough"
             );
+        }
+    }
+
+    /// Проверить, оставлять ли окно видимым после воспроизведения
+    pub fn get_stay_visible(&self) -> bool {
+        self.stay_visible.lock().map(|v| *v).unwrap_or(false)
+    }
+
+    /// Установить, оставлять ли окно видимым после воспроизведения
+    pub fn set_stay_visible(&self, enabled: bool) {
+        if let Ok(mut val) = self.stay_visible.lock() {
+            *val = enabled;
+        } else {
+            error!(target = "soundpanel::state", "Failed to lock stay_visible");
         }
     }
 

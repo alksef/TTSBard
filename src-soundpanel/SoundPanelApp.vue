@@ -27,6 +27,7 @@ let messageTimeout: number | null = null
 const opacity = ref(90)
 const bgColor = ref('#2a2a2a')
 const clickthroughEnabled = ref(false)
+const stayVisible = ref(false)
 const showTransparencyControl = ref(false)
 
 interface Binding {
@@ -158,7 +159,9 @@ function onKeydown(e: KeyboardEvent) {
   const b = bindings.value.find(x => x.key === key)
   if (b) {
     e.preventDefault()
-    invoke('sp_play_binding', { key }).then(() => closeWindow())
+    invoke('sp_play_binding', { key }).then(() => {
+      if (!stayVisible.value) closeWindow()
+    })
   } else {
     showNoBinding(key)
   }
@@ -187,6 +190,12 @@ onMounted(async () => {
     console.error('Failed to load clickthrough:', e)
   }
 
+  try {
+    stayVisible.value = await invoke<boolean>('sp_get_stay_visible')
+  } catch (e) {
+    console.error('Failed to load stay_visible:', e)
+  }
+
   const unlisten = await listen('soundpanel-appearance-update', async () => {
     console.log('[SoundPanel] Appearance update event received')
     const [newOpacity, newColor] = await invoke<[number, string]>('sp_get_floating_appearance')
@@ -197,6 +206,11 @@ onMounted(async () => {
       clickthroughEnabled.value = await invoke<boolean>('sp_is_floating_clickthrough_enabled')
     } catch (e) {
       console.error('Failed to reload clickthrough:', e)
+    }
+    try {
+      stayVisible.value = await invoke<boolean>('sp_get_stay_visible')
+    } catch (e) {
+      console.error('Failed to reload stay_visible:', e)
     }
     console.log('[SoundPanel] Updated refs:', { opacity: opacity.value, bgColor: bgColor.value })
   })

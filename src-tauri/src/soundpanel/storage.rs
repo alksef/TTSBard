@@ -202,12 +202,17 @@ pub fn load_appearance(
     let opacity = windows_manager.get_soundpanel_opacity();
     let bg_color = windows_manager.get_soundpanel_bg_color();
     let clickthrough = windows_manager.get_soundpanel_clickthrough();
+    let stay_visible = windows_manager.get_soundpanel_stay_visible();
 
-    info!(opacity, bg_color, clickthrough, "Loaded appearance");
+    info!(
+        opacity,
+        bg_color, clickthrough, stay_visible, "Loaded appearance"
+    );
 
     state.set_floating_opacity(opacity);
     state.set_floating_bg_color(bg_color.clone());
     state.set_floating_clickthrough(clickthrough);
+    state.set_stay_visible(stay_visible);
 
     Ok(SoundPanelAppearance {
         opacity,

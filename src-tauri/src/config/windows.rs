@@ -27,6 +27,8 @@ pub struct SoundPanelWindowSettings {
     pub bg_color: String,
     #[serde(default)]
     pub clickthrough: bool,
+    #[serde(default)]
+    pub stay_visible: bool,
 }
 
 /// Playback control window settings
@@ -82,6 +84,7 @@ impl Default for SoundPanelWindowSettings {
             opacity: 90,
             bg_color: "#2a2a2a".to_string(),
             clickthrough: false,
+            stay_visible: false,
         }
     }
 }
@@ -241,6 +244,20 @@ impl WindowsManager {
     pub fn get_soundpanel_clickthrough(&self) -> bool {
         self.load()
             .map(|s| s.soundpanel.clickthrough)
+            .unwrap_or(false)
+    }
+
+    /// Set soundpanel stay_visible
+    pub fn set_soundpanel_stay_visible(&self, stay_visible: bool) -> Result<()> {
+        let mut settings = self.load()?;
+        settings.soundpanel.stay_visible = stay_visible;
+        self.save(&settings)
+    }
+
+    /// Get soundpanel stay_visible
+    pub fn get_soundpanel_stay_visible(&self) -> bool {
+        self.load()
+            .map(|s| s.soundpanel.stay_visible)
             .unwrap_or(false)
     }
 

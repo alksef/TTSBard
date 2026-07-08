@@ -181,7 +181,28 @@ pub fn sp_is_floating_clickthrough_enabled(
     Ok(state.is_floating_clickthrough_enabled())
 }
 
-/// Воспроизвести звук по клавише (A-Z) и скрыть панель
+/// Проверить, оставлять ли окно видимым после воспроизведения звука
+#[tauri::command]
+pub fn sp_get_stay_visible(state: State<'_, SoundPanelState>) -> Result<bool, String> {
+    Ok(state.get_stay_visible())
+}
+
+/// Установить, оставлять ли окно видимым после воспроизведения звука
+#[tauri::command]
+pub fn sp_set_stay_visible(
+    enabled: bool,
+    state: State<'_, SoundPanelState>,
+    windows_manager: State<'_, WindowsManager>,
+) -> Result<(), String> {
+    info!(enabled, "Setting stay_visible");
+    state.set_stay_visible(enabled);
+    windows_manager
+        .set_soundpanel_stay_visible(enabled)
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    Ok(())
+}
+
+/// Воспроизвести звук по клавише (A-Z) и скрыть панель (если stay_visible выключен)
 #[tauri::command]
 pub fn sp_play_binding(key: String, app_handle: AppHandle) -> Result<(), String> {
     let key_char = key.chars().next().ok_or("Key is empty")?;
@@ -192,7 +213,9 @@ pub fn sp_play_binding(key: String, app_handle: AppHandle) -> Result<(), String>
     if let Some(binding) = state.get_binding(key_char) {
         info!(key = %key_char, description = binding.description, "Playing binding");
         state.play_sound(&binding);
-        state.emit_event(AppEvent::HideSoundPanelWindow);
+        if !state.get_stay_visible() {
+            state.emit_event(AppEvent::HideSoundPanelWindow);
+        }
         Ok(())
     } else {
         Err(format!("No binding for key {}", key_char))

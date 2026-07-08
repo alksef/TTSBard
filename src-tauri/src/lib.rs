@@ -41,7 +41,7 @@ use commands::playback_window::{pc_get_appearance, pc_set_opacity, pc_set_bg_col
 use commands::logging::{get_logging_settings, save_logging_settings};
 use commands::telegram::{telegram_init, telegram_request_code, telegram_sign_in, telegram_sign_out, telegram_get_status, telegram_get_user, telegram_auto_restore};
 use commands::ai::{set_ai_provider, set_ai_prompt, set_ai_openai_api_key, set_ai_openai_use_proxy, set_ai_zai_url, set_ai_zai_api_key, correct_text, set_editor_ai, get_editor_ai, set_editor_ai_completion, get_editor_ai_completion, get_ai_completion, set_ai_openai_model, get_ai_openai_model, set_ai_zai_model, get_ai_zai_model, set_ai_deepseek_api_key, set_ai_deepseek_model, set_ai_deepseek_use_proxy, get_ai_deepseek_model, ai_check_grammar};
-use soundpanel::{sp_get_bindings, sp_add_binding, sp_remove_binding, sp_test_sound, sp_is_supported_format, sp_get_floating_appearance, sp_set_floating_opacity, sp_set_floating_bg_color, sp_set_floating_clickthrough, sp_is_floating_clickthrough_enabled, sp_play_binding, get_intercept_settings, set_intercept_enabled, set_intercept_binding, clear_intercept_binding, sp_get_sets, sp_get_active_set, sp_set_active_set, sp_add_set, sp_rename_set, sp_remove_set};
+use soundpanel::{sp_get_bindings, sp_add_binding, sp_remove_binding, sp_test_sound, sp_is_supported_format, sp_get_floating_appearance, sp_set_floating_opacity, sp_set_floating_bg_color, sp_set_floating_clickthrough, sp_is_floating_clickthrough_enabled, sp_get_stay_visible, sp_set_stay_visible, sp_play_binding, get_intercept_settings, set_intercept_enabled, set_intercept_binding, clear_intercept_binding, sp_get_sets, sp_get_active_set, sp_set_active_set, sp_add_set, sp_rename_set, sp_remove_set};
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -308,6 +308,8 @@ pub fn run() {
             sp_set_floating_bg_color,
             sp_set_floating_clickthrough,
             sp_is_floating_clickthrough_enabled,
+            sp_get_stay_visible,
+            sp_set_stay_visible,
             sp_play_binding,
             sp_get_sets,
             sp_get_active_set,

@@ -27,6 +27,7 @@ const isSaving = ref(false)
 const opacity = ref(90)
 const bgColor = ref('#2a2a2a')
 const clickthroughEnabled = ref(false)
+const stayVisible = ref(false)
 const previewStyle = computed(() => ({
   backgroundColor: hexToRgba(bgColor.value, opacity.value / 100),
 }))
@@ -275,6 +276,11 @@ async function loadAppearanceSettings() {
   } catch (e) {
     debugError('Failed to load clickthrough setting:', e)
   }
+  try {
+    stayVisible.value = await invoke<boolean>('sp_get_stay_visible')
+  } catch (e) {
+    debugError('Failed to load stay_visible setting:', e)
+  }
 }
 
 async function saveOpacity() {
@@ -301,6 +307,14 @@ async function saveClickthrough() {
   }
 }
 
+async function saveStayVisible() {
+  try {
+    await invoke('sp_set_stay_visible', { enabled: stayVisible.value })
+  } catch (e) {
+    showError('Ошибка сохранения режима видимости: ' + (e as Error).message)
+  }
+}
+
 onMounted(async () => {
   await loadSets()
   await loadBindings()
@@ -309,7 +323,8 @@ onMounted(async () => {
     opacity.value = appSettings.value.windows.soundpanel.opacity
     bgColor.value = appSettings.value.windows.soundpanel.bg_color
     clickthroughEnabled.value = appSettings.value.windows.soundpanel.clickthrough
-    debugLog('[SoundPanelTab] Loaded appearance from unified config:', { opacity: opacity.value, bgColor: bgColor.value, clickthrough: clickthroughEnabled.value })
+    stayVisible.value = appSettings.value.windows.soundpanel.stay_visible
+    debugLog('[SoundPanelTab] Loaded appearance from unified config:', { opacity: opacity.value, bgColor: bgColor.value, clickthrough: clickthroughEnabled.value, stayVisible: stayVisible.value })
   } else {
     await loadAppearanceSettings()
   }
@@ -343,6 +358,7 @@ watch(() => appSettings.value, (newSettings) => {
     opacity.value = newSettings.windows.soundpanel.opacity
     bgColor.value = newSettings.windows.soundpanel.bg_color
     clickthroughEnabled.value = newSettings.windows.soundpanel.clickthrough
+    stayVisible.value = newSettings.windows.soundpanel.stay_visible
   }
 }, { deep: true })
 </script>
@@ -497,6 +513,19 @@ watch(() => appSettings.value, (newSettings) => {
           <span>Пропускать нажатия (click-through)</span>
         </label>
         <span class="setting-hint">Окно не будет перехватывать клики мыши</span>
+      </div>
+
+      <div class="setting-row">
+        <label class="setting-label checkbox-label">
+          <input
+            v-model="stayVisible"
+            type="checkbox"
+            class="checkbox-input"
+            @change="saveStayVisible"
+          />
+          <span>Оставлять окно видимым (не скрывать после звука)</span>
+        </label>
+        <span class="setting-hint">При включённом click-through буквы A-Z могут не работать без фокуса — используйте Intercept (NumPad/F-keys)</span>
       </div>
 
       <div class="preview-box" :style="previewStyle">
