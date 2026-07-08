@@ -28,17 +28,21 @@ const MAX_H = 600
 const playbackCard = ref<HTMLDivElement | null>(null)
 
 async function resizeToFit() {
-  await nextTick()
-  await new Promise<number>(resolve => requestAnimationFrame(resolve))
-  const card = playbackCard.value
-  if (!card) return
-  const contentHeight = card.offsetHeight
-  const clamped = Math.max(MIN_H, Math.min(MAX_H, contentHeight))
-  const win = getCurrentWindow()
-  const factor = await win.scaleFactor()
-  const currentLogicalH = (await win.outerSize()).height / factor
-  if (Math.abs(currentLogicalH - clamped) < 1) return
-  await win.setSize(new LogicalSize(350, clamped))
+  try {
+    await nextTick()
+    await new Promise<number>(resolve => requestAnimationFrame(resolve))
+    const card = playbackCard.value
+    if (!card) return
+    const contentHeight = card.offsetHeight
+    const clamped = Math.max(MIN_H, Math.min(MAX_H, contentHeight))
+    const win = getCurrentWindow()
+    const factor = await win.scaleFactor()
+    const currentLogicalH = (await win.outerSize()).height / factor
+    if (Math.abs(currentLogicalH - clamped) < 1) return
+    await win.setSize(new LogicalSize(350, clamped))
+  } catch (e) {
+    console.warn('resizeToFit failed', e)
+  }
 }
 
 interface PlaybackStateDto {
@@ -100,8 +104,6 @@ onMounted(async () => {
 
   await fetchState()
 
-  await resizeToFit()
-
   unlisteners = [
     await listen('playback-started', () => fetchState()),
     await listen('playback-finished', () => fetchState()),
@@ -121,6 +123,8 @@ onMounted(async () => {
       }
     }),
   ]
+
+  await resizeToFit()
 })
 
 watch(() => state.value, () => { resizeToFit() }, { deep: true })
