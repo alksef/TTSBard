@@ -389,39 +389,36 @@ pub async fn reconnect_telegram(
 /// Validate MTProxy secret format
 ///
 /// Validates that the secret is either:
-/// - Hex (32 chars for 16 bytes, or 34 chars with dd/ee prefix)
-/// - Base64 (24 chars)
+/// - Hex (≥32 chars, even length, decoded to ≥16 bytes)
+/// - Base64 (≥24 chars, decoded to ≥16 bytes)
+///
+/// The grammers-mtproto library supports three modes based on decoded byte length:
+/// - 16 bytes → Simple
+/// - 17 bytes → Secured
+/// - >17 bytes → Faketls (with embedded domain)
 fn validate_mtproxy_secret(secret: &str) -> Result<(), String> {
     let secret = secret.trim();
     let len = secret.len();
 
-    // Base64 format (24 chars = 16 bytes encoded)
-    if len == 24 {
-        // Try to decode as base64 using Engine
+    // Try base64 decode first (any length ≥24)
+    if len >= 24 {
         use base64::Engine;
-        if base64::engine::general_purpose::STANDARD.decode(secret).is_ok() {
-            return Ok(());
+        if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(secret) {
+            if decoded.len() >= 16 {
+                return Ok(());
+            }
         }
     }
 
-    // Hex format (32 chars = 16 bytes, or 34 chars with prefix)
-    if len == 32 || len == 34 {
-        // Check for prefix
-        if len == 34 {
-            let prefix = &secret[..2].to_lowercase();
-            if prefix != "dd" && prefix != "ee" {
-                return Err("Secret prefix must be 'dd' or 'ee' for 34-character hex".to_string());
-            }
-        }
-
-        // Try to decode as hex
-        if hex::decode(&secret[2..]).or_else(|_| hex::decode(secret)).is_ok() {
+    // Hex format: even length, ≥32 chars = ≥16 bytes
+    if len >= 32 && len % 2 == 0 {
+        if hex::decode(secret).is_ok() {
             return Ok(());
         }
     }
 
     Err(format!(
-        "Invalid secret format. Expected hex (32 or 34 chars) or base64 (24 chars), got {} chars",
+        "Invalid secret format. Expected hex (≥32 chars, even) or base64 (≥24 chars), got {} chars",
         len
     ))
 }

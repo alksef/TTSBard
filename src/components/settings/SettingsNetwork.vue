@@ -301,8 +301,8 @@ async function saveMtProxySettings() {
   // Validate secret format (optional if clearing)
   if (mtSecret.value.trim()) {
     const secretLen = mtSecret.value.trim().length;
-    if (secretLen !== 24 && secretLen !== 32 && secretLen !== 34) {
-      showStatus('Секрет должен быть 24 (base64), 32 или 34 символа (hex)', 'error');
+    if (secretLen < 24 || (secretLen >= 32 && secretLen % 2 !== 0)) {
+      showStatus('Секрет должен быть ≥24 символов (base64) или ≥32, чётное (hex)', 'error');
       return;
     }
   }

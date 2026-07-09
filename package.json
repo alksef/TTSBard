@@ -17,14 +17,14 @@
     "@codemirror/search": "^6.7.1",
     "@codemirror/state": "^6.7.0",
     "@codemirror/view": "^6.43.4",
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-dialog": "^2",
-    "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/plugin-opener": "^2.5.4",
     "lucide-vue-next": "^1.0.0",
     "vue": "^3.5.30"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2",
+    "@tauri-apps/cli": "^2.11.4",
     "@vitejs/plugin-vue": "^6.0.4",
     "cross-env": "^10.1.0",
     "typescript": "^6.0.2",
