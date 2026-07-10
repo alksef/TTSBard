@@ -1,10 +1,8 @@
 use crate::state::AppState;
 use crate::events::AppEvent;
 use crate::config::{SettingsManager, WindowsManager, AppSettingsDto, SpellSource};
-use crate::tts::TtsProvider;
-use crate::audio::OutputConfig;
 use tauri::{State, AppHandle, Manager, Emitter};
-use tracing::{info, warn, error, debug};
+use tracing::{info, warn};
 
 pub mod preprocessor;
 pub mod telegram;
@@ -19,6 +17,7 @@ pub mod playback;
 pub mod playback_window;
 pub mod window;
 pub mod spellcheck;
+pub mod tts_pipeline;
 
 pub use self::ai::*;
 pub use self::playback::*;
@@ -58,7 +57,7 @@ pub fn quit_app(app_handle: AppHandle) -> Result<(), String> {
 
 /// Internal function for TTS synthesis (shared between command and event handler)
 pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), String> {
-    info!(text, "Starting TTS");
+    info!(text, "Starting TTS Pipeline");
 
     if text.trim().is_empty() {
         return Err("Текст не может быть пустым".to_string());
@@ -71,156 +70,19 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
 
     let prefix_result = crate::preprocessor::parse_prefix(&text);
     let text = prefix_result.text;
-
-    if prefix_result.skip_twitch || prefix_result.skip_webview {
-        debug!(skip_twitch = prefix_result.skip_twitch, skip_webview = prefix_result.skip_webview, "Prefix flags");
-    }
-
-    let text = if let Some(preprocessor) = state.editor.get_preprocessor() {
-        let processed = preprocessor.process(&text);
-        if processed != text {
-            debug!(text, processed, "Replacements");
-        }
-        processed
-    } else {
-        text
-    };
-
-    let text = {
-        if settings.editor.ai {
-            match state.get_or_create_ai_client(&settings.ai, &settings.tts.network) {
-                Ok(client) => {
-                    match client.correct(&text, &settings.ai.prompt).await {
-                        Ok(corrected) => {
-                            if corrected != text {
-                                tracing::info!(
-                                    original = text.len(),
-                                    corrected = corrected.len(),
-                                    "AI correction applied"
-                                );
-                            }
-                            corrected
-                        }
-                        Err(e) => {
-                            tracing::warn!("AI correction failed, using original text: {}", e);
-                            text
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!("AI client not available, skipping correction: {}", e);
-                    text
-                }
-            }
-        } else {
-            text
-        }
-    };
-    tracing::debug!(text, "Text after AI correction stage");
-
-    let text = crate::preprocessor::process_numbers(&text);
-    debug!(text, "Final text for TTS");
-
     state.set_prefix_flags(prefix_result.skip_twitch, prefix_result.skip_webview);
 
-    let provider = {
-        let providers = state.tts_providers.lock();
+    let text = tts_pipeline::preprocess_text(state, &text);
 
-        providers.as_ref()
-            .ok_or_else(|| {
-                error!("TTS provider not initialized");
-                debug!(provider = ?state.get_tts_provider_type(), "Provider type");
-                "TTS provider не инициализирован. Выберите провайдер в настройках.".to_string()
-            })?
-            .clone()
-    };
+    let text = tts_pipeline::ai_correct_text(state, &text, &settings).await;
 
-    let audio_data = provider.synthesize(&text).await
-        .map_err(|e| {
-            error!(error = %e, "synthesize() error");
-            e
-        })?;
-    debug!(bytes = audio_data.len(), "Audio synthesized");
+    let audio_data = tts_pipeline::synthesize_audio(state, &text).await?;
+
+    let audio_data = tts_pipeline::apply_audio_effects_pipeline(audio_data, &settings)?;
 
     state.emit_event(AppEvent::TextSentToTts(text.clone()));
 
-    let audio_settings = settings.audio;
-
-    let effects = if settings.audio_effects.enabled {
-        Some(crate::audio::AudioEffects::new(
-            settings.audio_effects.pitch,
-            settings.audio_effects.speed,
-            settings.audio_effects.volume,
-        ))
-    } else {
-        None
-    };
-
-    let audio_data = match &effects {
-        Some(eff) => {
-            let original_len = audio_data.len();
-            match crate::audio::apply_effects(audio_data, eff) {
-                Ok(processed) => {
-                    debug!(original = original_len, processed = processed.len(), "Audio effects applied");
-                    processed
-                }
-                Err(e) => {
-                    error!(error = %e, "Failed to apply audio effects");
-                    return Err(format!("Не удалось применить аудио эффекты: {}", e));
-                }
-            }
-        }
-        None => audio_data,
-    };
-
-    let effects_volume = effects.as_ref().map(|e| e.volume_factor());
-
-    let speaker_config = if audio_settings.speaker_enabled {
-        let base_volume = audio_settings.speaker_volume as f32 / 100.0;
-        let final_volume = match effects_volume {
-            Some(ev) => base_volume * ev,
-            None => base_volume,
-        };
-        Some(OutputConfig {
-            device_id: audio_settings.speaker_device,
-            volume: final_volume,
-        })
-    } else {
-        None
-    };
-
-    let virtual_mic_config = audio_settings.virtual_mic_device.map(|device_id| {
-        let base_volume = audio_settings.virtual_mic_volume as f32 / 100.0;
-        let final_volume = match effects_volume {
-            Some(ev) => base_volume * ev,
-            None => base_volume,
-        };
-        OutputConfig {
-            device_id: Some(device_id),
-            volume: final_volume,
-        }
-    });
-
-    if speaker_config.is_none() && virtual_mic_config.is_none() {
-        return Err("Аудиовывод и виртуальный микрофон выключены. Включите хотя бы один вывод.".to_string());
-    }
-
-    if let Some(pb) = state.playback_manager.lock().as_ref() {
-        pb.update_audio_config(speaker_config, virtual_mic_config);
-        let phrase_id = uuid::Uuid::new_v4().to_string();
-        info!(target: "playback", "Enqueueing phrase to PlaybackManager");
-        let enqueued = pb.enqueue(phrase_id, text.clone(), audio_data);
-        info!(target: "playback", enqueued, "enqueue result");
-        if !enqueued {
-            warn!("Playback queue full, phrase dropped: {}", text);
-            return Err("Очередь воспроизведения переполнена. Попробуйте позже.".to_string());
-        }
-        if let Some(hm) = state.editor.history_manager.lock().as_ref() {
-            hm.record_phrase(&text);
-        }
-    } else {
-        return Err("Плеер не инициализирован".to_string());
-    }
+    tts_pipeline::enqueue_and_record(state, text, audio_data, &settings)?;
 
     Ok(())
 }
