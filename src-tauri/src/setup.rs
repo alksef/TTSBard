@@ -444,11 +444,12 @@ fn init_hooks(
 fn init_webview_server(app_state: &AppState, app_handle: AppHandle) {
     let webview_settings = app_state.webview_settings.clone();
     let (webview_tx, webview_rx) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
+    let shutdown = app_state.shutdown.clone();
 
     app_state.set_webview_event_sender(webview_tx);
 
     app_state.runtime.spawn(async move {
-        crate::servers::run_webview_server(webview_settings, app_handle, webview_rx).await;
+        crate::servers::run_webview_server(webview_settings, app_handle, webview_rx, shutdown).await;
     });
 }
 
@@ -456,9 +457,10 @@ fn init_webview_server(app_state: &AppState, app_handle: AppHandle) {
 fn init_twitch_client(app_state: &AppState, app_handle: AppHandle) {
     let app_state_clone = app_state.clone();
     let twitch_rx = app_state.twitch_event_tx.subscribe();
+    let shutdown = app_state.shutdown.clone();
 
     app_state.runtime.spawn(async move {
-        crate::servers::run_twitch_client(app_state_clone, app_handle, twitch_rx).await;
+        crate::servers::run_twitch_client(app_state_clone, app_handle, twitch_rx, shutdown).await;
     });
 }
 

@@ -49,7 +49,7 @@ pub mod spellcheck;
 /// Quit the application
 #[tauri::command]
 pub fn quit_app(app_handle: AppHandle) -> Result<(), String> {
-    info!("Quit requested - saving window states");
+    info!("Quit requested - initiating graceful shutdown");
 
     // Сохраняем состояние окон перед выходом
     if let Some(windows_manager) = app_handle.try_state::<WindowsManager>() {
@@ -64,15 +64,16 @@ pub fn quit_app(app_handle: AppHandle) -> Result<(), String> {
         }
     }
 
-    // Notify WebView server to shut down and clean up UPnP
+    // Signal all servers via CancellationToken
     if let Some(state) = app_handle.try_state::<AppState>() {
-        if let Some(tx) = state.webview_event_sender.lock().as_ref() {
-            info!("Sending quit event to WebView server");
-            let _ = tx.send(crate::events::AppEvent::Quit);
+        state.shutdown.cancel();
+        info!("Shutdown token cancelled — all servers notified");
+        std::thread::sleep(std::time::Duration::from_millis(600));
 
-            // Give the server time to clean up UPnP port mapping
-            info!("Waiting for WebView server cleanup...");
-            std::thread::sleep(std::time::Duration::from_millis(500));
+        // Fallback: also send Quit via webview event channel
+        if let Some(tx) = state.webview_event_sender.lock().as_ref() {
+            info!("Sending quit event to WebView server (fallback)");
+            let _ = tx.send(crate::events::AppEvent::Quit);
         }
     }
 

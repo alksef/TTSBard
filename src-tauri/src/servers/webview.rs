@@ -6,6 +6,7 @@
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 use tracing::{info, error};
+use tokio_util::sync::CancellationToken;
 use crate::events::AppEvent;
 use crate::webview::WebViewServer;
 use crate::webview::WebViewSettings;
@@ -17,6 +18,7 @@ pub async fn run_webview_server(
     webview_settings: Arc<tokio::sync::RwLock<WebViewSettings>>,
     app_handle: AppHandle,
     mut webview_rx: tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
+    shutdown: CancellationToken,
 ) {
     {
         let settings = webview_settings.read().await;
@@ -107,67 +109,77 @@ pub async fn run_webview_server(
                     server_handle.abort();
                     server_running = false;
                 } else {
-                    // Process events with timeout (async)
-                    match tokio::time::timeout(
-                        tokio::time::Duration::from_secs(1),
-                        webview_rx.recv(),
-                    ).await {
-                        Ok(Some(event)) => {
-                            info!("[WEBVIEW] 📨 Event received: {:?}", std::mem::discriminant(&event));
-                            match event {
-                                AppEvent::Quit => {
-                                    info!("[WEBVIEW] ⚠ Quit event received, shutting down server...");
+                    tokio::select! {
+                        biased;
+                        _ = shutdown.cancelled() => {
+                            info!("[WEBVIEW] ⛔ Shutdown signal");
+                            server.stop();
+                            server_handle.abort();
+                            return;
+                        }
+                        result = tokio::time::timeout(
+                            tokio::time::Duration::from_secs(1),
+                            webview_rx.recv(),
+                        ) => {
+                            match result {
+                                Ok(Some(event)) => {
+                                    info!("[WEBVIEW] 📨 Event received: {:?}", std::mem::discriminant(&event));
+                                    match event {
+                                        AppEvent::Quit => {
+                                            info!("[WEBVIEW] ⚠ Quit event received, shutting down server...");
 
-                                    // Stop server and clean up UPnP
-                                    server.stop();
+                                            // Stop server and clean up UPnP
+                                            server.stop();
 
-                                    server_handle.abort();
-                                    info!("[WEBVIEW] Server shut down for quit");
-                                    return;
-                                }
-                                AppEvent::TextSentToTts(text) => {
-                                    let preview = text.chars().take(50).collect::<String>();
-                                    info!("[WEBVIEW] 📤 Broadcasting to SSE clients: '{}'...", preview);
-                                    server.broadcast_text(&text).await;
-                                }
-                                AppEvent::RestartWebViewServer => {
-                                    info!("[WEBVIEW] ⚠ Restart event received, stopping server...");
-
-                                    // Stop server and clean up UPnP
-                                    server.stop();
-
-                                    server_handle.abort();
-                                    // Wait a bit for the server to fully shut down
-                                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                                    server_running = false;
-                                }
-                                AppEvent::ReloadWebViewTemplates => {
-                                    info!("[WEBVIEW] 🔄 Reloading templates...");
-                                    match server.templates.reload().await {
-                                        Ok(()) => {
-                                            info!("[WEBVIEW] ✅ Templates reloaded successfully");
+                                            server_handle.abort();
+                                            info!("[WEBVIEW] Server shut down for quit");
+                                            return;
                                         }
-                                        Err(e) => {
-                                            error!("[WEBVIEW] ❌ Failed to reload templates: {}", e);
+                                        AppEvent::TextSentToTts(text) => {
+                                            let preview = text.chars().take(50).collect::<String>();
+                                            info!("[WEBVIEW] 📤 Broadcasting to SSE clients: '{}'...", preview);
+                                            server.broadcast_text(&text).await;
+                                        }
+                                        AppEvent::RestartWebViewServer => {
+                                            info!("[WEBVIEW] ⚠ Restart event received, stopping server...");
+
+                                            // Stop server and clean up UPnP
+                                            server.stop();
+
+                                            server_handle.abort();
+                                            // Wait a bit for the server to fully shut down
+                                            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                                            server_running = false;
+                                        }
+                                        AppEvent::ReloadWebViewTemplates => {
+                                            info!("[WEBVIEW] 🔄 Reloading templates...");
+                                            match server.templates.reload().await {
+                                                Ok(()) => {
+                                                    info!("[WEBVIEW] ✅ Templates reloaded successfully");
+                                                }
+                                                Err(e) => {
+                                                    error!("[WEBVIEW] ❌ Failed to reload templates: {}", e);
+                                                }
+                                            }
+                                        }
+                                        AppEvent::ToggleUpnp(enabled) => {
+                                            info!("[WEBVIEW] 🔄 Toggling UPnP: {}", enabled);
+                                            server.toggle_upnp(enabled);
+                                        }
+                                        _ => {
+                                            info!("[WEBVIEW] ℹ️  Ignoring event: {:?}", std::mem::discriminant(&event));
                                         }
                                     }
                                 }
-                                AppEvent::ToggleUpnp(enabled) => {
-                                    info!("[WEBVIEW] 🔄 Toggling UPnP: {}", enabled);
-                                    server.toggle_upnp(enabled);
+                                Err(_) => {
+                                    // Timeout - continue loop to check settings
                                 }
-                                _ => {
-                                    info!("[WEBVIEW] ℹ️  Ignoring event: {:?}", std::mem::discriminant(&event));
+                                Ok(None) => {
+                                    // Channel closed
+                                    info!("[WEBVIEW] Event channel disconnected");
+                                    return;
                                 }
                             }
-                        }
-                        Err(_) => {
-                            // Timeout - continue loop to check settings
-                        }
-                        Ok(None) => {
-                            // Channel closed
-                            info!("[WEBVIEW] Event channel disconnected");
-                            return;
                         }
                     }
                 }
@@ -179,39 +191,47 @@ pub async fn run_webview_server(
             info!("[WEBVIEW] ========================================");
             // Wait for enable or restart event
             loop {
-                match tokio::time::timeout(
-                    tokio::time::Duration::from_secs(2),
-                    webview_rx.recv(),
-                ).await {
-                    Ok(Some(AppEvent::Quit)) => {
-                        info!("[WEBVIEW] ⚠ Quit event received (server disabled)");
+                tokio::select! {
+                    biased;
+                    _ = shutdown.cancelled() => {
                         return;
                     }
-                    Ok(Some(AppEvent::RestartWebViewServer)) => {
-                        info!("[WEBVIEW] ⚠ Restart event received, exiting disabled state");
-                        break;
-                    }
-                    Ok(Some(AppEvent::TextSentToTts(text))) => {
-                        // Ignore TTS events while disabled but log them
-                        let preview = text.chars().take(30).collect::<String>();
-                        info!("[WEBVIEW] Ignoring TTS text (server disabled): '{}'...", preview);
-                    }
-                    Err(_) => {
-                        // Timeout - check if enabled now
-                        let settings = webview_settings.read().await;
-                        if settings.enabled {
-                            drop(settings);
-                            info!("[WEBVIEW] ✓ Enabled detected via timeout!");
-                            break;
+                    result = tokio::time::timeout(
+                        tokio::time::Duration::from_secs(2),
+                        webview_rx.recv(),
+                    ) => {
+                        match result {
+                            Ok(Some(AppEvent::Quit)) => {
+                                info!("[WEBVIEW] ⚠ Quit event received (server disabled)");
+                                return;
+                            }
+                            Ok(Some(AppEvent::RestartWebViewServer)) => {
+                                info!("[WEBVIEW] ⚠ Restart event received, exiting disabled state");
+                                break;
+                            }
+                            Ok(Some(AppEvent::TextSentToTts(text))) => {
+                                // Ignore TTS events while disabled but log them
+                                let preview = text.chars().take(30).collect::<String>();
+                                info!("[WEBVIEW] Ignoring TTS text (server disabled): '{}'...", preview);
+                            }
+                            Err(_) => {
+                                // Timeout - check if enabled now
+                                let settings = webview_settings.read().await;
+                                if settings.enabled {
+                                    drop(settings);
+                                    info!("[WEBVIEW] ✓ Enabled detected via timeout!");
+                                    break;
+                                }
+                                drop(settings);
+                            }
+                            Ok(None) => {
+                                info!("[WEBVIEW] Event channel disconnected");
+                                return;
+                            }
+                            Ok(Some(other)) => {
+                                info!("[WEBVIEW] Received unexpected event while disabled: {:?}", other);
+                            }
                         }
-                        drop(settings);
-                    }
-                    Ok(None) => {
-                        info!("[WEBVIEW] Event channel disconnected");
-                        return;
-                    }
-                    Ok(Some(other)) => {
-                        info!("[WEBVIEW] Received unexpected event while disabled: {:?}", other);
                     }
                 }
             }

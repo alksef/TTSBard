@@ -5,6 +5,7 @@
 
 use tauri::{AppHandle, Emitter};
 use tracing::{debug, error, info};
+use tokio_util::sync::CancellationToken;
 use crate::events::{TwitchEvent, TwitchConnectionStatus};
 use crate::state::AppState;
 use crate::twitch::TwitchClient;
@@ -15,6 +16,7 @@ pub async fn run_twitch_client(
     app_state: AppState,
     app_handle: AppHandle,
     mut twitch_rx: Receiver<TwitchEvent>,
+    shutdown: CancellationToken,
 ) {
     let mut twitch_client: Option<TwitchClient> = None;
     let mut last_status = TwitchConnectionStatus::Disconnected;
@@ -36,6 +38,14 @@ pub async fn run_twitch_client(
 
     loop {
         tokio::select! {
+            biased;
+            _ = shutdown.cancelled() => {
+                info!("[TWITCH] ⛔ Shutdown");
+                if let Some(client) = twitch_client.take() {
+                    client.stop().await;
+                }
+                return;
+            }
             _ = status_check_interval.tick() => {
                 if let Some(client) = &twitch_client {
                     let twitch_status = client.status().await;
