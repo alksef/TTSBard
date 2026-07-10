@@ -1,4 +1,5 @@
 mod server;
+pub mod service;
 pub mod templates;
 pub mod security;
 pub mod upnp;

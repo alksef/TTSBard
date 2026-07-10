@@ -188,7 +188,7 @@ impl EventHandler {
 
         // === Twitch send (check flag) ===
         if !skip_twitch {
-            let settings = self.state.twitch_settings.blocking_read();
+            let settings = self.state.twitch.settings.blocking_read();
             if settings.enabled {
                 drop(settings);
                 self.state.send_twitch_event(TwitchEvent::SendMessage(text));

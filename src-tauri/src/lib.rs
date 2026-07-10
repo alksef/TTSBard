@@ -3,6 +3,7 @@ mod ai;
 mod commands;
 pub mod audio;
 mod config;
+mod editor;
 mod error;
 mod event_loop;
 mod events;
@@ -236,7 +237,7 @@ pub fn run() {
     let (history_path, ngram_path, phrase_path) = history::history_paths()
         .expect("Failed to resolve history paths");
     let history_manager = Arc::new(history::HistoryManager::new(history_path, ngram_path, phrase_path));
-    *app_state.history_manager.lock() = Some(history_manager.clone());
+    *app_state.editor.history_manager.lock() = Some(history_manager.clone());
     let history_state = commands::history::HistoryState(history_manager);
 
     let tabs_path = tabs::tabs_path().expect("Failed to resolve tabs path");

@@ -76,7 +76,7 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
         debug!(skip_twitch = prefix_result.skip_twitch, skip_webview = prefix_result.skip_webview, "Prefix flags");
     }
 
-    let text = if let Some(preprocessor) = state.get_preprocessor() {
+    let text = if let Some(preprocessor) = state.editor.get_preprocessor() {
         let processed = preprocessor.process(&text);
         if processed != text {
             debug!(text, processed, "Replacements");
@@ -215,7 +215,7 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
             warn!("Playback queue full, phrase dropped: {}", text);
             return Err("Очередь воспроизведения переполнена. Попробуйте позже.".to_string());
         }
-        if let Some(hm) = state.history_manager.lock().as_ref() {
+        if let Some(hm) = state.editor.history_manager.lock().as_ref() {
             hm.record_phrase(&text);
         }
     } else {
@@ -250,7 +250,7 @@ pub async fn get_all_app_settings(
     };
 
     let twitch_settings = {
-        let s = app_state.twitch_settings.read().await;
+            let s = app_state.twitch.settings.read().await;
         s.clone()
     };
 
@@ -258,7 +258,7 @@ pub async fn get_all_app_settings(
         .map_err(|e| format!("Failed to load windows settings: {}", e))?;
 
     let interception_enabled = app_state.is_interception_enabled();
-    let preprocessor = app_state.get_preprocessor();
+    let preprocessor = app_state.editor.get_preprocessor();
 
     let soundpanel_bindings = soundpanel_state.get_all_bindings();
     info!(count = soundpanel_bindings.len(), "get_all_app_settings: Loaded soundpanel bindings");
