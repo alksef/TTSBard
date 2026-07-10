@@ -173,15 +173,7 @@ impl EventHandler {
 
         // === WebView broadcast (check flag) ===
         if !skip_webview {
-            if let Some(ref sender) = *self.state.webview_event_sender.lock() {
-                debug!("[EVENT] Sending to WebView");
-                match sender.send(AppEvent::TextSentToTts(text.clone())) {
-                    Ok(_) => debug!("[EVENT] TextSentToTts sent to WebView successfully"),
-                    Err(e) => error!(error = %e, "[EVENT] Failed to send to WebView"),
-                }
-            } else {
-                debug!("[EVENT] WebView sender is None, not forwarding");
-            }
+            self.state.webview.send_event(AppEvent::TextSentToTts(text.clone()));
         } else {
             debug!("[EVENT] WebView skipped (prefix)");
         }
