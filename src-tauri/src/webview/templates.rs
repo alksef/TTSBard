@@ -276,3 +276,23 @@ body {
     font-size: clamp(20px, 3vw, 42px);
 }"#.to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_templates_placeholders() {
+        let html = default_html();
+        assert!(html.contains("{{CSS}}"));
+    }
+
+    #[test]
+    fn test_xss_protection_in_js_script() {
+        let html = default_html();
+        // Ensure the SSE script uses textContent to prevent HTML injection (XSS)
+        assert!(html.contains("textContent"));
+        // Ensure the SSE script does not use innerHTML for output
+        assert!(!html.contains("innerHTML"));
+    }
+}

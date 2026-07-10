@@ -212,4 +212,41 @@ mod tests {
         assert_eq!(loaded.active_id, "a", "invalid active_id must fall back to first tab");
         let _ = fs::remove_file(&path);
     }
+
+    #[test]
+    fn save_all_concurrently_maintains_consistency() {
+        let (mgr, path) = manager_in_tmp();
+        let mgr_arc = std::sync::Arc::new(mgr);
+        let mut threads = vec![];
+
+        for i in 0..10 {
+            let mgr_clone = std::sync::Arc::clone(&mgr_arc);
+            threads.push(std::thread::spawn(move || {
+                let data = TabsData {
+                    active_id: format!("id-{}", i),
+                    tabs: vec![
+                        EditorTab {
+                            id: format!("id-{}", i),
+                            title: format!("Tab {}", i),
+                            text: format!("Text content {}", i),
+                        }
+                    ],
+                };
+                mgr_clone.save_all(data);
+            }));
+        }
+
+        for t in threads {
+            t.join().unwrap();
+        }
+
+        // Verify the file exists and is valid JSON
+        let content = fs::read_to_string(&path).unwrap();
+        let loaded: TabsData = serde_json::from_str(&content).unwrap();
+
+        assert!(loaded.active_id.starts_with("id-"));
+        assert_eq!(loaded.tabs.len(), 1);
+
+        let _ = fs::remove_file(&path);
+    }
 }

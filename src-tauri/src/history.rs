@@ -390,3 +390,51 @@ pub fn history_paths() -> Result<(PathBuf, PathBuf, PathBuf)> {
         dir.join("phrase_history.json"),
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    fn manager_in_tmp() -> (HistoryManager, PathBuf, PathBuf, PathBuf) {
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let n = SEQ.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir()
+            .join(format!("ttsbard-history-test-{}-{}", std::process::id(), n));
+        fs::create_dir_all(&dir).unwrap();
+        let p1 = dir.join("input_history.json");
+        let p2 = dir.join("ngrams.json");
+        let p3 = dir.join("phrase_history.json");
+        (HistoryManager::new(p1.clone(), p2.clone(), p3.clone()), p1, p2, p3)
+    }
+
+    #[test]
+    fn test_concurrent_phrase_recording() {
+        let (mgr, p1, p2, p3) = manager_in_tmp();
+        let mgr_arc = std::sync::Arc::new(mgr);
+        let mut threads = vec![];
+
+        for i in 0..20 {
+            let mgr_clone = std::sync::Arc::clone(&mgr_arc);
+            threads.push(std::thread::spawn(move || {
+                mgr_clone.record_phrase(&format!("test phrase {}", i));
+            }));
+        }
+
+        for t in threads {
+            t.join().unwrap();
+        }
+
+        // Verify the file exists and is valid JSON containing all recorded phrases
+        let content = fs::read_to_string(&p3).unwrap();
+        let loaded: Vec<PhraseEntry> = serde_json::from_str(&content).unwrap();
+
+        assert_eq!(loaded.len(), 20);
+
+        let _ = fs::remove_file(&p1);
+        let _ = fs::remove_file(&p2);
+        let _ = fs::remove_file(&p3);
+    }
+}
