@@ -18,6 +18,15 @@ pub async fn run_webview_server(
     app_handle: AppHandle,
     mut webview_rx: tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
 ) {
+    {
+        let settings = webview_settings.read().await;
+        if settings.start_on_boot && !settings.enabled {
+            drop(settings);
+            webview_settings.write().await.enabled = true;
+            info!("[WEBVIEW] Auto-start on boot: enabled");
+        }
+    }
+
     loop {
         // Check current settings
         let settings = webview_settings.read().await;

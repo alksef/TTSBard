@@ -20,6 +20,15 @@ pub async fn run_twitch_client(
     let mut last_status = TwitchConnectionStatus::Disconnected;
     let mut status_check_interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
 
+    {
+        let settings = app_state.twitch_settings.read().await;
+        if settings.start_on_boot && settings.enabled && settings.is_valid().is_ok() {
+            drop(settings);
+            info!("[TWITCH] Auto-start on boot");
+            app_state.send_twitch_event(crate::events::TwitchEvent::Restart);
+        }
+    }
+
     let update_status = |status: TwitchConnectionStatus| {
         *app_state.twitch_connection_status.lock() = status.clone();
         let _ = app_handle.emit("twitch-status-changed", &status);

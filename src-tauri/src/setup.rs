@@ -447,55 +447,8 @@ fn init_webview_server(app_state: &AppState, app_handle: AppHandle) {
 
     app_state.set_webview_event_sender(webview_tx);
 
-    thread::spawn(move || {
-        let rt = match tokio::runtime::Builder::new_multi_thread()
-            .thread_stack_size(8 * 1024 * 1024)
-            .enable_all()
-            .build()
-        {
-            Ok(rt) => rt,
-            Err(e) => {
-                tracing::error!(error = %e, "Failed to create tokio runtime for webview");
-                return;
-            }
-        };
-
-        rt.block_on(async move {
-            crate::servers::run_webview_server(
-                webview_settings,
-                app_handle,
-                webview_rx,
-            ).await;
-        });
-    });
-
-    // Auto-start WebView if configured
-    let app_state_autostart = app_state.clone();
-    thread::spawn(move || {
-        let rt = match tokio::runtime::Builder::new_multi_thread()
-            .thread_stack_size(8 * 1024 * 1024)
-            .enable_all()
-            .build()
-        {
-            Ok(rt) => rt,
-            Err(e) => {
-                tracing::error!(error = %e, "Failed to create WebView autostart runtime");
-                return;
-            }
-        };
-
-        rt.block_on(async move {
-            let settings = app_state_autostart.webview_settings.read().await;
-            if settings.start_on_boot && !settings.enabled {
-                info!("[WEBVIEW] Auto-starting on boot (start_on_boot=true)");
-                drop(settings);
-                // Set enabled to true to start the server
-                let mut s = app_state_autostart.webview_settings.write().await;
-                s.enabled = true;
-                drop(s);
-                info!("[WEBVIEW] Auto-start enabled");
-            }
-        });
+    app_state.runtime.spawn(async move {
+        crate::servers::run_webview_server(webview_settings, app_handle, webview_rx).await;
     });
 }
 
@@ -504,53 +457,8 @@ fn init_twitch_client(app_state: &AppState, app_handle: AppHandle) {
     let app_state_clone = app_state.clone();
     let twitch_rx = app_state.twitch_event_tx.subscribe();
 
-    thread::spawn(move || {
-        let rt = match tokio::runtime::Builder::new_multi_thread()
-            .thread_stack_size(8 * 1024 * 1024)
-            .enable_all()
-            .build()
-        {
-            Ok(rt) => rt,
-            Err(e) => {
-                tracing::error!(error = %e, "Failed to create Twitch tokio runtime");
-                return;
-            }
-        };
-
-        rt.block_on(async move {
-            crate::servers::run_twitch_client(
-                app_state_clone.clone(),
-                app_handle,
-                twitch_rx,
-            ).await;
-        });
-    });
-
-    // Auto-start Twitch if configured
-    let app_state_autostart = app_state.clone();
-    thread::spawn(move || {
-        let rt = match tokio::runtime::Builder::new_multi_thread()
-            .thread_stack_size(8 * 1024 * 1024)
-            .enable_all()
-            .build()
-        {
-            Ok(rt) => rt,
-            Err(e) => {
-                tracing::error!(error = %e, "Failed to create Twitch autostart runtime");
-                return;
-            }
-        };
-
-        rt.block_on(async move {
-            let settings = app_state_autostart.twitch_settings.read().await;
-            if settings.start_on_boot && settings.enabled {
-                if let Ok(()) = settings.is_valid() {
-                    info!("[TWITCH] Auto-starting on boot");
-                    app_state_autostart.send_twitch_event(crate::events::TwitchEvent::Restart);
-                    info!("[TWITCH] Restart event sent for auto-start");
-                }
-            }
-        });
+    app_state.runtime.spawn(async move {
+        crate::servers::run_twitch_client(app_state_clone, app_handle, twitch_rx).await;
     });
 }
 
