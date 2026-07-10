@@ -28,6 +28,14 @@ const opacity = ref(90)
 const bgColor = ref('#2a2a2a')
 const clickthroughEnabled = ref(false)
 const stayVisible = ref(false)
+
+// Синхронный cleanup-список для Tauri-listener'ов
+const _cleanups: Array<() => void> = []
+onUnmounted(() => {
+  _cleanups.forEach(fn => fn())
+  _cleanups.length = 0
+})
+
 const previewStyle = computed(() => ({
   backgroundColor: hexToRgba(bgColor.value, opacity.value / 100),
 }))
@@ -338,24 +346,21 @@ onMounted(async () => {
   const unlistenAppearance = await listen('soundpanel-appearance-update', () => {
     loadAppearanceSettings()
   })
+  _cleanups.push(() => unlistenAppearance())
 
   const unlistenBindings = await listen('soundpanel-bindings-changed', async () => {
     debugLog('[SoundPanelTab] Bindings changed event, reloading')
     await loadSets()
     await loadBindings()
   })
+  _cleanups.push(() => unlistenBindings())
 
   const unlistenActiveSet = await listen('soundpanel-active-set-changed', async () => {
     debugLog('[SoundPanelTab] Active set changed event, reloading')
     await loadSets()
     await loadBindings()
   })
-
-  onUnmounted(() => {
-    unlistenAppearance?.()
-    unlistenBindings?.()
-    unlistenActiveSet?.()
-  })
+  _cleanups.push(() => unlistenActiveSet())
 })
 
 watch(() => appSettings.value, (newSettings) => {
