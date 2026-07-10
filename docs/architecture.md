@@ -1,6 +1,6 @@
 # Architecture & Design Patterns
 
-**Last Updated:** 2026-04-15
+**Last Updated:** 2026-07-11
 **Version:** 0.3.0-dev
 
 ## System Architecture
@@ -149,13 +149,17 @@ await invoke('set_interception', { enabled: true });
 
 ### 3. State Management
 
-**Thread-Safe Shared State**
+**Thread-Safe Shared State & Domain Services**
 
 ```rust
 pub struct AppState {
-    // MPSC event senders
+    // Senders
     pub event_sender: Arc<Mutex<Option<Sender<AppEvent>>>>,
-    pub webview_event_sender: Arc<Mutex<Option<Sender<AppEvent>>>>,
+
+    // Domain Services (AppState acts as a container)
+    pub webview: Arc<crate::webview::service::WebViewService>,
+    pub twitch: Arc<crate::twitch::TwitchService>,
+    pub editor: Arc<crate::editor::EditorService>,
 
     // Runtime flags
     pub interception_enabled: Arc<Mutex<bool>>,
@@ -171,14 +175,18 @@ pub struct AppState {
     pub ai_client: Arc<Mutex<Option<Arc<AiProvider>>>>,
     pub ai_settings_hash: Arc<AtomicU64>,
 
-    // Other modules
-    pub preprocessor: Arc<Mutex<Option<TextPreprocessor>>>,
-    pub webview_settings: Arc<tokio::sync::RwLock<WebViewSettings>>,
-    pub twitch_settings: Arc<tokio::sync::RwLock<TwitchSettings>>,
+    // Windows & Audio
+    pub active_window: Arc<Mutex<ActiveWindow>>,
     pub cached_devices: Arc<RwLock<HashMap<String, cpal::Device>>>,
+    pub prefix_skip_twitch: Arc<Mutex<bool>>,
+    pub prefix_skip_webview: Arc<Mutex<bool>>,
+    pub playback_manager: Arc<Mutex<Option<Arc<crate::playback::PlaybackManager>>>>,
 
     // Tokio runtime
     pub runtime: Arc<tokio::runtime::Runtime>,
+    
+    // Cancellation token for unified graceful shutdown
+    pub shutdown: CancellationToken,
 }
 ```
 
@@ -186,12 +194,11 @@ pub struct AppState {
 
 ```rust
 // Mutex for write-heavy or rarely-accessed data
-let enabled = state.interception_enabled.lock().await;
+let enabled = state.is_interception_enabled();
 
-// RwLock for read-heavy configuration
-let config = state.tts_config.read(); // Multiple readers
-let provider_type = config.provider_type;
-// ...
+// Accessing domain services (e.g. WebView settings or event sender)
+let settings = state.webview.settings.read().await;
+state.webview.send_event(AppEvent::RestartWebViewServer);
 
 // RwLock write access
 {
@@ -609,20 +616,13 @@ Main Thread (Tokio Runtime)
 ├── Tauri Event Loop
 ├── MPSC Event Handler
 ├── Command Handlers
-└── Audio Tasks (spawned)
+├── Audio Tasks (spawned)
+├── WebView Server Task (Axum + SSE, spawned on runtime)
+└── Twitch Client Task (IRC client, spawned on runtime)
 
 Hook Thread (Windows Callback)
 ├── Keyboard Processing
 └── Event Emission (non-blocking)
-
-Servers/ Module (Dedicated Threads)
-├── WebView Server Thread (Axum + SSE)
-│   ├── HTTP request handling
-│   ├── SSE client management
-│   └── Text broadcasting
-└── Twitch Client Thread
-    ├── IRC connection
-    └── Message processing
 
 Audio Tasks (Spawned)
 ├── TTS Playback (cpal/rodio)
@@ -634,7 +634,8 @@ Audio Tasks (Spawned)
 - Hook callback must be fast (non-blocking)
 - Use `tx.try_send()` or spawn tasks for heavy work
 - Audio playback in separate threads/tasks
-- Servers run in dedicated threads with own runtime
+- WebView and Twitch servers run as spawned async tasks on the unified Tokio runtime (no extra runtimes or threads)
+- Coordinated graceful shutdown using a unified `CancellationToken`
 - SSE broadcasting is async and non-blocking
 
 ---
@@ -718,11 +719,12 @@ Audio Tasks (Spawned)
 src-tauri/src/
 ├── main.rs              # Entry point
 ├── lib.rs               # Tauri setup, command registration
-├── state.rs             # AppState definition
+├── state.rs             # AppState definition (domain services container)
+├── editor.rs            # EditorService (preprocessor, history, spelling)
 ├── events.rs            # AppEvent enums and senders
 ├── setup.rs             # App initialization
 ├── event_loop.rs        # Event processing loop
-├── thread_manager.rs    # Thread spawning helpers
+├── thread_manager.rs    # Thread spawning helpers (deprecated, async preferred)
 ├── rate_limiter.rs      # Rate limiting for API calls
 │
 ├── commands/            # Tauri command handlers
@@ -734,6 +736,7 @@ src-tauri/src/
 │   ├── telegram.rs     # Telegram TTS
 │   ├── twitch.rs       # Twitch chat
 │   ├── webview.rs      # WebView server
+│   ├── tts_pipeline.rs # TTS Pipeline stages (preprocess -> correct -> synthesize -> effects -> play)
 │   └── window.rs       # Window management
 │
 ├── config/              # Configuration management
@@ -765,13 +768,14 @@ src-tauri/src/
 │   ├── device.rs       # Device enumeration
 │   └── player.rs       # Audio playback
 │
-├── servers/             # Network servers
+├── servers/             # Network servers (run as tasks on main runtime)
 │   ├── mod.rs
-│   ├── webview.rs      # Axum SSE server
-│   └── twitch.rs       # Twitch IRC client
+│   ├── webview.rs      # Axum SSE server entrypoint
+│   └── twitch.rs       # Twitch IRC client entrypoint
 │
 ├── webview/             # WebView server components
 │   ├── mod.rs
+│   ├── service.rs      # WebViewService container
 │   ├── server.rs       # Server implementation
 │   ├── security.rs     # Token auth
 │   ├── templates.rs    # HTML templates
@@ -785,6 +789,7 @@ src-tauri/src/
 │
 ├── twitch/              # Twitch integration
 │   ├── mod.rs
+│   ├── service.rs      # TwitchService container
 │   └── client.rs       # IRC client
 │
 ├── soundpanel/          # Sound panel module
@@ -821,6 +826,11 @@ src-tauri/src/
 - ✅ **Twitch Chat Integration**: IRC client for TTS
 - ✅ **WebView Server**: Axum-based HTTP + SSE server
 - ✅ **Unified Config**: DTOs for single-call settings loading
+- ✅ **Decomposed AppState**: Extracted domain runtime services (`TwitchService`, `WebViewService`, `EditorService`)
+- ✅ **Unified Async Runtime**: Merged 5 separate Tokio runtimes into 1 managed by AppState
+- ✅ **Graceful Shutdown**: Coordinated thread-safe server termination using `CancellationToken`
+- ✅ **Sequential TTS Pipeline**: Modular stages (`preprocess_text` -> `ai_correct_text` -> `synthesize_audio` -> `apply_audio_effects_pipeline` -> `enqueue_and_record`)
+- ✅ **Threadless Atomic Writes**: Safe settings/history/tabs saves using mutex-based write serialization and temporary file atomic rename/fsync
 
 ### Potential Improvements
 1. **Multi-Platform**: Replace Windows hook with platform-agnostic solution
