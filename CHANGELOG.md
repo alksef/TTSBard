@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Переработана Telegram/Silero интеграция: упрощена привязка личного аккаунта, добавлена встроенная поддержка Socks5 и MTProxy.
+- Доработан клиент Telegram (Silero Bot): добавлена поддержка FakeTLS для MTProxy.
 - Оптимизирована сборка: теперь генерируется `.msi`-установщик и архив `resources.zip` со словарями.
 
 ## [0.9.0] - 2026-04-27
