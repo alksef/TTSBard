@@ -288,6 +288,7 @@ export interface AiSettingsDto {
   zai: AiZAiSettingsDto
   deepseek: AiDeepSeekSettingsDto
   prompt: string
+  timeout?: number
 }
 
 // ============================================================================

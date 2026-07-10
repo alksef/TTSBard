@@ -44,10 +44,7 @@ pub fn quit_app(app_handle: AppHandle) -> Result<(), String> {
         info!("Shutdown token cancelled — all servers notified");
         std::thread::sleep(std::time::Duration::from_millis(600));
 
-        if let Some(tx) = state.webview_event_sender.lock().as_ref() {
-            info!("Sending quit event to WebView server (fallback)");
-            let _ = tx.send(crate::events::AppEvent::Quit);
-        }
+        state.webview.send_event(crate::events::AppEvent::Quit);
     }
 
     let _ = app_handle.emit("app-exit", ());
@@ -107,7 +104,7 @@ pub async fn get_all_app_settings(
         .map_err(|e| format!("Failed to load settings: {}", e))?;
 
     let webview_settings = {
-        let s = app_state.webview_settings.read().await;
+        let s = app_state.webview.settings.read().await;
         s.clone()
     };
 
