@@ -23,7 +23,7 @@ pub async fn run_twitch_client(
     let mut status_check_interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
 
     {
-        let settings = app_state.twitch_settings.read().await;
+        let settings = app_state.twitch.settings.read().await;
         if settings.start_on_boot && settings.enabled && settings.is_valid().is_ok() {
             drop(settings);
             info!("[TWITCH] Auto-start on boot");
@@ -32,7 +32,7 @@ pub async fn run_twitch_client(
     }
 
     let update_status = |status: TwitchConnectionStatus| {
-        *app_state.twitch_connection_status.lock() = status.clone();
+        *app_state.twitch.connection_status.lock() = status.clone();
         let _ = app_handle.emit("twitch-status-changed", &status);
     };
 
@@ -80,7 +80,7 @@ pub async fn run_twitch_client(
                             TwitchEvent::Restart => {
                                 info!("Restart event received");
 
-                                let settings = app_state.twitch_settings.read().await;
+                                let settings = app_state.twitch.settings.read().await;
                                 let is_enabled = settings.enabled;
                                 let is_valid = settings.is_valid().is_ok();
                                 let settings_clone = settings.clone();

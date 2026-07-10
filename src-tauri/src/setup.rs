@@ -47,11 +47,11 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
 
     // Load Twitch settings into AppState
     info!("Loading Twitch settings...");
-    *app_state.inner().twitch_settings.blocking_write() = settings.twitch.clone();
+    *app_state.inner().twitch.settings.blocking_write() = settings.twitch.clone();
 
     // Load WebView settings into AppState
     info!("Loading WebView settings...");
-    *app_state.inner().webview_settings.blocking_write() = crate::webview::WebViewSettings {
+    *app_state.inner().webview.settings.blocking_write() = crate::webview::WebViewSettings {
         enabled: settings.webview.enabled,
         start_on_boot: settings.webview.start_on_boot,
         port: settings.webview.port,
@@ -326,7 +326,7 @@ fn init_spellcheck(app: &App, app_state: &AppState) {
 
     let manager = Arc::new(crate::spellcheck::SpellcheckManager::new(aff_path, dic_path));
     let spellcheck_state = crate::commands::spellcheck::SpellcheckState(manager.clone());
-    *app_state.spellcheck_manager.lock() = Some(manager);
+    *app_state.editor.spellcheck_manager.lock() = Some(manager);
     app.manage(spellcheck_state);
     info!("[spellcheck] initialized");
 }
@@ -442,11 +442,11 @@ fn init_hooks(
 
 /// Initialize WebView server
 fn init_webview_server(app_state: &AppState, app_handle: AppHandle) {
-    let webview_settings = app_state.webview_settings.clone();
+    let webview_settings = app_state.webview.settings.clone();
     let (webview_tx, webview_rx) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
     let shutdown = app_state.shutdown.clone();
 
-    app_state.set_webview_event_sender(webview_tx);
+    app_state.webview.set_event_sender(webview_tx);
 
     app_state.runtime.spawn(async move {
         crate::servers::run_webview_server(webview_settings, app_handle, webview_rx, shutdown).await;
@@ -456,7 +456,7 @@ fn init_webview_server(app_state: &AppState, app_handle: AppHandle) {
 /// Initialize Twitch client
 fn init_twitch_client(app_state: &AppState, app_handle: AppHandle) {
     let app_state_clone = app_state.clone();
-    let twitch_rx = app_state.twitch_event_tx.subscribe();
+    let twitch_rx = app_state.twitch.event_tx.subscribe();
     let shutdown = app_state.shutdown.clone();
 
     app_state.runtime.spawn(async move {

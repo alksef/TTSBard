@@ -33,7 +33,7 @@ pub fn save_replacements(content: String, state: State<'_, AppState>) -> Result<
         .map_err(|e| format!("Failed to write replacements file: {}", e))?;
 
     // Reload preprocessor in state
-    state.reload_preprocessor();
+    state.editor.reload_preprocessor();
 
     Ok(())
 }
@@ -68,7 +68,7 @@ pub fn save_usernames(content: String, state: State<'_, AppState>) -> Result<(),
         .map_err(|e| format!("Failed to write usernames file: {}", e))?;
 
     // Reload preprocessor in state
-    state.reload_preprocessor();
+    state.editor.reload_preprocessor();
 
     Ok(())
 }

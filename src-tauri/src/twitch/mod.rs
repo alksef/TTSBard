@@ -1,6 +1,8 @@
 mod client;
+pub mod service;
 
 pub use client::{TwitchClient, TwitchStatus};
+pub use service::TwitchService;
 
 use serde::{Deserialize, Serialize};
 // Import with alias to avoid name conflict

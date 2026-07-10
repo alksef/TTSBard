@@ -1,13 +1,10 @@
 use crate::ai::AiProvider;
-use crate::config::TwitchSettings;
-use crate::events::{AppEvent, TwitchEvent, TwitchEventSender};
-use crate::preprocessor::TextPreprocessor;
+use crate::events::{AppEvent, TwitchEvent};
 use crate::telegram::TelegramClient;
 use crate::tts::{
     fish::FishTts, local::LocalTts, openai::OpenAiTts, silero::SileroTts, TtsProvider,
     TtsProviderType,
 };
-use crate::webview::WebViewSettings;
 use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64};
@@ -74,8 +71,8 @@ pub struct AppState {
     /// Отправитель событий для MPSC канала
     pub event_sender: Arc<Mutex<Option<Sender<AppEvent>>>>,
 
-    /// Отправитель событий для WebView сервера
-    pub webview_event_sender: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedSender<AppEvent>>>>,
+    /// WebView service (settings + event sender)
+    pub webview: Arc<crate::webview::service::WebViewService>,
 
     /// Включен ли режим перехвата
     pub interception_enabled: Arc<Mutex<bool>>,
@@ -89,23 +86,14 @@ pub struct AppState {
     /// TTS провайдеры
     pub tts_providers: Arc<Mutex<Option<TtsProvider>>>,
 
-    /// Cached preprocessor for live replacement
-    pub preprocessor: Arc<Mutex<Option<TextPreprocessor>>>,
+    /// Editor service (preprocessor, history, spellcheck)
+    pub editor: Arc<crate::editor::EditorService>,
 
     /// Активное плавающее окно (для взаимного исключения хоткеев)
     pub active_window: Arc<Mutex<ActiveWindow>>,
 
-    /// WebView settings
-    pub webview_settings: Arc<tokio::sync::RwLock<WebViewSettings>>,
-
-    /// Настройки Twitch чата
-    pub twitch_settings: Arc<tokio::sync::RwLock<TwitchSettings>>,
-
-    /// Текущий статус подключения к Twitch
-    pub twitch_connection_status: Arc<Mutex<crate::events::TwitchConnectionStatus>>,
-
-    /// Sender для Twitch событий
-    pub twitch_event_tx: TwitchEventSender,
+    /// Twitch service (settings, connection status, event sender)
+    pub twitch: Arc<crate::twitch::TwitchService>,
 
     /// Backend ready flag - set to true when all initialization is complete
     pub backend_ready: Arc<AtomicBool>,
@@ -134,12 +122,6 @@ pub struct AppState {
     /// Playback manager for queue/pause/resume
     pub playback_manager: Arc<Mutex<Option<Arc<crate::playback::PlaybackManager>>>>,
 
-    /// History manager (word/ngram/phrase history)
-    pub history_manager: Arc<Mutex<Option<Arc<crate::history::HistoryManager>>>>,
-
-    /// Spellcheck manager (offline hunspell-based spell checking)
-    pub spellcheck_manager: Arc<Mutex<Option<Arc<crate::spellcheck::SpellcheckManager>>>>,
-
     /// Токен отмены для всех фоновых серверов
     pub shutdown: CancellationToken,
 }
@@ -147,6 +129,7 @@ pub struct AppState {
 impl AppState {
     pub fn new() -> Self {
         let (twitch_event_tx, _) = broadcast::channel::<TwitchEvent>(100);
+        let twitch = Arc::new(crate::twitch::TwitchService::new(twitch_event_tx));
 
         // Создаём runtime один раз при инициализации AppState
         // Arc сохраняет runtime живым пока живёт AppState
@@ -158,21 +141,20 @@ impl AppState {
                 .expect("Failed to create tokio runtime"),
         );
 
+        let editor = Arc::new(crate::editor::EditorService::new());
+
+        let webview = Arc::new(crate::webview::service::WebViewService::new());
+
         Self {
             event_sender: Arc::new(Mutex::new(None)),
-            webview_event_sender: Arc::new(Mutex::new(None)),
+            webview,
             interception_enabled: Arc::new(Mutex::new(false)),
             hotkey_enabled: Arc::new(Mutex::new(true)), // default true
             tts_config: Arc::new(RwLock::new(TtsConfig::default())),
             tts_providers: Arc::new(Mutex::new(None)),
-            preprocessor: Arc::new(Mutex::new(None)),
+            editor,
             active_window: Arc::new(Mutex::new(ActiveWindow::None)),
-            webview_settings: Arc::new(tokio::sync::RwLock::new(WebViewSettings::default())),
-            twitch_settings: Arc::new(tokio::sync::RwLock::new(TwitchSettings::default())),
-            twitch_connection_status: Arc::new(Mutex::new(
-                crate::events::TwitchConnectionStatus::Disconnected,
-            )),
-            twitch_event_tx,
+            twitch,
             backend_ready: Arc::new(AtomicBool::new(false)),
             playback_manager: Arc::new(Mutex::new(None)),
             hotkey_recording_in_progress: Arc::new(AtomicBool::new(false)),
@@ -182,8 +164,6 @@ impl AppState {
             prefix_skip_webview: Arc::new(Mutex::new(false)),
             ai_client: Arc::new(Mutex::new(None)),
             ai_settings_hash: Arc::new(AtomicU64::new(0)),
-            history_manager: Arc::new(Mutex::new(None)),
-            spellcheck_manager: Arc::new(Mutex::new(None)),
             shutdown: CancellationToken::new(),
         }
     }
@@ -205,20 +185,6 @@ impl AppState {
 
     pub fn get_event_sender(&self) -> Option<Sender<AppEvent>> {
         self.event_sender.lock().clone()
-    }
-
-    pub fn set_webview_event_sender(&self, sender: tokio::sync::mpsc::UnboundedSender<AppEvent>) {
-        info!("Storing WebView event sender");
-        *self.webview_event_sender.lock() = Some(sender);
-    }
-
-    pub fn send_webview_event(&self, event: AppEvent) {
-        if let Some(ref sender) = *self.webview_event_sender.lock() {
-            debug!(event = ?event, "Sending event to WebView");
-            let _ = sender.send(event);
-        } else {
-            warn!("WebView event sender not set");
-        }
     }
 
     pub fn is_interception_enabled(&self) -> bool {
@@ -408,20 +374,6 @@ impl AppState {
         self.tts_config.write().local_url = url;
     }
 
-    /// Get or create preprocessor instance
-    pub fn get_preprocessor(&self) -> Option<TextPreprocessor> {
-        let mut prep = self.preprocessor.lock();
-        if prep.is_none() {
-            *prep = TextPreprocessor::load_from_files().ok();
-        }
-        prep.clone()
-    }
-
-    /// Reload preprocessor (call when settings change)
-    pub fn reload_preprocessor(&self) {
-        *self.preprocessor.lock() = TextPreprocessor::load_from_files().ok();
-    }
-
     // ========== Active Window Management (взаимное исключение хоткеев) ==========
 
     /// Установить активное окно
@@ -433,7 +385,7 @@ impl AppState {
 
     /// Отправить событие Twitch
     pub fn send_twitch_event(&self, event: TwitchEvent) {
-        let _ = self.twitch_event_tx.send(event);
+        self.twitch.send_event(event);
     }
 
     // ========== Prefix Flags Management ==========

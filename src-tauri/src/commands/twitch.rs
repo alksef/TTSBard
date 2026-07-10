@@ -7,7 +7,7 @@ use tauri::{State, Manager};
 pub async fn get_twitch_settings(
     state: State<'_, AppState>,
 ) -> Result<TwitchSettings, String> {
-    let settings = state.twitch_settings.read().await;
+    let settings = state.twitch.settings.read().await;
     Ok(settings.clone())
 }
 
@@ -31,7 +31,7 @@ pub async fn save_twitch_settings(
     }
 
     // Проверка изменений
-    let old_settings = state.twitch_settings.read().await;
+    let old_settings = state.twitch.settings.read().await;
     let enabled_changed = old_settings.enabled != settings.enabled;
     let credentials_changed = old_settings.username != settings.username
         || old_settings.token != settings.token
@@ -48,7 +48,7 @@ pub async fn save_twitch_settings(
     }
 
     // Только после успешного сохранения в файл обновляем AppState
-    let mut s = state.twitch_settings.write().await;
+    let mut s = state.twitch.settings.write().await;
     *s = settings.clone();
     drop(s);
 
@@ -69,7 +69,7 @@ pub async fn connect_twitch(
     tracing::info!("Connect command received");
 
     // Получаем текущие настройки
-    let settings = state.twitch_settings.read().await;
+    let settings = state.twitch.settings.read().await;
 
     // Валидация
     if let Err(e) = settings.is_valid() {
@@ -78,7 +78,7 @@ pub async fn connect_twitch(
     drop(settings);
 
     // Обновляем только runtime state (НЕ сохраняем в конфиг)
-    let mut s = state.twitch_settings.write().await;
+    let mut s = state.twitch.settings.write().await;
     s.enabled = true;
     drop(s);
 
@@ -96,7 +96,7 @@ pub async fn disconnect_twitch(
     tracing::info!("Disconnect command received");
 
     // Обновляем только runtime state (НЕ сохраняем в конфиг)
-    let mut s = state.twitch_settings.write().await;
+    let mut s = state.twitch.settings.write().await;
     s.enabled = false;
     drop(s);
 
@@ -111,7 +111,7 @@ pub async fn disconnect_twitch(
 pub async fn get_twitch_status(
     state: State<'_, AppState>,
 ) -> Result<crate::events::TwitchConnectionStatus, String> {
-    let status = state.twitch_connection_status.lock().clone();
+    let status = state.twitch.connection_status.lock().clone();
     Ok(status)
 }
 
