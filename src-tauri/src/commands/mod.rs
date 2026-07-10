@@ -848,66 +848,87 @@ pub fn get_virtual_mic_devices() -> Vec<OutputDeviceInfo> {
 
 /// Get current audio settings
 #[tauri::command]
-pub fn get_audio_settings() -> Result<crate::config::AudioSettings, String> {
-    SettingsManager::new()
-        .and_then(|mgr| mgr.load())
+pub fn get_audio_settings(
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<crate::config::AudioSettings, String> {
+    settings_manager
+        .load()
         .map(|s| s.audio)
         .map_err(|e| e.to_string())
 }
 
 /// Set speaker device
 #[tauri::command]
-pub fn set_speaker_device(device_id: Option<String>) -> Result<(), String> {
-    SettingsManager::new()
-        .and_then(|mgr| mgr.set_speaker_device(device_id))
+pub fn set_speaker_device(
+    device_id: Option<String>,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<(), String> {
+    settings_manager
+        .set_speaker_device(device_id)
         .map_err(|e| e.to_string())
 }
 
 /// Set speaker enabled
 #[tauri::command]
-pub fn set_speaker_enabled(enabled: bool) -> Result<(), String> {
-    SettingsManager::new()
-        .and_then(|mgr| mgr.set_speaker_enabled(enabled))
+pub fn set_speaker_enabled(
+    enabled: bool,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<(), String> {
+    settings_manager
+        .set_speaker_enabled(enabled)
         .map_err(|e| e.to_string())
 }
 
 /// Set speaker volume
 #[tauri::command]
-pub fn set_speaker_volume(volume: u8) -> Result<(), String> {
-    SettingsManager::new()
-        .and_then(|mgr| mgr.set_speaker_volume(volume))
+pub fn set_speaker_volume(
+    volume: u8,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<(), String> {
+    settings_manager
+        .set_speaker_volume(volume)
         .map_err(|e| e.to_string())
 }
 
 /// Set virtual mic device
 #[tauri::command]
-pub fn set_virtual_mic_device(device_id: Option<String>) -> Result<(), String> {
-    SettingsManager::new()
-        .and_then(|mgr| mgr.set_virtual_mic_device(device_id))
+pub fn set_virtual_mic_device(
+    device_id: Option<String>,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<(), String> {
+    settings_manager
+        .set_virtual_mic_device(device_id)
         .map_err(|e| e.to_string())
 }
 
 /// Enable virtual mic
 #[tauri::command]
-pub fn enable_virtual_mic() -> Result<(), String> {
-    SettingsManager::new()
-        .and_then(|mgr| mgr.set_virtual_mic_device(Some("".to_string())))  // Enable by setting a device
+pub fn enable_virtual_mic(
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<(), String> {
+    settings_manager
+        .set_virtual_mic_device(Some("".to_string())) // Enable by setting a device
         .map_err(|e| e.to_string())
 }
 
 /// Disable virtual mic
 #[tauri::command]
-pub fn disable_virtual_mic() -> Result<(), String> {
-    SettingsManager::new()
-        .and_then(|mgr| mgr.set_virtual_mic_device(None))
+pub fn disable_virtual_mic(
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<(), String> {
+    settings_manager
+        .set_virtual_mic_device(None)
         .map_err(|e| e.to_string())
 }
 
 /// Set virtual mic volume
 #[tauri::command]
-pub fn set_virtual_mic_volume(volume: u8) -> Result<(), String> {
-    SettingsManager::new()
-        .and_then(|mgr| mgr.set_virtual_mic_volume(volume))
+pub fn set_virtual_mic_volume(
+    volume: u8,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<(), String> {
+    settings_manager
+        .set_virtual_mic_volume(volume)
         .map_err(|e| e.to_string())
 }
 
