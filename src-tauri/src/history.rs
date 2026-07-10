@@ -1,12 +1,55 @@
 use anyhow::{Context, Result};
 use chrono::Utc;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const PHRASE_HISTORY_SIZE: usize = 200;
+
+static HISTORY_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn history_write_lock() -> &'static Mutex<()> {
+    HISTORY_WRITE_LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn write_json_atomically(path: &Path, content: &str) -> std::io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "No parent dir"))?;
+
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?
+        .as_nanos();
+    let tmp_path = parent.join(format!(
+        ".{}.{}.tmp",
+        path.file_name().and_then(|name| name.to_str()).unwrap_or("history.json"),
+        stamp
+    ));
+
+    {
+        let mut file = fs::File::create(&tmp_path)?;
+        file.write_all(content.as_bytes())?;
+        file.sync_all()?;
+    }
+
+    if let Err(rename_error) = fs::rename(&tmp_path, path) {
+        let _ = fs::remove_file(path);
+        fs::rename(&tmp_path, path).map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Replace failed: {} (original: {})", e, rename_error),
+            )
+        })?;
+    }
+
+    Ok(())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryEntry {
@@ -67,23 +110,21 @@ fn clean_token(token: &str) -> String {
         .to_lowercase()
 }
 
-fn spawn_save(path: PathBuf, ngram_path: PathBuf, data: HistoryData, ngrams: NgramData) {
-    std::thread::spawn(move || {
-        if let Ok(content) = serde_json::to_string_pretty(&data) {
-            let _ = fs::write(&path, content);
-        }
-        if let Ok(content) = serde_json::to_string_pretty(&ngrams) {
-            let _ = fs::write(&ngram_path, content);
-        }
-    });
+fn save_history_sync(path: PathBuf, ngram_path: PathBuf, data: HistoryData, ngrams: NgramData) {
+    let _lock = history_write_lock().lock();
+    if let Ok(content) = serde_json::to_string_pretty(&data) {
+        let _ = write_json_atomically(&path, &content);
+    }
+    if let Ok(content) = serde_json::to_string_pretty(&ngrams) {
+        let _ = write_json_atomically(&ngram_path, &content);
+    }
 }
 
-fn spawn_save_phrases(path: PathBuf, phrases: Vec<PhraseEntry>) {
-    std::thread::spawn(move || {
-        if let Ok(content) = serde_json::to_string_pretty(&phrases) {
-            let _ = fs::write(&path, content);
-        }
-    });
+fn save_phrases_sync(path: PathBuf, phrases: Vec<PhraseEntry>) {
+    let _lock = history_write_lock().lock();
+    if let Ok(content) = serde_json::to_string_pretty(&phrases) {
+        let _ = write_json_atomically(&path, &content);
+    }
 }
 
 impl HistoryManager {
@@ -168,7 +209,7 @@ impl HistoryManager {
         let ngrams_snapshot = ngrams.clone();
         drop(data);
         drop(ngrams);
-        spawn_save(path, ngram_path, data_snapshot, ngrams_snapshot);
+        save_history_sync(path, ngram_path, data_snapshot, ngrams_snapshot);
     }
 
     pub fn suggest(&self, query: &str, limit: usize) -> Vec<HistoryEntry> {
@@ -249,7 +290,7 @@ impl HistoryManager {
         let ngrams_snapshot = ngrams.clone();
         drop(data);
         drop(ngrams);
-        spawn_save(path, ngram_path, data_snapshot, ngrams_snapshot);
+        save_history_sync(path, ngram_path, data_snapshot, ngrams_snapshot);
     }
 
     // Контракт нормализации фраз: храним text.trim(); дедупликация и поиск —
@@ -296,7 +337,7 @@ impl HistoryManager {
         let path = self.phrase_path.clone();
         let snapshot = phrases.clone();
         drop(phrases);
-        spawn_save_phrases(path, snapshot);
+        save_phrases_sync(path, snapshot);
     }
 
     pub fn get_phrases(&self, filter: Option<&str>, limit: usize) -> Vec<PhraseEntry> {
@@ -324,7 +365,7 @@ impl HistoryManager {
         let path = self.phrase_path.clone();
         let snapshot = phrases.clone();
         drop(phrases);
-        spawn_save_phrases(path, snapshot);
+        save_phrases_sync(path, snapshot);
     }
 
     pub fn clear_phrases(&self) {
@@ -334,7 +375,7 @@ impl HistoryManager {
         let path = self.phrase_path.clone();
         let snapshot = phrases.clone();
         drop(phrases);
-        spawn_save_phrases(path, snapshot);
+        save_phrases_sync(path, snapshot);
     }
 }
 

@@ -1,10 +1,53 @@
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAX_TABS: usize = 50;
 const MAX_TAB_TEXT_LEN: usize = 100_000;
+
+static TABS_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn tabs_write_lock() -> &'static Mutex<()> {
+    TABS_WRITE_LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn write_json_atomically(path: &Path, content: &str) -> std::io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "No parent dir"))?;
+
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?
+        .as_nanos();
+    let tmp_path = parent.join(format!(
+        ".{}.{}.tmp",
+        path.file_name().and_then(|name| name.to_str()).unwrap_or("tabs.json"),
+        stamp
+    ));
+
+    {
+        let mut file = fs::File::create(&tmp_path)?;
+        file.write_all(content.as_bytes())?;
+        file.sync_all()?;
+    }
+
+    if let Err(rename_error) = fs::rename(&tmp_path, path) {
+        let _ = fs::remove_file(path);
+        fs::rename(&tmp_path, path).map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Replace failed: {} (original: {})", e, rename_error),
+            )
+        })?;
+    }
+
+    Ok(())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct EditorTab {
@@ -27,14 +70,6 @@ pub struct TabsData {
 pub struct TabManager {
     path: PathBuf,
     data: RwLock<TabsData>,
-}
-
-fn spawn_save(path: PathBuf, data: TabsData) {
-    std::thread::spawn(move || {
-        if let Ok(content) = serde_json::to_string_pretty(&data) {
-            let _ = fs::write(&path, content);
-        }
-    });
 }
 
 impl TabManager {
@@ -69,7 +104,11 @@ impl TabManager {
         let mut guard = self.data.write();
         *guard = data.clone();
         drop(guard);
-        spawn_save(self.path.clone(), data);
+
+        let _lock = tabs_write_lock().lock();
+        if let Ok(content) = serde_json::to_string_pretty(&data) {
+            let _ = write_json_atomically(&self.path, &content);
+        }
     }
 }
 
@@ -119,8 +158,6 @@ mod tests {
             ],
         };
         mgr.save_all(data);
-        // save_all spawns a writer thread; wait for it to flush before re-reading.
-        std::thread::sleep(std::time::Duration::from_millis(150));
 
         // A fresh manager reading the same file must hydrate the saved data.
         let mgr2 = TabManager::new(path.clone());
