@@ -78,7 +78,7 @@ jobs:
           path: |
             src-tauri/target/${{ matrix.target }}/release/*.exe
             src-tauri/target/${{ matrix.target }}/release/resources.zip
-            src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
 
   release:
     needs: build
