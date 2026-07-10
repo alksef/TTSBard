@@ -74,7 +74,7 @@ pub struct AppState {
     pub event_sender: Arc<Mutex<Option<Sender<AppEvent>>>>,
 
     /// Отправитель событий для WebView сервера
-    pub webview_event_sender: Arc<Mutex<Option<Sender<AppEvent>>>>,
+    pub webview_event_sender: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedSender<AppEvent>>>>,
 
     /// Включен ли режим перехвата
     pub interception_enabled: Arc<Mutex<bool>>,
@@ -202,7 +202,7 @@ impl AppState {
         self.event_sender.lock().clone()
     }
 
-    pub fn set_webview_event_sender(&self, sender: Sender<AppEvent>) {
+    pub fn set_webview_event_sender(&self, sender: tokio::sync::mpsc::UnboundedSender<AppEvent>) {
         info!("Storing WebView event sender");
         *self.webview_event_sender.lock() = Some(sender);
     }

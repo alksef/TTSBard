@@ -16,7 +16,7 @@ use crate::setup::parse_webview_server_error;
 pub async fn run_webview_server(
     webview_settings: Arc<tokio::sync::RwLock<WebViewSettings>>,
     app_handle: AppHandle,
-    webview_rx: std::sync::mpsc::Receiver<AppEvent>,
+    mut webview_rx: tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
 ) {
     loop {
         // Check current settings
@@ -98,9 +98,12 @@ pub async fn run_webview_server(
                     server_handle.abort();
                     server_running = false;
                 } else {
-                    // Process events with timeout (synchronous)
-                    match webview_rx.recv_timeout(std::time::Duration::from_secs(1)) {
-                        Ok(event) => {
+                    // Process events with timeout (async)
+                    match tokio::time::timeout(
+                        tokio::time::Duration::from_secs(1),
+                        webview_rx.recv(),
+                    ).await {
+                        Ok(Some(event)) => {
                             info!("[WEBVIEW] 📨 Event received: {:?}", std::mem::discriminant(&event));
                             match event {
                                 AppEvent::Quit => {
@@ -149,10 +152,10 @@ pub async fn run_webview_server(
                                 }
                             }
                         }
-                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        Err(_) => {
                             // Timeout - continue loop to check settings
                         }
-                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                        Ok(None) => {
                             // Channel closed
                             info!("[WEBVIEW] Event channel disconnected");
                             return;
@@ -167,21 +170,24 @@ pub async fn run_webview_server(
             info!("[WEBVIEW] ========================================");
             // Wait for enable or restart event
             loop {
-                match webview_rx.recv_timeout(std::time::Duration::from_secs(2)) {
-                    Ok(AppEvent::Quit) => {
+                match tokio::time::timeout(
+                    tokio::time::Duration::from_secs(2),
+                    webview_rx.recv(),
+                ).await {
+                    Ok(Some(AppEvent::Quit)) => {
                         info!("[WEBVIEW] ⚠ Quit event received (server disabled)");
                         return;
                     }
-                    Ok(AppEvent::RestartWebViewServer) => {
+                    Ok(Some(AppEvent::RestartWebViewServer)) => {
                         info!("[WEBVIEW] ⚠ Restart event received, exiting disabled state");
                         break;
                     }
-                    Ok(AppEvent::TextSentToTts(text)) => {
+                    Ok(Some(AppEvent::TextSentToTts(text))) => {
                         // Ignore TTS events while disabled but log them
                         let preview = text.chars().take(30).collect::<String>();
                         info!("[WEBVIEW] Ignoring TTS text (server disabled): '{}'...", preview);
                     }
-                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    Err(_) => {
                         // Timeout - check if enabled now
                         let settings = webview_settings.read().await;
                         if settings.enabled {
@@ -191,11 +197,11 @@ pub async fn run_webview_server(
                         }
                         drop(settings);
                     }
-                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    Ok(None) => {
                         info!("[WEBVIEW] Event channel disconnected");
                         return;
                     }
-                    Ok(other) => {
+                    Ok(Some(other)) => {
                         info!("[WEBVIEW] Received unexpected event while disabled: {:?}", other);
                     }
                 }
