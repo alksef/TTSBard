@@ -339,8 +339,8 @@ pub async fn reconnect_telegram(
         }
     }
 
-    // Replace old client with new one in a single lock
-    let (is_authorized, proxy_status) = {
+    // Disconnect old client and replace it in state
+    let client_clone = {
         let mut client_guard = telegram_state.client.lock().await;
 
         // Disconnect and take old client if exists
@@ -352,23 +352,13 @@ pub async fn reconnect_telegram(
         }
 
         // Save new client
-        *client_guard = Some(client);
-
-        // Get proxy status and verify authorization while holding lock
-        let status = if let Some(c) = client_guard.as_ref() {
-            c.get_proxy_status().await
-        } else {
-            crate::telegram::ProxyStatus::default()
-        };
-
-        let authorized = if let Some(c) = client_guard.as_ref() {
-            c.is_authorized().await?
-        } else {
-            false
-        };
-
-        (authorized, status)
+        *client_guard = Some(client.clone());
+        client
     };
+
+    // Get proxy status and verify authorization without holding the state lock
+    let proxy_status = client_clone.get_proxy_status().await;
+    let is_authorized = client_clone.is_authorized().await?;
 
     // Update cached proxy status
     telegram_state.update_proxy_status(proxy_status.clone()).await;

@@ -469,7 +469,12 @@ watch(() => appSettings.value, (newSettings) => {
       </table>
 
       <div class="stats-with-add">
-        <button @click="showAddDialog = true" class="add-button-inline" title="Добавить звук">
+        <button
+          @click="showAddDialog = true"
+          class="add-button-inline"
+          :disabled="sets.length === 0"
+          :title="sets.length === 0 ? 'Создайте сначала набор' : 'Добавить звук'"
+        >
           <Plus :size="16" />
         </button>
         <span class="stats">Всего привязок: {{ bindings.length }} / 26</span>
@@ -924,8 +929,13 @@ watch(() => appSettings.value, (newSettings) => {
   height: 36px;
 }
 
-.add-button-inline:hover {
+.add-button-inline:hover:not(:disabled) {
   filter: brightness(1.06);
+}
+
+.add-button-inline:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .remove-button {

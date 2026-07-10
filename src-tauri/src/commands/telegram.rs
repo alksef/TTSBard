@@ -94,17 +94,15 @@ pub async fn telegram_init(
     }
 
     // Сохраняем клиент в состоянии
-    {
+    let client_clone = {
         let mut state_guard = state.client.lock().await;
-        *state_guard = Some(client);
-    }
+        *state_guard = Some(client.clone());
+        client
+    };
 
     // Update cached proxy status
-    let client_guard = state.client.lock().await;
-    if let Some(c) = client_guard.as_ref() {
-        let proxy_status = c.get_proxy_status().await;
-        state.update_proxy_status(proxy_status).await;
-    }
+    let proxy_status = client_clone.get_proxy_status().await;
+    state.update_proxy_status(proxy_status).await;
 
     Ok(())
 }
@@ -114,9 +112,11 @@ pub async fn telegram_init(
 pub async fn telegram_request_code(
     state: State<'_, TelegramState>,
 ) -> Result<(), String> {
-    let client_guard = state.client.lock().await;
-    let client = client_guard.as_ref()
-        .ok_or_else(|| "Клиент не инициализирован. Сначала вызовите telegram_init.".to_string())?;
+    let client_opt = {
+        let guard = state.client.lock().await;
+        guard.clone()
+    };
+    let client = client_opt.ok_or_else(|| "Клиент не инициализирован. Сначала вызовите telegram_init.".to_string())?;
 
     client.request_code().await
         .map_err(|e| format!("Ошибка запроса кода: {}", e))?;
@@ -134,9 +134,11 @@ pub async fn telegram_sign_in(
         return Err("Код не может быть пустым".to_string());
     }
 
-    let client_guard = state.client.lock().await;
-    let client = client_guard.as_ref()
-        .ok_or_else(|| "Клиент не инициализирован. Сначала вызовите telegram_init.".to_string())?;
+    let client_opt = {
+        let guard = state.client.lock().await;
+        guard.clone()
+    };
+    let client = client_opt.ok_or_else(|| "Клиент не инициализирован. Сначала вызовите telegram_init.".to_string())?;
 
     client.sign_in(&code).await
         .map_err(|e| format!("Ошибка входа: {}", e))?;
@@ -149,7 +151,6 @@ pub async fn telegram_sign_in(
             None => return Err("api_id not set".to_string()),
         }
     };
-    drop(client_guard);
 
     // Save to settings.json (convert u32 to i64)
     settings_manager.set_telegram_api_id(Some(api_id_to_save as i64))
@@ -164,15 +165,16 @@ pub async fn telegram_sign_out(
     state: State<'_, TelegramState>,
     settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
-    let client_guard = state.client.lock().await;
-    let client = client_guard.as_ref()
-        .ok_or_else(|| "Клиент не инициализирован".to_string())?;
+    let client_opt = {
+        let guard = state.client.lock().await;
+        guard.clone()
+    };
+    let client = client_opt.ok_or_else(|| "Клиент не инициализирован".to_string())?;
 
     client.sign_out().await
         .map_err(|e| format!("Ошибка выхода: {}", e))?;
 
     // Удаляем клиент из состояния
-    drop(client_guard);
     let mut state_guard = state.client.lock().await;
     *state_guard = None;
 
@@ -188,8 +190,11 @@ pub async fn telegram_sign_out(
 pub async fn telegram_get_status(
     state: State<'_, TelegramState>,
 ) -> Result<bool, String> {
-    let client_guard = state.client.lock().await;
-    let client = match client_guard.as_ref() {
+    let client_opt = {
+        let guard = state.client.lock().await;
+        guard.clone()
+    };
+    let client = match client_opt {
         Some(c) => c,
         None => return Ok(false), // Неинициализирован = не авторизован
     };
@@ -202,8 +207,11 @@ pub async fn telegram_get_status(
 pub async fn telegram_get_user(
     state: State<'_, TelegramState>,
 ) -> Result<Option<UserInfo>, String> {
-    let client_guard = state.client.lock().await;
-    let client = match client_guard.as_ref() {
+    let client_opt = {
+        let guard = state.client.lock().await;
+        guard.clone()
+    };
+    let client = match client_opt {
         Some(c) => c,
         None => return Ok(None), // Неинициализирован = нет пользователя
     };
@@ -234,12 +242,13 @@ pub async fn speak_text_silero(
     }
 
     // Получаем клиент
-    let client_guard = state.client.lock().await;
-    let client = client_guard
-        .as_ref()
-        .ok_or_else(|| {
-            "Telegram client not initialized. Please connect to Telegram first.".to_string()
-        })?;
+    let client_opt = {
+        let guard = state.client.lock().await;
+        guard.clone()
+    };
+    let client = client_opt.ok_or_else(|| {
+        "Telegram client not initialized. Please connect to Telegram first.".to_string()
+    })?;
 
     // Проверяем авторизацию
     let is_authorized = client.is_authorized().await?;
@@ -250,7 +259,7 @@ pub async fn speak_text_silero(
     }
 
     // Выполняем синтез
-    let result = SileroTtsBot::synthesize(client, text).await?;
+    let result = SileroTtsBot::synthesize(&client, text).await?;
 
     Ok(result)
 }
@@ -263,12 +272,13 @@ pub async fn telegram_get_current_voice(
     tracing::debug!("Getting current voice");
 
     // Получаем клиент
-    let client_guard = state.client.lock().await;
-    let client = client_guard
-        .as_ref()
-        .ok_or_else(|| {
-            "Telegram client not initialized. Please connect to Telegram first.".to_string()
-        })?;
+    let client_opt = {
+        let guard = state.client.lock().await;
+        guard.clone()
+    };
+    let client = client_opt.ok_or_else(|| {
+        "Telegram client not initialized. Please connect to Telegram first.".to_string()
+    })?;
 
     // Проверяем авторизацию
     let is_authorized = client.is_authorized().await?;
@@ -277,7 +287,7 @@ pub async fn telegram_get_current_voice(
     }
 
     // Получаем текущий голос (может вернуть None при таймауте)
-    let voice = get_current_voice(client).await?;
+    let voice = get_current_voice(&client).await?;
 
     Ok(voice)
 }
@@ -290,12 +300,13 @@ pub async fn telegram_get_limits(
     tracing::debug!("Getting limits");
 
     // Получаем клиент
-    let client_guard = state.client.lock().await;
-    let client = client_guard
-        .as_ref()
-        .ok_or_else(|| {
-            "Telegram client not initialized. Please connect to Telegram first.".to_string()
-        })?;
+    let client_opt = {
+        let guard = state.client.lock().await;
+        guard.clone()
+    };
+    let client = client_opt.ok_or_else(|| {
+        "Telegram client not initialized. Please connect to Telegram first.".to_string()
+    })?;
 
     // Проверяем авторизацию
     let is_authorized = client.is_authorized().await?;
@@ -304,7 +315,7 @@ pub async fn telegram_get_limits(
     }
 
     // Получаем лимиты (может вернуть None при таймауте)
-    let limits = get_limits(client).await?;
+    let limits = get_limits(&client).await?;
 
     Ok(limits)
 }
@@ -365,21 +376,18 @@ pub async fn telegram_auto_restore(
     }
 
     // Сохраняем клиент в состоянии
-    let mut state_guard = state.client.lock().await;
-    *state_guard = Some(client);
+    let client_clone = {
+        let mut state_guard = state.client.lock().await;
+        *state_guard = Some(client.clone());
+        client
+    };
 
     // Update cached proxy status
-    if let Some(c) = state_guard.as_ref() {
-        let proxy_status = c.get_proxy_status().await;
-        state.update_proxy_status(proxy_status).await;
-    }
+    let proxy_status = client_clone.get_proxy_status().await;
+    state.update_proxy_status(proxy_status).await;
 
     // Проверяем авторизацию
-    let is_authorized = if let Some(c) = state_guard.as_ref() {
-        c.is_authorized().await?
-    } else {
-        false
-    };
+    let is_authorized = client_clone.is_authorized().await?;
 
     if is_authorized {
         info!("Session auto-restored successfully");
@@ -402,12 +410,14 @@ pub async fn telegram_set_speaker(
     }
 
     // 2. Получить клиент из state
-    let client_guard = state.client.lock().await;
-    let client = client_guard.as_ref()
-        .ok_or_else(|| "Telegram client not initialized".to_string())?;
+    let client_opt = {
+        let guard = state.client.lock().await;
+        guard.clone()
+    };
+    let client = client_opt.ok_or_else(|| "Telegram client not initialized".to_string())?;
 
     // 3. Вызвать bot::set_speaker()
-    set_speaker(client, &voice_code).await
+    set_speaker(&client, &voice_code).await
 }
 
 /// Добавить голос в список сохраненных

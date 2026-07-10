@@ -130,6 +130,7 @@ impl ProxyConfig {
     }
 }
 
+#[derive(Clone)]
 pub struct TelegramClient {
     pub(crate) pool_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     pub(crate) client: Arc<Mutex<Option<Client>>>,
@@ -408,30 +409,42 @@ impl TelegramClient {
 
     /// Проверка авторизации
     pub async fn is_authorized(&self) -> Result<bool, String> {
-        let client = self.client.lock().await;
-        let client = client.as_ref()
-            .ok_or_else(|| "Клиент не инициализирован".to_string())?;
+        let client = {
+            let guard = self.client.lock().await;
+            guard.clone().ok_or_else(|| "Клиент не инициализирован".to_string())?
+        };
 
-        client.is_authorized().await
-            .map_err(|e| format!("Ошибка проверки авторизации: {}", e))
+        tokio::time::timeout(
+            tokio::time::Duration::from_secs(10),
+            client.is_authorized()
+        ).await
+        .map_err(|_| "Превышено время ожидания проверки авторизации".to_string())?
+        .map_err(|e| format!("Ошибка проверки авторизации: {}", e))
     }
 
     /// Запрос кода подтверждения
     pub async fn request_code(&self) -> Result<AuthState, String> {
-        let client = self.client.lock().await;
-        let client = client.as_ref()
-            .ok_or_else(|| "Клиент не инициализирован".to_string())?;
+        let client = {
+            let guard = self.client.lock().await;
+            guard.clone().ok_or_else(|| "Клиент не инициализирован".to_string())?
+        };
 
-        let api_hash = self.api_hash.lock().await;
-        let api_hash = api_hash.as_ref()
-            .ok_or_else(|| "API hash не задан".to_string())?;
+        let api_hash = {
+            let guard = self.api_hash.lock().await;
+            guard.clone().ok_or_else(|| "API hash не задан".to_string())?
+        };
 
-        let phone_number = self.phone_number.lock().await;
-        let phone_number = phone_number.as_ref()
-            .ok_or_else(|| "Номер телефона не задан".to_string())?;
+        let phone_number = {
+            let guard = self.phone_number.lock().await;
+            guard.clone().ok_or_else(|| "Номер телефона не задан".to_string())?
+        };
 
-        let token = client.request_login_code(phone_number, api_hash).await
-            .map_err(|e| format!("Ошибка при запросе кода: {}", e))?;
+        let token = tokio::time::timeout(
+            tokio::time::Duration::from_secs(15),
+            client.request_login_code(&phone_number, &api_hash)
+        ).await
+        .map_err(|_| "Превышено время ожидания запроса кода. Проверьте подключение.".to_string())?
+        .map_err(|e| format!("Ошибка при запросе кода: {}", e))?;
 
         *self.login_token.lock().await = Some(token);
 
@@ -444,10 +457,11 @@ impl TelegramClient {
         // Security: Don't log the actual code - prevents timing analysis via logs
         info!("[AUTH] Starting sign_in (code not logged for security)");
 
-        let client = self.client.lock().await;
-        let client = client.as_ref()
-            .ok_or_else(|| "Клиент не инициализирован".to_string())?;
-        info!("[AUTH] Client acquired");
+        let client = {
+            let guard = self.client.lock().await;
+            guard.clone().ok_or_else(|| "Клиент не инициализирован".to_string())?
+        };
+        info!("[AUTH] Client acquired and cloned");
 
         // Забираем токен из Option (take() освобождает мьютекс, возвращая значение)
         let token = self.login_token.lock().await.take()
@@ -509,9 +523,10 @@ impl TelegramClient {
     pub async fn get_user_info(&self) -> Result<UserInfo, String> {
         debug!("[AUTH] Getting user info");
 
-        let client = self.client.lock().await;
-        let client = client.as_ref()
-            .ok_or_else(|| "Клиент не инициализирован".to_string())?;
+        let client = {
+            let guard = self.client.lock().await;
+            guard.clone().ok_or_else(|| "Клиент не инициализирован".to_string())?
+        };
 
         // Добавляем таймаут на получение информации (10 секунд)
         let me = tokio::time::timeout(
@@ -523,10 +538,10 @@ impl TelegramClient {
 
         debug!(username = ?me.username(), "[AUTH] User info received");
 
-        let phone_number = self.phone_number.lock().await;
-        let phone_number = phone_number.as_ref()
-            .unwrap_or(&"unknown".to_string())
-            .clone();
+        let phone_number = {
+            let guard = self.phone_number.lock().await;
+            guard.as_ref().unwrap_or(&"unknown".to_string()).clone()
+        };
 
         Ok(UserInfo {
             id: me.raw.id(),
