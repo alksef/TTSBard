@@ -27,9 +27,9 @@ impl TtsRateLimiter {
     }
 
     /// Create a new rate limiter with custom settings
-    pub fn with_config(requests_per_minute: u32, burst_size: u32) -> Self {
-        let quota = Quota::per_minute(NonZeroU32::new(requests_per_minute).unwrap())
-            .allow_burst(NonZeroU32::new(burst_size).unwrap());
+    pub fn with_config(requests_per_minute: NonZeroU32, burst_size: NonZeroU32) -> Self {
+        let quota = Quota::per_minute(requests_per_minute)
+            .allow_burst(burst_size);
 
         Self {
             limiter: Arc::new(Mutex::new(RateLimiter::direct(quota))),
@@ -65,7 +65,7 @@ mod tests {
 
     #[test]
     fn test_rate_limiter_basic() {
-        let limiter = TtsRateLimiter::with_config(10, 2);
+        let limiter = TtsRateLimiter::with_config(NonZeroU32::new(10).unwrap(), NonZeroU32::new(2).unwrap());
 
         // First request should succeed
         assert!(limiter.check().is_ok());
@@ -79,7 +79,7 @@ mod tests {
 
     #[test]
     fn test_rate_limiter_wait_time() {
-        let limiter = TtsRateLimiter::with_config(2, 1);
+        let limiter = TtsRateLimiter::with_config(NonZeroU32::new(2).unwrap(), NonZeroU32::new(1).unwrap());
 
         // First request should succeed
         assert!(limiter.check().is_ok());
