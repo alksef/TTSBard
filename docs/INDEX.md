@@ -23,9 +23,27 @@ Quick reference for the TTSBard project.
    - Storage locations
    - Registered hotkeys
 
+3. **[presentation.md](./presentation/presentation.md)** — Презентация возможностей для стримеров
+   - 11 ключевых функциональных блоков для broadcast-аудитории
+
 ---
 
 ## 📚 Documentation Files
+
+### [presentation.md](./presentation/presentation.md)
+**Broadcast-oriented user guide / features presentation**
+
+- Общий функционал (глобальные хоткеи, трей, компактный режим, защита от захвата экрана)
+- Текстовый ввод (CodeMirror 6, офлайн-спеллчекер, автодополнение)
+- AI-коррекция текста (OpenAI, DeepSeek, Z.ai)
+- Интерактивная Саундпанель (режим оверлея, тематические наборы, авто-закрытие)
+- Блок быстрой вставки (пресеты, автозамена по пробелу)
+- Разделение аудиовывода (динамики + виртуальный микрофон)
+- Интеграция с OBS (WebView / SSE, экспорт потока наружу)
+- Интеграция с Twitch Chat (IRC-клиент, маршрутизация)
+- Экспериментальный Numpad Control (управление цифровым блоком)
+- Интеграция с Telegram (Silero Bot, личный аккаунт, прокси)
+- Панель управления воспроизведением (пауза, стоп, повтор, кэш-история)
 
 ### [QUICK_START.md](./QUICK_START.md)
 **⭐ START HERE — Полный контекст за 2-3 минуты**

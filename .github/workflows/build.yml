@@ -65,12 +65,20 @@ jobs:
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
 
+      - name: Create resources zip
+        run: |
+          cd src-tauri/target/${{ matrix.target }}/release
+          7z a resources.zip resources
+        shell: bash
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: app-windows-${{ matrix.target }}
           path: |
             src-tauri/target/${{ matrix.target }}/release/*.exe
+            src-tauri/target/${{ matrix.target }}/release/resources.zip
+            src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
 
   release:
     needs: build
@@ -93,6 +101,8 @@ jobs:
         with:
           files: |
             artifacts/**/*.exe
+            artifacts/**/*.zip
+            artifacts/**/*.msi
           draft: false
           prerelease: false
         env:

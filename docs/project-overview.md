@@ -170,6 +170,7 @@ app-tts-v2/
 ### 1. Text Interception & TTS
 - Активация: `Ctrl+Shift+F1` (настраиваемый хоткей)
 - Floating window перехватывает клавиши через Windows hook
+- **CodeMirror 6 Editor**: Поддержка офлайн-проверки орфографии (Spellcheck) и умного автодополнения слов на основе истории ввода в сессии.
 - `F8` переключает EN/RU раскладку (внутренняя, обход системной)
 - `F6` переключает режим: Enter закрывает / Enter не закрывает окно
 - Текст отправляется в выбранный TTS провайдер
@@ -179,14 +180,14 @@ app-tts-v2/
 | Провайдер | Описание | Требования |
 |-----------|----------|------------|
 | **OpenAI** | OpenAI TTS API (tts-1) | API Key |
-| **Silero** | Silero Bot через Telegram | Авторизация в Telegram |
+| **Silero** | Silero Bot через Telegram с поддержкой Socks5 и MTProxy | Авторизация в Telegram |
 | **Local** | TTSVoiceWizard (локальный сервер) | Локальный TTS сервер |
 | **Fish Audio** | Fish Audio API | API Key |
 
 ### 3. AI Text Correction
 - Режим Quick Editor: Enter/Esc сворачивают окно вместо закрытия
 - Режим AI Editor: автоисправление текста перед TTS через AI
-- Провайдеры: OpenAI (GPT-4o-mini), Z.ai (GLM-4.5)
+- Провайдеры: OpenAI (GPT-4o-mini), DeepSeek (DeepSeek-V3), Z.ai (GLM-4.5)
 - Настраиваемый промпт и таймаут
 
 ### 4. Sound Panel (Sound Board)
@@ -206,10 +207,11 @@ app-tts-v2/
 - Префиксы маршрутизации: без префикса / `!` / `!!`
 
 ### 7. WebView Server (OBS Integration)
-- SSE для real-time обновлений
+- SSE для real-time субтитров
 - Настраиваемые HTML/CSS шаблоны
 - Токен-аутентификация для внешнего доступа
 - UPnP для автоматического проброса портов
+- **Экспорт потока наружу**: Возможность стримить текстовый поток в OBS другого стримера во время коллабораций.
 
 ### 8. Twitch Chat Integration
 - Подключение через IRC
@@ -224,8 +226,16 @@ app-tts-v2/
 - Темы: темная / светлая
 - Логирование: настраиваемый уровень, per-module уровни
 - Редактор: Quick Editor / AI Editor
-- Сетевые настройки: единый прокси для всех провайдеров
+- Сетевые настройки: поддержка Socks5 и MTProxy (прямой прокси для Telegram)
 - Настройки окон: позиция, прозрачность, click-through
+
+### 11. Playback Control Panel
+- Панель управления речью в реальном времени.
+- Мгновенная остановка чтения (кнопка Стоп).
+- Навигация по фразам и пауза.
+
+### 12. Experimental Keyboard Intercept
+- Режим Numpad Control — клавиши цифрового блока клавиатуры переводятся в режим управления воспроизведением и навигации в приложении.
 
 ---
 
@@ -236,6 +246,7 @@ app-tts-v2/
 | **Main Window** | Настройки приложения | Decorated, resizable |
 | **Floating Window** | Текстовый ввод (перехват) | Undecorated, always-on-top, no-focus |
 | **Sound Panel Window** | Звуковая панель | Undecorated, always-on-top, click-through optional |
+| **Playback Window** | Панель управления воспроизведением | Undecorated, floating |
 
 ---
 
