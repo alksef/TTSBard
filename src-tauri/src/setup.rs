@@ -443,7 +443,7 @@ fn init_hooks(
 /// Initialize WebView server
 fn init_webview_server(app_state: &AppState, app_handle: AppHandle) {
     let webview_settings = app_state.webview_settings.clone();
-    let (webview_tx, webview_rx) = std::sync::mpsc::channel::<AppEvent>();
+    let (webview_tx, webview_rx) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
 
     app_state.set_webview_event_sender(webview_tx);
 
