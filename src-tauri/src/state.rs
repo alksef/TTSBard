@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 /// NOTE: Lock ordering hierarchy is no longer needed with unified TtsConfig.
@@ -138,6 +139,9 @@ pub struct AppState {
 
     /// Spellcheck manager (offline hunspell-based spell checking)
     pub spellcheck_manager: Arc<Mutex<Option<Arc<crate::spellcheck::SpellcheckManager>>>>,
+
+    /// Токен отмены для всех фоновых серверов
+    pub shutdown: CancellationToken,
 }
 
 impl AppState {
@@ -180,6 +184,7 @@ impl AppState {
             ai_settings_hash: Arc::new(AtomicU64::new(0)),
             history_manager: Arc::new(Mutex::new(None)),
             spellcheck_manager: Arc::new(Mutex::new(None)),
+            shutdown: CancellationToken::new(),
         }
     }
 
