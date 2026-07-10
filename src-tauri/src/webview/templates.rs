@@ -54,7 +54,17 @@ pub fn default_html() -> String {
 
             // Split text into words for better animation
             const words = text.split(' ');
-            textContent.innerHTML = words.map(word => `<span class="word">${word}</span>`).join(' ');
+            const fragment = document.createDocumentFragment();
+            words.forEach((word, index) => {
+                if (index > 0) {
+                    fragment.appendChild(document.createTextNode(' '));
+                }
+                const wordElement = document.createElement('span');
+                wordElement.className = 'word';
+                wordElement.textContent = word;
+                fragment.appendChild(wordElement);
+            });
+            textContent.replaceChildren(fragment);
 
             container.classList.remove('visible');
             container.classList.add('updating');

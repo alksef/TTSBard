@@ -8,8 +8,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::OnceLock;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::hotkeys::HotkeySettings;
 use super::validation::{validate_port, validate_volume};
@@ -656,6 +660,49 @@ pub struct SettingsManager {
     cache: Arc<RwLock<AppSettings>>,
 }
 
+static SETTINGS_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn settings_write_lock() -> &'static Mutex<()> {
+    SETTINGS_WRITE_LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn write_json_atomically(path: &Path, content: &str) -> Result<()> {
+    let parent = path
+        .parent()
+        .context("Settings path must have a parent directory")?;
+
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("System clock is before UNIX_EPOCH")?
+        .as_nanos();
+    let tmp_path = parent.join(format!(
+        ".{}.{}.tmp",
+        path.file_name().and_then(|name| name.to_str()).unwrap_or("settings.json"),
+        stamp
+    ));
+
+    {
+        let mut file = fs::File::create(&tmp_path)
+            .with_context(|| format!("Failed to create temp settings file at {:?}", tmp_path))?;
+        file.write_all(content.as_bytes())
+            .with_context(|| format!("Failed to write temp settings file at {:?}", tmp_path))?;
+        file.sync_all()
+            .with_context(|| format!("Failed to flush temp settings file at {:?}", tmp_path))?;
+    }
+
+    if let Err(rename_error) = fs::rename(&tmp_path, path) {
+        let _ = fs::remove_file(path);
+        fs::rename(&tmp_path, path).with_context(|| {
+            format!(
+                "Failed to replace settings file {:?} with temp file {:?}: {}",
+                path, tmp_path, rename_error
+            )
+        })?;
+    }
+
+    Ok(())
+}
+
 impl SettingsManager {
     /// Create a new SettingsManager with initialized cache
     pub fn new() -> Result<Self> {
@@ -705,7 +752,8 @@ impl SettingsManager {
                 settings.hotkeys = HotkeySettings::default();
                 // Save migrated settings
                 let content = serde_json::to_string_pretty(&settings)?;
-                fs::write(&path, content)?;
+                let _guard = settings_write_lock().lock();
+                write_json_atomically(&path, &content)?;
             }
 
             settings.validate();
@@ -716,7 +764,8 @@ impl SettingsManager {
             // Save defaults to disk for next time
             let content =
                 serde_json::to_string_pretty(&settings).context("Failed to serialize settings")?;
-            fs::write(&path, content).context("Failed to write settings file")?;
+            let _guard = settings_write_lock().lock();
+            write_json_atomically(&path, &content).context("Failed to write settings file")?;
             Ok(settings)
         }
     }
@@ -741,7 +790,8 @@ impl SettingsManager {
         let content =
             serde_json::to_string_pretty(settings).context("Failed to serialize settings")?;
 
-        fs::write(&path, content).context("Failed to write settings file")?;
+        let _guard = settings_write_lock().lock();
+        write_json_atomically(&path, &content).context("Failed to write settings file")?;
 
         // Update cache after successful disk write
         *self.cache.write() = settings.clone();
@@ -771,6 +821,7 @@ impl SettingsManager {
         T: serde::Serialize,
     {
         let path = self.settings_path();
+        let _guard = settings_write_lock().lock();
 
         // Read existing JSON or create default
         let mut json_value = if path.exists() {
@@ -831,7 +882,7 @@ impl SettingsManager {
         let content = serde_json::to_string_pretty(&json_value)
             .context("Failed to serialize updated settings")?;
 
-        fs::write(&path, &content).context("Failed to write settings file")?;
+        write_json_atomically(&path, &content).context("Failed to write settings file")?;
 
         // Update cache after successful disk write
         let settings: AppSettings =
@@ -1413,4 +1464,60 @@ mod tests {
         let p: AiProviderType = serde_json::from_str("\"deepseek\"").unwrap();
         assert_eq!(p, AiProviderType::DeepSeek);
     }
+    #[test]
+    fn concurrent_updates_preserve_both_fields() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let config_dir = std::env::temp_dir().join(format!(
+            "ttsbard-settings-test-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let settings_path = config_dir.join("settings.json");
+        let default_settings = AppSettings::default();
+        std::fs::write(
+            &settings_path,
+            serde_json::to_string_pretty(&default_settings).unwrap(),
+        )
+        .unwrap();
+
+        let manager_a = SettingsManager {
+            config_dir: config_dir.clone(),
+            cache: Arc::new(RwLock::new(default_settings.clone())),
+        };
+        let manager_b = SettingsManager {
+            config_dir: config_dir.clone(),
+            cache: Arc::new(RwLock::new(default_settings)),
+        };
+
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+        let barrier_a = barrier.clone();
+        let barrier_b = barrier.clone();
+
+        let handle_a = std::thread::spawn(move || {
+            barrier_a.wait();
+            manager_a.set_speaker_volume(33).unwrap();
+        });
+        let handle_b = std::thread::spawn(move || {
+            barrier_b.wait();
+            manager_b.set_show_playback_on_start(true).unwrap();
+        });
+
+        barrier.wait();
+        handle_a.join().unwrap();
+        handle_b.join().unwrap();
+
+        let content = std::fs::read_to_string(&settings_path).unwrap();
+        let settings: AppSettings = serde_json::from_str(&content).unwrap();
+
+        assert_eq!(settings.audio.speaker_volume, 33);
+        assert!(settings.show_playback_on_start);
+
+        let _ = std::fs::remove_dir_all(&config_dir);
+    }
+
 }

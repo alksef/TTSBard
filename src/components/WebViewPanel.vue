@@ -262,8 +262,8 @@ watch(webviewSettingsFromComposable, (newSettings) => {
     start_on_boot: newSettings.start_on_boot,
     port: newSettings.port,
     bind_address: newSettings.bind_address,
-    access_token: (newSettings as any).access_token || null,
-    upnp_enabled: (newSettings as any).upnp_enabled || false,
+    access_token: newSettings.access_token || null,
+    upnp_enabled: newSettings.upnp_enabled || false,
   };
 }, { immediate: true, deep: true })
 
