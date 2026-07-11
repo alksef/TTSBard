@@ -11,12 +11,51 @@ use symphonia::core::audio::Signal;
 use rubato::{FftFixedInOut, Resampler};
 use pitch_shift::PitchShifter;
 
+use std::collections::HashMap;
+use std::sync::OnceLock;
+use parking_lot::Mutex;
+use ndarray::prelude::*;
+// The `deep_filter` crate exposes its library under the name `df`.
+use df::tract::{DfParams, DfTract, RuntimeParams};
+
+/// Lazily-initialized DeepFilterNet model templates, keyed by channel count.
+///
+/// The tract runtime (ONNX graph compilation) is the expensive part and is built
+/// exactly once per channel configuration. Actual processing clones a pristine
+/// template so streaming state never leaks between phrases.
+static DF_TEMPLATES: OnceLock<Mutex<HashMap<usize, DfTract>>> = OnceLock::new();
+
+/// Get a fresh DeepFilterNet instance for the given channel count.
+///
+/// The heavy model initialization happens only once per channel count; subsequent
+/// calls clone the cached template (cheap compared to rebuilding the tract graph).
+fn get_df_model(channels: usize) -> Result<DfTract, String> {
+    let templates = DF_TEMPLATES.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut guard = templates.lock();
+
+    if !guard.contains_key(&channels) {
+        tracing::info!(channels, "Initializing DeepFilterNet model (one-time)");
+        let rp = RuntimeParams::default_with_ch(channels);
+        let df_params = DfParams::default();
+        let df = DfTract::new(df_params, &rp)
+            .map_err(|e| format!("Failed to initialize DeepFilterNet: {}", e))?;
+        guard.insert(channels, df);
+    }
+
+    Ok(guard
+        .get(&channels)
+        .expect("DeepFilterNet template must exist after insert")
+        .clone())
+}
+
 /// Audio effects configuration
 #[derive(Debug, Clone, Copy)]
 pub struct AudioEffects {
     pub pitch: i16,   // -100 to +100 (проценты)
     pub speed: i16,   // -100 to +100 (проценты)
     pub volume: i16,  // 0 to 200 (проценты, 100 = норма)
+    pub enhance_enabled: bool, // DeepFilterNet noise suppression
+    pub enhance_atten_db: f32, // attenuation limit in dB (5..30)
 }
 
 impl AudioEffects {
@@ -25,13 +64,24 @@ impl AudioEffects {
             pitch: pitch.clamp(-100, 100),
             speed: speed.clamp(-100, 100),
             volume: volume.clamp(0, 200),
+            enhance_enabled: false,
+            enhance_atten_db: 12.0,
         }
+    }
+
+    /// Configure DeepFilterNet noise suppression (builder-style).
+    ///
+    /// `atten_db` is clamped to the supported 5..30 dB range.
+    pub fn with_enhance(mut self, enabled: bool, atten_db: f32) -> Self {
+        self.enhance_enabled = enabled;
+        self.enhance_atten_db = atten_db.clamp(5.0, 30.0);
+        self
     }
 
     /// Check if any effects are active
     #[allow(dead_code)]
     pub fn is_active(&self) -> bool {
-        self.pitch != 0 || self.speed != 0 || self.volume != 100
+        self.pitch != 0 || self.speed != 0 || self.volume != 100 || self.enhance_enabled
     }
 
     /// Convert volume percentage to amplification factor
@@ -88,15 +138,16 @@ impl AudioEffects {
 ///
 /// Processing pipeline:
 /// 1. Decode MP3 to PCM
-/// 2. Apply speed change (resampling via rubato)
-/// 3. Apply pitch shift (phase vocoder - NO duration change)
-/// 4. Re-encode to WAV
+/// 2. Apply DeepFilterNet noise suppression (if enabled)
+/// 3. Apply speed change (resampling via rubato)
+/// 4. Apply pitch shift (phase vocoder - NO duration change)
+/// 5. Re-encode to WAV
 ///
 /// Note: Volume is NOT applied here - it's handled during playback via rodio
 /// Note: Pitch and speed are now INDEPENDENT (no chipmunk effect)
 pub fn apply_effects(mp3_data: Vec<u8>, effects: &AudioEffects) -> Result<Vec<u8>, String> {
-    // Only process if pitch or speed effects are active
-    if effects.pitch == 0 && effects.speed == 0 {
+    // Only process if any effect is active
+    if effects.pitch == 0 && effects.speed == 0 && !effects.enhance_enabled {
         return Ok(mp3_data);
     }
 
@@ -104,8 +155,29 @@ pub fn apply_effects(mp3_data: Vec<u8>, effects: &AudioEffects) -> Result<Vec<u8
     let pcm_data = decode_mp3(&mp3_data)?;
 
     let mut samples = pcm_data.samples;
-    let sample_rate = pcm_data.sample_rate;
+    let mut sample_rate = pcm_data.sample_rate;
     let channels = pcm_data.channels;
+
+    // Apply DeepFilterNet noise suppression first, on the clean decoded signal
+    // (before pitch/speed alter the time/frequency content).
+    if effects.enhance_enabled {
+        match apply_enhance(&samples, sample_rate, channels, effects.enhance_atten_db) {
+            Ok(enhanced) => {
+                samples = enhanced;
+                sample_rate = 48000; // DeepFilterNet model output is always 48 kHz
+                tracing::debug!(
+                    atten_db = effects.enhance_atten_db,
+                    channels,
+                    "Applied DeepFilterNet enhancement"
+                );
+            }
+            Err(e) => {
+                // Enhancement is best-effort: keep original samples on failure so
+                // the rest of the pipeline (and playback) still works.
+                tracing::error!(error = %e, "DeepFilterNet enhancement failed, skipping");
+            }
+        }
+    }
 
     // Apply speed change if needed (changes duration)
     if effects.speed != 0 {
@@ -269,6 +341,88 @@ fn decode_mp3(mp3_data: &[u8]) -> Result<PcmData, String> {
         sample_rate,
         channels,
     })
+}
+
+/// Apply DeepFilterNet noise suppression to interleaved PCM samples.
+///
+/// The DeepFilterNet model operates at a fixed sample rate (48 kHz for DFN3) and
+/// consumes frames of exactly `hop_size` samples per channel. This function:
+/// 1. De-interleaves the PCM into a `[channels, frames]` array.
+/// 2. Resamples to the model's sample rate (if the input differs).
+/// 3. Streams `hop_size` frames through `DfTract::process`.
+/// 4. Resamples back to the original sample rate.
+/// 5. Re-interleaves the result.
+///
+/// `atten_db` is the attenuation limit (5..30). Lower values mean gentler cleanup.
+fn apply_enhance(
+    samples: &[f32],
+    sample_rate: u32,
+    channels: usize,
+    atten_db: f32,
+) -> Result<Vec<f32>, String> {
+    if samples.is_empty() || channels == 0 {
+        return Ok(samples.to_vec());
+    }
+
+    // Obtain a fresh model instance (cheap clone of a one-time initialized template)
+    // so streaming state never leaks between phrases.
+    let mut model = get_df_model(channels)?;
+    model.set_atten_lim(atten_db.clamp(5.0, 30.0));
+
+    let model_sr = model.sr;
+    let hop_size = model.hop_size;
+
+    // De-interleave into [channels, frames_per_ch].
+    let frames_per_ch = samples.len() / channels;
+    if frames_per_ch == 0 {
+        return Ok(samples.to_vec());
+    }
+    let mut deinterleaved: Array2<f32> = Array2::zeros((channels, frames_per_ch));
+    for (i, &s) in samples.iter().enumerate() {
+        let ch = i % channels;
+        let f = i / channels;
+        if f < frames_per_ch {
+            deinterleaved[[ch, f]] = s;
+        }
+    }
+
+    // Resample to the model's sample rate if needed.
+    let needs_resample = sample_rate as usize != model_sr;
+    let input = if needs_resample {
+        df::transforms::resample(deinterleaved.view(), sample_rate as usize, model_sr, None)
+            .map_err(|e| format!("Resample to {} Hz failed: {:?}", model_sr, e))?
+    } else {
+        deinterleaved
+    };
+
+    // Stream hop_size frames through the model.
+    let total = input.len_of(Axis(1));
+    let mut enhanced: Array2<f32> = Array2::zeros((channels, total));
+    for (ns_f, mut enh_f) in input
+        .view()
+        .axis_chunks_iter(Axis(1), hop_size)
+        .zip(enhanced.view_mut().axis_chunks_iter_mut(Axis(1), hop_size))
+    {
+        if ns_f.len_of(Axis(1)) < hop_size {
+            // Partial trailing frame: pass through unprocessed to preserve length.
+            enh_f.assign(&ns_f);
+            break;
+        }
+        model
+            .process(ns_f, enh_f.view_mut())
+            .map_err(|e| format!("DeepFilterNet process failed: {}", e))?;
+    }
+
+    // Re-interleave.
+    let out_frames = enhanced.len_of(Axis(1));
+    let mut result = Vec::with_capacity(out_frames * channels);
+    for f in 0..out_frames {
+        for ch in 0..channels {
+            result.push(enhanced[[ch, f]]);
+        }
+    }
+
+    Ok(result)
 }
 
 /// Apply speed change using resampling

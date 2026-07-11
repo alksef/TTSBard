@@ -9,6 +9,8 @@ interface Props {
   pitch?: number;
   speed?: number;
   volume?: number;
+  enhanceEnabled?: boolean;
+  enhanceAttenDb?: number;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -16,6 +18,8 @@ const props = withDefaults(defineProps<Props>(), {
   pitch: 0,
   speed: 0,
   volume: 100,
+  enhanceEnabled: false,
+  enhanceAttenDb: 12,
 });
 
 const emit = defineEmits<{
@@ -23,17 +27,23 @@ const emit = defineEmits<{
   'update:pitch': [value: number];
   'update:speed': [value: number];
   'update:volume': [value: number];
+  'update:enhanceEnabled': [value: boolean];
+  'update:enhanceAttenDb': [value: number];
 }>();
 
 const localEnabled = ref(props.enabled);
 const localPitch = ref(props.pitch);
 const localSpeed = ref(props.speed);
 const localVolume = ref(props.volume);
+const localEnhanceEnabled = ref(props.enhanceEnabled);
+const localEnhanceAttenDb = ref(props.enhanceAttenDb);
 
 watch(() => props.enabled, (val) => localEnabled.value = val);
 watch(() => props.pitch, (val) => localPitch.value = val);
 watch(() => props.speed, (val) => localSpeed.value = val);
 watch(() => props.volume, (val) => localVolume.value = val);
+watch(() => props.enhanceEnabled, (val) => localEnhanceEnabled.value = val);
+watch(() => props.enhanceAttenDb, (val) => localEnhanceAttenDb.value = val);
 
 async function handleToggle(enabled: boolean) {
   try {
@@ -69,6 +79,25 @@ async function handleVolumeChange(value: number) {
     emit('update:volume', value);
   } catch (error) {
     debugError('[AudioEffects] Failed to set volume:', error);
+  }
+}
+
+async function handleEnhanceToggle(enabled: boolean) {
+  try {
+    await invoke('set_audio_effects_enhance_enabled', { enabled });
+    emit('update:enhanceEnabled', enabled);
+  } catch (error) {
+    debugError('[AudioEffects] Failed to toggle enhance:', error);
+    localEnhanceEnabled.value = !enabled;
+  }
+}
+
+async function handleEnhanceAttenChange(value: number) {
+  try {
+    await invoke('set_audio_effects_enhance_atten_db', { attenDb: value });
+    emit('update:enhanceAttenDb', value);
+  } catch (error) {
+    debugError('[AudioEffects] Failed to set enhance atten:', error);
   }
 }
 </script>
@@ -136,6 +165,35 @@ async function handleVolumeChange(value: number) {
           <span class="volume-value">{{ localVolume }}%</span>
         </div>
       </div>
+
+      <!-- Enhance: DeepFilterNet noise suppression -->
+      <div class="setting-row enhance-toggle-row">
+        <label>Очистка от шума</label>
+        <label class="toggle-switch toggle-switch-small">
+          <input
+            type="checkbox"
+            :checked="localEnhanceEnabled"
+            @change="handleEnhanceToggle(($event.target as HTMLInputElement).checked)"
+          />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <!-- Enhance depth: 5 to 30 dB (attenuation limit) -->
+      <div v-if="localEnhanceEnabled" class="setting-row">
+        <label>Глубина очистки</label>
+        <div class="volume-control">
+          <input
+            type="range"
+            min="5"
+            max="30"
+            :value="localEnhanceAttenDb"
+            @input="localEnhanceAttenDb = parseInt(($event.target as HTMLInputElement).value)"
+            @change="handleEnhanceAttenChange(localEnhanceAttenDb)"
+          />
+          <span class="volume-value">{{ localEnhanceAttenDb }} dB</span>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -178,6 +236,10 @@ async function handleVolumeChange(value: number) {
   display: inline-block;
   width: 44px;
   height: 24px;
+}
+
+.enhance-toggle-row {
+  justify-content: space-between;
 }
 
 .toggle-switch input {

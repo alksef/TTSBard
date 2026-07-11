@@ -70,6 +70,13 @@ pub struct AudioEffectsSettings {
     pub speed: i16, // -100 to +100 (проценты)
     #[serde(default = "default_volume")]
     pub volume: i16, // 0 to 200 (проценты, 100 = норма)
+    /// Включить очистку речи от шума (DeepFilterNet)
+    #[serde(default = "default_enhance_enabled")]
+    pub enhance_enabled: bool,
+    /// Глубина очистки (attenuation limit) в dB: 5..30.
+    /// Меньше — мягче, больше — сильнее подавление шума.
+    #[serde(default = "default_enhance_atten_db")]
+    pub enhance_atten_db: f32,
 }
 
 fn default_effects_enabled() -> bool {
@@ -84,6 +91,12 @@ fn default_speed() -> i16 {
 fn default_volume() -> i16 {
     100
 }
+fn default_enhance_enabled() -> bool {
+    false
+}
+fn default_enhance_atten_db() -> f32 {
+    12.0
+}
 
 impl Default for AudioEffectsSettings {
     fn default() -> Self {
@@ -92,6 +105,8 @@ impl Default for AudioEffectsSettings {
             pitch: 0,
             speed: 0,
             volume: 100,
+            enhance_enabled: false,
+            enhance_atten_db: 12.0,
         }
     }
 }
@@ -1402,6 +1417,17 @@ impl SettingsManager {
     pub fn set_audio_effects_volume(&self, volume: i16) -> Result<()> {
         let validated = volume.clamp(0, 200);
         self.update_field("/audio_effects/volume", &validated)
+    }
+
+    /// Set audio effects enhance (DeepFilterNet noise suppression) enabled
+    pub fn set_audio_effects_enhance_enabled(&self, enabled: bool) -> Result<()> {
+        self.update_field("/audio_effects/enhance_enabled", &enabled)
+    }
+
+    /// Set audio effects enhance attenuation limit (dB), clamped to 5..30
+    pub fn set_audio_effects_enhance_atten_db(&self, atten_db: f32) -> Result<()> {
+        let validated = atten_db.clamp(5.0, 30.0);
+        self.update_field("/audio_effects/enhance_atten_db", &validated)
     }
 
     // ========== Hotkey Settings ==========

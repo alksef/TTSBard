@@ -167,6 +167,8 @@ export interface AudioEffectsSettingsDto {
   pitch: number  // -100 to +100
   speed: number  // -100 to +100
   volume: number // 0 to 200
+  enhance_enabled: boolean // DeepFilterNet noise suppression
+  enhance_atten_db: number // 5 to 30 dB (attenuation limit)
 }
 
 // ============================================================================
@@ -314,7 +316,7 @@ export interface AppSettingsDto {
   twitch: TwitchSettingsDto
   windows: WindowsSettingsDto
   audio: AudioSettingsDto
-  audio_effects?: AudioEffectsSettingsDto
+  audio_effects: AudioEffectsSettingsDto
   general: GeneralSettingsDto
   logging: LoggingSettingsDto
   preprocessor: PreprocessorSettingsDto

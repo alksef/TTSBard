@@ -77,6 +77,10 @@ pub fn apply_audio_effects_pipeline(audio_data: Vec<u8>, settings: &AppSettings)
         settings.audio_effects.pitch,
         settings.audio_effects.speed,
         settings.audio_effects.volume,
+    )
+    .with_enhance(
+        settings.audio_effects.enhance_enabled,
+        settings.audio_effects.enhance_atten_db,
     );
 
     let original_len = audio_data.len();
