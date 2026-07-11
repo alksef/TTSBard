@@ -21,6 +21,7 @@ pub fn set_ai_provider(
         "openai" => crate::config::AiProviderType::OpenAi,
         "zai" => crate::config::AiProviderType::ZAi,
         "deepseek" => crate::config::AiProviderType::DeepSeek,
+        "custom" => crate::config::AiProviderType::Custom,
         _ => return Err("Invalid provider".into()),
     };
     settings_manager.set_ai_provider(provider_enum)
@@ -223,6 +224,9 @@ pub async fn get_ai_completion(
         crate::config::AiProviderType::OpenAi => settings.ai.openai.api_key.is_some(),
         crate::config::AiProviderType::ZAi => settings.ai.zai.api_key.is_some(),
         crate::config::AiProviderType::DeepSeek => settings.ai.deepseek.api_key.is_some(),
+        crate::config::AiProviderType::Custom => {
+            settings.ai.custom.api_key.is_some() && settings.ai.custom.url.is_some()
+        }
     };
     if !has_key {
         return Ok(String::new());
@@ -337,6 +341,72 @@ pub fn get_ai_deepseek_model(
     settings_manager: State<'_, SettingsManager>,
 ) -> String {
     settings_manager.get_ai_deepseek_model()
+}
+
+/// Set Custom API URL for AI text correction
+#[tauri::command]
+pub fn set_ai_custom_url(
+    settings_manager: State<'_, SettingsManager>,
+    state: State<'_, AppState>,
+    url: String,
+) -> Result<(), String> {
+    if url.trim().is_empty() {
+        return Err("API URL cannot be empty".into());
+    }
+    settings_manager.set_ai_custom_url(Some(url))
+        .map_err(|e| format!("Failed to save Custom API URL: {}", e))?;
+    state.invalidate_ai_client();
+    Ok(())
+}
+
+/// Set Custom API key for AI text correction
+#[tauri::command]
+pub fn set_ai_custom_api_key(
+    settings_manager: State<'_, SettingsManager>,
+    state: State<'_, AppState>,
+    key: String,
+) -> Result<(), String> {
+    if key.trim().is_empty() {
+        return Err("API key cannot be empty".into());
+    }
+    settings_manager.set_ai_custom_api_key(Some(key))
+        .map_err(|e| format!("Failed to save Custom API key: {}", e))?;
+    state.invalidate_ai_client();
+    Ok(())
+}
+
+/// Set Custom model for AI text correction
+#[tauri::command]
+pub fn set_ai_custom_model(
+    settings_manager: State<'_, SettingsManager>,
+    model: String,
+) -> Result<(), String> {
+    if model.trim().is_empty() {
+        return Err("Model cannot be empty".into());
+    }
+    settings_manager.set_ai_custom_model(model)
+        .map_err(|e| format!("Failed to save Custom model: {}", e))
+}
+
+/// Set Custom use proxy for AI text correction
+#[tauri::command]
+pub fn set_ai_custom_use_proxy(
+    settings_manager: State<'_, SettingsManager>,
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<(), String> {
+    settings_manager.set_ai_custom_use_proxy(enabled)
+        .map_err(|e| format!("Failed to save Custom proxy setting: {}", e))?;
+    state.invalidate_ai_client();
+    Ok(())
+}
+
+/// Get Custom model for AI text correction
+#[tauri::command]
+pub fn get_ai_custom_model(
+    settings_manager: State<'_, SettingsManager>,
+) -> String {
+    settings_manager.get_ai_custom_model()
 }
 
 const MAX_GRAMMAR_TEXT_LEN: usize = 10_000;

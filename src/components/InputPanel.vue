@@ -62,13 +62,16 @@ const isProviderConfigured = computed(() => {
       ? !!aiSettings.value?.zai?.api_key
       : provider === 'deepseek'
         ? !!aiSettings.value?.deepseek?.api_key
-        : false
+        : provider === 'custom'
+          ? !!aiSettings.value?.custom?.api_key && !!aiSettings.value?.custom?.url
+          : false
 
   debugLog('[InputPanel] AI provider check:', {
     provider,
     hasOpenaiKey: !!aiSettings.value?.openai?.api_key,
     hasZaiKey: !!aiSettings.value?.zai?.api_key,
     hasDeepSeekKey: !!aiSettings.value?.deepseek?.api_key,
+    hasCustomKey: !!aiSettings.value?.custom?.api_key && !!aiSettings.value?.custom?.url,
     isProviderConfigured: hasKey
   })
 

@@ -6,6 +6,7 @@ pub mod common;
 pub mod openai;
 pub mod zai;
 pub mod deepseek;
+pub mod custom;
 
 use async_trait::async_trait;
 use crate::config::{AiSettings, AiProviderType, NetworkSettings};
@@ -96,6 +97,7 @@ pub enum AiProvider {
     OpenAi(openai::OpenAiClient),
     ZAi(zai::ZAiClient),
     DeepSeek(deepseek::DeepSeekClient),
+    Custom(custom::CustomClient),
 }
 
 impl AiProvider {
@@ -105,6 +107,7 @@ impl AiProvider {
             AiProvider::OpenAi(client) => client.correct(text, prompt).await,
             AiProvider::ZAi(client) => client.correct(text, prompt).await,
             AiProvider::DeepSeek(client) => client.correct(text, prompt).await,
+            AiProvider::Custom(client) => client.correct(text, prompt).await,
         }
     }
 }
@@ -130,6 +133,10 @@ pub fn create_ai_client(
         AiProviderType::DeepSeek => {
             let client = deepseek::DeepSeekClient::new(settings, network_settings)?;
             Ok(AiProvider::DeepSeek(client))
+        }
+        AiProviderType::Custom => {
+            let client = custom::CustomClient::new(settings, network_settings)?;
+            Ok(AiProvider::Custom(client))
         }
     }
 }
@@ -180,6 +187,15 @@ pub fn hash_ai_settings(settings: &AiSettings) -> u64 {
         key.hash(&mut hasher);
     }
     settings.deepseek.use_proxy.hash(&mut hasher);
+
+    // Hash Custom settings
+    if let Some(url) = &settings.custom.url {
+        url.hash(&mut hasher);
+    }
+    if let Some(key) = &settings.custom.api_key {
+        key.hash(&mut hasher);
+    }
+    settings.custom.use_proxy.hash(&mut hasher);
 
     hasher.finish()
 }
