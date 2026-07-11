@@ -33,6 +33,9 @@ export default defineConfig(async () => ({
   // Multi-window build configuration
   build: {
     target: 'esnext', // Explicit target for Vite 7+ (default changed to 'baseline-widely-available')
+    // The desktop main entry contains the settings panels; keep a meaningful
+    // regression warning while allowing the current ~504 kB production chunk.
+    chunkSizeWarningLimit: 550,
     rollupOptions: {
       input: {
         main: './index.html',

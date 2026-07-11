@@ -2,58 +2,64 @@
 //!
 //! Provides pitch, speed, and volume adjustments
 
-use symphonia::core::codecs::{CODEC_TYPE_NULL, DecoderOptions};
+use pitch_shift::PitchShifter;
+use rubato::{FftFixedInOut, Resampler};
+use symphonia::core::audio::Signal;
+use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
-use symphonia::core::audio::Signal;
-use rubato::{FftFixedInOut, Resampler};
-use pitch_shift::PitchShifter;
 
-use std::collections::HashMap;
-use std::sync::OnceLock;
-use parking_lot::Mutex;
 use ndarray::prelude::*;
+use std::cell::RefCell;
+use std::collections::HashMap;
 // The `deep_filter` crate exposes its library under the name `df`.
 use df::tract::{DfParams, DfTract, RuntimeParams};
 
-/// Lazily-initialized DeepFilterNet model templates, keyed by channel count.
-///
-/// The tract runtime (ONNX graph compilation) is the expensive part and is built
-/// exactly once per channel configuration. Actual processing clones a pristine
-/// template so streaming state never leaks between phrases.
-static DF_TEMPLATES: OnceLock<Mutex<HashMap<usize, DfTract>>> = OnceLock::new();
+// Lazily-initialized DeepFilterNet model templates, keyed by channel count.
+//
+// The tract runtime (ONNX graph compilation) is the expensive part and is built
+// exactly once per channel configuration. Actual processing clones a pristine
+// template so streaming state never leaks between phrases.
+//
+// Uses `thread_local!` + `RefCell` instead of `static OnceLock<Mutex<...>>`
+// because tract-core 0.21.4's `SimpleState<..., Box<dyn OpState>, ...>` is not
+// `Send`/`Sync` (the `OpState` trait lacks a `Send` bound in this version).
+thread_local! {
+    static DF_TEMPLATES: RefCell<HashMap<usize, DfTract>> = RefCell::new(HashMap::new());
+}
 
 /// Get a fresh DeepFilterNet instance for the given channel count.
 ///
 /// The heavy model initialization happens only once per channel count; subsequent
 /// calls clone the cached template (cheap compared to rebuilding the tract graph).
 fn get_df_model(channels: usize) -> Result<DfTract, String> {
-    let templates = DF_TEMPLATES.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut guard = templates.lock();
+    DF_TEMPLATES.with(|templates| {
+        let mut guard = templates.borrow_mut();
 
-    if !guard.contains_key(&channels) {
-        tracing::info!(channels, "Initializing DeepFilterNet model (one-time)");
-        let rp = RuntimeParams::default_with_ch(channels);
-        let df_params = DfParams::default();
-        let df = DfTract::new(df_params, &rp)
-            .map_err(|e| format!("Failed to initialize DeepFilterNet: {}", e))?;
-        guard.insert(channels, df);
-    }
+        if !guard.contains_key(&channels) {
+            tracing::info!(channels, "Initializing DeepFilterNet model (one-time)");
+            let rp = RuntimeParams::default_with_ch(channels);
+            let df_params = DfParams::default();
+            let df = DfTract::new(df_params, &rp)
+                .map_err(|e| format!("Failed to initialize DeepFilterNet: {}", e))?;
+            guard.insert(channels, df);
+        }
 
-    Ok(guard
-        .get(&channels)
-        .expect("DeepFilterNet template must exist after insert")
-        .clone())
+        Ok(guard
+            .get(&channels)
+            .expect("DeepFilterNet template must exist after insert")
+            .clone())
+    })
 }
 
 /// Audio effects configuration
 #[derive(Debug, Clone, Copy)]
 pub struct AudioEffects {
-    pub pitch: i16,   // -100 to +100 (проценты)
-    pub speed: i16,   // -100 to +100 (проценты)
-    pub volume: i16,  // 0 to 200 (проценты, 100 = норма)
+    pub pitch: i16,            // -100 to +100 (проценты)
+    pub speed: i16,            // -100 to +100 (проценты)
+    pub volume: i16,           // 0 to 200 (проценты, 100 = норма)
     pub enhance_enabled: bool, // DeepFilterNet noise suppression
     pub enhance_atten_db: f32, // attenuation limit in dB (5..30)
 }
@@ -132,12 +138,12 @@ impl AudioEffects {
     }
 }
 
-/// Apply audio effects to MP3 data
+/// Apply audio effects to audio data
 ///
-/// Returns processed MP3 data or original if no effects active
+/// Returns processed WAV data or original if no effects active
 ///
 /// Processing pipeline:
-/// 1. Decode MP3 to PCM
+/// 1. Decode audio to PCM (Symphonia probing handles WAV, MP3, and other formats)
 /// 2. Apply DeepFilterNet noise suppression (if enabled)
 /// 3. Apply speed change (resampling via rubato)
 /// 4. Apply pitch shift (phase vocoder - NO duration change)
@@ -145,14 +151,14 @@ impl AudioEffects {
 ///
 /// Note: Volume is NOT applied here - it's handled during playback via rodio
 /// Note: Pitch and speed are now INDEPENDENT (no chipmunk effect)
-pub fn apply_effects(mp3_data: Vec<u8>, effects: &AudioEffects) -> Result<Vec<u8>, String> {
+pub fn apply_effects(audio_data: Vec<u8>, effects: &AudioEffects) -> Result<Vec<u8>, String> {
     // Only process if any effect is active
     if effects.pitch == 0 && effects.speed == 0 && !effects.enhance_enabled {
-        return Ok(mp3_data);
+        return Ok(audio_data);
     }
 
-    // Decode MP3 to PCM
-    let pcm_data = decode_mp3(&mp3_data)?;
+    // Decode audio to PCM
+    let pcm_data = decode_audio(&audio_data)?;
 
     let mut samples = pcm_data.samples;
     let mut sample_rate = pcm_data.sample_rate;
@@ -222,24 +228,23 @@ struct PcmData {
     channels: usize,
 }
 
-/// Decode MP3 to PCM using symphonia
-fn decode_mp3(mp3_data: &[u8]) -> Result<PcmData, String> {
+/// Decode audio to PCM using Symphonia (auto-detects WAV, MP3, and other formats)
+fn decode_audio(audio_data: &[u8]) -> Result<PcmData, String> {
     use std::io::Cursor;
 
     // Clone the data to own it (required for MediaSourceStream)
-    let data = mp3_data.to_vec();
+    let data = audio_data.to_vec();
     let cursor = Cursor::new(data);
     let mss = MediaSourceStream::new(Box::new(cursor), Default::default());
 
-    let mut hint = Hint::new();
-    hint.with_extension("mp3");
+    let hint = Hint::new();
 
     let meta_opts: MetadataOptions = Default::default();
     let fmt_opts: FormatOptions = Default::default();
 
     let probed = symphonia::default::get_probe()
         .format(&hint, mss, &fmt_opts, &meta_opts)
-        .map_err(|e| format!("Failed to probe MP3: {}", e))?;
+        .map_err(|e| format!("Failed to probe audio: {}", e))?;
 
     let mut format = probed.format;
 
@@ -253,10 +258,7 @@ fn decode_mp3(mp3_data: &[u8]) -> Result<PcmData, String> {
         .make(&track.codec_params, &DecoderOptions::default())
         .map_err(|e| format!("Failed to create decoder: {}", e))?;
 
-    let sample_rate = track
-        .codec_params
-        .sample_rate
-        .ok_or("No sample rate")? as u32;
+    let sample_rate = track.codec_params.sample_rate.ok_or("No sample rate")? as u32;
 
     let channels = track.codec_params.channels.ok_or("No channels")?.count();
 
@@ -460,10 +462,7 @@ fn apply_speed(
     // Get the actual input buffer size required by the resampler
     let input_buffer_size = resampler.input_frames_max();
 
-    tracing::debug!(
-        input_buffer_size,
-        "apply_speed: Resampler created"
-    );
+    tracing::debug!(input_buffer_size, "apply_speed: Resampler created");
 
     // De-interleave samples
     let mut interleaved: Vec<Vec<f32>> = vec![Vec::new(); channels];
@@ -509,7 +508,9 @@ fn apply_speed(
         input_idx = end;
 
         // If we have less than a full buffer left, create a new resampler for the remainder
-        if input_idx < interleaved[0].len() && (interleaved[0].len() - input_idx) < input_buffer_size {
+        if input_idx < interleaved[0].len()
+            && (interleaved[0].len() - input_idx) < input_buffer_size
+        {
             let remaining = interleaved[0].len() - input_idx;
 
             tracing::debug!(
@@ -553,7 +554,8 @@ fn apply_speed(
             );
 
             // Process the final chunk (with zero-padding)
-            let final_chunks_refs: Vec<&[f32]> = final_chunks.iter().map(|v| v.as_slice()).collect();
+            let final_chunks_refs: Vec<&[f32]> =
+                final_chunks.iter().map(|v| v.as_slice()).collect();
             match final_resampler.process(&final_chunks_refs, None) {
                 Ok(output) => {
                     for (ch, channel_output) in output.iter().enumerate() {
@@ -629,12 +631,8 @@ fn apply_pitch(
 
     for ch in 0..channels {
         // De-interleave channel samples
-        let channel_samples: Vec<f32> = samples
-            .iter()
-            .skip(ch)
-            .step_by(channels)
-            .copied()
-            .collect();
+        let channel_samples: Vec<f32> =
+            samples.iter().skip(ch).step_by(channels).copied().collect();
 
         // Create pitch shifter with 50ms window duration (recommended)
         let mut shifter = PitchShifter::new(50, sample_rate as usize);
@@ -714,9 +712,9 @@ fn trim_silence(samples: &[f32], channels: usize, sample_rate: u32, aggressive: 
     // Aggressive mode: short tail for zero-padding artifacts
     // Conservative mode: longer tail to preserve speech endings (fricatives, breaths)
     let (threshold, tail_ms, fade_ms) = if aggressive {
-        (0.001, 5u32, 5u32)   // Short tail + fast fade for zero-padding
+        (0.001, 5u32, 5u32) // Short tail + fast fade for zero-padding
     } else {
-        (0.005, 50u32, 30u32)  // Long tail + slow fade for speech preservation
+        (0.005, 50u32, 30u32) // Long tail + slow fade for speech preservation
     };
 
     let tail_samples = (sample_rate * tail_ms / 1000) as usize * channels;
@@ -794,38 +792,56 @@ fn encode_wav(samples: &[f32], sample_rate: u32, channels: usize) -> Result<Vec<
     let mut cursor = Cursor::new(&mut wav_data);
 
     // RIFF header
-    cursor.write_all(b"RIFF").map_err(|e| format!("Failed to write RIFF: {}", e))?;
-    cursor.write_all(&(file_size as u32).to_le_bytes())
+    cursor
+        .write_all(b"RIFF")
+        .map_err(|e| format!("Failed to write RIFF: {}", e))?;
+    cursor
+        .write_all(&(file_size as u32).to_le_bytes())
         .map_err(|e| format!("Failed to write file size: {}", e))?;
-    cursor.write_all(b"WAVE").map_err(|e| format!("Failed to write WAVE: {}", e))?;
+    cursor
+        .write_all(b"WAVE")
+        .map_err(|e| format!("Failed to write WAVE: {}", e))?;
 
     // fmt chunk
-    cursor.write_all(b"fmt ").map_err(|e| format!("Failed to write fmt: {}", e))?;
-    cursor.write_all(&16u32.to_le_bytes()) // fmt chunk size
+    cursor
+        .write_all(b"fmt ")
+        .map_err(|e| format!("Failed to write fmt: {}", e))?;
+    cursor
+        .write_all(&16u32.to_le_bytes()) // fmt chunk size
         .map_err(|e| format!("Failed to write fmt size: {}", e))?;
-    cursor.write_all(&1u16.to_le_bytes()) // PCM format
+    cursor
+        .write_all(&1u16.to_le_bytes()) // PCM format
         .map_err(|e| format!("Failed to write format: {}", e))?;
-    cursor.write_all(&(channels as u16).to_le_bytes())
+    cursor
+        .write_all(&(channels as u16).to_le_bytes())
         .map_err(|e| format!("Failed to write channels: {}", e))?;
-    cursor.write_all(&sample_rate.to_le_bytes())
+    cursor
+        .write_all(&sample_rate.to_le_bytes())
         .map_err(|e| format!("Failed to write sample rate: {}", e))?;
     let byte_rate = sample_rate * channels as u32 * 2;
-    cursor.write_all(&byte_rate.to_le_bytes())
+    cursor
+        .write_all(&byte_rate.to_le_bytes())
         .map_err(|e| format!("Failed to write byte rate: {}", e))?;
     let block_align = channels as u16 * 2;
-    cursor.write_all(&block_align.to_le_bytes())
+    cursor
+        .write_all(&block_align.to_le_bytes())
         .map_err(|e| format!("Failed to write block align: {}", e))?;
-    cursor.write_all(&16u16.to_le_bytes()) // bits per sample
+    cursor
+        .write_all(&16u16.to_le_bytes()) // bits per sample
         .map_err(|e| format!("Failed to write bits per sample: {}", e))?;
 
     // data chunk
-    cursor.write_all(b"data").map_err(|e| format!("Failed to write data: {}", e))?;
-    cursor.write_all(&(data_size as u32).to_le_bytes())
+    cursor
+        .write_all(b"data")
+        .map_err(|e| format!("Failed to write data: {}", e))?;
+    cursor
+        .write_all(&(data_size as u32).to_le_bytes())
         .map_err(|e| format!("Failed to write data size: {}", e))?;
 
     // Write sample data
     for sample in i16_samples {
-        cursor.write_all(&sample.to_le_bytes())
+        cursor
+            .write_all(&sample.to_le_bytes())
             .map_err(|e| format!("Failed to write sample: {}", e))?;
     }
 

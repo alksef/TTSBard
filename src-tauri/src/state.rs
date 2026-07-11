@@ -214,6 +214,7 @@ impl AppState {
             .store(recording, std::sync::atomic::Ordering::Relaxed);
     }
 
+    #[allow(dead_code)]
     pub fn get_tts_provider_type(&self) -> TtsProviderType {
         self.tts_config.read().provider_type
     }
