@@ -50,6 +50,12 @@ rubato = "0.14"
 pitch_shift = "1.0"
 symphonia = { version = "0.5", features = ["mp3", "wav"] }
 lewton = "0.10"
+# DeepFilterNet real-time speech enhancement (native Rust inference via tract).
+# NOTE: the package is `deep_filter` (in the libDF subdirectory) but its library
+# target is named `df`, so it is imported in code as `df::tract::*`.
+deep_filter = { git = "https://github.com/Rikorose/DeepFilterNet", subdirectory = "libDF", features = ["tract", "default-model"] }
+# ndarray must match the version used by deep_filter (^0.15) to share array types.
+ndarray = "0.15"
 image = "0.25"
 regex = "1"
 lazy_static = "1.4"

@@ -15,6 +15,7 @@ use crate::config::{
     AppSettings as ConfigAppSettings, AudioSettings, Hotkey, HotkeyModifier, HotkeySettings,
     LoggingSettings, TwitchSettings,
 };
+use crate::config::settings::AudioEffectsSettings;
 use crate::soundpanel::SoundBinding;
 use crate::tts::TtsProviderType;
 use crate::tts::VoiceModel;
@@ -460,6 +461,47 @@ pub type TwitchSettingsDto = TwitchSettings;
 
 /// Audio settings DTO (same as AudioSettings, already has Serialize/Deserialize)
 pub type AudioSettingsDto = AudioSettings;
+
+// ============================================================================
+// Audio Effects Settings DTO
+// ============================================================================
+
+/// Audio post-processing effects settings DTO
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioEffectsSettingsDto {
+    pub enabled: bool,
+    pub pitch: i16,
+    pub speed: i16,
+    pub volume: i16,
+    pub enhance_enabled: bool,
+    pub enhance_atten_db: f32,
+}
+
+impl From<AudioEffectsSettings> for AudioEffectsSettingsDto {
+    fn from(s: AudioEffectsSettings) -> Self {
+        Self {
+            enabled: s.enabled,
+            pitch: s.pitch,
+            speed: s.speed,
+            volume: s.volume,
+            enhance_enabled: s.enhance_enabled,
+            enhance_atten_db: s.enhance_atten_db,
+        }
+    }
+}
+
+impl From<AudioEffectsSettingsDto> for AudioEffectsSettings {
+    fn from(dto: AudioEffectsSettingsDto) -> Self {
+        Self {
+            enabled: dto.enabled,
+            pitch: dto.pitch,
+            speed: dto.speed,
+            volume: dto.volume,
+            enhance_enabled: dto.enhance_enabled,
+            enhance_atten_db: dto.enhance_atten_db,
+        }
+    }
+}
 
 // ============================================================================
 // Logging Settings DTO
@@ -946,6 +988,8 @@ pub struct AppSettingsDto {
     pub windows: WindowsSettingsDto,
     /// Audio settings
     pub audio: AudioSettingsDto,
+    /// Audio post-processing effects settings
+    pub audio_effects: AudioEffectsSettingsDto,
     /// General settings
     pub general: GeneralSettingsDto,
     /// Editor settings
@@ -971,6 +1015,7 @@ impl AppSettingsDto {
             twitch: params.twitch_settings.clone(),
             windows: params.windows_settings.clone().into(),
             audio: params.config.audio.clone(),
+            audio_effects: params.config.audio_effects.clone().into(),
             general: GeneralSettingsDto::from_config_and_state(
                 params.config,
                 params.interception_enabled,

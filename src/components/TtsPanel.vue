@@ -97,6 +97,8 @@ const audioEffects = ref({
   pitch: 0,
   speed: 0,
   volume: 100,
+  enhance_enabled: false,
+  enhance_atten_db: 12,
 });
 
 // Error state
@@ -345,6 +347,8 @@ async function loadAudioEffects() {
       pitch: number;
       speed: number;
       volume: number;
+      enhance_enabled: boolean;
+      enhance_atten_db: number;
     }>('get_audio_effects');
     audioEffects.value = effects;
     debugLog('[TTS] Audio effects loaded:', effects);
@@ -371,6 +375,16 @@ function handleAudioEffectsSpeed(value: number) {
 function handleAudioEffectsVolume(value: number) {
   audioEffects.value.volume = value;
   debugLog('[TTS] Audio effects volume changed:', value);
+}
+
+function handleAudioEffectsEnhanceEnabled(value: boolean) {
+  audioEffects.value.enhance_enabled = value;
+  debugLog('[TTS] Audio effects enhance toggled:', value);
+}
+
+function handleAudioEffectsEnhanceAttenDb(value: number) {
+  audioEffects.value.enhance_atten_db = value;
+  debugLog('[TTS] Audio effects enhance atten changed:', value);
 }
 
 // Voice management handlers
@@ -614,10 +628,14 @@ function dismissStatus() {
         :pitch="audioEffects.pitch"
         :speed="audioEffects.speed"
         :volume="audioEffects.volume"
+        :enhance-enabled="audioEffects.enhance_enabled"
+        :enhance-atten-db="audioEffects.enhance_atten_db"
         @toggle="handleAudioEffectsToggle"
         @update:pitch="handleAudioEffectsPitch"
         @update:speed="handleAudioEffectsSpeed"
         @update:volume="handleAudioEffectsVolume"
+        @update:enhance-enabled="handleAudioEffectsEnhanceEnabled"
+        @update:enhance-atten-db="handleAudioEffectsEnhanceAttenDb"
       />
     </div>
 

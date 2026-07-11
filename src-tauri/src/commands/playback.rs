@@ -227,3 +227,23 @@ pub fn set_audio_effects_volume(
     settings_manager.set_audio_effects_volume(volume)
         .map_err(|e| e.to_string())
 }
+
+/// Set audio effects enhance (DeepFilterNet noise suppression) enabled
+#[tauri::command]
+pub fn set_audio_effects_enhance_enabled(
+    enabled: bool,
+    settings_manager: State<'_, SettingsManager>
+) -> Result<(), String> {
+    settings_manager.set_audio_effects_enhance_enabled(enabled)
+        .map_err(|e| e.to_string())
+}
+
+/// Set audio effects enhance attenuation limit (dB, 5..30)
+#[tauri::command]
+pub fn set_audio_effects_enhance_atten_db(
+    atten_db: f32,
+    settings_manager: State<'_, SettingsManager>
+) -> Result<(), String> {
+    settings_manager.set_audio_effects_enhance_atten_db(atten_db)
+        .map_err(|e| e.to_string())
+}
