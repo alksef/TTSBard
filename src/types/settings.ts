@@ -258,6 +258,7 @@ export const AiProviderType = {
   OpenAi: 'openai',
   ZAi: 'zai',  // Z.ai (capital Z)
   DeepSeek: 'deepseek',
+  Custom: 'custom',
 } as const
 
 export type AiProviderType = (typeof AiProviderType)[keyof typeof AiProviderType]
@@ -280,6 +281,13 @@ export interface AiDeepSeekSettingsDto {
   model: string
 }
 
+export interface AiCustomSettingsDto {
+  url?: string
+  api_key?: string
+  use_proxy?: boolean
+  model: string
+}
+
 // Z.ai (Anthropic-compatible AI provider)
 
 export interface AiSettingsDto {
@@ -287,6 +295,7 @@ export interface AiSettingsDto {
   openai: AiOpenAiSettingsDto
   zai: AiZAiSettingsDto
   deepseek: AiDeepSeekSettingsDto
+  custom: AiCustomSettingsDto
   prompt: string
   timeout?: number
 }

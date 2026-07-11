@@ -21,6 +21,7 @@ const providers = ref<Record<AiProviderType, AiProviderState>>({
   openai: { type: 'openai', configured: false, expanded: false },
   zai: { type: 'zai', configured: false, expanded: false },
   deepseek: { type: 'deepseek', configured: false, expanded: false },
+  custom: { type: 'custom', configured: false, expanded: false },
 });
 
 // Get settings from composable
@@ -47,6 +48,12 @@ const zaiApiKey = ref('');
 const deepseekApiKey = ref('');
 const deepseekUseProxy = ref(false);
 
+// Custom settings
+const customUrl = ref('');
+const customApiKey = ref('');
+const customModel = ref('');
+const customUseProxy = ref(false);
+
 // Status message
 const statusMessage = ref('');
 const statusType = ref<'success' | 'error'>('error');
@@ -59,6 +66,8 @@ const isCurrentProviderConfigured = computed(() => {
     return zaiApiKey.value.trim().length > 0;
   } else if (activeProvider.value === 'deepseek') {
     return deepseekApiKey.value.trim().length > 0;
+  } else if (activeProvider.value === 'custom') {
+    return customApiKey.value.trim().length > 0 && customUrl.value.trim().length > 0;
   }
   return false;
 });
@@ -204,6 +213,49 @@ async function toggleDeepSeekUseProxy() {
   }
 }
 
+async function saveCustomSettings() {
+  debugLog('[AI] Saving Custom settings...');
+
+  if (!customUrl.value.trim()) {
+    showError('API URL не может быть пустым');
+    return;
+  }
+
+  if (!customApiKey.value.trim()) {
+    showError('Ключ API не может быть пустым');
+    return;
+  }
+
+  if (!customModel.value.trim()) {
+    showError('Модель не может быть пустой');
+    return;
+  }
+
+  try {
+    await invoke('set_ai_custom_url', { url: customUrl.value });
+    await invoke('set_ai_custom_api_key', { key: customApiKey.value });
+    await invoke('set_ai_custom_model', { model: customModel.value });
+    providers.value.custom.configured = true;
+    debugLog('[AI] Custom settings saved successfully');
+    showSuccess('Настройки сохранены');
+  } catch (error) {
+    debugError('[AI] Failed to save Custom settings:', error);
+    showError(error as string);
+  }
+}
+
+async function toggleCustomUseProxy() {
+  try {
+    await invoke('set_ai_custom_use_proxy', { enabled: customUseProxy.value });
+    debugLog('[AI] Custom use proxy toggled:', customUseProxy.value);
+    showSuccess(customUseProxy.value ? 'Прокси включён' : 'Прокси выключен');
+  } catch (error) {
+    debugError('[AI] Failed to toggle Custom proxy:', error);
+    showError(error as string);
+    customUseProxy.value = !customUseProxy.value;
+  }
+}
+
 async function setActiveProvider(provider: AiProviderType) {
   try {
     await invoke('set_ai_provider', { provider });
@@ -266,7 +318,11 @@ watch(aiSettings, async (newSettings) => {
       ? !!newSettings.openai?.api_key
       : newSettings.provider === 'zai'
         ? !!newSettings.zai?.api_key
-        : !!newSettings.deepseek?.api_key;
+        : newSettings.provider === 'deepseek'
+          ? !!newSettings.deepseek?.api_key
+          : newSettings.provider === 'custom'
+            ? !!newSettings.custom?.api_key && !!newSettings.custom?.url
+            : false;
 
     // Auto-disable AI if switching to unconfigured provider
     if (!configured && aiEnabled.value && prevProvider !== newSettings.provider) {
@@ -315,6 +371,25 @@ watch(aiSettings, async (newSettings) => {
     }
     if (newSettings.deepseek.use_proxy !== undefined) {
       deepseekUseProxy.value = newSettings.deepseek.use_proxy;
+    }
+  }
+
+  // Update Custom settings
+  if (newSettings.custom) {
+    if (newSettings.custom.url) {
+      customUrl.value = newSettings.custom.url;
+    }
+    if (newSettings.custom.api_key) {
+      customApiKey.value = newSettings.custom.api_key;
+    }
+    if (newSettings.custom.model) {
+      customModel.value = newSettings.custom.model;
+    }
+    if (newSettings.custom.api_key && newSettings.custom.url) {
+      providers.value.custom.configured = true;
+    }
+    if (newSettings.custom.use_proxy !== undefined) {
+      customUseProxy.value = newSettings.custom.use_proxy;
     }
   }
 }, { immediate: true, deep: true });
@@ -514,6 +589,77 @@ function dismissStatus() {
               />
               <label for="ai-deepseek-use-proxy" class="proxy-checkbox-label">
                 Использовать SOCKS5
+              </label>
+            </div>
+          </div>
+        </div>
+      </ProviderCard>
+
+      <!-- Custom Provider -->
+      <ProviderCard
+        title="Custom"
+        :icon="Server"
+        :active="activeProvider === 'custom'"
+        :expanded="providers.custom.expanded"
+        @select="setActiveProvider('custom')"
+        @toggle="toggleProvider('custom')"
+      >
+        <div class="card-content-inner">
+          <!-- URL -->
+          <div class="setting-group">
+            <div class="zai-form-row">
+              <label>API URL:</label>
+              <input
+                v-model="customUrl"
+                type="text"
+                class="zai-input"
+                placeholder="http://127.0.0.1:8080/v1"
+              />
+            </div>
+          </div>
+
+          <!-- API Key -->
+          <div class="setting-group">
+            <div class="zai-form-row">
+              <label>Ключ API:</label>
+              <InputWithToggle
+                v-model="customApiKey"
+                type="password"
+                class="zai-input-wide"
+              />
+            </div>
+          </div>
+
+          <!-- Model -->
+          <div class="setting-group">
+            <div class="zai-form-row">
+              <label>Модель:</label>
+              <input
+                v-model="customModel"
+                type="text"
+                class="zai-input"
+                placeholder="deepseek-chat"
+              />
+            </div>
+          </div>
+
+          <!-- Buttons Row -->
+          <div class="button-row">
+            <button @click="saveCustomSettings" class="save-button-inline zai-save-button">Сохранить</button>
+          </div>
+
+          <!-- Proxy -->
+          <div class="setting-group">
+            <div class="proxy-checkbox-container">
+              <input
+                id="ai-custom-use-proxy"
+                type="checkbox"
+                v-model="customUseProxy"
+                @change="toggleCustomUseProxy"
+                class="proxy-checkbox"
+              />
+              <label for="ai-custom-use-proxy" class="proxy-checkbox-label">
+                Использовать системный прокси
               </label>
             </div>
           </div>

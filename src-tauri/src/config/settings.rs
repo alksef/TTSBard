@@ -482,6 +482,7 @@ pub enum AiProviderType {
     OpenAi,
     ZAi,
     DeepSeek,
+    Custom,
 }
 
 /// OpenAI settings for AI text correction
@@ -539,6 +540,32 @@ impl Default for AiDeepSeekSettings {
     }
 }
 
+/// Custom OpenAI-compatible settings for AI text correction
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AiCustomSettings {
+    pub url: Option<String>,
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub use_proxy: bool,
+    #[serde(default = "default_custom_model")]
+    pub model: String,
+}
+
+fn default_custom_model() -> String {
+    "deepseek-chat".to_string()
+}
+
+impl Default for AiCustomSettings {
+    fn default() -> Self {
+        Self {
+            url: None,
+            api_key: None,
+            use_proxy: false,
+            model: default_custom_model(),
+        }
+    }
+}
+
 /// AI settings for text correction
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AiSettings {
@@ -550,6 +577,8 @@ pub struct AiSettings {
     pub zai: AiZAiSettings,
     #[serde(default)]
     pub deepseek: AiDeepSeekSettings,
+    #[serde(default)]
+    pub custom: AiCustomSettings,
     #[serde(default = "default_ai_prompt")]
     pub prompt: String,
     #[serde(default = "default_ai_timeout")]
@@ -578,6 +607,7 @@ impl Default for AiSettings {
             openai: AiOpenAiSettings::default(),
             zai: AiZAiSettings::default(),
             deepseek: AiDeepSeekSettings::default(),
+            custom: AiCustomSettings::default(),
             prompt: default_ai_prompt(),
             timeout: default_ai_timeout(),
         }
@@ -1319,6 +1349,31 @@ impl SettingsManager {
         self.update_field("/ai/deepseek/model", &model)
     }
 
+    /// Set Custom API URL for AI text correction
+    pub fn set_ai_custom_url(&self, url: Option<String>) -> Result<()> {
+        self.update_field("/ai/custom/url", &url)
+    }
+
+    /// Set Custom API key for AI text correction
+    pub fn set_ai_custom_api_key(&self, key: Option<String>) -> Result<()> {
+        self.update_field("/ai/custom/api_key", &key)
+    }
+
+    /// Set Custom use proxy for AI text correction
+    pub fn set_ai_custom_use_proxy(&self, enabled: bool) -> Result<()> {
+        self.update_field("/ai/custom/use_proxy", &enabled)
+    }
+
+    /// Get Custom model for AI text correction
+    pub fn get_ai_custom_model(&self) -> String {
+        self.cache.read().ai.custom.model.clone()
+    }
+
+    /// Set Custom model for AI text correction
+    pub fn set_ai_custom_model(&self, model: String) -> Result<()> {
+        self.update_field("/ai/custom/model", &model)
+    }
+
     // ========== Audio Effects Settings ==========
 
     /// Get audio effects settings
@@ -1444,6 +1499,7 @@ mod tests {
                 use_proxy: true,
                 model: "deepseek-chat".into(),
             },
+            custom: AiCustomSettings::default(),
             prompt: default_ai_prompt(),
             timeout: default_ai_timeout(),
         };
