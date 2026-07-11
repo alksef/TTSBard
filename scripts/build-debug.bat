@@ -1,13 +1,12 @@
 @echo off
-REM build-debug.bat — debug-сборка TTSBard (двойной клик или консоль).
-REM Компилирует бэкенд в debug-профайле + фронтенд, выдаёт runnable ttsbard.exe.
-REM Инсталляторы (nsis/msi) НЕ собираются — для этого используйте build-release.bat.
+REM TTSBard debug build (double-click or run from a console).
+REM Builds the frontend and debug backend executable without installers.
 SETLOCAL
 
-REM Переход в корень репо (родитель папки scripts\).
+REM Change to the repository root (parent of scripts\).
 CD /D "%~dp0\.."
 
-REM -ExecutionPolicy Bypass — обходит локальную политику выполнения PS.
+REM Bypass the local PowerShell execution policy for this script.
 powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\build.ps1" -Mode debug
 SET EXITCODE=%ERRORLEVEL%
 

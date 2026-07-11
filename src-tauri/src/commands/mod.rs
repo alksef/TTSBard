@@ -2,7 +2,7 @@ use crate::state::AppState;
 use crate::events::AppEvent;
 use crate::config::{SettingsManager, WindowsManager, AppSettingsDto, SpellSource};
 use tauri::{State, AppHandle, Manager, Emitter};
-use tracing::{info, warn};
+use tracing::info;
 
 pub mod preprocessor;
 pub mod telegram;

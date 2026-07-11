@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use tokio::sync::broadcast;
 
 use crate::config::TwitchSettings;
 use crate::events::{TwitchConnectionStatus, TwitchEvent, TwitchEventSender};

@@ -7,7 +7,7 @@ use crate::commands::telegram::TelegramState;
 use crate::state::AppState;
 use crate::tts::{TtsProviderType, TtsProvider, VoiceModel};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 use tracing::{info, warn, error, debug};
 
 /// Set AI provider

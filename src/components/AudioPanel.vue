@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
-import { RefreshCw, Loader, Volume2, VolumeX, Mic, Info, Play } from 'lucide-vue-next';
-import { useAudioSettings } from '../composables/useAppSettings';
+import { open } from '@tauri-apps/plugin-dialog';
+import { RefreshCw, Loader, Volume2, VolumeX, Mic, Info, Play, AudioLines, Sliders, Upload, Square, FileAudio, Save, ShieldCheck } from 'lucide-vue-next';
+import { useAudioSettings, useAudioEffectsSettings } from '../composables/useAppSettings';
 import { debugLog } from '../utils/debug';
 
 interface DeviceInfo {
@@ -11,10 +12,9 @@ interface DeviceInfo {
   is_default: boolean;
 }
 
-// Get settings from composable
 const audioSettingsFromComposable = useAudioSettings();
+const audioEffectsFromComposable = useAudioEffectsSettings();
 
-// State
 const outputDevices = ref<DeviceInfo[]>([]);
 const virtualMicDevices = ref<DeviceInfo[]>([]);
 const audioSettings = ref({
@@ -32,13 +32,31 @@ const isTestingVirtualMic = ref(false);
 const errorMessage = ref('');
 const isDataLoaded = ref(false);
 
-// UI-only state for virtual mic selector (persists across enable/disable)
 const selectedVirtualMicDevice = ref<string | null>(null);
 
-// Methods
+const activeTab = ref<'devices' | 'effects'>('devices');
+
+const draftEffects = ref({
+  enabled: false,
+  pitch: 0,
+  speed: 0,
+  volume: 100,
+  enhance_enabled: false,
+  enhance_atten_db: 12,
+});
+
+const isDirty = ref(false);
+const saveStatus = ref<'idle' | 'saving' | 'saved' | 'error'>('idle');
+const saveError = ref('');
+
+const selectedFile = ref<{ path: string; name: string; size: number } | null>(null);
+const isPreviewPlaying = ref(false);
+const previewError = ref('');
+const previewMode = ref<'original' | 'effects' | null>(null);
+
 async function loadDevices(force = false) {
   if (isDataLoaded.value && !force) {
-    return; // Skip if already loaded and not forcing refresh
+    return;
   }
 
   try {
@@ -61,7 +79,6 @@ async function loadSettings(force = false) {
   }
 
   try {
-    // Settings are now loaded from composable via watch
     isDataLoaded.value = true;
   } catch (error) {
     console.error('Failed to load audio settings:', error);
@@ -125,10 +142,8 @@ async function setVirtualMicDevice(deviceId: string | null) {
 
 async function enableVirtualMic() {
   try {
-    // Use UI-selected device (persists across enable/disable)
     let deviceId = selectedVirtualMicDevice.value;
 
-    // Fallback to first available if nothing selected
     if (!deviceId && virtualMicDevices.value.length > 0) {
       deviceId = virtualMicDevices.value[0].id;
     }
@@ -138,7 +153,6 @@ async function enableVirtualMic() {
       return;
     }
 
-    // Set the device (this enables the virtual mic)
     await invoke('set_virtual_mic_device', { deviceId });
     selectedVirtualMicDevice.value = deviceId;
     audioSettings.value.virtual_mic_device = deviceId;
@@ -151,9 +165,7 @@ async function enableVirtualMic() {
 async function disableVirtualMic() {
   try {
     await invoke('disable_virtual_mic');
-    // Update UI state to reflect disabled (but keep selector state)
     audioSettings.value.virtual_mic_device = null;
-    // selectedVirtualMicDevice persists for re-enable
   } catch (error) {
     console.error('Failed to disable virtual mic:', error);
     errorMessage.value = error as string;
@@ -211,31 +223,153 @@ function getDeviceDisplayName(device: DeviceInfo): string {
   return device.name;
 }
 
-// Load on mount
+async function loadDraftEffects() {
+  try {
+    const effects = await invoke<{
+      enabled: boolean;
+      pitch: number;
+      speed: number;
+      volume: number;
+      enhance_enabled: boolean;
+      enhance_atten_db: number;
+    }>('get_audio_effects');
+    draftEffects.value = { ...effects };
+    isDirty.value = false;
+  } catch (e) {
+    // fallback to defaults
+  }
+}
+
+function markDirty() {
+  isDirty.value = true;
+  saveStatus.value = 'idle';
+  saveError.value = '';
+}
+
+async function pickFile() {
+  try {
+    const result = await open({
+      filters: [{ name: 'Аудиофайлы', extensions: ['wav', 'mp3'] }],
+      multiple: false,
+    });
+    if (result && typeof result === 'string') {
+      const fileName = result.split('\\').pop() || result.split('/').pop() || result;
+      selectedFile.value = { path: result, name: fileName, size: 0 };
+      previewError.value = '';
+    }
+  } catch (e) {
+    previewError.value = 'Не удалось открыть диалог выбора файла';
+  }
+}
+
+async function playPreview(mode: 'original' | 'effects') {
+  if (!selectedFile.value) return;
+
+  stopPreviewInternal();
+
+  isPreviewPlaying.value = true;
+  previewMode.value = mode;
+  previewError.value = '';
+
+  try {
+    const spkr = audioSettings.value.speaker_device ?? null;
+    const vol = audioSettings.value.speaker_volume ?? 80;
+
+    if (mode === 'original') {
+      await invoke('preview_audio_file', {
+        filePath: selectedFile.value.path,
+        speakerDevice: spkr,
+        speakerVolume: vol,
+        voiceTransformEnabled: false,
+        pitch: 0, speed: 0, volume: 100,
+        enhanceEnabled: false, enhanceAttenDb: 12,
+      });
+    } else {
+      await invoke('preview_audio_file', {
+        filePath: selectedFile.value.path,
+        speakerDevice: spkr,
+        speakerVolume: vol,
+        voiceTransformEnabled: draftEffects.value.enabled,
+        pitch: draftEffects.value.pitch,
+        speed: draftEffects.value.speed,
+        volume: draftEffects.value.volume,
+        enhanceEnabled: draftEffects.value.enhance_enabled,
+        enhanceAttenDb: draftEffects.value.enhance_atten_db,
+      });
+    }
+  } catch (e) {
+    previewError.value = e as string;
+  } finally {
+    isPreviewPlaying.value = false;
+    previewMode.value = null;
+  }
+}
+
+async function stopPreview() {
+  await invoke('stop_preview');
+  isPreviewPlaying.value = false;
+  previewMode.value = null;
+}
+
+function stopPreviewInternal() {
+  invoke('stop_preview').catch(() => {});
+}
+
+async function saveEffects() {
+  saveStatus.value = 'saving';
+  saveError.value = '';
+
+  try {
+    await invoke('save_audio_effects', {
+      enabled: draftEffects.value.enabled,
+      pitch: draftEffects.value.pitch,
+      speed: draftEffects.value.speed,
+      volume: draftEffects.value.volume,
+      enhanceEnabled: draftEffects.value.enhance_enabled,
+      enhanceAttenDb: draftEffects.value.enhance_atten_db,
+    });
+    isDirty.value = false;
+    saveStatus.value = 'saved';
+    setTimeout(() => { if (saveStatus.value === 'saved') saveStatus.value = 'idle'; }, 3000);
+  } catch (e) {
+    saveStatus.value = 'error';
+    saveError.value = e as string;
+  }
+}
+
+function resetVoiceTransform() {
+  draftEffects.value.pitch = 0;
+  draftEffects.value.speed = 0;
+  draftEffects.value.volume = 100;
+  markDirty();
+}
+
+const fileFormat = computed(() => {
+  if (!selectedFile.value) return '';
+  const ext = selectedFile.value.name.split('.').pop()?.toUpperCase();
+  return ext || '';
+});
+
 onMounted(async () => {
   isLoading.value = true;
   try {
     await loadDevices();
     await loadSettings();
+    await loadDraftEffects();
   } finally {
     isLoading.value = false;
   }
 });
 
-// Watch for settings changes from composable
 watch(audioSettingsFromComposable, (newSettings) => {
   if (!newSettings) return;
 
   debugLog('[AudioPanel] Settings updated from composable:', newSettings);
 
-  // Initialize selectedVirtualMicDevice on first load (only if not set)
   if (selectedVirtualMicDevice.value === null && newSettings.virtual_mic_device) {
     selectedVirtualMicDevice.value = newSettings.virtual_mic_device;
   }
 
-  // Update local state from backend
-  // Note: virtual_mic_device is managed by local functions (enable/disable/set)
-  // and may differ from backend value when disabled
   audioSettings.value = {
     speaker_device: newSettings.speaker_device || null,
     speaker_enabled: newSettings.speaker_enabled,
@@ -244,157 +378,318 @@ watch(audioSettingsFromComposable, (newSettings) => {
     virtual_mic_volume: newSettings.virtual_mic_volume,
   };
 }, { immediate: true });
+
+watch(audioEffectsFromComposable, (newEffects) => {
+  if (!newEffects) return;
+  if (!isDirty.value) {
+    draftEffects.value = {
+      enabled: newEffects.enabled,
+      pitch: newEffects.pitch,
+      speed: newEffects.speed,
+      volume: newEffects.volume,
+      enhance_enabled: newEffects.enhance_enabled,
+      enhance_atten_db: newEffects.enhance_atten_db,
+    };
+  }
+}, { immediate: true });
 </script>
 
 <template>
   <div class="audio-panel">
     <div v-if="errorMessage" class="error-box">
       {{ errorMessage }}
-      <button @click="errorMessage = ''" class="close-btn">×</button>
+      <button @click="errorMessage = ''" class="close-btn">&times;</button>
     </div>
 
     <div v-if="isLoading" class="loading">
       Loading audio devices...
     </div>
 
-    <div v-else class="audio-settings">
-      <!-- Speaker Section -->
-      <div class="setting-section">
-        <div class="section-header">
-          <Volume2 class="section-icon" :size="20" />
-          <span class="section-title">Динамик</span>
-          <div class="toggle-buttons">
-            <button
-              @click="setSpeakerEnabled(true)"
-              :class="{ active: audioSettings.speaker_enabled }"
-              class="toggle-btn"
-            >
-              <Volume2 :size="14" /> Вкл
-            </button>
-            <button
-              @click="setSpeakerEnabled(false)"
-              :class="{ active: !audioSettings.speaker_enabled }"
-              class="toggle-btn"
-            >
-              <VolumeX :size="14" /> Выкл
-            </button>
-          </div>
-        </div>
+    <div v-else>
+      <div class="tab-bar">
+        <button
+          class="tab-btn"
+          :class="{ active: activeTab === 'devices' }"
+          @click="activeTab = 'devices'"
+        >Устройства</button>
+        <button
+          class="tab-btn"
+          :class="{ active: activeTab === 'effects' }"
+          @click="activeTab = 'effects'"
+        >Эффекты</button>
+      </div>
 
-        <div class="setting-row" :class="{ disabled: !audioSettings.speaker_enabled }">
-          <label>Устройство</label>
-          <div class="input-with-action">
-            <select
-              :disabled="!audioSettings.speaker_enabled"
-              @change="setSpeakerDevice(($event.target as HTMLSelectElement).value || null)"
-            >
-              <option value="">(по умолчанию)</option>
-              <option
-                v-for="device in outputDevices"
-                :key="device.id"
-                :value="device.id"
-                :selected="audioSettings.speaker_device === device.id"
-              >
-                {{ getDeviceDisplayName(device) }}
-              </option>
-            </select>
-            <button
-              @click="testSpeaker"
-              :disabled="!audioSettings.speaker_enabled || isTestingSpeaker"
-              class="test-btn"
-              title="Тест воспроизведения"
-            >
-              <Loader v-if="isTestingSpeaker" :size="16" class="spinner" />
-              <Play v-else :size="16" />
-            </button>
-          </div>
-        </div>
+      <div v-if="activeTab === 'devices'" class="tab-content">
+        <div class="audio-settings">
+          <div class="setting-section">
+            <div class="section-header">
+              <Volume2 class="section-icon" :size="20" />
+              <span class="section-title">Динамик</span>
+              <div class="toggle-buttons">
+                <button
+                  @click="setSpeakerEnabled(true)"
+                  :class="{ active: audioSettings.speaker_enabled }"
+                  class="toggle-btn"
+                >
+                  <Volume2 :size="14" /> Вкл
+                </button>
+                <button
+                  @click="setSpeakerEnabled(false)"
+                  :class="{ active: !audioSettings.speaker_enabled }"
+                  class="toggle-btn"
+                >
+                  <VolumeX :size="14" /> Выкл
+                </button>
+              </div>
+            </div>
 
-        <div class="setting-row" :class="{ disabled: !audioSettings.speaker_enabled }">
-          <label>Громкость</label>
-          <div class="volume-control">
-            <input
-              type="range"
-              min="0"
-              max="100"
-              :value="audioSettings.speaker_volume"
-              @input="setSpeakerVolume(($event.target as HTMLInputElement).valueAsNumber)"
-              :disabled="!audioSettings.speaker_enabled"
-            />
-            <span class="volume-value">{{ audioSettings.speaker_volume }}%</span>
+            <div class="setting-row" :class="{ disabled: !audioSettings.speaker_enabled }">
+              <label>Устройство</label>
+              <div class="input-with-action">
+                <select
+                  :disabled="!audioSettings.speaker_enabled"
+                  @change="setSpeakerDevice(($event.target as HTMLSelectElement).value || null)"
+                >
+                  <option value="">(по умолчанию)</option>
+                  <option
+                    v-for="device in outputDevices"
+                    :key="device.id"
+                    :value="device.id"
+                    :selected="audioSettings.speaker_device === device.id"
+                  >
+                    {{ getDeviceDisplayName(device) }}
+                  </option>
+                </select>
+                <button
+                  @click="testSpeaker"
+                  :disabled="!audioSettings.speaker_enabled || isTestingSpeaker"
+                  class="test-btn"
+                  title="Тест воспроизведения"
+                >
+                  <Loader v-if="isTestingSpeaker" :size="16" class="spinner" />
+                  <Play v-else :size="16" />
+                </button>
+              </div>
+            </div>
+
+            <div class="setting-row" :class="{ disabled: !audioSettings.speaker_enabled }">
+              <label>Громкость</label>
+              <div class="volume-control">
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  :value="audioSettings.speaker_volume"
+                  @input="setSpeakerVolume(($event.target as HTMLInputElement).valueAsNumber)"
+                  :disabled="!audioSettings.speaker_enabled"
+                />
+                <span class="volume-value">{{ audioSettings.speaker_volume }}%</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="setting-section">
+            <div class="section-header">
+              <Mic class="section-icon" :size="20" />
+              <span class="section-title">Виртуальный микрофон</span>
+              <div class="toggle-buttons">
+                <button
+                  @click="enableVirtualMic()"
+                  :class="{ active: !!audioSettings.virtual_mic_device }"
+                  class="toggle-btn"
+                >
+                  <Mic :size="14" /> Вкл
+                </button>
+                <button
+                  @click="disableVirtualMic()"
+                  :class="{ active: !audioSettings.virtual_mic_device }"
+                  class="toggle-btn"
+                >
+                  <Mic :size="14" /> Выкл
+                </button>
+              </div>
+            </div>
+
+            <div class="setting-row" :class="{ disabled: !audioSettings.virtual_mic_device }">
+              <label>Устройство</label>
+              <div class="input-with-action">
+                <select
+                  :disabled="!audioSettings.virtual_mic_device"
+                  @change="setVirtualMicDevice(($event.target as HTMLSelectElement).value || null)"
+                >
+                  <option value="">(не выбрано)</option>
+                  <option
+                    v-for="device in virtualMicDevices"
+                    :key="device.id"
+                    :value="device.id"
+                    :selected="selectedVirtualMicDevice === device.id"
+                  >
+                    {{ device.name }}
+                  </option>
+                </select>
+                <button
+                  @click="testVirtualMic"
+                  :disabled="!audioSettings.virtual_mic_device || isTestingVirtualMic"
+                  class="test-btn"
+                  title="Тест воспроизведения"
+                >
+                  <Loader v-if="isTestingVirtualMic" :size="16" class="spinner" />
+                  <Play v-else :size="16" />
+                </button>
+              </div>
+            </div>
+
+            <div class="setting-row" :class="{ disabled: !audioSettings.virtual_mic_device }">
+              <label>Громкость</label>
+              <div class="volume-control">
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  :value="audioSettings.virtual_mic_volume"
+                  @input="setVirtualMicVolume(($event.target as HTMLInputElement).valueAsNumber)"
+                  :disabled="!audioSettings.virtual_mic_device"
+                />
+                <span class="volume-value">{{ audioSettings.virtual_mic_volume }}%</span>
+              </div>
+            </div>
+
+            <div v-if="virtualMicDevices.length === 0" class="info-box">
+              <Info :size="16" /> Virtual audio devices not found. Install VB-Cable or VoiceMeeter to use virtual mic.
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- Virtual Mic Section -->
-      <div class="setting-section">
-        <div class="section-header">
-          <Mic class="section-icon" :size="20" />
-          <span class="section-title">Виртуальный микрофон</span>
-          <div class="toggle-buttons">
-            <button
-              @click="enableVirtualMic()"
-              :class="{ active: !!audioSettings.virtual_mic_device }"
-              class="toggle-btn"
-            >
-              <Mic :size="14" /> Вкл
-            </button>
-            <button
-              @click="disableVirtualMic()"
-              :class="{ active: !audioSettings.virtual_mic_device }"
-              class="toggle-btn"
-            >
-              <Mic :size="14" /> Выкл
+      <div v-if="activeTab === 'effects'" class="tab-content effects-tab">
+        <div class="setting-section">
+          <div class="section-header">
+            <FileAudio class="section-icon" :size="20" />
+            <span class="section-title">Проверка эффектов</span>
+          </div>
+
+          <div v-if="!selectedFile" class="preview-empty">
+            <button @click="pickFile" class="accent-btn">
+              <Upload :size="16" /> Выбрать аудиофайл
             </button>
           </div>
-        </div>
 
-        <div class="setting-row" :class="{ disabled: !audioSettings.virtual_mic_device }">
-          <label>Устройство</label>
-          <div class="input-with-action">
-            <select
-              :disabled="!audioSettings.virtual_mic_device"
-              @change="setVirtualMicDevice(($event.target as HTMLSelectElement).value || null)"
-            >
-              <option value="">(не выбрано)</option>
-              <option
-                v-for="device in virtualMicDevices"
-                :key="device.id"
-                :value="device.id"
-                :selected="selectedVirtualMicDevice === device.id"
+          <div v-else class="preview-active">
+            <div class="file-info">
+              <span class="file-name">{{ selectedFile.name }}</span>
+              <span class="file-format">{{ fileFormat }}</span>
+            </div>
+
+            <div class="preview-controls">
+              <button
+                @click="playPreview('original')"
+                :disabled="isPreviewPlaying"
+                class="play-btn"
               >
-                {{ device.name }}
-              </option>
-            </select>
-            <button
-              @click="testVirtualMic"
-              :disabled="!audioSettings.virtual_mic_device || isTestingVirtualMic"
-              class="test-btn"
-              title="Тест воспроизведения"
-            >
-              <Loader v-if="isTestingVirtualMic" :size="16" class="spinner" />
-              <Play v-else :size="16" />
-            </button>
+                <Play :size="16" /> Оригинал
+              </button>
+              <button
+                @click="playPreview('effects')"
+                :disabled="isPreviewPlaying"
+                class="play-btn effects-btn"
+              >
+                <AudioLines :size="16" /> С эффектами
+              </button>
+              <button
+                @click="stopPreview"
+                :disabled="!isPreviewPlaying"
+                class="play-btn stop-btn"
+              >
+                <Square :size="16" /> Стоп
+              </button>
+            </div>
+
+            <div v-if="isPreviewPlaying" class="preview-status playing">
+              <Loader :size="16" class="spinner" /> Воспроизведение...
+            </div>
+            <div v-if="previewError" class="preview-status error">{{ previewError }}</div>
           </div>
         </div>
 
-        <div class="setting-row" :class="{ disabled: !audioSettings.virtual_mic_device }">
-          <label>Громкость</label>
-          <div class="volume-control">
-            <input
-              type="range"
-              min="0"
-              max="100"
-              :value="audioSettings.virtual_mic_volume"
-              @input="setVirtualMicVolume(($event.target as HTMLInputElement).valueAsNumber)"
-              :disabled="!audioSettings.virtual_mic_device"
-            />
-            <span class="volume-value">{{ audioSettings.virtual_mic_volume }}%</span>
+        <div class="setting-section">
+          <div class="section-header">
+            <Sliders class="section-icon" :size="20" />
+            <span class="section-title">Преобразование голоса</span>
+            <label class="toggle-switch">
+              <input
+                type="checkbox"
+                v-model="draftEffects.enabled"
+                @change="markDirty"
+              />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
+          <div class="setting-row" :class="{ disabled: !draftEffects.enabled }">
+            <label>Высота (pitch)</label>
+            <div class="volume-control">
+              <input type="range" min="-100" max="100" v-model.number="draftEffects.pitch" @input="markDirty" :disabled="!draftEffects.enabled" />
+              <span class="volume-value">{{ draftEffects.pitch }}%</span>
+            </div>
+          </div>
+
+          <div class="setting-row" :class="{ disabled: !draftEffects.enabled }">
+            <label>Скорость</label>
+            <div class="volume-control">
+              <input type="range" min="-100" max="100" v-model.number="draftEffects.speed" @input="markDirty" :disabled="!draftEffects.enabled" />
+              <span class="volume-value">{{ draftEffects.speed }}%</span>
+            </div>
+          </div>
+
+          <div class="setting-row" :class="{ disabled: !draftEffects.enabled }">
+            <label>Громкость</label>
+            <div class="volume-control">
+              <input type="range" min="0" max="200" v-model.number="draftEffects.volume" @input="markDirty" :disabled="!draftEffects.enabled" />
+              <span class="volume-value">{{ draftEffects.volume }}%</span>
+            </div>
+          </div>
+
+          <div class="setting-row reset-row">
+            <button @click="resetVoiceTransform" :disabled="!draftEffects.enabled" class="reset-btn">Сбросить</button>
           </div>
         </div>
 
-        <div v-if="virtualMicDevices.length === 0" class="info-box">
-          <Info :size="16" /> Virtual audio devices not found. Install VB-Cable or VoiceMeeter to use virtual mic.
+        <div class="setting-section">
+          <div class="section-header">
+            <ShieldCheck class="section-icon" :size="20" />
+            <span class="section-title">Очистка шума — DeepFilterNet</span>
+            <label class="toggle-switch">
+              <input
+                type="checkbox"
+                v-model="draftEffects.enhance_enabled"
+                @change="markDirty"
+              />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
+          <div class="model-info">Модель встроена в приложение, загрузка не требуется</div>
+
+          <div class="setting-row" :class="{ disabled: !draftEffects.enhance_enabled }">
+            <label>Глубина очистки</label>
+            <div class="volume-control">
+              <input type="range" min="5" max="30" v-model.number="draftEffects.enhance_atten_db" @input="markDirty" :disabled="!draftEffects.enhance_enabled" />
+              <span class="volume-value">{{ draftEffects.enhance_atten_db }} dB</span>
+            </div>
+          </div>
+
+          <div class="model-hint">Чрезмерное подавление может вызвать артефакты речи</div>
+        </div>
+
+        <div class="save-section">
+          <button @click="saveEffects" :disabled="!isDirty || saveStatus === 'saving'" class="save-btn">
+            <Save :size="16" />
+            <span v-if="saveStatus === 'saving'">Сохранение...</span>
+            <span v-else>Сохранить</span>
+          </button>
+          <span v-if="saveStatus === 'saved'" class="save-status saved">Сохранено</span>
+          <span v-else-if="saveStatus === 'error'" class="save-status error">{{ saveError }}</span>
+          <span v-else-if="isDirty" class="save-status dirty">Изменения не сохранены</span>
         </div>
       </div>
     </div>
@@ -714,5 +1009,316 @@ watch(audioSettingsFromComposable, (newSettings) => {
   outline: none;
   border-color: var(--card-active-border);
   box-shadow: 0 0 0 3px var(--color-accent-glow);
+}
+
+/* Tab bar */
+.tab-bar {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 4px;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 10px 16px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-secondary);
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.2s;
+  font-family: inherit;
+}
+
+.tab-btn:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-field-hover);
+}
+
+.tab-btn.active {
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
+  color: var(--color-text-white);
+  border-color: transparent;
+}
+
+.tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.effects-tab {
+  gap: 16px;
+}
+
+/* Preview card */
+.preview-empty {
+  display: flex;
+  justify-content: center;
+  padding: 20px;
+}
+
+.accent-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
+  color: var(--color-text-white);
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  transition: all 0.2s;
+}
+
+.accent-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px var(--color-accent-glow);
+}
+
+.preview-active {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.file-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.file-name {
+  flex: 1;
+  font-size: 14px;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-format {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  background: var(--color-bg-field-hover);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+}
+
+.preview-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.play-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-field);
+  color: var(--color-text-primary);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+
+.play-btn:hover:not(:disabled) {
+  background: var(--color-bg-field-hover);
+  border-color: var(--color-border-strong);
+}
+
+.play-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.play-btn.effects-btn:hover:not(:disabled) {
+  background: var(--btn-accent-bg);
+  border-color: var(--color-accent);
+}
+
+.play-btn.stop-btn {
+  color: var(--color-danger);
+  border-color: var(--danger-border);
+}
+
+.play-btn.stop-btn:hover:not(:disabled) {
+  background: var(--danger-bg-weak);
+}
+
+.preview-status {
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.preview-status.playing {
+  color: var(--color-text-secondary);
+}
+
+.preview-status.error {
+  color: var(--color-danger);
+}
+
+/* Toggle switch */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--color-surface-dim, rgba(255,255,255,0.15));
+  transition: 0.3s;
+  border-radius: 24px;
+}
+
+.toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: 0.3s;
+  border-radius: 50%;
+}
+
+input:checked + .toggle-slider {
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
+}
+
+input:checked + .toggle-slider:before {
+  transform: translateX(20px);
+}
+
+/* Save section */
+.save-section {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 0;
+}
+
+.save-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 24px;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
+  color: var(--color-text-white);
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  transition: all 0.2s;
+}
+
+.save-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px var(--color-accent-glow);
+}
+
+.save-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.save-status {
+  font-size: 13px;
+}
+
+.save-status.saved {
+  color: var(--color-success);
+}
+
+.save-status.error {
+  color: var(--color-danger);
+}
+
+.save-status.dirty {
+  color: var(--color-text-muted);
+}
+
+/* Model info */
+.model-info {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-bottom: 12px;
+  padding: 6px 10px;
+  background: var(--color-bg-field);
+  border-radius: 6px;
+  border: 1px solid var(--color-border-weak);
+}
+
+.model-hint {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: var(--warning-bg-weak);
+  border: 1px solid var(--warning-border);
+  border-radius: 6px;
+}
+
+/* Reset */
+.reset-row {
+  justify-content: flex-end;
+}
+
+.reset-btn {
+  padding: 6px 14px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-field);
+  color: var(--color-text-secondary);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+
+.reset-btn:hover:not(:disabled) {
+  background: var(--color-bg-field-hover);
+  border-color: var(--color-border-strong);
+}
+
+.reset-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 </style>

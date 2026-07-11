@@ -270,6 +270,31 @@ impl AudioPlayer {
 
         result
     }
+    /// Play preview audio with external stop flag (for preview commands).
+    /// This is a STATIC method that uses a shared AtomicBool for cancellation.
+    pub fn play_preview_with_stop_flag(
+        stop_flag: Arc<AtomicBool>,
+        audio_data: Vec<u8>,
+        config: OutputConfig,
+    ) -> Result<(), String> {
+        let device = resolve_output_device(&config.device_id, &None)?;
+        let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+        debug!(device_name = %device_name, "Playing preview audio");
+
+        let (_stream, sink) = open_sink_on_device(&device, &audio_data, config.volume)?;
+
+        while !sink.empty() {
+            if stop_flag.load(Ordering::SeqCst) {
+                debug!("Preview playback stopped by flag");
+                sink.stop();
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+
+        debug!("Preview playback finished");
+        Ok(())
+    }
 }
 
 impl Default for AudioPlayer {

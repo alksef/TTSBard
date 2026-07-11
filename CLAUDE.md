@@ -23,6 +23,12 @@ All subagents should be launched using the **glm-4.** model (use `model: "sonnet
 
 ## Implementation Workflow (Claude → DeepSeek)
 
+### Build-fix size rule
+
+- Claude fixes minor build errors and warnings directly when the change is small and localized.
+- For substantial changes, Claude writes a concrete task in `docs/deepseek/tasks/` and immediately runs it non-interactively with `opencode run --model deepseek/deepseek-v4-pro`.
+- After DeepSeek finishes, Claude independently reviews the diff and reruns the relevant checks/build; DeepSeek checklist marks are not accepted as verification.
+
 **Claude does NOT write implementation code.** Claude's role is planning and review only.
 
 Workflow:

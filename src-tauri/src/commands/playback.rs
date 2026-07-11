@@ -1,9 +1,12 @@
+use crate::audio::effects;
+use crate::audio::{AudioEffects, AudioPlayer, OutputConfig, OutputDeviceInfo};
 use crate::config::SettingsManager;
-use crate::audio::OutputDeviceInfo;
 use crate::playback::{PlaybackManager, PlaybackStateDto};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tauri::State;
-use tracing::{info, debug};
+use std::sync::{Mutex as StdMutex, OnceLock};
+use tauri::{Emitter, State};
+use tracing::{debug, info};
 
 pub struct PlaybackState(pub Arc<PlaybackManager>);
 
@@ -131,9 +134,7 @@ pub fn set_virtual_mic_device(
 
 /// Enable virtual mic
 #[tauri::command]
-pub fn enable_virtual_mic(
-    settings_manager: State<'_, SettingsManager>,
-) -> Result<(), String> {
+pub fn enable_virtual_mic(settings_manager: State<'_, SettingsManager>) -> Result<(), String> {
     settings_manager
         .set_virtual_mic_device(Some("".to_string())) // Enable by setting a device
         .map_err(|e| e.to_string())
@@ -141,9 +142,7 @@ pub fn enable_virtual_mic(
 
 /// Disable virtual mic
 #[tauri::command]
-pub fn disable_virtual_mic(
-    settings_manager: State<'_, SettingsManager>,
-) -> Result<(), String> {
+pub fn disable_virtual_mic(settings_manager: State<'_, SettingsManager>) -> Result<(), String> {
     settings_manager
         .set_virtual_mic_device(None)
         .map_err(|e| e.to_string())
@@ -183,7 +182,7 @@ pub fn test_audio_device(device_id: Option<String>, volume: u8) -> Result<(), St
 /// Get audio effects settings
 #[tauri::command]
 pub fn get_audio_effects(
-    settings_manager: State<'_, SettingsManager>
+    settings_manager: State<'_, SettingsManager>,
 ) -> crate::config::AudioEffectsSettings {
     settings_manager.get_audio_effects()
 }
@@ -192,9 +191,10 @@ pub fn get_audio_effects(
 #[tauri::command]
 pub fn set_audio_effects_enabled(
     enabled: bool,
-    settings_manager: State<'_, SettingsManager>
+    settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
-    settings_manager.set_audio_effects_enabled(enabled)
+    settings_manager
+        .set_audio_effects_enabled(enabled)
         .map_err(|e| e.to_string())
 }
 
@@ -202,9 +202,10 @@ pub fn set_audio_effects_enabled(
 #[tauri::command]
 pub fn set_audio_effects_pitch(
     pitch: i16,
-    settings_manager: State<'_, SettingsManager>
+    settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
-    settings_manager.set_audio_effects_pitch(pitch)
+    settings_manager
+        .set_audio_effects_pitch(pitch)
         .map_err(|e| e.to_string())
 }
 
@@ -212,9 +213,10 @@ pub fn set_audio_effects_pitch(
 #[tauri::command]
 pub fn set_audio_effects_speed(
     speed: i16,
-    settings_manager: State<'_, SettingsManager>
+    settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
-    settings_manager.set_audio_effects_speed(speed)
+    settings_manager
+        .set_audio_effects_speed(speed)
         .map_err(|e| e.to_string())
 }
 
@@ -222,9 +224,10 @@ pub fn set_audio_effects_speed(
 #[tauri::command]
 pub fn set_audio_effects_volume(
     volume: i16,
-    settings_manager: State<'_, SettingsManager>
+    settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
-    settings_manager.set_audio_effects_volume(volume)
+    settings_manager
+        .set_audio_effects_volume(volume)
         .map_err(|e| e.to_string())
 }
 
@@ -232,9 +235,10 @@ pub fn set_audio_effects_volume(
 #[tauri::command]
 pub fn set_audio_effects_enhance_enabled(
     enabled: bool,
-    settings_manager: State<'_, SettingsManager>
+    settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
-    settings_manager.set_audio_effects_enhance_enabled(enabled)
+    settings_manager
+        .set_audio_effects_enhance_enabled(enabled)
         .map_err(|e| e.to_string())
 }
 
@@ -242,8 +246,139 @@ pub fn set_audio_effects_enhance_enabled(
 #[tauri::command]
 pub fn set_audio_effects_enhance_atten_db(
     atten_db: f32,
-    settings_manager: State<'_, SettingsManager>
+    settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
-    settings_manager.set_audio_effects_enhance_atten_db(atten_db)
+    settings_manager
+        .set_audio_effects_enhance_atten_db(atten_db)
         .map_err(|e| e.to_string())
+}
+
+// ==================== Preview & Save Commands ====================
+
+pub struct PreviewState {
+    stop_flag: Arc<AtomicBool>,
+}
+
+impl PreviewState {
+    pub fn new() -> Self {
+        Self {
+            stop_flag: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+fn preview_state() -> &'static StdMutex<PreviewState> {
+    static STATE: OnceLock<StdMutex<PreviewState>> = OnceLock::new();
+    STATE.get_or_init(|| StdMutex::new(PreviewState::new()))
+}
+
+/// Preview audio file through speaker with applied effects
+#[tauri::command]
+pub async fn preview_audio_file(
+    file_path: String,
+    speaker_device: Option<String>,
+    speaker_volume: u8,
+    voice_transform_enabled: bool,
+    pitch: i16,
+    speed: i16,
+    volume: i16,
+    enhance_enabled: bool,
+    enhance_atten_db: f32,
+) -> Result<(), String> {
+    let speaker_volume = speaker_volume.clamp(0, 100);
+    let pitch = pitch.clamp(-100, 100);
+    let speed = speed.clamp(-100, 100);
+    let volume = volume.clamp(0, 200);
+    let enhance_atten_db = enhance_atten_db.clamp(5.0, 30.0);
+
+    let stop_flag = {
+        let state = preview_state();
+        let guard = state
+            .lock()
+            .map_err(|e| format!("Ошибка блокировки плеера: {}", e))?;
+
+        guard.stop_flag.store(true, Ordering::SeqCst);
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        guard.stop_flag.store(false, Ordering::SeqCst);
+
+        guard.stop_flag.clone()
+    };
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let file_data =
+            std::fs::read(&file_path).map_err(|e| format!("Не удалось прочитать файл: {}", e))?;
+
+        let voice_pitch = if voice_transform_enabled { pitch } else { 0 };
+        let voice_speed = if voice_transform_enabled { speed } else { 0 };
+        let voice_volume = if voice_transform_enabled { volume } else { 100 };
+
+        let effects_config = AudioEffects::new(voice_pitch, voice_speed, voice_volume)
+            .with_enhance(enhance_enabled, enhance_atten_db);
+
+        let has_effects =
+            voice_pitch != 0 || voice_speed != 0 || voice_volume != 100 || enhance_enabled;
+
+        let processed = if has_effects {
+            effects::apply_effects(file_data, &effects_config)?
+        } else {
+            file_data
+        };
+
+        let output_volume = if voice_transform_enabled {
+            (speaker_volume as f32 / 100.0) * (voice_volume as f32 / 100.0)
+        } else {
+            speaker_volume as f32 / 100.0
+        };
+
+        let config = OutputConfig {
+            device_id: speaker_device,
+            volume: output_volume,
+        };
+
+        AudioPlayer::play_preview_with_stop_flag(stop_flag, processed, config)
+    })
+    .await
+    .map_err(|e| format!("Ошибка потока воспроизведения: {}", e))?
+}
+
+/// Stop current preview playback
+#[tauri::command]
+pub fn stop_preview() -> Result<(), String> {
+    let state = preview_state();
+    let guard = state
+        .lock()
+        .map_err(|e| format!("Ошибка блокировки плеера: {}", e))?;
+    guard.stop_flag.store(true, Ordering::SeqCst);
+    Ok(())
+}
+
+/// Atomically save all audio effects settings
+#[tauri::command]
+pub fn save_audio_effects(
+    enabled: bool,
+    pitch: i16,
+    speed: i16,
+    volume: i16,
+    enhance_enabled: bool,
+    enhance_atten_db: f32,
+    settings_manager: State<'_, SettingsManager>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    let mut settings = settings_manager
+        .load()
+        .map_err(|e| format!("Не удалось загрузить настройки: {}", e))?;
+
+    settings.audio_effects.enabled = enabled;
+    settings.audio_effects.pitch = pitch.clamp(-100, 100);
+    settings.audio_effects.speed = speed.clamp(-100, 100);
+    settings.audio_effects.volume = volume.clamp(0, 200);
+    settings.audio_effects.enhance_enabled = enhance_enabled;
+    settings.audio_effects.enhance_atten_db = enhance_atten_db.clamp(5.0, 30.0);
+
+    settings_manager
+        .save(&settings)
+        .map_err(|e| format!("Не удалось сохранить настройки: {}", e))?;
+
+    let _ = app_handle.emit("settings-changed", ());
+    Ok(())
 }

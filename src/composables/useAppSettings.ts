@@ -267,3 +267,8 @@ export function useEditorSettings(): ComputedRef<AppSettingsDto['editor'] | unde
   const { settings } = useAppSettings()
   return computed(() => settings.value?.editor)
 }
+
+export function useAudioEffectsSettings(): ComputedRef<AppSettingsDto['audio_effects'] | undefined> {
+  const { settings } = useAppSettings()
+  return computed(() => settings.value?.audio_effects)
+}
