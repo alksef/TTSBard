@@ -1,4 +1,4 @@
-﻿# build.ps1 — сборка TTSBard (Tauri) под Windows.
+# build.ps1 — сборка TTSBard (Tauri) под Windows.
 #
 # Использование:
 #   .\scripts\build.ps1                  # релиз по умолчанию
@@ -85,9 +85,9 @@ if (-not (Test-Path $nodeModules)) {
 $buildStart = Get-Date
 
 if ($Mode -eq 'debug') {
-    Write-Step "Building (tauri build --debug)..."
+    Write-Step "Building (tauri build --debug --no-bundle)..."
     # --debug: бэкенд в debug-профайле, фронтенд-бандл, готовый exe, БЕЗ инсталляторов.
-    npm run tauri -- build --debug
+    npm run tauri -- build --debug --no-bundle
 } else {
     Write-Step "Building (tauri build, release)..."
     npm run tauri -- build
