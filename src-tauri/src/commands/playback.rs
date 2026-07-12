@@ -1,5 +1,5 @@
 use crate::audio::effects;
-use crate::audio::{AudioEffects, AudioPlayer, OutputConfig, OutputDeviceInfo};
+use crate::audio::{decode_audio, AudioEffects, AudioPlayer, AudioPcm, OutputConfig, OutputDeviceInfo};
 use crate::config::SettingsManager;
 use crate::playback::{PlaybackManager, PlaybackStateDto};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -330,10 +330,10 @@ pub async fn preview_audio_file(
         let has_effects =
             voice_pitch != 0 || voice_speed != 0 || voice_volume != 100 || enhance_enabled;
 
-        let processed = if has_effects {
-            effects::apply_effects(file_data, &effects_config)?
+        let pcm: AudioPcm = if has_effects {
+            effects::apply_effects(&file_data, &effects_config)?
         } else {
-            file_data
+            decode_audio(&file_data).map_err(|e| format!("Audio decode failed: {}", e))?
         };
 
         let output_volume = if voice_transform_enabled {
@@ -347,7 +347,7 @@ pub async fn preview_audio_file(
             volume: output_volume,
         };
 
-        AudioPlayer::play_preview_with_stop_flag(stop_flag, processed, config)
+        AudioPlayer::play_preview_pcm_with_stop_flag(stop_flag, &pcm, config)
     })
     .await
     .map_err(|e| format!("Ошибка потока воспроизведения: {}", e))?

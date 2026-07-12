@@ -75,11 +75,11 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
 
     let audio_data = tts_pipeline::synthesize_audio(state, &text).await?;
 
-    let audio_data = tts_pipeline::apply_audio_effects_pipeline(audio_data, &settings)?;
+    let audio_pcm = tts_pipeline::apply_audio_effects_pipeline(audio_data, &settings)?;
 
     state.emit_event(AppEvent::TextSentToTts(text.clone()));
 
-    tts_pipeline::enqueue_and_record(state, text, audio_data, &settings)?;
+    tts_pipeline::enqueue_and_record(state, text, audio_pcm, &settings)?;
 
     Ok(())
 }

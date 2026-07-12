@@ -11,6 +11,7 @@
 
 use cpal::traits::{DeviceTrait, HostTrait};
 use parking_lot::RwLock;
+use rodio::buffer::SamplesBuffer;
 use rodio::{Decoder, OutputStream, Sink};
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -92,6 +93,35 @@ pub fn open_sink_on_device(
 
     sink.set_volume(volume);
     debug!(volume = volume, "Volume set");
+
+    sink.append(source);
+    Ok((_stream, sink))
+}
+
+/// Create OutputStream + Sink on device from interleaved PCM f32 samples.
+/// Uses `rodio::buffer::SamplesBuffer` instead of WAV/MP3 decoder.
+pub fn open_sink_on_device_pcm(
+    device: &cpal::Device,
+    pcm: &crate::audio::AudioPcm,
+    volume: f32,
+) -> Result<(OutputStream, Sink), String> {
+    let (_stream, stream_handle) = OutputStream::try_from_device(device)
+        .map_err(|e| format!("Failed to create output stream: {}", e))?;
+
+    debug!(
+        channels = pcm.channels,
+        sample_rate = pcm.sample_rate,
+        frames = pcm.frame_count(),
+        "Creating PCM SamplesBuffer source"
+    );
+
+    let source = SamplesBuffer::new(pcm.channels as u16, pcm.sample_rate, pcm.samples.clone());
+
+    let sink =
+        Sink::try_new(&stream_handle).map_err(|e| format!("Failed to create sink: {}", e))?;
+
+    sink.set_volume(volume);
+    debug!(volume, "Volume set");
 
     sink.append(source);
     Ok((_stream, sink))
@@ -293,6 +323,32 @@ impl AudioPlayer {
         }
 
         debug!("Preview playback finished");
+        Ok(())
+    }
+
+    /// Play preview PCM audio with external stop flag.
+    /// Uses `SamplesBuffer` — no WAV encoder/decoder involved.
+    pub fn play_preview_pcm_with_stop_flag(
+        stop_flag: Arc<AtomicBool>,
+        pcm: &crate::audio::AudioPcm,
+        config: OutputConfig,
+    ) -> Result<(), String> {
+        let device = resolve_output_device(&config.device_id, &None)?;
+        let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+        debug!(device_name = %device_name, channels=pcm.channels, sr=pcm.sample_rate, "Playing PCM preview");
+
+        let (_stream, sink) = open_sink_on_device_pcm(&device, pcm, config.volume)?;
+
+        while !sink.empty() {
+            if stop_flag.load(Ordering::SeqCst) {
+                debug!("Preview PCM playback stopped by flag");
+                sink.stop();
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+
+        debug!("Preview PCM playback finished");
         Ok(())
     }
 }
