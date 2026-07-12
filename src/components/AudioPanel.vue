@@ -44,6 +44,7 @@ const draftEffects = ref({
   enhance_enabled: false,
   enhance_atten_db: 12,
 });
+const savedEffects = ref({ ...draftEffects.value });
 
 const isDirty = ref(false);
 const saveStatus = ref<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -235,6 +236,7 @@ async function loadDraftEffects() {
       enhance_atten_db: number;
     }>('get_audio_effects');
     draftEffects.value = { ...effects };
+    savedEffects.value = { ...effects };
     isDirty.value = false;
   } catch (e) {
     // fallback to defaults
@@ -378,6 +380,7 @@ async function saveEffects() {
       enhanceEnabled: draftEffects.value.enhance_enabled,
       enhanceAttenDb: draftEffects.value.enhance_atten_db,
     });
+    savedEffects.value = { ...draftEffects.value };
     isDirty.value = false;
     saveStatus.value = 'saved';
     setTimeout(() => { if (saveStatus.value === 'saved') saveStatus.value = 'idle'; }, 3000);
@@ -385,6 +388,13 @@ async function saveEffects() {
     saveStatus.value = 'error';
     saveError.value = e as string;
   }
+}
+
+function cancelEffects() {
+  draftEffects.value = { ...savedEffects.value };
+  isDirty.value = false;
+  saveStatus.value = 'idle';
+  saveError.value = '';
 }
 
 const fileFormat = computed(() => {
@@ -433,6 +443,7 @@ watch(audioEffectsFromComposable, (newEffects) => {
       enhance_enabled: newEffects.enhance_enabled,
       enhance_atten_db: newEffects.enhance_atten_db,
     };
+    savedEffects.value = { ...draftEffects.value };
   }
 }, { immediate: true });
 </script>
@@ -802,6 +813,9 @@ watch(audioEffectsFromComposable, (newEffects) => {
             <span v-else-if="saveStatus === 'error'" class="save-status error">{{ saveError }}</span>
             <span v-else-if="isDirty" class="save-status dirty">Изменения не сохранены</span>
           </div>
+          <button @click="cancelEffects" :disabled="!isDirty || saveStatus === 'saving'" class="cancel-btn">
+            Отменить
+          </button>
           <button @click="saveEffects" :disabled="!isDirty || saveStatus === 'saving'" class="save-btn">
             <span v-if="saveStatus === 'saving'">Сохранение...</span>
             <span v-else>Сохранить</span>
@@ -1417,6 +1431,32 @@ input:checked + .toggle-slider:before {
 
 .save-status.dirty {
   color: var(--color-text-muted);
+}
+
+.cancel-btn {
+  padding: 0.6rem 1.2rem;
+  background: transparent;
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-text-secondary);
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  transition: all 0.2s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.cancel-btn:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+  background: var(--color-bg-field-hover);
+}
+
+.cancel-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .save-btn {
