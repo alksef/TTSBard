@@ -698,22 +698,22 @@ watch(audioEffectsFromComposable, (newEffects) => {
           </div>
 
           <div class="setting-row slider-row" :class="{ disabled: !draftEffects.enabled }">
-            <label>Высота (pitch)</label>
+            <label>Высота</label>
             <div class="slider-group">
               <div class="volume-control">
                 <input type="range" min="-100" max="100" step="1" v-model.number="draftEffects.pitch" @input="markDirty" :disabled="!draftEffects.enabled" />
                 <span class="volume-value">{{ draftEffects.pitch }}%</span>
               </div>
               <div class="slider-marks">
-                <button type="button" class="mark-btn mark-btn--start" :class="{ active: draftEffects.pitch === -100 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', -100)" style="left: 0%">−100</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.pitch === -100 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', -100)" style="left: 0%">−100</button>
                 <button type="button" class="mark-btn" :class="{ active: draftEffects.pitch === -75 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', -75)" style="left: 12.5%">−75</button>
                 <button type="button" class="mark-btn" :class="{ active: draftEffects.pitch === -50 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', -50)" style="left: 25%">−50</button>
                 <button type="button" class="mark-btn" :class="{ active: draftEffects.pitch === -25 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', -25)" style="left: 37.5%">−25</button>
                 <button type="button" class="mark-btn" :class="{ active: draftEffects.pitch === 0 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', 0)" style="left: 50%">0</button>
                 <button type="button" class="mark-btn" :class="{ active: draftEffects.pitch === 25 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', 25)" style="left: 62.5%">+25</button>
                 <button type="button" class="mark-btn" :class="{ active: draftEffects.pitch === 50 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', 50)" style="left: 75%">+50</button>
-                <button type="button" class="mark-btn mark-btn--before-end" :class="{ active: draftEffects.pitch === 75 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', 75)" style="left: 87.5%">+75</button>
-                <button type="button" class="mark-btn mark-btn--end" :class="{ active: draftEffects.pitch === 100 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', 100)" style="left: 100%">+100</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.pitch === 75 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', 75)" style="left: 87.5%">+75</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.pitch === 100 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', 100)" style="left: 100%">+100</button>
               </div>
             </div>
           </div>
@@ -726,15 +726,15 @@ watch(audioEffectsFromComposable, (newEffects) => {
                 <span class="volume-value">{{ draftEffects.speed }}%</span>
               </div>
               <div class="slider-marks">
-                <button type="button" class="mark-btn mark-btn--start" :class="{ active: draftEffects.speed === -100 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', -100)" style="left: 0%">−100</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === -100 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', -100)" style="left: 0%">−100</button>
                 <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === -75 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', -75)" style="left: 12.5%">−75</button>
                 <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === -50 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', -50)" style="left: 25%">−50</button>
                 <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === -25 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', -25)" style="left: 37.5%">−25</button>
                 <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === 0 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', 0)" style="left: 50%">0</button>
                 <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === 25 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', 25)" style="left: 62.5%">+25</button>
                 <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === 50 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', 50)" style="left: 75%">+50</button>
-                <button type="button" class="mark-btn mark-btn--before-end" :class="{ active: draftEffects.speed === 75 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', 75)" style="left: 87.5%">+75</button>
-                <button type="button" class="mark-btn mark-btn--end" :class="{ active: draftEffects.speed === 100 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', 100)" style="left: 100%">+100</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === 75 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', 75)" style="left: 87.5%">+75</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === 100 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', 100)" style="left: 100%">+100</button>
               </div>
             </div>
           </div>
@@ -747,15 +747,15 @@ watch(audioEffectsFromComposable, (newEffects) => {
                 <span class="volume-value">{{ draftEffects.volume }}%</span>
               </div>
               <div class="slider-marks">
-                <button type="button" class="mark-btn mark-btn--start" :class="{ active: draftEffects.volume === 0 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 0)" style="left: 0%" aria-label="Без звука, 0%" title="Без звука, 0%">0</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 0 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 0)" style="left: 0%" aria-label="Без звука, 0%" title="Без звука, 0%">0</button>
                 <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 25 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 25)" style="left: 12.5%">25</button>
                 <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 50 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 50)" style="left: 25%">50</button>
                 <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 75 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 75)" style="left: 37.5%">75</button>
                 <button type="button" class="mark-btn mark-btn--default" :class="{ active: draftEffects.volume === 100 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 100)" style="left: 50%" aria-label="Нормальная громкость, 100%" title="Нормальная громкость, 100%">100</button>
                 <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 125 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 125)" style="left: 62.5%">125</button>
                 <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 150 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 150)" style="left: 75%">150</button>
-                <button type="button" class="mark-btn mark-btn--before-end" :class="{ active: draftEffects.volume === 175 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 175)" style="left: 87.5%">175</button>
-                <button type="button" class="mark-btn mark-btn--end" :class="{ active: draftEffects.volume === 200 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 200)" style="left: 100%">200</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 175 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 175)" style="left: 87.5%">175</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 200 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 200)" style="left: 100%">200</button>
               </div>
             </div>
           </div>
@@ -785,10 +785,10 @@ watch(audioEffectsFromComposable, (newEffects) => {
                 <span class="volume-value">{{ draftEffects.enhance_atten_db }} dB</span>
               </div>
               <div class="slider-marks">
-                <button type="button" class="mark-btn mark-btn--start" :class="{ active: draftEffects.enhance_atten_db === 5 }" :disabled="!draftEffects.enhance_enabled" @click="setEnhanceAttenDb(5)" style="left: 0%">5</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.enhance_atten_db === 5 }" :disabled="!draftEffects.enhance_enabled" @click="setEnhanceAttenDb(5)" style="left: 0%">5</button>
                 <button type="button" class="mark-btn mark-btn--default" :class="{ active: draftEffects.enhance_atten_db === 12 }" :disabled="!draftEffects.enhance_enabled" @click="setEnhanceAttenDb(12)" style="left: 28%" title="Значение по умолчанию, 12 dB" aria-label="Значение по умолчанию, 12 dB">12</button>
                 <button type="button" class="mark-btn" :class="{ active: draftEffects.enhance_atten_db === 20 }" :disabled="!draftEffects.enhance_enabled" @click="setEnhanceAttenDb(20)" style="left: 60%">20</button>
-                <button type="button" class="mark-btn mark-btn--end" :class="{ active: draftEffects.enhance_atten_db === 30 }" :disabled="!draftEffects.enhance_enabled" @click="setEnhanceAttenDb(30)" style="left: 100%">30</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.enhance_atten_db === 30 }" :disabled="!draftEffects.enhance_enabled" @click="setEnhanceAttenDb(30)" style="left: 100%">30</button>
               </div>
             </div>
           </div>
@@ -1507,18 +1507,6 @@ input:checked + .toggle-slider:before {
   font-weight: 700;
 }
 
-.mark-btn--start {
-  transform: translateX(0);
-}
-
-.mark-btn--end {
-  transform: translateX(-100%);
-}
-
-.mark-btn--before-end {
-  transform: translateX(-70%);
-}
-
 /* Effect slider rows: tighter label area to give marks more room */
 .slider-row label {
   min-width: 90px;
@@ -1529,6 +1517,7 @@ input:checked + .toggle-slider:before {
 }
 
 .slider-row .slider-marks {
-  width: calc(100% - 51px);
+  margin-left: 8px;
+  width: calc(100% - 67px);
 }
 </style>
