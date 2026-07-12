@@ -43,33 +43,38 @@ async function toggleMinimalMode() {
 
 <style scoped>
 .minimal-mode-toggle {
-  position: fixed;
-  bottom: 1.5rem;
-  right: 1.5rem;
-  width: 3rem;
-  height: 3rem;
-  border-radius: 999px;
-  border: 1px solid var(--color-border-strong);
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 2.75rem;
+  height: 2.75rem;
+  border: none;
   background: var(--color-bg-elevated);
   color: var(--color-text-secondary);
   cursor: pointer;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.25s ease;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 0;
+  padding-bottom: 0.25rem;
+  padding-right: 0.25rem;
+  transition: background 0.2s ease, color 0.2s ease;
   z-index: 10000;
-  box-shadow: 0 4px 16px rgba(var(--rgb-black), 0.2);
+  clip-path: polygon(100% 0, 0 100%, 100% 100%);
 }
 
 .minimal-mode-toggle:hover {
-  color: var(--color-text-primary);
   background: var(--sidebar-btn-hover-bg);
-  transform: scale(1.06);
+  color: var(--color-text-primary);
 }
 
 .minimal-mode-toggle.is-minimal {
   background: var(--color-accent);
   color: var(--color-text-white);
+}
+
+.minimal-mode-toggle.is-minimal:hover {
+  background: var(--color-accent);
 }
 
 .minimal-mode-toggle.is-animating {

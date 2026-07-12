@@ -192,6 +192,8 @@ export interface MainWindowSettingsDto {
   custom_background: boolean
   opacity: number
   bg_color: string
+  custom_opacity: boolean
+  opacity_compact_only: boolean
 }
 
 export interface SoundPanelWindowSettingsDto {

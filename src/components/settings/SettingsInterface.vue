@@ -22,6 +22,8 @@ function showError(message: string) {
 const mainCustomBackground = ref(false);
 const mainBgColor = ref('#10131a');
 const mainOpacity = ref(100);
+const mainCustomOpacity = ref(false);
+const mainOpacityCompactOnly = ref(false);
 
 // Sound panel
 const spSource = ref<'main' | 'own'>('own');
@@ -35,6 +37,8 @@ const pbOpacity = ref(94);
 
 const spOwnDisabled = computed(() => spSource.value === 'main');
 const pbOwnDisabled = computed(() => pbSource.value === 'main');
+const mainOpacityDisabled = computed(() => !mainCustomOpacity.value);
+const mainCompactOnlyDisabled = computed(() => !mainCustomOpacity.value);
 
 // ==================== Theme ====================
 
@@ -72,6 +76,28 @@ async function saveMainOpacity() {
     await invoke('set_main_opacity', { value: mainOpacity.value });
   } catch (e) {
     showError('Ошибка сохранения прозрачности: ' + (e as Error).message);
+  }
+}
+
+async function toggleMainCustomOpacity() {
+  const newValue = !mainCustomOpacity.value;
+  mainCustomOpacity.value = newValue;
+  try {
+    await invoke('set_main_custom_opacity', { value: newValue });
+  } catch (e) {
+    mainCustomOpacity.value = !newValue;
+    showError('Ошибка сохранения настройки: ' + (e as Error).message);
+  }
+}
+
+async function toggleMainOpacityCompactOnly() {
+  const newValue = !mainOpacityCompactOnly.value;
+  mainOpacityCompactOnly.value = newValue;
+  try {
+    await invoke('set_main_opacity_compact_only', { value: newValue });
+  } catch (e) {
+    mainOpacityCompactOnly.value = !newValue;
+    showError('Ошибка сохранения настройки: ' + (e as Error).message);
   }
 }
 
@@ -142,6 +168,8 @@ watch(
     mainCustomBackground.value = settings.main.custom_background;
     mainBgColor.value = settings.main.bg_color;
     mainOpacity.value = settings.main.opacity;
+    mainCustomOpacity.value = settings.main.custom_opacity;
+    mainOpacityCompactOnly.value = settings.main.opacity_compact_only;
 
     spSource.value = settings.soundpanel.appearance_source === 'main' ? 'main' : 'own';
     spBgColor.value = settings.soundpanel.bg_color;
@@ -201,7 +229,19 @@ watch(
         <span class="setting-hint">Если выключено, используется цвет активной темы</span>
       </div>
 
-      <div class="appearance-grid">
+      <div class="setting-row" style="margin-bottom: 0.75rem">
+        <label class="setting-label checkbox-label">
+          <input
+            :checked="mainCustomOpacity"
+            type="checkbox"
+            class="checkbox-input"
+            @change="toggleMainCustomOpacity"
+          />
+          <span>Использовать свою прозрачность</span>
+        </label>
+      </div>
+
+      <div class="appearance-grid" style="margin-bottom: 0.5rem">
         <div class="appearance-column">
           <label class="setting-label">Цвет</label>
           <div class="appearance-controls">
@@ -235,11 +275,26 @@ watch(
               max="100"
               step="5"
               class="slider-input inline-slider"
+              :disabled="mainOpacityDisabled"
               @change="saveMainOpacity"
             />
             <span class="opacity-value">{{ mainOpacity }}%</span>
           </div>
         </div>
+      </div>
+
+      <div class="setting-row indent-row" :class="{ 'row-disabled': mainCompactOnlyDisabled }">
+        <label class="setting-label checkbox-label">
+          <input
+            :checked="mainOpacityCompactOnly"
+            type="checkbox"
+            class="checkbox-input"
+            :disabled="mainCompactOnlyDisabled"
+            @change="toggleMainOpacityCompactOnly"
+          />
+          <span>Применять прозрачность только в компактном режиме</span>
+        </label>
+        <span class="setting-hint">В обычном режиме окно будет полностью непрозрачным</span>
       </div>
     </section>
 
@@ -555,5 +610,14 @@ watch(
 
 .theme-option input[type="radio"] {
   display: none;
+}
+
+.indent-row {
+  margin-left: 1.6rem;
+}
+
+.row-disabled {
+  opacity: 0.4;
+  pointer-events: none;
 }
 </style>
