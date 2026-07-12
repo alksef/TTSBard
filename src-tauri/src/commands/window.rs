@@ -268,6 +268,36 @@ fn emit_appearance_updates(app_handle: &AppHandle) {
     let _ = update_playback_appearance(app_handle);
 }
 
+/// Enforce compact bounds (min 300x300, max 500x500) on the main window
+#[tauri::command]
+pub fn set_main_bounds(app_handle: AppHandle) -> Result<(), String> {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let min_size = tauri::Size::Physical(tauri::PhysicalSize { width: 300, height: 300 });
+        let max_size = tauri::Size::Physical(tauri::PhysicalSize { width: 500, height: 500 });
+        window.set_min_size(Some(min_size))
+            .map_err(|e| format!("Failed to set min size: {}", e))?;
+        window.set_max_size(Some(max_size))
+            .map_err(|e| format!("Failed to set max size: {}", e))?;
+        Ok(())
+    } else {
+        Err("Main window not found".to_string())
+    }
+}
+
+/// Remove compact bounds so the normal 800x630 window can be restored
+#[tauri::command]
+pub fn remove_main_bounds(app_handle: AppHandle) -> Result<(), String> {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        window.set_min_size(Option::<tauri::Size>::None)
+            .map_err(|e| format!("Failed to remove min size: {}", e))?;
+        window.set_max_size(Option::<tauri::Size>::None)
+            .map_err(|e| format!("Failed to remove max size: {}", e))?;
+        Ok(())
+    } else {
+        Err("Main window not found".to_string())
+    }
+}
+
 /// Set main window compact dimensions (clamped 300..500)
 #[tauri::command]
 pub fn set_main_compact_dims(
