@@ -66,6 +66,13 @@ pub async fn quit_app(app_handle: AppHandle) -> Result<(), String> {
     }
 
     if let Some(state) = app_handle.try_state::<AppState>() {
+        let mut hook_guard = state.soundpanel_hook.lock();
+        if let Some(ref mut hook_manager) = *hook_guard {
+            hook_manager.stop();
+        }
+        *hook_guard = None;
+        drop(hook_guard);
+
         state.shutdown.cancel();
         info!("Shutdown token cancelled — all servers notified");
         std::thread::sleep(std::time::Duration::from_millis(600));

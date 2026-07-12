@@ -428,13 +428,14 @@ fn init_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
 
 /// Initialize keyboard hooks
 fn init_hooks(
-    _app_state: &AppState,
+    app_state: &AppState,
     soundpanel_state: &SoundPanelState,
     app_handle: AppHandle,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::soundpanel::initialize_soundpanel_hook;
 
-    let _soundpanel_hook_handle = initialize_soundpanel_hook(soundpanel_state.clone(), app_handle);
+    let hook_manager = initialize_soundpanel_hook(soundpanel_state.clone(), app_handle);
+    *app_state.soundpanel_hook.lock() = Some(hook_manager);
     info!("[SOUNDPANEL] Keyboard hook initialized");
 
     Ok(())
