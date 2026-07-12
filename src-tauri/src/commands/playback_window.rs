@@ -2,16 +2,24 @@
 //!
 //! Tauri commands for playback window appearance settings (opacity, bg_color).
 
-use crate::config::{is_valid_hex_color, WindowsManager};
+use crate::commands::window::resolve_main_appearance;
+use crate::config::{is_valid_hex_color, SettingsManager, WindowsManager};
 use crate::playback_window::update_playback_appearance;
 use tauri::{AppHandle, State};
 use tracing::info;
 
 /// Get playback window appearance (opacity, bg_color)
+///
+/// If `appearance_source == "main"`, the appearance is inherited from the main
+/// window settings (resolving the active theme when no custom color is set).
 #[tauri::command]
 pub fn pc_get_appearance(
     windows_manager: State<'_, WindowsManager>,
+    settings_manager: State<'_, SettingsManager>,
 ) -> Result<(u8, String), String> {
+    if windows_manager.get_playback_appearance_source() == "main" {
+        return Ok(resolve_main_appearance(&windows_manager, &settings_manager));
+    }
     let opacity = windows_manager.get_playback_opacity();
     let color = windows_manager.get_playback_bg_color();
     Ok((opacity, color))

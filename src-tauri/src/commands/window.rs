@@ -1,6 +1,7 @@
 use crate::state::AppState;
 use crate::config::{SettingsManager, WindowsManager, Theme, HotkeySettings, Hotkey};
-use crate::soundpanel_window::hide_soundpanel_window;
+use crate::soundpanel_window::{hide_soundpanel_window, update_soundpanel_appearance};
+use crate::playback_window::update_playback_appearance;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tracing::{info, debug};
 
@@ -258,4 +259,136 @@ pub async fn set_hotkey_recording(app_handle: AppHandle, recording: bool) {
     if let Some(app_state) = app_handle.try_state::<AppState>() {
         app_state.set_hotkey_recording(recording);
     }
+}
+
+/// Notify all windows that appearance settings changed so panels update on the fly
+fn emit_appearance_updates(app_handle: &AppHandle) {
+    let _ = app_handle.emit("settings-changed", ());
+    let _ = update_soundpanel_appearance(app_handle);
+    let _ = update_playback_appearance(app_handle);
+}
+
+// ========== Main Window Appearance ==========
+
+/// Resolve the effective main window appearance as `(opacity, bg_color)`.
+///
+/// When `custom_background` is disabled, the color falls back to the active
+/// theme background (Light -> `#fafcff`, Dark -> `#090b0f`). Used by panels that
+/// inherit the main window appearance (`appearance_source == "main"`).
+pub fn resolve_main_appearance(
+    windows_manager: &WindowsManager,
+    settings_manager: &SettingsManager,
+) -> (u8, String) {
+    let (custom_background, opacity, bg_color) = windows_manager.get_main_appearance();
+    let color = if custom_background {
+        bg_color
+    } else {
+        let theme = settings_manager.load().map(|s| s.theme).unwrap_or(Theme::Dark);
+        match theme {
+            Theme::Light => "#fafcff".to_string(),
+            Theme::Dark => "#090b0f".to_string(),
+        }
+    };
+    (opacity, color)
+}
+
+/// Get main window appearance (custom_background, opacity, bg_color)
+#[tauri::command]
+pub fn get_main_appearance(
+    windows_manager: State<'_, WindowsManager>,
+) -> Result<(bool, u8, String), String> {
+    Ok(windows_manager.get_main_appearance())
+}
+
+/// Set whether the main window uses a custom background color
+#[tauri::command]
+pub fn set_main_custom_background(
+    value: bool,
+    app_handle: AppHandle,
+    windows_manager: State<'_, WindowsManager>,
+) -> Result<(), String> {
+    info!(value, "Setting main custom background");
+    windows_manager
+        .set_main_custom_background(value)
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    emit_appearance_updates(&app_handle);
+    Ok(())
+}
+
+/// Set main window opacity (10-100)
+#[tauri::command]
+pub fn set_main_opacity(
+    value: u8,
+    app_handle: AppHandle,
+    windows_manager: State<'_, WindowsManager>,
+) -> Result<(), String> {
+    info!(value, "Setting main opacity");
+    windows_manager
+        .set_main_opacity(value)
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    emit_appearance_updates(&app_handle);
+    Ok(())
+}
+
+/// Set main window background color (#RRGGBB)
+#[tauri::command]
+pub fn set_main_bg_color(
+    color: String,
+    app_handle: AppHandle,
+    windows_manager: State<'_, WindowsManager>,
+) -> Result<(), String> {
+    info!(color, "Setting main bg color");
+    windows_manager
+        .set_main_bg_color(color)
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    emit_appearance_updates(&app_handle);
+    Ok(())
+}
+
+// ========== Panel Appearance Source ==========
+
+/// Get soundpanel appearance source ("own" or "main")
+#[tauri::command]
+pub fn get_soundpanel_appearance_source(
+    windows_manager: State<'_, WindowsManager>,
+) -> String {
+    windows_manager.get_soundpanel_appearance_source()
+}
+
+/// Set soundpanel appearance source ("own" or "main")
+#[tauri::command]
+pub fn set_soundpanel_appearance_source(
+    source: String,
+    app_handle: AppHandle,
+    windows_manager: State<'_, WindowsManager>,
+) -> Result<(), String> {
+    info!(source, "Setting soundpanel appearance source");
+    windows_manager
+        .set_soundpanel_appearance_source(source)
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    emit_appearance_updates(&app_handle);
+    Ok(())
+}
+
+/// Get playback appearance source ("own" or "main")
+#[tauri::command]
+pub fn get_playback_appearance_source(
+    windows_manager: State<'_, WindowsManager>,
+) -> String {
+    windows_manager.get_playback_appearance_source()
+}
+
+/// Set playback appearance source ("own" or "main")
+#[tauri::command]
+pub fn set_playback_appearance_source(
+    source: String,
+    app_handle: AppHandle,
+    windows_manager: State<'_, WindowsManager>,
+) -> Result<(), String> {
+    info!(source, "Setting playback appearance source");
+    windows_manager
+        .set_playback_appearance_source(source)
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    emit_appearance_updates(&app_handle);
+    Ok(())
 }

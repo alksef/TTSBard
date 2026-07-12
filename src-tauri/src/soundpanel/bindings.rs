@@ -2,7 +2,8 @@
 //!
 //! Tauri команды для взаимодействия между frontend и backend.
 
-use crate::config::{is_valid_hex_color, WindowsManager};
+use crate::commands::window::resolve_main_appearance;
+use crate::config::{is_valid_hex_color, SettingsManager, WindowsManager};
 use crate::events::AppEvent;
 use crate::soundpanel::audio::play_audio_file;
 use crate::soundpanel::intercept::InterceptSettings;
@@ -116,10 +117,18 @@ pub fn sp_is_supported_format(filename: String) -> Result<bool, String> {
 }
 
 /// Получить настройки внешнего вида floating окна звуковой панели
+///
+/// Если `appearance_source == "main"`, оформление наследуется от главного окна
+/// (с учётом активной темы, когда собственный цвет главного окна выключен).
 #[tauri::command]
 pub fn sp_get_floating_appearance(
     state: State<'_, SoundPanelState>,
+    windows_manager: State<'_, WindowsManager>,
+    settings_manager: State<'_, SettingsManager>,
 ) -> Result<(u8, String), String> {
+    if windows_manager.get_soundpanel_appearance_source() == "main" {
+        return Ok(resolve_main_appearance(&windows_manager, &settings_manager));
+    }
     let opacity = state.get_floating_opacity();
     let color = state.get_floating_bg_color();
     Ok((opacity, color))

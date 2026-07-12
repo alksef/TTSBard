@@ -28,7 +28,6 @@ const opacity = ref(90)
 const bgColor = ref('#2a2a2a')
 const clickthroughEnabled = ref(false)
 const stayVisible = ref(false)
-const showTransparencyControl = ref(false)
 
 interface Binding {
   key: string
@@ -126,16 +125,6 @@ async function toggleClickthrough() {
   } catch (e) {
     console.error('Failed to toggle clickthrough:', e)
   }
-}
-
-function changeTransparency(value: number) {
-  opacity.value = value
-  invoke('sp_set_floating_opacity', { value })
-}
-
-function handleTransparencyChange(event: Event) {
-  const target = event.target as HTMLInputElement
-  changeTransparency(parseFloat(target.value))
 }
 
 function codeToLetter(code: string): string | null {
@@ -273,31 +262,11 @@ onMounted(async () => {
         >
           {{ clickthroughEnabled ? '👆' : '🖱️' }}
         </button>
-        <button
-          @click="showTransparencyControl = !showTransparencyControl"
-          title="Transparency"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="5"/>
-            <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
-          </svg>
-        </button>
         <button @click="closeWindow" title="Close">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M18 6L6 18M6 6l12 12"/>
           </svg>
         </button>
-      </div>
-
-      <div v-if="showTransparencyControl" class="transparency-control">
-        <label>Transparency: {{ (opacity / 100).toFixed(2) }}</label>
-        <input
-          type="range"
-          min="10"
-          max="100"
-          :value="opacity"
-          @input="handleTransparencyChange"
-        />
       </div>
     </div>
 
@@ -468,33 +437,6 @@ button:active {
 button.active {
   background: rgba(100, 200, 100, 0.5);
   border-color: rgba(100, 200, 100, 0.8);
-}
-
-.transparency-control {
-  position: absolute;
-  top: 32px;
-  right: 10px;
-  padding: 10px;
-  border-radius: 4px;
-  min-width: 140px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  -webkit-app-region: no-drag;
-  z-index: 100;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(50, 50, 50, 0.95);
-}
-
-.transparency-control label {
-  display: block;
-  font-size: 11px;
-  margin-bottom: 6px;
-  opacity: 0.8;
-  color: white;
-}
-
-.transparency-control input[type="range"] {
-  width: 100%;
-  cursor: pointer;
 }
 
 .content {

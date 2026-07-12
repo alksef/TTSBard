@@ -16,7 +16,8 @@
         "title": "TTSBard",
         "width": 800,
         "height": 600,
-        "decorations": true,
+        "decorations": false,
+        "transparent": true,
         "resizable": true,
         "visible": false
       },
