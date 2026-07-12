@@ -90,6 +90,16 @@ pub async fn speak_text(state: State<'_, AppState>, text: String) -> Result<(), 
     speak_text_internal(&state, text).await
 }
 
+/// Synthesize text and export raw audio bytes to a file (no effects, no playback)
+#[tauri::command]
+pub async fn speak_text_raw_export(
+    state: State<'_, AppState>,
+    text: String,
+    path: String,
+) -> Result<(), String> {
+    tts_pipeline::synthesize_and_export(&state, &text, &path).await
+}
+
 /// Get all application settings in a single call
 #[tauri::command]
 pub async fn get_all_app_settings(
@@ -236,4 +246,27 @@ pub fn get_editor_spellcheck_source(
     settings_manager: State<'_, SettingsManager>
 ) -> SpellSource {
     settings_manager.get_editor_spellcheck_source()
+}
+
+/// Set editor height
+#[tauri::command]
+pub fn set_editor_height(
+    height: u32,
+    app_handle: AppHandle,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<u32, String> {
+    settings_manager.set_editor_height(height)
+        .map_err(|e| format!("Failed to save editor height: {}", e))?;
+
+    let _ = app_handle.emit("settings-changed", ());
+
+    Ok(height.clamp(200, 1200))
+}
+
+/// Get editor height
+#[tauri::command]
+pub fn get_editor_height(
+    settings_manager: State<'_, SettingsManager>,
+) -> u32 {
+    settings_manager.get_editor_height()
 }

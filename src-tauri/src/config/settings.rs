@@ -481,6 +481,12 @@ pub struct EditorSettings {
     pub spellcheck_enabled: bool,
     #[serde(default)]
     pub spellcheck_source: SpellSource,
+    #[serde(default = "default_editor_height")]
+    pub editor_height: u32,
+}
+
+fn default_editor_height() -> u32 {
+    340
 }
 
 impl Default for EditorSettings {
@@ -491,6 +497,7 @@ impl Default for EditorSettings {
             ai_completion: false,
             spellcheck_enabled: true,
             spellcheck_source: SpellSource::Offline,
+            editor_height: 340,
         }
     }
 }
@@ -1300,6 +1307,17 @@ impl SettingsManager {
     /// Get spellcheck source
     pub fn get_editor_spellcheck_source(&self) -> SpellSource {
         self.cache.read().editor.spellcheck_source.clone()
+    }
+
+    /// Set editor height
+    pub fn set_editor_height(&self, height: u32) -> Result<()> {
+        let validated = height.clamp(200, 1200);
+        self.update_field("/editor/editor_height", &validated)
+    }
+
+    /// Get editor height
+    pub fn get_editor_height(&self) -> u32 {
+        self.cache.read().editor.editor_height
     }
 
     // ========== AI Settings ==========

@@ -6,15 +6,28 @@ import { usePhraseHistory, type PhraseEntry } from '../composables/usePhraseHist
 import { relativeTime } from '../utils/time'
 import { debugError } from '../utils/debug'
 
+const props = defineProps<{
+  expanded?: boolean
+  hideToggle?: boolean
+}>()
+
 const emit = defineEmits<{
   select: [text: string]
   append: [text: string]
   replace: [text: string]
+  'update:expanded': [expanded: boolean]
+  'expansion-change': [expanded: boolean]
 }>()
 
 const { list, remove, clear, isLoading } = usePhraseHistory()
 
-const isExpanded = ref(false)
+const isExpanded = ref(props.expanded ?? false)
+
+watch(() => props.expanded, (val) => {
+  if (val !== undefined) {
+    isExpanded.value = val
+  }
+})
 const filter = ref('')
 const phrases = ref<PhraseEntry[]>([])
 const filterDebounced = ref('')
@@ -55,6 +68,8 @@ watch(isExpanded, (val) => {
 
 function toggleExpand() {
   isExpanded.value = !isExpanded.value
+  emit('update:expanded', isExpanded.value)
+  emit('expansion-change', isExpanded.value)
 }
 
 function selectPhrase(phrase: PhraseEntry) {
@@ -122,7 +137,7 @@ onUnmounted(() => {
 
 <template>
   <div class="phrase-history">
-    <button class="toggle-button" @click="toggleExpand">
+    <button v-if="!hideToggle" class="toggle-button" @click="toggleExpand">
       <ChevronDown v-if="isExpanded" :size="16" />
       <ChevronRight v-else :size="16" />
       <span>История фраз</span>

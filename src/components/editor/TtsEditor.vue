@@ -24,11 +24,13 @@ const props = withDefaults(
     placeholder?: string
     replacements?: Record<string, string>
     usernames?: Record<string, string>
+    editorHeightPx?: string
   }>(),
   {
     placeholder: '',
     replacements: () => ({}),
     usernames: () => ({}),
+    editorHeightPx: '340px',
   }
 )
 
@@ -54,11 +56,10 @@ watch(() => props.usernames, (v) => { usr.value = v }, { immediate: true })
 const ttsTheme = EditorView.theme({
   '&': {
     border: '1px solid var(--color-border-strong)',
-    // Верхние углы без скругления — сочетается со строкой табов сверху.
     borderRadius: '0 0 18px 18px',
     background: 'color-mix(in srgb, var(--input-bg-strong) var(--main-window-opacity), transparent)',
     boxShadow: '0 2px 16px rgba(var(--rgb-black), 0.03)',
-    minHeight: '340px',
+    minHeight: 'var(--editor-height, 340px)',
     transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
   },
   '&.cm-focused': {
@@ -72,7 +73,7 @@ const ttsTheme = EditorView.theme({
     fontSize: '1rem',
     lineHeight: '1.6',
     color: 'var(--color-text-primary)',
-    minHeight: '340px',
+    minHeight: 'var(--editor-height, 340px)',
     overflow: 'auto',
   },
   '.cm-content': {
@@ -393,21 +394,21 @@ defineExpose({ focus })
 </script>
 
 <template>
-  <div ref="editorRef" class="tts-editor" @click="view?.focus()" />
+  <div ref="editorRef" class="tts-editor" :style="{ '--editor-height': editorHeightPx }" @click="view?.focus()" />
 </template>
 
 <style scoped>
 .tts-editor {
   width: 100%;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0;
 }
 
 .tts-editor :deep(.cm-editor) {
-  min-height: 340px;
+  min-height: var(--editor-height, 340px);
   height: auto;
 }
 
 .tts-editor :deep(.cm-editor .cm-scroller) {
-  min-height: 340px;
+  min-height: var(--editor-height, 340px);
 }
 </style>

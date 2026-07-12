@@ -268,6 +268,26 @@ fn emit_appearance_updates(app_handle: &AppHandle) {
     let _ = update_playback_appearance(app_handle);
 }
 
+/// Set main window compact dimensions (clamped 300..500)
+#[tauri::command]
+pub fn set_main_compact_dims(
+    width: u32,
+    height: u32,
+    windows_manager: State<'_, WindowsManager>,
+) -> Result<(), String> {
+    windows_manager
+        .set_main_compact_dims(width, height)
+        .map_err(|e| format!("Failed to save compact dims: {}", e))
+}
+
+/// Get main window compact dimensions
+#[tauri::command]
+pub fn get_main_compact_dims(
+    windows_manager: State<'_, WindowsManager>,
+) -> (u32, u32) {
+    windows_manager.get_main_compact_dims()
+}
+
 // ========== Main Window Appearance ==========
 
 /// Resolve the effective main window appearance as `(opacity, bg_color)`.

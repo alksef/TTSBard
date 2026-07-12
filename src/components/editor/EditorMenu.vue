@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
-import { MoreHorizontal } from 'lucide-vue-next'
 
 const emit = defineEmits<{
   correct: []
   complete: []
   grammar: []
-  'toggle-history': []
+  'save-audio': []
 }>()
 
 defineProps<{
@@ -65,9 +64,10 @@ function run(fn: () => void) { close(); fn() }
       :aria-expanded="open"
       aria-haspopup="true"
       title="Меню редактора"
+      aria-label="Меню редактора"
       @click="onTriggerClick"
     >
-      <MoreHorizontal :size="16" />
+      ⋯
     </button>
     <div v-if="open" class="menu-dropdown">
       <button
@@ -95,9 +95,10 @@ function run(fn: () => void) { close(); fn() }
       <div class="menu-separator" />
       <button
         class="menu-item"
-        @click="run(() => emit('toggle-history'))"
+        :disabled="!hasText"
+        @click="run(() => emit('save-audio'))"
       >
-        История фраз
+        Сохранить аудио…
       </button>
     </div>
   </div>
@@ -105,10 +106,8 @@ function run(fn: () => void) { close(); fn() }
 
 <style scoped>
 .editor-menu {
-  position: absolute;
-  bottom: 0.6rem;
-  right: 6.8rem;
-  z-index: 10;
+  position: relative;
+  display: inline-flex;
 }
 
 .menu-trigger {

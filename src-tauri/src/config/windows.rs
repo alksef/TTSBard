@@ -26,6 +26,10 @@ pub struct MainWindowSettings {
     pub custom_opacity: bool,
     #[serde(default)]
     pub opacity_compact_only: bool,
+    #[serde(default = "default_compact_width")]
+    pub compact_width: u32,
+    #[serde(default = "default_compact_height")]
+    pub compact_height: u32,
 }
 
 /// Sound panel window settings
@@ -105,6 +109,12 @@ fn default_main_bg_color() -> String {
 fn default_appearance_source() -> String {
     "own".to_string()
 }
+fn default_compact_width() -> u32 {
+    450
+}
+fn default_compact_height() -> u32 {
+    400
+}
 
 impl Default for MainWindowSettings {
     fn default() -> Self {
@@ -116,6 +126,8 @@ impl Default for MainWindowSettings {
             bg_color: "#10131a".to_string(),
             custom_opacity: false,
             opacity_compact_only: false,
+            compact_width: 450,
+            compact_height: 400,
         }
     }
 }
@@ -161,6 +173,8 @@ impl Default for WindowsSettings {
                 bg_color: "#10131a".to_string(),
                 custom_opacity: false,
                 opacity_compact_only: false,
+                compact_width: 450,
+                compact_height: 400,
                 ..MainWindowSettings::default()
             },
             soundpanel: SoundPanelWindowSettings {
@@ -317,6 +331,21 @@ impl WindowsManager {
         let mut settings = self.load()?;
         settings.main.opacity_compact_only = value;
         self.save(&settings)
+    }
+
+    /// Set main window compact dimensions (clamped to 300..500)
+    pub fn set_main_compact_dims(&self, width: u32, height: u32) -> Result<()> {
+        let mut settings = self.load()?;
+        settings.main.compact_width = width.clamp(300, 500);
+        settings.main.compact_height = height.clamp(300, 500);
+        self.save(&settings)
+    }
+
+    /// Get main window compact dimensions
+    pub fn get_main_compact_dims(&self) -> (u32, u32) {
+        self.load()
+            .map(|s| (s.main.compact_width, s.main.compact_height))
+            .unwrap_or((450, 400))
     }
 
     // ========== Sound Panel Window ==========

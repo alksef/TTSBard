@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted as vueOnUnmounted, inject, nextTick, type Ref } from 'vue'
+import { ref, computed, onMounted, onUnmounted as vueOnUnmounted, inject, nextTick, type Ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { useEditorSettings, useAiSettings } from '../composables/useAppSettings'
+import { save } from '@tauri-apps/plugin-dialog'
+import { useEditorSettings, useAppSettings, useTtsSettings, useAiSettings } from '../composables/useAppSettings'
 import { useErrorHandler } from '../composables/useErrorHandler'
 import { debugLog, debugError } from '../utils/debug'
-import { Sparkles } from 'lucide-vue-next'
 import TtsEditor from './editor/TtsEditor.vue'
 import PhraseHistoryList from './PhraseHistoryList.vue'
 import EditorMenu from './editor/EditorMenu.vue'
@@ -38,22 +38,21 @@ async function onSelect(id: string) {
 const isCorrecting = ref(false)
 const isCompleting = ref(false)
 const isCheckingGrammar = ref(false)
-const showHistory = ref(true)
+const showHistory = ref(false)
 const replacements = ref<Map<string, string>>(new Map())
 const usernames = ref<Map<string, string>>(new Map())
 const isMinimalMode = inject<Ref<boolean>>('isMinimalMode', ref(false))
 
-// Get settings from composable
 const editorSettings = useEditorSettings()
 const aiSettings = useAiSettings()
+const ttsSettings = useTtsSettings()
 
-// Computed property for template
+const appSettingsContext = useAppSettings()
+
 const quickEditorEnabled = computed(() => editorSettings.value?.quick ?? false)
 
-// Computed: Check if AI correction is enabled in editor
 const aiEditorEnabled = computed(() => editorSettings.value?.ai ?? false)
 
-// Computed: Check if current AI provider has API key configured
 const isProviderConfigured = computed(() => {
   const provider = aiSettings.value?.provider
   const hasKey = provider === 'openai'
@@ -78,13 +77,14 @@ const isProviderConfigured = computed(() => {
   return hasKey
 })
 
-// Computed: Check if AI button should be enabled (manual correction)
-// Requires only provider to be configured, not the auto-correction setting
 const isAiButtonEnabled = computed(() => {
   return isProviderConfigured.value
 })
 
 let unlistenSettings: UnlistenFn | null = null
+let previousCompactHeight = 0
+let isAppDrivenResize = false
+let compactSaveTimer: ReturnType<typeof setTimeout> | null = null
 
 async function reloadPreprocessorData() {
   try {
@@ -111,23 +111,14 @@ function onPreprocessorChanged() {
 onMounted(async () => {
   await initTabs()
 
-  // Listen for settings changes (kept for other potential settings)
   unlistenSettings = await listen('settings-changed', async () => {
     debugLog('[InputPanel] Settings changed event received')
   })
 
-  // Reload preprocessor data when replacements/usernames are saved in settings
   window.addEventListener('preprocessor-data-changed', onPreprocessorChanged)
 
-  // Initial load
   await reloadPreprocessorData()
 
-  // Flush tabs to disk when the main window is closed.
-  // NOTE: the backend (lib.rs on_window_event) handles CloseRequested for "main"
-  // by prevent_close() + hide() (minimize to tray). We must NOT call
-  // preventDefault()/destroy() here — that would destroy the window instead of
-  // hiding it to tray, breaking the tray behavior. We only flush tabs; the
-  // backend's own handler still runs and hides the window.
   let unlistenClose: (() => void) | undefined
   const currentWindow = getCurrentWindow()
   const closeHandler = async () => {
@@ -138,11 +129,34 @@ onMounted(async () => {
     unlistenClose = unlistenResult
   }
 
+  let unlistenResize: (() => void) | undefined
+  const resizeHandler = currentWindow.onResized(async () => {
+    if (!isMinimalMode.value) return
+    if (isAppDrivenResize) return
+
+    if (compactSaveTimer) clearTimeout(compactSaveTimer)
+    compactSaveTimer = setTimeout(async () => {
+      try {
+        const size = await currentWindow.outerSize()
+        const w = Math.max(300, Math.min(500, size.width))
+        const h = Math.max(300, Math.min(500, size.height))
+        await invoke('set_main_compact_dims', { width: w, height: h })
+      } catch {
+        // silently fail
+      }
+    }, 1000)
+  })
+  const unlistenResizeResult = await resizeHandler
+  if (typeof unlistenResizeResult === 'function') {
+    unlistenResize = unlistenResizeResult
+  }
+
   vueOnUnmounted(() => {
     if (unlistenClose) unlistenClose()
+    if (unlistenResize) unlistenResize()
+    if (compactSaveTimer) clearTimeout(compactSaveTimer)
   })
 })
-
 
 vueOnUnmounted(async () => {
   await flushTabsSave()
@@ -223,6 +237,66 @@ async function checkGrammar() {
   }
 }
 
+function getProviderExtension(): string {
+  const provider = ttsSettings.value?.provider
+  if (provider === 'fish') {
+    return ttsSettings.value?.fish?.format || 'mp3'
+  }
+  if (provider === 'local') {
+    return 'wav'
+  }
+  return 'mp3'
+}
+
+async function saveAudio() {
+  const currentText = text.value
+  if (!currentText.trim()) return
+
+  const ext = getProviderExtension()
+  try {
+    const filePath = await save({
+      defaultPath: `tts_export.${ext}`,
+      filters: [{ name: 'Audio', extensions: [ext] }],
+    })
+    if (!filePath) return
+
+    await invoke('speak_text_raw_export', { text: currentText, path: filePath })
+  } catch (e) {
+    debugError('[InputPanel] Save audio failed:', e)
+    showError(e as string)
+  }
+}
+
+async function handleExpandedChange(expanded: boolean) {
+  if (!isMinimalMode.value) return
+
+  try {
+    const currentWindow = getCurrentWindow()
+    const size = await currentWindow.outerSize()
+
+    isAppDrivenResize = true
+    if (expanded) {
+      previousCompactHeight = size.height
+      const newHeight = Math.min(size.height + 180, 500)
+      await invoke('resize_main_window', { width: size.width, height: newHeight })
+    } else {
+      const restoreHeight = previousCompactHeight || (windowsSettingsCompactHeight())
+      previousCompactHeight = 0
+      await invoke('resize_main_window', { width: size.width, height: restoreHeight })
+    }
+  } catch {
+    // silently fail
+  } finally {
+    setTimeout(() => { isAppDrivenResize = false }, 1000)
+  }
+}
+
+watch(showHistory, handleExpandedChange)
+
+function windowsSettingsCompactHeight(): number {
+  return appSettingsContext.settings.value?.windows?.main?.compact_height ?? 400
+}
+
 async function handleEnter() {
   const currentText = text.value
   const senderTabId = activeId.value
@@ -245,10 +319,8 @@ async function handleEnter() {
 }
 
 async function handleEsc() {
-  // Get quick editor enabled from composable
   const quickEditorEnabledValue = editorSettings.value?.quick ?? false
 
-  // Hide window if quick editor is enabled (fire and forget)
   if (quickEditorEnabledValue) {
     hideMainWindow()
   }
@@ -283,6 +355,45 @@ const usernamesRecord = computed(() => {
   usernames.value.forEach((v, k) => { obj[k] = v })
   return obj
 })
+
+// Editor resize state
+const editorHeight = ref(editorSettings.value?.editor_height ?? 340)
+const isResizing = ref(false)
+const resizeStartY = ref(0)
+const resizeStartHeight = ref(0)
+
+watch(() => editorSettings.value?.editor_height, (newVal) => {
+  if (newVal !== undefined && newVal !== editorHeight.value && !isResizing.value) {
+    editorHeight.value = newVal
+  }
+}, { immediate: true })
+
+function onResizePointerDown(e: PointerEvent) {
+  isResizing.value = true
+  resizeStartY.value = e.clientY
+  resizeStartHeight.value = editorHeight.value
+  ;(e.target as HTMLElement)?.setPointerCapture?.(e.pointerId)
+}
+
+function onResizePointerMove(e: PointerEvent) {
+  if (!isResizing.value) return
+  const dy = e.clientY - resizeStartY.value
+  const newHeight = Math.max(200, Math.min(1200, resizeStartHeight.value + dy))
+  editorHeight.value = newHeight
+}
+
+function onResizePointerUp(_e: PointerEvent) {
+  if (!isResizing.value) return
+  isResizing.value = false
+  const heightToSave = editorHeight.value
+  invoke('set_editor_height', { height: heightToSave }).catch(() => {})
+}
+
+const editorHeightPx = computed(() => `${editorHeight.value}px`)
+
+function toggleHistory() {
+  showHistory.value = !showHistory.value
+}
 </script>
 
 <template>
@@ -303,35 +414,68 @@ const usernamesRecord = computed(() => {
           :placeholder="'Введите текст для озвучивания...'"
           :replacements="replacementsRecord"
           :usernames="usernamesRecord"
+          :editor-height-px="editorHeightPx"
           @enter="handleEnter"
           @esc="handleEsc"
         />
-        <PhraseHistoryList
-          v-if="showHistory"
-          @select="appendPhrase"
-          @append="appendPhrase"
-          @replace="replacePhrase"
+        <div
+          class="editor-resize-handle"
+          @pointerdown="onResizePointerDown"
+          @pointermove="onResizePointerMove"
+          @pointerup="onResizePointerUp"
+          title="Изменить высоту редактора"
         />
-        <EditorMenu
-          :is-ai-enabled="isAiButtonEnabled"
-          :has-text="!!text.trim()"
-          :compact="isMinimalMode"
-          @correct="correctText"
-          @complete="completeText"
-          @grammar="checkGrammar"
-          @toggle-history="showHistory = !showHistory"
-        />
+      </div>
+
+      <div class="editor-action-bar" :class="{ 'compact-action-bar': isMinimalMode }">
+        <template v-if="!isMinimalMode">
+          <EditorMenu
+            :is-ai-enabled="isAiButtonEnabled"
+            :has-text="!!text.trim()"
+            @correct="correctText"
+            @complete="completeText"
+            @grammar="checkGrammar"
+            @save-audio="saveAudio"
+          />
+          <button
+            class="action-btn speak-btn"
+            :disabled="!text.trim()"
+            @click="handleEnter"
+            title="Озвучить текст — Enter"
+            aria-label="Озвучить текст (Enter)"
+          >
+            Озвучить
+          </button>
+        </template>
         <button
-          class="correct-button"
-          :class="{ loading: isCorrecting || isCompleting || isCheckingGrammar, 'minimal-mode': isMinimalMode }"
+          class="action-btn history-btn"
+          :class="{ active: showHistory }"
+          @click="toggleHistory"
+          title="История фраз"
+          aria-label="Показать историю фраз"
+        >
+          История фраз
+        </button>
+        <button
+          v-if="!isMinimalMode"
+          class="action-btn ai-btn"
+          :class="{ loading: isCorrecting || isCompleting || isCheckingGrammar }"
           :disabled="isCorrecting || isCompleting || isCheckingGrammar || !text.trim() || !isAiButtonEnabled"
           @click="correctText"
           title="Корректировать текст с помощью AI"
-        >
-          <Sparkles :size="16" />
-          <span>AI</span>
-        </button>
+          aria-label="AI корректировка текста"
+          >
+            AI
+          </button>
       </div>
+
+      <PhraseHistoryList
+        v-model:expanded="showHistory"
+        :hide-toggle="true"
+        @select="appendPhrase"
+        @append="appendPhrase"
+        @replace="replacePhrase"
+      />
       <div v-if="quickEditorEnabled" class="quick-editor-hint">
         Режим быстрого редактора
       </div>
@@ -364,15 +508,82 @@ const usernamesRecord = computed(() => {
 
 .textarea-wrapper {
   position: relative;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0;
 }
 
 .textarea-wrapper.minimal-wrapper :deep(.cm-editor) {
-  min-height: 280px;
+  min-height: 200px;
 }
 
 .textarea-wrapper.minimal-wrapper :deep(.cm-scroller) {
-  min-height: 280px !important;
+  min-height: 200px !important;
+}
+
+.editor-resize-handle {
+  height: 6px;
+  cursor: ns-resize;
+  background: transparent;
+  transition: background 0.15s ease;
+  border-radius: 0 0 3px 3px;
+  margin-top: -1px;
+}
+
+.editor-resize-handle:hover {
+  background: var(--color-accent);
+  opacity: 0.4;
+}
+
+.editor-action-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0;
+  flex-wrap: nowrap;
+}
+
+.editor-action-bar.compact-action-bar {
+  padding: 0.25rem 0;
+}
+
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.75rem;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.action-btn:hover:not(:disabled) {
+  background: var(--color-accent);
+  color: var(--color-text-on-accent, #ffffff);
+  border-color: var(--color-accent);
+}
+
+.action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.action-btn.active {
+  background: var(--color-accent);
+  color: var(--color-text-on-accent, #ffffff);
+  border-color: var(--color-accent);
+}
+
+.ai-btn.loading {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.speak-btn {
+  font-weight: 500;
 }
 
 @media (max-width: 960px) {
@@ -396,53 +607,6 @@ const usernamesRecord = computed(() => {
   opacity: 0.8;
   text-align: center;
   font-weight: 600;
-}
-
-.correct-button {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  position: absolute;
-  bottom: 0.6rem;
-  right: 0.5rem;
-  z-index: 10;
-  padding: 0.5rem 1rem;
-  background: var(--color-accent, #6366f1);
-  color: var(--color-text-on-accent, #ffffff);
-  border: none;
-  border-radius: 12px;
-  font-size: 0.9rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.correct-button:hover:not(:disabled) {
-  filter: brightness(1.1);
-}
-
-.correct-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  background: #6b7280;
-}
-
-.correct-button.loading {
-  animation: pulse 1.5s ease-in-out infinite;
-}
-
-/* Minimal mode: compact + translucent so it overlaps the text less;
-   fully visible on hover/focus. */
-.correct-button.minimal-mode {
-  opacity: 0.4;
-  padding: 0.35rem 0.7rem;
-  font-size: 0.8rem;
-  transition: opacity 0.15s ease, filter 0.15s ease;
-}
-
-.correct-button.minimal-mode:hover:not(:disabled),
-.correct-button.minimal-mode:focus-visible:not(:disabled) {
-  opacity: 1;
 }
 
 @keyframes pulse {

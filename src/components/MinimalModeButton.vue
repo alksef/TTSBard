@@ -2,9 +2,12 @@
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { Minimize2, Maximize2 } from 'lucide-vue-next'
+import { useWindowsSettings } from '../composables/useAppSettings'
 
 const isMinimalMode = ref(false)
 const isAnimating = ref(false)
+
+const windowsSettings = useWindowsSettings()
 
 const emit = defineEmits<{
   minimalModeChanged: [isMinimal: boolean]
@@ -15,8 +18,11 @@ async function toggleMinimalMode() {
   isAnimating.value = true
 
   try {
-    const width = isMinimalMode.value ? 800 : 450
-    const height = isMinimalMode.value ? 630 : 400
+    const compactWidth = windowsSettings.value?.main?.compact_width ?? 450
+    const compactHeight = windowsSettings.value?.main?.compact_height ?? 400
+
+    const width = isMinimalMode.value ? 800 : compactWidth
+    const height = isMinimalMode.value ? 630 : compactHeight
 
     await invoke('resize_main_window', { width, height })
     emit('minimalModeChanged', !isMinimalMode.value)
