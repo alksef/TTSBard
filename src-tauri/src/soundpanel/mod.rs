@@ -10,7 +10,7 @@ pub mod intercept;
 mod state;
 mod storage;
 
-pub use hook::initialize_soundpanel_hook;
+pub use hook::{initialize_soundpanel_hook, HookManager};
 pub use state::{SoundBinding, SoundPanelState};
 pub use storage::{load_appearance, load_bindings};
 

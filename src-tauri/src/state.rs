@@ -125,6 +125,9 @@ pub struct AppState {
     /// Shared settings cache (same Arc as SettingsManager.cache) for hot-path reads
     pub settings_cache: Arc<RwLock<crate::config::AppSettings>>,
 
+    /// Keyboard hook lifecycle manager (Windows only; no-op on other platforms)
+    pub soundpanel_hook: Arc<Mutex<Option<crate::soundpanel::HookManager>>>,
+
     /// Токен отмены для всех фоновых серверов
     pub shutdown: CancellationToken,
 }
@@ -168,6 +171,7 @@ impl AppState {
             ai_client: Arc::new(Mutex::new(None)),
             ai_settings_hash: Arc::new(AtomicU64::new(0)),
             settings_cache: Arc::new(RwLock::new(Default::default())),
+            soundpanel_hook: Arc::new(Mutex::new(None)),
             shutdown: CancellationToken::new(),
         }
     }
