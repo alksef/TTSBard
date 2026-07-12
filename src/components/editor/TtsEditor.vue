@@ -56,7 +56,7 @@ const ttsTheme = EditorView.theme({
     border: '1px solid var(--color-border-strong)',
     // Верхние углы без скругления — сочетается со строкой табов сверху.
     borderRadius: '0 0 18px 18px',
-    background: 'var(--input-bg-strong)',
+    background: 'color-mix(in srgb, var(--input-bg-strong) var(--main-window-opacity), transparent)',
     boxShadow: '0 2px 16px rgba(var(--rgb-black), 0.03)',
     minHeight: '340px',
     transition: 'border-color 0.2s ease, box-shadow 0.2s ease',

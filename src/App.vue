@@ -92,6 +92,7 @@ const appStyle = computed(() => {
   const { r, g, b } = hexToRgb(baseColor)
   return {
     background: `var(--app-gradient-line), var(--app-gradient-glow), rgba(${r}, ${g}, ${b}, ${opacity})`,
+    '--main-window-opacity': `${opacity * 100}%`,
   }
 })
 
