@@ -185,9 +185,12 @@ export interface LoggingSettingsDto {
 // Windows Settings Types
 // ============================================================================
 
-export interface WindowPositionDto {
+export interface MainWindowSettingsDto {
   x?: number
   y?: number
+  custom_background: boolean
+  opacity: number
+  bg_color: string
 }
 
 export interface SoundPanelWindowSettingsDto {
@@ -197,6 +200,7 @@ export interface SoundPanelWindowSettingsDto {
   bg_color: string
   clickthrough: boolean
   stay_visible: boolean
+  appearance_source: string
 }
 
 export interface PlaybackWindowSettingsDto {
@@ -204,6 +208,7 @@ export interface PlaybackWindowSettingsDto {
   y?: number
   opacity: number
   bg_color: string
+  appearance_source: string
 }
 
 export interface GlobalSettingsDto {
@@ -212,7 +217,7 @@ export interface GlobalSettingsDto {
 
 export interface WindowsSettingsDto {
   global: GlobalSettingsDto
-  main: WindowPositionDto
+  main: MainWindowSettingsDto
   soundpanel: SoundPanelWindowSettingsDto
   playback: PlaybackWindowSettingsDto
 }

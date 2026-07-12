@@ -8,7 +8,7 @@ use crate::config::settings::{
     ProxyMode, ProxySettings, ProxyType, Socks5Settings, TelegramTtsSettings, TtsSettings,
 };
 use crate::config::windows::{
-    GlobalSettings, PlaybackWindowSettings, SoundPanelWindowSettings, WindowPosition,
+    GlobalSettings, MainWindowSettings, PlaybackWindowSettings, SoundPanelWindowSettings,
     WindowsSettings,
 };
 use crate::config::{
@@ -514,8 +514,8 @@ pub type LoggingSettingsDto = LoggingSettings;
 // Windows Settings DTO
 // ============================================================================
 
-/// Window position DTO
-pub type WindowPositionDto = WindowPosition;
+/// Main window settings DTO
+pub type MainWindowSettingsDto = MainWindowSettings;
 
 /// Sound panel window settings DTO
 pub type SoundPanelWindowSettingsDto = SoundPanelWindowSettings;
@@ -530,7 +530,7 @@ pub type GlobalSettingsDto = GlobalSettings;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindowsSettingsDto {
     pub global: GlobalSettingsDto,
-    pub main: WindowPositionDto,
+    pub main: MainWindowSettingsDto,
     pub soundpanel: SoundPanelWindowSettingsDto,
     pub playback: PlaybackWindowSettingsDto,
 }

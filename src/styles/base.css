@@ -7,17 +7,14 @@
 }
 
 html {
-  background: var(--color-bg);
+  background: transparent !important;
 }
 
 body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-osx-font-smoothing: grayscale;
-  background:
-    radial-gradient(circle at top left, rgba(var(--rgb-accent), 0.12), transparent 28%),
-    radial-gradient(circle at bottom right, rgba(var(--rgb-warning), 0.06), transparent 22%),
-    var(--color-bg);
+  background: transparent !important;
   color: var(--color-text-primary);
 }
 

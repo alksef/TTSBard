@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { Settings, Network, Type, Sparkles } from 'lucide-vue-next'
+import { Settings, Network, Type, Sparkles, Palette } from 'lucide-vue-next'
 import SettingsGeneral from './settings/SettingsGeneral.vue'
+import SettingsInterface from './settings/SettingsInterface.vue'
 import SettingsEditor from './settings/SettingsEditor.vue'
 import SettingsNetwork from './settings/SettingsNetwork.vue'
 import SettingsAiPanel from './SettingsAiPanel.vue'
 
-type TabType = 'general' | 'editor' | 'network' | 'ai'
+type TabType = 'general' | 'interface' | 'editor' | 'network' | 'ai'
 const activeTab = ref<TabType>('general')
 
 // Error/Info Message Display
@@ -48,6 +49,10 @@ function handleMessage(message: string) {
         <Settings :size="18" />
         <span>Общие</span>
       </button>
+      <button :class="{ active: activeTab === 'interface' }" @click="activeTab = 'interface'">
+        <Palette :size="18" />
+        <span>Интерфейс</span>
+      </button>
       <button :class="{ active: activeTab === 'editor' }" @click="activeTab = 'editor'">
         <Type :size="18" />
         <span>Редактор</span>
@@ -65,6 +70,10 @@ function handleMessage(message: string) {
     <!-- Tab Contents -->
     <SettingsGeneral
       v-show="activeTab === 'general'"
+      @show-message="handleMessage"
+    />
+    <SettingsInterface
+      v-show="activeTab === 'interface'"
       @show-message="handleMessage"
     />
     <SettingsEditor

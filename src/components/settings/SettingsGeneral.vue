@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
-import { AlertTriangle, Moon, Sun } from 'lucide-vue-next';
-import type { Theme } from '../../types/settings';
+import { AlertTriangle } from 'lucide-vue-next';
 import { useGeneralSettings, useWindowsSettings, useLoggingSettings } from '../../composables/useAppSettings';
 
 const showPlaybackOnStart = ref(false);
@@ -35,14 +34,6 @@ const emit = defineEmits<{
 
 function showError(message: string) {
   emit('show-message', message);
-}
-
-async function setTheme(theme: Theme) {
-  try {
-    await invoke('update_theme', { theme });
-  } catch (e) {
-    showError('Ошибка изменения темы: ' + (e as Error).message);
-  }
 }
 
 async function toggleExcludeFromCapture() {
@@ -116,39 +107,6 @@ watch(loggingSettings, (newSettings) => {
 
 <template>
   <div class="settings-general">
-    <!-- Theme Selector -->
-    <section class="settings-section">
-      <div class="theme-selector">
-        <label
-          class="theme-option"
-          :class="{ active: generalSettings?.theme === 'dark' }"
-        >
-          <input
-            type="radio"
-            value="dark"
-            :checked="generalSettings?.theme === 'dark'"
-            @change="setTheme('dark')"
-          />
-          <Moon :size="16" />
-          <span>Тёмная</span>
-        </label>
-
-        <label
-          class="theme-option"
-          :class="{ active: generalSettings?.theme === 'light' }"
-        >
-          <input
-            type="radio"
-            value="light"
-            :checked="generalSettings?.theme === 'light'"
-            @change="setTheme('light')"
-          />
-          <Sun :size="16" />
-          <span>Светлая</span>
-        </label>
-      </div>
-    </section>
-
     <!-- Exclude from Capture -->
     <section class="settings-section">
       <div class="setting-row">
@@ -323,42 +281,5 @@ watch(loggingSettings, (newSettings) => {
 
 .level-select option:hover {
   background: var(--select-bg-hover);
-}
-
-/* Theme Selector Styles */
-.theme-selector {
-  display: flex;
-  gap: 1rem;
-}
-
-.theme-option {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  background: var(--color-bg-field);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  cursor: pointer;
-  user-select: none;
-  transition: all 0.2s ease;
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--color-text-secondary);
-}
-
-.theme-option:hover {
-  background: var(--color-bg-field-hover);
-  border-color: var(--color-border-strong);
-}
-
-.theme-option.active {
-  background: var(--btn-accent-bg);
-  border-color: var(--color-accent);
-  color: var(--color-text-primary);
-}
-
-.theme-option input[type="radio"] {
-  display: none;
 }
 </style>

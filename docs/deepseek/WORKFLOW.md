@@ -27,7 +27,7 @@ Bash** (через `opencode run`), поэтому итерации автома
 ```bash
 opencode run \
   --model deepseek/deepseek-v4-pro \
-  --dir /d/RustProjects/app-tts-v2 \
+  --dir /home/aefimov/ProjectsMy/TTSBard \
   --log-level ERROR \
   "$(cat docs/deepseek/tasks/74-round3-01.md)"
 ```

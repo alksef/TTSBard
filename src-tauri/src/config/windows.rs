@@ -9,11 +9,19 @@ use std::path::PathBuf;
 
 use super::validation::{is_valid_hex_color, validate_opacity};
 
-/// Main window position
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct WindowPosition {
+/// Main window settings (position and appearance)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MainWindowSettings {
+    #[serde(default)]
     pub x: Option<i32>,
+    #[serde(default)]
     pub y: Option<i32>,
+    #[serde(default = "default_main_custom_background")]
+    pub custom_background: bool,
+    #[serde(default = "default_main_opacity")]
+    pub opacity: u8,
+    #[serde(default = "default_main_bg_color")]
+    pub bg_color: String,
 }
 
 /// Sound panel window settings
@@ -29,6 +37,8 @@ pub struct SoundPanelWindowSettings {
     pub clickthrough: bool,
     #[serde(default)]
     pub stay_visible: bool,
+    #[serde(default = "default_appearance_source")]
+    pub appearance_source: String,
 }
 
 /// Playback control window settings
@@ -42,6 +52,8 @@ pub struct PlaybackWindowSettings {
     pub opacity: u8,
     #[serde(default = "default_playback_bg_color")]
     pub bg_color: String,
+    #[serde(default = "default_appearance_source")]
+    pub appearance_source: String,
 }
 
 /// Global settings that apply to all windows
@@ -52,11 +64,13 @@ pub struct GlobalSettings {
 }
 
 /// All window settings
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WindowsSettings {
     #[serde(default)]
     pub global: GlobalSettings,
-    pub main: WindowPosition,
+    #[serde(default)]
+    pub main: MainWindowSettings,
+    #[serde(default)]
     pub soundpanel: SoundPanelWindowSettings,
     #[serde(default)]
     pub playback: PlaybackWindowSettings,
@@ -75,6 +89,30 @@ fn default_playback_opacity() -> u8 {
 fn default_playback_bg_color() -> String {
     "#10131a".to_string()
 }
+fn default_main_custom_background() -> bool {
+    false
+}
+fn default_main_opacity() -> u8 {
+    100
+}
+fn default_main_bg_color() -> String {
+    "#10131a".to_string()
+}
+fn default_appearance_source() -> String {
+    "own".to_string()
+}
+
+impl Default for MainWindowSettings {
+    fn default() -> Self {
+        Self {
+            x: None,
+            y: None,
+            custom_background: false,
+            opacity: 100,
+            bg_color: "#10131a".to_string(),
+        }
+    }
+}
 
 impl Default for SoundPanelWindowSettings {
     fn default() -> Self {
@@ -85,6 +123,7 @@ impl Default for SoundPanelWindowSettings {
             bg_color: "#2a2a2a".to_string(),
             clickthrough: false,
             stay_visible: false,
+            appearance_source: "own".to_string(),
         }
     }
 }
@@ -96,6 +135,34 @@ impl Default for PlaybackWindowSettings {
             y: None,
             opacity: 94,
             bg_color: "#10131a".to_string(),
+            appearance_source: "own".to_string(),
+        }
+    }
+}
+
+impl Default for WindowsSettings {
+    /// Defaults used for brand-new installations (no windows.json yet).
+    ///
+    /// New installs default the panels to inheriting the main window's
+    /// appearance (`appearance_source = "main"`), while old files that lack the
+    /// field deserialize as `"own"` to preserve their existing look.
+    fn default() -> Self {
+        Self {
+            global: GlobalSettings::default(),
+            main: MainWindowSettings {
+                custom_background: false,
+                opacity: 100,
+                bg_color: "#10131a".to_string(),
+                ..MainWindowSettings::default()
+            },
+            soundpanel: SoundPanelWindowSettings {
+                appearance_source: "main".to_string(),
+                ..SoundPanelWindowSettings::default()
+            },
+            playback: PlaybackWindowSettings {
+                appearance_source: "main".to_string(),
+                ..PlaybackWindowSettings::default()
+            },
         }
     }
 }
@@ -103,11 +170,16 @@ impl Default for PlaybackWindowSettings {
 impl WindowsSettings {
     /// Validate all settings and fix invalid values
     pub fn validate(&mut self) {
-        // Validate opacity
+        // Validate opacity (10..=100 for all windows)
+        self.main.opacity = validate_opacity(self.main.opacity);
         self.soundpanel.opacity = validate_opacity(self.soundpanel.opacity);
         self.playback.opacity = validate_opacity(self.playback.opacity);
 
         // Validate colors
+        if !is_valid_hex_color(&self.main.bg_color) {
+            tracing::warn!(bg_color = ?self.main.bg_color, "Invalid main bg_color, using default");
+            self.main.bg_color = "#10131a".to_string();
+        }
         if !is_valid_hex_color(&self.soundpanel.bg_color) {
             tracing::warn!(bg_color = ?self.soundpanel.bg_color, "Invalid soundpanel bg_color, using default");
             self.soundpanel.bg_color = "#2a2a2a".to_string();
@@ -186,6 +258,38 @@ impl WindowsManager {
         self.save(&settings)
     }
 
+    /// Get main window appearance (custom_background, opacity, bg_color)
+    pub fn get_main_appearance(&self) -> (bool, u8, String) {
+        self.load()
+            .map(|s| (s.main.custom_background, s.main.opacity, s.main.bg_color))
+            .unwrap_or((false, 100, "#10131a".to_string()))
+    }
+
+    /// Set whether the main window uses a custom background color
+    pub fn set_main_custom_background(&self, value: bool) -> Result<()> {
+        let mut settings = self.load()?;
+        settings.main.custom_background = value;
+        self.save(&settings)
+    }
+
+    /// Set main window opacity
+    pub fn set_main_opacity(&self, opacity: u8) -> Result<()> {
+        let mut settings = self.load()?;
+        settings.main.opacity = validate_opacity(opacity);
+        self.save(&settings)
+    }
+
+    /// Set main window background color
+    pub fn set_main_bg_color(&self, color: String) -> Result<()> {
+        let mut settings = self.load()?;
+        if is_valid_hex_color(&color) {
+            settings.main.bg_color = color;
+            self.save(&settings)
+        } else {
+            Err(anyhow::anyhow!("Invalid hex color format"))
+        }
+    }
+
     // ========== Sound Panel Window ==========
 
     /// Set soundpanel window position
@@ -261,6 +365,20 @@ impl WindowsManager {
             .unwrap_or(false)
     }
 
+    /// Set soundpanel appearance source ("own" or "main")
+    pub fn set_soundpanel_appearance_source(&self, source: String) -> Result<()> {
+        let mut settings = self.load()?;
+        settings.soundpanel.appearance_source = source;
+        self.save(&settings)
+    }
+
+    /// Get soundpanel appearance source ("own" or "main")
+    pub fn get_soundpanel_appearance_source(&self) -> String {
+        self.load()
+            .map(|s| s.soundpanel.appearance_source)
+            .unwrap_or_else(|_| "own".to_string())
+    }
+
     // ========== Playback Control Window ==========
 
     /// Set playback window position
@@ -306,6 +424,20 @@ impl WindowsManager {
         self.load()
             .map(|s| s.playback.bg_color)
             .unwrap_or_else(|_| "#10131a".to_string())
+    }
+
+    /// Set playback appearance source ("own" or "main")
+    pub fn set_playback_appearance_source(&self, source: String) -> Result<()> {
+        let mut settings = self.load()?;
+        settings.playback.appearance_source = source;
+        self.save(&settings)
+    }
+
+    /// Get playback appearance source ("own" or "main")
+    pub fn get_playback_appearance_source(&self) -> String {
+        self.load()
+            .map(|s| s.playback.appearance_source)
+            .unwrap_or_else(|_| "own".to_string())
     }
 
     // ========== Global Settings ==========
