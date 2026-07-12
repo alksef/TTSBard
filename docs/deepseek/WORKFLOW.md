@@ -1,5 +1,14 @@
 # Workflow: Claude ↔ DeepSeek (реализационный цикл)
 
+## Task decomposition rule
+
+Do not give DeepSeek broad stage tasks that combine several independent subsystems. First decompose the stage into several focused task files.
+
+- Each task should have one goal, a bounded file set, and its own acceptance criteria.
+- Do not mix UI restructuring, backend APIs, settings persistence, and data export in one task.
+- Run checks and perform an independent review after every focused task. Form the next task from review findings instead of appending all remaining requirements to the same prompt.
+- If a stage cannot be split cleanly, start with a small end-to-end skeleton; do not implement the entire stage in one DeepSeek run.
+
 > **Кому читать:** любому агенту (Claude или другому), работающему над этим репо.
 > По `CLAUDE.md`: **Claude = план/ревью, DeepSeek = пишет код.** Ниже — как цикл
 > запускается автоматически, без ручных кликов пользователя.
