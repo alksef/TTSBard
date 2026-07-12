@@ -84,6 +84,14 @@ Quick reference for the TTSBard project.
 - `commands/` - Tauri commands
 - `config/` - Configuration management
 
+### [audio-effects.md](./audio-effects.md)
+**Аудиоэффекты и постобработка звука (Pitch, Speed, Volume, DeepFilterNet)**
+
+- Описание алгоритмов изменения питча (Pitch Shift) и скорости (Speed)
+- Интеграция нейросетевого шумоподавления DeepFilterNet 3
+- Настройки глубины очистки звука и режим предпрослушивания (Preview)
+- Схемы обработки ошибок и fallback-поведение
+
 ---
 
 ### [vue-components.md](./vue-components.md)
