@@ -197,6 +197,10 @@ impl WindowsSettings {
         self.soundpanel.opacity = validate_opacity(self.soundpanel.opacity);
         self.playback.opacity = validate_opacity(self.playback.opacity);
 
+        // Clamp compact dimensions to 300..500
+        self.main.compact_width = self.main.compact_width.clamp(300, 500);
+        self.main.compact_height = self.main.compact_height.clamp(300, 500);
+
         // Validate colors
         if !is_valid_hex_color(&self.main.bg_color) {
             tracing::warn!(bg_color = ?self.main.bg_color, "Invalid main bg_color, using default");

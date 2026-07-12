@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { Minimize2, Maximize2 } from 'lucide-vue-next'
 import { useWindowsSettings } from '../composables/useAppSettings'
+import { compactModeState, initCompactDims } from '../composables/compactModeState'
 
 const isMinimalMode = ref(false)
 const isAnimating = ref(false)
@@ -13,24 +14,44 @@ const emit = defineEmits<{
   minimalModeChanged: [isMinimal: boolean]
 }>()
 
+initCompactDims(
+  windowsSettings.value?.main?.compact_width ?? 450,
+  windowsSettings.value?.main?.compact_height ?? 400,
+)
+
+const compactWidth = computed(() => compactModeState.width)
+const compactHeight = computed(() => compactModeState.height)
+
 async function toggleMinimalMode() {
   if (isAnimating.value) return
   isAnimating.value = true
 
   try {
-    const compactWidth = windowsSettings.value?.main?.compact_width ?? 450
-    const compactHeight = windowsSettings.value?.main?.compact_height ?? 400
-
-    const width = isMinimalMode.value ? 800 : compactWidth
-    const height = isMinimalMode.value ? 630 : compactHeight
-
-    await invoke('resize_main_window', { width, height })
+    if (isMinimalMode.value) {
+      // Leaving compact mode: flush pending save before guard, remove bounds before resize
+      await compactModeState.flushPendingCompactSave?.()
+      compactModeState.appDrivenResize++
+      await invoke('remove_main_bounds')
+      await invoke('resize_main_window', { width: 800, height: 630 })
+    } else {
+      // Entering compact mode: set bounds, then resize
+      compactModeState.appDrivenResize++
+      await invoke('set_main_bounds')
+      await invoke('resize_main_window', { width: compactWidth.value, height: compactHeight.value })
+    }
     emit('minimalModeChanged', !isMinimalMode.value)
     isMinimalMode.value = !isMinimalMode.value
   } catch (error) {
     console.error('Failed to toggle minimal mode:', error)
+    try { await invoke('remove_main_bounds') } catch { /* ignore */ }
+    compactModeState.appDrivenResize = 0
   } finally {
-    setTimeout(() => { isAnimating.value = false }, 300)
+    setTimeout(() => {
+      isAnimating.value = false
+      if (compactModeState.appDrivenResize > 0) {
+        compactModeState.appDrivenResize--
+      }
+    }, 500)
   }
 }
 </script>

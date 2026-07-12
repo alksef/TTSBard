@@ -7,6 +7,7 @@ import { save } from '@tauri-apps/plugin-dialog'
 import { useEditorSettings, useAppSettings, useTtsSettings, useAiSettings } from '../composables/useAppSettings'
 import { useErrorHandler } from '../composables/useErrorHandler'
 import { debugLog, debugError } from '../utils/debug'
+import { compactModeState, initCompactDims } from '../composables/compactModeState'
 import TtsEditor from './editor/TtsEditor.vue'
 import PhraseHistoryList from './PhraseHistoryList.vue'
 import EditorMenu from './editor/EditorMenu.vue'
@@ -83,7 +84,6 @@ const isAiButtonEnabled = computed(() => {
 
 let unlistenSettings: UnlistenFn | null = null
 let previousCompactHeight = 0
-let isAppDrivenResize = false
 let compactSaveTimer: ReturnType<typeof setTimeout> | null = null
 
 async function reloadPreprocessorData() {
@@ -111,6 +111,11 @@ function onPreprocessorChanged() {
 onMounted(async () => {
   await initTabs()
 
+  initCompactDims(
+    appSettingsContext.settings.value?.windows?.main?.compact_width ?? 450,
+    appSettingsContext.settings.value?.windows?.main?.compact_height ?? 400,
+  )
+
   unlistenSettings = await listen('settings-changed', async () => {
     debugLog('[InputPanel] Settings changed event received')
   })
@@ -132,15 +137,20 @@ onMounted(async () => {
   let unlistenResize: (() => void) | undefined
   const resizeHandler = currentWindow.onResized(async () => {
     if (!isMinimalMode.value) return
-    if (isAppDrivenResize) return
+    if (compactModeState.appDrivenResize > 0) return
+    if (showHistory.value) return
 
     if (compactSaveTimer) clearTimeout(compactSaveTimer)
     compactSaveTimer = setTimeout(async () => {
+      if (!isMinimalMode.value) return
+      if (compactModeState.appDrivenResize > 0) return
       try {
         const size = await currentWindow.outerSize()
         const w = Math.max(300, Math.min(500, size.width))
         const h = Math.max(300, Math.min(500, size.height))
         await invoke('set_main_compact_dims', { width: w, height: h })
+        compactModeState.width = w
+        compactModeState.height = h
       } catch {
         // silently fail
       }
@@ -151,10 +161,31 @@ onMounted(async () => {
     unlistenResize = unlistenResizeResult
   }
 
+  compactModeState.flushPendingCompactSave = async () => {
+    if (!isMinimalMode.value) return
+    if (compactModeState.appDrivenResize > 0) return
+    if (showHistory.value) return
+    if (compactSaveTimer) {
+      clearTimeout(compactSaveTimer)
+      compactSaveTimer = null
+    }
+    try {
+      const size = await currentWindow.outerSize()
+      const w = Math.max(300, Math.min(500, size.width))
+      const h = Math.max(300, Math.min(500, size.height))
+      await invoke('set_main_compact_dims', { width: w, height: h })
+      compactModeState.width = w
+      compactModeState.height = h
+    } catch {
+      // silently fail
+    }
+  }
+
   vueOnUnmounted(() => {
     if (unlistenClose) unlistenClose()
     if (unlistenResize) unlistenResize()
     if (compactSaveTimer) clearTimeout(compactSaveTimer)
+    compactModeState.flushPendingCompactSave = null
   })
 })
 
@@ -274,28 +305,38 @@ async function handleExpandedChange(expanded: boolean) {
     const currentWindow = getCurrentWindow()
     const size = await currentWindow.outerSize()
 
-    isAppDrivenResize = true
+    compactModeState.appDrivenResize++
+    const cw = compactModeState.width
     if (expanded) {
       previousCompactHeight = size.height
-      const newHeight = Math.min(size.height + 180, 500)
-      await invoke('resize_main_window', { width: size.width, height: newHeight })
+      const newHeight = Math.min(Math.max(size.height + 180, 300), 500)
+      await invoke('resize_main_window', { width: cw, height: newHeight })
     } else {
-      const restoreHeight = previousCompactHeight || (windowsSettingsCompactHeight())
+      const restoreHeight = Math.min(Math.max(previousCompactHeight || compactModeState.height, 300), 500)
       previousCompactHeight = 0
-      await invoke('resize_main_window', { width: size.width, height: restoreHeight })
+      await invoke('resize_main_window', { width: cw, height: restoreHeight })
     }
   } catch {
     // silently fail
   } finally {
-    setTimeout(() => { isAppDrivenResize = false }, 1000)
+    setTimeout(() => { compactModeState.appDrivenResize-- }, 800)
   }
 }
 
 watch(showHistory, handleExpandedChange)
 
-function windowsSettingsCompactHeight(): number {
-  return appSettingsContext.settings.value?.windows?.main?.compact_height ?? 400
-}
+watch(isMinimalMode, (minimal) => {
+  if (minimal && showHistory.value) {
+    showHistory.value = false
+  }
+})
+
+watch(() => appSettingsContext.settings.value?.windows?.main, (main) => {
+  if (main) {
+    compactModeState.width = main.compact_width ?? 450
+    compactModeState.height = main.compact_height ?? 400
+  }
+}, { immediate: true })
 
 async function handleEnter() {
   const currentText = text.value
@@ -441,7 +482,7 @@ function toggleHistory() {
             class="action-btn speak-btn"
             :disabled="!text.trim()"
             @click="handleEnter"
-            title="Озвучить текст — Enter"
+            title="Enter"
             aria-label="Озвучить текст (Enter)"
           >
             Озвучить

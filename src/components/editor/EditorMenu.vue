@@ -146,7 +146,7 @@ function run(fn: () => void) { close(); fn() }
 .menu-dropdown {
   position: absolute;
   bottom: calc(100% + 6px);
-  right: 0;
+  left: 0;
   min-width: 200px;
   padding: 0.4rem;
   background: var(--color-bg-elevated);
