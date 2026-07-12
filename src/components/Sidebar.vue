@@ -185,8 +185,8 @@ function toggleCollapse() {
     linear-gradient(180deg, rgba(var(--rgb-contrast), 0.03), transparent 22%),
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--sidebar-bg-top) var(--main-window-opacity), transparent) 0%,
-      color-mix(in srgb, var(--sidebar-bg-bottom) var(--main-window-opacity), transparent) 100%
+      rgba(var(--main-window-rgb), var(--main-window-opacity)) 0%,
+      rgba(var(--main-window-rgb), var(--main-window-opacity)) 100%
     );
   color: var(--color-text-primary);
   display: flex;
