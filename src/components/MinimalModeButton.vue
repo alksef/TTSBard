@@ -16,7 +16,7 @@ async function toggleMinimalMode() {
 
   try {
     const width = isMinimalMode.value ? 800 : 450
-    const height = isMinimalMode.value ? 600 : 400
+    const height = isMinimalMode.value ? 630 : 400
 
     await invoke('resize_main_window', { width, height })
     emit('minimalModeChanged', !isMinimalMode.value)
