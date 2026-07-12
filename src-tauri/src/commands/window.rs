@@ -345,6 +345,36 @@ pub fn set_main_bg_color(
     Ok(())
 }
 
+/// Set whether the main window uses custom opacity
+#[tauri::command]
+pub fn set_main_custom_opacity(
+    value: bool,
+    app_handle: AppHandle,
+    windows_manager: State<'_, WindowsManager>,
+) -> Result<(), String> {
+    info!(value, "Setting main custom opacity");
+    windows_manager
+        .set_main_custom_opacity(value)
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    emit_appearance_updates(&app_handle);
+    Ok(())
+}
+
+/// Set whether custom opacity is applied only in compact mode
+#[tauri::command]
+pub fn set_main_opacity_compact_only(
+    value: bool,
+    app_handle: AppHandle,
+    windows_manager: State<'_, WindowsManager>,
+) -> Result<(), String> {
+    info!(value, "Setting main opacity compact only");
+    windows_manager
+        .set_main_opacity_compact_only(value)
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    emit_appearance_updates(&app_handle);
+    Ok(())
+}
+
 // ========== Panel Appearance Source ==========
 
 /// Get soundpanel appearance source ("own" or "main")

@@ -83,7 +83,10 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
 const appStyle = computed(() => {
   const main = appSettings.settings.value?.windows?.main
   const theme = appSettings.settings.value?.general?.theme ?? 'dark'
-  const opacity = Math.min(100, Math.max(10, main?.opacity ?? 100)) / 100
+  let effectiveOpacity = main?.opacity ?? 100
+  if (!main?.custom_opacity) effectiveOpacity = 100
+  if (main?.opacity_compact_only && !isMinimalMode.value) effectiveOpacity = 100
+  const opacity = Math.min(100, Math.max(10, effectiveOpacity)) / 100
   const baseColor = main?.custom_background
     ? main.bg_color
     : theme === 'light'
@@ -223,6 +226,7 @@ onMounted(async () => {
 
 <style scoped>
 .app-container {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100vh;

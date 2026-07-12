@@ -22,6 +22,10 @@ pub struct MainWindowSettings {
     pub opacity: u8,
     #[serde(default = "default_main_bg_color")]
     pub bg_color: String,
+    #[serde(default)]
+    pub custom_opacity: bool,
+    #[serde(default)]
+    pub opacity_compact_only: bool,
 }
 
 /// Sound panel window settings
@@ -110,6 +114,8 @@ impl Default for MainWindowSettings {
             custom_background: false,
             opacity: 100,
             bg_color: "#10131a".to_string(),
+            custom_opacity: false,
+            opacity_compact_only: false,
         }
     }
 }
@@ -153,6 +159,8 @@ impl Default for WindowsSettings {
                 custom_background: false,
                 opacity: 100,
                 bg_color: "#10131a".to_string(),
+                custom_opacity: false,
+                opacity_compact_only: false,
                 ..MainWindowSettings::default()
             },
             soundpanel: SoundPanelWindowSettings {
@@ -258,10 +266,17 @@ impl WindowsManager {
         self.save(&settings)
     }
 
-    /// Get main window appearance (custom_background, opacity, bg_color)
+    /// Get main window appearance (custom_background, effective_opacity, bg_color)
     pub fn get_main_appearance(&self) -> (bool, u8, String) {
         self.load()
-            .map(|s| (s.main.custom_background, s.main.opacity, s.main.bg_color))
+            .map(|s| {
+                let opacity = if s.main.custom_opacity {
+                    s.main.opacity
+                } else {
+                    100
+                };
+                (s.main.custom_background, opacity, s.main.bg_color)
+            })
             .unwrap_or((false, 100, "#10131a".to_string()))
     }
 
@@ -288,6 +303,20 @@ impl WindowsManager {
         } else {
             Err(anyhow::anyhow!("Invalid hex color format"))
         }
+    }
+
+    /// Set whether the main window uses custom opacity
+    pub fn set_main_custom_opacity(&self, value: bool) -> Result<()> {
+        let mut settings = self.load()?;
+        settings.main.custom_opacity = value;
+        self.save(&settings)
+    }
+
+    /// Set whether custom opacity is applied only in compact mode
+    pub fn set_main_opacity_compact_only(&self, value: bool) -> Result<()> {
+        let mut settings = self.load()?;
+        settings.main.opacity_compact_only = value;
+        self.save(&settings)
     }
 
     // ========== Sound Panel Window ==========
