@@ -1,4 +1,4 @@
-# build.ps1 — сборка TTSBard (Tauri) под Windows.
+﻿# build.ps1 — сборка TTSBard (Tauri) под Windows.
 #
 # Использование:
 #   .\scripts\build.ps1                  # релиз по умолчанию
