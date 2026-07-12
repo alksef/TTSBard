@@ -1,17 +1,16 @@
-use crate::preprocessor::{TextPreprocessor, replacements_file, usernames_file};
+use crate::preprocessor::{replacements_file, usernames_file, TextPreprocessor};
 use crate::state::AppState;
-use tauri::State;
 use std::fs;
+use tauri::{AppHandle, State};
 
 /// Get the current replacements list content
 #[tauri::command]
 pub fn get_replacements() -> Result<String, String> {
-    let path = replacements_file()
-        .map_err(|e| format!("Failed to get replacements file path: {}", e))?;
+    let path =
+        replacements_file().map_err(|e| format!("Failed to get replacements file path: {}", e))?;
 
     if path.exists() {
-        fs::read_to_string(&path)
-            .map_err(|e| format!("Failed to read replacements file: {}", e))
+        fs::read_to_string(&path).map_err(|e| format!("Failed to read replacements file: {}", e))
     } else {
         Ok(String::new())
     }
@@ -19,34 +18,34 @@ pub fn get_replacements() -> Result<String, String> {
 
 /// Save the replacements list content
 #[tauri::command]
-pub fn save_replacements(content: String, state: State<'_, AppState>) -> Result<(), String> {
-    let path = replacements_file()
-        .map_err(|e| format!("Failed to get replacements file path: {}", e))?;
+pub fn save_replacements(
+    content: String,
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    let path =
+        replacements_file().map_err(|e| format!("Failed to get replacements file path: {}", e))?;
 
     // Create parent directory if it doesn't exist
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create directory: {}", e))?;
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
     }
 
-    fs::write(&path, content)
-        .map_err(|e| format!("Failed to write replacements file: {}", e))?;
+    fs::write(&path, content).map_err(|e| format!("Failed to write replacements file: {}", e))?;
 
     // Reload preprocessor in state
     state.editor.reload_preprocessor();
 
+    super::emit_settings_changed(&app_handle);
+
     Ok(())
 }
-
-/// Get the current usernames list content
 #[tauri::command]
 pub fn get_usernames() -> Result<String, String> {
-    let path = usernames_file()
-        .map_err(|e| format!("Failed to get usernames file path: {}", e))?;
+    let path = usernames_file().map_err(|e| format!("Failed to get usernames file path: {}", e))?;
 
     if path.exists() {
-        fs::read_to_string(&path)
-            .map_err(|e| format!("Failed to read usernames file: {}", e))
+        fs::read_to_string(&path).map_err(|e| format!("Failed to read usernames file: {}", e))
     } else {
         Ok(String::new())
     }
@@ -54,21 +53,24 @@ pub fn get_usernames() -> Result<String, String> {
 
 /// Save the usernames list content
 #[tauri::command]
-pub fn save_usernames(content: String, state: State<'_, AppState>) -> Result<(), String> {
-    let path = usernames_file()
-        .map_err(|e| format!("Failed to get usernames file path: {}", e))?;
+pub fn save_usernames(
+    content: String,
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    let path = usernames_file().map_err(|e| format!("Failed to get usernames file path: {}", e))?;
 
     // Create parent directory if it doesn't exist
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create directory: {}", e))?;
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
     }
 
-    fs::write(&path, content)
-        .map_err(|e| format!("Failed to write usernames file: {}", e))?;
+    fs::write(&path, content).map_err(|e| format!("Failed to write usernames file: {}", e))?;
 
     // Reload preprocessor in state
     state.editor.reload_preprocessor();
+
+    super::emit_settings_changed(&app_handle);
 
     Ok(())
 }

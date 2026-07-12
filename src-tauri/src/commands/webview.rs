@@ -1,7 +1,7 @@
 use crate::config::SettingsManager;
 use crate::state::AppState;
 use crate::webview::WebViewSettings;
-use tauri::{Emitter, Manager, State};
+use tauri::{Manager, State};
 use std::fs;
 
 /// Get current webview settings from AppState
@@ -98,7 +98,7 @@ pub async fn save_webview_settings(
     }
 
     // Emit settings-changed event to update UI
-    let _ = app_handle.emit("settings-changed", ());
+    super::emit_settings_changed(&app_handle);
 
     // Trigger server restart if server settings changed
     // Note: start_on_boot changes don't require restart (only affects next boot)
@@ -220,7 +220,7 @@ pub async fn generate_webview_token(
     }
 
     // Emit settings-changed event to update UI
-    let _ = app_handle.emit("settings-changed", ());
+    super::emit_settings_changed(&app_handle);
 
     Ok(token)
 }
@@ -274,7 +274,7 @@ pub async fn regenerate_webview_token(
     }
 
     // Emit settings-changed event to update UI
-    let _ = app_handle.emit("settings-changed", ());
+    super::emit_settings_changed(&app_handle);
 
     // Restart server to apply new token
     state.webview.send_event(crate::events::AppEvent::RestartWebViewServer);
@@ -299,6 +299,7 @@ pub async fn set_webview_upnp_enabled(
     if let Some(manager) = settings_manager {
         manager.set_webview_upnp_enabled(enabled)
             .map_err(|e| format!("Failed to save UPnP setting: {}", e))?;
+        super::emit_settings_changed(&app_handle);
     }
 
     // Toggle UPnP without server restart

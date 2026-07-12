@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use tauri::{command, State};
+use tauri::{command, State, AppHandle};
 use tracing::{info, error, warn};
 use std::time::Instant;
 use crate::config::{SettingsManager, dto::ProxySettingsDto, ProxyType, ProxyMode, MtProxySettings};
@@ -204,6 +204,7 @@ pub fn get_proxy_settings(
 /// * `proxy_type` - Type of proxy (Socks5, Socks4, Http)
 #[command]
 pub fn set_proxy_url(
+    app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     url: String,
     proxy_type: ProxyType,
@@ -223,6 +224,8 @@ pub fn set_proxy_url(
     settings_manager.set_proxy_url(url)
         .map_err(|e| format!("Failed to save proxy settings: {}", e))?;
 
+    super::emit_settings_changed(&app_handle);
+
     info!("Proxy URL updated successfully");
     Ok(())
 }
@@ -235,6 +238,7 @@ pub fn set_proxy_url(
 /// * `enabled` - Whether OpenAI should use the unified proxy
 #[command]
 pub fn set_openai_use_proxy(
+    app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     enabled: bool,
 ) -> Result<(), String> {
@@ -242,6 +246,8 @@ pub fn set_openai_use_proxy(
 
     settings_manager.set_openai_use_proxy(enabled)
         .map_err(|e| format!("Failed to save OpenAI proxy setting: {}", e))?;
+
+    super::emit_settings_changed(&app_handle);
 
     info!("OpenAI proxy setting updated successfully");
     Ok(())
@@ -255,6 +261,7 @@ pub fn set_openai_use_proxy(
 /// * `mode` - Proxy mode for Telegram connection
 #[command]
 pub fn set_telegram_proxy_mode(
+    app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     mode: ProxyMode,
 ) -> Result<(), String> {
@@ -262,6 +269,8 @@ pub fn set_telegram_proxy_mode(
 
     settings_manager.set_telegram_proxy_mode(mode)
         .map_err(|e| format!("Failed to save Telegram proxy mode: {}", e))?;
+
+    super::emit_settings_changed(&app_handle);
 
     info!("Telegram proxy mode updated successfully");
     Ok(())
@@ -559,6 +568,7 @@ pub fn get_mtproxy_settings(
 /// * `dc_id` - Optional DC ID (data center ID)
 #[command]
 pub fn set_mtproxy_settings(
+    app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     host: Option<String>,
     port: u16,
@@ -590,6 +600,8 @@ pub fn set_mtproxy_settings(
 
     settings_manager.set_mtproxy_settings(host, port, secret, dc_id)
         .map_err(|e| format!("Failed to save MTProxy settings: {}", e))?;
+
+    super::emit_settings_changed(&app_handle);
 
     info!("MTProxy settings updated successfully");
     Ok(())

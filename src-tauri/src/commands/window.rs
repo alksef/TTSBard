@@ -2,7 +2,7 @@ use crate::state::AppState;
 use crate::config::{SettingsManager, WindowsManager, Theme, HotkeySettings, Hotkey};
 use crate::soundpanel_window::{hide_soundpanel_window, update_soundpanel_appearance};
 use crate::playback_window::update_playback_appearance;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Manager, State};
 use tracing::{info, debug};
 
 #[tauri::command]
@@ -54,6 +54,7 @@ pub fn get_hotkey_enabled(
 #[tauri::command]
 pub fn set_hotkey_enabled(
     enabled: bool,
+    app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     state: State<'_, AppState>
 ) -> Result<(), String> {
@@ -61,6 +62,7 @@ pub fn set_hotkey_enabled(
         .map_err(|e| format!("Failed to save settings: {}", e))?;
 
     state.set_hotkey_enabled(enabled);
+    super::emit_settings_changed(&app_handle);
 
     Ok(())
 }
@@ -82,6 +84,8 @@ pub fn set_global_exclude_from_capture(
 
     windows_manager.set_global_exclude_from_capture(value)
         .map_err(|e| format!("Failed to save settings: {}", e))?;
+
+    super::emit_settings_changed(&_app_handle);
 
     info!("Setting saved. Will apply to all windows after application restart.");
     Ok(())
@@ -120,7 +124,7 @@ pub fn update_theme(
     }
     info!(?tauri_theme, "Applied window theme");
 
-    let _ = app_handle.emit("settings-changed", ());
+    super::emit_settings_changed(&app_handle);
 
     info!(?theme, "Theme updated successfully");
     Ok(())
@@ -170,10 +174,13 @@ pub fn toggle_playback_control_window(app_handle: AppHandle) -> Result<(), Strin
 #[tauri::command]
 pub fn set_show_playback_on_start(
     value: bool,
+    app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
     settings_manager.set_show_playback_on_start(value)
-        .map_err(|e| format!("Failed to save settings: {}", e))
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    super::emit_settings_changed(&app_handle);
+    Ok(())
 }
 
 /// Get show playback control window on start
@@ -217,6 +224,8 @@ pub async fn set_hotkey(
     settings_manager.set_hotkey(&name, &hotkey)
         .map_err(|e| format!("Failed to save hotkey: {}", e))?;
 
+    super::emit_settings_changed(&app_handle);
+
     crate::hotkeys::reregister_hotkeys(&app_handle)
         .map_err(|e| format!("Failed to re-register hotkeys: {}", e))?;
 
@@ -232,6 +241,8 @@ pub async fn reset_hotkey_to_default(
 ) -> Result<Hotkey, String> {
     let default = settings_manager.reset_hotkey_to_default(&name)
         .map_err(|e| format!("Failed to reset hotkey: {}", e))?;
+
+    super::emit_settings_changed(&app_handle);
 
     crate::hotkeys::reregister_hotkeys(&app_handle)
         .map_err(|e| format!("Failed to re-register hotkeys: {}", e))?;
@@ -263,7 +274,7 @@ pub async fn set_hotkey_recording(app_handle: AppHandle, recording: bool) {
 
 /// Notify all windows that appearance settings changed so panels update on the fly
 fn emit_appearance_updates(app_handle: &AppHandle) {
-    let _ = app_handle.emit("settings-changed", ());
+    super::emit_settings_changed(app_handle);
     let _ = update_soundpanel_appearance(app_handle);
     let _ = update_playback_appearance(app_handle);
 }
@@ -303,11 +314,14 @@ pub fn remove_main_bounds(app_handle: AppHandle) -> Result<(), String> {
 pub fn set_main_compact_dims(
     width: u32,
     height: u32,
+    app_handle: AppHandle,
     windows_manager: State<'_, WindowsManager>,
 ) -> Result<(), String> {
     windows_manager
         .set_main_compact_dims(width, height)
-        .map_err(|e| format!("Failed to save compact dims: {}", e))
+        .map_err(|e| format!("Failed to save compact dims: {}", e))?;
+    super::emit_settings_changed(&app_handle);
+    Ok(())
 }
 
 /// Get main window compact dimensions

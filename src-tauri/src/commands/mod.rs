@@ -23,6 +23,12 @@ pub use self::ai::*;
 pub use self::playback::*;
 pub use self::window::*;
 
+/// Centralized helper to emit `settings-changed` event after persisted settings are written.
+/// Use this instead of duplicating the `"settings-changed"` string literal across command modules.
+pub fn emit_settings_changed(app_handle: &AppHandle) {
+    let _ = app_handle.emit("settings-changed", ());
+}
+
 /// Quit the application
 #[tauri::command]
 pub fn quit_app(app_handle: AppHandle) -> Result<(), String> {
@@ -189,7 +195,7 @@ pub fn set_editor_quick(
     settings_manager.set_editor_quick(value)
         .map_err(|e| format!("Failed to save settings: {}", e))?;
 
-    let _ = app_handle.emit("settings-changed", ());
+    emit_settings_changed(&app_handle);
 
     Ok(value)
 }
@@ -212,7 +218,7 @@ pub fn set_editor_spellcheck_enabled(
     settings_manager.set_editor_spellcheck_enabled(value)
         .map_err(|e| format!("Failed to save settings: {}", e))?;
 
-    let _ = app_handle.emit("settings-changed", ());
+    emit_settings_changed(&app_handle);
 
     Ok(value)
 }
@@ -235,7 +241,7 @@ pub fn set_editor_spellcheck_source(
     settings_manager.set_editor_spellcheck_source(value.clone())
         .map_err(|e| format!("Failed to save settings: {}", e))?;
 
-    let _ = app_handle.emit("settings-changed", ());
+    emit_settings_changed(&app_handle);
 
     Ok(value)
 }
@@ -258,7 +264,7 @@ pub fn set_editor_height(
     settings_manager.set_editor_height(height)
         .map_err(|e| format!("Failed to save editor height: {}", e))?;
 
-    let _ = app_handle.emit("settings-changed", ());
+    emit_settings_changed(&app_handle);
 
     Ok(height.clamp(200, 1200))
 }
