@@ -27,6 +27,9 @@ export function createAppSettings(): AppSettingsContext {
   // Store cleanup function for event listeners
   let cleanupListeners: (() => void) | null = null
 
+  // Coalescing flag: if an event arrives during load, schedule exactly one follow-up reload
+  let pendingReload = false
+
   /**
    * Wait for backend to be ready
    */
@@ -53,7 +56,8 @@ export function createAppSettings(): AppSettingsContext {
    */
   async function load(): Promise<void> {
     if (isLoading.value) {
-      debugLog('[useAppSettings] Already loading, skipping')
+      debugLog('[useAppSettings] Already loading, scheduling pending reload')
+      pendingReload = true
       return
     }
 
@@ -90,6 +94,12 @@ export function createAppSettings(): AppSettingsContext {
     } finally {
       isLoading.value = false
       debugLog('[useAppSettings] Loading finished. isLoading:', isLoading.value, 'error:', error.value)
+
+      if (pendingReload) {
+        pendingReload = false
+        debugLog('[useAppSettings] Pending reload detected, triggering follow-up reload')
+        await load()
+      }
     }
   }
 

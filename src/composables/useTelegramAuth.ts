@@ -1,7 +1,7 @@
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { debugLog, debugError } from '../utils/debug'
-import type { VoiceCode } from '../types/settings'
+import type { VoiceCode, AppSettingsDto } from '../types/settings'
 
 export type TelegramAuthState = 'idle' | 'loading' | 'code_required' | 'connected' | 'error'
 
@@ -277,7 +277,7 @@ export function useTelegramAuth() {
   async function loadSavedVoices() {
     try {
       debugLog('[TELEGRAM VOICES] Loading saved voices')
-      const settings = await invoke<any>('get_all_app_settings')
+      const settings = await invoke<AppSettingsDto>('get_all_app_settings')
       savedVoices.value = settings.tts.telegram.voices || []
       debugLog('[TELEGRAM VOICES] Saved voices loaded:', savedVoices.value.length)
     } catch (error) {
