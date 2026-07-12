@@ -65,11 +65,11 @@ pub struct AudioEffectsSettings {
     #[serde(default = "default_effects_enabled")]
     pub enabled: bool,
     #[serde(default = "default_pitch")]
-    pub pitch: i16, // -100 to +100 (проценты)
+    pub pitch: i16, // -100 to +100 (percent → -12..+12 semitones)
     #[serde(default = "default_speed")]
-    pub speed: i16, // -100 to +100 (проценты)
+    pub speed: i16, // -100 to +100 (percent → 0.75..1.50 tempo factor)
     #[serde(default = "default_volume")]
-    pub volume: i16, // 0 to 200 (проценты, 100 = норма)
+    pub volume: i16, // 0 to 200 (percent, 100 = normal)
     /// Включить очистку речи от шума (DeepFilterNet)
     #[serde(default = "default_enhance_enabled")]
     pub enhance_enabled: bool,
@@ -77,6 +77,10 @@ pub struct AudioEffectsSettings {
     /// Меньше — мягче, больше — сильнее подавление шума.
     #[serde(default = "default_enhance_atten_db")]
     pub enhance_atten_db: f32,
+    /// Сохранять тембр голоса при изменении высоты (Signalsmith formant correction).
+    /// По умолчанию включено. Не зависит от DeepFilterNet.
+    #[serde(default = "default_formant_preserved")]
+    pub formant_preserved: bool,
 }
 
 fn default_effects_enabled() -> bool {
@@ -97,6 +101,9 @@ fn default_enhance_enabled() -> bool {
 fn default_enhance_atten_db() -> f32 {
     12.0
 }
+fn default_formant_preserved() -> bool {
+    true
+}
 
 impl Default for AudioEffectsSettings {
     fn default() -> Self {
@@ -107,6 +114,7 @@ impl Default for AudioEffectsSettings {
             volume: 100,
             enhance_enabled: false,
             enhance_atten_db: 12.0,
+            formant_preserved: true,
         }
     }
 }
@@ -722,7 +730,9 @@ fn write_json_atomically(path: &Path, content: &str) -> Result<()> {
         .as_nanos();
     let tmp_path = parent.join(format!(
         ".{}.{}.tmp",
-        path.file_name().and_then(|name| name.to_str()).unwrap_or("settings.json"),
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("settings.json"),
         stamp
     ));
 
@@ -1430,6 +1440,11 @@ impl SettingsManager {
         self.update_field("/audio_effects/enhance_atten_db", &validated)
     }
 
+    /// Set audio effects formant preservation (Signalsmith formant correction)
+    pub fn set_audio_effects_formant_preserved(&self, preserved: bool) -> Result<()> {
+        self.update_field("/audio_effects/formant_preserved", &preserved)
+    }
+
     // ========== Hotkey Settings ==========
 
     /// Get all hotkey settings
@@ -1601,5 +1616,4 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&config_dir);
     }
-
 }

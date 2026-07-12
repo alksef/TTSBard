@@ -43,8 +43,15 @@ const draftEffects = ref({
   volume: 100,
   enhance_enabled: false,
   enhance_atten_db: 12,
+  formant_preserved: true,
 });
 const savedEffects = ref({ ...draftEffects.value });
+
+const tempoLabel = computed(() => {
+  const speed = draftEffects.value.speed;
+  const tempo = speed <= 0 ? 1 - Math.abs(speed) * 0.25 / 100 : 1 + speed * 0.5 / 100;
+  return `${tempo.toFixed(2)}×`;
+});
 
 const isDirty = ref(false);
 const saveStatus = ref<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -234,6 +241,7 @@ async function loadDraftEffects() {
       volume: number;
       enhance_enabled: boolean;
       enhance_atten_db: number;
+      formant_preserved: boolean;
     }>('get_audio_effects');
     draftEffects.value = { ...effects };
     savedEffects.value = { ...effects };
@@ -379,6 +387,7 @@ async function saveEffects() {
       volume: draftEffects.value.volume,
       enhanceEnabled: draftEffects.value.enhance_enabled,
       enhanceAttenDb: draftEffects.value.enhance_atten_db,
+      formantPreserved: draftEffects.value.formant_preserved,
     });
     savedEffects.value = { ...draftEffects.value };
     isDirty.value = false;
@@ -442,6 +451,7 @@ watch(audioEffectsFromComposable, (newEffects) => {
       volume: newEffects.volume,
       enhance_enabled: newEffects.enhance_enabled,
       enhance_atten_db: newEffects.enhance_atten_db,
+      formant_preserved: newEffects.formant_preserved ?? true,
     };
     savedEffects.value = { ...draftEffects.value };
   }
@@ -730,22 +740,18 @@ watch(audioEffectsFromComposable, (newEffects) => {
           </div>
 
           <div class="setting-row slider-row" :class="{ disabled: !draftEffects.enabled }">
-            <label>Скорость</label>
+            <label>Темп</label>
             <div class="slider-group">
               <div class="volume-control">
                 <input type="range" min="-100" max="100" step="1" v-model.number="draftEffects.speed" @input="markDirty" :disabled="!draftEffects.enabled" />
-                <span class="volume-value">{{ draftEffects.speed }}%</span>
+                <span class="volume-value">{{ tempoLabel }}</span>
               </div>
-              <div class="slider-marks">
-                <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === -100 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', -100)" style="left: 0%">−100</button>
-                <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === -75 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', -75)" style="left: 12.5%">−75</button>
-                <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === -50 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', -50)" style="left: 25%">−50</button>
-                <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === -25 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', -25)" style="left: 37.5%">−25</button>
-                <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === 0 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', 0)" style="left: 50%">0</button>
-                <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === 25 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', 25)" style="left: 62.5%">+25</button>
-                <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === 50 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', 50)" style="left: 75%">+50</button>
-                <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === 75 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', 75)" style="left: 87.5%">+75</button>
-                <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === 100 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', 100)" style="left: 100%">+100</button>
+              <div class="slider-marks tempo-marks">
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === -100 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', -100)" style="left: 0%">0.75×</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === -40 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', -40)" style="left: 30%">0.90×</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === 0 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', 0)" style="left: 50%">1.00×</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === 50 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', 50)" style="left: 75%">1.25×</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === 100 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', 100)" style="left: 100%">1.50×</button>
               </div>
             </div>
           </div>
@@ -771,6 +777,18 @@ watch(audioEffectsFromComposable, (newEffects) => {
             </div>
           </div>
 
+          <div class="setting-row" :class="{ disabled: !draftEffects.enabled }">
+            <label class="setting-label">Сохранять тембр голоса</label>
+            <label class="toggle-switch">
+              <input
+                type="checkbox"
+                v-model="draftEffects.formant_preserved"
+                @change="markDirty"
+                :disabled="!draftEffects.enabled"
+              />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
 
         </div>
 
@@ -1366,6 +1384,11 @@ watch(audioEffectsFromComposable, (newEffects) => {
   height: 24px;
 }
 
+.setting-row .toggle-switch {
+  flex: 0 0 44px;
+  min-width: 44px;
+}
+
 .toggle-switch input {
   opacity: 0;
   width: 0;
@@ -1559,5 +1582,18 @@ input:checked + .toggle-slider:before {
 .slider-row .slider-marks {
   margin-left: 8px;
   width: calc(100% - 67px);
+}
+
+.tempo-marks {
+  display: block;
+}
+
+.tempo-marks .mark-btn {
+  position: absolute;
+  transform: translateX(-50%);
+  min-width: 0;
+  padding-left: 2px;
+  padding-right: 2px;
+  font-size: 10px;
 }
 </style>

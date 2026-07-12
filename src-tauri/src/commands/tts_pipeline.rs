@@ -81,7 +81,8 @@ pub fn apply_audio_effects_pipeline(audio_data: Vec<u8>, settings: &AppSettings)
     .with_enhance(
         settings.audio_effects.enhance_enabled,
         settings.audio_effects.enhance_atten_db,
-    );
+    )
+    .with_formant_preserved(settings.audio_effects.formant_preserved);
 
     let original_len = audio_data.len();
     match apply_effects(audio_data, &effects) {
