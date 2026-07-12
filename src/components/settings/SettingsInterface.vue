@@ -159,7 +159,6 @@ watch(
   <div class="settings-interface">
     <!-- Theme -->
     <section class="settings-section">
-      <h2 class="section-title">Тема</h2>
       <div class="theme-selector">
         <label class="theme-option" :class="{ active: generalSettings?.theme === 'dark' }">
           <input
