@@ -1,6 +1,6 @@
 use crate::config::{SettingsManager, TwitchSettings};
 use crate::state::AppState;
-use tauri::{State, Manager};
+use tauri::{Manager, State};
 
 /// Получить текущие настройки Twitch (включая токен)
 #[tauri::command]
@@ -45,6 +45,7 @@ pub async fn save_twitch_settings(
     if let Some(manager) = settings_manager {
         manager.set_twitch_settings(&settings)
             .map_err(|e| format!("Failed to save Twitch settings: {}", e))?;
+        super::emit_settings_changed(&app_handle);
     }
 
     // Только после успешного сохранения в файл обновляем AppState

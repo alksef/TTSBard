@@ -1,8 +1,8 @@
 //! Logging commands for managing application logging settings
 
-use crate::config::{SettingsManager, LoggingSettings};
-use tauri::State;
+use crate::config::{LoggingSettings, SettingsManager};
 use std::collections::HashMap;
+use tauri::{AppHandle, State};
 
 const VALID_LOG_LEVELS: &[&str] = &["error", "warn", "info", "debug", "trace"];
 
@@ -38,7 +38,7 @@ pub fn validate_module_levels(levels: &HashMap<String, String>) -> Result<(), St
 /// Get logging settings
 #[tauri::command]
 pub fn get_logging_settings(
-    settings_manager: State<'_, SettingsManager>
+    settings_manager: State<'_, SettingsManager>,
 ) -> Result<LoggingSettings, String> {
     Ok(settings_manager.get_logging_settings())
 }
@@ -48,14 +48,20 @@ pub fn get_logging_settings(
 pub fn save_logging_settings(
     enabled: bool,
     level: String,
-    settings_manager: State<'_, SettingsManager>
+    app_handle: AppHandle,
+    settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
     // Validate log level before updating (no clone needed - pass as &str)
     validate_log_level(&level)?;
 
     // Atomically update logging settings
-    settings_manager.update_logging(|logging| {
-        logging.enabled = enabled;
-        logging.level = level;
-    }).map_err(|e| e.to_string())
+    settings_manager
+        .update_logging(|logging| {
+            logging.enabled = enabled;
+            logging.level = level;
+        })
+        .map_err(|e| e.to_string())?;
+
+    super::emit_settings_changed(&app_handle);
+    Ok(())
 }

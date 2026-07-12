@@ -5,7 +5,7 @@ use crate::playback::{PlaybackManager, PlaybackStateDto};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::{Mutex as StdMutex, OnceLock};
-use tauri::{Emitter, State};
+use tauri::{AppHandle, State};
 use tracing::{debug, info};
 
 pub struct PlaybackState(pub Arc<PlaybackManager>);
@@ -91,72 +91,91 @@ pub fn get_audio_settings(
 /// Set speaker device
 #[tauri::command]
 pub fn set_speaker_device(
+    app_handle: AppHandle,
     device_id: Option<String>,
     settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
     settings_manager
         .set_speaker_device(device_id)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    super::emit_settings_changed(&app_handle);
+    Ok(())
 }
 
 /// Set speaker enabled
 #[tauri::command]
 pub fn set_speaker_enabled(
+    app_handle: AppHandle,
     enabled: bool,
     settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
     settings_manager
         .set_speaker_enabled(enabled)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    super::emit_settings_changed(&app_handle);
+    Ok(())
 }
 
 /// Set speaker volume
 #[tauri::command]
 pub fn set_speaker_volume(
+    app_handle: AppHandle,
     volume: u8,
     settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
     settings_manager
         .set_speaker_volume(volume)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    super::emit_settings_changed(&app_handle);
+    Ok(())
 }
 
 /// Set virtual mic device
 #[tauri::command]
 pub fn set_virtual_mic_device(
+    app_handle: AppHandle,
     device_id: Option<String>,
     settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
     settings_manager
         .set_virtual_mic_device(device_id)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    super::emit_settings_changed(&app_handle);
+    Ok(())
 }
 
 /// Enable virtual mic
 #[tauri::command]
-pub fn enable_virtual_mic(settings_manager: State<'_, SettingsManager>) -> Result<(), String> {
+pub fn enable_virtual_mic(app_handle: AppHandle, settings_manager: State<'_, SettingsManager>) -> Result<(), String> {
     settings_manager
         .set_virtual_mic_device(Some("".to_string())) // Enable by setting a device
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    super::emit_settings_changed(&app_handle);
+    Ok(())
 }
 
 /// Disable virtual mic
 #[tauri::command]
-pub fn disable_virtual_mic(settings_manager: State<'_, SettingsManager>) -> Result<(), String> {
+pub fn disable_virtual_mic(app_handle: AppHandle, settings_manager: State<'_, SettingsManager>) -> Result<(), String> {
     settings_manager
         .set_virtual_mic_device(None)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    super::emit_settings_changed(&app_handle);
+    Ok(())
 }
 
 /// Set virtual mic volume
 #[tauri::command]
 pub fn set_virtual_mic_volume(
+    app_handle: AppHandle,
     volume: u8,
     settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
     settings_manager
         .set_virtual_mic_volume(volume)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    super::emit_settings_changed(&app_handle);
+    Ok(())
 }
 
 /// Test playback on a specific audio device
@@ -190,78 +209,99 @@ pub fn get_audio_effects(
 /// Set audio effects enabled
 #[tauri::command]
 pub fn set_audio_effects_enabled(
+    app_handle: AppHandle,
     enabled: bool,
     settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
     settings_manager
         .set_audio_effects_enabled(enabled)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    super::emit_settings_changed(&app_handle);
+    Ok(())
 }
 
 /// Set audio effects pitch
 #[tauri::command]
 pub fn set_audio_effects_pitch(
+    app_handle: AppHandle,
     pitch: i16,
     settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
     settings_manager
         .set_audio_effects_pitch(pitch)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    super::emit_settings_changed(&app_handle);
+    Ok(())
 }
 
 /// Set audio effects speed
 #[tauri::command]
 pub fn set_audio_effects_speed(
+    app_handle: AppHandle,
     speed: i16,
     settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
     settings_manager
         .set_audio_effects_speed(speed)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    super::emit_settings_changed(&app_handle);
+    Ok(())
 }
 
 /// Set audio effects volume
 #[tauri::command]
 pub fn set_audio_effects_volume(
+    app_handle: AppHandle,
     volume: i16,
     settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
     settings_manager
         .set_audio_effects_volume(volume)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    super::emit_settings_changed(&app_handle);
+    Ok(())
 }
 
 /// Set audio effects enhance (DeepFilterNet noise suppression) enabled
 #[tauri::command]
 pub fn set_audio_effects_enhance_enabled(
+    app_handle: AppHandle,
     enabled: bool,
     settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
     settings_manager
         .set_audio_effects_enhance_enabled(enabled)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    super::emit_settings_changed(&app_handle);
+    Ok(())
 }
 
 /// Set audio effects enhance attenuation limit (dB, 5..30)
 #[tauri::command]
 pub fn set_audio_effects_enhance_atten_db(
+    app_handle: AppHandle,
     atten_db: f32,
     settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
     settings_manager
         .set_audio_effects_enhance_atten_db(atten_db)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    super::emit_settings_changed(&app_handle);
+    Ok(())
 }
 
 /// Set audio effects formant preservation (Signalsmith formant correction)
 #[tauri::command]
 pub fn set_audio_effects_formant_preserved(
+    app_handle: AppHandle,
     preserved: bool,
     settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
     settings_manager
         .set_audio_effects_formant_preserved(preserved)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    super::emit_settings_changed(&app_handle);
+    Ok(())
 }
 
 // ==================== Preview & Save Commands ====================
@@ -393,6 +433,6 @@ pub fn save_audio_effects(
         .save(&settings)
         .map_err(|e| format!("Не удалось сохранить настройки: {}", e))?;
 
-    let _ = app_handle.emit("settings-changed", ());
+    super::emit_settings_changed(&app_handle);
     Ok(())
 }

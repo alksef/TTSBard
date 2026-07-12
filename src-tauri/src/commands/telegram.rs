@@ -1,6 +1,6 @@
 use crate::telegram::{TelegramClient, UserInfo, TtsResult, SileroTtsBot, CurrentVoice, Limits, get_current_voice, get_limits, ProxyStatus, types::VoiceCode, bot::set_speaker};
 use crate::config::{SettingsManager, ProxyMode};
-use tauri::State;
+use tauri::{State, AppHandle};
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tracing::info;
@@ -128,6 +128,7 @@ pub async fn telegram_request_code(
 pub async fn telegram_sign_in(
     state: State<'_, TelegramState>,
     settings_manager: State<'_, SettingsManager>,
+    app_handle: AppHandle,
     code: String,
 ) -> Result<(), String> {
     if code.trim().is_empty() {
@@ -156,6 +157,8 @@ pub async fn telegram_sign_in(
     settings_manager.set_telegram_api_id(Some(api_id_to_save as i64))
         .map_err(|e| format!("Failed to save api_id: {}", e))?;
 
+    super::emit_settings_changed(&app_handle);
+
     Ok(())
 }
 
@@ -164,6 +167,7 @@ pub async fn telegram_sign_in(
 pub async fn telegram_sign_out(
     state: State<'_, TelegramState>,
     settings_manager: State<'_, SettingsManager>,
+    app_handle: AppHandle,
 ) -> Result<(), String> {
     let client_opt = {
         let guard = state.client.lock().await;
@@ -181,6 +185,8 @@ pub async fn telegram_sign_out(
     // Удаляем сохранённый api_id из settings.json
     settings_manager.set_telegram_api_id(None)
         .map_err(|e| format!("Failed to delete api_id: {}", e))?;
+
+    super::emit_settings_changed(&app_handle);
 
     Ok(())
 }
@@ -424,6 +430,7 @@ pub async fn telegram_set_speaker(
 #[tauri::command]
 pub fn telegram_add_voice_code(
     settings_manager: State<'_, SettingsManager>,
+    app_handle: AppHandle,
     voice: VoiceCode,
 ) -> Result<(), String> {
     // 1. Проверить что voice.id не пустой
@@ -445,6 +452,8 @@ pub fn telegram_add_voice_code(
     settings_manager.save(&settings)
         .map_err(|e| format!("Failed to save settings: {}", e))?;
 
+    super::emit_settings_changed(&app_handle);
+
     Ok(())
 }
 
@@ -452,6 +461,7 @@ pub fn telegram_add_voice_code(
 #[tauri::command]
 pub fn telegram_remove_voice_code(
     settings_manager: State<'_, SettingsManager>,
+    app_handle: AppHandle,
     voice_id: String,
 ) -> Result<(), String> {
     let mut settings = settings_manager.load()
@@ -469,6 +479,8 @@ pub fn telegram_remove_voice_code(
     settings_manager.save(&settings)
         .map_err(|e| format!("Failed to save settings: {}", e))?;
 
+    super::emit_settings_changed(&app_handle);
+
     Ok(())
 }
 
@@ -477,6 +489,7 @@ pub fn telegram_remove_voice_code(
 pub async fn telegram_select_voice(
     state: State<'_, TelegramState>,
     settings_manager: State<'_, SettingsManager>,
+    app_handle: AppHandle,
     voice_id: String,
 ) -> Result<bool, String> {
     // 1. Отправить "/speaker {voice_id}" боту
@@ -496,6 +509,8 @@ pub async fn telegram_select_voice(
 
         settings_manager.save(&settings)
             .map_err(|e| format!("Failed to save settings: {}", e))?;
+
+        super::emit_settings_changed(&app_handle);
     }
 
     // 3. Вернуть результат
