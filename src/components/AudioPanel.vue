@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import { RefreshCw, Loader, Volume2, VolumeX, Mic, Info, Play, AudioLines, Sliders, Upload, Square, FileAudio, Save, ShieldCheck } from 'lucide-vue-next';
+import { RefreshCw, Loader, Volume2, VolumeX, Mic, Info, Play, AudioLines, Sliders, Upload, Square, FileAudio, Save, ShieldCheck, X, FolderOpen } from 'lucide-vue-next';
 import { useAudioSettings, useAudioEffectsSettings } from '../composables/useAppSettings';
 import { debugLog } from '../utils/debug';
 
@@ -53,6 +53,7 @@ const selectedFile = ref<{ path: string; name: string; size: number } | null>(nu
 const isPreviewPlaying = ref(false);
 const previewError = ref('');
 const previewMode = ref<'original' | 'effects' | null>(null);
+const previewGeneration = ref(0);
 
 async function loadDevices(force = false) {
   if (isDataLoaded.value && !force) {
@@ -254,12 +255,44 @@ async function pickFile() {
     });
     if (result && typeof result === 'string') {
       const fileName = result.split('\\').pop() || result.split('/').pop() || result;
+      stopPreviewAndClearState();
       selectedFile.value = { path: result, name: fileName, size: 0 };
       previewError.value = '';
     }
   } catch (e) {
     previewError.value = 'Не удалось открыть диалог выбора файла';
   }
+}
+
+async function replaceFile() {
+  try {
+    const result = await open({
+      filters: [{ name: 'Аудиофайлы', extensions: ['wav', 'mp3'] }],
+      multiple: false,
+    });
+    if (result && typeof result === 'string') {
+      const fileName = result.split('\\').pop() || result.split('/').pop() || result;
+      stopPreviewAndClearState();
+      selectedFile.value = { path: result, name: fileName, size: 0 };
+      previewError.value = '';
+    }
+    // Cancelling the dialog (result is null) keeps oldFile unchanged
+  } catch (e) {
+    previewError.value = 'Не удалось открыть диалог выбора файла';
+  }
+}
+
+function clearFile() {
+  stopPreviewAndClearState();
+  selectedFile.value = null;
+  previewError.value = '';
+}
+
+function stopPreviewAndClearState() {
+  previewGeneration.value++;
+  invoke('stop_preview').catch(() => {});
+  isPreviewPlaying.value = false;
+  previewMode.value = null;
 }
 
 async function playPreview(mode: 'original' | 'effects') {
@@ -270,6 +303,8 @@ async function playPreview(mode: 'original' | 'effects') {
   isPreviewPlaying.value = true;
   previewMode.value = mode;
   previewError.value = '';
+
+  const gen = ++previewGeneration.value;
 
   try {
     const spkr = audioSettings.value.speaker_device ?? null;
@@ -298,15 +333,20 @@ async function playPreview(mode: 'original' | 'effects') {
       });
     }
   } catch (e) {
-    previewError.value = e as string;
+    if (previewGeneration.value === gen) {
+      previewError.value = e as string;
+    }
   } finally {
-    isPreviewPlaying.value = false;
-    previewMode.value = null;
+    if (previewGeneration.value === gen) {
+      isPreviewPlaying.value = false;
+      previewMode.value = null;
+    }
   }
 }
 
 async function stopPreview() {
-  await invoke('stop_preview');
+  previewGeneration.value++;
+  invoke('stop_preview').catch(() => {});
   isPreviewPlaying.value = false;
   previewMode.value = null;
 }
@@ -406,17 +446,21 @@ watch(audioEffectsFromComposable, (newEffects) => {
     </div>
 
     <div v-else>
-      <div class="tab-bar">
+      <div class="audio-tabs">
         <button
-          class="tab-btn"
           :class="{ active: activeTab === 'devices' }"
           @click="activeTab = 'devices'"
-        >Устройства</button>
+        >
+          <Volume2 :size="18" />
+          <span>Устройства</span>
+        </button>
         <button
-          class="tab-btn"
           :class="{ active: activeTab === 'effects' }"
           @click="activeTab = 'effects'"
-        >Эффекты</button>
+        >
+          <AudioLines :size="18" />
+          <span>Эффекты</span>
+        </button>
       </div>
 
       <div v-if="activeTab === 'devices'" class="tab-content">
@@ -569,7 +613,7 @@ watch(audioEffectsFromComposable, (newEffects) => {
           </div>
 
           <div v-if="!selectedFile" class="preview-empty">
-            <button @click="pickFile" class="accent-btn">
+            <button @click="pickFile" class="action-btn">
               <Upload :size="16" /> Выбрать аудиофайл
             </button>
           </div>
@@ -578,6 +622,22 @@ watch(audioEffectsFromComposable, (newEffects) => {
             <div class="file-info">
               <span class="file-name">{{ selectedFile.name }}</span>
               <span class="file-format">{{ fileFormat }}</span>
+              <button
+                @click="replaceFile"
+                class="file-action-btn"
+                title="Заменить файл"
+                aria-label="Заменить файл"
+              >
+                <FolderOpen :size="14" />
+              </button>
+              <button
+                @click="clearFile"
+                class="file-action-btn"
+                title="Очистить выбранный файл"
+                aria-label="Очистить выбранный файл"
+              >
+                <X :size="14" />
+              </button>
             </div>
 
             <div class="preview-controls">
@@ -591,7 +651,7 @@ watch(audioEffectsFromComposable, (newEffects) => {
               <button
                 @click="playPreview('effects')"
                 :disabled="isPreviewPlaying"
-                class="play-btn effects-btn"
+                class="play-btn"
               >
                 <AudioLines :size="16" /> С эффектами
               </button>
@@ -682,14 +742,16 @@ watch(audioEffectsFromComposable, (newEffects) => {
         </div>
 
         <div class="save-section">
+          <div class="save-status-area">
+            <span v-if="saveStatus === 'saved'" class="save-status saved">Сохранено</span>
+            <span v-else-if="saveStatus === 'error'" class="save-status error">{{ saveError }}</span>
+            <span v-else-if="isDirty" class="save-status dirty">Изменения не сохранены</span>
+          </div>
           <button @click="saveEffects" :disabled="!isDirty || saveStatus === 'saving'" class="save-btn">
             <Save :size="16" />
             <span v-if="saveStatus === 'saving'">Сохранение...</span>
             <span v-else>Сохранить</span>
           </button>
-          <span v-if="saveStatus === 'saved'" class="save-status saved">Сохранено</span>
-          <span v-else-if="saveStatus === 'error'" class="save-status error">{{ saveError }}</span>
-          <span v-else-if="isDirty" class="save-status dirty">Изменения не сохранены</span>
         </div>
       </div>
     </div>
@@ -740,7 +802,6 @@ watch(audioEffectsFromComposable, (newEffects) => {
 .refresh-btn:hover:not(:disabled) {
   background: var(--color-bg-field-hover);
   border-color: var(--card-active-border);
-  transform: scale(1.05);
 }
 
 .refresh-btn:disabled {
@@ -786,14 +847,14 @@ watch(audioEffectsFromComposable, (newEffects) => {
 .audio-settings {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 1.5rem;
 }
 
 .setting-section {
+  padding: 12px 16px;
   background: var(--color-bg-field);
   border: 1px solid var(--color-border);
   border-radius: 12px;
-  padding: 12px 16px;
   backdrop-filter: blur(8px);
 }
 
@@ -829,13 +890,14 @@ watch(audioEffectsFromComposable, (newEffects) => {
   border: 1px solid var(--color-border);
   background: var(--color-bg-field);
   color: var(--color-text-secondary);
-  border-radius: 10px;
+  border-radius: 8px;
   cursor: pointer;
   font-size: 12px;
   transition: all 0.2s;
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  font-family: inherit;
 }
 
 .toggle-btn:hover {
@@ -843,9 +905,9 @@ watch(audioEffectsFromComposable, (newEffects) => {
 }
 
 .toggle-btn.active {
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: var(--color-text-white);
-  border-color: transparent;
+  background: var(--btn-accent-bg);
+  border-color: var(--color-accent);
+  color: var(--color-text-primary);
 }
 
 .setting-row {
@@ -1012,66 +1074,66 @@ watch(audioEffectsFromComposable, (newEffects) => {
 }
 
 /* Tab bar */
-.tab-bar {
+.audio-tabs {
   display: flex;
-  gap: 4px;
-  margin-bottom: 20px;
-  background: var(--color-bg-field);
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  padding: 4px;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 0.5rem;
 }
 
-.tab-btn {
-  flex: 1;
-  padding: 10px 16px;
-  border: 1px solid transparent;
+.audio-tabs button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
   background: transparent;
+  border: none;
+  border-radius: 8px 8px 0 0;
   color: var(--color-text-secondary);
-  border-radius: 10px;
   cursor: pointer;
-  font-size: 14px;
-  font-weight: 600;
   transition: all 0.2s;
+  font-size: 0.9rem;
+  font-weight: 500;
   font-family: inherit;
 }
 
-.tab-btn:hover {
+.audio-tabs button:hover {
   color: var(--color-text-primary);
   background: var(--color-bg-field-hover);
 }
 
-.tab-btn.active {
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: var(--color-text-white);
-  border-color: transparent;
+.audio-tabs button.active {
+  color: var(--color-accent);
+  background: var(--color-bg-field);
+  border-bottom: 2px solid var(--color-accent);
 }
 
 .tab-content {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 1.5rem;
 }
 
 .effects-tab {
-  gap: 16px;
+  gap: 1.5rem;
 }
 
-/* Preview card */
+/* Preview */
 .preview-empty {
   display: flex;
   justify-content: center;
   padding: 20px;
 }
 
-.accent-btn {
+.action-btn {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   padding: 10px 20px;
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: var(--color-text-white);
-  border: none;
+  background: var(--btn-accent-bg);
+  border: 1px solid var(--color-accent);
+  color: var(--color-text-primary);
   border-radius: 10px;
   cursor: pointer;
   font-size: 14px;
@@ -1080,9 +1142,9 @@ watch(audioEffectsFromComposable, (newEffects) => {
   transition: all 0.2s;
 }
 
-.accent-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 16px var(--color-accent-glow);
+.action-btn:hover {
+  background: var(--color-bg-field-hover);
+  border-color: var(--color-border-strong);
 }
 
 .preview-active {
@@ -1094,11 +1156,12 @@ watch(audioEffectsFromComposable, (newEffects) => {
 .file-info {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   padding: 8px 12px;
   background: var(--color-bg-field);
   border: 1px solid var(--color-border);
   border-radius: 8px;
+  min-width: 0;
 }
 
 .file-name {
@@ -1119,8 +1182,29 @@ watch(audioEffectsFromComposable, (newEffects) => {
   font-family: var(--font-mono);
 }
 
+.file-action-btn {
+  flex-shrink: 0;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-field);
+  color: var(--color-text-secondary);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.file-action-btn:hover {
+  background: var(--color-bg-field-hover);
+  border-color: var(--color-border-strong);
+  color: var(--color-text-primary);
+}
+
 .preview-controls {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -1147,11 +1231,6 @@ watch(audioEffectsFromComposable, (newEffects) => {
 .play-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.play-btn.effects-btn:hover:not(:disabled) {
-  background: var(--btn-accent-bg);
-  border-color: var(--color-accent);
 }
 
 .play-btn.stop-btn {
@@ -1217,7 +1296,7 @@ watch(audioEffectsFromComposable, (newEffects) => {
 }
 
 input:checked + .toggle-slider {
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
+  background: var(--color-accent);
 }
 
 input:checked + .toggle-slider:before {
@@ -1229,33 +1308,12 @@ input:checked + .toggle-slider:before {
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 16px 0;
+  justify-content: flex-end;
 }
 
-.save-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 24px;
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: var(--color-text-white);
-  border: none;
-  border-radius: 10px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 600;
-  font-family: inherit;
-  transition: all 0.2s;
-}
-
-.save-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 16px var(--color-accent-glow);
-}
-
-.save-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.save-status-area {
+  flex: 1;
+  min-width: 0;
 }
 
 .save-status {
@@ -1272,6 +1330,33 @@ input:checked + .toggle-slider:before {
 
 .save-status.dirty {
   color: var(--color-text-muted);
+}
+
+.save-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0.6rem 1.2rem;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
+  border: none;
+  color: var(--color-text-white);
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  transition: all 0.2s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.save-btn:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.save-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Model info */
