@@ -1,6 +1,7 @@
 use crate::audio::{apply_effects, decode_audio, AudioEffects, AudioPcm, OutputConfig};
 use crate::config::AppSettings;
 use crate::state::AppState;
+use std::fs;
 use tracing::{debug, error, info, warn};
 
 /// 1. Этап предварительной подготовки текста (препроцессор + замена чисел)
@@ -170,4 +171,29 @@ pub fn enqueue_and_record(
     } else {
         Err("Плеер не инициализирован".to_string())
     }
+}
+
+/// Export raw TTS audio bytes to a file — synthesis only, no effects, no playback.
+pub async fn synthesize_and_export(state: &AppState, text: &str, path: &str) -> Result<(), String> {
+    let settings_manager = crate::config::SettingsManager::new()
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+    let settings = settings_manager.load()
+        .map_err(|e| format!("Failed to load settings: {}", e))?;
+
+    let prefix_result = crate::preprocessor::parse_prefix(text);
+    let text = prefix_result.text;
+    state.set_prefix_flags(prefix_result.skip_twitch, prefix_result.skip_webview);
+
+    let text = preprocess_text(state, &text);
+    let text = ai_correct_text(state, &text, &settings).await;
+    let audio_data = synthesize_audio(state, &text).await?;
+
+    fs::write(path, &audio_data)
+        .map_err(|e| format!("Failed to write audio file: {}", e))?;
+
+    if let Some(hm) = state.editor.history_manager.lock().as_ref() {
+        hm.record_phrase(&text);
+    }
+
+    Ok(())
 }

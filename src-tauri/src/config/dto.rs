@@ -634,6 +634,7 @@ pub struct EditorSettingsDto {
     pub ai_completion: bool,
     pub spellcheck_enabled: bool,
     pub spellcheck_source: SpellSourceDto,
+    pub editor_height: u32,
 }
 
 /// Spell check source DTO
@@ -1032,6 +1033,7 @@ impl AppSettingsDto {
                     crate::config::SpellSource::Online => SpellSourceDto::Online,
                     crate::config::SpellSource::Offline => SpellSourceDto::Offline,
                 },
+                editor_height: params.config.editor.editor_height,
             },
             logging: params.config.logging.clone(),
             preprocessor: PreprocessorSettingsDto::from_preprocessor(params.preprocessor),

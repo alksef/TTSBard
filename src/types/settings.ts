@@ -194,6 +194,8 @@ export interface MainWindowSettingsDto {
   bg_color: string
   custom_opacity: boolean
   opacity_compact_only: boolean
+  compact_width: number
+  compact_height: number
 }
 
 export interface SoundPanelWindowSettingsDto {
@@ -258,6 +260,7 @@ export interface EditorSettingsDto {
   ai_completion: boolean
   spellcheck_enabled: boolean
   spellcheck_source: 'online' | 'offline'
+  editor_height: number
 }
 
 // ============================================================================
