@@ -8,7 +8,6 @@ import SoundPanelTab from './components/SoundPanelTab.vue'
 import PlaybackTab from './components/PlaybackTab.vue'
 import AudioPanel from './components/AudioPanel.vue'
 import PreprocessorPanel from './components/PreprocessorPanel.vue'
-import InfoPanel from './components/InfoPanel.vue'
 import WebViewPanel from './components/WebViewPanel.vue'
 import TwitchPanel from './components/TwitchPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
@@ -20,7 +19,7 @@ import { useTelegramAuth, TELEGRAM_AUTH_KEY } from './composables/useTelegramAut
 import { provideAppSettings } from './composables/useAppSettings'
 import { debugLog } from './utils/debug'
 
-type Panel = 'info' | 'input' | 'tts' | 'soundpanel' | 'playback' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'settings' | 'hotkeys' | 'intercept'
+type Panel = 'input' | 'tts' | 'soundpanel' | 'playback' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'settings' | 'hotkeys' | 'intercept'
 
 const currentPanel = ref<Panel>('input')
 
@@ -200,7 +199,6 @@ onMounted(async () => {
         <Sidebar v-if="!isMinimalMode" :current-panel="currentPanel" @set-panel="setPanel" />
 
         <main class="main-content" :class="{ 'minimal-content': isMinimalMode }">
-          <InfoPanel v-show="currentPanel === 'info'" />
           <InputPanel v-show="currentPanel === 'input'" />
           <TtsPanel v-show="currentPanel === 'tts'" />
           <SoundPanelTab v-show="currentPanel === 'soundpanel'" />
