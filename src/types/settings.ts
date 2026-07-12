@@ -164,11 +164,12 @@ export interface AudioSettingsDto {
 
 export interface AudioEffectsSettingsDto {
   enabled: boolean
-  pitch: number  // -100 to +100
-  speed: number  // -100 to +100
+  pitch: number  // -100 to +100 → -12..+12 semitones
+  speed: number  // -100 to +100 → 0.75..1.50 tempo factor
   volume: number // 0 to 200
   enhance_enabled: boolean // DeepFilterNet noise suppression
   enhance_atten_db: number // 5 to 30 dB (attenuation limit)
+  formant_preserved: boolean // Signalsmith formant correction (default: true)
 }
 
 // ============================================================================

@@ -253,6 +253,17 @@ pub fn set_audio_effects_enhance_atten_db(
         .map_err(|e| e.to_string())
 }
 
+/// Set audio effects formant preservation (Signalsmith formant correction)
+#[tauri::command]
+pub fn set_audio_effects_formant_preserved(
+    preserved: bool,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<(), String> {
+    settings_manager
+        .set_audio_effects_formant_preserved(preserved)
+        .map_err(|e| e.to_string())
+}
+
 // ==================== Preview & Save Commands ====================
 
 pub struct PreviewState {
@@ -362,6 +373,7 @@ pub fn save_audio_effects(
     volume: i16,
     enhance_enabled: bool,
     enhance_atten_db: f32,
+    formant_preserved: bool,
     settings_manager: State<'_, SettingsManager>,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
@@ -375,6 +387,7 @@ pub fn save_audio_effects(
     settings.audio_effects.volume = volume.clamp(0, 200);
     settings.audio_effects.enhance_enabled = enhance_enabled;
     settings.audio_effects.enhance_atten_db = enhance_atten_db.clamp(5.0, 30.0);
+    settings.audio_effects.formant_preserved = formant_preserved;
 
     settings_manager
         .save(&settings)

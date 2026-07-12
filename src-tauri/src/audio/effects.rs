@@ -1,9 +1,7 @@
 //! Audio post-processing effects for TTS
 //!
-//! Provides pitch, speed, and volume adjustments
+//! Provides tempo, pitch, and volume adjustments using Signalsmith Stretch.
 
-use pitch_shift::PitchShifter;
-use rubato::{FftFixedInOut, Resampler};
 use symphonia::core::audio::Signal;
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::formats::FormatOptions;
@@ -57,12 +55,13 @@ fn get_df_model(channels: usize) -> Result<DfTract, String> {
 /// Audio effects configuration
 #[derive(Debug, Clone, Copy)]
 pub struct AudioEffects {
-    pub pitch: i16,            // -100 to +100 (проценты)
-    pub speed: i16,            // -100 to +100 (проценты)
-    pub volume: i16,           // 0 to 200 (проценты, 100 = норма)
+    pub pitch: i16,            // -100 to +100 (percent → -12..+12 semitones)
+    pub speed: i16,            // -100 to +100 (percent → 0.75..1.50 tempo factor)
+    pub volume: i16,           // 0 to 200 (percent, 100 = normal)
     pub enhance_enabled: bool, // DeepFilterNet noise suppression
     pub enhance_atten_db: f32, // attenuation limit in dB (5..30)
     pub fail_on_enhance_error: bool,
+    pub formant_preserved: bool, // Signalsmith formant correction (default: true)
 }
 
 impl AudioEffects {
@@ -74,6 +73,7 @@ impl AudioEffects {
             enhance_enabled: false,
             enhance_atten_db: 12.0,
             fail_on_enhance_error: false,
+            formant_preserved: true,
         }
     }
 
@@ -92,6 +92,12 @@ impl AudioEffects {
         self
     }
 
+    /// Configure formant preservation (builder-style).
+    pub fn with_formant_preserved(mut self, preserved: bool) -> Self {
+        self.formant_preserved = preserved;
+        self
+    }
+
     /// Check if any effects are active
     #[allow(dead_code)]
     pub fn is_active(&self) -> bool {
@@ -104,26 +110,30 @@ impl AudioEffects {
         self.volume as f32 / 100.0
     }
 
-    /// Convert speed percentage to playback rate
-    /// Negative = slower (down to 0.25x), 0 = normal (1x), Positive = faster (up to 4x)
-    /// -100% = 0.25x (slower), 0% = 1.0x (normal), +100% = 4.0x (faster)
+    /// Convert speed percentage to tempo factor for Signalsmith Stretch.
     ///
-    /// Note: This returns the INVERSE of the playback rate because resampling works inversely:
-    /// - Faster playback (>1x) requires FEWER samples → lower sample rate (< original)
-    /// - Slower playback (<1x) requires MORE samples → higher sample rate (> original)
+    /// Safe range: -100 → 0.75× (slower, longer output), 0 → 1.0× (normal),
+    /// +100 → 1.50× (faster, shorter output).
+    ///
+    /// Note: the field retains the name `speed` for backward compatibility with
+    /// existing storage/API, but the semantic is now **tempo** (time stretch with
+    /// pitch preservation), NOT the old resampling-based speed change.
     pub fn speed_factor(&self) -> f32 {
-        if self.speed == 0 {
-            1.0
-        } else if self.speed < 0 {
-            // -100 to 0 maps to 0.25 to 1.0 (slower to normal)
-            // Invert: 0.25 → 4.0, 1.0 → 1.0
-            let playback_rate = 1.0 - (self.speed as f32 / 100.0).abs() * 0.75;
-            1.0 / playback_rate
+        self.tempo_factor()
+    }
+
+    /// Convert speed slider position (-100..100) to tempo factor (0.75..1.50).
+    ///
+    /// - Negative values → slower (output is longer): 1.0 → 0.75
+    /// - Zero → normal: 1.0
+    /// - Positive values → faster (output is shorter): 1.0 → 1.50
+    pub fn tempo_factor(&self) -> f32 {
+        if self.speed <= 0 {
+            // -100..0 → 0.75..1.0
+            1.0 - (self.speed as f32 / 100.0).abs() * 0.25
         } else {
-            // 0 to +100 maps to 1.0 to 4.0 (normal to faster)
-            // Invert: 1.0 → 1.0, 4.0 → 0.25
-            let playback_rate = 1.0 + (self.speed as f32 / 100.0) * 3.0;
-            1.0 / playback_rate
+            // 0..+100 → 1.0..1.50
+            1.0 + (self.speed as f32 / 100.0) * 0.50
         }
     }
 
@@ -153,12 +163,11 @@ impl AudioEffects {
 /// Processing pipeline:
 /// 1. Decode audio to PCM (Symphonia probing handles WAV, MP3, and other formats)
 /// 2. Apply DeepFilterNet noise suppression (if enabled)
-/// 3. Apply speed change (resampling via rubato)
-/// 4. Apply pitch shift (phase vocoder - NO duration change)
-/// 5. Re-encode to WAV
+/// 3. Apply Signalsmith Stretch (tempo + pitch + formant correction)
+/// 4. Re-encode to WAV
 ///
 /// Note: Volume is NOT applied here - it's handled during playback via rodio
-/// Note: Pitch and speed are now INDEPENDENT (no chipmunk effect)
+/// Note: Pitch and tempo are now INDEPENDENT with formant correction via Signalsmith
 pub fn apply_effects(audio_data: Vec<u8>, effects: &AudioEffects) -> Result<Vec<u8>, String> {
     // Only process if any effect is active
     if effects.pitch == 0 && effects.speed == 0 && !effects.enhance_enabled {
@@ -173,7 +182,7 @@ pub fn apply_effects(audio_data: Vec<u8>, effects: &AudioEffects) -> Result<Vec<
     let channels = pcm_data.channels;
 
     // Apply DeepFilterNet noise suppression first, on the clean decoded signal
-    // (before pitch/speed alter the time/frequency content).
+    // (before tempo/pitch alter the time/frequency content).
     if effects.enhance_enabled {
         match apply_enhance(&samples, sample_rate, channels, effects.enhance_atten_db) {
             Ok(enhanced) => {
@@ -189,47 +198,49 @@ pub fn apply_effects(audio_data: Vec<u8>, effects: &AudioEffects) -> Result<Vec<
                 if effects.fail_on_enhance_error {
                     return Err(format!("DeepFilterNet enhancement failed: {}", e));
                 }
-                // Enhancement is best-effort: keep original samples on failure so
-                // the rest of the pipeline (and playback) still works.
                 tracing::error!(error = %e, "DeepFilterNet enhancement failed, skipping");
             }
         }
     }
 
-    // Apply speed change if needed (changes duration)
-    if effects.speed != 0 {
-        let speed_factor = effects.speed_factor();
-        samples = apply_speed(&samples, sample_rate, speed_factor, channels)?;
-        // Trim zero-padding artifacts from resampling (aggressive mode)
-        samples = trim_silence(&samples, channels, sample_rate, true);
-    }
-
-    // Apply pitch shift if needed (NO duration change - phase vocoder)
-    if effects.pitch != 0 {
-        let semitones = effects.pitch_semitones();
-        samples = apply_pitch(&samples, sample_rate, semitones, channels)?;
-
-        // Only trim after pitch for significant negative values (pitching down by > 5 semitones)
-        // Small changes (< 5 semitones) don't get trimmed because:
-        // - Phase vocoder artifacts are similar for both positive and negative small shifts
-        // - Trim cuts off speech tails that naturally decay faster
-        // - Only large negative shifts preserve enough energy for safe trimming
-        if semitones < -5.0 {
-            samples = trim_silence(&samples, channels, sample_rate, false);
-            tracing::debug!(
-                semitones,
-                "Applied trim after pitch (large negative pitch shift)"
-            );
-        } else {
-            tracing::debug!(
-                semitones,
-                "Skipped trim after pitch (small pitch shift - preserving full audio)"
-            );
-        }
+    // Apply Signalsmith Stretch for tempo + pitch + formant correction
+    if effects.speed != 0 || effects.pitch != 0 {
+        samples = apply_stretch(
+            &samples,
+            channels,
+            sample_rate,
+            effects.tempo_factor(),
+            effects.pitch_semitones(),
+            effects.formant_preserved,
+        )?;
     }
 
     // Encode PCM back to WAV
     encode_wav(&samples, sample_rate, channels)
+}
+
+/// Apply Signalsmith Stretch to interleaved float PCM.
+///
+/// Handles tempo (time stretch), pitch shift, and optional formant correction
+/// in a single integrated processing pass.
+fn apply_stretch(
+    samples: &[f32],
+    channels: usize,
+    sample_rate: u32,
+    tempo_factor: f32,
+    pitch_semitones: f32,
+    preserve_formants: bool,
+) -> Result<Vec<f32>, String> {
+    if samples.is_empty() || channels == 0 {
+        return Ok(samples.to_vec());
+    }
+
+    let mut processor = crate::signalsmith::StretchProcessor::new(channels, sample_rate)
+        .map_err(|e| format!("Failed to create SignalsmithStretch: {}", e))?;
+
+    processor
+        .process(samples, tempo_factor, pitch_semitones, preserve_formants)
+        .map_err(|e| format!("SignalsmithStretch processing failed: {}", e))
 }
 
 /// Decoded PCM data
@@ -438,348 +449,6 @@ fn apply_enhance(
     Ok(result)
 }
 
-/// Apply speed change using resampling
-fn apply_speed(
-    samples: &[f32],
-    sample_rate: u32,
-    speed_factor: f32,
-    channels: usize,
-) -> Result<Vec<f32>, String> {
-    if (speed_factor - 1.0).abs() < 0.001 {
-        return Ok(samples.to_vec());
-    }
-
-    // Calculate new sample rate based on speed factor
-    let new_sample_rate = (sample_rate as f32 * speed_factor).round() as usize;
-
-    tracing::debug!(
-        input_samples = samples.len(),
-        sample_rate,
-        speed_factor,
-        new_sample_rate,
-        channels,
-        "apply_speed: Starting resampling"
-    );
-
-    // Create resampler with automatic buffer size calculation
-    let mut resampler = FftFixedInOut::new(
-        sample_rate as usize,
-        new_sample_rate,
-        1024, // recommended chunk size (resampler will calculate actual buffer sizes)
-        channels,
-    )
-    .map_err(|e| format!("Failed to create resampler: {}", e))?;
-
-    // Get the actual input buffer size required by the resampler
-    let input_buffer_size = resampler.input_frames_max();
-
-    tracing::debug!(input_buffer_size, "apply_speed: Resampler created");
-
-    // De-interleave samples
-    let mut interleaved: Vec<Vec<f32>> = vec![Vec::new(); channels];
-    for (i, &sample) in samples.iter().enumerate() {
-        interleaved[i % channels].push(sample);
-    }
-
-    tracing::debug!(
-        samples_per_channel = interleaved[0].len(),
-        "apply_speed: De-interleaved"
-    );
-
-    // Resample all channels together (rubato handles multi-channel)
-    let mut resampled = vec![Vec::new(); channels];
-    let mut input_idx = 0;
-    let mut chunk_count = 0;
-
-    while input_idx < interleaved[0].len() {
-        let end = (input_idx + input_buffer_size).min(interleaved[0].len());
-
-        // Prepare input for all channels
-        let chunks: Vec<&[f32]> = (0..channels)
-            .map(|ch| &interleaved[ch][input_idx..end])
-            .collect();
-
-        // Only process if we have enough data (rubato needs exact buffer size)
-        if chunks[0].len() == input_buffer_size {
-            match resampler.process(&chunks, None) {
-                Ok(output) => {
-                    // output is Vec<Vec<f32>> - one vector per channel
-                    for (ch, channel_output) in output.iter().enumerate() {
-                        resampled[ch].extend_from_slice(channel_output);
-                    }
-                    chunk_count += 1;
-                }
-                Err(_e) => {
-                    #[cfg(debug_assertions)]
-                    tracing::debug!("Rubato process error");
-                }
-            }
-        }
-
-        input_idx = end;
-
-        // If we have less than a full buffer left, create a new resampler for the remainder
-        if input_idx < interleaved[0].len()
-            && (interleaved[0].len() - input_idx) < input_buffer_size
-        {
-            let remaining = interleaved[0].len() - input_idx;
-
-            tracing::debug!(
-                remaining,
-                input_idx,
-                total_input = interleaved[0].len(),
-                "apply_speed: Processing final partial buffer with dedicated resampler"
-            );
-
-            // Create a new resampler sized for the remaining samples
-            // Note: FftFixedInOut may adjust the buffer size for FFT requirements
-            let final_chunk_size = remaining.max(64); // Minimum size for FFT
-            let mut final_resampler = FftFixedInOut::new(
-                sample_rate as usize,
-                new_sample_rate,
-                final_chunk_size,
-                channels,
-            )
-            .map_err(|e| format!("Failed to create final resampler: {}", e))?;
-
-            let final_input_buffer_size = final_resampler.input_frames_max();
-
-            // Prepare the final chunks with zero-padding if needed
-            let final_chunks: Vec<Vec<f32>> = (0..channels)
-                .map(|ch| {
-                    let mut chunk = interleaved[ch][input_idx..].to_vec();
-                    // Zero-pad to the required buffer size
-                    while chunk.len() < final_input_buffer_size {
-                        chunk.push(0.0);
-                    }
-                    chunk
-                })
-                .collect();
-
-            tracing::debug!(
-                final_chunk_size,
-                final_input_buffer_size,
-                actual_input_len = interleaved[0].len() - input_idx,
-                padded_len = final_chunks[0].len(),
-                "apply_speed: Final resampler created with zero-padding"
-            );
-
-            // Process the final chunk (with zero-padding)
-            let final_chunks_refs: Vec<&[f32]> =
-                final_chunks.iter().map(|v| v.as_slice()).collect();
-            match final_resampler.process(&final_chunks_refs, None) {
-                Ok(output) => {
-                    for (ch, channel_output) in output.iter().enumerate() {
-                        resampled[ch].extend_from_slice(channel_output);
-                    }
-                    chunk_count += 1;
-                }
-                Err(_e) => {
-                    #[cfg(debug_assertions)]
-                    tracing::debug!("Rubato process error (final chunk)");
-                }
-            }
-
-            break;
-        }
-    }
-
-    let expected_output = (interleaved[0].len() as f32 * speed_factor).round() as usize;
-    let sample_diff = resampled[0].len() as isize - expected_output as isize;
-
-    tracing::debug!(
-        chunks_processed = chunk_count,
-        output_samples_per_channel = resampled[0].len(),
-        expected_output,
-        sample_diff,
-        "apply_speed: Resampling complete"
-    );
-
-    // Trim excess samples from zero-padding artifacts
-    // Zero-padding in final chunks can add extra silence at the end
-    for channel in resampled.iter_mut() {
-        if channel.len() > expected_output {
-            channel.truncate(expected_output);
-        }
-    }
-
-    // Interleave back
-    let max_len = resampled.iter().map(|v| v.len()).max().unwrap_or(0);
-    let mut result = Vec::with_capacity(max_len * channels);
-    for sample_idx in 0..max_len {
-        for channel in &resampled {
-            result.push(channel.get(sample_idx).copied().unwrap_or(0.0));
-        }
-    }
-
-    Ok(result)
-}
-
-/// Apply pitch shift using phase vocoder
-///
-/// This changes pitch WITHOUT changing duration, unlike resampling-based approaches.
-/// Uses the PitchShifter which implements the phase vocoder algorithm.
-fn apply_pitch(
-    samples: &[f32],
-    sample_rate: u32,
-    semitones: f32,
-    channels: usize,
-) -> Result<Vec<f32>, String> {
-    if semitones.abs() < 0.01 {
-        return Ok(samples.to_vec());
-    }
-
-    tracing::debug!(
-        input_samples = samples.len(),
-        sample_rate,
-        semitones,
-        channels,
-        "apply_pitch: Starting phase vocoder pitch shift"
-    );
-
-    // Process per channel (phase vocoder works on mono)
-    let mut result = Vec::new();
-
-    for ch in 0..channels {
-        // De-interleave channel samples
-        let channel_samples: Vec<f32> =
-            samples.iter().skip(ch).step_by(channels).copied().collect();
-
-        // Create pitch shifter with 50ms window duration (recommended)
-        let mut shifter = PitchShifter::new(50, sample_rate as usize);
-
-        // Create output buffer
-        let mut pitched = vec![0.0; channel_samples.len()];
-
-        // Apply pitch shift
-        // over_sampling=16 for good quality, shift in semitones
-        shifter.shift_pitch(16, semitones, &channel_samples, &mut pitched);
-
-        // Interleave back into result
-        for (i, &sample) in pitched.iter().enumerate() {
-            // Ensure we have space for this sample
-            let pos = i * channels + ch;
-            if pos >= result.len() {
-                result.resize(pos + 1, 0.0);
-            }
-            result[pos] = sample;
-        }
-    }
-
-    // Fill in any missing samples for multi-channel audio
-    let total_samples = (result.len() / channels) * channels;
-    result.resize(total_samples, 0.0);
-
-    tracing::debug!(
-        output_samples = result.len(),
-        "apply_pitch: Pitch shift complete"
-    );
-
-    Ok(result)
-}
-
-/// Apply exponential fade-out to prevent clicks and phase discontinuities
-///
-/// Smoothly reduces amplitude over the specified duration using an exponential curve.
-/// This prevents abrupt edges that cause artifacts in FFT-based processing.
-///
-/// # Arguments
-/// * `samples` - Audio samples to modify (interleaved if multi-channel)
-/// * `fade_samples` - Number of samples over which to apply fade (per channel)
-/// * `channels` - Number of audio channels (1=mono, 2=stereo)
-fn apply_fade_out(samples: &mut [f32], fade_samples: usize, channels: usize) {
-    let total_samples = samples.len() / channels;
-
-    if fade_samples == 0 || fade_samples > total_samples {
-        return;
-    }
-
-    // Apply exponential fade-out from the end
-    for (frame_idx, chunk) in samples.chunks_exact_mut(channels).rev().enumerate() {
-        if frame_idx >= fade_samples {
-            break;
-        }
-
-        // Exponential curve: more gradual at start, steeper at end
-        let progress = frame_idx as f32 / fade_samples as f32;
-        let gain = (1.0 - progress).powi(2); // Quadratic for smoother decay
-
-        for sample in chunk {
-            *sample *= gain;
-        }
-    }
-}
-
-/// Trim silence from the end of audio with fade-out to prevent phase artifacts
-///
-/// Analyzes amplitude from the end and finds where real audio ends, then applies
-/// an exponential fade-out instead of a hard cut. This prevents phase discontinuities
-/// and clicks that would be amplified by FFT-based processing (resampling, pitch shifting).
-///
-/// # Arguments
-/// * `aggressive` - If true, uses shorter tail for zero-padding cleanup (after speed).
-///   If false, preserves longer tail for speech natural decay (after pitch).
-fn trim_silence(samples: &[f32], channels: usize, sample_rate: u32, aggressive: bool) -> Vec<f32> {
-    // Aggressive mode: short tail for zero-padding artifacts
-    // Conservative mode: longer tail to preserve speech endings (fricatives, breaths)
-    let (threshold, tail_ms, fade_ms) = if aggressive {
-        (0.001, 5u32, 5u32) // Short tail + fast fade for zero-padding
-    } else {
-        (0.005, 50u32, 30u32) // Long tail + slow fade for speech preservation
-    };
-
-    let tail_samples = (sample_rate * tail_ms / 1000) as usize * channels;
-    let fade_samples = (sample_rate * fade_ms / 1000) as usize * channels;
-    let min_silence_samples = (sample_rate * 20 / 1000) as usize * channels; // 20ms minimum silence
-
-    if samples.len() < min_silence_samples {
-        return samples.to_vec();
-    }
-
-    // Analyze from the end, working backwards to find silence start
-    let mut silence_count = 0;
-    let mut silence_start_idx = samples.len();
-
-    for (i, chunk) in samples.chunks_exact(channels).rev().enumerate() {
-        let is_silent = chunk.iter().all(|&s| s.abs() < threshold);
-
-        if is_silent {
-            silence_count += channels;
-            if silence_count >= min_silence_samples {
-                // Found silence start - keep tail before this
-                silence_start_idx = samples.len() - (i * channels) - silence_count + channels;
-                break;
-            }
-        } else {
-            silence_count = 0;
-        }
-    }
-
-    // Determine final cut point, preserving tail
-    let end_idx = if silence_start_idx + tail_samples < samples.len() {
-        silence_start_idx + tail_samples
-    } else {
-        samples.len()
-    };
-
-    let mut trimmed = samples[..end_idx.min(samples.len())].to_vec();
-
-    // Apply exponential fade-out to the tail to prevent phase artifacts
-    apply_fade_out(&mut trimmed, fade_samples / channels, channels);
-
-    tracing::debug!(
-        original_samples = samples.len(),
-        trimmed_samples = trimmed.len(),
-        removed_samples = samples.len() - trimmed.len(),
-        tail_ms,
-        fade_ms,
-        aggressive,
-        "trim_silence: Removed trailing silence with fade-out"
-    );
-
-    trimmed
-}
-
 /// Encode PCM samples to WAV
 ///
 /// WAV format: RIFF header + fmt chunk + data chunk
@@ -876,26 +545,31 @@ mod tests {
     }
 
     #[test]
-    fn test_speed_factor() {
+    fn test_tempo_factor() {
         let effects = AudioEffects::new(0, 0, 100);
-        assert_eq!(effects.speed_factor(), 1.0);
+        assert_eq!(effects.tempo_factor(), 1.0);
 
         let effects = AudioEffects::new(0, -100, 100);
-        // Slower: 0.25x playback → needs 4x the samples → factor=4.0
-        assert_eq!(effects.speed_factor(), 4.0);
+        // -100 = slowest: 0.75x tempo
+        assert!((effects.tempo_factor() - 0.75).abs() < 0.01);
 
         let effects = AudioEffects::new(0, 100, 100);
-        // Faster: 4x playback → needs 0.25x the samples → factor=0.25
-        assert_eq!(effects.speed_factor(), 0.25);
+        // +100 = fastest: 1.50x tempo
+        assert!((effects.tempo_factor() - 1.50).abs() < 0.01);
 
-        // Test intermediate values
         let effects = AudioEffects::new(0, -40, 100);
-        // Slower: 0.7x playback → needs 1/0.7 ≈ 1.43 samples
-        assert!((effects.speed_factor() - 1.43).abs() < 0.01);
+        // -40 = 1.0 - 0.40*0.25 = 0.90
+        assert!((effects.tempo_factor() - 0.90).abs() < 0.01);
 
         let effects = AudioEffects::new(0, 50, 100);
-        // Faster: 2.5x playback → needs 1/2.5 = 0.4 samples
-        assert!((effects.speed_factor() - 0.4).abs() < 0.01);
+        // +50 = 1.0 + 0.50*0.50 = 1.25
+        assert!((effects.tempo_factor() - 1.25).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_formant_preserved_default() {
+        let effects = AudioEffects::new(0, 0, 100);
+        assert!(effects.formant_preserved);
     }
 
     #[test]
@@ -970,8 +644,7 @@ mod tests {
 
         let wav_data = encode_wav(&samples, sample_rate, channels).expect("encode WAV fixture");
 
-        let fx = AudioEffects::new(0, 0, 100)
-            .with_enhance(true, 12.0);
+        let fx = AudioEffects::new(0, 0, 100).with_enhance(true, 12.0);
 
         let result = apply_effects(wav_data, &fx).expect("apply_effects should succeed");
 

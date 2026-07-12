@@ -3,6 +3,7 @@
 //! This module defines DTOs for the `get_all_app_settings` command.
 //! These structures serialize all application settings into a single response.
 
+use crate::config::settings::AudioEffectsSettings;
 use crate::config::settings::{
     FishAudioSettings, LocalTtsSettings, MtProxySettings, NetworkSettings, OpenAiSettings,
     ProxyMode, ProxySettings, ProxyType, Socks5Settings, TelegramTtsSettings, TtsSettings,
@@ -15,7 +16,6 @@ use crate::config::{
     AppSettings as ConfigAppSettings, AudioSettings, Hotkey, HotkeyModifier, HotkeySettings,
     LoggingSettings, TwitchSettings,
 };
-use crate::config::settings::AudioEffectsSettings;
 use crate::soundpanel::SoundBinding;
 use crate::tts::TtsProviderType;
 use crate::tts::VoiceModel;
@@ -475,6 +475,7 @@ pub struct AudioEffectsSettingsDto {
     pub volume: i16,
     pub enhance_enabled: bool,
     pub enhance_atten_db: f32,
+    pub formant_preserved: bool,
 }
 
 impl From<AudioEffectsSettings> for AudioEffectsSettingsDto {
@@ -486,6 +487,7 @@ impl From<AudioEffectsSettings> for AudioEffectsSettingsDto {
             volume: s.volume,
             enhance_enabled: s.enhance_enabled,
             enhance_atten_db: s.enhance_atten_db,
+            formant_preserved: s.formant_preserved,
         }
     }
 }
@@ -499,6 +501,7 @@ impl From<AudioEffectsSettingsDto> for AudioEffectsSettings {
             volume: dto.volume,
             enhance_enabled: dto.enhance_enabled,
             enhance_atten_db: dto.enhance_atten_db,
+            formant_preserved: dto.formant_preserved,
         }
     }
 }

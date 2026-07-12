@@ -23,6 +23,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+cc = { version = "1", features = ["parallel"] }
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
@@ -46,8 +47,6 @@ urlencoding = "2.1"
 dirs = "5"
 rodio = { version = "0.19", features = ["symphonia-mp3", "symphonia-wav"] }
 cpal = "0.15"
-rubato = "0.14"
-pitch_shift = "1.0"
 symphonia = { version = "0.5", features = ["mp3", "wav"] }
 lewton = "0.10"
 # DeepFilterNet real-time speech enhancement (native Rust inference via tract).
