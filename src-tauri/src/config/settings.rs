@@ -749,8 +749,13 @@ impl SettingsManager {
         if path.exists() {
             let content = fs::read_to_string(&path).context("Failed to read settings file")?;
 
-            let mut settings: AppSettings =
-                serde_json::from_str(&content).context("Failed to parse settings")?;
+            let mut settings = match serde_json::from_str::<AppSettings>(&content) {
+                Ok(parsed) => parsed,
+                Err(e) => {
+                    warn!(error = %e, "settings.json is corrupted, recovering from backup");
+                    return persistence::recover_corrupted_json(&path, &AppSettings::default());
+                }
+            };
 
             // Migrate from old settings missing hotkey fields.
             // Новые playback-поля (pause/stop/repeat) уже заполнены дефолтом
@@ -1642,6 +1647,85 @@ mod tests {
 
         manager.set_openai_api_key(None).unwrap();
         assert!(manager.get_openai_api_key().is_none());
+
+        let _ = std::fs::remove_dir_all(&config_dir);
+    }
+
+    #[test]
+    fn malformed_settings_json_recovery() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let config_dir = std::env::temp_dir().join(format!(
+            "ttsbard-corrupt-settings-test-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let settings_path = config_dir.join("settings.json");
+        std::fs::write(&settings_path, "{{{not valid json at all").unwrap();
+
+        let settings = SettingsManager::load_from_disk(&config_dir).unwrap();
+
+        assert_eq!(
+            settings.audio.speaker_volume,
+            AppSettings::default().audio.speaker_volume,
+            "recovered settings should use defaults"
+        );
+
+        // Verify backup file exists
+        let backup_count = std::fs::read_dir(&config_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_str()
+                    .map_or(false, |n| n.contains(".bak.") && n.ends_with(".json"))
+            })
+            .count();
+        assert_eq!(backup_count, 1, "a single backup file should exist");
+
+        // Verify new settings.json contains valid defaults
+        let new_content = std::fs::read_to_string(&settings_path).unwrap();
+        let parsed: AppSettings =
+            serde_json::from_str(&new_content).expect("recovered settings.json must be valid JSON");
+        assert_eq!(parsed, AppSettings::default());
+
+        let _ = std::fs::remove_dir_all(&config_dir);
+    }
+
+    #[test]
+    fn empty_settings_json_recovery() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let config_dir = std::env::temp_dir().join(format!(
+            "ttsbard-empty-settings-test-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let settings_path = config_dir.join("settings.json");
+        std::fs::write(&settings_path, "").unwrap();
+
+        let settings = SettingsManager::load_from_disk(&config_dir).unwrap();
+
+        assert_eq!(settings, AppSettings::default());
+
+        let backup_count = std::fs::read_dir(&config_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_str()
+                    .map_or(false, |n| n.contains(".bak.") && n.ends_with(".json"))
+            })
+            .count();
+        assert_eq!(backup_count, 1);
 
         let _ = std::fs::remove_dir_all(&config_dir);
     }

@@ -260,8 +260,13 @@ impl WindowsManager {
             let content =
                 fs::read_to_string(&path).context("Failed to read windows settings file")?;
 
-            let mut settings: WindowsSettings =
-                serde_json::from_str(&content).context("Failed to parse windows settings")?;
+            let mut settings = match serde_json::from_str::<WindowsSettings>(&content) {
+                Ok(parsed) => parsed,
+                Err(e) => {
+                    tracing::warn!(error = %e, "windows.json is corrupted, recovering from backup");
+                    return persistence::recover_corrupted_json(&path, &WindowsSettings::default());
+                }
+            };
 
             settings.validate();
             Ok(settings)
@@ -625,6 +630,83 @@ mod tests {
         assert_eq!(settings.main.opacity, 42);
         assert_eq!(settings.soundpanel.x, Some(100));
         assert_eq!(settings.soundpanel.y, Some(200));
+
+        let _ = std::fs::remove_dir_all(&config_dir);
+    }
+
+    #[test]
+    fn malformed_windows_json_recovery() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let config_dir = std::env::temp_dir().join(format!(
+            "ttsbard-corrupt-windows-test-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let windows_path = config_dir.join("windows.json");
+        std::fs::write(&windows_path, "{{{not valid json at all").unwrap();
+
+        let settings = WindowsManager::load_from_disk(&config_dir).unwrap();
+
+        assert_eq!(
+            settings.main.opacity,
+            WindowsSettings::default().main.opacity,
+            "recovered settings should use defaults"
+        );
+
+        let backup_count = std::fs::read_dir(&config_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_str()
+                    .map_or(false, |n| n.contains(".bak.") && n.ends_with(".json"))
+            })
+            .count();
+        assert_eq!(backup_count, 1, "a single backup file should exist");
+
+        let new_content = std::fs::read_to_string(&windows_path).unwrap();
+        let parsed: WindowsSettings =
+            serde_json::from_str(&new_content).expect("recovered windows.json must be valid JSON");
+        assert_eq!(parsed, WindowsSettings::default());
+
+        let _ = std::fs::remove_dir_all(&config_dir);
+    }
+
+    #[test]
+    fn empty_windows_json_recovery() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let config_dir = std::env::temp_dir().join(format!(
+            "ttsbard-empty-windows-test-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let windows_path = config_dir.join("windows.json");
+        std::fs::write(&windows_path, "").unwrap();
+
+        let settings = WindowsManager::load_from_disk(&config_dir).unwrap();
+
+        assert_eq!(settings, WindowsSettings::default());
+
+        let backup_count = std::fs::read_dir(&config_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_str()
+                    .map_or(false, |n| n.contains(".bak.") && n.ends_with(".json"))
+            })
+            .count();
+        assert_eq!(backup_count, 1);
 
         let _ = std::fs::remove_dir_all(&config_dir);
     }
