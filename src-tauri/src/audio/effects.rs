@@ -12,6 +12,7 @@ use symphonia::core::probe::Hint;
 use ndarray::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::io::{Cursor, Write};
 // The `deep_filter` crate exposes its library under the name `df`.
 use df::tract::{DfParams, DfTract, RuntimeParams};
 
@@ -50,6 +51,55 @@ fn get_df_model(channels: usize) -> Result<DfTract, String> {
             .expect("DeepFilterNet template must exist after insert")
             .clone())
     })
+}
+
+/// Owned interleaved PCM audio with metadata.
+///
+/// Invariants (enforced by constructor):
+/// - `channels > 0`
+/// - `sample_rate > 0`
+/// - `samples.len() % channels == 0`
+/// - All samples are finite (`f32::is_finite`)
+#[derive(Debug, Clone)]
+pub struct AudioPcm {
+    pub samples: Vec<f32>,
+    pub sample_rate: u32,
+    pub channels: usize,
+}
+
+impl AudioPcm {
+    /// Validate invariants and create a new `AudioPcm`.
+    pub fn new(samples: Vec<f32>, sample_rate: u32, channels: usize) -> Result<Self, String> {
+        if channels == 0 {
+            return Err("channels must be > 0".to_string());
+        }
+        if sample_rate == 0 {
+            return Err("sample_rate must be > 0".to_string());
+        }
+        if samples.len() % channels != 0 {
+            return Err(format!(
+                "samples length {} not divisible by channels {}",
+                samples.len(),
+                channels
+            ));
+        }
+        if !samples.iter().all(|s| s.is_finite()) {
+            return Err("samples contain non-finite values".to_string());
+        }
+        Ok(Self {
+            samples,
+            sample_rate,
+            channels,
+        })
+    }
+
+    pub fn frame_count(&self) -> usize {
+        self.samples.len() / self.channels
+    }
+
+    pub fn duration_secs(&self) -> f64 {
+        self.frame_count() as f64 / self.sample_rate as f64
+    }
 }
 
 /// Audio effects configuration
@@ -156,38 +206,30 @@ impl AudioEffects {
     }
 }
 
-/// Apply audio effects to audio data
+/// Apply audio effects to audio data.
 ///
-/// Returns processed WAV data or original if no effects active
+/// Always decodes to PCM first, even when effects are disabled.
+/// Returns interleaved `AudioPcm` ready for playback.
 ///
 /// Processing pipeline:
 /// 1. Decode audio to PCM (Symphonia probing handles WAV, MP3, and other formats)
 /// 2. Apply DeepFilterNet noise suppression (if enabled)
 /// 3. Apply Signalsmith Stretch (tempo + pitch + formant correction)
-/// 4. Re-encode to WAV
 ///
 /// Note: Volume is NOT applied here - it's handled during playback via rodio
 /// Note: Pitch and tempo are now INDEPENDENT with formant correction via Signalsmith
-pub fn apply_effects(audio_data: Vec<u8>, effects: &AudioEffects) -> Result<Vec<u8>, String> {
-    // Only process if any effect is active
-    if effects.pitch == 0 && effects.speed == 0 && !effects.enhance_enabled {
-        return Ok(audio_data);
-    }
+pub fn apply_effects(audio_data: &[u8], effects: &AudioEffects) -> Result<AudioPcm, String> {
+    let pcm = decode_audio(audio_data)?;
 
-    // Decode audio to PCM
-    let pcm_data = decode_audio(&audio_data)?;
+    let mut samples = pcm.samples;
+    let mut sample_rate = pcm.sample_rate;
+    let channels = pcm.channels;
 
-    let mut samples = pcm_data.samples;
-    let mut sample_rate = pcm_data.sample_rate;
-    let channels = pcm_data.channels;
-
-    // Apply DeepFilterNet noise suppression first, on the clean decoded signal
-    // (before tempo/pitch alter the time/frequency content).
     if effects.enhance_enabled {
         match apply_enhance(&samples, sample_rate, channels, effects.enhance_atten_db) {
             Ok(enhanced) => {
                 samples = enhanced;
-                sample_rate = 48000; // DeepFilterNet model output is always 48 kHz
+                sample_rate = 48000;
                 tracing::debug!(
                     atten_db = effects.enhance_atten_db,
                     channels,
@@ -203,7 +245,6 @@ pub fn apply_effects(audio_data: Vec<u8>, effects: &AudioEffects) -> Result<Vec<
         }
     }
 
-    // Apply Signalsmith Stretch for tempo + pitch + formant correction
     if effects.speed != 0 || effects.pitch != 0 {
         samples = apply_stretch(
             &samples,
@@ -215,8 +256,7 @@ pub fn apply_effects(audio_data: Vec<u8>, effects: &AudioEffects) -> Result<Vec<
         )?;
     }
 
-    // Encode PCM back to WAV
-    encode_wav(&samples, sample_rate, channels)
+    AudioPcm::new(samples, sample_rate, channels)
 }
 
 /// Apply Signalsmith Stretch to interleaved float PCM.
@@ -243,24 +283,16 @@ fn apply_stretch(
         .map_err(|e| format!("SignalsmithStretch processing failed: {}", e))
 }
 
-/// Decoded PCM data
-struct PcmData {
-    samples: Vec<f32>,
-    sample_rate: u32,
-    channels: usize,
-}
-
-/// Decode audio to PCM using Symphonia (auto-detects WAV, MP3, and other formats)
-fn decode_audio(audio_data: &[u8]) -> Result<PcmData, String> {
-    use std::io::Cursor;
-
-    // Clone the data to own it (required for MediaSourceStream)
+/// Decode audio bytes to interleaved f32 PCM using Symphonia.
+///
+/// Handles F32, S16, S24, S32, U8 formats. Interleaves frame-by-frame
+/// (sample[f0,ch0], sample[f0,ch1], sample[f1,ch0], ...).
+pub fn decode_audio(audio_data: &[u8]) -> Result<AudioPcm, String> {
     let data = audio_data.to_vec();
     let cursor = Cursor::new(data);
     let mss = MediaSourceStream::new(Box::new(cursor), Default::default());
 
     let hint = Hint::new();
-
     let meta_opts: MetadataOptions = Default::default();
     let fmt_opts: FormatOptions = Default::default();
 
@@ -281,90 +313,63 @@ fn decode_audio(audio_data: &[u8]) -> Result<PcmData, String> {
         .map_err(|e| format!("Failed to create decoder: {}", e))?;
 
     let sample_rate = track.codec_params.sample_rate.ok_or("No sample rate")? as u32;
-
     let channels = track.codec_params.channels.ok_or("No channels")?.count();
-
     let mut samples = Vec::new();
     let mut decoder = decoder;
 
     loop {
         let packet = match format.next_packet() {
             Ok(packet) => packet,
-            Err(symphonia::core::errors::Error::ResetRequired) => {
-                // Continue after reset
-                continue;
-            }
+            Err(symphonia::core::errors::Error::ResetRequired) => continue,
             Err(_) => break,
         };
 
         match decoder.decode(&packet) {
             Ok(audio_buf) => {
-                // Convert audio buffer to f32 samples
+                let num_channels = audio_buf.spec().channels.count();
+                let num_frames = audio_buf.frames();
+
+                macro_rules! interleave {
+                    ($buf:expr, $convert:expr) => {{
+                        for f in 0..num_frames {
+                            for ch in 0..num_channels {
+                                let raw = $buf.chan(ch)[f];
+                                samples.push($convert(raw));
+                            }
+                        }
+                    }};
+                }
+
                 match audio_buf {
                     symphonia::core::audio::AudioBufferRef::F32(buf) => {
-                        // AudioBuffer has .chan() method to get channel data
-                        let num_channels = buf.spec().channels.count();
-                        for ch in 0..num_channels {
-                            for &sample in buf.chan(ch) {
-                                samples.push(sample);
-                            }
-                        }
+                        interleave!(buf, |v: f32| v);
                     }
                     symphonia::core::audio::AudioBufferRef::S16(buf) => {
-                        // Convert from i16 to f32
-                        let num_channels = buf.spec().channels.count();
-                        for ch in 0..num_channels {
-                            for &sample in buf.chan(ch) {
-                                samples.push(sample as f32 / 32768.0);
-                            }
-                        }
+                        interleave!(buf, |v: i16| v as f32 / 32768.0);
                     }
                     symphonia::core::audio::AudioBufferRef::S24(buf) => {
-                        // Convert from i24 to f32 (use .inner() method)
-                        let num_channels = buf.spec().channels.count();
-                        for ch in 0..num_channels {
-                            for &sample in buf.chan(ch) {
-                                samples.push(sample.inner() as f32 / 8388608.0);
+                        for f in 0..num_frames {
+                            for ch in 0..num_channels {
+                                let raw = buf.chan(ch)[f];
+                                samples.push(raw.inner() as f32 / 8388608.0);
                             }
                         }
                     }
                     symphonia::core::audio::AudioBufferRef::S32(buf) => {
-                        // Convert from i32 to f32
-                        let num_channels = buf.spec().channels.count();
-                        for ch in 0..num_channels {
-                            for &sample in buf.chan(ch) {
-                                samples.push(sample as f32 / 2147483648.0);
-                            }
-                        }
+                        interleave!(buf, |v: i32| v as f32 / 2147483648.0);
                     }
                     symphonia::core::audio::AudioBufferRef::U8(buf) => {
-                        // Convert from u8 to f32
-                        let num_channels = buf.spec().channels.count();
-                        for ch in 0..num_channels {
-                            for &sample in buf.chan(ch) {
-                                samples.push((sample as f32 - 128.0) / 128.0);
-                            }
-                        }
+                        interleave!(buf, |v: u8| (v as f32 - 128.0) / 128.0);
                     }
-                    _ => {
-                        // Unsupported format
-                        return Err("Unsupported audio format".to_string());
-                    }
+                    _ => return Err("Unsupported audio format".to_string()),
                 }
             }
-            Err(symphonia::core::errors::Error::DecodeError(_)) => {
-                // Skip decode errors
-                continue;
-            }
+            Err(symphonia::core::errors::Error::DecodeError(_)) => continue,
             Err(e) => return Err(format!("Decoder error: {}", e)),
         }
     }
 
-    Ok(PcmData {
-        samples,
-        sample_rate,
-        channels,
-    })
+    AudioPcm::new(samples, sample_rate, channels)
 }
 
 /// Apply DeepFilterNet noise suppression to interleaved PCM samples.
@@ -449,14 +454,10 @@ fn apply_enhance(
     Ok(result)
 }
 
-/// Encode PCM samples to WAV
-///
-/// WAV format: RIFF header + fmt chunk + data chunk
-/// Simple container for PCM data
+/// Encode PCM samples to WAV bytes.
+/// Kept for tests and export purposes — playback path uses `AudioPcm` directly.
+#[allow(dead_code)]
 fn encode_wav(samples: &[f32], sample_rate: u32, channels: usize) -> Result<Vec<u8>, String> {
-    use std::io::{Cursor, Write};
-
-    // Clamp and convert to i16
     let i16_samples: Vec<i16> = samples
         .iter()
         .map(|&s| {
@@ -619,8 +620,8 @@ mod tests {
         assert!(df.hop_size > 0);
     }
 
-    /// Integration test: generates a small WAV fixture, processes through
-    /// DeepFilterNet enhancement, and verifies finite output.
+    /// Integration test: processes a generated PCM signal through
+    /// DeepFilterNet enhancement and verifies finite output.
     #[test]
     fn test_deep_filter_audio_fixture() {
         let sample_rate = 48000u32;
@@ -628,12 +629,10 @@ mod tests {
         let duration_samples = 480 * 20; // 20 hops × 480 samples = 0.2s
         let freq = 440.0f32;
 
-        // Generate a sine wave mixed with low-level deterministic noise
         let samples: Vec<f32> = (0u32..duration_samples as u32)
             .map(|i| {
                 let t = i as f32 / sample_rate as f32;
                 let sine = (2.0 * std::f32::consts::PI * freq * t).sin() * 0.5;
-                // Simple LCG for deterministic pseudo-random noise
                 let noise = (i.wrapping_mul(1664525).wrapping_add(1013904223) as f32
                     / u32::MAX as f32
                     - 0.5)
@@ -642,34 +641,157 @@ mod tests {
             })
             .collect();
 
-        let wav_data = encode_wav(&samples, sample_rate, channels).expect("encode WAV fixture");
+        let pcm = AudioPcm::new(samples, sample_rate, channels).expect("AudioPcm fixture valid");
+
+        let wav_data =
+            encode_wav(&pcm.samples, pcm.sample_rate, pcm.channels).expect("encode WAV fixture");
 
         let fx = AudioEffects::new(0, 0, 100).with_enhance(true, 12.0);
 
-        let result = apply_effects(wav_data, &fx).expect("apply_effects should succeed");
+        let result = apply_effects(&wav_data, &fx).expect("apply_effects should succeed");
 
-        // Decode result and validate
-        let pcm = decode_audio(&result).expect("decode result WAV");
-
-        assert!(!pcm.samples.is_empty(), "output must be non-empty");
-        assert_eq!(pcm.channels, channels);
-        // DeepFilterNet outputs 48 kHz
-        assert_eq!(pcm.sample_rate, 48000);
+        assert!(!result.samples.is_empty(), "output must be non-empty");
+        assert_eq!(result.channels, channels);
+        assert_eq!(result.sample_rate, 48000);
 
         assert!(
-            pcm.samples.iter().all(|&s| s.is_finite()),
+            result.samples.iter().all(|&s| s.is_finite()),
             "all output samples must be finite"
         );
         assert!(
-            pcm.samples.iter().any(|&s| s != 0.0),
+            result.samples.iter().any(|&s| s != 0.0),
             "enhanced output must contain non-zero audio"
         );
 
         eprintln!(
-            "enhanced: {} samples, {} channels, {} Hz",
-            pcm.samples.len(),
-            pcm.channels,
-            pcm.sample_rate
+            "enhanced: {} samples, {} channels, {} Hz, {:.3}s",
+            result.samples.len(),
+            result.channels,
+            result.sample_rate,
+            result.duration_secs()
         );
+    }
+
+    #[test]
+    fn test_audiocm_new_valid_mono() {
+        let pcm = AudioPcm::new(vec![0.0, 0.5, -0.5], 44100, 1).expect("valid mono");
+        assert_eq!(pcm.sample_rate, 44100);
+        assert_eq!(pcm.channels, 1);
+        assert_eq!(pcm.frame_count(), 3);
+        assert!((pcm.duration_secs() - 3.0 / 44100.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_audiocm_new_valid_stereo() {
+        let pcm = AudioPcm::new(vec![0.0, 0.5, -0.5, 0.3], 48000, 2).expect("valid stereo");
+        assert_eq!(pcm.sample_rate, 48000);
+        assert_eq!(pcm.channels, 2);
+        assert_eq!(pcm.frame_count(), 2);
+    }
+
+    #[test]
+    fn test_audiocm_validation_channels() {
+        assert!(AudioPcm::new(vec![0.0], 44100, 0).is_err());
+        // Empty samples with valid channels is OK (silence)
+        assert!(AudioPcm::new(vec![], 44100, 1).is_ok());
+    }
+
+    #[test]
+    fn test_audiocm_validation_divisibility() {
+        assert!(AudioPcm::new(vec![0.0, 0.5, -0.5], 44100, 2).is_err());
+    }
+
+    #[test]
+    fn test_audiocm_validation_finite() {
+        assert!(AudioPcm::new(vec![f32::NAN], 44100, 1).is_err());
+        assert!(AudioPcm::new(vec![f32::INFINITY], 44100, 1).is_err());
+        assert!(AudioPcm::new(vec![f32::NEG_INFINITY], 44100, 1).is_err());
+    }
+
+    #[test]
+    fn test_audiocm_validation_sample_rate() {
+        assert!(AudioPcm::new(vec![0.0], 0, 1).is_err());
+        assert!(AudioPcm::new(vec![0.0], 1, 1).is_ok());
+    }
+
+    #[test]
+    fn test_decode_interleave_stereo() {
+        // Generate a simple WAV with distinct L/R channels
+        let sample_rate = 48000u32;
+        let channels = 2usize;
+        // L=0.5, R=-0.5 repeated 3 times → expect interleaved output
+        let interleaved = vec![0.5f32, -0.5, 0.5, -0.5, 0.5, -0.5];
+        let wav = encode_wav(&interleaved, sample_rate, channels).expect("encode stereo WAV");
+
+        let pcm = decode_audio(&wav).expect("decode stereo WAV");
+        assert_eq!(pcm.channels, 2);
+        assert_eq!(pcm.sample_rate, sample_rate);
+
+        // Verify interleaved layout: frame0 L, frame0 R, frame1 L, ...
+        for f in 0..pcm.frame_count() {
+            let idx = f * channels;
+            assert!(
+                (pcm.samples[idx] - 0.5).abs() < 0.01,
+                "frame {f} L mismatch"
+            );
+            assert!(
+                (pcm.samples[idx + 1] - (-0.5)).abs() < 0.01,
+                "frame {f} R mismatch"
+            );
+        }
+    }
+
+    #[test]
+    fn test_decode_interleave_mono() {
+        let sample_rate = 44100u32;
+        let input_src: Vec<f32> = (0..100)
+            .map(|i| (i as f32 * 0.02 - 1.0).clamp(-1.0, 1.0))
+            .collect();
+        let wav = encode_wav(&input_src, sample_rate, 1).expect("encode mono WAV");
+
+        let pcm = decode_audio(&wav).expect("decode mono WAV");
+        assert_eq!(pcm.channels, 1);
+        assert_eq!(pcm.sample_rate, sample_rate);
+        assert_eq!(pcm.frame_count(), 100);
+
+        for (i, (a, b)) in input_src.iter().zip(pcm.samples.iter()).enumerate() {
+            assert!(
+                (a - b).abs() < 0.01,
+                "mono sample {i}: expected {a}, got {b}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_decode_interleave_mono_i16() {
+        // Generate WAV with i16 PCM instead of f32
+        let sample_rate = 22050u32;
+        let channels = 1usize;
+        let samples: Vec<f32> = vec![-1.0, 0.0, 0.5, 1.0];
+        let wav = encode_wav(&samples, sample_rate, channels).expect("encode WAV");
+
+        let pcm = decode_audio(&wav).expect("decode WAV");
+        assert_eq!(pcm.channels, 1);
+        assert_eq!(pcm.sample_rate, sample_rate);
+        assert_eq!(pcm.frame_count(), 4);
+        // Verify approximate values (i16 quantization)
+        assert!((pcm.samples[0] + 1.0).abs() < 0.001);
+        assert!(pcm.samples[1].abs() < 0.001);
+        assert!((pcm.samples[2] - 0.5).abs() < 0.001);
+        assert!((pcm.samples[3] - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_apply_effects_no_effects_returns_pcm() {
+        let samples: Vec<f32> = (0..200)
+            .map(|i| (i as f32 * 0.01 - 1.0).clamp(-1.0, 1.0))
+            .collect();
+        let wav = encode_wav(&samples, 44100, 1).expect("encode WAV");
+        let fx = AudioEffects::new(0, 0, 100);
+
+        let result = apply_effects(&wav, &fx).expect("apply_effects no fx");
+        assert_eq!(result.sample_rate, 44100);
+        assert_eq!(result.channels, 1);
+        assert_eq!(result.frame_count(), 200);
     }
 }

@@ -1,4 +1,4 @@
-use crate::audio::{open_sink_on_device, resolve_output_device, OutputConfig};
+use crate::audio::{open_sink_on_device_pcm, resolve_output_device, AudioPcm, OutputConfig};
 use chrono::Utc;
 use parking_lot::RwLock;
 use rodio::{OutputStream, Sink};
@@ -26,14 +26,14 @@ pub enum PlaybackStatus {
 pub struct QueuedPhrase {
     pub id: String,
     pub text: String,
-    pub audio: Arc<[u8]>,
+    pub audio: Arc<AudioPcm>,
 }
 
 #[derive(Clone)]
 struct CachedPhrase {
     id: String,
     text: String,
-    audio: Arc<[u8]>,
+    audio: Arc<AudioPcm>,
     timestamp: i64,
 }
 
@@ -161,7 +161,7 @@ impl PlaybackManager {
 
                     if let Some(ref c) = cfg.speaker {
                         match resolve_output_device(&c.device_id, &cached_devices) {
-                            Ok(dev) => match open_sink_on_device(&dev, &audio, c.volume) {
+                            Ok(dev) => match open_sink_on_device_pcm(&dev, &audio, c.volume) {
                                 Ok((s, sink)) => {
                                     sink_spk = Some(sink);
                                     _stream_spk = Some(s);
@@ -177,7 +177,7 @@ impl PlaybackManager {
                     }
                     if let Some(ref c) = cfg.mic {
                         match resolve_output_device(&c.device_id, &cached_devices) {
-                            Ok(dev) => match open_sink_on_device(&dev, &audio, c.volume) {
+                            Ok(dev) => match open_sink_on_device_pcm(&dev, &audio, c.volume) {
                                 Ok((s, sink)) => {
                                     sink_mic = Some(sink);
                                     _stream_mic = Some(s);
@@ -324,8 +324,8 @@ impl PlaybackManager {
     }
 
     /// Добавить фразу в очередь. Возвращает `true` если фраза принята, `false` если очередь полна.
-    pub fn enqueue(&self, id: String, text: String, audio: Vec<u8>) -> bool {
-        let arc_audio: Arc<[u8]> = audio.into();
+    pub fn enqueue(&self, id: String, text: String, audio: AudioPcm) -> bool {
+        let arc_audio = Arc::new(audio);
         let mut s = self.state.write();
 
         let ts = Utc::now().timestamp();
@@ -405,7 +405,7 @@ impl PlaybackManager {
     }
 
     pub fn replay_from_cache(&self, id: &str) {
-        let replay: Option<(String, String, Arc<[u8]>)> = {
+        let replay: Option<(String, String, Arc<AudioPcm>)> = {
             let s = self.state.read();
             s.audio_cache
                 .iter()
@@ -413,7 +413,7 @@ impl PlaybackManager {
                 .map(|c| (c.id.clone(), c.text.clone(), Arc::clone(&c.audio)))
         };
         if let Some((id, text, audio)) = replay {
-            self.enqueue(id, text, audio.to_vec());
+            self.enqueue(id, text, (*audio).clone());
         }
     }
 

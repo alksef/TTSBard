@@ -1,7 +1,7 @@
 # Улучшение: передача PCM между audio-effects и playback без промежуточного WAV
 
 - **Дата:** 2026-07-12
-- **Статус:** stage / кандидат к планированию
+- **Статус:** реализовано в PCM playback pipeline
 - **Область:** `src-tauri/src/commands/tts_pipeline.rs`, audio playback pipeline
 
 ## Цель
@@ -50,3 +50,11 @@ WAV/аудиофайл → decode → AudioPcm { samples, sample_rate, channels 
 - Нужно проверить совместимость текущего rodio/CPAL source с произвольным sample rate и interleaved PCM.
 - Если часть playback pipeline принимает только `Read + Seek`, потребуется локальный PCM source adapter, а не возврат к WAV-контейнеру.
 - Это отдельный рефакторинг, не смешивать его с изменением алгоритмов эффектов.
+
+## Результат реализации
+
+- Введён внутренний `AudioPcm` с interleaved `f32` samples и метаданными.
+- Symphonia-декодер собирает PCM frame-by-frame, а не канал за каналом.
+- TTS, preview, очередь, history cache, repeat и replay используют PCM напрямую.
+- Rodio playback создаёт `SamplesBuffer<f32>` без промежуточного WAV.
+- WAV encoder оставлен только для тестовых fixture/helper-кода.
