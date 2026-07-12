@@ -62,6 +62,7 @@ pub struct AudioEffects {
     pub volume: i16,           // 0 to 200 (проценты, 100 = норма)
     pub enhance_enabled: bool, // DeepFilterNet noise suppression
     pub enhance_atten_db: f32, // attenuation limit in dB (5..30)
+    pub fail_on_enhance_error: bool,
 }
 
 impl AudioEffects {
@@ -72,6 +73,7 @@ impl AudioEffects {
             volume: volume.clamp(0, 200),
             enhance_enabled: false,
             enhance_atten_db: 12.0,
+            fail_on_enhance_error: false,
         }
     }
 
@@ -81,6 +83,12 @@ impl AudioEffects {
     pub fn with_enhance(mut self, enabled: bool, atten_db: f32) -> Self {
         self.enhance_enabled = enabled;
         self.enhance_atten_db = atten_db.clamp(5.0, 30.0);
+        self
+    }
+
+    /// Configure failure behavior on DeepFilterNet error (builder-style).
+    pub fn with_fail_on_enhance_error(mut self, fail: bool) -> Self {
+        self.fail_on_enhance_error = fail;
         self
     }
 
@@ -178,6 +186,9 @@ pub fn apply_effects(audio_data: Vec<u8>, effects: &AudioEffects) -> Result<Vec<
                 );
             }
             Err(e) => {
+                if effects.fail_on_enhance_error {
+                    return Err(format!("DeepFilterNet enhancement failed: {}", e));
+                }
                 // Enhancement is best-effort: keep original samples on failure so
                 // the rest of the pipeline (and playback) still works.
                 tracing::error!(error = %e, "DeepFilterNet enhancement failed, skipping");
@@ -959,13 +970,8 @@ mod tests {
 
         let wav_data = encode_wav(&samples, sample_rate, channels).expect("encode WAV fixture");
 
-        let fx = AudioEffects {
-            pitch: 0,
-            speed: 0,
-            volume: 100,
-            enhance_enabled: true,
-            enhance_atten_db: 12.0,
-        };
+        let fx = AudioEffects::new(0, 0, 100)
+            .with_enhance(true, 12.0);
 
         let result = apply_effects(wav_data, &fx).expect("apply_effects should succeed");
 
