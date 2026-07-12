@@ -313,7 +313,8 @@ pub async fn preview_audio_file(
         let voice_volume = if voice_transform_enabled { volume } else { 100 };
 
         let effects_config = AudioEffects::new(voice_pitch, voice_speed, voice_volume)
-            .with_enhance(enhance_enabled, enhance_atten_db);
+            .with_enhance(enhance_enabled, enhance_atten_db)
+            .with_fail_on_enhance_error(true);
 
         let has_effects =
             voice_pitch != 0 || voice_speed != 0 || voice_volume != 100 || enhance_enabled;
