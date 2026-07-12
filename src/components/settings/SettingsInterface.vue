@@ -202,42 +202,44 @@ watch(
         <span class="setting-hint">Если выключено, используется цвет активной темы</span>
       </div>
 
-      <div class="setting-row">
-        <label class="setting-label">Цвет фона</label>
-        <div class="appearance-controls">
-          <input
-            v-model="mainBgColor"
-            type="color"
-            class="color-input"
-            :disabled="!mainCustomBackground"
-            @change="saveMainBgColor"
-          />
-          <input
-            v-model="mainBgColor"
-            type="text"
-            placeholder="#10131a"
-            class="text-input color-text"
-            maxlength="7"
-            :disabled="!mainCustomBackground"
-            @blur="saveMainBgColor"
-            @keyup.enter="saveMainBgColor"
-          />
+      <div class="appearance-grid">
+        <div class="appearance-column">
+          <label class="setting-label">Цвет</label>
+          <div class="appearance-controls">
+            <input
+              v-model="mainBgColor"
+              type="color"
+              class="color-input"
+              :disabled="!mainCustomBackground"
+              @change="saveMainBgColor"
+            />
+            <input
+              v-model="mainBgColor"
+              type="text"
+              placeholder="#10131a"
+              class="text-input color-text"
+              maxlength="7"
+              :disabled="!mainCustomBackground"
+              @blur="saveMainBgColor"
+              @keyup.enter="saveMainBgColor"
+            />
+          </div>
         </div>
-      </div>
 
-      <div class="setting-row">
-        <label class="setting-label">Прозрачность</label>
-        <div class="appearance-controls">
-          <input
-            v-model.number="mainOpacity"
-            type="range"
-            min="10"
-            max="100"
-            step="5"
-            class="slider-input inline-slider"
-            @change="saveMainOpacity"
-          />
-          <span class="opacity-value">{{ mainOpacity }}%</span>
+        <div class="appearance-column">
+          <label class="setting-label">Прозрачность</label>
+          <div class="appearance-controls">
+            <input
+              v-model.number="mainOpacity"
+              type="range"
+              min="10"
+              max="100"
+              step="5"
+              class="slider-input inline-slider"
+              @change="saveMainOpacity"
+            />
+            <span class="opacity-value">{{ mainOpacity }}%</span>
+          </div>
         </div>
       </div>
     </section>
@@ -258,37 +260,45 @@ watch(
         </select>
       </div>
 
-      <div class="setting-row">
-        <label class="setting-label">Цвет фона</label>
-        <div class="appearance-controls">
-          <input
-            v-model="spBgColor"
-            type="color"
-            class="color-input"
-            :disabled="spOwnDisabled"
-            @change="saveSpBgColor"
-          />
-          <input
-            v-model="spBgColor"
-            type="text"
-            placeholder="#2a2a2a"
-            class="text-input color-text"
-            maxlength="7"
-            :disabled="spOwnDisabled"
-            @blur="saveSpBgColor"
-            @keyup.enter="saveSpBgColor"
-          />
-          <input
-            v-model.number="spOpacity"
-            type="range"
-            min="10"
-            max="100"
-            step="5"
-            class="slider-input inline-slider"
-            :disabled="spOwnDisabled"
-            @change="saveSpOpacity"
-          />
-          <span class="opacity-value">{{ spOpacity }}%</span>
+      <div class="appearance-grid">
+        <div class="appearance-column">
+          <label class="setting-label">Цвет</label>
+          <div class="appearance-controls">
+            <input
+              v-model="spBgColor"
+              type="color"
+              class="color-input"
+              :disabled="spOwnDisabled"
+              @change="saveSpBgColor"
+            />
+            <input
+              v-model="spBgColor"
+              type="text"
+              placeholder="#2a2a2a"
+              class="text-input color-text"
+              maxlength="7"
+              :disabled="spOwnDisabled"
+              @blur="saveSpBgColor"
+              @keyup.enter="saveSpBgColor"
+            />
+          </div>
+        </div>
+
+        <div class="appearance-column">
+          <label class="setting-label">Прозрачность</label>
+          <div class="appearance-controls">
+            <input
+              v-model.number="spOpacity"
+              type="range"
+              min="10"
+              max="100"
+              step="5"
+              class="slider-input inline-slider"
+              :disabled="spOwnDisabled"
+              @change="saveSpOpacity"
+            />
+            <span class="opacity-value">{{ spOpacity }}%</span>
+          </div>
         </div>
       </div>
     </section>
@@ -309,37 +319,45 @@ watch(
         </select>
       </div>
 
-      <div class="setting-row">
-        <label class="setting-label">Цвет фона</label>
-        <div class="appearance-controls">
-          <input
-            v-model="pbBgColor"
-            type="color"
-            class="color-input"
-            :disabled="pbOwnDisabled"
-            @change="savePbBgColor"
-          />
-          <input
-            v-model="pbBgColor"
-            type="text"
-            placeholder="#10131a"
-            class="text-input color-text"
-            maxlength="7"
-            :disabled="pbOwnDisabled"
-            @blur="savePbBgColor"
-            @keyup.enter="savePbBgColor"
-          />
-          <input
-            v-model.number="pbOpacity"
-            type="range"
-            min="10"
-            max="100"
-            step="5"
-            class="slider-input inline-slider"
-            :disabled="pbOwnDisabled"
-            @change="savePbOpacity"
-          />
-          <span class="opacity-value">{{ pbOpacity }}%</span>
+      <div class="appearance-grid">
+        <div class="appearance-column">
+          <label class="setting-label">Цвет</label>
+          <div class="appearance-controls">
+            <input
+              v-model="pbBgColor"
+              type="color"
+              class="color-input"
+              :disabled="pbOwnDisabled"
+              @change="savePbBgColor"
+            />
+            <input
+              v-model="pbBgColor"
+              type="text"
+              placeholder="#10131a"
+              class="text-input color-text"
+              maxlength="7"
+              :disabled="pbOwnDisabled"
+              @blur="savePbBgColor"
+              @keyup.enter="savePbBgColor"
+            />
+          </div>
+        </div>
+
+        <div class="appearance-column">
+          <label class="setting-label">Прозрачность</label>
+          <div class="appearance-controls">
+            <input
+              v-model.number="pbOpacity"
+              type="range"
+              min="10"
+              max="100"
+              step="5"
+              class="slider-input inline-slider"
+              :disabled="pbOwnDisabled"
+              @change="savePbOpacity"
+            />
+            <span class="opacity-value">{{ pbOpacity }}%</span>
+          </div>
         </div>
       </div>
     </section>
@@ -405,6 +423,16 @@ watch(
   font-size: 0.85rem;
   color: var(--color-text-muted);
   line-height: 1.4;
+}
+
+.appearance-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 1rem;
+}
+
+.appearance-column {
+  min-width: 0;
 }
 
 .appearance-controls {
