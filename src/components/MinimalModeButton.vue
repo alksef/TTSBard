@@ -69,12 +69,13 @@ async function toggleMinimalMode() {
 }
 
 .minimal-mode-toggle.is-minimal {
-  background: var(--color-accent);
-  color: var(--color-text-white);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
 }
 
 .minimal-mode-toggle.is-minimal:hover {
-  background: var(--color-accent);
+  background: var(--sidebar-btn-hover-bg);
+  color: var(--color-text-primary);
 }
 
 .minimal-mode-toggle.is-animating {
