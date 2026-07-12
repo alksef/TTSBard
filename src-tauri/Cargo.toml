@@ -121,3 +121,11 @@ windows = { version = "0.58", features = [
 [features]
 default = ["mtproxy"]
 mtproxy = ["grammers-mtsender/mtproxy"]
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+
+# Workaround: duplicate node names generated during tract-pulse
+# codegen/compaction for the DFN3 graph. Our local copy auto-deduplicates names.
+[patch.crates-io]
+tract-core = { path = "patches/tract-core" }

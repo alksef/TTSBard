@@ -43,7 +43,7 @@ fn get_df_model(channels: usize) -> Result<DfTract, String> {
             let rp = RuntimeParams::default_with_ch(channels);
             let df_params = DfParams::default();
             let df = DfTract::new(df_params, &rp)
-                .map_err(|e| format!("Failed to initialize DeepFilterNet: {}", e))?;
+                .map_err(|e| format!("Failed to initialize DeepFilterNet: {:#}", e))?;
             guard.insert(channels, df);
         }
 
@@ -920,5 +920,77 @@ mod tests {
         assert_eq!(effects.pitch, -100);
         assert_eq!(effects.speed, 100);
         assert_eq!(effects.volume, 200);
+    }
+
+    /// Diagnostic test: reproduces DfTract initialization standalone.
+    /// Must succeed after the fix is applied.
+    #[test]
+    fn test_df_tract_initialize_mono() {
+        let rp = df::tract::RuntimeParams::default_with_ch(1);
+        let df_params = df::tract::DfParams::default();
+        let df =
+            df::tract::DfTract::new(df_params, &rp).expect("DfTract::new(mono) should succeed");
+        assert!(df.sr > 0);
+        assert!(df.hop_size > 0);
+    }
+
+    /// Integration test: generates a small WAV fixture, processes through
+    /// DeepFilterNet enhancement, and verifies finite output.
+    #[test]
+    fn test_deep_filter_audio_fixture() {
+        let sample_rate = 48000u32;
+        let channels = 1usize;
+        let duration_samples = 480 * 20; // 20 hops × 480 samples = 0.2s
+        let freq = 440.0f32;
+
+        // Generate a sine wave mixed with low-level deterministic noise
+        let samples: Vec<f32> = (0u32..duration_samples as u32)
+            .map(|i| {
+                let t = i as f32 / sample_rate as f32;
+                let sine = (2.0 * std::f32::consts::PI * freq * t).sin() * 0.5;
+                // Simple LCG for deterministic pseudo-random noise
+                let noise = (i.wrapping_mul(1664525).wrapping_add(1013904223) as f32
+                    / u32::MAX as f32
+                    - 0.5)
+                    * 0.02;
+                (sine + noise).clamp(-1.0, 1.0)
+            })
+            .collect();
+
+        let wav_data = encode_wav(&samples, sample_rate, channels).expect("encode WAV fixture");
+
+        let fx = AudioEffects {
+            pitch: 0,
+            speed: 0,
+            volume: 100,
+            enhance_enabled: true,
+            enhance_atten_db: 12.0,
+        };
+
+        let result = apply_effects(wav_data, &fx).expect("apply_effects should succeed");
+
+        // Decode result and validate
+        let pcm = decode_audio(&result).expect("decode result WAV");
+
+        assert!(!pcm.samples.is_empty(), "output must be non-empty");
+        assert_eq!(pcm.channels, channels);
+        // DeepFilterNet outputs 48 kHz
+        assert_eq!(pcm.sample_rate, 48000);
+
+        assert!(
+            pcm.samples.iter().all(|&s| s.is_finite()),
+            "all output samples must be finite"
+        );
+        assert!(
+            pcm.samples.iter().any(|&s| s != 0.0),
+            "enhanced output must contain non-zero audio"
+        );
+
+        eprintln!(
+            "enhanced: {} samples, {} channels, {} Hz",
+            pcm.samples.len(),
+            pcm.channels,
+            pcm.sample_rate
+        );
     }
 }

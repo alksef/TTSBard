@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import { RefreshCw, Loader, Volume2, VolumeX, Mic, Info, Play, AudioLines, Sliders, Upload, Square, FileAudio, Save, ShieldCheck, X, FolderOpen } from 'lucide-vue-next';
+import { RefreshCw, Loader, Volume2, VolumeX, Mic, Info, Play, AudioLines, Sliders, Upload, Square, FileAudio, ShieldCheck, X, FolderOpen, TriangleAlert } from 'lucide-vue-next';
 import { useAudioSettings, useAudioEffectsSettings } from '../composables/useAppSettings';
 import { debugLog } from '../utils/debug';
 
@@ -247,6 +247,16 @@ function markDirty() {
   saveError.value = '';
 }
 
+function setEffectValue(field: 'pitch' | 'speed' | 'volume', value: number) {
+  draftEffects.value[field] = value;
+  markDirty();
+}
+
+function setEnhanceAttenDb(value: number) {
+  draftEffects.value.enhance_atten_db = value;
+  markDirty();
+}
+
 async function pickFile() {
   try {
     const result = await open({
@@ -375,13 +385,6 @@ async function saveEffects() {
     saveStatus.value = 'error';
     saveError.value = e as string;
   }
-}
-
-function resetVoiceTransform() {
-  draftEffects.value.pitch = 0;
-  draftEffects.value.speed = 0;
-  draftEffects.value.volume = 100;
-  markDirty();
 }
 
 const fileFormat = computed(() => {
@@ -606,10 +609,22 @@ watch(audioEffectsFromComposable, (newEffects) => {
       </div>
 
       <div v-if="activeTab === 'effects'" class="tab-content effects-tab">
+        <div v-if="isDirty" class="draft-warning" role="status">
+          <TriangleAlert :size="18" />
+          <span>Есть несохранённые изменения.</span>
+        </div>
+
         <div class="setting-section">
           <div class="section-header">
             <FileAudio class="section-icon" :size="20" />
             <span class="section-title">Проверка эффектов</span>
+            <span v-if="isPreviewPlaying" class="playback-status-inline">
+              <Loader :size="14" class="spinner" /> Воспроизведение...
+            </span>
+          </div>
+
+          <div class="preview-hint">
+            Режим «С эффектами» использует текущие выбранные настройки, даже если они ещё не сохранены.
           </div>
 
           <div v-if="!selectedFile" class="preview-empty">
@@ -664,9 +679,6 @@ watch(audioEffectsFromComposable, (newEffects) => {
               </button>
             </div>
 
-            <div v-if="isPreviewPlaying" class="preview-status playing">
-              <Loader :size="16" class="spinner" /> Воспроизведение...
-            </div>
             <div v-if="previewError" class="preview-status error">{{ previewError }}</div>
           </div>
         </div>
@@ -685,33 +697,70 @@ watch(audioEffectsFromComposable, (newEffects) => {
             </label>
           </div>
 
-          <div class="setting-row" :class="{ disabled: !draftEffects.enabled }">
+          <div class="setting-row slider-row" :class="{ disabled: !draftEffects.enabled }">
             <label>Высота (pitch)</label>
-            <div class="volume-control">
-              <input type="range" min="-100" max="100" v-model.number="draftEffects.pitch" @input="markDirty" :disabled="!draftEffects.enabled" />
-              <span class="volume-value">{{ draftEffects.pitch }}%</span>
+            <div class="slider-group">
+              <div class="volume-control">
+                <input type="range" min="-100" max="100" step="1" v-model.number="draftEffects.pitch" @input="markDirty" :disabled="!draftEffects.enabled" />
+                <span class="volume-value">{{ draftEffects.pitch }}%</span>
+              </div>
+              <div class="slider-marks">
+                <button type="button" class="mark-btn mark-btn--start" :class="{ active: draftEffects.pitch === -100 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', -100)" style="left: 0%">−100</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.pitch === -75 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', -75)" style="left: 12.5%">−75</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.pitch === -50 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', -50)" style="left: 25%">−50</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.pitch === -25 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', -25)" style="left: 37.5%">−25</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.pitch === 0 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', 0)" style="left: 50%">0</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.pitch === 25 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', 25)" style="left: 62.5%">+25</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.pitch === 50 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', 50)" style="left: 75%">+50</button>
+                <button type="button" class="mark-btn mark-btn--before-end" :class="{ active: draftEffects.pitch === 75 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', 75)" style="left: 87.5%">+75</button>
+                <button type="button" class="mark-btn mark-btn--end" :class="{ active: draftEffects.pitch === 100 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', 100)" style="left: 100%">+100</button>
+              </div>
             </div>
           </div>
 
-          <div class="setting-row" :class="{ disabled: !draftEffects.enabled }">
+          <div class="setting-row slider-row" :class="{ disabled: !draftEffects.enabled }">
             <label>Скорость</label>
-            <div class="volume-control">
-              <input type="range" min="-100" max="100" v-model.number="draftEffects.speed" @input="markDirty" :disabled="!draftEffects.enabled" />
-              <span class="volume-value">{{ draftEffects.speed }}%</span>
+            <div class="slider-group">
+              <div class="volume-control">
+                <input type="range" min="-100" max="100" step="1" v-model.number="draftEffects.speed" @input="markDirty" :disabled="!draftEffects.enabled" />
+                <span class="volume-value">{{ draftEffects.speed }}%</span>
+              </div>
+              <div class="slider-marks">
+                <button type="button" class="mark-btn mark-btn--start" :class="{ active: draftEffects.speed === -100 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', -100)" style="left: 0%">−100</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === -75 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', -75)" style="left: 12.5%">−75</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === -50 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', -50)" style="left: 25%">−50</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === -25 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', -25)" style="left: 37.5%">−25</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === 0 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', 0)" style="left: 50%">0</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === 25 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', 25)" style="left: 62.5%">+25</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === 50 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', 50)" style="left: 75%">+50</button>
+                <button type="button" class="mark-btn mark-btn--before-end" :class="{ active: draftEffects.speed === 75 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', 75)" style="left: 87.5%">+75</button>
+                <button type="button" class="mark-btn mark-btn--end" :class="{ active: draftEffects.speed === 100 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', 100)" style="left: 100%">+100</button>
+              </div>
             </div>
           </div>
 
-          <div class="setting-row" :class="{ disabled: !draftEffects.enabled }">
+          <div class="setting-row slider-row" :class="{ disabled: !draftEffects.enabled }">
             <label>Громкость</label>
-            <div class="volume-control">
-              <input type="range" min="0" max="200" v-model.number="draftEffects.volume" @input="markDirty" :disabled="!draftEffects.enabled" />
-              <span class="volume-value">{{ draftEffects.volume }}%</span>
+            <div class="slider-group">
+              <div class="volume-control">
+                <input type="range" min="0" max="200" step="1" v-model.number="draftEffects.volume" @input="markDirty" :disabled="!draftEffects.enabled" />
+                <span class="volume-value">{{ draftEffects.volume }}%</span>
+              </div>
+              <div class="slider-marks">
+                <button type="button" class="mark-btn mark-btn--start" :class="{ active: draftEffects.volume === 0 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 0)" style="left: 0%" aria-label="Без звука, 0%" title="Без звука, 0%">0</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 25 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 25)" style="left: 12.5%">25</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 50 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 50)" style="left: 25%">50</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 75 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 75)" style="left: 37.5%">75</button>
+                <button type="button" class="mark-btn mark-btn--default" :class="{ active: draftEffects.volume === 100 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 100)" style="left: 50%" aria-label="Нормальная громкость, 100%" title="Нормальная громкость, 100%">100</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 125 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 125)" style="left: 62.5%">125</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 150 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 150)" style="left: 75%">150</button>
+                <button type="button" class="mark-btn mark-btn--before-end" :class="{ active: draftEffects.volume === 175 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 175)" style="left: 87.5%">175</button>
+                <button type="button" class="mark-btn mark-btn--end" :class="{ active: draftEffects.volume === 200 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 200)" style="left: 100%">200</button>
+              </div>
             </div>
           </div>
 
-          <div class="setting-row reset-row">
-            <button @click="resetVoiceTransform" :disabled="!draftEffects.enabled" class="reset-btn">Сбросить</button>
-          </div>
+
         </div>
 
         <div class="setting-section">
@@ -728,13 +777,19 @@ watch(audioEffectsFromComposable, (newEffects) => {
             </label>
           </div>
 
-          <div class="model-info">Модель встроена в приложение, загрузка не требуется</div>
-
-          <div class="setting-row" :class="{ disabled: !draftEffects.enhance_enabled }">
+          <div class="setting-row slider-row" :class="{ disabled: !draftEffects.enhance_enabled }">
             <label>Глубина очистки</label>
-            <div class="volume-control">
-              <input type="range" min="5" max="30" v-model.number="draftEffects.enhance_atten_db" @input="markDirty" :disabled="!draftEffects.enhance_enabled" />
-              <span class="volume-value">{{ draftEffects.enhance_atten_db }} dB</span>
+            <div class="slider-group">
+              <div class="volume-control">
+                <input type="range" min="5" max="30" step="1" v-model.number="draftEffects.enhance_atten_db" @input="markDirty" :disabled="!draftEffects.enhance_enabled" />
+                <span class="volume-value">{{ draftEffects.enhance_atten_db }} dB</span>
+              </div>
+              <div class="slider-marks">
+                <button type="button" class="mark-btn mark-btn--start" :class="{ active: draftEffects.enhance_atten_db === 5 }" :disabled="!draftEffects.enhance_enabled" @click="setEnhanceAttenDb(5)" style="left: 0%">5</button>
+                <button type="button" class="mark-btn mark-btn--default" :class="{ active: draftEffects.enhance_atten_db === 12 }" :disabled="!draftEffects.enhance_enabled" @click="setEnhanceAttenDb(12)" style="left: 28%" title="Значение по умолчанию, 12 dB" aria-label="Значение по умолчанию, 12 dB">12</button>
+                <button type="button" class="mark-btn" :class="{ active: draftEffects.enhance_atten_db === 20 }" :disabled="!draftEffects.enhance_enabled" @click="setEnhanceAttenDb(20)" style="left: 60%">20</button>
+                <button type="button" class="mark-btn mark-btn--end" :class="{ active: draftEffects.enhance_atten_db === 30 }" :disabled="!draftEffects.enhance_enabled" @click="setEnhanceAttenDb(30)" style="left: 100%">30</button>
+              </div>
             </div>
           </div>
 
@@ -748,7 +803,6 @@ watch(audioEffectsFromComposable, (newEffects) => {
             <span v-else-if="isDirty" class="save-status dirty">Изменения не сохранены</span>
           </div>
           <button @click="saveEffects" :disabled="!isDirty || saveStatus === 'saving'" class="save-btn">
-            <Save :size="16" />
             <span v-if="saveStatus === 'saving'">Сохранение...</span>
             <span v-else>Сохранить</span>
           </button>
@@ -756,7 +810,7 @@ watch(audioEffectsFromComposable, (newEffects) => {
       </div>
     </div>
 
-    <div class="panel-footer">
+    <div v-if="activeTab === 'devices'" class="panel-footer">
       <button
         @click="refreshData"
         :disabled="isRefreshing"
@@ -1249,12 +1303,45 @@ watch(audioEffectsFromComposable, (newEffects) => {
   gap: 8px;
 }
 
-.preview-status.playing {
-  color: var(--color-text-secondary);
-}
-
 .preview-status.error {
   color: var(--color-danger);
+}
+
+.playback-status-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.playback-status-inline .spinner {
+  animation: spin 1s linear infinite;
+}
+
+/* Draft warning */
+.draft-warning {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--warning-bg-weak);
+  border: 1px solid var(--warning-border);
+  border-radius: 10px;
+  color: var(--warning-text-bright);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* Preview hint */
+.preview-hint {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin-bottom: 12px;
+  line-height: 1.4;
 }
 
 /* Toggle switch */
@@ -1359,17 +1446,6 @@ input:checked + .toggle-slider:before {
   cursor: not-allowed;
 }
 
-/* Model info */
-.model-info {
-  font-size: 12px;
-  color: var(--color-text-muted);
-  margin-bottom: 12px;
-  padding: 6px 10px;
-  background: var(--color-bg-field);
-  border-radius: 6px;
-  border: 1px solid var(--color-border-weak);
-}
-
 .model-hint {
   font-size: 12px;
   color: var(--color-text-muted);
@@ -1380,30 +1456,79 @@ input:checked + .toggle-slider:before {
   border-radius: 6px;
 }
 
-/* Reset */
-.reset-row {
-  justify-content: flex-end;
+/* Slider reference marks */
+.slider-group {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
-.reset-btn {
-  padding: 6px 14px;
-  border: 1px solid var(--color-border);
+.slider-marks {
+  position: relative;
+  height: 22px;
+  margin-top: 1px;
+  width: calc(100% - 57px);
+}
+
+.mark-btn {
+  position: absolute;
+  transform: translateX(-50%);
   background: var(--color-bg-field);
-  color: var(--color-text-secondary);
-  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 4px;
   cursor: pointer;
-  font-size: 12px;
+  white-space: nowrap;
+  line-height: 1.3;
   font-family: inherit;
-  transition: all 0.15s;
+  transition: color 0.15s, border-color 0.15s;
 }
 
-.reset-btn:hover:not(:disabled) {
-  background: var(--color-bg-field-hover);
+.mark-btn:hover:not(:disabled) {
+  color: var(--color-text-primary);
   border-color: var(--color-border-strong);
 }
 
-.reset-btn:disabled {
+.mark-btn.active {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+  background: var(--color-accent-glow);
+}
+
+.mark-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.mark-btn--default {
+  font-weight: 700;
+}
+
+.mark-btn--start {
+  transform: translateX(0);
+}
+
+.mark-btn--end {
+  transform: translateX(-100%);
+}
+
+.mark-btn--before-end {
+  transform: translateX(-70%);
+}
+
+/* Effect slider rows: tighter label area to give marks more room */
+.slider-row label {
+  min-width: 90px;
+}
+
+.slider-row .volume-control {
+  gap: 6px;
+}
+
+.slider-row .slider-marks {
+  width: calc(100% - 51px);
 }
 </style>
