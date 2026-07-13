@@ -215,10 +215,26 @@ impl AudioEffects {
 /// 1. Decode audio to PCM (Symphonia probing handles WAV, MP3, and other formats)
 /// 2. Apply DeepFilterNet noise suppression (if enabled)
 /// 3. Apply Signalsmith Stretch (tempo + pitch + formant correction)
+/// 4. Apply DSP (EQ + compressor + limiter) if config is provided
 ///
 /// Note: Volume is NOT applied here - it's handled during playback via rodio
 /// Note: Pitch and tempo are now INDEPENDENT with formant correction via Signalsmith
-pub fn apply_effects(audio_data: &[u8], effects: &AudioEffects) -> Result<AudioPcm, String> {
+pub fn apply_effects(
+    audio_data: &[u8],
+    effects: &AudioEffects,
+    dsp_config: Option<&super::dsp::DspConfig>,
+) -> Result<AudioPcm, String> {
+    apply_effects_inner(audio_data, effects, dsp_config, apply_enhance)
+}
+
+/// Internal pipeline: identical to [`apply_effects`] but accepts a custom
+/// enhancement function so tests can inject deterministic `Err` outcomes.
+fn apply_effects_inner(
+    audio_data: &[u8],
+    effects: &AudioEffects,
+    dsp_config: Option<&super::dsp::DspConfig>,
+    enhance_fn: impl FnOnce(&[f32], u32, usize, f32) -> Result<(Vec<f32>, u32), String>,
+) -> Result<AudioPcm, String> {
     let pcm = decode_audio(audio_data)?;
 
     let mut samples = pcm.samples;
@@ -226,13 +242,14 @@ pub fn apply_effects(audio_data: &[u8], effects: &AudioEffects) -> Result<AudioP
     let channels = pcm.channels;
 
     if effects.enhance_enabled {
-        match apply_enhance(&samples, sample_rate, channels, effects.enhance_atten_db) {
-            Ok(enhanced) => {
+        match enhance_fn(&samples, sample_rate, channels, effects.enhance_atten_db) {
+            Ok((enhanced, enhanced_sr)) => {
                 samples = enhanced;
-                sample_rate = 48000;
+                sample_rate = enhanced_sr;
                 tracing::debug!(
                     atten_db = effects.enhance_atten_db,
                     channels,
+                    enhanced_sr,
                     "Applied DeepFilterNet enhancement"
                 );
             }
@@ -254,6 +271,15 @@ pub fn apply_effects(audio_data: &[u8], effects: &AudioEffects) -> Result<AudioP
             effects.pitch_semitones(),
             effects.formant_preserved,
         )?;
+    }
+
+    if let Some(dsp_cfg) = dsp_config {
+        let dsp_enabled =
+            dsp_cfg.eq.enabled || dsp_cfg.compressor.enabled || dsp_cfg.limiter.enabled;
+        if dsp_enabled {
+            samples = super::dsp::process_dsp(&samples, sample_rate, channels, dsp_cfg);
+            tracing::debug!("Applied DSP post-processing");
+        }
     }
 
     AudioPcm::new(samples, sample_rate, channels)
@@ -379,8 +405,14 @@ pub fn decode_audio(audio_data: &[u8]) -> Result<AudioPcm, String> {
 /// 1. De-interleaves the PCM into a `[channels, frames]` array.
 /// 2. Resamples to the model's sample rate (if the input differs).
 /// 3. Streams `hop_size` frames through `DfTract::process`.
-/// 4. Resamples back to the original sample rate.
-/// 5. Re-interleaves the result.
+/// 4. Re-interleaves the result.
+///
+/// ## Contract (Variant A)
+///
+/// The output retains the model's native sample rate (currently 48 kHz) without
+/// resampling back to the input rate. The returned tuple includes both the
+/// interleaved samples and the actual output sample rate so callers never need
+/// to assume a fixed frequency.
 ///
 /// `atten_db` is the attenuation limit (5..30). Lower values mean gentler cleanup.
 fn apply_enhance(
@@ -388,9 +420,9 @@ fn apply_enhance(
     sample_rate: u32,
     channels: usize,
     atten_db: f32,
-) -> Result<Vec<f32>, String> {
+) -> Result<(Vec<f32>, u32), String> {
     if samples.is_empty() || channels == 0 {
-        return Ok(samples.to_vec());
+        return Ok((samples.to_vec(), sample_rate));
     }
 
     // Obtain a fresh model instance (cheap clone of a one-time initialized template)
@@ -404,7 +436,7 @@ fn apply_enhance(
     // De-interleave into [channels, frames_per_ch].
     let frames_per_ch = samples.len() / channels;
     if frames_per_ch == 0 {
-        return Ok(samples.to_vec());
+        return Ok((samples.to_vec(), sample_rate));
     }
     let mut deinterleaved: Array2<f32> = Array2::zeros((channels, frames_per_ch));
     for (i, &s) in samples.iter().enumerate() {
@@ -451,13 +483,17 @@ fn apply_enhance(
         }
     }
 
-    Ok(result)
+    Ok((result, model_sr as u32))
 }
 
 /// Encode PCM samples to WAV bytes.
 /// Kept for tests and export purposes — playback path uses `AudioPcm` directly.
 #[allow(dead_code)]
-fn encode_wav(samples: &[f32], sample_rate: u32, channels: usize) -> Result<Vec<u8>, String> {
+pub(crate) fn encode_wav(
+    samples: &[f32],
+    sample_rate: u32,
+    channels: usize,
+) -> Result<Vec<u8>, String> {
     let i16_samples: Vec<i16> = samples
         .iter()
         .map(|&s| {
@@ -648,7 +684,7 @@ mod tests {
 
         let fx = AudioEffects::new(0, 0, 100).with_enhance(true, 12.0);
 
-        let result = apply_effects(&wav_data, &fx).expect("apply_effects should succeed");
+        let result = apply_effects(&wav_data, &fx, None).expect("apply_effects should succeed");
 
         assert!(!result.samples.is_empty(), "output must be non-empty");
         assert_eq!(result.channels, channels);
@@ -789,9 +825,269 @@ mod tests {
         let wav = encode_wav(&samples, 44100, 1).expect("encode WAV");
         let fx = AudioEffects::new(0, 0, 100);
 
-        let result = apply_effects(&wav, &fx).expect("apply_effects no fx");
+        let result = apply_effects(&wav, &fx, None).expect("apply_effects no fx");
         assert_eq!(result.sample_rate, 44100);
         assert_eq!(result.channels, 1);
         assert_eq!(result.frame_count(), 200);
+    }
+
+    // ---------------------------------------------------------------------------
+    // DeepFilterNet sample-rate contract tests (Stage 30, Variant A)
+    // ---------------------------------------------------------------------------
+
+    /// Generate a test signal: sine wave + minimal noise, interleaved, at the
+    /// given sample rate, for approximately `duration_secs`.
+    fn make_test_signal(sample_rate: u32, channels: usize, duration_secs: f64) -> Vec<f32> {
+        let num_samples = (sample_rate as f64 * duration_secs) as usize;
+        let freq = 440.0f32;
+        let mut out = Vec::with_capacity(num_samples * channels);
+
+        for i in 0..(num_samples as u64) {
+            let t = i as f32 / sample_rate as f32;
+            let sine = (2.0 * std::f32::consts::PI * freq * t).sin() * 0.5;
+            let noise =
+                ((i.wrapping_mul(1664525).wrapping_add(1013904223)) as f32 / u32::MAX as f32 - 0.5)
+                    * 0.01;
+            let val = (sine + noise).clamp(-1.0, 1.0);
+            for _ch in 0..channels {
+                out.push(val);
+            }
+        }
+        out
+    }
+
+    /// Return the model's native sample rate for the given channel count.
+    /// Panics if model initialization fails.
+    fn df_model_sample_rate(channels: usize) -> u32 {
+        get_df_model(channels)
+            .expect("get DF model for sample-rate check")
+            .sr as u32
+    }
+
+    // Tests for each input sample rate — verifies apply_enhance contract
+
+    fn test_enhance_at_rate(input_rate: u32) {
+        let channels: usize = 1;
+        let duration = 0.2;
+        let samples = make_test_signal(input_rate, channels, duration);
+
+        let (enhanced, out_rate) =
+            apply_enhance(&samples, input_rate, channels, 12.0).expect("enhance should succeed");
+
+        let expected_sr = df_model_sample_rate(channels);
+        assert_eq!(
+            out_rate, expected_sr,
+            "output sample rate must match model SR"
+        );
+        assert!(!enhanced.is_empty(), "output must be non-empty");
+
+        let out_pcm = AudioPcm::new(enhanced, out_rate, channels).expect("enhanced PCM valid");
+        let out_dur = out_pcm.duration_secs();
+        let tolerance = duration * 0.05;
+        assert!(
+            (out_dur - duration).abs() < tolerance,
+            "duration mismatch: expected ~{duration}s, got {out_dur}s (sr_in={input_rate}, sr_out={out_rate})"
+        );
+        assert!(
+            out_pcm.samples.iter().all(|&s| s.is_finite()),
+            "all output samples must be finite"
+        );
+        assert_eq!(
+            out_pcm.channels, channels,
+            "channel count must be preserved"
+        );
+    }
+
+    #[test]
+    fn test_enhance_input_16000hz() {
+        test_enhance_at_rate(16_000);
+    }
+
+    #[test]
+    fn test_enhance_input_22050hz() {
+        test_enhance_at_rate(22_050);
+    }
+
+    #[test]
+    fn test_enhance_input_24000hz() {
+        test_enhance_at_rate(24_000);
+    }
+
+    #[test]
+    fn test_enhance_input_44100hz() {
+        test_enhance_at_rate(44_100);
+    }
+
+    #[test]
+    fn test_enhance_input_48000hz() {
+        test_enhance_at_rate(48_000);
+    }
+
+    /// Test apply_enhance with a very short signal (< 1 hop).
+    #[test]
+    fn test_enhance_short_signal() {
+        let sample_rate = 24_000u32;
+        let channels = 1usize;
+        // Fewer samples than a single hop (hop_size = 480 for DFN3 mono).
+        let samples = make_test_signal(sample_rate, channels, 0.01);
+
+        let (enhanced, out_rate) =
+            apply_enhance(&samples, sample_rate, channels, 12.0).expect("enhance short signal");
+
+        let expected_sr = df_model_sample_rate(channels);
+        assert_eq!(out_rate, expected_sr);
+        assert!(!enhanced.is_empty());
+        assert!(
+            enhanced.iter().all(|&s| s.is_finite()),
+            "short signal output must be finite"
+        );
+    }
+
+    /// Test apply_enhance preserves channels for stereo interleaved input.
+    #[test]
+    fn test_enhance_stereo_interleaved() {
+        let sample_rate = 44_100u32;
+        let channels = 2usize;
+        let samples = make_test_signal(sample_rate, channels, 0.2);
+
+        let (enhanced, out_rate) =
+            apply_enhance(&samples, sample_rate, channels, 12.0).expect("enhance stereo");
+
+        let expected_sr = df_model_sample_rate(channels);
+        assert_eq!(out_rate, expected_sr);
+        assert_eq!(
+            enhanced.len() % channels,
+            0,
+            "interleaved layout must be preserved"
+        );
+
+        let out_pcm =
+            AudioPcm::new(enhanced, out_rate, channels).expect("enhanced stereo PCM valid");
+        assert_eq!(out_pcm.channels, 2);
+        assert!(
+            out_pcm.samples.iter().all(|&s| s.is_finite()),
+            "stereo output must be finite"
+        );
+    }
+
+    /// Apply enhancement to a mono signal.
+    #[test]
+    fn test_enhance_mono_signal() {
+        let sample_rate = 16_000u32;
+        let channels = 1usize;
+        let samples = make_test_signal(sample_rate, channels, 0.2);
+
+        let (enhanced, out_rate) =
+            apply_enhance(&samples, sample_rate, channels, 12.0).expect("enhance mono");
+
+        let expected_sr = df_model_sample_rate(channels);
+        assert_eq!(out_rate, expected_sr);
+        assert_eq!(enhanced.len() % channels, 0);
+
+        let out_pcm = AudioPcm::new(enhanced, out_rate, channels).expect("enhanced mono PCM valid");
+        assert_eq!(out_pcm.channels, 1);
+        assert!(
+            out_pcm.samples.iter().all(|&s| s.is_finite()),
+            "mono output must be finite"
+        );
+    }
+
+    /// Integration test: apply_effects with enhancement at a non-48 kHz input.
+    /// Verifies the output sample rate is the model's native rate.
+    #[test]
+    fn test_apply_effects_with_enhance_24khz_input() {
+        let sample_rate = 24_000u32;
+        let channels = 1usize;
+        let samples = make_test_signal(sample_rate, channels, 0.2);
+        let wav = encode_wav(&samples, sample_rate, channels).expect("encode WAV");
+        let fx = AudioEffects::new(0, 0, 100).with_enhance(true, 12.0);
+
+        let result = apply_effects(&wav, &fx, None).expect("apply_effects with enhance");
+
+        let expected_sr = df_model_sample_rate(channels);
+        assert_eq!(result.sample_rate, expected_sr);
+        assert_eq!(result.channels, channels);
+        assert!(!result.samples.is_empty());
+        assert!(
+            result.samples.iter().all(|&s| s.is_finite()),
+            "all output must be finite"
+        );
+        assert!(
+            result.samples.iter().any(|&s| s != 0.0),
+            "output must contain non-zero audio"
+        );
+    }
+
+    /// Disabled enhancement must preserve the original sample rate.
+    #[test]
+    fn test_apply_effects_enhance_disabled_preserves_sr() {
+        let sample_rate = 44_100u32;
+        let channels = 1usize;
+        let samples = make_test_signal(sample_rate, channels, 0.1);
+        let wav = encode_wav(&samples, sample_rate, channels).expect("encode WAV");
+        let fx = AudioEffects::new(0, 0, 100); // enhance_enabled = false
+
+        let result = apply_effects(&wav, &fx, None).expect("apply_effects without enhance");
+        assert_eq!(result.sample_rate, sample_rate);
+        assert_eq!(result.channels, channels);
+    }
+
+    /// fail_on_enhance_error = false + deterministic simulated error:
+    /// the pipeline must succeed and return the decoded input samples
+    /// along with the original sample rate (no enhancement was applied).
+    #[test]
+    fn test_enhance_error_fallback_preserves_original() {
+        let sample_rate = 44_100u32;
+        let channels = 1usize;
+        let samples = make_test_signal(sample_rate, channels, 0.1);
+        let expected_frames = samples.len() / channels;
+        let wav = encode_wav(&samples, sample_rate, channels).expect("encode WAV");
+
+        let fx = AudioEffects::new(0, 0, 100)
+            .with_enhance(true, 12.0)
+            .with_fail_on_enhance_error(false);
+
+        let result = apply_effects_inner(&wav, &fx, None, |_, _, _, _| {
+            Err("simulated enhancement failure".to_string())
+        })
+        .expect("pipeline must succeed when fail_on_enhance_error is false");
+
+        assert_eq!(
+            result.sample_rate, sample_rate,
+            "fallback must preserve original sample rate"
+        );
+        assert_eq!(result.channels, channels);
+        assert_eq!(
+            result.frame_count(),
+            expected_frames,
+            "fallback must preserve original frame count"
+        );
+        assert!(
+            result.samples.iter().all(|&s| s.is_finite()),
+            "fallback output must be finite"
+        );
+    }
+
+    /// fail_on_enhance_error = true + deterministic simulated error:
+    /// the pipeline must propagate the error.
+    #[test]
+    fn test_enhance_error_fail_flag_propagates() {
+        let sample_rate = 44_100u32;
+        let channels = 1usize;
+        let samples = make_test_signal(sample_rate, channels, 0.1);
+        let wav = encode_wav(&samples, sample_rate, channels).expect("encode WAV");
+
+        let fx = AudioEffects::new(0, 0, 100)
+            .with_enhance(true, 12.0)
+            .with_fail_on_enhance_error(true);
+
+        let result = apply_effects_inner(&wav, &fx, None, |_, _, _, _| {
+            Err("simulated enhancement failure".to_string())
+        });
+
+        assert!(
+            result.is_err(),
+            "pipeline must fail when fail_on_enhance_error is true"
+        );
     }
 }

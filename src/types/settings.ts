@@ -170,6 +170,51 @@ export interface AudioEffectsSettingsDto {
   enhance_enabled: boolean // DeepFilterNet noise suppression
   enhance_atten_db: number // 5 to 30 dB (attenuation limit)
   formant_preserved: boolean // Signalsmith formant correction (default: true)
+  boundary_cleanup_enabled: boolean // per-phrase boundary cleanup (default: true)
+}
+
+// ============================================================================
+// DSP Post-Processing Settings Types
+// ============================================================================
+
+export interface DspEqBandSettingsDto {
+  enabled: boolean
+  frequency_hz: number
+  gain_db: number
+  q: number
+}
+
+export interface DspEqSettingsDto {
+  enabled: boolean
+  low_cut_enabled: boolean
+  low_cut_hz: number
+  low_cut_slope_db: number
+  bands: DspEqBandSettingsDto[]
+  high_shelf_enabled: boolean
+  high_shelf_hz: number
+  high_shelf_gain_db: number
+}
+
+export interface DspCompressorSettingsDto {
+  enabled: boolean
+  threshold_db: number
+  ratio: number
+  attack_ms: number
+  release_ms: number
+  knee_db: number
+  makeup_db: number
+}
+
+export interface DspLimiterSettingsDto {
+  enabled: boolean
+  ceiling_db: number
+  release_ms: number
+}
+
+export interface DspSettingsDto {
+  eq: DspEqSettingsDto
+  compressor: DspCompressorSettingsDto
+  limiter: DspLimiterSettingsDto
 }
 
 // ============================================================================
@@ -328,6 +373,7 @@ export interface AppSettingsDto {
   windows: WindowsSettingsDto
   audio: AudioSettingsDto
   audio_effects: AudioEffectsSettingsDto
+  dsp: DspSettingsDto
   general: GeneralSettingsDto
   logging: LoggingSettingsDto
   preprocessor: PreprocessorSettingsDto

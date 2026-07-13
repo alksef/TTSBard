@@ -2,8 +2,8 @@
 import { ref, computed, onMounted, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import { RefreshCw, Loader, Volume2, VolumeX, Mic, Info, Play, AudioLines, Sliders, Upload, Square, FileAudio, ShieldCheck, X, FolderOpen, TriangleAlert } from 'lucide-vue-next';
-import { useAudioSettings, useAudioEffectsSettings } from '../composables/useAppSettings';
+import { RefreshCw, Loader, Volume2, VolumeX, Mic, Info, Play, AudioLines, Sliders, Upload, Square, FileAudio, ShieldCheck, X, FolderOpen, TriangleAlert, ChevronDown, ChevronUp } from 'lucide-vue-next';
+import { useAudioSettings, useAudioEffectsSettings, useDspSettings } from '../composables/useAppSettings';
 import { debugLog, debugError } from '../utils/debug';
 
 interface DeviceInfo {
@@ -14,6 +14,7 @@ interface DeviceInfo {
 
 const audioSettingsFromComposable = useAudioSettings();
 const audioEffectsFromComposable = useAudioEffectsSettings();
+const dspSettingsFromComposable = useDspSettings();
 
 const outputDevices = ref<DeviceInfo[]>([]);
 const virtualMicDevices = ref<DeviceInfo[]>([]);
@@ -34,7 +35,7 @@ const isDataLoaded = ref(false);
 
 const selectedVirtualMicDevice = ref<string | null>(null);
 
-const activeTab = ref<'devices' | 'effects'>('devices');
+const activeTab = ref<'devices' | 'effects_dsp'>('devices');
 
 const draftEffects = ref({
   enabled: false,
@@ -44,6 +45,7 @@ const draftEffects = ref({
   enhance_enabled: false,
   enhance_atten_db: 12,
   formant_preserved: true,
+  boundary_cleanup_enabled: true,
 });
 const savedEffects = ref({ ...draftEffects.value });
 
@@ -56,6 +58,123 @@ const tempoLabel = computed(() => {
 const isDirty = ref(false);
 const saveStatus = ref<'idle' | 'saving' | 'saved' | 'error'>('idle');
 const saveError = ref('');
+
+function createDefaultDsp() {
+  return {
+    eq: {
+      enabled: false,
+      low_cut_enabled: false,
+      low_cut_hz: 80,
+      low_cut_slope_db: 12,
+      bands: [
+        { enabled: false, frequency_hz: 2500, gain_db: 0, q: 0.7 },
+        { enabled: false, frequency_hz: 2500, gain_db: 0, q: 0.7 },
+        { enabled: false, frequency_hz: 2500, gain_db: 0, q: 0.7 },
+      ],
+      high_shelf_enabled: false,
+      high_shelf_hz: 8000,
+      high_shelf_gain_db: 0,
+    },
+    compressor: {
+      enabled: false,
+      threshold_db: -18,
+      ratio: 2,
+      attack_ms: 8,
+      release_ms: 120,
+      knee_db: 6,
+      makeup_db: 0,
+    },
+    limiter: {
+      enabled: false,
+      ceiling_db: -1,
+      release_ms: 50,
+    },
+  };
+}
+
+function createNaturalDsp() {
+  const d = createDefaultDsp();
+  d.limiter.enabled = true;
+  return d;
+}
+
+function createClearDsp() {
+  const d = createDefaultDsp();
+  d.eq.low_cut_enabled = true;
+  d.eq.bands[0] = { enabled: true, frequency_hz: 3200, gain_db: 2, q: 0.5 };
+  d.compressor.enabled = true;
+  d.compressor.threshold_db = -20;
+  d.compressor.ratio = 2;
+  d.compressor.attack_ms = 5;
+  d.compressor.release_ms = 80;
+  d.limiter.enabled = true;
+  return d;
+}
+
+const draftDsp = ref(createNaturalDsp());
+const savedDsp = ref(createNaturalDsp());
+const dspDirty = ref(false);
+const dspSaveStatus = ref<'idle' | 'saving' | 'saved' | 'error'>('idle');
+const dspSaveError = ref('');
+const effectsCollapsed = ref(false);
+const dspMainCollapsed = ref(false);
+const dspCollapsed = ref({ eq: false, compressor: false, limiter: false });
+const dspPreset = ref<'natural' | 'clear' | 'custom'>('natural');
+
+function bodiesEqual<T extends Record<string, unknown>>(a: T, b: T): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function detectDspPreset(): 'natural' | 'clear' | 'custom' {
+  const d = draftDsp.value;
+  if (bodiesEqual(d, createNaturalDsp())) return 'natural';
+  if (bodiesEqual(d, createClearDsp())) return 'clear';
+  return 'custom';
+}
+
+function setDspPreset(preset: 'natural' | 'clear') {
+  if (preset === 'natural') {
+    draftDsp.value = createNaturalDsp();
+  } else {
+    draftDsp.value = createClearDsp();
+  }
+  markDspDirty();
+  dspPreset.value = preset;
+}
+
+function markDspDirty() {
+  dspDirty.value = true;
+  dspSaveStatus.value = 'idle';
+  dspSaveError.value = '';
+  dspPreset.value = 'custom';
+}
+
+async function saveDsp() {
+  dspSaveStatus.value = 'saving';
+  dspSaveError.value = '';
+  try {
+    await invoke('save_dsp_settings', { dsp: draftDsp.value });
+    savedDsp.value = JSON.parse(JSON.stringify(draftDsp.value));
+    dspDirty.value = false;
+    dspSaveStatus.value = 'saved';
+    setTimeout(() => { if (dspSaveStatus.value === 'saved') dspSaveStatus.value = 'idle'; }, 3000);
+  } catch (e) {
+    dspSaveStatus.value = 'error';
+    dspSaveError.value = e as string;
+  }
+}
+
+function cancelDsp() {
+  draftDsp.value = JSON.parse(JSON.stringify(savedDsp.value));
+  dspDirty.value = false;
+  dspSaveStatus.value = 'idle';
+  dspSaveError.value = '';
+  dspPreset.value = detectDspPreset();
+}
+
+function toggleDspCollapse(section: 'eq' | 'compressor' | 'limiter') {
+  dspCollapsed.value[section] = !dspCollapsed.value[section];
+}
 
 const selectedFile = ref<{ path: string; name: string; size: number } | null>(null);
 const isPreviewPlaying = ref(false);
@@ -303,6 +422,7 @@ async function playPreview(mode: 'original' | 'effects') {
         voiceTransformEnabled: false,
         pitch: 0, speed: 0, volume: 100,
         enhanceEnabled: false, enhanceAttenDb: 12,
+        dspSettings: null,
       });
     } else {
       await invoke('preview_audio_file', {
@@ -315,6 +435,7 @@ async function playPreview(mode: 'original' | 'effects') {
         volume: draftEffects.value.volume,
         enhanceEnabled: draftEffects.value.enhance_enabled,
         enhanceAttenDb: draftEffects.value.enhance_atten_db,
+        dspSettings: draftDsp.value,
       });
     }
   } catch (e) {
@@ -353,6 +474,7 @@ async function saveEffects() {
       enhanceEnabled: draftEffects.value.enhance_enabled,
       enhanceAttenDb: draftEffects.value.enhance_atten_db,
       formantPreserved: draftEffects.value.formant_preserved,
+      boundaryCleanupEnabled: draftEffects.value.boundary_cleanup_enabled,
     });
     savedEffects.value = { ...draftEffects.value };
     isDirty.value = false;
@@ -415,8 +537,18 @@ watch(audioEffectsFromComposable, (newEffects) => {
       enhance_enabled: newEffects.enhance_enabled,
       enhance_atten_db: newEffects.enhance_atten_db,
       formant_preserved: newEffects.formant_preserved ?? true,
+      boundary_cleanup_enabled: newEffects.boundary_cleanup_enabled ?? true,
     };
     savedEffects.value = { ...draftEffects.value };
+  }
+}, { immediate: true });
+
+watch(dspSettingsFromComposable, (newDsp) => {
+  if (!newDsp) return;
+  if (!dspDirty.value) {
+    draftDsp.value = JSON.parse(JSON.stringify(newDsp));
+    savedDsp.value = JSON.parse(JSON.stringify(newDsp));
+    dspPreset.value = detectDspPreset();
   }
 }, { immediate: true });
 </script>
@@ -432,7 +564,7 @@ watch(audioEffectsFromComposable, (newEffects) => {
       Loading audio devices...
     </div>
 
-    <div v-else>
+    <div v-else class="audio-panel-inner">
       <div class="audio-tabs">
         <button
           :class="{ active: activeTab === 'devices' }"
@@ -442,11 +574,11 @@ watch(audioEffectsFromComposable, (newEffects) => {
           <span>Устройства</span>
         </button>
         <button
-          :class="{ active: activeTab === 'effects' }"
-          @click="activeTab = 'effects'"
+          :class="{ active: activeTab === 'effects_dsp' }"
+          @click="activeTab = 'effects_dsp'"
         >
-          <AudioLines :size="18" />
-          <span>Эффекты</span>
+          <Sliders :size="18" />
+          <span>Эффекты и DSP</span>
         </button>
       </div>
 
@@ -592,81 +724,112 @@ watch(audioEffectsFromComposable, (newEffects) => {
         </div>
       </div>
 
-      <div v-if="activeTab === 'effects'" class="tab-content effects-tab">
-        <div v-if="isDirty" class="draft-warning" role="status">
-          <TriangleAlert :size="18" />
-          <span>Есть несохранённые изменения.</span>
+      <div v-if="activeTab === 'effects_dsp'" class="unified-tab">
+        <!-- Shared preview panel (fixed above scroll) -->
+        <div class="preview-panel-fixed">
+          <div class="setting-section">
+            <div class="section-header">
+              <FileAudio class="section-icon" :size="20" />
+              <span class="section-title">Проверка эффектов</span>
+              <span v-if="isPreviewPlaying" class="playback-status-inline">
+                <Loader :size="14" class="spinner" /> Воспроизведение...
+              </span>
+            </div>
+
+            <div class="preview-hint">
+              Режим «Все эффекты» использует текущие настройки эффектов и DSP, даже если они ещё не сохранены.
+            </div>
+
+            <div v-if="!selectedFile" class="preview-empty">
+              <button @click="pickFile" class="action-btn">
+                <Upload :size="16" /> Выбрать аудиофайл
+              </button>
+            </div>
+
+            <div v-else class="preview-active">
+              <div class="file-info">
+                <span class="file-name">{{ selectedFile.name }}</span>
+                <span class="file-format">{{ fileFormat }}</span>
+                <button
+                  @click="replaceFile"
+                  class="file-action-btn"
+                  title="Заменить файл"
+                  aria-label="Заменить файл"
+                >
+                  <FolderOpen :size="14" />
+                </button>
+                <button
+                  @click="clearFile"
+                  class="file-action-btn"
+                  title="Очистить выбранный файл"
+                  aria-label="Очистить выбранный файл"
+                >
+                  <X :size="14" />
+                </button>
+              </div>
+
+              <div class="preview-controls">
+                <button
+                  @click="playPreview('original')"
+                  :disabled="isPreviewPlaying"
+                  class="play-btn"
+                  title="Оригинал без эффектов и DSP"
+                  aria-label="Воспроизвести оригинал"
+                >
+                  <Play :size="16" /> Оригинал
+                </button>
+                <button
+                  @click="playPreview('effects')"
+                  :disabled="isPreviewPlaying"
+                  class="play-btn"
+                  title="Со всеми эффектами и DSP"
+                  aria-label="Воспроизвести со всеми эффектами"
+                >
+                  <AudioLines :size="16" /> Все эффекты
+                </button>
+                <button
+                  @click="stopPreview"
+                  :disabled="!isPreviewPlaying"
+                  class="play-btn stop-btn"
+                  title="Остановить воспроизведение"
+                  aria-label="Остановить воспроизведение"
+                >
+                  <Square :size="16" /> Стоп
+                </button>
+              </div>
+
+              <div v-if="previewError" class="preview-status error">{{ previewError }}</div>
+              <div v-else-if="isDirty || dspDirty" class="preview-status dirty-indicator">
+                <TriangleAlert :size="12" /> Превью с несохранёнными изменениями
+              </div>
+            </div>
+          </div>
         </div>
 
+        <div class="effects-scroll">
+          <div v-if="isDirty || dspDirty" class="draft-warning" role="status">
+            <TriangleAlert :size="18" />
+            <span>Есть несохранённые изменения.</span>
+          </div>
+
+        <!-- Boundary cleanup section -->
         <div class="setting-section">
           <div class="section-header">
-            <FileAudio class="section-icon" :size="20" />
-            <span class="section-title">Проверка эффектов</span>
-            <span v-if="isPreviewPlaying" class="playback-status-inline">
-              <Loader :size="14" class="spinner" /> Воспроизведение...
-            </span>
+            <ShieldCheck class="section-icon" :size="20" />
+            <span class="section-title">Обработка границ фраз</span>
+            <label class="toggle-switch">
+              <input
+                type="checkbox"
+                v-model="draftEffects.boundary_cleanup_enabled"
+                @change="markDirty"
+              />
+              <span class="toggle-slider"></span>
+            </label>
           </div>
-
-          <div class="preview-hint">
-            Режим «С эффектами» использует текущие выбранные настройки, даже если они ещё не сохранены.
-          </div>
-
-          <div v-if="!selectedFile" class="preview-empty">
-            <button @click="pickFile" class="action-btn">
-              <Upload :size="16" /> Выбрать аудиофайл
-            </button>
-          </div>
-
-          <div v-else class="preview-active">
-            <div class="file-info">
-              <span class="file-name">{{ selectedFile.name }}</span>
-              <span class="file-format">{{ fileFormat }}</span>
-              <button
-                @click="replaceFile"
-                class="file-action-btn"
-                title="Заменить файл"
-                aria-label="Заменить файл"
-              >
-                <FolderOpen :size="14" />
-              </button>
-              <button
-                @click="clearFile"
-                class="file-action-btn"
-                title="Очистить выбранный файл"
-                aria-label="Очистить выбранный файл"
-              >
-                <X :size="14" />
-              </button>
-            </div>
-
-            <div class="preview-controls">
-              <button
-                @click="playPreview('original')"
-                :disabled="isPreviewPlaying"
-                class="play-btn"
-              >
-                <Play :size="16" /> Оригинал
-              </button>
-              <button
-                @click="playPreview('effects')"
-                :disabled="isPreviewPlaying"
-                class="play-btn"
-              >
-                <AudioLines :size="16" /> С эффектами
-              </button>
-              <button
-                @click="stopPreview"
-                :disabled="!isPreviewPlaying"
-                class="play-btn stop-btn"
-              >
-                <Square :size="16" /> Стоп
-              </button>
-            </div>
-
-            <div v-if="previewError" class="preview-status error">{{ previewError }}</div>
-          </div>
+          <div class="model-hint">Исправление резких начал и концов фраз</div>
         </div>
 
+        <!-- Voice effects section (collapsible) -->
         <div class="setting-section">
           <div class="section-header">
             <Sliders class="section-icon" :size="20" />
@@ -679,7 +842,18 @@ watch(audioEffectsFromComposable, (newEffects) => {
               />
               <span class="toggle-slider"></span>
             </label>
+            <button
+              @click="effectsCollapsed = !effectsCollapsed"
+              class="collapse-btn"
+              :title="effectsCollapsed ? 'Развернуть эффекты голоса' : 'Свернуть эффекты голоса'"
+              :aria-label="effectsCollapsed ? 'Развернуть эффекты голоса' : 'Свернуть эффекты голоса'"
+            >
+              <ChevronDown v-if="effectsCollapsed" :size="16" />
+              <ChevronUp v-else :size="16" />
+            </button>
           </div>
+
+          <div v-show="!effectsCollapsed">
 
           <div class="setting-row slider-row" :class="{ disabled: !draftEffects.enabled }">
             <label>Высота</label>
@@ -753,6 +927,7 @@ watch(audioEffectsFromComposable, (newEffects) => {
             </label>
           </div>
 
+          </div>
         </div>
 
         <div class="setting-section">
@@ -802,6 +977,275 @@ watch(audioEffectsFromComposable, (newEffects) => {
             <span v-else>Сохранить</span>
           </button>
         </div>
+
+        <!-- DSP section (collapsible) -->
+        <div class="setting-section">
+          <div class="section-header">
+            <Sliders class="section-icon" :size="20" />
+            <span class="section-title">DSP-постобработка</span>
+            <button
+              @click="dspMainCollapsed = !dspMainCollapsed"
+              class="collapse-btn"
+              :title="dspMainCollapsed ? 'Развернуть DSP-постобработку' : 'Свернуть DSP-постобработку'"
+              :aria-label="dspMainCollapsed ? 'Развернуть DSP-постобработку' : 'Свернуть DSP-постобработку'"
+            >
+              <ChevronDown v-if="dspMainCollapsed" :size="16" />
+              <ChevronUp v-else :size="16" />
+            </button>
+          </div>
+
+          <div v-show="!dspMainCollapsed">
+
+          <div class="dsp-presets">
+            <span class="dsp-presets-label">Режим:</span>
+            <div class="toggle-buttons">
+              <button
+                @click="setDspPreset('natural')"
+                :class="{ active: dspPreset === 'natural' }"
+                class="toggle-btn"
+                :disabled="dspPreset === 'natural'"
+                title="Только защитный лимитер"
+                aria-label="Natural — только лимитер"
+              >Natural</button>
+              <button
+                @click="setDspPreset('clear')"
+                :class="{ active: dspPreset === 'clear' }"
+                class="toggle-btn"
+                :disabled="dspPreset === 'clear'"
+                title="Мягкая обработка для разборчивости"
+                aria-label="Clear — мягкая обработка"
+              >Clear</button>
+              <button
+                :class="{ active: dspPreset === 'custom' }"
+                class="toggle-btn"
+                disabled
+                title="Ручная настройка DSP-параметров"
+                aria-label="Custom — ручная настройка"
+              >Custom</button>
+            </div>
+          </div>
+
+          <!-- EQ Section -->
+          <div class="setting-section dsp-subsection">
+            <div class="section-header">
+              <span class="section-title">EQ</span>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="draftDsp.eq.enabled" @change="markDspDirty" />
+                <span class="toggle-slider"></span>
+              </label>
+              <button
+                @click="toggleDspCollapse('eq')"
+                class="collapse-btn"
+                :title="dspCollapsed.eq ? 'Развернуть EQ' : 'Свернуть EQ'"
+                :aria-label="dspCollapsed.eq ? 'Развернуть EQ' : 'Свернуть EQ'"
+              >
+                <ChevronDown v-if="dspCollapsed.eq" :size="16" />
+                <ChevronUp v-else :size="16" />
+              </button>
+            </div>
+
+            <div v-show="!dspCollapsed.eq">
+              <div class="setting-row" :class="{ disabled: !draftDsp.eq.enabled }">
+                <label class="setting-label">Low Cut</label>
+                <label class="toggle-switch">
+                  <input type="checkbox" v-model="draftDsp.eq.low_cut_enabled" @change="markDspDirty" :disabled="!draftDsp.eq.enabled" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="setting-row" :class="{ disabled: !draftDsp.eq.enabled }">
+                <label>Частота</label>
+                <div class="volume-control">
+                  <input type="range" min="10" max="500" step="1" v-model.number="draftDsp.eq.low_cut_hz" @input="markDspDirty" :disabled="!draftDsp.eq.enabled" />
+                  <span class="volume-value">{{ draftDsp.eq.low_cut_hz }} Hz</span>
+                </div>
+              </div>
+              <div class="setting-row" :class="{ disabled: !draftDsp.eq.enabled }">
+                <label>Крутизна</label>
+                <div class="volume-control">
+                  <input type="range" min="6" max="48" step="6" v-model.number="draftDsp.eq.low_cut_slope_db" @input="markDspDirty" :disabled="!draftDsp.eq.enabled" />
+                  <span class="volume-value">{{ draftDsp.eq.low_cut_slope_db }} dB/oct</span>
+                </div>
+              </div>
+
+              <div v-for="(band, i) in draftDsp.eq.bands" :key="i" class="dsp-band-block">
+                <div class="setting-row" :class="{ disabled: !draftDsp.eq.enabled }">
+                  <label class="setting-label">Полоса {{ i + 1 }}</label>
+                  <label class="toggle-switch">
+                    <input type="checkbox" v-model="band.enabled" @change="markDspDirty" :disabled="!draftDsp.eq.enabled" />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="setting-row" :class="{ disabled: !draftDsp.eq.enabled }">
+                  <label>Частота</label>
+                  <div class="volume-control">
+                    <input type="range" min="20" max="20000" step="1" v-model.number="band.frequency_hz" @input="markDspDirty" :disabled="!draftDsp.eq.enabled" />
+                    <span class="volume-value">{{ band.frequency_hz }} Hz</span>
+                  </div>
+                </div>
+                <div class="setting-row" :class="{ disabled: !draftDsp.eq.enabled }">
+                  <label>Усиление</label>
+                  <div class="volume-control">
+                    <input type="range" min="-24" max="24" step="0.1" v-model.number="band.gain_db" @input="markDspDirty" :disabled="!draftDsp.eq.enabled" />
+                    <span class="volume-value">{{ band.gain_db.toFixed(1) }} dB</span>
+                  </div>
+                </div>
+                <div class="setting-row" :class="{ disabled: !draftDsp.eq.enabled }">
+                  <label>Q</label>
+                  <div class="volume-control">
+                    <input type="range" min="0.1" max="10" step="0.1" v-model.number="band.q" @input="markDspDirty" :disabled="!draftDsp.eq.enabled" />
+                    <span class="volume-value">{{ band.q.toFixed(1) }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="setting-row" :class="{ disabled: !draftDsp.eq.enabled }">
+                <label class="setting-label">High Shelf</label>
+                <label class="toggle-switch">
+                  <input type="checkbox" v-model="draftDsp.eq.high_shelf_enabled" @change="markDspDirty" :disabled="!draftDsp.eq.enabled" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="setting-row" :class="{ disabled: !draftDsp.eq.enabled }">
+                <label>Частота</label>
+                <div class="volume-control">
+                  <input type="range" min="1000" max="20000" step="100" v-model.number="draftDsp.eq.high_shelf_hz" @input="markDspDirty" :disabled="!draftDsp.eq.enabled" />
+                  <span class="volume-value">{{ draftDsp.eq.high_shelf_hz }} Hz</span>
+                </div>
+              </div>
+              <div class="setting-row" :class="{ disabled: !draftDsp.eq.enabled }">
+                <label>Усиление</label>
+                <div class="volume-control">
+                  <input type="range" min="-24" max="24" step="0.1" v-model.number="draftDsp.eq.high_shelf_gain_db" @input="markDspDirty" :disabled="!draftDsp.eq.enabled" />
+                  <span class="volume-value">{{ draftDsp.eq.high_shelf_gain_db.toFixed(1) }} dB</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Compressor Section -->
+          <div class="setting-section dsp-subsection">
+            <div class="section-header">
+              <span class="section-title">Компрессор</span>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="draftDsp.compressor.enabled" @change="markDspDirty" />
+                <span class="toggle-slider"></span>
+              </label>
+              <button
+                @click="toggleDspCollapse('compressor')"
+                class="collapse-btn"
+                :title="dspCollapsed.compressor ? 'Развернуть Компрессор' : 'Свернуть Компрессор'"
+                :aria-label="dspCollapsed.compressor ? 'Развернуть Компрессор' : 'Свернуть Компрессор'"
+              >
+                <ChevronDown v-if="dspCollapsed.compressor" :size="16" />
+                <ChevronUp v-else :size="16" />
+              </button>
+            </div>
+
+            <div v-show="!dspCollapsed.compressor">
+              <div class="setting-row" :class="{ disabled: !draftDsp.compressor.enabled }">
+                <label>Threshold</label>
+                <div class="volume-control">
+                  <input type="range" min="-60" max="0" step="0.1" v-model.number="draftDsp.compressor.threshold_db" @input="markDspDirty" :disabled="!draftDsp.compressor.enabled" />
+                  <span class="volume-value">{{ draftDsp.compressor.threshold_db.toFixed(1) }} dB</span>
+                </div>
+              </div>
+              <div class="setting-row" :class="{ disabled: !draftDsp.compressor.enabled }">
+                <label>Ratio</label>
+                <div class="volume-control">
+                  <input type="range" min="1" max="20" step="0.1" v-model.number="draftDsp.compressor.ratio" @input="markDspDirty" :disabled="!draftDsp.compressor.enabled" />
+                  <span class="volume-value">{{ draftDsp.compressor.ratio.toFixed(1) }}:1</span>
+                </div>
+              </div>
+              <div class="setting-row" :class="{ disabled: !draftDsp.compressor.enabled }">
+                <label>Attack</label>
+                <div class="volume-control">
+                  <input type="range" min="0.1" max="500" step="0.1" v-model.number="draftDsp.compressor.attack_ms" @input="markDspDirty" :disabled="!draftDsp.compressor.enabled" />
+                  <span class="volume-value">{{ draftDsp.compressor.attack_ms.toFixed(1) }} ms</span>
+                </div>
+              </div>
+              <div class="setting-row" :class="{ disabled: !draftDsp.compressor.enabled }">
+                <label>Release</label>
+                <div class="volume-control">
+                  <input type="range" min="1" max="2000" step="1" v-model.number="draftDsp.compressor.release_ms" @input="markDspDirty" :disabled="!draftDsp.compressor.enabled" />
+                  <span class="volume-value">{{ draftDsp.compressor.release_ms.toFixed(0) }} ms</span>
+                </div>
+              </div>
+              <div class="setting-row" :class="{ disabled: !draftDsp.compressor.enabled }">
+                <label>Knee</label>
+                <div class="volume-control">
+                  <input type="range" min="0" max="20" step="0.1" v-model.number="draftDsp.compressor.knee_db" @input="markDspDirty" :disabled="!draftDsp.compressor.enabled" />
+                  <span class="volume-value">{{ draftDsp.compressor.knee_db.toFixed(1) }} dB</span>
+                </div>
+              </div>
+              <div class="setting-row" :class="{ disabled: !draftDsp.compressor.enabled }">
+                <label>Makeup</label>
+                <div class="volume-control">
+                  <input type="range" min="-12" max="24" step="0.1" v-model.number="draftDsp.compressor.makeup_db" @input="markDspDirty" :disabled="!draftDsp.compressor.enabled" />
+                  <span class="volume-value">{{ draftDsp.compressor.makeup_db.toFixed(1) }} dB</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Limiter Section -->
+          <div class="setting-section dsp-subsection">
+            <div class="section-header">
+              <span class="section-title">Лимитер</span>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="draftDsp.limiter.enabled" @change="markDspDirty" />
+                <span class="toggle-slider"></span>
+              </label>
+              <button
+                @click="toggleDspCollapse('limiter')"
+                class="collapse-btn"
+                :title="dspCollapsed.limiter ? 'Развернуть Лимитер' : 'Свернуть Лимитер'"
+                :aria-label="dspCollapsed.limiter ? 'Развернуть Лимитер' : 'Свернуть Лимитер'"
+              >
+                <ChevronDown v-if="dspCollapsed.limiter" :size="16" />
+                <ChevronUp v-else :size="16" />
+              </button>
+            </div>
+
+            <div v-show="!dspCollapsed.limiter">
+              <div class="setting-row" :class="{ disabled: !draftDsp.limiter.enabled }">
+                <label>Ceiling</label>
+                <div class="volume-control">
+                  <input type="range" min="-12" max="0" step="0.1" v-model.number="draftDsp.limiter.ceiling_db" @input="markDspDirty" :disabled="!draftDsp.limiter.enabled" />
+                  <span class="volume-value">{{ draftDsp.limiter.ceiling_db.toFixed(1) }} dB</span>
+                </div>
+              </div>
+              <div class="setting-row" :class="{ disabled: !draftDsp.limiter.enabled }">
+                <label>Release</label>
+                <div class="volume-control">
+                  <input type="range" min="1" max="500" step="1" v-model.number="draftDsp.limiter.release_ms" @input="markDspDirty" :disabled="!draftDsp.limiter.enabled" />
+                  <span class="volume-value">{{ draftDsp.limiter.release_ms.toFixed(0) }} ms</span>
+                </div>
+              </div>
+              <div class="limiter-hint">
+                <ShieldCheck :size="14" />
+                <span>Лимитер — защитный потолок. Не допускает выход сигнала выше ceiling.</span>
+              </div>
+            </div>
+          </div>
+
+          </div>
+        </div>
+
+        <div class="save-section">
+          <div class="save-status-area">
+            <span v-if="dspSaveStatus === 'saved'" class="save-status saved">Сохранено</span>
+            <span v-else-if="dspSaveStatus === 'error'" class="save-status error">{{ dspSaveError }}</span>
+            <span v-else-if="dspDirty" class="save-status dirty">Изменения не сохранены</span>
+          </div>
+          <button @click="cancelDsp" :disabled="!dspDirty || dspSaveStatus === 'saving'" class="cancel-btn">
+            Отменить
+          </button>
+          <button @click="saveDsp" :disabled="!dspDirty || dspSaveStatus === 'saving'" class="save-btn">
+            <span v-if="dspSaveStatus === 'saving'">Сохранение...</span>
+            <span v-else>Сохранить</span>
+          </button>
+        </div>
+        </div>
       </div>
     </div>
 
@@ -824,6 +1268,17 @@ watch(audioEffectsFromComposable, (newEffects) => {
 .audio-panel {
   max-width: 900px;
   margin: 0 auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.audio-panel-inner {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 .panel-footer {
@@ -1129,6 +1584,10 @@ watch(audioEffectsFromComposable, (newEffects) => {
   margin-bottom: 1.5rem;
   border-bottom: 1px solid var(--color-border);
   padding-bottom: 0.5rem;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: transparent;
 }
 
 .audio-tabs button {
@@ -1164,8 +1623,32 @@ watch(audioEffectsFromComposable, (newEffects) => {
   gap: 1.5rem;
 }
 
-.effects-tab {
+.unified-tab {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.preview-panel-fixed {
+  flex: 0 0 auto;
+}
+
+.effects-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
   gap: 1.5rem;
+}
+
+.dirty-indicator {
+  color: var(--color-text-muted);
+  align-items: center;
+  gap: 6px;
 }
 
 /* Preview */
@@ -1558,5 +2041,74 @@ input:checked + .toggle-slider:before {
   padding-left: 2px;
   padding-right: 2px;
   font-size: 10px;
+}
+
+.collapse-btn {
+  flex-shrink: 0;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-field);
+  color: var(--color-text-secondary);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.collapse-btn:hover {
+  background: var(--color-bg-field-hover);
+  border-color: var(--color-border-strong);
+  color: var(--color-text-primary);
+}
+
+.dsp-subsection {
+  margin-bottom: 12px;
+  padding: 10px 14px;
+}
+
+.dsp-subsection:last-child {
+  margin-bottom: 0;
+}
+
+.dsp-band-block {
+  margin-bottom: 4px;
+}
+
+.dsp-band-block:last-child {
+  margin-bottom: 0;
+}
+
+.dsp-band-block .setting-row:last-child {
+  margin-bottom: 8px;
+}
+
+.limiter-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: var(--info-bg-weak);
+  border: 1px solid var(--info-border);
+  border-radius: 6px;
+}
+
+.dsp-presets {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.dsp-presets-label {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+  white-space: nowrap;
 }
 </style>

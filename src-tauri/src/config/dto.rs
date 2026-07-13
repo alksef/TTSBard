@@ -476,6 +476,7 @@ pub struct AudioEffectsSettingsDto {
     pub enhance_enabled: bool,
     pub enhance_atten_db: f32,
     pub formant_preserved: bool,
+    pub boundary_cleanup_enabled: bool,
 }
 
 impl From<AudioEffectsSettings> for AudioEffectsSettingsDto {
@@ -488,6 +489,7 @@ impl From<AudioEffectsSettings> for AudioEffectsSettingsDto {
             enhance_enabled: s.enhance_enabled,
             enhance_atten_db: s.enhance_atten_db,
             formant_preserved: s.formant_preserved,
+            boundary_cleanup_enabled: s.boundary_cleanup_enabled,
         }
     }
 }
@@ -502,6 +504,189 @@ impl From<AudioEffectsSettingsDto> for AudioEffectsSettings {
             enhance_enabled: dto.enhance_enabled,
             enhance_atten_db: dto.enhance_atten_db,
             formant_preserved: dto.formant_preserved,
+            boundary_cleanup_enabled: dto.boundary_cleanup_enabled,
+        }
+    }
+}
+
+// ============================================================================
+// DSP Post-Processing Settings DTO
+// ============================================================================
+
+/// DSP EQ band DTO
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DspEqBandSettingsDto {
+    pub enabled: bool,
+    pub frequency_hz: f32,
+    pub gain_db: f32,
+    pub q: f32,
+}
+
+impl From<crate::config::DspEqBandSettings> for DspEqBandSettingsDto {
+    fn from(s: crate::config::DspEqBandSettings) -> Self {
+        Self {
+            enabled: s.enabled,
+            frequency_hz: s.frequency_hz,
+            gain_db: s.gain_db,
+            q: s.q,
+        }
+    }
+}
+
+impl From<DspEqBandSettingsDto> for crate::config::DspEqBandSettings {
+    fn from(dto: DspEqBandSettingsDto) -> Self {
+        Self {
+            enabled: dto.enabled,
+            frequency_hz: dto.frequency_hz,
+            gain_db: dto.gain_db,
+            q: dto.q,
+        }
+    }
+}
+
+/// DSP EQ settings DTO
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DspEqSettingsDto {
+    pub enabled: bool,
+    pub low_cut_enabled: bool,
+    pub low_cut_hz: f32,
+    pub low_cut_slope_db: f32,
+    pub bands: Vec<DspEqBandSettingsDto>,
+    pub high_shelf_enabled: bool,
+    pub high_shelf_hz: f32,
+    pub high_shelf_gain_db: f32,
+}
+
+impl From<crate::config::DspEqSettings> for DspEqSettingsDto {
+    fn from(s: crate::config::DspEqSettings) -> Self {
+        Self {
+            enabled: s.enabled,
+            low_cut_enabled: s.low_cut_enabled,
+            low_cut_hz: s.low_cut_hz,
+            low_cut_slope_db: s.low_cut_slope_db,
+            bands: s.bands.into_iter().map(|b| b.into()).collect(),
+            high_shelf_enabled: s.high_shelf_enabled,
+            high_shelf_hz: s.high_shelf_hz,
+            high_shelf_gain_db: s.high_shelf_gain_db,
+        }
+    }
+}
+
+impl From<DspEqSettingsDto> for crate::config::DspEqSettings {
+    fn from(dto: DspEqSettingsDto) -> Self {
+        let mut bands = [
+            crate::config::DspEqBandSettings::default(),
+            crate::config::DspEqBandSettings::default(),
+            crate::config::DspEqBandSettings::default(),
+        ];
+        for (i, b) in dto.bands.into_iter().take(3).enumerate() {
+            bands[i] = b.into();
+        }
+        Self {
+            enabled: dto.enabled,
+            low_cut_enabled: dto.low_cut_enabled,
+            low_cut_hz: dto.low_cut_hz,
+            low_cut_slope_db: dto.low_cut_slope_db,
+            bands,
+            high_shelf_enabled: dto.high_shelf_enabled,
+            high_shelf_hz: dto.high_shelf_hz,
+            high_shelf_gain_db: dto.high_shelf_gain_db,
+        }
+    }
+}
+
+/// DSP compressor settings DTO
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DspCompressorSettingsDto {
+    pub enabled: bool,
+    pub threshold_db: f32,
+    pub ratio: f32,
+    pub attack_ms: f32,
+    pub release_ms: f32,
+    pub knee_db: f32,
+    pub makeup_db: f32,
+}
+
+impl From<crate::config::DspCompressorSettings> for DspCompressorSettingsDto {
+    fn from(s: crate::config::DspCompressorSettings) -> Self {
+        Self {
+            enabled: s.enabled,
+            threshold_db: s.threshold_db,
+            ratio: s.ratio,
+            attack_ms: s.attack_ms,
+            release_ms: s.release_ms,
+            knee_db: s.knee_db,
+            makeup_db: s.makeup_db,
+        }
+    }
+}
+
+impl From<DspCompressorSettingsDto> for crate::config::DspCompressorSettings {
+    fn from(dto: DspCompressorSettingsDto) -> Self {
+        Self {
+            enabled: dto.enabled,
+            threshold_db: dto.threshold_db,
+            ratio: dto.ratio,
+            attack_ms: dto.attack_ms,
+            release_ms: dto.release_ms,
+            knee_db: dto.knee_db,
+            makeup_db: dto.makeup_db,
+        }
+    }
+}
+
+/// DSP limiter settings DTO
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DspLimiterSettingsDto {
+    pub enabled: bool,
+    pub ceiling_db: f32,
+    pub release_ms: f32,
+}
+
+impl From<crate::config::DspLimiterSettings> for DspLimiterSettingsDto {
+    fn from(s: crate::config::DspLimiterSettings) -> Self {
+        Self {
+            enabled: s.enabled,
+            ceiling_db: s.ceiling_db,
+            release_ms: s.release_ms,
+        }
+    }
+}
+
+impl From<DspLimiterSettingsDto> for crate::config::DspLimiterSettings {
+    fn from(dto: DspLimiterSettingsDto) -> Self {
+        Self {
+            enabled: dto.enabled,
+            ceiling_db: dto.ceiling_db,
+            release_ms: dto.release_ms,
+        }
+    }
+}
+
+/// DSP post-processing settings DTO
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DspSettingsDto {
+    pub eq: DspEqSettingsDto,
+    pub compressor: DspCompressorSettingsDto,
+    pub limiter: DspLimiterSettingsDto,
+}
+
+impl From<crate::config::DspSettings> for DspSettingsDto {
+    fn from(s: crate::config::DspSettings) -> Self {
+        Self {
+            eq: s.eq.into(),
+            compressor: s.compressor.into(),
+            limiter: s.limiter.into(),
+        }
+    }
+}
+
+impl From<DspSettingsDto> for crate::config::DspSettings {
+    fn from(dto: DspSettingsDto) -> Self {
+        Self {
+            eq: dto.eq.into(),
+            compressor: dto.compressor.into(),
+            limiter: dto.limiter.into(),
         }
     }
 }
@@ -994,6 +1179,8 @@ pub struct AppSettingsDto {
     pub audio: AudioSettingsDto,
     /// Audio post-processing effects settings
     pub audio_effects: AudioEffectsSettingsDto,
+    /// DSP post-processing settings (EQ + compressor + limiter)
+    pub dsp: DspSettingsDto,
     /// General settings
     pub general: GeneralSettingsDto,
     /// Editor settings
@@ -1020,6 +1207,7 @@ impl AppSettingsDto {
             windows: params.windows_settings.clone().into(),
             audio: params.config.audio.clone(),
             audio_effects: params.config.audio_effects.clone().into(),
+            dsp: params.config.dsp.clone().into(),
             general: GeneralSettingsDto::from_config_and_state(
                 params.config,
                 params.interception_enabled,
