@@ -82,27 +82,11 @@ async function loadDevices(force = false) {
   }
 }
 
-async function loadSettings(force = false) {
-  if (isDataLoaded.value && !force) {
-    return;
-  }
-
-  try {
-    isDataLoaded.value = true;
-  } catch (error) {
-    console.error('Failed to load audio settings:', error);
-    errorMessage.value = error as string;
-  }
-}
-
 async function refreshData() {
   isRefreshing.value = true;
   errorMessage.value = '';
   try {
-    await Promise.all([
-      loadDevices(true),
-      loadSettings(true)
-    ]);
+    await loadDevices(true);
   } finally {
     isRefreshing.value = false;
   }
@@ -230,25 +214,6 @@ function getDeviceDisplayName(device: DeviceInfo): string {
     return `${device.name} (по умолчанию)`;
   }
   return device.name;
-}
-
-async function loadDraftEffects() {
-  try {
-    const effects = await invoke<{
-      enabled: boolean;
-      pitch: number;
-      speed: number;
-      volume: number;
-      enhance_enabled: boolean;
-      enhance_atten_db: number;
-      formant_preserved: boolean;
-    }>('get_audio_effects');
-    draftEffects.value = { ...effects };
-    savedEffects.value = { ...effects };
-    isDirty.value = false;
-  } catch (e) {
-    // fallback to defaults
-  }
 }
 
 function markDirty() {
@@ -416,8 +381,6 @@ onMounted(async () => {
   isLoading.value = true;
   try {
     await loadDevices();
-    await loadSettings();
-    await loadDraftEffects();
   } finally {
     isLoading.value = false;
   }

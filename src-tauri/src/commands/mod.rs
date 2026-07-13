@@ -23,10 +23,10 @@ pub use self::ai::*;
 pub use self::playback::*;
 pub use self::window::*;
 
-/// Centralized helper to emit `settings-changed` event after persisted settings are written.
-/// Use this instead of duplicating the `"settings-changed"` string literal across command modules.
+pub const SETTINGS_CHANGED_EVENT: &str = "settings-changed";
+
 pub fn emit_settings_changed(app_handle: &AppHandle) {
-    let _ = app_handle.emit("settings-changed", ());
+    let _ = app_handle.emit(SETTINGS_CHANGED_EVENT, ());
 }
 
 /// Run a sync manager operation on a blocking thread pool.

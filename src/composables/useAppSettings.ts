@@ -9,7 +9,7 @@ import { ref, computed, provide, inject, onScopeDispose, type ComputedRef, type 
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type { AppSettingsDto, AppSettingsContext } from '../types/settings'
-import { APP_SETTINGS_KEY } from '../types/settings'
+import { APP_SETTINGS_KEY, SETTINGS_CHANGED_EVENT } from '../types/settings'
 import { debugLog, debugError } from '../utils/debug'
 
 // Maximum number of retries for backend ready
@@ -121,7 +121,7 @@ export function createAppSettings(): AppSettingsContext {
     })
 
     // Listen for general settings changes
-    const unlistenSettingsChanged = await listen('settings-changed', () => {
+    const unlistenSettingsChanged = await listen(SETTINGS_CHANGED_EVENT, () => {
       debugLog('[useAppSettings] Settings changed, reloading')
       reload()
     })
@@ -276,6 +276,11 @@ export function useAiSettings(): ComputedRef<AppSettingsDto['ai'] | undefined> {
 export function useEditorSettings(): ComputedRef<AppSettingsDto['editor'] | undefined> {
   const { settings } = useAppSettings()
   return computed(() => settings.value?.editor)
+}
+
+export function useHotkeysSettings(): ComputedRef<AppSettingsDto['hotkeys'] | undefined> {
+  const { settings } = useAppSettings()
+  return computed(() => settings.value?.hotkeys)
 }
 
 export function useAudioEffectsSettings(): ComputedRef<AppSettingsDto['audio_effects'] | undefined> {
