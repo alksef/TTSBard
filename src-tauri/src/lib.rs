@@ -48,14 +48,14 @@ use commands::telegram::{
 };
 use commands::{
     apply_openai_proxy_settings, close_soundpanel_window, disable_virtual_mic, enable_virtual_mic,
-    get_audio_effects, get_audio_settings, get_editor_height, get_editor_quick,
+    get_audio_effects, get_audio_settings, get_dsp_settings, get_editor_height, get_editor_quick,
     get_editor_spellcheck_enabled, get_editor_spellcheck_source, get_global_exclude_from_capture,
     get_hotkey_enabled, get_hotkey_settings, get_interception, get_local_tts_url,
     get_main_appearance, get_main_compact_dims, get_openai_api_key, get_openai_voice,
     get_output_devices, get_playback_appearance_source, get_show_playback_on_start,
     get_soundpanel_appearance_source, get_tts_provider, get_virtual_mic_devices, has_api_key,
     hide_main_window, open_file_dialog, preview_audio_file, quit_app, reregister_hotkeys_cmd,
-    reset_hotkey_to_default, save_audio_effects, set_audio_effects_enabled,
+    reset_hotkey_to_default, save_audio_effects, save_dsp_settings, set_audio_effects_enabled,
     set_audio_effects_enhance_atten_db, set_audio_effects_enhance_enabled,
     set_audio_effects_formant_preserved, set_audio_effects_pitch, set_audio_effects_speed,
     set_audio_effects_volume, set_editor_height, set_editor_quick, set_editor_spellcheck_enabled,
@@ -333,6 +333,7 @@ pub fn run() {
             commands::history::get_phrase_history,
             commands::history::delete_phrase_history,
             commands::history::clear_phrase_history,
+            commands::history::replay_phrase_from_cache,
             // Tab persistence commands
             commands::tabs::get_tabs,
             commands::tabs::save_tabs,
@@ -388,6 +389,8 @@ pub fn run() {
             preview_audio_file,
             stop_preview,
             save_audio_effects,
+            get_dsp_settings,
+            save_dsp_settings,
             // Preprocessor commands
             commands::preprocessor::get_replacements,
             commands::preprocessor::save_replacements,
@@ -622,6 +625,12 @@ pub fn run() {
                 }
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                crate::playback_window::save_playback_position(&app_handle);
+                crate::soundpanel_window::save_soundpanel_position(&app_handle);
+            }
+        });
 }
