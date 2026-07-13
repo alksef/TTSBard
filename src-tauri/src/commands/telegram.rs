@@ -295,6 +295,8 @@ pub async fn speak_text_silero(
 #[tauri::command]
 pub async fn telegram_get_current_voice(
     state: State<'_, TelegramState>,
+    settings_manager: State<'_, SettingsManager>,
+    app_handle: AppHandle,
 ) -> Result<Option<CurrentVoice>, String> {
     tracing::debug!("Getting current voice");
 
@@ -315,6 +317,30 @@ pub async fn telegram_get_current_voice(
 
     // Получаем текущий голос (может вернуть None при таймауте)
     let voice = get_current_voice(&client).await?;
+
+    if let Some(ref current) = voice {
+        let voice_id = &current.id;
+        if !voice_id.is_empty() {
+            let needs_sync = {
+                let settings = settings_manager
+                    .load()
+                    .map_err(|e| format!("Failed to load settings: {}", e))?;
+                settings.tts.telegram.current_voice_id != *voice_id
+            };
+            if needs_sync {
+                let vid = voice_id.clone();
+                super::persist_blocking(settings_manager.inner(), move |mgr| {
+                    let mut settings = mgr
+                        .load()
+                        .map_err(|e| anyhow::anyhow!("Failed to load settings: {}", e))?;
+                    settings.tts.telegram.current_voice_id = vid;
+                    mgr.save(&settings)
+                })
+                .await?;
+                super::emit_settings_changed(&app_handle);
+            }
+        }
+    }
 
     Ok(voice)
 }
