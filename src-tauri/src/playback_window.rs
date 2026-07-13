@@ -50,24 +50,24 @@ pub fn show_playback_window(app_handle: &AppHandle) -> tauri::Result<()> {
     Err(tauri::Error::WindowNotFound)
 }
 
-/// Hide playback-control window
-pub fn hide_playback_window(app_handle: &AppHandle) -> tauri::Result<()> {
+/// Save playback window position if the window exists
+pub fn save_playback_position(app_handle: &AppHandle) {
     if let Some(window) = app_handle.get_webview_window("playback-control") {
-        // Save current position before hiding
         if let Some(manager) = app_handle.try_state::<WindowsManager>() {
             if let Ok(outer_pos) = window.outer_position() {
                 let x = outer_pos.x;
                 let y = outer_pos.y;
-                debug!(
-                    window_type = "playback-control",
-                    x,
-                    y,
-                    action = "hide",
-                    "Saving position before hide"
-                );
+                debug!(window_type = "playback-control", x, y, "Saving position");
                 let _ = manager.set_playback_position(Some(x), Some(y));
             }
         }
+    }
+}
+
+/// Hide playback-control window
+pub fn hide_playback_window(app_handle: &AppHandle) -> tauri::Result<()> {
+    save_playback_position(app_handle);
+    if let Some(window) = app_handle.get_webview_window("playback-control") {
         window.hide()?;
     }
     Ok(())

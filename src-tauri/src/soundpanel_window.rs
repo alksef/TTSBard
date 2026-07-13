@@ -119,25 +119,27 @@ pub fn emit_soundpanel_bindings_changed(app_handle: &AppHandle) -> tauri::Result
     Ok(())
 }
 
-/// Hide soundpanel floating window
-pub fn hide_soundpanel_window(app_handle: &AppHandle, app_state: &AppState) -> tauri::Result<()> {
-    app_state.set_active_window(crate::state::ActiveWindow::None);
-
+/// Save soundpanel position via WindowsManager (safe – returns early if unavailable)
+pub fn save_soundpanel_position(app_handle: &AppHandle) {
     if let Some(window) = app_handle.get_webview_window("soundpanel") {
         if let Some(manager) = app_handle.try_state::<WindowsManager>() {
             if let Ok(outer_pos) = window.outer_position() {
                 let x = outer_pos.x;
                 let y = outer_pos.y;
-                debug!(
-                    window_type = "soundpanel",
-                    x,
-                    y,
-                    action = "hide",
-                    "Saving position before hide"
-                );
+                debug!(window_type = "soundpanel", x, y, "Saving position");
                 let _ = manager.set_soundpanel_position(Some(x), Some(y));
             }
         }
+    }
+}
+
+/// Hide soundpanel floating window
+pub fn hide_soundpanel_window(app_handle: &AppHandle, app_state: &AppState) -> tauri::Result<()> {
+    app_state.set_active_window(crate::state::ActiveWindow::None);
+
+    if let Some(window) = app_handle.get_webview_window("soundpanel") {
+        save_soundpanel_position(app_handle);
+
         window.hide()?;
 
         if let Some(sp_state) = app_handle.try_state::<SoundPanelState>() {
