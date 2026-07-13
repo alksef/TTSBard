@@ -15,11 +15,6 @@ const {
   newFilePath,
   isTesting,
   isSaving,
-  opacity,
-  bgColor,
-  clickthroughEnabled,
-  stayVisible,
-  previewStyle,
   sets,
   activeSetId,
   editingSetId,
@@ -39,10 +34,6 @@ const {
   browseFile,
   closeAddDialog,
   getAvailableKeys,
-  saveOpacity,
-  saveBgColor,
-  saveClickthrough,
-  saveStayVisible,
 } = useSoundPanel()
 
 void addSetInputRef
@@ -153,74 +144,6 @@ void editingInputRef
           <Plus :size="16" />
         </button>
         <span class="stats">Всего привязок: {{ bindings.length }} / 26</span>
-      </div>
-    </section>
-
-    <!-- Настройки внешнего вида floating окна -->
-    <section class="appearance-section">
-      <h2>Внешний вид плавающего окна</h2>
-
-      <div class="setting-row">
-        <label class="setting-label">
-          Цвет фона
-        </label>
-        <div class="appearance-controls">
-          <input
-            v-model="bgColor"
-            type="color"
-            class="color-input"
-            @change="saveBgColor"
-          />
-          <input
-            v-model="bgColor"
-            type="text"
-            placeholder="#2a2a2a"
-            class="text-input color-text"
-            maxlength="7"
-            @blur="saveBgColor"
-            @keyup.enter="saveBgColor"
-          />
-          <input
-            v-model.number="opacity"
-            type="range"
-            min="10"
-            max="100"
-            step="5"
-            class="slider-input inline-slider"
-            @change="saveOpacity"
-          />
-          <span class="opacity-value">{{ opacity }}%</span>
-        </div>
-      </div>
-
-      <div class="setting-row">
-        <label class="setting-label checkbox-label">
-          <input
-            v-model="clickthroughEnabled"
-            type="checkbox"
-            class="checkbox-input"
-            @change="saveClickthrough"
-          />
-          <span>Пропускать нажатия (click-through)</span>
-        </label>
-        <span class="setting-hint">Окно не будет перехватывать клики мыши</span>
-      </div>
-
-      <div class="setting-row">
-        <label class="setting-label checkbox-label">
-          <input
-            v-model="stayVisible"
-            type="checkbox"
-            class="checkbox-input"
-            @change="saveStayVisible"
-          />
-          <span>Оставлять окно видимым (не скрывать после звука)</span>
-        </label>
-        <span class="setting-hint">При включённом click-through буквы A-Z могут не работать без фокуса — используйте Intercept (NumPad/F-keys)</span>
-      </div>
-
-      <div class="preview-box" :style="previewStyle">
-        <span class="preview-text">Предпросмотр</span>
       </div>
     </section>
 
@@ -830,114 +753,4 @@ void editingInputRef
   animation: pulse 1s infinite;
 }
 
-/* Appearance section */
-.appearance-section {
-  padding: 12px 16px;
-  margin-top: 1.5rem;
-  background: var(--color-bg-field);
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  backdrop-filter: blur(8px);
-}
-
-.appearance-section h2 {
-  margin-top: 0;
-  margin-bottom: 1rem;
-  font-size: 1.1rem;
-  color: var(--color-text-primary);
-}
-
-.setting-row {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
-}
-
-.setting-label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-weight: 600;
-  color: var(--color-text-primary);
-}
-
-.appearance-controls {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.color-input {
-  width: 50px;
-  height: 36px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
-  cursor: pointer;
-  padding: 0;
-  background: transparent;
-}
-
-.color-text {
-  width: 95px;
-  font-family: var(--font-mono);
-  text-transform: uppercase;
-}
-
-.slider-input {
-  width: 100%;
-  margin-top: 0.5rem;
-  cursor: pointer;
-  accent-color: var(--color-accent);
-}
-
-.inline-slider {
-  width: 150px;
-  margin-top: 0;
-  flex: 1;
-  min-width: 100px;
-}
-
-.opacity-value {
-  font-size: 0.9rem;
-  color: var(--color-text-secondary);
-  min-width: 45px;
-}
-
-.preview-box {
-  margin-top: 1rem;
-  padding: 1rem;
-  border-radius: 12px;
-  text-align: center;
-  border: 1px solid var(--color-border);
-  min-height: 60px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.preview-text {
-  color: var(--color-text-white);
-  font-weight: 500;
-  text-shadow: 0 1px 2px var(--text-shadow-dark);
-}
-
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  cursor: pointer;
-}
-
-.checkbox-input {
-  width: auto;
-  cursor: pointer;
-}
-
-.setting-hint {
-  font-size: 0.8rem;
-  color: var(--color-text-secondary);
-  margin-top: 0.25rem;
-}
 </style>

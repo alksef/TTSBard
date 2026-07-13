@@ -48,6 +48,8 @@ pub struct SoundPanelWindowSettings {
     pub clickthrough: bool,
     #[serde(default)]
     pub stay_visible: bool,
+    #[serde(default = "default_soundpanel_hide_on_blur")]
+    pub hide_on_blur: bool,
     #[serde(default = "default_appearance_source")]
     pub appearance_source: String,
 }
@@ -109,6 +111,9 @@ fn default_main_opacity() -> u8 {
 fn default_main_bg_color() -> String {
     "#10131a".to_string()
 }
+fn default_soundpanel_hide_on_blur() -> bool {
+    true
+}
 fn default_appearance_source() -> String {
     "own".to_string()
 }
@@ -144,6 +149,7 @@ impl Default for SoundPanelWindowSettings {
             bg_color: "#2a2a2a".to_string(),
             clickthrough: false,
             stay_visible: false,
+            hide_on_blur: true,
             appearance_source: "own".to_string(),
         }
     }
@@ -182,6 +188,7 @@ impl Default for WindowsSettings {
             },
             soundpanel: SoundPanelWindowSettings {
                 appearance_source: "main".to_string(),
+                hide_on_blur: true,
                 ..SoundPanelWindowSettings::default()
             },
             playback: PlaybackWindowSettings {
@@ -480,6 +487,18 @@ impl WindowsManager {
     /// Get soundpanel stay_visible
     pub fn get_soundpanel_stay_visible(&self) -> bool {
         self.cache.read().soundpanel.stay_visible
+    }
+
+    /// Set soundpanel hide_on_blur
+    pub fn set_soundpanel_hide_on_blur(&self, hide_on_blur: bool) -> Result<()> {
+        self.update(|s| {
+            s.soundpanel.hide_on_blur = hide_on_blur;
+        })
+    }
+
+    /// Get soundpanel hide_on_blur
+    pub fn get_soundpanel_hide_on_blur(&self) -> bool {
+        self.cache.read().soundpanel.hide_on_blur
     }
 
     /// Set soundpanel appearance source ("own" or "main")

@@ -1,14 +1,11 @@
-import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { open, confirm } from '@tauri-apps/plugin-dialog'
 import type { SoundBinding, SoundSets, SoundSet } from '../types'
-import { useAppSettings } from './useAppSettings'
 import { debugLog, debugError } from '../utils/debug'
 
 export function useSoundPanel() {
-  const { settings: appSettings } = useAppSettings()
-
   const bindings = ref<SoundBinding[]>([])
   const errorMessage = ref<string | null>(null)
   const showAddDialog = ref(false)
@@ -23,27 +20,11 @@ export function useSoundPanel() {
   const isTesting = ref(false)
   const isSaving = ref(false)
 
-  const opacity = ref(90)
-  const bgColor = ref('#2a2a2a')
-  const clickthroughEnabled = ref(false)
-  const stayVisible = ref(false)
-
   const _cleanups: Array<() => void> = []
   onUnmounted(() => {
     _cleanups.forEach(fn => fn())
     _cleanups.length = 0
   })
-
-  const previewStyle = computed(() => ({
-    backgroundColor: hexToRgba(bgColor.value, opacity.value / 100),
-  }))
-
-  function hexToRgba(hex: string, opacityVal: number): string {
-    const r = parseInt(hex.slice(1, 3), 16)
-    const g = parseInt(hex.slice(3, 5), 16)
-    const b = parseInt(hex.slice(5, 7), 16)
-    return `rgba(${r}, ${g}, ${b}, ${opacityVal})`
-  }
 
   const availableKeys = Array.from({ length: 26 }, (_, i) =>
     String.fromCharCode(65 + i)
@@ -255,81 +236,9 @@ export function useSoundPanel() {
     return availableKeys.filter(key => !usedKeys.has(key))
   }
 
-  async function loadAppearanceSettings() {
-    try {
-      const [loadedOpacity, loadedColor] = await invoke<[number, string]>('sp_get_floating_appearance')
-      opacity.value = loadedOpacity
-      bgColor.value = loadedColor
-    } catch (e) {
-      debugError('Failed to load appearance settings:', e)
-    }
-    try {
-      clickthroughEnabled.value = await invoke<boolean>('sp_is_floating_clickthrough_enabled')
-    } catch (e) {
-      debugError('Failed to load clickthrough setting:', e)
-    }
-    try {
-      stayVisible.value = await invoke<boolean>('sp_get_stay_visible')
-    } catch (e) {
-      debugError('Failed to load stay_visible setting:', e)
-    }
-  }
-
-  async function saveOpacity() {
-    try {
-      await invoke('sp_set_floating_opacity', { value: opacity.value })
-    } catch (e) {
-      showError('Ошибка сохранения прозрачности: ' + (e as Error).message)
-    }
-  }
-
-  async function saveBgColor() {
-    try {
-      await invoke('sp_set_floating_bg_color', { color: bgColor.value })
-    } catch (e) {
-      showError('Ошибка сохранения цвета: ' + (e as Error).message)
-    }
-  }
-
-  async function saveClickthrough() {
-    try {
-      await invoke('sp_set_floating_clickthrough', { enabled: clickthroughEnabled.value })
-    } catch (e) {
-      showError('Ошибка сохранения clickthrough: ' + (e as Error).message)
-    }
-  }
-
-  async function saveStayVisible() {
-    try {
-      await invoke('sp_set_stay_visible', { enabled: stayVisible.value })
-    } catch (e) {
-      showError('Ошибка сохранения режима видимости: ' + (e as Error).message)
-    }
-  }
-
   onMounted(async () => {
     await loadSets()
     await loadBindings()
-
-    if (appSettings.value) {
-      opacity.value = appSettings.value.windows.soundpanel.opacity
-      bgColor.value = appSettings.value.windows.soundpanel.bg_color
-      clickthroughEnabled.value = appSettings.value.windows.soundpanel.clickthrough
-      stayVisible.value = appSettings.value.windows.soundpanel.stay_visible
-      debugLog('[SoundPanelTab] Loaded appearance from unified config:', {
-        opacity: opacity.value,
-        bgColor: bgColor.value,
-        clickthrough: clickthroughEnabled.value,
-        stayVisible: stayVisible.value
-      })
-    } else {
-      await loadAppearanceSettings()
-    }
-
-    const unlistenAppearance = await listen('soundpanel-appearance-update', () => {
-      loadAppearanceSettings()
-    })
-    _cleanups.push(() => unlistenAppearance())
 
     const unlistenBindings = await listen('soundpanel-bindings-changed', async () => {
       debugLog('[SoundPanelTab] Bindings changed event, reloading')
@@ -346,16 +255,6 @@ export function useSoundPanel() {
     _cleanups.push(() => unlistenActiveSet())
   })
 
-  watch(() => appSettings.value, (newSettings) => {
-    if (newSettings) {
-      debugLog('[SoundPanelTab] Settings changed, updating appearance')
-      opacity.value = newSettings.windows.soundpanel.opacity
-      bgColor.value = newSettings.windows.soundpanel.bg_color
-      clickthroughEnabled.value = newSettings.windows.soundpanel.clickthrough
-      stayVisible.value = newSettings.windows.soundpanel.stay_visible
-    }
-  }, { deep: true })
-
   return {
     bindings,
     errorMessage,
@@ -369,11 +268,6 @@ export function useSoundPanel() {
     newFilePath,
     isTesting,
     isSaving,
-    opacity,
-    bgColor,
-    clickthroughEnabled,
-    stayVisible,
-    previewStyle,
     availableKeys,
     sets,
     activeSetId,
@@ -398,10 +292,5 @@ export function useSoundPanel() {
     closeAddDialog,
     showError,
     getAvailableKeys,
-    loadAppearanceSettings,
-    saveOpacity,
-    saveBgColor,
-    saveClickthrough,
-    saveStayVisible,
   }
 }
