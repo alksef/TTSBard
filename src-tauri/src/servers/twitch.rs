@@ -3,13 +3,13 @@
 // This module manages the Twitch client connection.
 // Refactored from lib.rs Twitch client thread (2026-03-11)
 
-use tauri::{AppHandle, Emitter};
-use tracing::{debug, error, info};
-use tokio_util::sync::CancellationToken;
-use crate::events::{TwitchEvent, TwitchConnectionStatus};
+use crate::events::{TwitchConnectionStatus, TwitchEvent};
 use crate::state::AppState;
 use crate::twitch::TwitchClient;
+use tauri::{AppHandle, Emitter};
 use tokio::sync::broadcast::Receiver;
+use tokio_util::sync::CancellationToken;
+use tracing::{debug, error, info};
 
 /// Run Twitch client in async context
 pub async fn run_twitch_client(

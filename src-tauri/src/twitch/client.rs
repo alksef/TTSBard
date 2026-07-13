@@ -1,11 +1,11 @@
 use super::TwitchSettings;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, WriteHalf};
+use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio_native_tls::TlsConnector;
-use tokio::io::{BufReader, AsyncBufReadExt, AsyncWriteExt, WriteHalf};
-use tokio::net::TcpStream;
-use tracing::{info, warn, error, debug};
+use tracing::{debug, error, info, warn};
 
 /// Статус подключения к Twitch
 #[derive(Debug, Clone, PartialEq)]
@@ -19,9 +19,7 @@ pub enum TwitchStatus {
 /// Sanitize text for IRC to prevent injection attacks
 fn sanitize_irc_text(text: &str) -> String {
     // Remove ALL CRLF characters first
-    let clean = text
-        .replace('\r', "")
-        .replace('\n', " ");
+    let clean = text.replace('\r', "").replace('\n', " ");
 
     // Remove control characters but allow Unicode text (including Cyrillic)
     let clean: String = clean
@@ -76,7 +74,7 @@ impl TwitchClient {
                 .danger_accept_invalid_certs(false)
                 .danger_accept_invalid_hostnames(false)
                 .build()
-                .map_err(|e| format!("Failed to build TLS connector: {}", e))?
+                .map_err(|e| format!("Failed to build TLS connector: {}", e))?,
         );
         let tls_stream = connector.connect("irc.chat.twitch.tv", tcp_stream).await?;
         debug!("TLS connected");
@@ -92,7 +90,9 @@ impl TwitchClient {
         if let Some(writer) = writer_ref.as_mut() {
             let auth_messages = format!(
                 "PASS {}\r\nNICK {}\r\nJOIN #{}\r\n",
-                self.settings.irc_token(), self.settings.username, self.settings.channel
+                self.settings.irc_token(),
+                self.settings.username,
+                self.settings.channel
             );
             debug!(username = %self.settings.username, channel = %self.settings.channel,
                 "Sending auth and join");
@@ -123,11 +123,16 @@ impl TwitchClient {
                 // Читаем одну строку с timeout
                 match tokio::time::timeout(
                     tokio::time::Duration::from_millis(100),
-                    reader_lines.next_line()
-                ).await {
+                    reader_lines.next_line(),
+                )
+                .await
+                {
                     Ok(Ok(Some(line))) => {
                         // Лируем только важные сообщения
-                        if line.starts_with("PING") || !line.contains("PRIVMSG") || line.contains("test message") {
+                        if line.starts_with("PING")
+                            || !line.contains("PRIVMSG")
+                            || line.contains("test message")
+                        {
                             debug!(%line, "Received");
                         }
 
@@ -160,12 +165,13 @@ impl TwitchClient {
                         }
 
                         // Ошибка авторизации
-                        if line.contains("Login authentication failed") || line.contains("Login unsuccessful") {
+                        if line.contains("Login authentication failed")
+                            || line.contains("Login unsuccessful")
+                        {
                             error!("Authentication failed");
                             error!("Check your username and token");
-                            *status_clone.lock().await = TwitchStatus::Error(
-                                "Authentication failed".to_string()
-                            );
+                            *status_clone.lock().await =
+                                TwitchStatus::Error("Authentication failed".to_string());
                         }
                     }
                     Ok(Ok(None)) => {

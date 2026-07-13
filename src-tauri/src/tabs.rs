@@ -26,7 +26,9 @@ fn write_json_atomically(path: &Path, content: &str) -> std::io::Result<()> {
         .as_nanos();
     let tmp_path = parent.join(format!(
         ".{}.{}.tmp",
-        path.file_name().and_then(|name| name.to_str()).unwrap_or("tabs.json"),
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("tabs.json"),
         stamp
     ));
 
@@ -131,8 +133,8 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static SEQ: AtomicU64 = AtomicU64::new(0);
         let n = SEQ.fetch_add(1, Ordering::SeqCst);
-        let dir = std::env::temp_dir()
-            .join(format!("ttsbard-tabs-test-{}-{}", std::process::id(), n));
+        let dir =
+            std::env::temp_dir().join(format!("ttsbard-tabs-test-{}-{}", std::process::id(), n));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("tabs_test.json");
         let _ = fs::remove_file(&path);
@@ -153,8 +155,16 @@ mod tests {
         let data = TabsData {
             active_id: "id-2".into(),
             tabs: vec![
-                EditorTab { id: "id-1".into(), title: "Текст 1".into(), text: "привет".into() },
-                EditorTab { id: "id-2".into(), title: "Текст 2".into(), text: "мир".into() },
+                EditorTab {
+                    id: "id-1".into(),
+                    title: "Текст 1".into(),
+                    text: "привет".into(),
+                },
+                EditorTab {
+                    id: "id-2".into(),
+                    title: "Текст 2".into(),
+                    text: "мир".into(),
+                },
             ],
         };
         mgr.save_all(data);
@@ -179,7 +189,10 @@ mod tests {
                 text: String::new(),
             })
             .collect();
-        mgr.save_all(TabsData { active_id: "id-0".into(), tabs });
+        mgr.save_all(TabsData {
+            active_id: "id-0".into(),
+            tabs,
+        });
         let loaded = mgr.load_all();
         assert_eq!(loaded.tabs.len(), MAX_TABS);
         let _ = fs::remove_file(&path);
@@ -191,7 +204,11 @@ mod tests {
         let huge = "x".repeat(MAX_TAB_TEXT_LEN + 1000);
         mgr.save_all(TabsData {
             active_id: "id-1".into(),
-            tabs: vec![EditorTab { id: "id-1".into(), title: "T".into(), text: huge }],
+            tabs: vec![EditorTab {
+                id: "id-1".into(),
+                title: "T".into(),
+                text: huge,
+            }],
         });
         let loaded = mgr.load_all();
         assert_eq!(loaded.tabs[0].text.len(), MAX_TAB_TEXT_LEN);
@@ -204,12 +221,23 @@ mod tests {
         mgr.save_all(TabsData {
             active_id: "does-not-exist".into(),
             tabs: vec![
-                EditorTab { id: "a".into(), title: "A".into(), text: String::new() },
-                EditorTab { id: "b".into(), title: "B".into(), text: String::new() },
+                EditorTab {
+                    id: "a".into(),
+                    title: "A".into(),
+                    text: String::new(),
+                },
+                EditorTab {
+                    id: "b".into(),
+                    title: "B".into(),
+                    text: String::new(),
+                },
             ],
         });
         let loaded = mgr.load_all();
-        assert_eq!(loaded.active_id, "a", "invalid active_id must fall back to first tab");
+        assert_eq!(
+            loaded.active_id, "a",
+            "invalid active_id must fall back to first tab"
+        );
         let _ = fs::remove_file(&path);
     }
 
@@ -224,13 +252,11 @@ mod tests {
             threads.push(std::thread::spawn(move || {
                 let data = TabsData {
                     active_id: format!("id-{}", i),
-                    tabs: vec![
-                        EditorTab {
-                            id: format!("id-{}", i),
-                            title: format!("Tab {}", i),
-                            text: format!("Text content {}", i),
-                        }
-                    ],
+                    tabs: vec![EditorTab {
+                        id: format!("id-{}", i),
+                        title: format!("Tab {}", i),
+                        text: format!("Text content {}", i),
+                    }],
                 };
                 mgr_clone.save_all(data);
             }));

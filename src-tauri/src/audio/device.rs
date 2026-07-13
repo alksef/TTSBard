@@ -27,11 +27,8 @@ pub fn get_output_devices() -> Vec<OutputDeviceInfo> {
 
         for (index, device) in output_devices.enumerate() {
             if let Ok(name) = device.name() {
-                let is_default = default_device
-                    .as_ref()
-                    .and_then(|d| d.name().ok())
-                    .as_ref()
-                    == Some(&name);
+                let is_default =
+                    default_device.as_ref().and_then(|d| d.name().ok()).as_ref() == Some(&name);
 
                 // Используем индекс как ID, так как имя может содержать специальные символы
                 let device_info = OutputDeviceInfo {
@@ -40,8 +37,11 @@ pub fn get_output_devices() -> Vec<OutputDeviceInfo> {
                     is_default,
                 };
 
-                debug!(device_name = device_info.name, is_default = device_info.is_default,
-                    "Found device");
+                debug!(
+                    device_name = device_info.name,
+                    is_default = device_info.is_default,
+                    "Found device"
+                );
                 devices.push(device_info);
             }
         }
@@ -52,11 +52,11 @@ pub fn get_output_devices() -> Vec<OutputDeviceInfo> {
 
 /// Ключевые слова для определения виртуальных устройств
 const VIRTUAL_KEYWORDS: &[&str] = &[
-    "cable",        // VB-Cable, VoiceMeeter Cable
-    "virtual",      // Virtual Speaker, Virtual Audio
-    "voicemeeter",  // VoiceMeeter, VAIO
-    "vb-audio",     // VB-Audio products
-    "aux",          // VoiceMeeter AUX
+    "cable",       // VB-Cable, VoiceMeeter Cable
+    "virtual",     // Virtual Speaker, Virtual Audio
+    "voicemeeter", // VoiceMeeter, VAIO
+    "vb-audio",    // VB-Audio products
+    "aux",         // VoiceMeeter AUX
 ];
 
 /// Получить только виртуальные аудио устройства
@@ -68,12 +68,13 @@ pub fn get_virtual_mic_devices() -> Vec<OutputDeviceInfo> {
         .into_iter()
         .filter(|device| {
             let name_lower = device.name.to_lowercase();
-            VIRTUAL_KEYWORDS.iter().any(|keyword| name_lower.contains(keyword))
+            VIRTUAL_KEYWORDS
+                .iter()
+                .any(|keyword| name_lower.contains(keyword))
         })
         .collect();
 
-    info!(count = virtual_devices.len(),
-        "Found virtual devices");
+    info!(count = virtual_devices.len(), "Found virtual devices");
     for device in &virtual_devices {
         debug!(device_name = device.name, "Virtual device");
     }

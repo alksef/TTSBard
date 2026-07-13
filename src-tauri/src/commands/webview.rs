@@ -1,14 +1,12 @@
 use crate::config::SettingsManager;
 use crate::state::AppState;
 use crate::webview::WebViewSettings;
-use tauri::{Manager, State};
 use std::fs;
+use tauri::{Manager, State};
 
 /// Get current webview settings from AppState
 #[tauri::command]
-pub async fn get_webview_settings(
-    state: State<'_, AppState>,
-) -> Result<WebViewSettings, String> {
+pub async fn get_webview_settings(state: State<'_, AppState>) -> Result<WebViewSettings, String> {
     let settings = state.webview.settings.read().await;
     Ok(WebViewSettings {
         enabled: settings.enabled,
@@ -70,7 +68,8 @@ pub async fn save_webview_settings(
     // Check if enabled status or port changed (start_on_boot doesn't require restart)
     let old_settings = state.webview.settings.read().await;
     let enabled_changed = old_settings.enabled != settings.enabled;
-    let port_changed = old_settings.port != settings.port || old_settings.bind_address != settings.bind_address;
+    let port_changed =
+        old_settings.port != settings.port || old_settings.bind_address != settings.bind_address;
     let upnp_changed = old_settings.upnp_enabled != settings.upnp_enabled;
     drop(old_settings);
 
@@ -87,7 +86,8 @@ pub async fn save_webview_settings(
             mgr.set_webview_bind_address(bind_addr)?;
             mgr.set_webview_upnp_enabled(upnp_enabled)?;
             Ok(())
-        }).await?;
+        })
+        .await?;
         super::emit_settings_changed(&app_handle);
     }
 
@@ -98,7 +98,9 @@ pub async fn save_webview_settings(
 
     // Trigger UPnP toggle if it changed (without server restart)
     if upnp_changed {
-        state.webview.send_event(crate::events::AppEvent::ToggleUpnp(settings.upnp_enabled));
+        state
+            .webview
+            .send_event(crate::events::AppEvent::ToggleUpnp(settings.upnp_enabled));
     }
 
     // Trigger server restart if server settings changed
@@ -106,7 +108,9 @@ pub async fn save_webview_settings(
     if enabled_changed || port_changed {
         tracing::info!("Sending RestartWebViewServer event to WebView server");
         // Send restart event directly to WebView server using the state parameter
-        state.webview.send_event(crate::events::AppEvent::RestartWebViewServer);
+        state
+            .webview
+            .send_event(crate::events::AppEvent::RestartWebViewServer);
         tracing::debug!("RestartWebViewServer event sent successfully");
         Ok("Настройки сохранены. Сервер перезапускается...".to_string())
     } else {
@@ -119,9 +123,11 @@ pub async fn save_webview_settings(
 pub fn get_local_ip() -> Result<String, String> {
     let socket = std::net::UdpSocket::bind("0.0.0.0:0")
         .map_err(|e| format!("Failed to bind socket: {}", e))?;
-    socket.connect("8.8.8.8:80")
+    socket
+        .connect("8.8.8.8:80")
         .map_err(|e| format!("Failed to connect: {}", e))?;
-    let local_ip = socket.local_addr()
+    let local_ip = socket
+        .local_addr()
         .map_err(|e| format!("Failed to get local address: {}", e))?
         .ip()
         .to_string();
@@ -137,10 +143,10 @@ pub async fn open_template_folder() -> Result<(), String> {
         .join("webview");
 
     // Create directory first, before canonicalize
-    fs::create_dir_all(&config_dir)
-        .map_err(|e| e.to_string())?;
+    fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
 
-    let config_dir = config_dir.canonicalize()
+    let config_dir = config_dir
+        .canonicalize()
         .map_err(|e| format!("Invalid config dir: {}", e))?;
 
     let path = config_dir.to_str().ok_or("Invalid path")?;
@@ -174,27 +180,26 @@ pub async fn open_template_folder() -> Result<(), String> {
 
 /// Send test message to SSE (without TTS)
 #[tauri::command]
-pub async fn send_test_message(
-    text: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn send_test_message(text: String, state: State<'_, AppState>) -> Result<(), String> {
     if text.trim().is_empty() {
         return Err("Text cannot be empty".to_string());
     }
 
     // Send ONLY to WebView channel, not to TTS
     // This allows testing WebView display without triggering voice synthesis
-    state.webview.send_event(crate::events::AppEvent::TextSentToTts(text));
+    state
+        .webview
+        .send_event(crate::events::AppEvent::TextSentToTts(text));
     Ok(())
 }
 
 /// Reload templates from disk (hot reload without server restart)
 #[tauri::command]
-pub async fn reload_templates(
-    state: State<'_, AppState>,
-) -> Result<String, String> {
+pub async fn reload_templates(state: State<'_, AppState>) -> Result<String, String> {
     // Send event to reload templates without restarting the server
-    state.webview.send_event(crate::events::AppEvent::ReloadWebViewTemplates);
+    state
+        .webview
+        .send_event(crate::events::AppEvent::ReloadWebViewTemplates);
     Ok("Шаблоны обновлены!".to_string())
 }
 
@@ -219,7 +224,8 @@ pub async fn generate_webview_token(
         let t = token.clone();
         super::persist_blocking(manager.inner(), move |mgr| {
             mgr.set_webview_access_token(Some(t))
-        }).await?;
+        })
+        .await?;
         super::emit_settings_changed(&app_handle);
     }
 
@@ -228,9 +234,7 @@ pub async fn generate_webview_token(
 
 /// Get the masked access token (first 8 chars only)
 #[tauri::command]
-pub async fn get_webview_token(
-    state: State<'_, AppState>,
-) -> Result<Option<String>, String> {
+pub async fn get_webview_token(state: State<'_, AppState>) -> Result<Option<String>, String> {
     let settings = state.webview.settings.read().await;
     Ok(settings.access_token.as_ref().map(|t| {
         if t.len() > 8 {
@@ -243,11 +247,11 @@ pub async fn get_webview_token(
 
 /// Copy the access token to clipboard
 #[tauri::command]
-pub async fn copy_webview_token(
-    state: State<'_, AppState>,
-) -> Result<String, String> {
+pub async fn copy_webview_token(state: State<'_, AppState>) -> Result<String, String> {
     let settings = state.webview.settings.read().await;
-    let token = settings.access_token.clone()
+    let token = settings
+        .access_token
+        .clone()
         .ok_or("Токен не сгенерирован")?;
 
     drop(settings);
@@ -273,12 +277,15 @@ pub async fn regenerate_webview_token(
         let t = token.clone();
         super::persist_blocking(manager.inner(), move |mgr| {
             mgr.set_webview_access_token(Some(t))
-        }).await?;
+        })
+        .await?;
         super::emit_settings_changed(&app_handle);
     }
 
     // Restart server to apply new token
-    state.webview.send_event(crate::events::AppEvent::RestartWebViewServer);
+    state
+        .webview
+        .send_event(crate::events::AppEvent::RestartWebViewServer);
 
     Ok("Токен перегенерирован. Старый токен больше не действителен.".to_string())
 }
@@ -300,12 +307,15 @@ pub async fn set_webview_upnp_enabled(
     if let Some(manager) = settings_manager {
         super::persist_blocking(manager.inner(), move |mgr| {
             mgr.set_webview_upnp_enabled(enabled)
-        }).await?;
+        })
+        .await?;
         super::emit_settings_changed(&app_handle);
     }
 
     // Toggle UPnP without server restart
-    state.webview.send_event(crate::events::AppEvent::ToggleUpnp(enabled));
+    state
+        .webview
+        .send_event(crate::events::AppEvent::ToggleUpnp(enabled));
 
     if enabled {
         Ok("UPnP включён".to_string())
@@ -316,9 +326,7 @@ pub async fn set_webview_upnp_enabled(
 
 /// Get UPnP enabled status
 #[tauri::command]
-pub async fn get_webview_upnp_enabled(
-    state: State<'_, AppState>,
-) -> Result<bool, String> {
+pub async fn get_webview_upnp_enabled(state: State<'_, AppState>) -> Result<bool, String> {
     Ok(state.webview.settings.read().await.upnp_enabled)
 }
 

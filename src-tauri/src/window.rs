@@ -1,8 +1,5 @@
 #[cfg(windows)]
-use windows::{
-    Win32::Foundation::*,
-    Win32::UI::WindowsAndMessaging::*,
-};
+use windows::{Win32::Foundation::*, Win32::UI::WindowsAndMessaging::*};
 
 /// Установить защиту от захвата экрана для окна
 #[cfg(windows)]
@@ -23,7 +20,10 @@ pub fn set_window_exclude_from_capture(hwnd: isize, exclude: bool) -> anyhow::Re
         if result.is_err() {
             let error = GetLastError();
             tracing::error!(error = ?error, "[WINDOW] SetWindowDisplayAffinity failed");
-            return Err(anyhow::anyhow!("SetWindowDisplayAffinity failed: {:?}", error));
+            return Err(anyhow::anyhow!(
+                "SetWindowDisplayAffinity failed: {:?}",
+                error
+            ));
         }
 
         tracing::debug!(hwnd = ?hwnd, exclude, affinity = ?affinity, "[WINDOW] SetWindowDisplayAffinity SUCCESS");

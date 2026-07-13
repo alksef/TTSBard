@@ -1,8 +1,8 @@
-use std::sync::Arc;
-use parking_lot::Mutex;
-use crate::webview::WebViewSettings;
 use crate::events::AppEvent;
-use tracing::{info, debug, warn};
+use crate::webview::WebViewSettings;
+use parking_lot::Mutex;
+use std::sync::Arc;
+use tracing::{debug, info, warn};
 
 pub struct WebViewService {
     pub settings: Arc<tokio::sync::RwLock<WebViewSettings>>,

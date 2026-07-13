@@ -1,23 +1,23 @@
-use crate::state::AppState;
+use crate::config::{AppSettingsDto, SettingsManager, SpellSource, WindowsManager};
 use crate::events::AppEvent;
-use crate::config::{SettingsManager, WindowsManager, AppSettingsDto, SpellSource};
-use tauri::{State, AppHandle, Manager, Emitter};
+use crate::state::AppState;
+use tauri::{AppHandle, Emitter, Manager, State};
 use tracing::info;
 
-pub mod preprocessor;
-pub mod telegram;
-pub mod webview;
-pub mod twitch;
-pub mod logging;
-pub mod proxy;
 pub mod ai;
 pub mod history;
-pub mod tabs;
+pub mod logging;
 pub mod playback;
 pub mod playback_window;
-pub mod window;
+pub mod preprocessor;
+pub mod proxy;
 pub mod spellcheck;
+pub mod tabs;
+pub mod telegram;
 pub mod tts_pipeline;
+pub mod twitch;
+pub mod webview;
+pub mod window;
 
 pub use self::ai::*;
 pub use self::playback::*;
@@ -58,9 +58,8 @@ pub async fn quit_app(app_handle: AppHandle) -> Result<(), String> {
                 let y = pos.y;
                 info!(x, y, "Saving main window position");
                 let wm = windows_manager.inner();
-                let _ = persist_blocking(wm, move |mgr| {
-                    mgr.set_main_position(Some(x), Some(y))
-                }).await;
+                let _ =
+                    persist_blocking(wm, move |mgr| mgr.set_main_position(Some(x), Some(y))).await;
             }
         }
     }
@@ -108,16 +107,9 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
     let audio_pcm = tts_pipeline::apply_audio_effects_pipeline(audio_data, &settings)?;
 
     let (provider_name, voice_name) = get_provider_voice_names(&settings);
-    let effects_fp = crate::history::compute_effects_fingerprint(
-        &settings.audio_effects,
-        &settings.dsp,
-    );
-    let cache_key = crate::history::build_cache_key(
-        &text,
-        &provider_name,
-        &voice_name,
-        effects_fp,
-    );
+    let effects_fp =
+        crate::history::compute_effects_fingerprint(&settings.audio_effects, &settings.dsp);
+    let cache_key = crate::history::build_cache_key(&text, &provider_name, &voice_name, effects_fp);
 
     let cache_saved = crate::history::save_audio_cache(&cache_key, &audio_pcm).is_ok();
 
@@ -179,7 +171,8 @@ pub async fn get_all_app_settings(
 ) -> Result<AppSettingsDto, String> {
     info!("get_all_app_settings: Loading all settings");
 
-    let config = settings_manager.load()
+    let config = settings_manager
+        .load()
         .map_err(|e| format!("Failed to load settings: {}", e))?;
 
     let webview_settings = {
@@ -188,30 +181,32 @@ pub async fn get_all_app_settings(
     };
 
     let twitch_settings = {
-            let s = app_state.twitch.settings.read().await;
+        let s = app_state.twitch.settings.read().await;
         s.clone()
     };
 
-    let windows_settings = windows_manager.load()
+    let windows_settings = windows_manager
+        .load()
         .map_err(|e| format!("Failed to load windows settings: {}", e))?;
 
     let interception_enabled = app_state.is_interception_enabled();
     let preprocessor = app_state.editor.get_preprocessor();
 
     let soundpanel_bindings = soundpanel_state.get_all_bindings();
-    info!(count = soundpanel_bindings.len(), "get_all_app_settings: Loaded soundpanel bindings");
-
-    let settings = AppSettingsDto::from_all_sources(
-        crate::config::AllSourcesParams {
-            config: &config,
-            webview_settings: &webview_settings,
-            twitch_settings: &twitch_settings,
-            windows_settings: &windows_settings,
-            interception_enabled,
-            preprocessor: preprocessor.as_ref(),
-            soundpanel_bindings,
-        }
+    info!(
+        count = soundpanel_bindings.len(),
+        "get_all_app_settings: Loaded soundpanel bindings"
     );
+
+    let settings = AppSettingsDto::from_all_sources(crate::config::AllSourcesParams {
+        config: &config,
+        webview_settings: &webview_settings,
+        twitch_settings: &twitch_settings,
+        windows_settings: &windows_settings,
+        interception_enabled,
+        preprocessor: preprocessor.as_ref(),
+        soundpanel_bindings,
+    });
 
     info!(
         tts_provider = ?settings.tts.provider,
@@ -227,7 +222,9 @@ pub async fn get_all_app_settings(
 /// Check if backend is ready (settings loaded, initialization complete)
 #[tauri::command]
 pub fn is_backend_ready(app_state: State<'_, AppState>) -> bool {
-    app_state.backend_ready.load(std::sync::atomic::Ordering::SeqCst)
+    app_state
+        .backend_ready
+        .load(std::sync::atomic::Ordering::SeqCst)
 }
 
 /// Confirm backend is ready and emit event if already ready
@@ -236,7 +233,9 @@ pub async fn confirm_backend_ready(
     app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
-    let ready = app_state.backend_ready.load(std::sync::atomic::Ordering::SeqCst);
+    let ready = app_state
+        .backend_ready
+        .load(std::sync::atomic::Ordering::SeqCst);
 
     if ready {
         info!("confirm_backend_ready: Backend already ready, emitting event");
@@ -253,11 +252,12 @@ pub async fn confirm_backend_ready(
 pub async fn set_editor_quick(
     value: bool,
     app_handle: AppHandle,
-    settings_manager: State<'_, SettingsManager>
+    settings_manager: State<'_, SettingsManager>,
 ) -> Result<bool, String> {
     persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_editor_quick(value)
-    }).await?;
+    })
+    .await?;
 
     emit_settings_changed(&app_handle);
 
@@ -266,9 +266,7 @@ pub async fn set_editor_quick(
 
 /// Get quick editor enabled
 #[tauri::command]
-pub fn get_editor_quick(
-    settings_manager: State<'_, SettingsManager>
-) -> bool {
+pub fn get_editor_quick(settings_manager: State<'_, SettingsManager>) -> bool {
     settings_manager.get_editor_quick()
 }
 
@@ -277,11 +275,12 @@ pub fn get_editor_quick(
 pub async fn set_editor_spellcheck_enabled(
     value: bool,
     app_handle: AppHandle,
-    settings_manager: State<'_, SettingsManager>
+    settings_manager: State<'_, SettingsManager>,
 ) -> Result<bool, String> {
     persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_editor_spellcheck_enabled(value)
-    }).await?;
+    })
+    .await?;
 
     emit_settings_changed(&app_handle);
 
@@ -290,9 +289,7 @@ pub async fn set_editor_spellcheck_enabled(
 
 /// Get spellcheck enabled
 #[tauri::command]
-pub fn get_editor_spellcheck_enabled(
-    settings_manager: State<'_, SettingsManager>
-) -> bool {
+pub fn get_editor_spellcheck_enabled(settings_manager: State<'_, SettingsManager>) -> bool {
     settings_manager.get_editor_spellcheck_enabled()
 }
 
@@ -301,12 +298,13 @@ pub fn get_editor_spellcheck_enabled(
 pub async fn set_editor_spellcheck_source(
     value: SpellSource,
     app_handle: AppHandle,
-    settings_manager: State<'_, SettingsManager>
+    settings_manager: State<'_, SettingsManager>,
 ) -> Result<SpellSource, String> {
     let v = value.clone();
     persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_editor_spellcheck_source(v)
-    }).await?;
+    })
+    .await?;
 
     emit_settings_changed(&app_handle);
 
@@ -315,9 +313,7 @@ pub async fn set_editor_spellcheck_source(
 
 /// Get spellcheck source
 #[tauri::command]
-pub fn get_editor_spellcheck_source(
-    settings_manager: State<'_, SettingsManager>
-) -> SpellSource {
+pub fn get_editor_spellcheck_source(settings_manager: State<'_, SettingsManager>) -> SpellSource {
     settings_manager.get_editor_spellcheck_source()
 }
 
@@ -330,7 +326,8 @@ pub async fn set_editor_height(
 ) -> Result<u32, String> {
     persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_editor_height(height)
-    }).await?;
+    })
+    .await?;
 
     emit_settings_changed(&app_handle);
 
@@ -339,8 +336,6 @@ pub async fn set_editor_height(
 
 /// Get editor height
 #[tauri::command]
-pub fn get_editor_height(
-    settings_manager: State<'_, SettingsManager>,
-) -> u32 {
+pub fn get_editor_height(settings_manager: State<'_, SettingsManager>) -> u32 {
     settings_manager.get_editor_height()
 }

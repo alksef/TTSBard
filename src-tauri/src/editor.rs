@@ -1,8 +1,8 @@
-use std::sync::Arc;
-use parking_lot::Mutex;
-use crate::preprocessor::TextPreprocessor;
 use crate::history::HistoryManager;
+use crate::preprocessor::TextPreprocessor;
 use crate::spellcheck::SpellcheckManager;
+use parking_lot::Mutex;
+use std::sync::Arc;
 
 pub struct EditorService {
     pub preprocessor: Arc<Mutex<Option<TextPreprocessor>>>,

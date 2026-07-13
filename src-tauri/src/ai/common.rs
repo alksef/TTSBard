@@ -1,8 +1,8 @@
 //! Common functionality for AI clients
 
+use super::AiError;
 use async_openai::types::chat::CreateChatCompletionResponse;
 use tracing::error;
-use super::AiError;
 
 // ============================================================================
 // Constants
@@ -37,7 +37,9 @@ pub fn validate_correction_result(
 ) -> Result<(), AiError> {
     if corrected.trim().is_empty() {
         error!("{} returned empty corrected text", provider_name);
-        return Err(AiError::InvalidResponse("AI returned empty corrected text".to_string()));
+        return Err(AiError::InvalidResponse(
+            "AI returned empty corrected text".to_string(),
+        ));
     }
 
     tracing::info!(
@@ -101,21 +103,30 @@ mod tests {
     fn test_validate_correction_input_empty_text() {
         let result = validate_correction_input("", "test prompt");
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().to_string(), "Invalid input: Text cannot be empty");
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Invalid input: Text cannot be empty"
+        );
     }
 
     #[test]
     fn test_validate_correction_input_empty_prompt() {
         let result = validate_correction_input("test text", "");
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().to_string(), "Invalid input: Prompt cannot be empty");
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Invalid input: Prompt cannot be empty"
+        );
     }
 
     #[test]
     fn test_validate_correction_result_empty() {
         let result = validate_correction_result("", "original", "TestProvider");
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().to_string(), "Invalid response: AI returned empty corrected text");
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Invalid response: AI returned empty corrected text"
+        );
     }
 
     #[test]

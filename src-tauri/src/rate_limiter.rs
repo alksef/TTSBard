@@ -2,11 +2,15 @@
 //!
 //! Provides rate limiting for TTS requests to prevent abuse
 #![allow(dead_code)] // Ready for integration when needed
-use governor::{Quota, RateLimiter, state::{InMemoryState, NotKeyed}, clock::DefaultClock};
+use governor::{
+    clock::DefaultClock,
+    state::{InMemoryState, NotKeyed},
+    Quota, RateLimiter,
+};
+use parking_lot::Mutex;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::Duration;
-use parking_lot::Mutex;
 
 /// TTS Rate Limiter using token bucket algorithm
 pub struct TtsRateLimiter {
@@ -28,8 +32,7 @@ impl TtsRateLimiter {
 
     /// Create a new rate limiter with custom settings
     pub fn with_config(requests_per_minute: NonZeroU32, burst_size: NonZeroU32) -> Self {
-        let quota = Quota::per_minute(requests_per_minute)
-            .allow_burst(burst_size);
+        let quota = Quota::per_minute(requests_per_minute).allow_burst(burst_size);
 
         Self {
             limiter: Arc::new(Mutex::new(RateLimiter::direct(quota))),
@@ -38,7 +41,9 @@ impl TtsRateLimiter {
 
     /// Check if request is allowed under rate limit
     pub fn check(&self) -> Result<(), String> {
-        self.limiter.lock().check()
+        self.limiter
+            .lock()
+            .check()
             .map(|_| ())
             .map_err(|e| format!("Rate limit exceeded: {}", e))
     }
@@ -65,7 +70,8 @@ mod tests {
 
     #[test]
     fn test_rate_limiter_basic() {
-        let limiter = TtsRateLimiter::with_config(NonZeroU32::new(10).unwrap(), NonZeroU32::new(2).unwrap());
+        let limiter =
+            TtsRateLimiter::with_config(NonZeroU32::new(10).unwrap(), NonZeroU32::new(2).unwrap());
 
         // First request should succeed
         assert!(limiter.check().is_ok());
@@ -79,7 +85,8 @@ mod tests {
 
     #[test]
     fn test_rate_limiter_wait_time() {
-        let limiter = TtsRateLimiter::with_config(NonZeroU32::new(2).unwrap(), NonZeroU32::new(1).unwrap());
+        let limiter =
+            TtsRateLimiter::with_config(NonZeroU32::new(2).unwrap(), NonZeroU32::new(1).unwrap());
 
         // First request should succeed
         assert!(limiter.check().is_ok());

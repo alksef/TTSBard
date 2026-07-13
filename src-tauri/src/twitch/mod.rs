@@ -9,8 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::TwitchSettings as ConfigTwitchSettings;
 
 /// Настройки подключения к Twitch IRC
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TwitchSettings {
     pub enabled: bool,
     pub username: String,
@@ -18,7 +17,6 @@ pub struct TwitchSettings {
     pub channel: String,
     pub start_on_boot: bool,
 }
-
 
 impl TwitchSettings {
     /// Возвращает токен с префиксом oauth: для IRC

@@ -3,15 +3,15 @@
 //! Provides AI client implementations for text correction using various providers.
 
 pub mod common;
+pub mod custom;
+pub mod deepseek;
 pub mod openai;
 pub mod zai;
-pub mod deepseek;
-pub mod custom;
 
+use crate::config::{AiProviderType, AiSettings, NetworkSettings};
 use async_trait::async_trait;
-use crate::config::{AiSettings, AiProviderType, NetworkSettings};
-use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 // ============================================================================
 // AI Error Types
@@ -46,10 +46,7 @@ pub enum AiError {
 
     /// API returned an error
     #[error("API error (status {status}): {message}")]
-    ApiError {
-        status: u16,
-        message: String,
-    },
+    ApiError { status: u16, message: String },
 
     /// Invalid response from API
     #[error("Invalid response: {0}")]

@@ -126,7 +126,8 @@ pub fn default_html() -> String {
         };
     </script>
 </body>
-</html>"#.to_string()
+</html>"#
+        .to_string()
 }
 
 /// Default CSS for centered white text with shadow and fade animation

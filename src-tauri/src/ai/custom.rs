@@ -162,10 +162,7 @@ impl CustomClient {
 
         let response = self.client.chat().create(request).await.map_err(|e| {
             let error_msg = e.to_string();
-            error!(
-                error_type = "custom_api_error",
-                "Custom API request failed"
-            );
+            error!(error_type = "custom_api_error", "Custom API request failed");
 
             if error_msg.contains("timeout") || error_msg.contains("timed out") {
                 error!(timeout_secs = self.timeout, "Custom request timeout");

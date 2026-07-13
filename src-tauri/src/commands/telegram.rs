@@ -1,7 +1,10 @@
-use crate::telegram::{TelegramClient, UserInfo, TtsResult, SileroTtsBot, CurrentVoice, Limits, get_current_voice, get_limits, ProxyStatus, types::VoiceCode, bot::set_speaker};
-use crate::config::{SettingsManager, ProxyMode};
-use tauri::{State, AppHandle};
+use crate::config::{ProxyMode, SettingsManager};
+use crate::telegram::{
+    bot::set_speaker, get_current_voice, get_limits, types::VoiceCode, CurrentVoice, Limits,
+    ProxyStatus, SileroTtsBot, TelegramClient, TtsResult, UserInfo,
+};
 use std::sync::Arc;
+use tauri::{AppHandle, State};
 use tokio::sync::{Mutex, RwLock};
 use tracing::info;
 
@@ -58,7 +61,8 @@ pub async fn telegram_init(
     }
 
     // Load proxy settings
-    let settings = settings_manager.load()
+    let settings = settings_manager
+        .load()
         .map_err(|e| format!("Failed to load settings: {}", e))?;
 
     info!(proxy_mode = ?settings.tts.telegram.proxy_mode, "Initializing Telegram with proxy settings");
@@ -70,20 +74,29 @@ pub async fn telegram_init(
     match &settings.tts.telegram.proxy_mode {
         ProxyMode::None => {
             info!("Initializing without proxy");
-            client.init_with_proxy(api_id, api_hash, phone, None).await
+            client
+                .init_with_proxy(api_id, api_hash, phone, None)
+                .await
                 .map_err(|e| format!("Ошибка инициализации клиента: {}", e))?;
         }
         ProxyMode::Socks5 => {
             let proxy_url = settings.tts.network.proxy.proxy_url.clone();
-            info!(has_proxy = proxy_url.is_some(), "Initializing with SOCKS5 proxy");
-            client.init_with_proxy(api_id, api_hash, phone, proxy_url).await
+            info!(
+                has_proxy = proxy_url.is_some(),
+                "Initializing with SOCKS5 proxy"
+            );
+            client
+                .init_with_proxy(api_id, api_hash, phone, proxy_url)
+                .await
                 .map_err(|e| format!("Ошибка инициализации клиента: {}", e))?;
         }
         ProxyMode::MtProxy => {
             #[cfg(feature = "mtproxy")]
             {
                 info!("Initializing with MTProxy");
-                client.init_with_mtproxy(api_id, api_hash, phone, &settings.tts.network.mtproxy).await
+                client
+                    .init_with_mtproxy(api_id, api_hash, phone, &settings.tts.network.mtproxy)
+                    .await
                     .map_err(|e| format!("Ошибка инициализации клиента: {}", e))?;
             }
             #[cfg(not(feature = "mtproxy"))]
@@ -109,16 +122,17 @@ pub async fn telegram_init(
 
 /// Запрос кода подтверждения
 #[tauri::command]
-pub async fn telegram_request_code(
-    state: State<'_, TelegramState>,
-) -> Result<(), String> {
+pub async fn telegram_request_code(state: State<'_, TelegramState>) -> Result<(), String> {
     let client_opt = {
         let guard = state.client.lock().await;
         guard.clone()
     };
-    let client = client_opt.ok_or_else(|| "Клиент не инициализирован. Сначала вызовите telegram_init.".to_string())?;
+    let client = client_opt
+        .ok_or_else(|| "Клиент не инициализирован. Сначала вызовите telegram_init.".to_string())?;
 
-    client.request_code().await
+    client
+        .request_code()
+        .await
         .map_err(|e| format!("Ошибка запроса кода: {}", e))?;
     Ok(())
 }
@@ -139,9 +153,12 @@ pub async fn telegram_sign_in(
         let guard = state.client.lock().await;
         guard.clone()
     };
-    let client = client_opt.ok_or_else(|| "Клиент не инициализирован. Сначала вызовите telegram_init.".to_string())?;
+    let client = client_opt
+        .ok_or_else(|| "Клиент не инициализирован. Сначала вызовите telegram_init.".to_string())?;
 
-    client.sign_in(&code).await
+    client
+        .sign_in(&code)
+        .await
         .map_err(|e| format!("Ошибка входа: {}", e))?;
 
     // После успешного входа сохраняем api_id в settings.json
@@ -156,7 +173,8 @@ pub async fn telegram_sign_in(
     // Save to settings.json (convert u32 to i64)
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_telegram_api_id(Some(api_id_to_save as i64))
-    }).await?;
+    })
+    .await?;
 
     super::emit_settings_changed(&app_handle);
 
@@ -176,7 +194,9 @@ pub async fn telegram_sign_out(
     };
     let client = client_opt.ok_or_else(|| "Клиент не инициализирован".to_string())?;
 
-    client.sign_out().await
+    client
+        .sign_out()
+        .await
         .map_err(|e| format!("Ошибка выхода: {}", e))?;
 
     // Удаляем клиент из состояния
@@ -186,7 +206,8 @@ pub async fn telegram_sign_out(
     // Удаляем сохранённый api_id из settings.json
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_telegram_api_id(None)
-    }).await?;
+    })
+    .await?;
 
     super::emit_settings_changed(&app_handle);
 
@@ -195,9 +216,7 @@ pub async fn telegram_sign_out(
 
 /// Проверка статуса авторизации
 #[tauri::command]
-pub async fn telegram_get_status(
-    state: State<'_, TelegramState>,
-) -> Result<bool, String> {
+pub async fn telegram_get_status(state: State<'_, TelegramState>) -> Result<bool, String> {
     let client_opt = {
         let guard = state.client.lock().await;
         guard.clone()
@@ -348,7 +367,8 @@ pub async fn telegram_auto_restore(
     info!(api_id, "Found saved api_id");
 
     // Load proxy settings
-    let settings = settings_manager.load()
+    let settings = settings_manager
+        .load()
         .map_err(|e| format!("Failed to load settings: {}", e))?;
 
     info!(proxy_mode = ?settings.tts.telegram.proxy_mode, "Restoring session with proxy settings");
@@ -360,20 +380,29 @@ pub async fn telegram_auto_restore(
     match &settings.tts.telegram.proxy_mode {
         ProxyMode::None => {
             info!("Initializing without proxy");
-            client.init_empty(api_id).await
+            client
+                .init_empty(api_id)
+                .await
                 .map_err(|e| format!("Ошибка инициализации сессии: {}", e))?;
         }
         ProxyMode::Socks5 => {
             let proxy_url = settings.tts.network.proxy.proxy_url.clone();
-            info!(has_proxy = proxy_url.is_some(), "Initializing with SOCKS5 proxy");
-            client.init_empty_with_proxy(api_id, proxy_url).await
+            info!(
+                has_proxy = proxy_url.is_some(),
+                "Initializing with SOCKS5 proxy"
+            );
+            client
+                .init_empty_with_proxy(api_id, proxy_url)
+                .await
                 .map_err(|e| format!("Ошибка инициализации сессии: {}", e))?;
         }
         ProxyMode::MtProxy => {
             #[cfg(feature = "mtproxy")]
             {
                 info!("Initializing with MTProxy");
-                client.init_empty_with_mtproxy(api_id, &settings.tts.network.mtproxy).await
+                client
+                    .init_empty_with_mtproxy(api_id, &settings.tts.network.mtproxy)
+                    .await
                     .map_err(|e| format!("Ошибка инициализации сессии: {}", e))?;
             }
             #[cfg(not(feature = "mtproxy"))]
@@ -434,13 +463,15 @@ pub async fn telegram_set_speaker(
     if success {
         let vid = voice_code;
         super::persist_blocking(settings_manager.inner(), move |mgr| {
-            let mut settings = mgr.load()
+            let mut settings = mgr
+                .load()
                 .map_err(|e| anyhow::anyhow!("Failed to load settings: {}", e))?;
 
             settings.tts.telegram.current_voice_id = vid;
 
             mgr.save(&settings)
-        }).await?;
+        })
+        .await?;
 
         super::emit_settings_changed(&app_handle);
     }
@@ -460,16 +491,24 @@ pub async fn telegram_add_voice_code(
     }
 
     super::persist_blocking(settings_manager.inner(), move |mgr| {
-        let mut settings = mgr.load()
+        let mut settings = mgr
+            .load()
             .map_err(|e| anyhow::anyhow!("Failed to load settings: {}", e))?;
 
-        if settings.tts.telegram.voices.iter().any(|v| v.id == voice.id) {
+        if settings
+            .tts
+            .telegram
+            .voices
+            .iter()
+            .any(|v| v.id == voice.id)
+        {
             return Err(anyhow::anyhow!("Voice with this ID already exists"));
         }
 
         settings.tts.telegram.voices.push(voice);
         mgr.save(&settings)
-    }).await?;
+    })
+    .await?;
 
     super::emit_settings_changed(&app_handle);
 
@@ -485,7 +524,8 @@ pub async fn telegram_remove_voice_code(
 ) -> Result<(), String> {
     let vid = voice_id.clone();
     super::persist_blocking(settings_manager.inner(), move |mgr| {
-        let mut settings = mgr.load()
+        let mut settings = mgr
+            .load()
             .map_err(|e| anyhow::anyhow!("Failed to load settings: {}", e))?;
 
         settings.tts.telegram.voices.retain(|v| v.id != vid);
@@ -495,7 +535,8 @@ pub async fn telegram_remove_voice_code(
         }
 
         mgr.save(&settings)
-    }).await?;
+    })
+    .await?;
 
     super::emit_settings_changed(&app_handle);
 
@@ -512,7 +553,8 @@ pub async fn telegram_select_voice(
 ) -> Result<bool, String> {
     // 1. Отправить "/speaker {voice_id}" боту
     let client_guard = state.client.lock().await;
-    let client = client_guard.as_ref()
+    let client = client_guard
+        .as_ref()
         .ok_or_else(|| "Telegram client not initialized".to_string())?;
 
     let success = set_speaker(client, &voice_id).await?;
@@ -522,13 +564,15 @@ pub async fn telegram_select_voice(
     if success {
         let vid = voice_id.clone();
         super::persist_blocking(settings_manager.inner(), move |mgr| {
-            let mut settings = mgr.load()
+            let mut settings = mgr
+                .load()
                 .map_err(|e| anyhow::anyhow!("Failed to load settings: {}", e))?;
 
             settings.tts.telegram.current_voice_id = vid;
 
             mgr.save(&settings)
-        }).await?;
+        })
+        .await?;
 
         super::emit_settings_changed(&app_handle);
     }

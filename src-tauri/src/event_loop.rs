@@ -4,14 +4,17 @@
 // Refactored from lib.rs handle_event() function (2026-03-11)
 
 use crate::events::{AppEvent, InputLayout, TwitchEvent};
-use crate::state::AppState;
 use crate::soundpanel_window::update_soundpanel_appearance;
+use crate::state::AppState;
 use tauri::{AppHandle, Manager};
 use tracing::{debug, error, info};
 
 /// Update tray icon based on interception state
 fn update_tray_icon(_app_handle: &AppHandle, is_intercepting: bool) {
-    debug!(is_intercepting, "[TRAY] Interception mode: tray icon update skipped (not implemented)");
+    debug!(
+        is_intercepting,
+        "[TRAY] Interception mode: tray icon update skipped (not implemented)"
+    );
     // TODO: Implement tray icon update with proper resource paths
 }
 
@@ -173,7 +176,9 @@ impl EventHandler {
 
         // === WebView broadcast (check flag) ===
         if !skip_webview {
-            self.state.webview.send_event(AppEvent::TextSentToTts(text.clone()));
+            self.state
+                .webview
+                .send_event(AppEvent::TextSentToTts(text.clone()));
         } else {
             debug!("[EVENT] WebView skipped (prefix)");
         }

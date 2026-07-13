@@ -3,8 +3,8 @@
 //! Provides automatic port forwarding on UPnP-enabled routers.
 
 use igd::{search_gateway, Gateway, PortMappingProtocol, SearchOptions};
-use std::sync::{Mutex, Arc};
 use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
+use std::sync::{Arc, Mutex};
 
 /// UPnP manager for automatic port forwarding
 ///
@@ -31,7 +31,9 @@ impl UpnpManager {
 
     /// Discover UPnP gateway on the local network
     fn discover_gateway(&self) -> Result<(), String> {
-        let mut gw = self.gateway.lock()
+        let mut gw = self
+            .gateway
+            .lock()
             .map_err(|e| format!("Failed to lock gateway: {}", e))?;
 
         if gw.is_some() {
@@ -39,11 +41,10 @@ impl UpnpManager {
         }
 
         tracing::info!("Searching for UPnP gateway...");
-        let gateway = search_gateway(SearchOptions::default())
-            .map_err(|e| {
-                tracing::warn!(error = %e, "UPnP gateway search failed");
-                format!("UPnP gateway not found: {}", e)
-            })?;
+        let gateway = search_gateway(SearchOptions::default()).map_err(|e| {
+            tracing::warn!(error = %e, "UPnP gateway search failed");
+            format!("UPnP gateway not found: {}", e)
+        })?;
 
         let addr = gateway.addr;
         tracing::info!(gateway_addr = %addr, "UPnP gateway found");
@@ -61,10 +62,12 @@ impl UpnpManager {
         let socket = std::net::UdpSocket::bind("0.0.0.0:0")
             .map_err(|e| format!("Failed to bind UDP socket: {}", e))?;
 
-        socket.connect("8.8.8.8:80")
+        socket
+            .connect("8.8.8.8:80")
             .map_err(|e| format!("Failed to connect to external address: {}", e))?;
 
-        let local_addr = socket.local_addr()
+        let local_addr = socket
+            .local_addr()
             .map_err(|e| format!("Failed to get local address: {}", e))?;
 
         match local_addr.ip() {
@@ -79,7 +82,12 @@ impl UpnpManager {
     /// to the same port on this machine. Uses TCP protocol.
     pub fn forward(&self) -> Result<(), String> {
         // Discover gateway if not already done
-        if self.gateway.lock().map_err(|e| format!("Failed to lock gateway: {}", e))?.is_none() {
+        if self
+            .gateway
+            .lock()
+            .map_err(|e| format!("Failed to lock gateway: {}", e))?
+            .is_none()
+        {
             self.discover_gateway()?;
         }
 
@@ -87,7 +95,9 @@ impl UpnpManager {
         let local_ip = self.get_local_ip()?;
 
         // Now lock gateway for the add_port call
-        let gw = self.gateway.lock()
+        let gw = self
+            .gateway
+            .lock()
             .map_err(|e| format!("Failed to lock gateway: {}", e))?;
 
         let gateway = gw.as_ref().unwrap();
@@ -102,16 +112,18 @@ impl UpnpManager {
             "Adding UPnP port mapping"
         );
 
-        gateway.add_port(
-            PortMappingProtocol::TCP,
-            self.port,
-            local_addr,
-            duration,
-            "ttsbard-webview",
-        ).map_err(|e| {
-            tracing::warn!(error = %e, "Failed to add UPnP port mapping");
-            format!("Failed to add port mapping: {}", e)
-        })?;
+        gateway
+            .add_port(
+                PortMappingProtocol::TCP,
+                self.port,
+                local_addr,
+                duration,
+                "ttsbard-webview",
+            )
+            .map_err(|e| {
+                tracing::warn!(error = %e, "Failed to add UPnP port mapping");
+                format!("Failed to add port mapping: {}", e)
+            })?;
 
         tracing::info!(port = self.port, "UPnP port forwarding enabled");
         Ok(())

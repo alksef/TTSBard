@@ -2,10 +2,10 @@
 //!
 //! Manages background threads with proper lifecycle and limits
 #![allow(dead_code)] // Ready for integration when needed
-use std::sync::Arc;
-use std::thread::{self, JoinHandle};
 use parking_lot::Mutex;
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::thread::{self, JoinHandle};
 
 /// Thread pool manager for controlled thread creation
 pub struct ThreadPoolManager {
@@ -53,7 +53,10 @@ impl ThreadPoolManager {
     /// Shutdown all threads gracefully
     pub fn shutdown(&self) {
         let mut threads = self.threads.lock();
-        tracing::debug!(thread_count = threads.len(), "[THREAD_POOL] Shutting down threads");
+        tracing::debug!(
+            thread_count = threads.len(),
+            "[THREAD_POOL] Shutting down threads"
+        );
         for (name, handle) in threads.drain() {
             tracing::debug!(thread_name = %name, "[THREAD_POOL] Joining thread");
             let _ = handle.join();

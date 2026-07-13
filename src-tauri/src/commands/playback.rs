@@ -1,5 +1,7 @@
 use crate::audio::effects;
-use crate::audio::{decode_audio, AudioEffects, AudioPlayer, AudioPcm, OutputConfig, OutputDeviceInfo};
+use crate::audio::{
+    decode_audio, AudioEffects, AudioPcm, AudioPlayer, OutputConfig, OutputDeviceInfo,
+};
 use crate::config::SettingsManager;
 use crate::playback::{PlaybackManager, PlaybackStateDto};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -146,7 +148,10 @@ pub fn set_virtual_mic_device(
 
 /// Enable virtual mic
 #[tauri::command]
-pub fn enable_virtual_mic(app_handle: AppHandle, settings_manager: State<'_, SettingsManager>) -> Result<(), String> {
+pub fn enable_virtual_mic(
+    app_handle: AppHandle,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<(), String> {
     settings_manager
         .set_virtual_mic_device(Some("".to_string())) // Enable by setting a device
         .map_err(|e| e.to_string())?;
@@ -156,7 +161,10 @@ pub fn enable_virtual_mic(app_handle: AppHandle, settings_manager: State<'_, Set
 
 /// Disable virtual mic
 #[tauri::command]
-pub fn disable_virtual_mic(app_handle: AppHandle, settings_manager: State<'_, SettingsManager>) -> Result<(), String> {
+pub fn disable_virtual_mic(
+    app_handle: AppHandle,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<(), String> {
     settings_manager
         .set_virtual_mic_device(None)
         .map_err(|e| e.to_string())?;
@@ -397,8 +405,11 @@ pub async fn preview_audio_file(
             .with_enhance(enhance_enabled, enhance_atten_db)
             .with_fail_on_enhance_error(true);
 
-        let has_effects =
-            voice_pitch != 0 || voice_speed != 0 || voice_volume != 100 || enhance_enabled || dsp_has_effect;
+        let has_effects = voice_pitch != 0
+            || voice_speed != 0
+            || voice_volume != 100
+            || enhance_enabled
+            || dsp_has_effect;
 
         let pcm: AudioPcm = if has_effects {
             effects::apply_effects(&file_data, &effects_config, dsp_config.as_ref())?
