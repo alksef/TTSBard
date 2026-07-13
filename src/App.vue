@@ -110,14 +110,14 @@ watch(() => appSettings.error.value, (newError) => {
     isUndefined: newError === undefined,
     truthy: !!newError
   })
-  debugLog('[App] appSettings.settings:', appSettings.settings.value)
+  debugLog('[App] appSettings loaded:', { hasSettings: !!appSettings.settings.value, theme: appSettings.settings.value?.general?.theme, hasWindows: !!appSettings.settings.value?.windows, provider: appSettings.settings.value?.ai?.provider })
   debugLog('[App] appSettings.isLoading:', appSettings.isLoading.value)
   debugLog('[App] Will show error?', newError && newError.length > 0)
 })
 
 // Watch for settings changes
 watch(() => appSettings.settings, (newSettings) => {
-  debugLog('[App] ✅ appSettings.settings changed:', newSettings)
+  debugLog('[App] ✅ appSettings.settings changed:', { hasTheme: !!newSettings?.value?.general?.theme, provider: newSettings?.value?.ai?.provider })
 })
 
 // Watch for loading state

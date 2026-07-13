@@ -1,10 +1,10 @@
-use reqwest::Client;
-use serde::Serialize;
+use crate::config::DEFAULT_TTS_TIMEOUT_SECS;
+use crate::events::EventSender;
 use crate::tts::engine::TtsEngine;
 use crate::tts::proxy_utils;
-use crate::events::EventSender;
-use crate::config::DEFAULT_TTS_TIMEOUT_SECS;
 use async_trait::async_trait;
+use reqwest::Client;
+use serde::Serialize;
 use std::time::{Duration, Instant};
 use tracing::{debug, error};
 
@@ -71,8 +71,7 @@ impl TtsEngine for OpenAiTts {
             voice = &self.voice,
             text_length = text.len(),
             text_preview = &text.chars().take(50).collect::<String>(),
-            api_key_prefix = &self.api_key[..7.min(self.api_key.len())],
-            api_key_suffix = &self.api_key[self.api_key.len().saturating_sub(4)..],
+            has_api_key = true,
             timeout_secs = self.timeout_secs,
             "TTS request started"
         );
@@ -83,10 +82,10 @@ impl TtsEngine for OpenAiTts {
             voice: self.voice.clone(),
         };
 
-        match serde_json::to_string(&request) {
-            Ok(body) => debug!(request_body = &body, "Request body serialized"),
-            Err(_) => debug!("Request body: (unable to serialize)"),
-        }
+        debug!(
+            request_json_len = request.input.len(),
+            "Request body prepared"
+        );
 
         let response = client
             .post("https://api.openai.com/v1/audio/speech")
@@ -103,7 +102,10 @@ impl TtsEngine for OpenAiTts {
                         timeout_secs = self.timeout_secs,
                         "Request timeout"
                     );
-                    format!("OpenAI timeout ({}s). Check internet or proxy settings.", self.timeout_secs)
+                    format!(
+                        "OpenAI timeout ({}s). Check internet or proxy settings.",
+                        self.timeout_secs
+                    )
                 } else if e.is_connect() {
                     error!(
                         error = %e,
@@ -128,10 +130,30 @@ impl TtsEngine for OpenAiTts {
             "Response status received"
         );
 
+        const ALLOWLISTED: &[&str] = &["content-type", "content-length", "server"];
+        const SENSITIVE: &[&str] = &[
+            "authorization",
+            "proxy-authorization",
+            "proxy-authenticate",
+            "www-authenticate",
+            "cookie",
+            "set-cookie",
+        ];
+
         debug!("Response headers:");
         for (name, value) in response.headers().iter() {
-            if let Ok(value_str) = value.to_str() {
-                debug!(header_name = %name, header_value = value_str);
+            let lower = name.as_str().to_lowercase();
+            if SENSITIVE.iter().any(|h| lower.eq_ignore_ascii_case(h)) {
+                continue;
+            }
+            if ALLOWLISTED.iter().any(|h| lower.eq_ignore_ascii_case(h)) {
+                if let Ok(s) = value.to_str() {
+                    debug!(header_name = %name, header_value = s);
+                } else {
+                    debug!(header_name = %name, header_value = "[non-utf8]");
+                }
+            } else {
+                debug!(header_name = %name, header_value = "[omitted]");
             }
         }
 
@@ -145,7 +167,11 @@ impl TtsEngine for OpenAiTts {
                 error_text = &error_text,
                 "TTS request failed"
             );
-            return Err(format!("TTS request failed ({}): {}", status.as_u16(), error_text));
+            return Err(format!(
+                "TTS request failed ({}): {}",
+                status.as_u16(),
+                error_text
+            ));
         }
 
         let audio_data = response

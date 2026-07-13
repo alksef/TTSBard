@@ -1,5 +1,6 @@
-use crate::tts::engine::TtsEngine;
 use crate::events::EventSender;
+use crate::secret_log;
+use crate::tts::engine::TtsEngine;
 use async_trait::async_trait;
 use reqwest::Client;
 use std::time::{Duration, Instant};
@@ -72,31 +73,37 @@ impl TtsEngine for LocalTts {
 
         // URL encode the text for the path parameter
         let encoded_text = urlencoding::encode(text);
-        let url = format!("{}/synthesize/{}", self.server_url.trim_end_matches('/'), encoded_text);
+        let url = format!(
+            "{}/synthesize/{}",
+            self.server_url.trim_end_matches('/'),
+            encoded_text
+        );
 
-        debug!(request_url = %url, "Sending LocalTTS request");
+        debug!(request_url = %secret_log::safe_url_for_log(&url), "Sending LocalTTS request");
 
-        let response = client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| {
-                let elapsed = start_time.elapsed();
-                error!(
-                    error = %e,
-                    elapsed_secs = elapsed.as_secs_f64(),
-                    timeout_secs = self.timeout_secs,
-                    server_url = %self.server_url,
-                    "LocalTTS request failed"
-                );
-                if e.is_timeout() {
-                    format!("Local TTS timeout ({}s). Server at {} may be slow or unavailable.", self.timeout_secs, self.server_url)
-                } else if e.is_connect() {
-                    format!("Local TTS connection failed to {}. Check if the TTS server is running.", self.server_url)
-                } else {
-                    format!("Failed to send TTS request to {}: {}", self.server_url, e)
-                }
-            })?;
+        let response = client.get(&url).send().await.map_err(|e| {
+            let elapsed = start_time.elapsed();
+            error!(
+                error = %e,
+                elapsed_secs = elapsed.as_secs_f64(),
+                timeout_secs = self.timeout_secs,
+                server_url = %self.server_url,
+                "LocalTTS request failed"
+            );
+            if e.is_timeout() {
+                format!(
+                    "Local TTS timeout ({}s). Server at {} may be slow or unavailable.",
+                    self.timeout_secs, self.server_url
+                )
+            } else if e.is_connect() {
+                format!(
+                    "Local TTS connection failed to {}. Check if the TTS server is running.",
+                    self.server_url
+                )
+            } else {
+                format!("Failed to send TTS request to {}: {}", self.server_url, e)
+            }
+        })?;
 
         // Log response status
         let status = response.status();
@@ -116,26 +123,28 @@ impl TtsEngine for LocalTts {
                 error_text = %error_text,
                 "LocalTTS request failed"
             );
-            return Err(format!("TTS request failed ({}): {}", status.as_u16(), error_text));
+            return Err(format!(
+                "TTS request failed ({}): {}",
+                status.as_u16(),
+                error_text
+            ));
         }
 
         // Get response as text (base64 encoded WAV data)
-        let base64_data = response
-            .text()
-            .await
-            .map_err(|e| {
-                error!(error = %e, "Failed to read LocalTTS response text");
-                format!("Failed to read response text: {}", e)
-            })?;
+        let base64_data = response.text().await.map_err(|e| {
+            error!(error = %e, "Failed to read LocalTTS response text");
+            format!("Failed to read response text: {}", e)
+        })?;
 
         debug!(base64_length = base64_data.len(), "Base64 data received");
 
         // Decode base64 to bytes
-        let audio_data = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &base64_data)
-            .map_err(|e| {
-                error!(error = %e, "Base64 decode failed");
-                format!("Failed to decode base64 audio data: {}", e)
-            })?;
+        let audio_data =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &base64_data)
+                .map_err(|e| {
+                    error!(error = %e, "Base64 decode failed");
+                    format!("Failed to decode base64 audio data: {}", e)
+                })?;
 
         info!(
             audio_bytes = audio_data.len(),

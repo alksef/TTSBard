@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { VoiceModel } from '../../types/settings';
 import { Search, Loader2 } from 'lucide-vue-next';
 import { fetchFishImage } from '../../composables/useFishImage';
+import { debugError } from '../../utils/debug';
 
 interface Props {
   apiKey?: string;
@@ -83,7 +84,7 @@ async function fetchModels(page: number = 1) {
     loadImages();
   } catch (e) {
     error.value = e as string;
-    console.error('Failed to fetch models:', e);
+    debugError('Failed to fetch models:', e);
   } finally {
     loading.value = false;
   }

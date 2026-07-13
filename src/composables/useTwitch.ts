@@ -2,7 +2,7 @@ import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useTwitchSettings } from './useAppSettings'
-import { debugLog } from '../utils/debug'
+import { debugLog, debugError } from '../utils/debug'
 
 export type TwitchStatus = 'Disconnected' | 'Connecting' | 'Connected' | 'Error'
 
@@ -118,7 +118,7 @@ export function useTwitch() {
       const status = await invoke<RustTwitchStatus>('get_twitch_status')
       handleStatusChange(convertStatusFromRust(status))
     } catch (e) {
-      console.error('[TwitchPanel] Failed to load status:', e)
+      debugError('[TwitchPanel] Failed to load status:', e)
     }
   }
 
@@ -156,7 +156,7 @@ export function useTwitch() {
     try {
       await invoke('save_twitch_settings', { settings: settings.value })
     } catch (e) {
-      console.error('[Twitch] Failed to save start_on_boot:', e)
+      debugError('[Twitch] Failed to save start_on_boot:', e)
     }
   }
 
@@ -179,7 +179,7 @@ export function useTwitch() {
 
   watch(twitchSettingsFromComposable, (newSettings) => {
     if (!newSettings) return
-    debugLog('[TwitchPanel] Settings updated from composable:', newSettings)
+    debugLog('[TwitchPanel] Settings updated from composable, has_token:', !!newSettings.token, 'channel:', newSettings.channel)
     settings.value = {
       enabled: newSettings.enabled,
       username: newSettings.username,

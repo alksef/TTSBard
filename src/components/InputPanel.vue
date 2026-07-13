@@ -202,7 +202,7 @@ async function hideMainWindow() {
   try {
     await invoke('hide_main_window')
   } catch (e) {
-    console.error('[InputPanel] Failed to hide window:', e)
+    debugError('[InputPanel] Failed to hide window:', e)
   }
 }
 

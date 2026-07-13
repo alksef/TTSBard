@@ -2,13 +2,14 @@
 //!
 //! Provides Tauri commands for managing AI provider settings
 
-use crate::config::SettingsManager;
 use crate::commands::telegram::TelegramState;
+use crate::config::SettingsManager;
+use crate::secret_log;
 use crate::state::AppState;
-use crate::tts::{TtsProviderType, TtsProvider, VoiceModel};
+use crate::tts::{TtsProvider, TtsProviderType, VoiceModel};
 use std::sync::Arc;
 use tauri::{AppHandle, State};
-use tracing::{info, warn, error, debug};
+use tracing::{debug, error, info, warn};
 
 /// Set AI provider
 #[tauri::command]
@@ -28,7 +29,8 @@ pub async fn set_ai_provider(
 
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_ai_provider(provider_enum)
-    }).await?;
+    })
+    .await?;
 
     state.invalidate_ai_client();
     super::emit_settings_changed(&app_handle);
@@ -49,7 +51,8 @@ pub async fn set_ai_prompt(
 
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_ai_prompt(prompt)
-    }).await?;
+    })
+    .await?;
 
     super::emit_settings_changed(&app_handle);
     Ok(())
@@ -65,7 +68,8 @@ pub async fn set_ai_openai_api_key(
 ) -> Result<(), String> {
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_ai_openai_api_key(Some(key))
-    }).await?;
+    })
+    .await?;
 
     state.invalidate_ai_client();
     super::emit_settings_changed(&app_handle);
@@ -83,7 +87,8 @@ pub async fn set_ai_openai_use_proxy(
 ) -> Result<(), String> {
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_ai_openai_use_proxy(enabled)
-    }).await?;
+    })
+    .await?;
 
     state.invalidate_ai_client();
     super::emit_settings_changed(&app_handle);
@@ -105,7 +110,8 @@ pub async fn set_ai_zai_url(
 
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_ai_zai_url(Some(url))
-    }).await?;
+    })
+    .await?;
 
     state.invalidate_ai_client();
     super::emit_settings_changed(&app_handle);
@@ -127,7 +133,8 @@ pub async fn set_ai_zai_api_key(
 
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_ai_zai_api_key(Some(api_key))
-    }).await?;
+    })
+    .await?;
 
     state.invalidate_ai_client();
     super::emit_settings_changed(&app_handle);
@@ -148,28 +155,33 @@ pub async fn correct_text(
     tracing::info!("correct_text called with {} chars", text.len());
 
     // Load settings
-    let settings = settings_manager.load()
-        .map_err(|e| {
-            tracing::error!("Failed to load settings: {}", e);
-            format!("Failed to load settings: {}", e)
-        })?;
+    let settings = settings_manager.load().map_err(|e| {
+        tracing::error!("Failed to load settings: {}", e);
+        format!("Failed to load settings: {}", e)
+    })?;
 
     // Get or create cached AI client
-    let client = state.get_or_create_ai_client(&settings.ai, &settings.tts.network)
+    let client = state
+        .get_or_create_ai_client(&settings.ai, &settings.tts.network)
         .map_err(|e| {
             tracing::error!("Failed to get AI client: {}", e);
             e
         })?;
 
     // Correct text
-    let corrected = client.correct(&text, &settings.ai.prompt)
+    let corrected = client
+        .correct(&text, &settings.ai.prompt)
         .await
         .map_err(|e| {
             tracing::error!("AI correction failed: {}", e);
             e.to_string()
         })?;
 
-    tracing::info!("Correction successful: {} -> {} chars", text.len(), corrected.len());
+    tracing::info!(
+        "Correction successful: {} -> {} chars",
+        text.len(),
+        corrected.len()
+    );
     Ok(corrected)
 }
 
@@ -184,7 +196,8 @@ pub async fn set_editor_ai(
 
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_editor_ai(enabled)
-    }).await?;
+    })
+    .await?;
 
     super::emit_settings_changed(&app_handle);
 
@@ -193,9 +206,7 @@ pub async fn set_editor_ai(
 
 /// Get AI correction in editor enabled state
 #[tauri::command]
-pub fn get_editor_ai(
-    settings_manager: State<'_, SettingsManager>,
-) -> bool {
+pub fn get_editor_ai(settings_manager: State<'_, SettingsManager>) -> bool {
     settings_manager.get_editor_ai()
 }
 
@@ -208,7 +219,8 @@ pub async fn set_editor_ai_completion(
 ) -> Result<(), String> {
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_editor_ai_completion(enabled)
-    }).await?;
+    })
+    .await?;
 
     super::emit_settings_changed(&app_handle);
     Ok(())
@@ -216,9 +228,7 @@ pub async fn set_editor_ai_completion(
 
 /// Get AI completion in editor enabled state
 #[tauri::command]
-pub fn get_editor_ai_completion(
-    settings_manager: State<'_, SettingsManager>,
-) -> bool {
+pub fn get_editor_ai_completion(settings_manager: State<'_, SettingsManager>) -> bool {
     settings_manager.get_editor_ai_completion()
 }
 
@@ -232,7 +242,8 @@ pub async fn get_ai_completion(
     state: State<'_, AppState>,
     context: String,
 ) -> Result<String, String> {
-    let settings = settings_manager.load()
+    let settings = settings_manager
+        .load()
         .map_err(|e| format!("Failed to load settings: {}", e))?;
 
     if !settings.editor.ai_completion {
@@ -251,14 +262,16 @@ pub async fn get_ai_completion(
         return Ok(String::new());
     }
 
-    let client = state.get_or_create_ai_client(&settings.ai, &settings.tts.network)
+    let client = state
+        .get_or_create_ai_client(&settings.ai, &settings.tts.network)
         .map_err(|e| format!("AI client error: {}", e))?;
 
     let prompt = "Ты помощник для завершения текста. Пользователь написал часть текста. \
         Продолжи его одним-двумя словами или короткой фразой (максимум 5 слов). \
         Отвечай только продолжением, без пояснений. Пиши на том же языке, что и контекст.";
 
-    let completion = client.correct(&context, prompt)
+    let completion = client
+        .correct(&context, prompt)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -279,7 +292,8 @@ pub async fn set_ai_openai_model(
 
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_ai_openai_model(model)
-    }).await?;
+    })
+    .await?;
 
     super::emit_settings_changed(&app_handle);
     Ok(())
@@ -287,9 +301,7 @@ pub async fn set_ai_openai_model(
 
 /// Get OpenAI model for AI text correction
 #[tauri::command]
-pub fn get_ai_openai_model(
-    settings_manager: State<'_, SettingsManager>,
-) -> String {
+pub fn get_ai_openai_model(settings_manager: State<'_, SettingsManager>) -> String {
     settings_manager.get_ai_openai_model()
 }
 
@@ -306,7 +318,8 @@ pub async fn set_ai_zai_model(
 
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_ai_zai_model(model)
-    }).await?;
+    })
+    .await?;
 
     super::emit_settings_changed(&app_handle);
     Ok(())
@@ -314,9 +327,7 @@ pub async fn set_ai_zai_model(
 
 /// Get Z.ai model for AI text correction
 #[tauri::command]
-pub fn get_ai_zai_model(
-    settings_manager: State<'_, SettingsManager>,
-) -> String {
+pub fn get_ai_zai_model(settings_manager: State<'_, SettingsManager>) -> String {
     settings_manager.get_ai_zai_model()
 }
 
@@ -334,7 +345,8 @@ pub async fn set_ai_deepseek_api_key(
 
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_ai_deepseek_api_key(Some(key))
-    }).await?;
+    })
+    .await?;
 
     state.invalidate_ai_client();
     super::emit_settings_changed(&app_handle);
@@ -355,7 +367,8 @@ pub async fn set_ai_deepseek_model(
 
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_ai_deepseek_model(model)
-    }).await?;
+    })
+    .await?;
 
     super::emit_settings_changed(&app_handle);
     Ok(())
@@ -371,7 +384,8 @@ pub async fn set_ai_deepseek_use_proxy(
 ) -> Result<(), String> {
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_ai_deepseek_use_proxy(enabled)
-    }).await?;
+    })
+    .await?;
 
     state.invalidate_ai_client();
     super::emit_settings_changed(&app_handle);
@@ -381,9 +395,7 @@ pub async fn set_ai_deepseek_use_proxy(
 
 /// Get DeepSeek model for AI text correction
 #[tauri::command]
-pub fn get_ai_deepseek_model(
-    settings_manager: State<'_, SettingsManager>,
-) -> String {
+pub fn get_ai_deepseek_model(settings_manager: State<'_, SettingsManager>) -> String {
     settings_manager.get_ai_deepseek_model()
 }
 
@@ -401,7 +413,8 @@ pub async fn set_ai_custom_url(
 
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_ai_custom_url(Some(url))
-    }).await?;
+    })
+    .await?;
 
     state.invalidate_ai_client();
     super::emit_settings_changed(&app_handle);
@@ -422,7 +435,8 @@ pub async fn set_ai_custom_api_key(
 
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_ai_custom_api_key(Some(key))
-    }).await?;
+    })
+    .await?;
 
     state.invalidate_ai_client();
     super::emit_settings_changed(&app_handle);
@@ -442,7 +456,8 @@ pub async fn set_ai_custom_model(
 
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_ai_custom_model(model)
-    }).await?;
+    })
+    .await?;
 
     super::emit_settings_changed(&app_handle);
     Ok(())
@@ -458,7 +473,8 @@ pub async fn set_ai_custom_use_proxy(
 ) -> Result<(), String> {
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_ai_custom_use_proxy(enabled)
-    }).await?;
+    })
+    .await?;
 
     state.invalidate_ai_client();
     super::emit_settings_changed(&app_handle);
@@ -467,9 +483,7 @@ pub async fn set_ai_custom_use_proxy(
 
 /// Get Custom model for AI text correction
 #[tauri::command]
-pub fn get_ai_custom_model(
-    settings_manager: State<'_, SettingsManager>,
-) -> String {
+pub fn get_ai_custom_model(settings_manager: State<'_, SettingsManager>) -> String {
     settings_manager.get_ai_custom_model()
 }
 
@@ -491,12 +505,21 @@ pub async fn ai_check_grammar(
     text: String,
 ) -> Result<String, String> {
     if text.len() > MAX_GRAMMAR_TEXT_LEN {
-        return Err(format!("Text too long (max {} chars)", MAX_GRAMMAR_TEXT_LEN));
+        return Err(format!(
+            "Text too long (max {} chars)",
+            MAX_GRAMMAR_TEXT_LEN
+        ));
     }
-    let settings = settings_manager.load().map_err(|e| format!("Failed to load settings: {}", e))?;
-    let client = state.get_or_create_ai_client(&settings.ai, &settings.tts.network)
+    let settings = settings_manager
+        .load()
+        .map_err(|e| format!("Failed to load settings: {}", e))?;
+    let client = state
+        .get_or_create_ai_client(&settings.ai, &settings.tts.network)
         .map_err(|e| format!("AI client error: {}", e))?;
-    let result = client.correct(&text, GRAMMAR_PROMPT).await.map_err(|e| e.to_string())?;
+    let result = client
+        .correct(&text, GRAMMAR_PROMPT)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(result)
 }
 
@@ -519,7 +542,8 @@ pub async fn set_tts_provider(
 
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_tts_provider(provider)
-    }).await?;
+    })
+    .await?;
 
     match provider {
         TtsProviderType::OpenAi => {
@@ -538,7 +562,12 @@ pub async fn set_tts_provider(
             let client_arc = Arc::clone(&telegram_state.client);
 
             debug!("Checking Telegram session");
-            let _connected = match super::telegram::telegram_auto_restore(telegram_state, settings_manager.clone()).await {
+            let _connected = match super::telegram::telegram_auto_restore(
+                telegram_state,
+                settings_manager.clone(),
+            )
+            .await
+            {
                 Ok(connected) => {
                     if connected {
                         info!("Telegram session restored");
@@ -584,9 +613,7 @@ pub async fn set_tts_provider(
 
 /// Get Local TTS URL
 #[tauri::command]
-pub fn get_local_tts_url(
-    settings_manager: State<'_, SettingsManager>
-) -> String {
+pub fn get_local_tts_url(settings_manager: State<'_, SettingsManager>) -> String {
     settings_manager.get_local_tts_url()
 }
 
@@ -598,7 +625,7 @@ pub async fn set_local_tts_url(
     settings_manager: State<'_, SettingsManager>,
     url: String,
 ) -> Result<(), String> {
-    info!(url, "Setting Local TTS URL");
+    info!(safe_url = %secret_log::safe_url_for_log(&url), "Setting Local TTS URL");
 
     if url.is_empty() {
         return Err("URL не может быть пустым".into());
@@ -611,7 +638,8 @@ pub async fn set_local_tts_url(
 
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_local_tts_url(url)
-    }).await?;
+    })
+    .await?;
 
     debug!("Updating runtime state");
 
@@ -624,7 +652,7 @@ pub async fn set_local_tts_url(
     if matches!(current_provider.as_ref(), Some(TtsProvider::Local(_))) {
         info!("Local TTS is active, reinitializing with new URL");
         state.init_local_tts(url_val.clone());
-        debug!(url = %url_val, "Local TTS reinitialized");
+        debug!(safe_url = %secret_log::safe_url_for_log(&url_val), "Local TTS reinitialized");
     } else {
         debug!("Local TTS is not active, skipping reinitialization");
     }
@@ -632,15 +660,13 @@ pub async fn set_local_tts_url(
     state.set_local_tts_url(url_val.clone());
     super::emit_settings_changed(&app_handle);
 
-    info!(url = %url_val, "Local TTS URL set successfully");
+    info!(safe_url = %secret_log::safe_url_for_log(&url_val), "Local TTS URL set successfully");
     Ok(())
 }
 
 /// Get OpenAI API key
 #[tauri::command]
-pub fn get_openai_api_key(
-    settings_manager: State<'_, SettingsManager>,
-) -> Option<String> {
+pub fn get_openai_api_key(settings_manager: State<'_, SettingsManager>) -> Option<String> {
     settings_manager.get_openai_api_key()
 }
 
@@ -658,7 +684,8 @@ pub async fn set_openai_api_key(
 
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_openai_api_key(Some(key))
-    }).await?;
+    })
+    .await?;
 
     let saved_key = settings_manager.get_openai_api_key();
     if let Some(ref k) = saved_key {
@@ -672,9 +699,7 @@ pub async fn set_openai_api_key(
 
 /// Get OpenAI voice
 #[tauri::command]
-pub fn get_openai_voice(
-    settings_manager: State<'_, SettingsManager>
-) -> String {
+pub fn get_openai_voice(settings_manager: State<'_, SettingsManager>) -> String {
     settings_manager.get_openai_voice()
 }
 
@@ -696,7 +721,8 @@ pub async fn set_openai_voice(
 
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_openai_voice(voice)
-    }).await?;
+    })
+    .await?;
 
     let saved_voice = settings_manager.get_openai_voice();
     debug!("Updating runtime state and reinitializing OpenAI TTS");
@@ -713,13 +739,17 @@ pub fn apply_openai_proxy_settings(
     state: State<'_, AppState>,
     settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
-    let settings = settings_manager.load()
+    let settings = settings_manager
+        .load()
         .map_err(|e| format!("Failed to load settings: {}", e))?;
 
     let proxy_url = if settings.tts.openai.use_proxy {
         settings.tts.network.proxy.proxy_url.clone()
     } else {
-        if let (Some(host), Some(port)) = (&settings.tts.openai.proxy_host, settings.tts.openai.proxy_port) {
+        if let (Some(host), Some(port)) = (
+            &settings.tts.openai.proxy_host,
+            settings.tts.openai.proxy_port,
+        ) {
             if !host.trim().is_empty() {
                 Some(format!("http://{}:{}", host.trim(), port))
             } else {
@@ -743,9 +773,7 @@ pub fn apply_openai_proxy_settings(
 
 /// Get Fish Audio API key
 #[tauri::command]
-pub fn get_fish_audio_api_key(
-    settings_manager: State<'_, SettingsManager>,
-) -> Option<String> {
+pub fn get_fish_audio_api_key(settings_manager: State<'_, SettingsManager>) -> Option<String> {
     settings_manager.get_fish_audio_api_key()
 }
 
@@ -763,7 +791,8 @@ pub async fn set_fish_audio_api_key(
 
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_fish_audio_api_key(Some(key))
-    }).await?;
+    })
+    .await?;
 
     let saved_key = settings_manager.get_fish_audio_api_key();
     if let Some(ref k) = saved_key {
@@ -777,9 +806,7 @@ pub async fn set_fish_audio_api_key(
 
 /// Get Fish Audio reference ID (voice model ID)
 #[tauri::command]
-pub fn get_fish_audio_reference_id(
-    settings_manager: State<'_, SettingsManager>
-) -> String {
+pub fn get_fish_audio_reference_id(settings_manager: State<'_, SettingsManager>) -> String {
     settings_manager.get_fish_audio_reference_id()
 }
 
@@ -797,7 +824,8 @@ pub async fn set_fish_audio_reference_id(
 
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_fish_audio_reference_id(reference_id)
-    }).await?;
+    })
+    .await?;
 
     let saved_id = settings_manager.get_fish_audio_reference_id();
     state.set_fish_audio_reference_id(saved_id.clone());
@@ -808,9 +836,7 @@ pub async fn set_fish_audio_reference_id(
 
 /// Get Fish Audio saved voice models
 #[tauri::command]
-pub fn get_fish_audio_voices(
-    settings_manager: State<'_, SettingsManager>
-) -> Vec<VoiceModel> {
+pub fn get_fish_audio_voices(settings_manager: State<'_, SettingsManager>) -> Vec<VoiceModel> {
     settings_manager.get_fish_audio_voices()
 }
 
@@ -830,7 +856,8 @@ pub async fn add_fish_audio_voice(
 
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.add_fish_audio_voice(voice)
-    }).await?;
+    })
+    .await?;
 
     info!("Fish Audio voice added successfully");
     super::emit_settings_changed(&app_handle);
@@ -850,7 +877,8 @@ pub async fn remove_fish_audio_voice(
 
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.remove_fish_audio_voice(&voice_id)
-    }).await?;
+    })
+    .await?;
 
     if was_selected {
         state.set_fish_audio_reference_id(String::new());
@@ -869,11 +897,13 @@ pub async fn fetch_fish_audio_models(
     title: Option<String>,
     language: Option<String>,
 ) -> Result<(i32, Vec<VoiceModel>), String> {
-    let api_key = settings_manager.get_fish_audio_api_key()
+    let api_key = settings_manager
+        .get_fish_audio_api_key()
         .ok_or_else(|| "API ключ не установлен".to_string())?;
 
     let proxy_url = if settings_manager.get_fish_audio_use_proxy() {
-        settings_manager.get_socks5_proxy_url()
+        settings_manager
+            .get_socks5_proxy_url()
             .filter(|url| !url.is_empty())
     } else {
         None
@@ -889,7 +919,8 @@ pub async fn fetch_fish_audio_models(
         page_number,
         title.as_deref(),
         language.as_deref(),
-    ).await
+    )
+    .await
 }
 
 /// Fetch Fish Audio cover image through proxy
@@ -899,16 +930,14 @@ pub async fn fetch_fish_audio_image(
     image_url: String,
 ) -> Result<String, String> {
     let proxy_url = if settings_manager.get_fish_audio_use_proxy() {
-        settings_manager.get_socks5_proxy_url()
+        settings_manager
+            .get_socks5_proxy_url()
             .filter(|url| !url.is_empty())
     } else {
         None
     };
 
-    crate::tts::fish::FishTts::fetch_image(
-        &image_url,
-        proxy_url.as_deref(),
-    ).await
+    crate::tts::fish::FishTts::fetch_image(&image_url, proxy_url.as_deref()).await
 }
 
 /// Set Fish Audio format
@@ -921,9 +950,11 @@ pub async fn set_fish_audio_format(
 ) -> Result<(), String> {
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_fish_audio_format(format)
-    }).await?;
+    })
+    .await?;
 
-    let saved_format = settings_manager.load()
+    let saved_format = settings_manager
+        .load()
         .map(|s| s.tts.fish.format.clone())
         .unwrap_or_default();
     state.set_fish_audio_format(saved_format);
@@ -945,7 +976,8 @@ pub async fn set_fish_audio_temperature(
 
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_fish_audio_temperature(temperature)
-    }).await?;
+    })
+    .await?;
 
     state.set_fish_audio_temperature(temperature);
     super::emit_settings_changed(&app_handle);
@@ -966,7 +998,8 @@ pub async fn set_fish_audio_sample_rate(
 
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_fish_audio_sample_rate(sample_rate)
-    }).await?;
+    })
+    .await?;
 
     state.set_fish_audio_sample_rate(sample_rate);
     super::emit_settings_changed(&app_handle);
@@ -982,7 +1015,8 @@ pub async fn set_fish_audio_use_proxy(
 ) -> Result<(), String> {
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_fish_audio_use_proxy(enabled)
-    }).await?;
+    })
+    .await?;
 
     super::emit_settings_changed(&app_handle);
     Ok(())
@@ -994,7 +1028,8 @@ pub fn apply_fish_audio_proxy_settings(
     state: State<'_, AppState>,
     settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
-    let settings = settings_manager.load()
+    let settings = settings_manager
+        .load()
         .map_err(|e| format!("Failed to load settings: {}", e))?;
 
     let proxy_url = if settings.tts.fish.use_proxy {
@@ -1013,8 +1048,6 @@ pub fn apply_fish_audio_proxy_settings(
 
 /// Check if API key is set
 #[tauri::command]
-pub fn has_api_key(
-    settings_manager: State<'_, SettingsManager>,
-) -> bool {
+pub fn has_api_key(settings_manager: State<'_, SettingsManager>) -> bool {
     settings_manager.get_openai_api_key().is_some()
 }

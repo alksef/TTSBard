@@ -1,10 +1,13 @@
-use serde::{Deserialize, Serialize};
-use tauri::{command, State, AppHandle};
-use tracing::{info, error, warn};
-use std::time::Instant;
-use crate::config::{SettingsManager, dto::ProxySettingsDto, ProxyType, ProxyMode, MtProxySettings};
 use crate::commands::telegram::TelegramState;
+use crate::config::{
+    dto::ProxySettingsDto, MtProxySettings, ProxyMode, ProxyType, SettingsManager,
+};
+use crate::secret_log;
 use crate::telegram::ProxyStatus;
+use serde::{Deserialize, Serialize};
+use std::time::Instant;
+use tauri::{command, AppHandle, State};
+use tracing::{error, info, warn};
 
 /// Result of testing a proxy connection
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,11 +114,7 @@ pub async fn test_proxy(
     };
 
     // Test connection to Telegram
-    let test_result = match client
-        .get("https://telegram.org")
-        .send()
-        .await
-    {
+    let test_result = match client.get("https://telegram.org").send().await {
         Ok(response) => {
             let latency = start.elapsed().as_millis() as u64;
             let status = response.status();
@@ -209,7 +208,7 @@ pub async fn set_proxy_url(
     url: String,
     proxy_type: ProxyType,
 ) -> Result<(), String> {
-    info!(url, ?proxy_type, "Setting proxy URL");
+    info!(safe_url = %secret_log::safe_url_for_log(&url), ?proxy_type, "Setting proxy URL");
 
     // Validate URL format
     if url.trim().is_empty() {
@@ -217,13 +216,17 @@ pub async fn set_proxy_url(
     }
 
     // Basic validation of URL format
-    if !url.starts_with("socks5://") && !url.starts_with("socks4://") && !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err("Proxy URL must start with socks5://, socks4://, http://, or https://".to_string());
+    if !url.starts_with("socks5://")
+        && !url.starts_with("socks4://")
+        && !url.starts_with("http://")
+        && !url.starts_with("https://")
+    {
+        return Err(
+            "Proxy URL must start with socks5://, socks4://, http://, or https://".to_string(),
+        );
     }
 
-    super::persist_blocking(settings_manager.inner(), move |mgr| {
-        mgr.set_proxy_url(url)
-    }).await?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| mgr.set_proxy_url(url)).await?;
 
     super::emit_settings_changed(&app_handle);
 
@@ -247,7 +250,8 @@ pub async fn set_openai_use_proxy(
 
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_openai_use_proxy(enabled)
-    }).await?;
+    })
+    .await?;
 
     super::emit_settings_changed(&app_handle);
 
@@ -271,7 +275,8 @@ pub async fn set_telegram_proxy_mode(
 
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_telegram_proxy_mode(mode)
-    }).await?;
+    })
+    .await?;
 
     super::emit_settings_changed(&app_handle);
 
@@ -308,7 +313,8 @@ pub async fn reconnect_telegram(
     info!("Reconnecting Telegram with new proxy settings");
 
     // Load current settings
-    let settings = settings_manager.load()
+    let settings = settings_manager
+        .load()
         .map_err(|e| format!("Failed to load settings: {}", e))?;
 
     // Check if we have a saved api_id
@@ -328,20 +334,29 @@ pub async fn reconnect_telegram(
     match &settings.tts.telegram.proxy_mode {
         ProxyMode::None => {
             info!("Initializing without proxy");
-            client.init_empty(api_id).await
+            client
+                .init_empty(api_id)
+                .await
                 .map_err(|e| format!("Failed to reconnect: {}", e))?;
         }
         ProxyMode::Socks5 => {
             let proxy_url = settings.tts.network.proxy.proxy_url.clone();
-            info!(has_proxy = proxy_url.is_some(), "Initializing with SOCKS5 proxy");
-            client.init_empty_with_proxy(api_id, proxy_url).await
+            info!(
+                has_proxy = proxy_url.is_some(),
+                "Initializing with SOCKS5 proxy"
+            );
+            client
+                .init_empty_with_proxy(api_id, proxy_url)
+                .await
                 .map_err(|e| format!("Failed to reconnect: {}", e))?;
         }
         ProxyMode::MtProxy => {
             #[cfg(feature = "mtproxy")]
             {
                 info!("Initializing with MTProxy");
-                client.init_empty_with_mtproxy(api_id, &settings.tts.network.mtproxy).await
+                client
+                    .init_empty_with_mtproxy(api_id, &settings.tts.network.mtproxy)
+                    .await
                     .map_err(|e| format!("Failed to reconnect: {}", e))?;
             }
             #[cfg(not(feature = "mtproxy"))]
@@ -373,7 +388,9 @@ pub async fn reconnect_telegram(
     let is_authorized = client_clone.is_authorized().await?;
 
     // Update cached proxy status
-    telegram_state.update_proxy_status(proxy_status.clone()).await;
+    telegram_state
+        .update_proxy_status(proxy_status.clone())
+        .await;
 
     if is_authorized {
         info!(status = %proxy_status, "Telegram reconnected successfully");
@@ -452,7 +469,7 @@ pub async fn test_mtproxy(
     info!(
         %host,
         %port,
-        secret_preview = &secret[..secret.len().min(4)],
+        has_secret = !secret.is_empty(),
         ?dc_id,
         "Testing MTProxy connection"
     );
@@ -498,51 +515,43 @@ pub async fn test_mtproxy(
 
     // Test TCP connection to MTProxy server
     let addr = format!("{}:{}", host, port);
-    let test_result = match tokio::time::timeout(
-        timeout,
-        tokio::net::TcpStream::connect(&addr)
-    ).await {
-        Ok(Ok(_stream)) => {
-            let latency = start.elapsed().as_millis() as u64;
-            info!(
-                latency_ms = latency,
-                "MTProxy server is reachable"
-            );
-            TestResultDto {
-                success: true,
-                latency_ms: Some(latency),
-                mode: "mtproxy".to_string(),
-                error: None,
+    let test_result =
+        match tokio::time::timeout(timeout, tokio::net::TcpStream::connect(&addr)).await {
+            Ok(Ok(_stream)) => {
+                let latency = start.elapsed().as_millis() as u64;
+                info!(latency_ms = latency, "MTProxy server is reachable");
+                TestResultDto {
+                    success: true,
+                    latency_ms: Some(latency),
+                    mode: "mtproxy".to_string(),
+                    error: None,
+                }
             }
-        }
-        Ok(Err(e)) => {
-            let latency = start.elapsed().as_millis() as u64;
-            error!(
-                error = %e,
-                latency_ms = latency,
-                "Failed to connect to MTProxy server"
-            );
-            TestResultDto {
-                success: false,
-                latency_ms: Some(latency),
-                mode: "mtproxy".to_string(),
-                error: Some(format!("Connection failed: {}", e)),
+            Ok(Err(e)) => {
+                let latency = start.elapsed().as_millis() as u64;
+                error!(
+                    error = %e,
+                    latency_ms = latency,
+                    "Failed to connect to MTProxy server"
+                );
+                TestResultDto {
+                    success: false,
+                    latency_ms: Some(latency),
+                    mode: "mtproxy".to_string(),
+                    error: Some(format!("Connection failed: {}", e)),
+                }
             }
-        }
-        Err(_) => {
-            let latency = start.elapsed().as_millis() as u64;
-            error!(
-                latency_ms = latency,
-                "MTProxy connection timed out"
-            );
-            TestResultDto {
-                success: false,
-                latency_ms: Some(latency),
-                mode: "mtproxy".to_string(),
-                error: Some("Connection timed out".to_string()),
+            Err(_) => {
+                let latency = start.elapsed().as_millis() as u64;
+                error!(latency_ms = latency, "MTProxy connection timed out");
+                TestResultDto {
+                    success: false,
+                    latency_ms: Some(latency),
+                    mode: "mtproxy".to_string(),
+                    error: Some("Connection timed out".to_string()),
+                }
             }
-        }
-    };
+        };
 
     Ok(test_result)
 }
@@ -554,7 +563,8 @@ pub async fn test_mtproxy(
 pub fn get_mtproxy_settings(
     settings_manager: State<'_, SettingsManager>,
 ) -> Result<MtProxySettings, String> {
-    let settings = settings_manager.load()
+    let settings = settings_manager
+        .load()
         .map_err(|e| format!("Failed to load settings: {}", e))?;
 
     Ok(settings.tts.network.mtproxy)
@@ -596,14 +606,14 @@ pub async fn set_mtproxy_settings(
     // Validate secret if provided
     if let Some(ref s) = secret {
         if !s.trim().is_empty() {
-            validate_mtproxy_secret(s)
-                .map_err(|e| format!("Invalid secret: {}", e))?;
+            validate_mtproxy_secret(s).map_err(|e| format!("Invalid secret: {}", e))?;
         }
     }
 
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_mtproxy_settings(host, port, secret, dc_id)
-    }).await?;
+    })
+    .await?;
 
     super::emit_settings_changed(&app_handle);
 

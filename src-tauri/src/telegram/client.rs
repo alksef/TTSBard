@@ -1,19 +1,20 @@
 use super::types::{AuthState, OperationResult, UserInfo};
-use grammers_client::{Client, SignInError};
+#[cfg(feature = "mtproxy")]
+use crate::config::MtProxySettings;
+use crate::config::ProxyMode;
+use crate::secret_log;
 use grammers_client::client::LoginToken;
-use grammers_mtsender::{SenderPool, ConnectionParams};
+use grammers_client::{Client, SignInError};
 #[cfg(feature = "mtproxy")]
 use grammers_mtsender::MtProxyConfig;
-use grammers_session::updates::UpdatesLike;
+use grammers_mtsender::{ConnectionParams, SenderPool};
 use grammers_session::storages::SqliteSession;
+use grammers_session::updates::UpdatesLike;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{info, error, debug, warn};
-use crate::config::ProxyMode;
-#[cfg(feature = "mtproxy")]
-use crate::config::MtProxySettings;
+use tracing::{debug, error, info, warn};
 
 // NOTE: api_id is now stored in settings.json (settings.tts.telegram.api_id)
 // The old telegram_config.json file is no longer used
@@ -31,7 +32,11 @@ impl fmt::Display for ProxyStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.mode {
             ProxyMode::None => write!(f, "No proxy"),
-            ProxyMode::Socks5 => write!(f, "SOCKS5 proxy: {}", self.proxy_url.as_deref().unwrap_or("not configured")),
+            ProxyMode::Socks5 => write!(
+                f,
+                "SOCKS5 proxy: {}",
+                self.proxy_url.as_deref().unwrap_or("not configured")
+            ),
             ProxyMode::MtProxy => {
                 if let Some(url) = &self.proxy_url {
                     write!(f, "MTProxy: {}", url)
@@ -93,9 +98,10 @@ impl ProxyConfig {
             ProxyConfig::None => None,
             ProxyConfig::Socks5(url) => Some(url.clone()),
             #[cfg(feature = "mtproxy")]
-            ProxyConfig::MtProxy(settings) => {
-                settings.host.as_ref().map(|h| format!("{}:{}", h, settings.port))
-            }
+            ProxyConfig::MtProxy(settings) => settings
+                .host
+                .as_ref()
+                .map(|h| format!("{}:{}", h, settings.port)),
         }
     }
 
@@ -146,8 +152,15 @@ pub struct TelegramClient {
 
 impl fmt::Debug for TelegramClient {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let session_str = self
+            .session_path
+            .try_lock()
+            .ok()
+            .and_then(|g| g.clone())
+            .map(|p| secret_log::safe_path_for_log(&p))
+            .unwrap_or_else(|| "[locked]".to_string());
         f.debug_struct("TelegramClient")
-            .field("session_path", &self.session_path)
+            .field("session_path", &session_str)
             .finish()
     }
 }
@@ -169,8 +182,8 @@ impl TelegramClient {
 
     /// Get session path in %APPDATA%\ttsbard\telegram.session
     fn get_session_path() -> Result<PathBuf, String> {
-        let appdata = std::env::var("APPDATA")
-            .map_err(|e| format!("Failed to get APPDATA: {}", e))?;
+        let appdata =
+            std::env::var("APPDATA").map_err(|e| format!("Failed to get APPDATA: {}", e))?;
 
         let app_dir = std::path::Path::new(&appdata).join("ttsbard");
 
@@ -206,13 +219,20 @@ impl TelegramClient {
                 };
 
                 // Split address into host and port
-                let (host, port_str) = address.rsplit_once(':')
+                let (host, port_str) = address
+                    .rsplit_once(':')
                     .ok_or_else(|| "Invalid SOCKS5 URL: missing port".to_string())?;
 
-                let _port: u16 = port_str.parse()
+                let _port: u16 = port_str
+                    .parse()
                     .map_err(|_| "Invalid SOCKS5 URL: invalid port".to_string())?;
 
-                info!(host, _port, has_auth = _auth.is_some(), "Validated SOCKS5 proxy");
+                info!(
+                    host,
+                    _port,
+                    has_auth = _auth.is_some(),
+                    "Validated SOCKS5 proxy"
+                );
 
                 Ok(url.to_string())
             }
@@ -224,12 +244,18 @@ impl TelegramClient {
     }
 
     /// Инициализация клиента с поддержкой прокси
-    pub async fn init_with_proxy(&self, api_id: u32, api_hash: String, phone: String, proxy_url: Option<String>) -> Result<OperationResult, String> {
+    pub async fn init_with_proxy(
+        &self,
+        api_id: u32,
+        api_hash: String,
+        phone: String,
+        proxy_url: Option<String>,
+    ) -> Result<OperationResult, String> {
         // Determine proxy mode from URL
         let (proxy_mode, proxy_url_str) = if let Some(ref url) = &proxy_url {
             let mode = ProxyMode::from_url(url);
             if mode == ProxyMode::None && !url.is_empty() {
-                warn!(url = %url, "[AUTH] Unknown proxy URL format, using direct connection");
+                warn!(safe_url = %secret_log::safe_url_for_log(url), "[AUTH] Unknown proxy URL format, using direct connection");
                 (ProxyMode::None, None)
             } else {
                 (mode, proxy_url.clone())
@@ -264,7 +290,8 @@ impl TelegramClient {
             Some(phone),
             proxy_config,
             "Initializing",
-        ).await
+        )
+        .await
     }
 
     /// Internal: Unified initialization with ProxyConfig
@@ -294,7 +321,7 @@ impl TelegramClient {
                 info!("[AUTH] {} without proxy", log_context);
             }
             ProxyConfig::Socks5(url) => {
-                info!(proxy_url = %url, "[AUTH] {} with SOCKS5 proxy", log_context);
+                info!(safe_url = %secret_log::safe_url_for_log(url), "[AUTH] {} with SOCKS5 proxy", log_context);
             }
             #[cfg(feature = "mtproxy")]
             ProxyConfig::MtProxy(settings) => {
@@ -302,7 +329,8 @@ impl TelegramClient {
                     host = %settings.host.as_deref().unwrap_or("none"),
                     port = %settings.port,
                     dc_id = ?settings.dc_id,
-                    phone = %phone.as_deref().unwrap_or("none"),
+                    has_phone = phone.is_some(),
+                    masked_secret = %crate::secret_log::mask_secret(settings.secret.as_deref().unwrap_or("")),
                     "[AUTH] {} with MTProxy", log_context
                 );
             }
@@ -320,17 +348,22 @@ impl TelegramClient {
         }
         *self.session_path.lock().await = Some(session_path.clone());
 
-        debug!(session_path = ?session_path, "[AUTH] Session path");
+        debug!(session_path = %secret_log::safe_path_for_log(&session_path), "[AUTH] Session path");
         debug!(exists = session_path.exists(), "[AUTH] Session exists");
 
         // Создаём сессию (откроем существующую или создадим новую)
-        let session = SqliteSession::open(&session_path).await
+        let session = SqliteSession::open(&session_path)
+            .await
             .map_err(|e| format!("Не удалось создать сессию: {}", e))?;
         let session = Arc::new(session);
 
         // Создаём SenderPool with appropriate configuration
         let conn_params = proxy_config.to_connection_params();
-        let SenderPool { runner, handle, updates } = match &proxy_config {
+        let SenderPool {
+            runner,
+            handle,
+            updates,
+        } = match &proxy_config {
             ProxyConfig::None => {
                 info!("[AUTH] Creating SenderPool without proxy");
                 SenderPool::new(session, api_id as i32)
@@ -386,15 +419,25 @@ impl TelegramClient {
 
             // Нужно авторизоваться заново
             info!("[AUTH] Session not authorized, need to sign in");
-            Ok(OperationResult::success("Клиент инициализирован, требуется авторизация"))
+            Ok(OperationResult::success(
+                "Клиент инициализирован, требуется авторизация",
+            ))
         } else {
-            Ok(OperationResult::success("Клиент инициализирован с существующей сессией"))
+            Ok(OperationResult::success(
+                "Клиент инициализирован с существующей сессией",
+            ))
         }
     }
 
     /// Инициализация клиента с поддержкой MTProxy
     #[cfg(feature = "mtproxy")]
-    pub async fn init_with_mtproxy(&self, api_id: u32, api_hash: String, phone: String, mtproxy_settings: &MtProxySettings) -> Result<OperationResult, String> {
+    pub async fn init_with_mtproxy(
+        &self,
+        api_id: u32,
+        api_hash: String,
+        phone: String,
+        mtproxy_settings: &MtProxySettings,
+    ) -> Result<OperationResult, String> {
         // Clone settings since we need to own them for ProxyConfig
         let settings = mtproxy_settings.clone();
 
@@ -404,45 +447,53 @@ impl TelegramClient {
             Some(phone),
             ProxyConfig::MtProxy(settings),
             "Initializing",
-        ).await
+        )
+        .await
     }
 
     /// Проверка авторизации
     pub async fn is_authorized(&self) -> Result<bool, String> {
         let client = {
             let guard = self.client.lock().await;
-            guard.clone().ok_or_else(|| "Клиент не инициализирован".to_string())?
+            guard
+                .clone()
+                .ok_or_else(|| "Клиент не инициализирован".to_string())?
         };
 
-        tokio::time::timeout(
-            tokio::time::Duration::from_secs(10),
-            client.is_authorized()
-        ).await
-        .map_err(|_| "Превышено время ожидания проверки авторизации".to_string())?
-        .map_err(|e| format!("Ошибка проверки авторизации: {}", e))
+        tokio::time::timeout(tokio::time::Duration::from_secs(10), client.is_authorized())
+            .await
+            .map_err(|_| "Превышено время ожидания проверки авторизации".to_string())?
+            .map_err(|e| format!("Ошибка проверки авторизации: {}", e))
     }
 
     /// Запрос кода подтверждения
     pub async fn request_code(&self) -> Result<AuthState, String> {
         let client = {
             let guard = self.client.lock().await;
-            guard.clone().ok_or_else(|| "Клиент не инициализирован".to_string())?
+            guard
+                .clone()
+                .ok_or_else(|| "Клиент не инициализирован".to_string())?
         };
 
         let api_hash = {
             let guard = self.api_hash.lock().await;
-            guard.clone().ok_or_else(|| "API hash не задан".to_string())?
+            guard
+                .clone()
+                .ok_or_else(|| "API hash не задан".to_string())?
         };
 
         let phone_number = {
             let guard = self.phone_number.lock().await;
-            guard.clone().ok_or_else(|| "Номер телефона не задан".to_string())?
+            guard
+                .clone()
+                .ok_or_else(|| "Номер телефона не задан".to_string())?
         };
 
         let token = tokio::time::timeout(
             tokio::time::Duration::from_secs(15),
-            client.request_login_code(&phone_number, &api_hash)
-        ).await
+            client.request_login_code(&phone_number, &api_hash),
+        )
+        .await
         .map_err(|_| "Превышено время ожидания запроса кода. Проверьте подключение.".to_string())?
         .map_err(|e| format!("Ошибка при запросе кода: {}", e))?;
 
@@ -459,12 +510,18 @@ impl TelegramClient {
 
         let client = {
             let guard = self.client.lock().await;
-            guard.clone().ok_or_else(|| "Клиент не инициализирован".to_string())?
+            guard
+                .clone()
+                .ok_or_else(|| "Клиент не инициализирован".to_string())?
         };
         info!("[AUTH] Client acquired and cloned");
 
         // Забираем токен из Option (take() освобождает мьютекс, возвращая значение)
-        let token = self.login_token.lock().await.take()
+        let token = self
+            .login_token
+            .lock()
+            .await
+            .take()
             .ok_or_else(|| "Токен авторизации не найден. Сначала запросите код.".to_string())?;
         info!("[AUTH] Token acquired and removed from mutex");
 
@@ -473,8 +530,9 @@ impl TelegramClient {
         // Добавляем таймаут на авторизацию (30 секунд)
         let sign_in_result = tokio::time::timeout(
             tokio::time::Duration::from_secs(30),
-            client.sign_in(&token, code)
-        ).await;
+            client.sign_in(&token, code),
+        )
+        .await;
 
         let elapsed = start_time.elapsed();
 
@@ -485,7 +543,9 @@ impl TelegramClient {
                 // Add jitter to obscure timing even on timeout
                 let jitter = rand::random::<u64>() % 500;
                 tokio::time::sleep(tokio::time::Duration::from_millis(500 + jitter)).await;
-                return Err("Превышено время ожидания. Проверьте подключение к интернету.".to_string());
+                return Err(
+                    "Превышено время ожидания. Проверьте подключение к интернету.".to_string(),
+                );
             }
         };
 
@@ -507,7 +567,10 @@ impl TelegramClient {
                 tokio::time::sleep(tokio::time::Duration::from_millis(500 + jitter)).await;
                 // Возвращаем токен обратно если нужна 2FA
                 *self.login_token.lock().await = Some(token);
-                Err("Требуется двухфакторная аутентификация. Эта функция пока не реализована.".to_string())
+                Err(
+                    "Требуется двухфакторная аутентификация. Эта функция пока не реализована."
+                        .to_string(),
+                )
             }
             Err(e) => {
                 error!("[AUTH] Sign in error: {:?}", e);
@@ -525,16 +588,18 @@ impl TelegramClient {
 
         let client = {
             let guard = self.client.lock().await;
-            guard.clone().ok_or_else(|| "Клиент не инициализирован".to_string())?
+            guard
+                .clone()
+                .ok_or_else(|| "Клиент не инициализирован".to_string())?
         };
 
         // Добавляем таймаут на получение информации (10 секунд)
-        let me = tokio::time::timeout(
-            tokio::time::Duration::from_secs(10),
-            client.get_me()
-        ).await
-        .map_err(|_| "Превышено время ожидания при получении информации о пользователе".to_string())?
-        .map_err(|e| format!("Ошибка при получении информации: {}", e))?;
+        let me = tokio::time::timeout(tokio::time::Duration::from_secs(10), client.get_me())
+            .await
+            .map_err(|_| {
+                "Превышено время ожидания при получении информации о пользователе".to_string()
+            })?
+            .map_err(|e| format!("Ошибка при получении информации: {}", e))?;
 
         debug!(username = ?me.username(), "[AUTH] User info received");
 
@@ -593,12 +658,16 @@ impl TelegramClient {
     }
 
     /// Инициализация с существующей сессией с поддержкой прокси
-    pub async fn init_empty_with_proxy(&self, api_id: u32, proxy_url: Option<String>) -> Result<OperationResult, String> {
+    pub async fn init_empty_with_proxy(
+        &self,
+        api_id: u32,
+        proxy_url: Option<String>,
+    ) -> Result<OperationResult, String> {
         // Determine proxy mode from URL
         let (proxy_mode, proxy_url_str) = if let Some(ref url) = &proxy_url {
             let mode = ProxyMode::from_url(url);
             if mode == ProxyMode::None && !url.is_empty() {
-                warn!(url = %url, "[AUTH] Unknown proxy URL format, using direct connection");
+                warn!(safe_url = %secret_log::safe_url_for_log(url), "[AUTH] Unknown proxy URL format, using direct connection");
                 (ProxyMode::None, None)
             } else {
                 (mode, proxy_url.clone())
@@ -627,18 +696,17 @@ impl TelegramClient {
             ProxyConfig::None
         };
 
-        self.init_with_config_internal(
-            api_id,
-            None,
-            None,
-            proxy_config,
-            "Restoring",
-        ).await
+        self.init_with_config_internal(api_id, None, None, proxy_config, "Restoring")
+            .await
     }
 
     /// Инициализация с существующей сессией с поддержкой MTProxy
     #[cfg(feature = "mtproxy")]
-    pub async fn init_empty_with_mtproxy(&self, api_id: u32, mtproxy_settings: &MtProxySettings) -> Result<OperationResult, String> {
+    pub async fn init_empty_with_mtproxy(
+        &self,
+        api_id: u32,
+        mtproxy_settings: &MtProxySettings,
+    ) -> Result<OperationResult, String> {
         // Clone settings since we need to own them for ProxyConfig
         let settings = mtproxy_settings.clone();
 
@@ -648,7 +716,8 @@ impl TelegramClient {
             None,
             ProxyConfig::MtProxy(settings),
             "Restoring",
-        ).await
+        )
+        .await
     }
 
     /// Get current proxy status

@@ -79,7 +79,7 @@ export function useWebView() {
 
   async function save() {
     try {
-      debugLog('[WebView] Saving settings:', settings.value)
+      debugLog('[WebView] Saving settings:', { enabled: settings.value.enabled, port: settings.value.port, bind_address: settings.value.bind_address, has_token: !!settings.value.access_token, upnp_enabled: settings.value.upnp_enabled, start_on_boot: settings.value.start_on_boot })
       const result = await invoke<string>('save_webview_settings', { settings: settings.value })
       debugLog('[WebView] Save result:', result)
       showError(result)

@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { Minimize2, Maximize2 } from 'lucide-vue-next'
 import { useWindowsSettings } from '../composables/useAppSettings'
 import { compactModeState, initCompactDims } from '../composables/compactModeState'
+import { debugError } from '../utils/debug'
 
 const isMinimalMode = ref(false)
 const isAnimating = ref(false)
@@ -42,7 +43,7 @@ async function toggleMinimalMode() {
     emit('minimalModeChanged', !isMinimalMode.value)
     isMinimalMode.value = !isMinimalMode.value
   } catch (error) {
-    console.error('Failed to toggle minimal mode:', error)
+    debugError('Failed to toggle minimal mode:', error)
     try { await invoke('remove_main_bounds') } catch { /* ignore */ }
     compactModeState.appDrivenResize = 0
   } finally {

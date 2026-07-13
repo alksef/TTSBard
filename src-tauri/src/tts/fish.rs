@@ -1,13 +1,14 @@
-use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use crate::config::DEFAULT_TTS_TIMEOUT_SECS;
+use crate::events::EventSender;
+use crate::secret_log;
 use crate::tts::engine::TtsEngine;
 use crate::tts::proxy_utils;
-use crate::events::EventSender;
-use crate::config::DEFAULT_TTS_TIMEOUT_SECS;
 use async_trait::async_trait;
+use base64::Engine;
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tracing::debug;
-use base64::Engine;
 
 /// Модель голоса из Fish Audio API
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -126,34 +127,31 @@ impl FishTts {
     }
 
     /// Загрузить изображение через прокси (возвращает base64 data URL)
-    pub async fn fetch_image(
-        image_url: &str,
-        proxy_url: Option<&str>,
-    ) -> Result<String, String> {
-        debug!(image_url, "Fetching Fish Audio image");
+    pub async fn fetch_image(image_url: &str, proxy_url: Option<&str>) -> Result<String, String> {
+        debug!(safe_url = %secret_log::safe_url_for_log(image_url), "Fetching Fish Audio image");
 
         let timeout = Duration::from_secs(30);
 
         let client = proxy_utils::build_client_with_proxy(proxy_url, timeout)?;
 
-        let response = client
-            .get(image_url)
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_timeout() {
-                    format!("Image request timed out after {}s", timeout.as_secs())
-                } else if e.is_connect() {
-                    format!("Failed to connect to image server: {}", e)
-                } else {
-                    format!("Failed to fetch image: {}", e)
-                }
-            })?;
+        let response = client.get(image_url).send().await.map_err(|e| {
+            if e.is_timeout() {
+                format!("Image request timed out after {}s", timeout.as_secs())
+            } else if e.is_connect() {
+                format!("Failed to connect to image server: {}", e)
+            } else {
+                format!("Failed to fetch image: {}", e)
+            }
+        })?;
 
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            return Err(format!("Failed to fetch image ({}): {}", status.as_u16(), error_text));
+            return Err(format!(
+                "Failed to fetch image ({}): {}",
+                status.as_u16(),
+                error_text
+            ));
         }
 
         // Determine content type from URL or response
@@ -161,7 +159,8 @@ impl FishTts {
             .headers()
             .get("content-type")
             .and_then(|v| v.to_str().ok())
-            .unwrap_or("image/jpeg").to_string();
+            .unwrap_or("image/jpeg")
+            .to_string();
 
         let image_bytes = response
             .bytes()
@@ -169,7 +168,10 @@ impl FishTts {
             .map_err(|e| format!("Failed to read image data: {}", e))?
             .to_vec();
 
-        debug!(size = image_bytes.len(), content_type, "Image fetched successfully");
+        debug!(
+            size = image_bytes.len(),
+            content_type, "Image fetched successfully"
+        );
 
         // Encode to base64
         let base64_data = base64::engine::general_purpose::STANDARD.encode(&image_bytes);
@@ -210,7 +212,10 @@ impl FishTts {
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            return Err(format!("Failed to list models ({}): {}", status, error_text));
+            return Err(format!(
+                "Failed to list models ({}): {}",
+                status, error_text
+            ));
         }
 
         let models_response: ListModelsResponse = response
@@ -218,7 +223,11 @@ impl FishTts {
             .await
             .map_err(|e| format!("Failed to parse response: {}", e))?;
 
-        let models: Vec<VoiceModel> = models_response.items.into_iter().map(|m| m.into()).collect();
+        let models: Vec<VoiceModel> = models_response
+            .items
+            .into_iter()
+            .map(|m| m.into())
+            .collect();
 
         Ok((models_response.total, models))
     }
@@ -267,7 +276,11 @@ impl TtsEngine for FishTts {
         let status = response.status();
         if !status.is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(format!("TTS request failed ({}): {}", status.as_u16(), error_text));
+            return Err(format!(
+                "TTS request failed ({}): {}",
+                status.as_u16(),
+                error_text
+            ));
         }
 
         let audio_data = response

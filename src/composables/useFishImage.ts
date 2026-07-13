@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { debugError } from '../utils/debug';
 
 const imageCache = new Map<string, string>();
 
@@ -15,7 +16,7 @@ export async function fetchFishImage(imageUrl: string | null | undefined): Promi
     imageCache.set(imageUrl, dataUrl);
     return dataUrl;
   } catch (error) {
-    console.error('Failed to fetch image:', error);
+    debugError('Failed to fetch image:', error);
     return undefined;
   }
 }

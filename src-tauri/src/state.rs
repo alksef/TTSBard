@@ -1,5 +1,6 @@
 use crate::ai::AiProvider;
 use crate::events::{AppEvent, TwitchEvent};
+use crate::secret_log;
 use crate::telegram::TelegramClient;
 use crate::tts::{
     fish::FishTts, local::LocalTts, openai::OpenAiTts, silero::SileroTts, TtsProvider,
@@ -242,7 +243,7 @@ impl AppState {
     }
 
     pub fn init_openai_tts(&self, api_key: String) {
-        info!(key_prefix = %&api_key[..7.min(api_key.len())], "init_openai_tts called");
+        info!(has_api_key = !api_key.is_empty(), "init_openai_tts called");
         let mut tts = OpenAiTts::new(api_key);
         let config = self.tts_config.read();
         let voice = config.openai_voice.clone();
@@ -257,14 +258,18 @@ impl AppState {
             tts = tts.with_event_tx(event_tx);
         }
 
-        info!(voice, proxy_url = ?tts.get_proxy_url(), "Created OpenAiTts");
+        info!(
+            voice,
+            has_proxy = tts.get_proxy_url().is_some(),
+            "Created OpenAiTts"
+        );
 
         *self.tts_providers.lock() = Some(TtsProvider::OpenAi(tts));
         info!("TTS provider set to OpenAi");
     }
 
     pub fn init_local_tts(&self, url: String) {
-        info!(url = %url, "Initializing Local TTS");
+        info!(safe_url = %secret_log::safe_url_for_log(&url), "Initializing Local TTS");
 
         let mut tts = LocalTts::new();
         tts.set_url(url);
@@ -274,7 +279,7 @@ impl AppState {
             tts = tts.with_event_tx(event_tx);
         }
 
-        info!(url = %tts.get_url(), "Created LocalTts");
+        info!(safe_url = %secret_log::safe_url_for_log(tts.get_url()), "Created LocalTts");
 
         *self.tts_providers.lock() = Some(TtsProvider::Local(tts));
         info!("TTS provider set to Local");

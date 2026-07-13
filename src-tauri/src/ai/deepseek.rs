@@ -4,22 +4,22 @@
 //! Uses async-openai crate with fixed base URL.
 
 use async_openai::{
-    Client,
     config::OpenAIConfig,
     types::chat::{
+        ChatCompletionRequestSystemMessage, ChatCompletionRequestUserMessage,
         CreateChatCompletionRequestArgs,
-        ChatCompletionRequestSystemMessage,
-        ChatCompletionRequestUserMessage,
     },
+    Client,
 };
 use backoff::ExponentialBackoff;
 use reqwest::Client as ReqwestClient;
 use std::time::Duration;
 use tracing::{error, info};
 
-use crate::config::{AiSettings, NetworkSettings};
-use super::{AiClient, AiError};
 use super::common as ai_common;
+use super::{AiClient, AiError};
+use crate::config::{AiSettings, NetworkSettings};
+use crate::secret_log;
 
 const DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com/v1";
 
@@ -41,7 +41,9 @@ impl DeepSeekClient {
     ///
     /// Returns `AiError::NotConfigured` if API key is not set.
     pub fn new(settings: &AiSettings, network_settings: &NetworkSettings) -> Result<Self, AiError> {
-        let api_key = settings.deepseek.api_key
+        let api_key = settings
+            .deepseek
+            .api_key
             .as_ref()
             .ok_or_else(|| AiError::NotConfigured("DeepSeek API key not set".to_string()))?
             .clone();
@@ -51,28 +53,38 @@ impl DeepSeekClient {
 
         // Create HTTP client with proxy if needed
         let http_client = if settings.deepseek.use_proxy {
-            let proxy_url = network_settings.proxy.proxy_url
+            let proxy_url = network_settings
+                .proxy
+                .proxy_url
                 .as_ref()
                 .ok_or_else(|| AiError::InvalidProxy("Proxy enabled but URL not set".to_string()))?
                 .clone();
 
             info!(
                 model = &model,
-                proxy_url = %proxy_url,
+                has_proxy = true,
+                safe_url = %secret_log::safe_url_for_log(&proxy_url),
                 "DeepSeekClient created with proxy"
             );
 
-            let (scheme, _rest) = proxy_url.split_once("://")
-                .ok_or_else(|| AiError::InvalidProxy("Invalid proxy URL: missing scheme".to_string()))?;
+            let (scheme, _rest) = proxy_url.split_once("://").ok_or_else(|| {
+                AiError::InvalidProxy("Invalid proxy URL: missing scheme".to_string())
+            })?;
 
             let scheme_lower = scheme.to_lowercase();
-            if !matches!(scheme_lower.as_str(), "socks5" | "socks5h" | "socks4" | "socks4a" | "http" | "https") {
-                return Err(AiError::InvalidProxy(format!("Unsupported proxy URL scheme: {}", scheme)));
+            if !matches!(
+                scheme_lower.as_str(),
+                "socks5" | "socks5h" | "socks4" | "socks4a" | "http" | "https"
+            ) {
+                return Err(AiError::InvalidProxy(format!(
+                    "Unsupported proxy URL scheme: {}",
+                    scheme
+                )));
             }
 
             let proxy = reqwest::Proxy::all(&proxy_url)
                 .map_err(|e| {
-                    error!(error = %e, proxy_url = %proxy_url, "Failed to create proxy");
+                    error!(error = %e, safe_url = %secret_log::safe_url_for_log(&proxy_url), "Failed to create proxy");
                     AiError::InvalidProxy(format!("Failed to create {} proxy: {}", scheme, e))
                 })?;
 
@@ -141,43 +153,42 @@ impl DeepSeekClient {
             "Sending DeepSeek correction request"
         );
 
-        let response = self.client
-            .chat()
-            .create(request)
-            .await
-            .map_err(|e| {
-                let error_msg = e.to_string();
-                error!(
-                    error = %error_msg,
-                    error_type = "deepseek_api_error",
-                    "DeepSeek API request failed"
-                );
+        let response = self.client.chat().create(request).await.map_err(|e| {
+            let error_msg = e.to_string();
+            error!(
+                error_type = "deepseek_api_error",
+                "DeepSeek API request failed"
+            );
 
-                if error_msg.contains("timeout") || error_msg.contains("timed out") {
-                    error!(timeout_secs = self.timeout, "DeepSeek request timeout");
-                    AiError::Timeout(format!("DeepSeek timeout ({}s). Check internet or proxy settings.", self.timeout))
-                } else if error_msg.contains("connect") || error_msg.contains("connection") {
-                    error!("DeepSeek connection failed");
-                    AiError::Connection(format!("DeepSeek connection failed: {}", e))
-                } else if error_msg.contains("401") || error_msg.contains("unauthorized") {
-                    error!("DeepSeek authentication failed (401)");
-                    AiError::NotConfigured("DeepSeek API key is invalid or missing".to_string())
-                } else if error_msg.contains("402") || error_msg.contains("Insufficient Balance") {
-                    error!("DeepSeek insufficient balance (402)");
-                    AiError::ApiError {
-                        status: 402,
-                        message: "Insufficient balance. Please top up your DeepSeek account.".to_string(),
-                    }
-                } else if error_msg.contains("429") {
-                    error!("DeepSeek rate limit exceeded (429)");
-                    AiError::ApiError {
-                        status: 429,
-                        message: "Rate limit exceeded. Please try again later.".to_string(),
-                    }
-                } else {
-                    AiError::Network(format!("Failed to send request: {}", e))
+            if error_msg.contains("timeout") || error_msg.contains("timed out") {
+                error!(timeout_secs = self.timeout, "DeepSeek request timeout");
+                AiError::Timeout(format!(
+                    "DeepSeek timeout ({}s). Check internet or proxy settings.",
+                    self.timeout
+                ))
+            } else if error_msg.contains("connect") || error_msg.contains("connection") {
+                error!("DeepSeek connection failed");
+                AiError::Connection(format!("DeepSeek connection failed: {}", e))
+            } else if error_msg.contains("401") || error_msg.contains("unauthorized") {
+                error!("DeepSeek authentication failed (401)");
+                AiError::NotConfigured("DeepSeek API key is invalid or missing".to_string())
+            } else if error_msg.contains("402") || error_msg.contains("Insufficient Balance") {
+                error!("DeepSeek insufficient balance (402)");
+                AiError::ApiError {
+                    status: 402,
+                    message: "Insufficient balance. Please top up your DeepSeek account."
+                        .to_string(),
                 }
-            })?;
+            } else if error_msg.contains("429") {
+                error!("DeepSeek rate limit exceeded (429)");
+                AiError::ApiError {
+                    status: 429,
+                    message: "Rate limit exceeded. Please try again later.".to_string(),
+                }
+            } else {
+                AiError::Network(format!("Failed to send request: {}", e))
+            }
+        })?;
 
         info!(
             choices_count = response.choices.len(),

@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { Loader2 } from 'lucide-vue-next';
-import { debugLog } from '../../utils/debug';
+import { debugLog, debugError } from '../../utils/debug';
 import InputWithToggle from '../shared/InputWithToggle.vue';
 import StatusMessage from '../shared/StatusMessage.vue';
 import TestResult, { type TestResult as TestResultType } from '../shared/TestResult.vue';
@@ -112,14 +112,14 @@ async function loadProxySettings() {
   isLoadingNetwork.value = true;
   try {
     const settings = await invoke<ProxySettings>('get_proxy_settings');
-    debugLog('[SettingsNetwork] Loaded proxy settings:', settings);
+    debugLog('[SettingsNetwork] Loaded proxy settings, has_proxy_url:', !!settings.proxy_url);
 
     // Parse existing proxy URL to extract fields
     if (settings.proxy_url) {
       parseProxyUrl(settings.proxy_url);
     }
   } catch (error) {
-    console.error('Failed to load proxy settings:', error);
+    debugError('Failed to load proxy settings:', error);
     showStatus('Ошибка загрузки настроек SOCKS5: ' + (error as Error).message, 'error');
   } finally {
     isLoadingNetwork.value = false;
@@ -157,7 +157,7 @@ function parseProxyUrl(url: string) {
       host.value = urlWithoutPrefix;
     }
   } catch (error) {
-    console.error('Failed to parse proxy URL:', error);
+    debugError('Failed to parse proxy URL:', error);
   }
 }
 
@@ -197,7 +197,7 @@ async function saveNetworkSettings() {
     });
     showStatus('Настройки SOCKS5 сохранены', 'success');
   } catch (error) {
-    console.error('Failed to save proxy URL:', error);
+    debugError('Failed to save proxy URL:', error);
     showStatus('Ошибка сохранения: ' + (error as Error).message, 'error');
   } finally {
     isSavingNetwork.value = false;
@@ -256,7 +256,7 @@ async function testConnection() {
       );
     }
   } catch (error) {
-    console.error('Failed to test proxy:', error);
+    debugError('Failed to test proxy:', error);
     socks5TestResult.value = {
       success: false,
       latency_ms: null,
@@ -272,14 +272,14 @@ async function testConnection() {
 async function loadMtProxySettings() {
   try {
     const settings = await invoke<MtProxySettings>('get_mtproxy_settings');
-    debugLog('[SettingsNetwork] Loaded MTProxy settings:', settings);
+    debugLog('[SettingsNetwork] Loaded MTProxy settings, has_secret:', !!settings.secret, 'host:', settings.host);
     mtHost.value = settings.host || '';
     // Показываем пустое поле если порт = дефолт (8888)
     mtPort.value = settings.port === 8888 ? '' : settings.port.toString();
     mtSecret.value = settings.secret || '';
     mtDcId.value = settings.dc_id?.toString() || '';
   } catch (error) {
-    console.error('Failed to load MTProxy settings:', error);
+    debugError('Failed to load MTProxy settings:', error);
     showStatus('Ошибка загрузки настроек MTProxy: ' + (error as Error).message, 'error');
   }
 }
@@ -320,7 +320,7 @@ async function saveMtProxySettings() {
     });
     showStatus('Настройки MTProxy сохранены', 'success');
   } catch (error) {
-    console.error('Failed to save MTProxy settings:', error);
+    debugError('Failed to save MTProxy settings:', error);
     showStatus('Ошибка сохранения: ' + (error as Error).message, 'error');
   } finally {
     isSavingNetwork.value = false;
@@ -382,7 +382,7 @@ async function testMtProxyConnection() {
       );
     }
   } catch (error) {
-    console.error('Failed to test MTProxy:', error);
+    debugError('Failed to test MTProxy:', error);
     mtProxyTestResult.value = {
       success: false,
       latency_ms: null,

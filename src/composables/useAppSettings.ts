@@ -10,7 +10,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type { AppSettingsDto, AppSettingsContext } from '../types/settings'
 import { APP_SETTINGS_KEY, SETTINGS_CHANGED_EVENT } from '../types/settings'
-import { debugLog, debugError } from '../utils/debug'
+import { debugLog, debugError, debugWarn } from '../utils/debug'
 
 // Maximum number of retries for backend ready
 const MAX_RETRIES = 50
@@ -42,12 +42,12 @@ export function createAppSettings(): AppSettingsContext {
           return true
         }
       } catch (e) {
-        console.warn(`[useAppSettings] Failed to check backend ready status: ${e}`)
+        debugWarn(`[useAppSettings] Failed to check backend ready status: ${e}`)
       }
       await new Promise(resolve => setTimeout(resolve, RETRY_INTERVAL_MS))
     }
 
-    console.warn('[useAppSettings] Backend not ready after retries')
+    debugWarn('[useAppSettings] Backend not ready after retries')
     return false
   }
 

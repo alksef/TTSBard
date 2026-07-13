@@ -18,6 +18,7 @@ use tauri::menu::{Menu, MenuItem};
 use tracing::{info, warn, error};
 
 use crate::state::AppState;
+use crate::secret_log;
 use crate::events::AppEvent;
 use crate::config::{SettingsManager, WindowsManager, AppSettings, WindowsSettings};
 use crate::soundpanel::SoundPanelState;
@@ -310,17 +311,17 @@ fn init_spellcheck(app: &App, app_state: &AppState) {
     let dic_path = dict_dir.join("ru.dic");
 
     if !aff_path.exists() {
-        warn!(path = %aff_path.display(), "[spellcheck] ru.aff not found (spellcheck disabled)");
+        warn!(path = %secret_log::safe_path_for_log(&aff_path), "[spellcheck] ru.aff not found (spellcheck disabled)");
         return;
     }
     if !dic_path.exists() {
-        warn!(path = %dic_path.display(), "[spellcheck] ru.dic not found (spellcheck disabled)");
+        warn!(path = %secret_log::safe_path_for_log(&dic_path), "[spellcheck] ru.dic not found (spellcheck disabled)");
         return;
     }
 
     info!(
-        aff = %aff_path.display(),
-        dic = %dic_path.display(),
+        aff = %secret_log::safe_path_for_log(&aff_path),
+        dic = %secret_log::safe_path_for_log(&dic_path),
         "[spellcheck] loading dictionary..."
     );
 
