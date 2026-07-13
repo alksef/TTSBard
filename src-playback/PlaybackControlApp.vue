@@ -22,6 +22,13 @@ const overlayStyle = computed(() => {
   }
 })
 
+const isLightBackground = computed(() => {
+  const r = parseInt(bgColor.value.slice(1, 3), 16)
+  const g = parseInt(bgColor.value.slice(3, 5), 16)
+  const b = parseInt(bgColor.value.slice(5, 7), 16)
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.55
+})
+
 const MIN_H = 150
 const MAX_H = 600
 
@@ -140,7 +147,7 @@ const pauseIcon = () =>
 </script>
 
 <template>
-  <div ref="playbackCard" class="playback-window" :style="overlayStyle">
+  <div ref="playbackCard" class="playback-window" :class="{ 'light-background': isLightBackground }" :style="overlayStyle">
     <div class="window-header" data-tauri-drag-region>
       <span class="title">Управление</span>
       <span class="status-badge" :class="state.status.toLowerCase()">
@@ -268,6 +275,12 @@ body {
   min-height: 150px;
   width: 100%;
   height: 100%;
+}
+
+.playback-window.light-background {
+  --text: #1f2937;
+  --text-muted: rgba(31, 41, 55, 0.55);
+  --border: rgba(31, 41, 55, 0.14);
 }
 
 .window-header {

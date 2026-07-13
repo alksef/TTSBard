@@ -15,7 +15,6 @@ import {
   Pencil,
   Settings,
   Keyboard,
-  MonitorPlay,
   Crosshair
 } from 'lucide-vue-next'
 
@@ -91,8 +90,7 @@ const sidebarGroups: SidebarGroup[] = [
   {
     title: 'Инструменты',
     buttons: [
-      { id: 'soundpanel', label: 'Звуковая панель', icon: Music },
-      { id: 'playback', label: 'Управление воспроизведением', icon: MonitorPlay }
+      { id: 'soundpanel', label: 'Звуковая панель', icon: Music }
     ]
   },
   {

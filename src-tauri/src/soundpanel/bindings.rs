@@ -211,6 +211,19 @@ pub fn sp_set_stay_visible(
     Ok(())
 }
 
+/// Установить, скрывать ли панель при потере фокуса
+#[tauri::command]
+pub fn sp_set_hide_on_blur(
+    enabled: bool,
+    windows_manager: State<'_, WindowsManager>,
+) -> Result<(), String> {
+    info!(enabled, "Setting hide_on_blur");
+    windows_manager
+        .set_soundpanel_hide_on_blur(enabled)
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    Ok(())
+}
+
 /// Воспроизвести звук по клавише (A-Z) и скрыть панель (если stay_visible выключен)
 #[tauri::command]
 pub fn sp_play_binding(key: String, app_handle: AppHandle) -> Result<(), String> {

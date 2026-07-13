@@ -21,5 +21,5 @@ pub use bindings::{
     sp_get_sets, sp_get_stay_visible, sp_is_floating_clickthrough_enabled, sp_is_supported_format,
     sp_play_binding, sp_remove_binding, sp_remove_set, sp_rename_set, sp_set_active_set,
     sp_set_floating_bg_color, sp_set_floating_clickthrough, sp_set_floating_opacity,
-    sp_set_stay_visible, sp_test_sound,
+    sp_set_hide_on_blur, sp_set_stay_visible, sp_test_sound,
 };

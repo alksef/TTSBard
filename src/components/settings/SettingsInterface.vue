@@ -29,6 +29,7 @@ const mainOpacityCompactOnly = ref(false);
 const spSource = ref<'main' | 'own'>('own');
 const spBgColor = ref('#2a2a2a');
 const spOpacity = ref(90);
+const spHideOnBlur = ref(true);
 
 // Playback control
 const pbSource = ref<'main' | 'own'>('own');
@@ -130,6 +131,17 @@ async function saveSpOpacity() {
   }
 }
 
+async function toggleSpHideOnBlur() {
+  const newValue = !spHideOnBlur.value;
+  spHideOnBlur.value = newValue;
+  try {
+    await invoke('sp_set_hide_on_blur', { enabled: newValue });
+  } catch (e) {
+    spHideOnBlur.value = !newValue;
+    showError('Ошибка сохранения настройки: ' + (e as Error).message);
+  }
+}
+
 // ==================== Playback control ====================
 
 async function setPbSource(source: 'main' | 'own') {
@@ -174,6 +186,7 @@ watch(
     spSource.value = settings.soundpanel.appearance_source === 'main' ? 'main' : 'own';
     spBgColor.value = settings.soundpanel.bg_color;
     spOpacity.value = settings.soundpanel.opacity;
+    spHideOnBlur.value = settings.soundpanel.hide_on_blur;
 
     pbSource.value = settings.playback.appearance_source === 'main' ? 'main' : 'own';
     pbBgColor.value = settings.playback.bg_color;
@@ -303,15 +316,16 @@ watch(
       <h2 class="section-title">Звуковая панель</h2>
 
       <div class="setting-row">
-        <label class="setting-label">Источник оформления</label>
-        <select
-          class="source-select"
-          :value="spSource"
-          @change="setSpSource(($event.target as HTMLSelectElement).value as 'main' | 'own')"
-        >
-          <option value="main">Как у главного окна</option>
-          <option value="own">Собственное</option>
-        </select>
+        <label class="setting-label checkbox-label">
+          <input
+            :checked="spSource === 'own'"
+            type="checkbox"
+            class="checkbox-input"
+            @change="setSpSource(($event.target as HTMLInputElement).checked ? 'own' : 'main')"
+          />
+          <span>Использовать свой цвет</span>
+        </label>
+        <span class="setting-hint">Если выключено, используется цвет активной темы</span>
       </div>
 
       <div class="appearance-grid">
@@ -355,6 +369,19 @@ watch(
           </div>
         </div>
       </div>
+
+      <div class="setting-row" style="margin-top: 0.75rem">
+        <label class="setting-label checkbox-label">
+          <input
+            :checked="spHideOnBlur"
+            type="checkbox"
+            class="checkbox-input"
+            @change="toggleSpHideOnBlur"
+          />
+          <span>Скрывать при потере фокуса</span>
+        </label>
+        <span class="setting-hint">Выключите, чтобы настроить положение панели перетаскиванием</span>
+      </div>
     </section>
 
     <!-- Playback control -->
@@ -362,15 +389,16 @@ watch(
       <h2 class="section-title">Управление воспроизведением</h2>
 
       <div class="setting-row">
-        <label class="setting-label">Источник оформления</label>
-        <select
-          class="source-select"
-          :value="pbSource"
-          @change="setPbSource(($event.target as HTMLSelectElement).value as 'main' | 'own')"
-        >
-          <option value="main">Как у главного окна</option>
-          <option value="own">Собственное</option>
-        </select>
+        <label class="setting-label checkbox-label">
+          <input
+            :checked="pbSource === 'own'"
+            type="checkbox"
+            class="checkbox-input"
+            @change="setPbSource(($event.target as HTMLInputElement).checked ? 'own' : 'main')"
+          />
+          <span>Использовать свой цвет</span>
+        </label>
+        <span class="setting-hint">Если выключено, используется цвет активной темы</span>
       </div>
 
       <div class="appearance-grid">
@@ -440,6 +468,7 @@ watch(
 }
 
 .setting-row {
+  display: block;
   margin-bottom: 1rem;
 }
 

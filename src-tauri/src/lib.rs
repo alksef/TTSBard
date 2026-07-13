@@ -77,7 +77,7 @@ use soundpanel::{
     sp_get_sets, sp_get_stay_visible, sp_is_floating_clickthrough_enabled, sp_is_supported_format,
     sp_play_binding, sp_remove_binding, sp_remove_set, sp_rename_set, sp_set_active_set,
     sp_set_floating_bg_color, sp_set_floating_clickthrough, sp_set_floating_opacity,
-    sp_set_stay_visible, sp_test_sound,
+    sp_set_hide_on_blur, sp_set_stay_visible, sp_test_sound,
 };
 use state::AppState;
 use std::path::PathBuf;
@@ -353,6 +353,7 @@ pub fn run() {
             sp_is_floating_clickthrough_enabled,
             sp_get_stay_visible,
             sp_set_stay_visible,
+            sp_set_hide_on_blur,
             sp_play_binding,
             sp_get_sets,
             sp_get_active_set,
@@ -548,20 +549,6 @@ pub fn run() {
             move |app| setup::init_app(app, settings_clone.clone())
         })
         .on_window_event(|window, event| {
-            // Hide soundpanel when it loses focus
-            if window.label() == "soundpanel" {
-                if let tauri::WindowEvent::Focused(false) = event {
-                    info!("SoundPanel lost focus - hiding");
-                    let app_handle = window.app_handle();
-                    if let Some(app_state) = app_handle.try_state::<AppState>() {
-                        let _ = crate::soundpanel_window::hide_soundpanel_window(
-                            &app_handle,
-                            &app_state,
-                        );
-                    }
-                }
-            }
-
             // Обрабатываем события главного окна
             if window.label() == "main" {
                 // Позиция сохраняется только при закрытии (событие Destroyed)
@@ -622,6 +609,23 @@ pub fn run() {
                         }
                     }
                     _ => {}
+                }
+            }
+
+            #[cfg(windows)]
+            if window.label() == "soundpanel" {
+                if let tauri::WindowEvent::Focused(focused) = event {
+                    if !*focused {
+                        let win_mgr = window.app_handle().state::<WindowsManager>();
+                        if win_mgr.get_soundpanel_hide_on_blur() {
+                            info!("Soundpanel lost focus - hiding via hide_on_blur");
+                            let app_state = window.app_handle().state::<AppState>();
+                            let _ = soundpanel_window::hide_soundpanel_window(
+                                &window.app_handle(),
+                                &app_state,
+                            );
+                        }
+                    }
                 }
             }
         })

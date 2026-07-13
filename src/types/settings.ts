@@ -250,6 +250,7 @@ export interface SoundPanelWindowSettingsDto {
   bg_color: string
   clickthrough: boolean
   stay_visible: boolean
+  hide_on_blur: boolean
   appearance_source: string
 }
 

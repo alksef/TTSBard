@@ -47,6 +47,13 @@ const overlayStyle = computed(() => {
   }
 })
 
+const isLightBackground = computed(() => {
+  const r = parseInt(bgColor.value.slice(1, 3), 16)
+  const g = parseInt(bgColor.value.slice(3, 5), 16)
+  const b = parseInt(bgColor.value.slice(5, 7), 16)
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.55
+})
+
 function hexToRgba(hex: string, alpha: number): string {
   const r = parseInt(hex.slice(1, 3), 16)
   const g = parseInt(hex.slice(3, 5), 16)
@@ -234,8 +241,8 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="overlay" :style="overlayStyle">
-    <div class="title-bar">
+  <div class="overlay" :class="{ 'light-background': isLightBackground }" :style="overlayStyle">
+    <div class="title-bar" data-tauri-drag-region>
       <div class="title-left">
         <span class="title">SoundPanel</span>
         <div v-if="sets.length > 0" class="set-selector">
@@ -341,6 +348,15 @@ body {
   flex-direction: column;
   border-radius: 8px;
   overflow: hidden;
+  --panel-text: #ffffff;
+  --panel-muted: rgba(255, 255, 255, 0.7);
+  --panel-border: rgba(255, 255, 255, 0.2);
+}
+
+.overlay.light-background {
+  --panel-text: #1f2937;
+  --panel-muted: rgba(31, 41, 55, 0.7);
+  --panel-border: rgba(31, 41, 55, 0.2);
 }
 
 .title-bar {
@@ -363,7 +379,7 @@ body {
   font-size: 13px;
   font-weight: 500;
   opacity: 0.9;
-  color: white;
+  color: var(--panel-text);
 }
 
 .set-selector {
@@ -376,7 +392,7 @@ body {
 .set-name {
   font-size: 12px;
   font-weight: 500;
-  color: white;
+  color: var(--panel-text);
   opacity: 0.85;
   min-width: 60px;
   text-align: center;
@@ -384,8 +400,8 @@ body {
 
 .set-arrow {
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--panel-border);
+  color: var(--panel-muted);
   width: 20px;
   height: 20px;
   border-radius: 3px;
@@ -400,8 +416,8 @@ body {
 
 .set-arrow:hover {
   background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.4);
-  color: white;
+  border-color: var(--panel-text);
+  color: var(--panel-text);
 }
 
 .buttons {
@@ -412,8 +428,8 @@ body {
 
 button {
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: white;
+  border: 1px solid var(--panel-border);
+  color: var(--panel-text);
   width: 24px;
   height: 24px;
   border-radius: 4px;
@@ -427,7 +443,7 @@ button {
 
 button:hover {
   background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.4);
+  border-color: var(--panel-text);
 }
 
 button:active {
@@ -503,12 +519,12 @@ button.active {
   font-family: monospace;
   font-weight: bold;
   font-size: 1.1rem;
-  color: white;
+  color: var(--panel-text);
 }
 
 .binding-desc {
   font-size: 0.75rem;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--panel-muted);
   max-width: 100px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -519,13 +535,13 @@ button.active {
   text-align: center;
   line-height: 1.6;
   font-size: 1rem;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--panel-muted);
 }
 
 .hint-sub {
   margin-top: 0.5rem;
   font-size: 0.85rem;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--panel-muted);
 }
 
 @keyframes shake {

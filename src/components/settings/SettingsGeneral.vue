@@ -193,6 +193,7 @@ watch(loggingSettings, (newSettings) => {
 }
 
 .setting-row {
+  display: block;
   margin-bottom: 1rem;
 }
 
