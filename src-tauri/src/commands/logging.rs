@@ -45,7 +45,7 @@ pub fn get_logging_settings(
 
 /// Save logging settings
 #[tauri::command]
-pub fn save_logging_settings(
+pub async fn save_logging_settings(
     enabled: bool,
     level: String,
     app_handle: AppHandle,
@@ -55,12 +55,12 @@ pub fn save_logging_settings(
     validate_log_level(&level)?;
 
     // Atomically update logging settings
-    settings_manager
-        .update_logging(|logging| {
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.update_logging(move |logging| {
             logging.enabled = enabled;
             logging.level = level;
         })
-        .map_err(|e| e.to_string())?;
+    }).await?;
 
     super::emit_settings_changed(&app_handle);
     Ok(())

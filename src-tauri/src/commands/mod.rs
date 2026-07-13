@@ -29,9 +29,26 @@ pub fn emit_settings_changed(app_handle: &AppHandle) {
     let _ = app_handle.emit("settings-changed", ());
 }
 
+/// Run a sync manager operation on a blocking thread pool.
+///
+/// The manager is cloned (cheap — `Arc` + `PathBuf`) so the closure
+/// owns its own handle and does not borrow `State<'_>`.
+pub async fn persist_blocking<M, F, R>(manager: &M, op: F) -> Result<R, String>
+where
+    M: Clone + Send + 'static,
+    F: FnOnce(&M) -> anyhow::Result<R> + Send + 'static,
+    R: Send + 'static,
+{
+    let mgr = manager.clone();
+    tokio::task::spawn_blocking(move || op(&mgr))
+        .await
+        .map_err(|e| format!("blocking task panicked: {}", e))?
+        .map_err(|e| e.to_string())
+}
+
 /// Quit the application
 #[tauri::command]
-pub fn quit_app(app_handle: AppHandle) -> Result<(), String> {
+pub async fn quit_app(app_handle: AppHandle) -> Result<(), String> {
     info!("Quit requested - initiating graceful shutdown");
 
     if let Some(windows_manager) = app_handle.try_state::<WindowsManager>() {
@@ -40,7 +57,10 @@ pub fn quit_app(app_handle: AppHandle) -> Result<(), String> {
                 let x = pos.x;
                 let y = pos.y;
                 info!(x, y, "Saving main window position");
-                let _ = windows_manager.set_main_position(Some(x), Some(y));
+                let wm = windows_manager.inner();
+                let _ = persist_blocking(wm, move |mgr| {
+                    mgr.set_main_position(Some(x), Some(y))
+                }).await;
             }
         }
     }
@@ -184,13 +204,14 @@ pub async fn confirm_backend_ready(
 
 /// Set quick editor enabled
 #[tauri::command]
-pub fn set_editor_quick(
+pub async fn set_editor_quick(
     value: bool,
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>
 ) -> Result<bool, String> {
-    settings_manager.set_editor_quick(value)
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_editor_quick(value)
+    }).await?;
 
     emit_settings_changed(&app_handle);
 
@@ -207,13 +228,14 @@ pub fn get_editor_quick(
 
 /// Set spellcheck enabled
 #[tauri::command]
-pub fn set_editor_spellcheck_enabled(
+pub async fn set_editor_spellcheck_enabled(
     value: bool,
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>
 ) -> Result<bool, String> {
-    settings_manager.set_editor_spellcheck_enabled(value)
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_editor_spellcheck_enabled(value)
+    }).await?;
 
     emit_settings_changed(&app_handle);
 
@@ -230,13 +252,15 @@ pub fn get_editor_spellcheck_enabled(
 
 /// Set spellcheck source
 #[tauri::command]
-pub fn set_editor_spellcheck_source(
+pub async fn set_editor_spellcheck_source(
     value: SpellSource,
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>
 ) -> Result<SpellSource, String> {
-    settings_manager.set_editor_spellcheck_source(value.clone())
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    let v = value.clone();
+    persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_editor_spellcheck_source(v)
+    }).await?;
 
     emit_settings_changed(&app_handle);
 
@@ -253,13 +277,14 @@ pub fn get_editor_spellcheck_source(
 
 /// Set editor height
 #[tauri::command]
-pub fn set_editor_height(
+pub async fn set_editor_height(
     height: u32,
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
 ) -> Result<u32, String> {
-    settings_manager.set_editor_height(height)
-        .map_err(|e| format!("Failed to save editor height: {}", e))?;
+    persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_editor_height(height)
+    }).await?;
 
     emit_settings_changed(&app_handle);
 

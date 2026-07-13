@@ -712,6 +712,7 @@ impl AppSettings {
 /// This implementation uses RwLock for efficient read-heavy workloads.
 /// Settings are loaded once into memory and cached, with cache invalidation
 /// only when settings are modified.
+#[derive(Clone)]
 pub struct SettingsManager {
     config_dir: PathBuf,
     /// In-memory cache of settings protected by RwLock for read-heavy access

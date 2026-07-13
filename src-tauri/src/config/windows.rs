@@ -224,6 +224,7 @@ impl WindowsSettings {
 ///
 /// Uses RwLock for read-heavy access and a shared global write lock
 /// to prevent concurrent updates from overwriting each other.
+#[derive(Clone)]
 pub struct WindowsManager {
     config_dir: PathBuf,
     cache: Arc<RwLock<WindowsSettings>>,
