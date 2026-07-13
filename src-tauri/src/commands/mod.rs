@@ -66,10 +66,7 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
         return Err("Текст не может быть пустым".to_string());
     }
 
-    let settings_manager = SettingsManager::new()
-        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
-    let settings = settings_manager.load()
-        .map_err(|e| format!("Failed to load settings: {}", e))?;
+    let settings = state.settings_cache.read().clone();
 
     let prefix_result = crate::preprocessor::parse_prefix(&text);
     let text = prefix_result.text;

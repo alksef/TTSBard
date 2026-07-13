@@ -54,13 +54,16 @@ fn greet(name: &str) -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Инициализируем состояние и менеджеры ДО setup
-    let app_state = AppState::new();
+    let mut app_state = AppState::new();
 
     let settings_manager = SettingsManager::new()
         .expect("Failed to create settings manager");
 
     let windows_manager = WindowsManager::new()
         .expect("Failed to create windows manager");
+
+    // Share the cache Arc so hot-path reads stay consistent with setter writes
+    app_state.settings_cache = settings_manager.cache_arc();
 
     // Load settings to configure logger
     // These settings will be passed to init_app to avoid race condition

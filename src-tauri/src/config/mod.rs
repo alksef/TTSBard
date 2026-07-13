@@ -5,6 +5,7 @@
 mod constants;
 pub mod dto;
 mod hotkeys;
+mod persistence;
 mod settings;
 mod validation;
 mod windows;

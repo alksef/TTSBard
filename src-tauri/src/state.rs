@@ -122,6 +122,9 @@ pub struct AppState {
     /// Playback manager for queue/pause/resume
     pub playback_manager: Arc<Mutex<Option<Arc<crate::playback::PlaybackManager>>>>,
 
+    /// Shared settings cache (same Arc as SettingsManager.cache) for hot-path reads
+    pub settings_cache: Arc<RwLock<crate::config::AppSettings>>,
+
     /// Токен отмены для всех фоновых серверов
     pub shutdown: CancellationToken,
 }
@@ -164,6 +167,7 @@ impl AppState {
             prefix_skip_webview: Arc::new(Mutex::new(false)),
             ai_client: Arc::new(Mutex::new(None)),
             ai_settings_hash: Arc::new(AtomicU64::new(0)),
+            settings_cache: Arc::new(RwLock::new(Default::default())),
             shutdown: CancellationToken::new(),
         }
     }
@@ -224,6 +228,7 @@ impl AppState {
         self.emit_event(AppEvent::TtsProviderChanged(provider));
     }
 
+    #[allow(dead_code)]
     pub fn get_openai_api_key(&self) -> Option<String> {
         self.tts_config.read().openai_key.clone()
     }
@@ -313,6 +318,7 @@ impl AppState {
         *self.tts_providers.lock() = Some(TtsProvider::Fish(tts));
     }
 
+    #[allow(dead_code)]
     pub fn get_fish_audio_api_key(&self) -> Option<String> {
         self.tts_config.read().fish_api_key.clone()
     }
@@ -367,6 +373,7 @@ impl AppState {
         self.tts_config.write().openai_proxy_url = proxy_url;
     }
 
+    #[allow(dead_code)]
     pub fn get_local_tts_url(&self) -> String {
         self.tts_config.read().local_url.clone()
     }

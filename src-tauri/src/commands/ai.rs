@@ -488,10 +488,13 @@ pub async fn set_tts_provider(
 ) -> Result<(), String> {
     info!(?provider, "Switching to provider");
 
+    settings_manager.set_tts_provider(provider)
+        .map_err(|e| format!("Failed to save provider: {}", e))?;
+
     match provider {
         TtsProviderType::OpenAi => {
             info!("Initializing OpenAI TTS");
-            let api_key = state.get_openai_api_key();
+            let api_key = settings_manager.get_openai_api_key();
             if let Some(key) = api_key {
                 state.init_openai_tts(key);
                 debug!("OpenAI TTS initialized");
@@ -525,13 +528,13 @@ pub async fn set_tts_provider(
         }
         TtsProviderType::Local => {
             info!("Initializing Local TTS");
-            let url = state.get_local_tts_url();
+            let url = settings_manager.get_local_tts_url();
             state.init_local_tts(url);
             debug!("Local TTS initialized");
         }
         TtsProviderType::Fish => {
             info!("Initializing Fish Audio TTS");
-            let api_key = state.get_fish_audio_api_key();
+            let api_key = settings_manager.get_fish_audio_api_key();
             if let Some(key) = api_key {
                 state.init_fish_audio_tts(key);
                 debug!("Fish Audio TTS initialized");
@@ -542,9 +545,6 @@ pub async fn set_tts_provider(
     }
 
     state.set_tts_provider_type(provider);
-
-    settings_manager.set_tts_provider(provider)
-        .map_err(|e| format!("Failed to save provider: {}", e))?;
 
     super::emit_settings_changed(&app_handle);
 
@@ -605,8 +605,10 @@ pub fn set_local_tts_url(
 
 /// Get OpenAI API key
 #[tauri::command]
-pub fn get_openai_api_key(state: State<'_, AppState>) -> Option<String> {
-    state.get_openai_api_key()
+pub fn get_openai_api_key(
+    settings_manager: State<'_, SettingsManager>,
+) -> Option<String> {
+    settings_manager.get_openai_api_key()
 }
 
 /// Set OpenAI API key
@@ -621,11 +623,11 @@ pub fn set_openai_api_key(
         return Err("Неверный формат API ключа OpenAI".into());
     }
 
+    settings_manager.set_openai_api_key(Some(key.clone()))
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
+
     state.set_openai_api_key(Some(key.clone()));
     state.init_openai_tts(key.clone());
-
-    settings_manager.set_openai_api_key(Some(key))
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
     super::emit_settings_changed(&app_handle);
 
     Ok(())
@@ -703,8 +705,10 @@ pub fn apply_openai_proxy_settings(
 
 /// Get Fish Audio API key
 #[tauri::command]
-pub fn get_fish_audio_api_key(state: State<'_, AppState>) -> Option<String> {
-    state.get_fish_audio_api_key()
+pub fn get_fish_audio_api_key(
+    settings_manager: State<'_, SettingsManager>,
+) -> Option<String> {
+    settings_manager.get_fish_audio_api_key()
 }
 
 /// Set Fish Audio API key
@@ -719,11 +723,11 @@ pub fn set_fish_audio_api_key(
         return Err("API Key не может быть пустым".into());
     }
 
+    settings_manager.set_fish_audio_api_key(Some(key.clone()))
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
+
     state.set_fish_audio_api_key(Some(key.clone()));
     state.init_fish_audio_tts(key.clone());
-
-    settings_manager.set_fish_audio_api_key(Some(key))
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
     super::emit_settings_changed(&app_handle);
 
     Ok(())
@@ -872,9 +876,9 @@ pub fn set_fish_audio_format(
     settings_manager: State<'_, SettingsManager>,
     format: String,
 ) -> Result<(), String> {
-    state.set_fish_audio_format(format.clone());
-    settings_manager.set_fish_audio_format(format)
+    settings_manager.set_fish_audio_format(format.clone())
         .map_err(|e| format!("Failed to save format: {}", e))?;
+    state.set_fish_audio_format(format);
     super::emit_settings_changed(&app_handle);
     Ok(())
 }
@@ -891,9 +895,9 @@ pub fn set_fish_audio_temperature(
         return Err("Temperature must be between 0.0 and 1.0".into());
     }
 
-    state.set_fish_audio_temperature(temperature);
     settings_manager.set_fish_audio_temperature(temperature)
         .map_err(|e| format!("Failed to save temperature: {}", e))?;
+    state.set_fish_audio_temperature(temperature);
     super::emit_settings_changed(&app_handle);
     Ok(())
 }
@@ -910,9 +914,9 @@ pub fn set_fish_audio_sample_rate(
         return Err("Sample rate cannot be zero".into());
     }
 
-    state.set_fish_audio_sample_rate(sample_rate);
     settings_manager.set_fish_audio_sample_rate(sample_rate)
         .map_err(|e| format!("Failed to save sample rate: {}", e))?;
+    state.set_fish_audio_sample_rate(sample_rate);
     super::emit_settings_changed(&app_handle);
     Ok(())
 }
@@ -955,6 +959,8 @@ pub fn apply_fish_audio_proxy_settings(
 
 /// Check if API key is set
 #[tauri::command]
-pub fn has_api_key(state: State<'_, AppState>) -> bool {
-    state.get_openai_api_key().is_some()
+pub fn has_api_key(
+    settings_manager: State<'_, SettingsManager>,
+) -> bool {
+    settings_manager.get_openai_api_key().is_some()
 }
