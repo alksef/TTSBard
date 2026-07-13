@@ -304,6 +304,28 @@ pub fn set_audio_effects_formant_preserved(
     Ok(())
 }
 
+/// Get DSP post-processing settings
+#[tauri::command]
+pub fn get_dsp_settings(
+    settings_manager: State<'_, SettingsManager>,
+) -> crate::config::DspSettings {
+    settings_manager.get_dsp_settings()
+}
+
+/// Atomically save all DSP post-processing settings
+#[tauri::command]
+pub fn save_dsp_settings(
+    dsp: crate::config::DspSettings,
+    settings_manager: State<'_, SettingsManager>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    settings_manager
+        .set_dsp_settings(&dsp)
+        .map_err(|e| format!("Не удалось сохранить DSP настройки: {}", e))?;
+    super::emit_settings_changed(&app_handle);
+    Ok(())
+}
+
 // ==================== Preview & Save Commands ====================
 
 pub struct PreviewState {
@@ -335,12 +357,20 @@ pub async fn preview_audio_file(
     volume: i16,
     enhance_enabled: bool,
     enhance_atten_db: f32,
+    dsp_settings: Option<crate::config::DspSettings>,
 ) -> Result<(), String> {
     let speaker_volume = speaker_volume.clamp(0, 100);
     let pitch = pitch.clamp(-100, 100);
     let speed = speed.clamp(-100, 100);
     let volume = volume.clamp(0, 200);
     let enhance_atten_db = enhance_atten_db.clamp(5.0, 30.0);
+
+    let dsp_config = dsp_settings.as_ref().map(|dsp| dsp.to_dsp_config());
+
+    let dsp_has_effect = dsp_config
+        .as_ref()
+        .map(|d| d.eq.enabled || d.compressor.enabled || d.limiter.enabled)
+        .unwrap_or(false);
 
     let stop_flag = {
         let state = preview_state();
@@ -368,10 +398,10 @@ pub async fn preview_audio_file(
             .with_fail_on_enhance_error(true);
 
         let has_effects =
-            voice_pitch != 0 || voice_speed != 0 || voice_volume != 100 || enhance_enabled;
+            voice_pitch != 0 || voice_speed != 0 || voice_volume != 100 || enhance_enabled || dsp_has_effect;
 
         let pcm: AudioPcm = if has_effects {
-            effects::apply_effects(&file_data, &effects_config)?
+            effects::apply_effects(&file_data, &effects_config, dsp_config.as_ref())?
         } else {
             decode_audio(&file_data).map_err(|e| format!("Audio decode failed: {}", e))?
         };
@@ -414,6 +444,7 @@ pub fn save_audio_effects(
     enhance_enabled: bool,
     enhance_atten_db: f32,
     formant_preserved: bool,
+    boundary_cleanup_enabled: bool,
     settings_manager: State<'_, SettingsManager>,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
@@ -428,6 +459,7 @@ pub fn save_audio_effects(
     settings.audio_effects.enhance_enabled = enhance_enabled;
     settings.audio_effects.enhance_atten_db = enhance_atten_db.clamp(5.0, 30.0);
     settings.audio_effects.formant_preserved = formant_preserved;
+    settings.audio_effects.boundary_cleanup_enabled = boundary_cleanup_enabled;
 
     settings_manager
         .save(&settings)

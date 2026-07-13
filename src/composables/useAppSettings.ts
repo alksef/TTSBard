@@ -287,3 +287,8 @@ export function useAudioEffectsSettings(): ComputedRef<AppSettingsDto['audio_eff
   const { settings } = useAppSettings()
   return computed(() => settings.value?.audio_effects)
 }
+
+export function useDspSettings(): ComputedRef<AppSettingsDto['dsp'] | undefined> {
+  const { settings } = useAppSettings()
+  return computed(() => settings.value?.dsp)
+}

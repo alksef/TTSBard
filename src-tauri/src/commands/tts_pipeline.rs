@@ -1,4 +1,4 @@
-use crate::audio::{apply_effects, decode_audio, AudioEffects, AudioPcm, OutputConfig};
+use crate::audio::{apply_effects, decode_audio, process_boundaries, AudioEffects, AudioPcm, OutputConfig};
 use crate::config::AppSettings;
 use crate::state::AppState;
 use std::fs;
@@ -68,13 +68,22 @@ pub async fn synthesize_audio(state: &AppState, text: &str) -> Result<Vec<u8>, S
     Ok(audio_data)
 }
 
-/// 4. Этап применения аудио-эффектов (pitch, speed, volume).
-/// Always decodes to PCM; returns `AudioPcm` ready for playback.
+/// 4. Этап применения аудио-эффектов (pitch, speed, volume,
+///    DeepFilterNet, DSP), boundary cleanup (DC offset + fade-in/out).
+///
+/// Pipeline order:
+///   1. Decode audio to PCM
+///   2. DeepFilterNet noise suppression (if enabled)
+///   3. Signalsmith Stretch (tempo + pitch + formant correction)
+///   4. DSP (EQ + compressor + limiter)
+///   5. Per-phrase boundary cleanup (DC offset removal + start/end fade)
+///
+/// Returns `AudioPcm` ready for playback.
 pub fn apply_audio_effects_pipeline(
     audio_data: Vec<u8>,
     settings: &AppSettings,
 ) -> Result<AudioPcm, String> {
-    if settings.audio_effects.enabled {
+    let pcm = if settings.audio_effects.enabled {
         let effects = AudioEffects::new(
             settings.audio_effects.pitch,
             settings.audio_effects.speed,
@@ -87,22 +96,40 @@ pub fn apply_audio_effects_pipeline(
         .with_formant_preserved(settings.audio_effects.formant_preserved);
 
         let original_len = audio_data.len();
-        match apply_effects(&audio_data, &effects) {
+        let dsp_config = settings.dsp.to_dsp_config();
+        match apply_effects(&audio_data, &effects, Some(&dsp_config)) {
             Ok(pcm) => {
                 debug!(original = original_len, frames = pcm.frame_count(), "Audio effects applied");
-                Ok(pcm)
+                pcm
             }
             Err(e) => {
                 error!(error = %e, "Failed to apply audio effects");
-                Err(format!("Не удалось применить аудио эффекты: {}", e))
+                return Err(format!("Не удалось применить аудио эффекты: {}", e));
             }
         }
     } else {
-        decode_audio(&audio_data).map_err(|e| format!("Audio decode failed: {}", e))
+        decode_audio(&audio_data).map_err(|e| format!("Audio decode failed: {}", e))?
+    };
+
+    // Step 5: Per-phrase boundary cleanup (DC offset + fade-in/out).
+    // Safe optional cleanup — on error, fall back to the original PCM.
+    if settings.audio_effects.boundary_cleanup_enabled {
+        let cleaned = process_boundaries(&pcm);
+        if !cleaned.samples.is_empty()
+            && cleaned.sample_rate == pcm.sample_rate
+            && cleaned.channels == pcm.channels
+            && cleaned.frame_count() == pcm.frame_count()
+        {
+            debug!(frames = cleaned.frame_count(), "Boundary cleanup applied");
+            return Ok(cleaned);
+        }
+        warn!("Boundary cleanup produced invalid result, falling back to original PCM");
     }
+
+    Ok(pcm)
 }
 
-/// 5. Отправка звука в плеер и запись истории
+/// 5. Отправка звука в плеер
 pub fn enqueue_and_record(
     state: &AppState,
     text: String,
@@ -164,9 +191,6 @@ pub fn enqueue_and_record(
             warn!("Playback queue full, phrase dropped: {}", text);
             return Err("Очередь воспроизведения переполнена. Попробуйте позже.".to_string());
         }
-        if let Some(hm) = state.editor.history_manager.lock().as_ref() {
-            hm.record_phrase(&text);
-        }
         Ok(())
     } else {
         Err("Плеер не инициализирован".to_string())
@@ -193,4 +217,109 @@ pub async fn synthesize_and_export(state: &AppState, text: &str, path: &str) -> 
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_settings(boundary_cleanup: bool) -> AppSettings {
+        let mut s = AppSettings::default();
+        s.audio_effects.boundary_cleanup_enabled = boundary_cleanup;
+        s
+    }
+
+    fn generate_silent_wav() -> Vec<u8> {
+        let sample_rate = 48000u32;
+        let channels = 1usize;
+        let frames = 1000usize;
+        let samples: Vec<f32> = (0..frames)
+            .map(|_| 0.0f32)
+            .collect();
+        crate::audio::effects::encode_wav(&samples, sample_rate, channels)
+            .expect("encode test WAV")
+    }
+
+    /// Boundary cleanup enabled: pipeline must return valid, finite PCM.
+    #[test]
+    fn pipeline_with_boundary_cleanup_enabled() {
+        let wav = generate_silent_wav();
+        let settings = make_settings(true);
+        let result = apply_audio_effects_pipeline(wav, &settings)
+            .expect("pipeline with boundary cleanup enabled");
+        assert!(result.samples.iter().all(|s| s.is_finite()));
+        assert_eq!(result.sample_rate, 48000);
+        assert_eq!(result.channels, 1);
+    }
+
+    /// Boundary cleanup disabled: pipeline must return valid, finite PCM.
+    #[test]
+    fn pipeline_with_boundary_cleanup_disabled() {
+        let wav = generate_silent_wav();
+        let settings = make_settings(false);
+        let result = apply_audio_effects_pipeline(wav, &settings)
+            .expect("pipeline with boundary cleanup disabled");
+        assert!(result.samples.iter().all(|s| s.is_finite()));
+        assert_eq!(result.sample_rate, 48000);
+        assert_eq!(result.channels, 1);
+    }
+
+    /// Boundary cleanup disabled must preserve original samples (no fade-in/out).
+    #[test]
+    fn pipeline_boundary_disabled_preserves_samples() {
+        let sample_rate = 48000u32;
+        let channels = 1usize;
+        let frames = 2000usize;
+        let samples: Vec<f32> = (0..frames)
+            .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / sample_rate as f32).sin() * 0.5)
+            .collect();
+        let wav = crate::audio::effects::encode_wav(&samples, sample_rate, channels)
+            .expect("encode test WAV");
+
+        let settings = make_settings(false);
+        let result = apply_audio_effects_pipeline(wav, &settings)
+            .expect("pipeline with boundary disabled");
+        for (a, b) in samples.iter().zip(result.samples.iter()) {
+            assert!((a - b).abs() < 0.01, "samples changed with boundary disabled");
+        }
+    }
+
+    /// Boundary cleanup enabled + effects disabled: DeepFilterNet and DSP
+    /// must still be inactive (only boundary cleanup runs).
+    #[test]
+    fn pipeline_boundary_enabled_does_not_enable_enhance_or_dsp() {
+        let wav = generate_silent_wav();
+        let mut settings = make_settings(true);
+        settings.audio_effects.enabled = false;
+        settings.audio_effects.enhance_enabled = false;
+        settings.dsp.eq.enabled = false;
+        settings.dsp.compressor.enabled = false;
+        settings.dsp.limiter.enabled = false;
+
+        let result = apply_audio_effects_pipeline(wav, &settings)
+            .expect("pipeline with boundary enabled, effects disabled");
+        // Sample rate preserved (no DeepFilterNet resampling).
+        assert_eq!(result.sample_rate, 48000);
+        assert!(result.samples.iter().all(|s| s.is_finite()));
+    }
+
+    /// Sample rate, channels, and frame count must be preserved after boundary cleanup.
+    #[test]
+    fn pipeline_preserves_metadata_with_boundary() {
+        let sample_rate = 44100u32;
+        let channels = 2usize;
+        let frames = 500usize;
+        let samples: Vec<f32> = (0..frames * channels)
+            .map(|i| (i as f32 * 0.001).sin() * 0.3)
+            .collect();
+        let wav = crate::audio::effects::encode_wav(&samples, sample_rate, channels)
+            .expect("encode stereo WAV");
+
+        let settings = make_settings(true);
+        let result = apply_audio_effects_pipeline(wav, &settings)
+            .expect("pipeline with boundary");
+        assert_eq!(result.sample_rate, sample_rate);
+        assert_eq!(result.channels, channels);
+        assert_eq!(result.frame_count(), frames);
+    }
 }

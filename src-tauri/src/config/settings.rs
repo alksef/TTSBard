@@ -79,6 +79,10 @@ pub struct AudioEffectsSettings {
     /// По умолчанию включено. Не зависит от DeepFilterNet.
     #[serde(default = "default_formant_preserved")]
     pub formant_preserved: bool,
+    /// Включить per-phrase boundary cleanup (DC offset removal + fade-in/out).
+    /// По умолчанию включено. Не зависит от DeepFilterNet и DSP.
+    #[serde(default = "default_boundary_cleanup_enabled")]
+    pub boundary_cleanup_enabled: bool,
 }
 
 fn default_effects_enabled() -> bool {
@@ -102,6 +106,9 @@ fn default_enhance_atten_db() -> f32 {
 fn default_formant_preserved() -> bool {
     true
 }
+fn default_boundary_cleanup_enabled() -> bool {
+    true
+}
 
 impl Default for AudioEffectsSettings {
     fn default() -> Self {
@@ -113,6 +120,238 @@ impl Default for AudioEffectsSettings {
             enhance_enabled: false,
             enhance_atten_db: 12.0,
             formant_preserved: true,
+            boundary_cleanup_enabled: true,
+        }
+    }
+}
+
+// ==================== DSP Post-Processing Settings ====================
+
+/// DSP post-processing EQ band
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DspEqBandSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_band_freq")]
+    pub frequency_hz: f32,
+    #[serde(default)]
+    pub gain_db: f32,
+    #[serde(default = "default_band_q")]
+    pub q: f32,
+}
+
+fn default_band_freq() -> f32 {
+    2500.0
+}
+fn default_band_q() -> f32 {
+    0.7
+}
+
+impl Default for DspEqBandSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            frequency_hz: 2500.0,
+            gain_db: 0.0,
+            q: 0.7,
+        }
+    }
+}
+
+/// DSP post-processing EQ settings
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DspEqSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub low_cut_enabled: bool,
+    #[serde(default = "default_low_cut_hz")]
+    pub low_cut_hz: f32,
+    #[serde(default = "default_low_cut_slope")]
+    pub low_cut_slope_db: f32,
+    #[serde(default = "default_dsp_bands")]
+    pub bands: [DspEqBandSettings; 3],
+    #[serde(default)]
+    pub high_shelf_enabled: bool,
+    #[serde(default = "default_high_shelf_hz")]
+    pub high_shelf_hz: f32,
+    #[serde(default)]
+    pub high_shelf_gain_db: f32,
+}
+
+fn default_low_cut_hz() -> f32 {
+    80.0
+}
+fn default_low_cut_slope() -> f32 {
+    12.0
+}
+fn default_dsp_bands() -> [DspEqBandSettings; 3] {
+    [
+        DspEqBandSettings::default(),
+        DspEqBandSettings::default(),
+        DspEqBandSettings::default(),
+    ]
+}
+fn default_high_shelf_hz() -> f32 {
+    8000.0
+}
+
+impl Default for DspEqSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            low_cut_enabled: false,
+            low_cut_hz: 80.0,
+            low_cut_slope_db: 12.0,
+            bands: default_dsp_bands(),
+            high_shelf_enabled: false,
+            high_shelf_hz: 8000.0,
+            high_shelf_gain_db: 0.0,
+        }
+    }
+}
+
+/// DSP post-processing compressor settings
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DspCompressorSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_comp_threshold")]
+    pub threshold_db: f32,
+    #[serde(default = "default_comp_ratio")]
+    pub ratio: f32,
+    #[serde(default = "default_comp_attack")]
+    pub attack_ms: f32,
+    #[serde(default = "default_comp_release")]
+    pub release_ms: f32,
+    #[serde(default = "default_comp_knee")]
+    pub knee_db: f32,
+    #[serde(default)]
+    pub makeup_db: f32,
+}
+
+fn default_comp_threshold() -> f32 {
+    -18.0
+}
+fn default_comp_ratio() -> f32 {
+    2.0
+}
+fn default_comp_attack() -> f32 {
+    8.0
+}
+fn default_comp_release() -> f32 {
+    120.0
+}
+fn default_comp_knee() -> f32 {
+    6.0
+}
+
+impl Default for DspCompressorSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            threshold_db: -18.0,
+            ratio: 2.0,
+            attack_ms: 8.0,
+            release_ms: 120.0,
+            knee_db: 6.0,
+            makeup_db: 0.0,
+        }
+    }
+}
+
+/// DSP post-processing limiter settings
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DspLimiterSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_lim_ceiling")]
+    pub ceiling_db: f32,
+    #[serde(default = "default_lim_release")]
+    pub release_ms: f32,
+}
+
+fn default_lim_ceiling() -> f32 {
+    -1.0
+}
+fn default_lim_release() -> f32 {
+    50.0
+}
+
+impl Default for DspLimiterSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            ceiling_db: -1.0,
+            release_ms: 50.0,
+        }
+    }
+}
+
+/// DSP post-processing settings
+///
+/// Contains independent `enabled` flags for EQ, compressor, and limiter.
+/// Each block can be bypassed individually at runtime.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DspSettings {
+    #[serde(default)]
+    pub eq: DspEqSettings,
+    #[serde(default)]
+    pub compressor: DspCompressorSettings,
+    #[serde(default)]
+    pub limiter: DspLimiterSettings,
+}
+
+impl Default for DspSettings {
+    fn default() -> Self {
+        Self {
+            eq: DspEqSettings::default(),
+            compressor: DspCompressorSettings::default(),
+            limiter: DspLimiterSettings::default(),
+        }
+    }
+}
+
+impl DspSettings {
+    /// Convert to runtime DSP configuration with validation/clamping.
+    pub fn to_dsp_config(&self) -> crate::audio::DspConfig {
+        use crate::audio::{CompressorConfig, DspConfig, EqBand, EqConfig, LimiterConfig};
+
+        let bands: [EqBand; 3] = std::array::from_fn(|i| {
+            let b = &self.eq.bands[i];
+            EqBand {
+                enabled: b.enabled,
+                frequency_hz: b.frequency_hz.clamp(20.0, 20000.0),
+                gain_db: b.gain_db.clamp(-24.0, 24.0),
+                q: b.q.clamp(0.1, 10.0),
+            }
+        });
+
+        DspConfig {
+            eq: EqConfig {
+                enabled: self.eq.enabled,
+                low_cut_enabled: self.eq.low_cut_enabled,
+                low_cut_hz: self.eq.low_cut_hz.clamp(10.0, 500.0),
+                low_cut_slope_db: self.eq.low_cut_slope_db.clamp(6.0, 48.0),
+                bands,
+                high_shelf_enabled: self.eq.high_shelf_enabled,
+                high_shelf_hz: self.eq.high_shelf_hz.clamp(1000.0, 20000.0),
+                high_shelf_gain_db: self.eq.high_shelf_gain_db.clamp(-24.0, 24.0),
+            },
+            compressor: CompressorConfig {
+                enabled: self.compressor.enabled,
+                threshold_db: self.compressor.threshold_db.clamp(-60.0, 0.0),
+                ratio: self.compressor.ratio.clamp(1.0, 20.0),
+                attack_ms: self.compressor.attack_ms.clamp(0.1, 500.0),
+                release_ms: self.compressor.release_ms.clamp(1.0, 2000.0),
+                knee_db: self.compressor.knee_db.clamp(0.0, 20.0),
+                makeup_db: self.compressor.makeup_db.clamp(-12.0, 24.0),
+            },
+            limiter: LimiterConfig {
+                enabled: self.limiter.enabled,
+                ceiling_db: self.limiter.ceiling_db.clamp(-12.0, 0.0),
+                release_ms: self.limiter.release_ms.clamp(1.0, 500.0),
+            },
         }
     }
 }
@@ -652,6 +891,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub audio_effects: AudioEffectsSettings,
     #[serde(default)]
+    pub dsp: DspSettings,
+    #[serde(default)]
     pub hotkey_enabled: bool,
     #[serde(default)]
     pub editor: EditorSettings,
@@ -677,6 +918,7 @@ impl Default for AppSettings {
             audio: AudioSettings::default(),
             tts: TtsSettings::default(),
             audio_effects: AudioEffectsSettings::default(),
+            dsp: DspSettings::default(),
             hotkey_enabled: true,
             editor: EditorSettings::default(),
             theme: Theme::Dark,
@@ -1439,6 +1681,20 @@ impl SettingsManager {
         self.update_field("/audio_effects/formant_preserved", &preserved)
     }
 
+    // ========== DSP Settings ==========
+
+    /// Get DSP post-processing settings
+    pub fn get_dsp_settings(&self) -> DspSettings {
+        self.cache.read().dsp.clone()
+    }
+
+    /// Atomically save all DSP settings
+    pub fn set_dsp_settings(&self, dsp: &DspSettings) -> Result<()> {
+        let mut settings = self.load()?;
+        settings.dsp = dsp.clone();
+        self.save(&settings)
+    }
+
     // ========== Hotkey Settings ==========
 
     /// Get all hotkey settings
@@ -1773,5 +2029,85 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&config_dir);
+    }
+
+    /// Backward-compat: old settings.json without `dsp` field must deserialize.
+    #[test]
+    fn settings_deserializes_without_dsp_field() {
+        let old_json = r#"{
+            "audio": { "speaker_device": null, "speaker_enabled": true, "speaker_volume": 80, "virtual_mic_device": null, "virtual_mic_volume": 100 },
+            "tts": { "provider": "openai", "openai": { "api_key": "sk-test", "voice": "alloy" }, "local": { "url": "http://127.0.0.1:8124" }, "fish": { "api_key": null, "voices": [], "reference_id": "", "format": "mp3", "temperature": 0.7, "sample_rate": 44100, "use_proxy": false }, "telegram": { "api_id": null, "proxy_mode": "none", "voices": [], "current_voice_id": "" }, "network": { "proxy": { "proxy_url": null }, "mtproxy": { "host": null, "port": 8888, "secret": null, "dc_id": null } } },
+            "audio_effects": { "enabled": false, "pitch": 0, "speed": 0, "volume": 100, "enhance_enabled": false, "enhance_atten_db": 12.0, "formant_preserved": true },
+            "hotkey_enabled": true,
+            "editor": { "quick": false, "ai": false, "ai_completion": false, "spellcheck_enabled": true, "spellcheck_source": "offline", "editor_height": 340 },
+            "theme": "dark",
+            "twitch": { "enabled": false, "username": "", "token": "", "channel": "", "start_on_boot": false },
+            "webview": { "enabled": false, "start_on_boot": false, "port": 10100, "bind_address": "0.0.0.0", "access_token": null, "upnp_enabled": false },
+            "logging": { "enabled": false, "level": "info", "module_levels": {} },
+            "ai": { "provider": "openai", "openai": { "api_key": null, "use_proxy": false, "model": "gpt-4o-mini" }, "zai": { "url": null, "api_key": null, "model": "glm-4.5" }, "deepseek": { "api_key": null, "use_proxy": false, "model": "deepseek-chat" }, "custom": { "url": null, "api_key": null, "use_proxy": false, "model": "deepseek-chat" }, "prompt": "test", "timeout": 20 },
+            "hotkeys": { "main_window": { "modifiers": ["ctrl"], "key": "F12" }, "sound_panel": { "modifiers": ["alt"], "key": "F12" }, "playback_pause": { "modifiers": [], "key": "" }, "playback_stop": { "modifiers": [], "key": "" }, "playback_repeat": { "modifiers": [], "key": "" }, "playback_control_window": { "modifiers": [], "key": "" } },
+            "show_playback_on_start": false
+        }"#;
+        let settings: AppSettings = serde_json::from_str(old_json)
+            .expect("old AppSettings (without dsp field) must deserialize");
+        // DSP falls back to default (all disabled)
+        assert!(!settings.dsp.eq.enabled);
+        assert!(!settings.dsp.compressor.enabled);
+        assert!(!settings.dsp.limiter.enabled);
+        assert_eq!(settings.dsp.eq.bands.len(), 3);
+    }
+
+    /// Backward-compat: old settings.json without `boundary_cleanup_enabled`
+    /// must deserialize with the field defaulting to `true`.
+    #[test]
+    fn audio_effects_deserializes_without_boundary_cleanup_field() {
+        let old_json = r#"{
+            "enabled": false,
+            "pitch": 0,
+            "speed": 0,
+            "volume": 100,
+            "enhance_enabled": false,
+            "enhance_atten_db": 12.0,
+            "formant_preserved": true
+        }"#;
+        let settings: AudioEffectsSettings = serde_json::from_str(old_json)
+            .expect("old AudioEffectsSettings (without boundary_cleanup_enabled) must deserialize");
+        assert!(settings.boundary_cleanup_enabled);
+    }
+
+    /// Round-trip: AudioEffectsSettings with boundary_cleanup_enabled = true/false
+    /// must serialize + deserialize correctly.
+    #[test]
+    fn audio_effects_boundary_cleanup_round_trip() {
+        let original = AudioEffectsSettings {
+            enabled: false,
+            pitch: 10,
+            speed: -20,
+            volume: 100,
+            enhance_enabled: true,
+            enhance_atten_db: 15.0,
+            formant_preserved: false,
+            boundary_cleanup_enabled: false,
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let back: AudioEffectsSettings = serde_json::from_str(&json).unwrap();
+        assert!(!back.boundary_cleanup_enabled);
+        assert_eq!(back.pitch, 10);
+        assert_eq!(back.enhance_atten_db, 15.0);
+
+        let original_true = AudioEffectsSettings {
+            boundary_cleanup_enabled: true,
+            ..AudioEffectsSettings::default()
+        };
+        let json_true = serde_json::to_string(&original_true).unwrap();
+        let back_true: AudioEffectsSettings = serde_json::from_str(&json_true).unwrap();
+        assert!(back_true.boundary_cleanup_enabled);
+    }
+
+    /// Default AudioEffectsSettings must have boundary_cleanup_enabled = true.
+    #[test]
+    fn default_audio_effects_boundary_cleanup_enabled() {
+        let s = AudioEffectsSettings::default();
+        assert!(s.boundary_cleanup_enabled);
     }
 }

@@ -15,7 +15,8 @@ pub use dto::{AllSourcesParams, AppSettingsDto};
 pub use hotkeys::{Hotkey, HotkeyModifier, HotkeySettings};
 pub use settings::{
     AiCustomSettings, AiDeepSeekSettings, AiOpenAiSettings, AiProviderType, AiSettings,
-    AiZAiSettings, AppSettings, AudioEffectsSettings, AudioSettings, LoggingSettings,
+    AiZAiSettings, AppSettings, AudioEffectsSettings, AudioSettings, DspCompressorSettings,
+    DspEqBandSettings, DspEqSettings, DspLimiterSettings, DspSettings, LoggingSettings,
     MtProxySettings, NetworkSettings, ProxyMode, ProxyType, SettingsManager, SpellSource, Theme,
     TwitchSettings,
 };
