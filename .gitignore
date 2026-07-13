@@ -30,6 +30,17 @@ Cargo.lock
 # Temporary files
 nul
 notes/note-run-claude.txt
+.venv/
+screenshots/
+audio.mp3
+ai-log-failed.txt
+grep.exe.stackdump
+$null
+src-tauri/build.txt
+test_theme.rs
+*.bak
+opencode.json
+.codex/
 
 images
 docs/ideas
