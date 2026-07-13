@@ -50,8 +50,7 @@ impl ReplacementList {
             return Ok(list);
         }
 
-        let content = fs::read_to_string(path)
-            .context("Failed to read replacements file")?;
+        let content = fs::read_to_string(path).context("Failed to read replacements file")?;
 
         for line in content.lines() {
             let line = line.trim();
@@ -81,8 +80,7 @@ impl ReplacementList {
             return Ok(list);
         }
 
-        let content = fs::read_to_string(path)
-            .context("Failed to read usernames file")?;
+        let content = fs::read_to_string(path).context("Failed to read usernames file")?;
 
         for line in content.lines() {
             let line = line.trim();
@@ -113,8 +111,7 @@ impl ReplacementList {
             content.push_str(&format!("{} {}\n", key, value));
         }
 
-        fs::write(path, content)
-            .context("Failed to write replacements file")?;
+        fs::write(path, content).context("Failed to write replacements file")?;
 
         Ok(())
     }
@@ -156,8 +153,8 @@ impl TextPreprocessor {
         let replacements_path = super::replacements_file()?;
         let usernames_path = super::usernames_file()?;
 
-        let mut replacement_list = ReplacementList::load_from_file(&replacements_path)
-            .unwrap_or_default();
+        let mut replacement_list =
+            ReplacementList::load_from_file(&replacements_path).unwrap_or_default();
 
         // Load usernames from separate file
         if usernames_path.exists() {
@@ -175,24 +172,28 @@ impl TextPreprocessor {
         let mut result = text.to_string();
 
         // Replace all \word patterns
-        result = REPLACEMENT_PATTERN_ALL.replace_all(&result, |caps: &regex::Captures| {
-            let key = &caps[1];
-            if let Some(replacement) = self.replacements.get_replacement(key) {
-                replacement.clone()
-            } else {
-                format!("\\{}", key)
-            }
-        }).to_string();
+        result = REPLACEMENT_PATTERN_ALL
+            .replace_all(&result, |caps: &regex::Captures| {
+                let key = &caps[1];
+                if let Some(replacement) = self.replacements.get_replacement(key) {
+                    replacement.clone()
+                } else {
+                    format!("\\{}", key)
+                }
+            })
+            .to_string();
 
         // Replace all %username patterns
-        result = USERNAME_PATTERN_ALL.replace_all(&result, |caps: &regex::Captures| {
-            let key = &caps[1];
-            if let Some(username) = self.replacements.get_username(key) {
-                username.clone()
-            } else {
-                format!("%{}", key)
-            }
-        }).to_string();
+        result = USERNAME_PATTERN_ALL
+            .replace_all(&result, |caps: &regex::Captures| {
+                let key = &caps[1];
+                if let Some(username) = self.replacements.get_username(key) {
+                    username.clone()
+                } else {
+                    format!("%{}", key)
+                }
+            })
+            .to_string();
 
         result
     }
@@ -261,8 +262,14 @@ invalidline
 
         let list = ReplacementList::load_from_file(temp_file).unwrap();
         assert_eq!(list.get_replacement("name"), Some(&"Alice".to_string()));
-        assert_eq!(list.get_replacement("greeting"), Some(&"Hello there".to_string()));
-        assert_eq!(list.get_replacement("admin"), Some(&"Administrator".to_string()));
+        assert_eq!(
+            list.get_replacement("greeting"),
+            Some(&"Hello there".to_string())
+        );
+        assert_eq!(
+            list.get_replacement("admin"),
+            Some(&"Administrator".to_string())
+        );
         assert_eq!(list.get_replacement("invalidline"), None); // Skipped
 
         fs::remove_file(temp_file).unwrap();
@@ -281,7 +288,10 @@ invalidline
 
         // Verify it can be loaded back
         let loaded = ReplacementList::load_from_file(temp_file).unwrap();
-        assert_eq!(loaded.get_replacement("key"), Some(&"value with spaces".to_string()));
+        assert_eq!(
+            loaded.get_replacement("key"),
+            Some(&"value with spaces".to_string())
+        );
 
         fs::remove_file(temp_file).unwrap();
     }

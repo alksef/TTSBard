@@ -644,11 +644,7 @@ mod tests {
 
     #[test]
     fn test_cache_write_read_roundtrip() {
-        let pcm = crate::audio::AudioPcm::new(
-            vec![0.0f32; 4800],
-            48000,
-            1,
-        ).unwrap();
+        let pcm = crate::audio::AudioPcm::new(vec![0.0f32; 4800], 48000, 1).unwrap();
 
         let key = build_cache_key("roundtrip test", "openai", "alloy", 0);
         save_audio_cache(&key, &pcm).unwrap();
@@ -667,8 +663,11 @@ mod tests {
         let result = read_audio_cache("nonexistent-key-00000000-0000-0000-0000-000000000000");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("CacheMiss") || err.contains("Failed to read cache file"),
-            "Expected CacheMiss error, got: {}", err);
+        assert!(
+            err.contains("CacheMiss") || err.contains("Failed to read cache file"),
+            "Expected CacheMiss error, got: {}",
+            err
+        );
     }
 
     #[test]
@@ -680,8 +679,11 @@ mod tests {
         mgr.record_phrase_with_meta("hello world", "openai", "alloy", "key-1");
 
         let phrases = mgr.get_phrases(None, 100);
-        assert_eq!(phrases.len(), 2,
-            "Different providers should create separate entries, same provider+voice should dedup");
+        assert_eq!(
+            phrases.len(),
+            2,
+            "Different providers should create separate entries, same provider+voice should dedup"
+        );
 
         let openai_entry = phrases.iter().find(|e| e.provider == "openai").unwrap();
         assert_eq!(openai_entry.voice, "alloy");
@@ -769,7 +771,12 @@ mod tests {
         assert!(!key.contains(' '));
 
         let path = get_cache_file_path(&key).unwrap();
-        assert!(path.file_name().unwrap().to_str().unwrap().ends_with(".wav"));
+        assert!(path
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .ends_with(".wav"));
     }
 
     #[test]
@@ -781,7 +788,10 @@ mod tests {
 
         let phrases = mgr.get_phrases(None, 100);
         assert_eq!(phrases.len(), 2);
-        let metadata_entry = phrases.iter().find(|entry| entry.provider == "openai").unwrap();
+        let metadata_entry = phrases
+            .iter()
+            .find(|entry| entry.provider == "openai")
+            .unwrap();
         assert_eq!(metadata_entry.voice, "alloy");
         assert_eq!(metadata_entry.cache_key, "cache-x");
         assert_eq!(metadata_entry.count, 1);

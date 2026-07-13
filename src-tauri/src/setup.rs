@@ -11,21 +11,21 @@
 
 use std::sync::mpsc;
 use std::thread;
-use tauri::{App, AppHandle, Manager, Emitter};
 use tauri::image::Image;
-use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::menu::{Menu, MenuItem};
-use tracing::{info, warn, error};
+use tauri::tray::{TrayIconBuilder, TrayIconEvent};
+use tauri::{App, AppHandle, Emitter, Manager};
+use tracing::{error, info, warn};
 
-use crate::state::AppState;
-use crate::secret_log;
-use crate::events::AppEvent;
-use crate::config::{SettingsManager, WindowsManager, AppSettings, WindowsSettings};
-use crate::soundpanel::SoundPanelState;
-use crate::commands::telegram::TelegramState;
 use crate::commands::playback::PlaybackState;
-use crate::tts::TtsProviderType;
+use crate::commands::telegram::TelegramState;
+use crate::config::{AppSettings, SettingsManager, WindowsManager, WindowsSettings};
 use crate::event_loop::EventHandler;
+use crate::events::AppEvent;
+use crate::secret_log;
+use crate::soundpanel::SoundPanelState;
+use crate::state::AppState;
+use crate::tts::TtsProviderType;
 use std::sync::Arc;
 
 /// Initialize the application (called from Tauri's setup callback)
@@ -82,14 +82,22 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
     } else {
         None
     };
-    let initial_mic = settings.audio.virtual_mic_device.clone().map(|dev_id| crate::audio::OutputConfig {
-        device_id: Some(dev_id),
-        volume: settings.audio.virtual_mic_volume as f32 / 100.0,
-    });
+    let initial_mic =
+        settings
+            .audio
+            .virtual_mic_device
+            .clone()
+            .map(|dev_id| crate::audio::OutputConfig {
+                device_id: Some(dev_id),
+                volume: settings.audio.virtual_mic_volume as f32 / 100.0,
+            });
     let pb_manager = Arc::new(crate::playback::PlaybackManager::new(
         app_handle_pb,
         event_tx.clone(),
-        crate::playback::AudioOutputsConfig { speaker: initial_speaker, mic: initial_mic },
+        crate::playback::AudioOutputsConfig {
+            speaker: initial_speaker,
+            mic: initial_mic,
+        },
         Some(app_state.inner().cached_devices.clone()),
     ));
     *app_state.inner().playback_manager.lock() = Some(pb_manager.clone());
@@ -109,9 +117,12 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
     });
 
     // Setup SoundPanel event system
-    use crate::soundpanel_window::{show_soundpanel_window, hide_soundpanel_window, emit_soundpanel_no_binding, update_soundpanel_appearance};
-    use crate::playback_window::{show_playback_window, hide_playback_window};
-    use crate::soundpanel::{load_bindings, load_appearance};
+    use crate::playback_window::{hide_playback_window, show_playback_window};
+    use crate::soundpanel::{load_appearance, load_bindings};
+    use crate::soundpanel_window::{
+        emit_soundpanel_no_binding, hide_soundpanel_window, show_soundpanel_window,
+        update_soundpanel_appearance,
+    };
 
     let (soundpanel_tx, soundpanel_rx) = mpsc::channel::<AppEvent>();
     soundpanel_state.inner().set_event_sender(soundpanel_tx);
@@ -131,7 +142,10 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
                 }
                 AppEvent::HideSoundPanelWindow => {
                     info!("[SOUNDPANEL] Hide soundpanel window");
-                    let _ = hide_soundpanel_window(&app_handle_for_soundpanel, &app_state_for_soundpanel);
+                    let _ = hide_soundpanel_window(
+                        &app_handle_for_soundpanel,
+                        &app_state_for_soundpanel,
+                    );
                 }
                 AppEvent::SoundPanelNoBinding(key) => {
                     info!(key = ?key, "No binding for key");
@@ -200,7 +214,9 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
     init_window_protection(app, &windows_manager);
 
     // Set backend ready flag - all initialization complete
-    app_state.backend_ready.store(true, std::sync::atomic::Ordering::SeqCst);
+    app_state
+        .backend_ready
+        .store(true, std::sync::atomic::Ordering::SeqCst);
     info!("Backend ready flag set");
 
     // Show main window after backend is fully initialized
@@ -219,11 +235,7 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
 }
 
 /// Initialize TTS provider based on settings
-fn init_tts_provider(
-    app_state: &AppState,
-    telegram_state: &TelegramState,
-    settings: AppSettings,
-) {
+fn init_tts_provider(app_state: &AppState, telegram_state: &TelegramState, settings: AppSettings) {
     info!(provider = ?settings.tts.provider, "Initializing TTS provider");
     app_state.set_tts_provider_type(settings.tts.provider);
 
@@ -325,7 +337,9 @@ fn init_spellcheck(app: &App, app_state: &AppState) {
         "[spellcheck] loading dictionary..."
     );
 
-    let manager = Arc::new(crate::spellcheck::SpellcheckManager::new(aff_path, dic_path));
+    let manager = Arc::new(crate::spellcheck::SpellcheckManager::new(
+        aff_path, dic_path,
+    ));
     let spellcheck_state = crate::commands::spellcheck::SpellcheckState(manager.clone());
     *app_state.editor.spellcheck_manager.lock() = Some(manager);
     app.manage(spellcheck_state);
@@ -346,7 +360,8 @@ fn init_windows(
         if let Some(x) = windows.main.x {
             if let Some(y) = windows.main.y {
                 info!(x, y, "Restoring main window position");
-                let _ = main_window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
+                let _ = main_window
+                    .set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
             }
         }
 
@@ -376,25 +391,23 @@ fn init_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
 
     // Load icon.png (512x512) for tray
     let png_bytes = include_bytes!("../icons/icon.png");
-    let decoded_image = image::load_from_memory(png_bytes)
-        .expect("Failed to decode tray icon");
+    let decoded_image = image::load_from_memory(png_bytes).expect("Failed to decode tray icon");
     let rgba_image = decoded_image.to_rgba8();
     let (width, height) = (rgba_image.width(), rgba_image.height());
 
     // Resize to 32x32 for tray
-    let resized = image::imageops::resize(&rgba_image, 32, 32, image::imageops::FilterType::Lanczos3);
+    let resized =
+        image::imageops::resize(&rgba_image, 32, 32, image::imageops::FilterType::Lanczos3);
     let tray_icon = Image::new_owned(resized.into_raw(), 32, 32);
 
-    info!(width, height, "Initializing system tray with icon (resized to 32x32 from original)");
+    info!(
+        width,
+        height, "Initializing system tray with icon (resized to 32x32 from original)"
+    );
 
     // Create context menu (only "Quit" item)
-    let quit_item = MenuItem::with_id(
-        &app_handle,
-        "quit",
-        "Выход",
-        true,
-        None as Option<&str>
-    ).unwrap();
+    let quit_item =
+        MenuItem::with_id(&app_handle, "quit", "Выход", true, None as Option<&str>).unwrap();
 
     let menu = Menu::with_items(&app_handle, &[&quit_item]).unwrap();
 
@@ -405,8 +418,15 @@ fn init_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         .tooltip("TTSBard")
         .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click { button, button_state, .. } = event {
-                if matches!(button, tauri::tray::MouseButton::Left) && matches!(button_state, tauri::tray::MouseButtonState::Up) {
+            if let TrayIconEvent::Click {
+                button,
+                button_state,
+                ..
+            } = event
+            {
+                if matches!(button, tauri::tray::MouseButton::Left)
+                    && matches!(button_state, tauri::tray::MouseButtonState::Up)
+                {
                     if let Some(window) = tray.app_handle().get_webview_window("main") {
                         let _ = window.show();
                         let _ = window.unminimize();
@@ -451,7 +471,8 @@ fn init_webview_server(app_state: &AppState, app_handle: AppHandle) {
     app_state.webview.set_event_sender(webview_tx);
 
     app_state.runtime.spawn(async move {
-        crate::servers::run_webview_server(webview_settings, app_handle, webview_rx, shutdown).await;
+        crate::servers::run_webview_server(webview_settings, app_handle, webview_rx, shutdown)
+            .await;
     });
 }
 
@@ -472,12 +493,18 @@ fn init_window_protection(app: &App, windows_manager: &WindowsManager) {
     use crate::window::set_window_exclude_from_capture;
 
     let exclude_from_capture = windows_manager.get_global_exclude_from_capture();
-    info!(exclude_from_capture, "Applying global exclude from capture to main window");
+    info!(
+        exclude_from_capture,
+        "Applying global exclude from capture to main window"
+    );
 
     if let Some(main_window) = app.get_webview_window("main") {
         if let Ok(hwnd) = main_window.hwnd() {
             match set_window_exclude_from_capture(hwnd.0 as isize, exclude_from_capture) {
-                Ok(_) => info!(exclude_from_capture, "Main window exclude from capture applied"),
+                Ok(_) => info!(
+                    exclude_from_capture,
+                    "Main window exclude from capture applied"
+                ),
                 Err(e) => error!(error = %e, "Failed to apply exclude from capture to main window"),
             }
         }
@@ -485,36 +512,44 @@ fn init_window_protection(app: &App, windows_manager: &WindowsManager) {
 }
 
 /// Parse WebView server startup errors and provide user-friendly messages
-pub(crate) fn parse_webview_server_error(error_msg: &str, bind_address: String, port: u16) -> (String, String) {
-    let log_context = format!("Failed to start WebView server on {}:{}", bind_address, port);
+pub(crate) fn parse_webview_server_error(
+    error_msg: &str,
+    bind_address: String,
+    port: u16,
+) -> (String, String) {
+    let log_context = format!(
+        "Failed to start WebView server on {}:{}",
+        bind_address, port
+    );
 
-    let user_friendly_msg = if error_msg.contains("addr in use") || error_msg.contains("port in use") {
-        format!(
-            "Порт {} уже занят. Пожалуйста, выберите другой порт в настройках WebView.",
-            port
-        )
-    } else if error_msg.contains("permission denied") {
-        format!(
-            "Нет прав для запуска сервера на порту {}. Попробуйте использовать порт выше 1024.",
-            port
-        )
-    } else if error_msg.contains("invalid input") || error_msg.contains("invalid address") {
-        format!(
-            "Некорректный адрес {}:{}. Пожалуйста, проверьте настройки WebView.",
-            bind_address, port
-        )
-    } else if error_msg.contains("access denied") {
-        "Доступ запрещен. Возможно, брандмауэр блокирует соединение.".to_string()
-    } else {
-        format!(
-            "Не удалось запустить WebView сервер: {}",
-            if error_msg.len() > 100 {
-                format!("{}...", &error_msg[..97])
-            } else {
-                error_msg.to_string()
-            }
-        )
-    };
+    let user_friendly_msg =
+        if error_msg.contains("addr in use") || error_msg.contains("port in use") {
+            format!(
+                "Порт {} уже занят. Пожалуйста, выберите другой порт в настройках WebView.",
+                port
+            )
+        } else if error_msg.contains("permission denied") {
+            format!(
+                "Нет прав для запуска сервера на порту {}. Попробуйте использовать порт выше 1024.",
+                port
+            )
+        } else if error_msg.contains("invalid input") || error_msg.contains("invalid address") {
+            format!(
+                "Некорректный адрес {}:{}. Пожалуйста, проверьте настройки WebView.",
+                bind_address, port
+            )
+        } else if error_msg.contains("access denied") {
+            "Доступ запрещен. Возможно, брандмауэр блокирует соединение.".to_string()
+        } else {
+            format!(
+                "Не удалось запустить WebView сервер: {}",
+                if error_msg.len() > 100 {
+                    format!("{}...", &error_msg[..97])
+                } else {
+                    error_msg.to_string()
+                }
+            )
+        };
 
     (user_friendly_msg, log_context)
 }

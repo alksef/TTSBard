@@ -10,7 +10,11 @@ mod tests {
         // Shift+0-9 symbols
         let shift_numbers = ['!', '@', '#', '$', '%', '^', '&', '*', '(', ')'];
         for &ch in &shift_numbers {
-            assert!(is_allowed_character(ch), "Character '{}' should be allowed", ch);
+            assert!(
+                is_allowed_character(ch),
+                "Character '{}' should be allowed",
+                ch
+            );
         }
     }
 
@@ -19,16 +23,26 @@ mod tests {
         // Common punctuation
         let punctuation = ['.', ',', ';', ':', '?', '!', '\'', '"'];
         for &ch in &punctuation {
-            assert!(is_allowed_character(ch), "Character '{}' should be allowed", ch);
+            assert!(
+                is_allowed_character(ch),
+                "Character '{}' should be allowed",
+                ch
+            );
         }
     }
 
     #[test]
     fn test_special_symbols_are_allowed() {
         // Special symbols including backslash, pipe, etc.
-        let special = ['\\', '|', '/', '@', '#', '$', '%', '^', '&', '*', '_', '+', '-', '=', '~', '`'];
+        let special = [
+            '\\', '|', '/', '@', '#', '$', '%', '^', '&', '*', '_', '+', '-', '=', '~', '`',
+        ];
         for &ch in &special {
-            assert!(is_allowed_character(ch), "Character '{}' should be allowed", ch);
+            assert!(
+                is_allowed_character(ch),
+                "Character '{}' should be allowed",
+                ch
+            );
         }
     }
 
@@ -36,7 +50,11 @@ mod tests {
     fn test_brackets_are_allowed() {
         let brackets = ['(', ')', '[', ']', '{', '}', '<', '>'];
         for &ch in &brackets {
-            assert!(is_allowed_character(ch), "Character '{}' should be allowed", ch);
+            assert!(
+                is_allowed_character(ch),
+                "Character '{}' should be allowed",
+                ch
+            );
         }
     }
 
@@ -45,7 +63,11 @@ mod tests {
         // Cyrillic and other non-ASCII should be allowed
         let unicode = ['А', 'Б', 'В', 'а', 'б', 'в', '€', '©'];
         for &ch in &unicode {
-            assert!(is_allowed_character(ch), "Character '{}' should be allowed", ch);
+            assert!(
+                is_allowed_character(ch),
+                "Character '{}' should be allowed",
+                ch
+            );
         }
     }
 
@@ -54,7 +76,11 @@ mod tests {
         // Control characters should be blocked
         let control = ['\x00', '\x01', '\x02', '\x07', '\x08', '\x1B', '\x7F'];
         for &ch in &control {
-            assert!(!is_allowed_character(ch), "Control character '{:x}' should be blocked", ch as u32);
+            assert!(
+                !is_allowed_character(ch),
+                "Control character '{:x}' should be blocked",
+                ch as u32
+            );
         }
     }
 }

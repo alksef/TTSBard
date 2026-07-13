@@ -3,9 +3,9 @@
 // Converts numbers to Russian text with grammatical gender agreement
 // Example: "1 книга" → "одна книга", "2 книги" → "две книги"
 
-use russian_numbers::NumeralName;
 use lazy_static::lazy_static;
 use regex::Regex;
+use russian_numbers::NumeralName;
 
 /// Detect grammatical gender of a Russian word by suffix
 fn detect_gender(word: &str) -> RussianGender {
@@ -45,10 +45,18 @@ fn convert_number_parts(parts: &[&str], gender: RussianGender) -> String {
             return match gender {
                 RussianGender::Masculine => num_str.to_string(),
                 RussianGender::Feminine => {
-                    if num_str == "один" { "одна".to_string() } else { "две".to_string() }
+                    if num_str == "один" {
+                        "одна".to_string()
+                    } else {
+                        "две".to_string()
+                    }
                 }
                 RussianGender::Neuter => {
-                    if num_str == "один" { "одно".to_string() } else { "два".to_string() }
+                    if num_str == "один" {
+                        "одно".to_string()
+                    } else {
+                        "два".to_string()
+                    }
                 }
             };
         }
@@ -74,43 +82,42 @@ lazy_static! {
 /// Numbers larger than 999,999,999,999,999,999 will be clamped to this maximum
 /// value due to `usize` conversion requirements for the `russian_numbers` crate.
 pub fn process_numbers(text: &str) -> String {
-    NUMBER_REGEX.replace_all(text, |caps: &regex::Captures| {
-        let number_str = &caps[0];
+    NUMBER_REGEX
+        .replace_all(text, |caps: &regex::Captures| {
+            let number_str = &caps[0];
 
-        if let Ok(num) = number_str.parse::<i64>() {
-            let is_negative = num < 0;
-            let abs_num = num.abs();
+            if let Ok(num) = number_str.parse::<i64>() {
+                let is_negative = num < 0;
+                let abs_num = num.abs();
 
-            // Find next word for gender determination
-            let after_match = &text[caps.get(0).unwrap().end()..];
-            let next_word = after_match
-                .split_whitespace()
-                .next()
-                .unwrap_or("");
+                // Find next word for gender determination
+                let after_match = &text[caps.get(0).unwrap().end()..];
+                let next_word = after_match.split_whitespace().next().unwrap_or("");
 
-            // Only apply gender agreement for 1 and 2 (where it matters in Russian)
-            let gender = if abs_num == 1 || abs_num == 2 {
-                detect_gender(next_word)
+                // Only apply gender agreement for 1 and 2 (where it matters in Russian)
+                let gender = if abs_num == 1 || abs_num == 2 {
+                    detect_gender(next_word)
+                } else {
+                    RussianGender::Masculine
+                };
+
+                // Limit to reasonable range for usize (0-999_999_999_999_999_999)
+                let abs_num_limited = abs_num.min(999_999_999_999_999_999);
+
+                // Convert number to words using NumeralName trait
+                let parts = (abs_num_limited as usize).numeral_name();
+                let result = convert_number_parts(&parts, gender);
+
+                if is_negative {
+                    format!("минус {}", result)
+                } else {
+                    result
+                }
             } else {
-                RussianGender::Masculine
-            };
-
-            // Limit to reasonable range for usize (0-999_999_999_999_999_999)
-            let abs_num_limited = abs_num.min(999_999_999_999_999_999);
-
-            // Convert number to words using NumeralName trait
-            let parts = (abs_num_limited as usize).numeral_name();
-            let result = convert_number_parts(&parts, gender);
-
-            if is_negative {
-                format!("минус {}", result)
-            } else {
-                result
+                number_str.to_string()
             }
-        } else {
-            number_str.to_string()
-        }
-    }).to_string()
+        })
+        .to_string()
 }
 
 #[cfg(test)]
@@ -199,13 +206,19 @@ mod tests {
     #[test]
     fn test_mixed_positive_and_negative() {
         // Test single-pass handling of mixed positive and negative numbers
-        assert_eq!(process_numbers("У меня 5 яблок и -10 градусов"),
-                   "У меня пять яблок и минус десять градусов");
+        assert_eq!(
+            process_numbers("У меня 5 яблок и -10 градусов"),
+            "У меня пять яблок и минус десять градусов"
+        );
         // Note: "2 стола" ends with 'а', heuristic detects as feminine → "две стола"
         // This is a known limitation for plural forms
-        assert_eq!(process_numbers("10 градусов, -5, 3 человека"),
-                   "десять градусов, минус пять, три человека");
-        assert_eq!(process_numbers("-1 ручка, 5 столов"),
-                   "минус одна ручка, пять столов");
+        assert_eq!(
+            process_numbers("10 градусов, -5, 3 человека"),
+            "десять градусов, минус пять, три человека"
+        );
+        assert_eq!(
+            process_numbers("-1 ручка, 5 столов"),
+            "минус одна ручка, пять столов"
+        );
     }
 }

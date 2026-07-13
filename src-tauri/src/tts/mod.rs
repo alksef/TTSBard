@@ -8,8 +8,8 @@ pub mod silero;
 // Реэкспорт VoiceModel для использования в других модулях
 pub use fish::VoiceModel;
 
-use serde::{Deserialize, Serialize};
 use crate::tts::engine::TtsEngine;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -21,7 +21,6 @@ pub enum TtsProviderType {
     Local,
     Fish,
 }
-
 
 #[derive(Clone, Debug)]
 pub enum TtsProvider {

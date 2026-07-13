@@ -4,9 +4,7 @@ use tauri::{Manager, State};
 
 /// Получить текущие настройки Twitch (включая токен)
 #[tauri::command]
-pub async fn get_twitch_settings(
-    state: State<'_, AppState>,
-) -> Result<TwitchSettings, String> {
+pub async fn get_twitch_settings(state: State<'_, AppState>) -> Result<TwitchSettings, String> {
     let settings = state.twitch.settings.read().await;
     Ok(settings.clone())
 }
@@ -44,9 +42,7 @@ pub async fn save_twitch_settings(
     let settings_manager = app_handle.try_state::<SettingsManager>();
     if let Some(manager) = settings_manager {
         let s = settings.clone();
-        super::persist_blocking(manager.inner(), move |mgr| {
-            mgr.set_twitch_settings(&s)
-        }).await?;
+        super::persist_blocking(manager.inner(), move |mgr| mgr.set_twitch_settings(&s)).await?;
         super::emit_settings_changed(&app_handle);
     }
 
@@ -66,9 +62,7 @@ pub async fn save_twitch_settings(
 
 /// Подключиться к Twitch
 #[tauri::command]
-pub async fn connect_twitch(
-    state: State<'_, AppState>,
-) -> Result<String, String> {
+pub async fn connect_twitch(state: State<'_, AppState>) -> Result<String, String> {
     tracing::info!("Connect command received");
 
     // Получаем текущие настройки
@@ -93,9 +87,7 @@ pub async fn connect_twitch(
 
 /// Отключиться от Twitch
 #[tauri::command]
-pub async fn disconnect_twitch(
-    state: State<'_, AppState>,
-) -> Result<String, String> {
+pub async fn disconnect_twitch(state: State<'_, AppState>) -> Result<String, String> {
     tracing::info!("Disconnect command received");
 
     // Обновляем только runtime state (НЕ сохраняем в конфиг)
@@ -120,9 +112,7 @@ pub async fn get_twitch_status(
 
 /// Проверить подключение к Twitch
 #[tauri::command]
-pub async fn test_twitch_connection(
-    settings: TwitchSettings,
-) -> Result<String, String> {
+pub async fn test_twitch_connection(settings: TwitchSettings) -> Result<String, String> {
     // Валидация
     if let Err(e) = settings.is_valid() {
         return Err(format!("Validation failed: {}", e));
@@ -135,18 +125,16 @@ pub async fn test_twitch_connection(
 
 /// Отправить тестовое сообщение в Twitch чат
 #[tauri::command]
-pub async fn send_twitch_test_message(
-    state: State<'_, AppState>,
-) -> Result<String, String> {
-    state.send_twitch_event(crate::events::TwitchEvent::SendMessage("test message".to_string()));
+pub async fn send_twitch_test_message(state: State<'_, AppState>) -> Result<String, String> {
+    state.send_twitch_event(crate::events::TwitchEvent::SendMessage(
+        "test message".to_string(),
+    ));
     Ok("Тестовое сообщение отправлено".to_string())
 }
 
 /// Перезапустить Twitch клиент
 #[tauri::command]
-pub async fn restart_twitch(
-    state: State<'_, AppState>,
-) -> Result<String, String> {
+pub async fn restart_twitch(state: State<'_, AppState>) -> Result<String, String> {
     tracing::info!("Restart command received");
     state.send_twitch_event(crate::events::TwitchEvent::Restart);
     Ok("Перезапуск Twitch...".to_string())

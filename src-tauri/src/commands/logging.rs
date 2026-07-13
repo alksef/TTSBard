@@ -60,7 +60,8 @@ pub async fn save_logging_settings(
             logging.enabled = enabled;
             logging.level = level;
         })
-    }).await?;
+    })
+    .await?;
 
     super::emit_settings_changed(&app_handle);
     Ok(())

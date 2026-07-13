@@ -144,10 +144,7 @@ impl OpenAiClient {
 
         let response = self.client.chat().create(request).await.map_err(|e| {
             let error_msg = e.to_string();
-            error!(
-                error_type = "openai_api_error",
-                "OpenAI API request failed"
-            );
+            error!(error_type = "openai_api_error", "OpenAI API request failed");
 
             // Parse error message for better error handling
             if error_msg.contains("timeout") || error_msg.contains("timed out") {

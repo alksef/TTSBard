@@ -1,9 +1,9 @@
+use super::upnp::UpnpManager;
 use super::{
     templates::{default_css, default_html},
     WebViewSettings,
 };
 use crate::webview::security::{is_local_network, validate_token};
-use super::upnp::UpnpManager;
 use axum::{
     extract::{ConnectInfo, Query, State},
     http::{header, HeaderMap, StatusCode},
@@ -150,7 +150,8 @@ impl WebViewServer {
 
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
         let settings = self.settings.read().await;
-        let addr = if settings.bind_address.contains(':') && !settings.bind_address.starts_with('[') {
+        let addr = if settings.bind_address.contains(':') && !settings.bind_address.starts_with('[')
+        {
             format!("[{}]:{}", settings.bind_address, settings.port)
         } else {
             format!("{}:{}", settings.bind_address, settings.port)
@@ -181,7 +182,8 @@ impl WebViewServer {
             .route("/sse", get(sse_handler))
             .with_state(state);
 
-        let socket_addr: SocketAddr = addr.parse()
+        let socket_addr: SocketAddr = addr
+            .parse()
             .map_err(|e| format!("Invalid address {}: {}", addr, e))?;
 
         let listener = tokio::net::TcpListener::bind(socket_addr)
@@ -197,7 +199,11 @@ impl WebViewServer {
             })?;
 
         tracing::info!(addr = %addr, "WebView server started");
-        axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await?;
         Ok(())
     }
 
@@ -240,16 +246,16 @@ struct AuthQuery {
 // Helper function to extract cookie from headers
 fn get_cookie_from_headers(headers: &HeaderMap, name: &str) -> Option<String> {
     let cookie_header = headers.get("cookie")?.to_str().ok()?;
-    cookie_header
-        .split(';')
-        .find_map(|pair| {
-            let mut parts = pair.trim().splitn(2, '=');
-            if parts.next()? == name {
-                parts.next().map(|s| urlencoding::decode(s).unwrap_or(s.into()).into_owned())
-            } else {
-                None
-            }
-        })
+    cookie_header.split(';').find_map(|pair| {
+        let mut parts = pair.trim().splitn(2, '=');
+        if parts.next()? == name {
+            parts
+                .next()
+                .map(|s| urlencoding::decode(s).unwrap_or(s.into()).into_owned())
+        } else {
+            None
+        }
+    })
 }
 
 async fn auth_handler(
@@ -258,13 +264,22 @@ async fn auth_handler(
 ) -> impl IntoResponse {
     if validate_token(params.token.as_deref(), state.access_token.as_deref()) {
         // Return Set-Cookie header with the token
-        let cookie_value = state.access_token.as_ref()
-            .map(|token| format!("{}={}; HttpOnly; Path=/; SameSite=Lax", AUTH_COOKIE_NAME, token))
+        let cookie_value = state
+            .access_token
+            .as_ref()
+            .map(|token| {
+                format!(
+                    "{}={}; HttpOnly; Path=/; SameSite=Lax",
+                    AUTH_COOKIE_NAME, token
+                )
+            })
             .unwrap_or_default();
 
         let mut response = (StatusCode::OK, "Авторизация успешна").into_response();
         if let Ok(cookie_header) = cookie_value.parse() {
-            response.headers_mut().insert(header::SET_COOKIE, cookie_header);
+            response
+                .headers_mut()
+                .insert(header::SET_COOKIE, cookie_header);
         }
         response
     } else {
@@ -303,8 +318,7 @@ async fn sse_handler(
     });
 
     Ok(Sse::new(stream).keep_alive(
-        axum::response::sse::KeepAlive::new()
-            .interval(std::time::Duration::from_secs(10))
+        axum::response::sse::KeepAlive::new().interval(std::time::Duration::from_secs(10)),
     ))
 }
 
@@ -339,17 +353,32 @@ async fn index(
     let response = if params.token.is_some()
         && validate_token(params.token.as_deref(), state.access_token.as_deref())
     {
-        let cookie_value = state.access_token.as_ref()
-            .map(|token| format!("{}={}; HttpOnly; Path=/; SameSite=Lax", AUTH_COOKIE_NAME, token))
+        let cookie_value = state
+            .access_token
+            .as_ref()
+            .map(|token| {
+                format!(
+                    "{}={}; HttpOnly; Path=/; SameSite=Lax",
+                    AUTH_COOKIE_NAME, token
+                )
+            })
             .unwrap_or_default();
 
-        let mut resp = ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], state.templates.get_rendered().await).into_response();
+        let mut resp = (
+            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            state.templates.get_rendered().await,
+        )
+            .into_response();
         if let Ok(cookie_header) = cookie_value.parse() {
             resp.headers_mut().insert(header::SET_COOKIE, cookie_header);
         }
         resp
     } else {
-        ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], state.templates.get_rendered().await).into_response()
+        (
+            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            state.templates.get_rendered().await,
+        )
+            .into_response()
     };
 
     response
@@ -364,8 +393,8 @@ mod tests {
         routing::get,
         Router,
     };
-    use tower::ServiceExt;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use tower::ServiceExt;
 
     fn build_test_app(token: Option<String>) -> Router {
         let state = ServerState {
@@ -445,7 +474,10 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
 
         let cookie = response.headers().get("set-cookie").unwrap();
-        assert!(cookie.to_str().unwrap().contains("webview_auth=secret-token"));
+        assert!(cookie
+            .to_str()
+            .unwrap()
+            .contains("webview_auth=secret-token"));
     }
 
     #[tokio::test]

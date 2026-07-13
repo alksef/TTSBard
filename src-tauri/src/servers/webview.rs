@@ -3,14 +3,14 @@
 // This module manages the WebView server for broadcasting TTS to web clients.
 // Refactored from lib.rs WebView server thread (2026-03-11)
 
-use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager};
-use tracing::{info, error};
-use tokio_util::sync::CancellationToken;
 use crate::events::AppEvent;
+use crate::setup::parse_webview_server_error;
 use crate::webview::WebViewServer;
 use crate::webview::WebViewSettings;
-use crate::setup::parse_webview_server_error;
+use std::sync::Arc;
+use tauri::{AppHandle, Emitter, Manager};
+use tokio_util::sync::CancellationToken;
+use tracing::{error, info};
 
 /// Run WebView server in async context
 /// This function is called from a dedicated thread with tokio runtime
@@ -68,7 +68,8 @@ pub async fn run_webview_server(
                 if let Err(e) = server_clone.start().await {
                     // Extract error details for user-friendly message
                     let error_msg = format!("{}", e);
-                    let (user_friendly_msg, log_context) = parse_webview_server_error(&error_msg, bind_address_clone, port);
+                    let (user_friendly_msg, log_context) =
+                        parse_webview_server_error(&error_msg, bind_address_clone, port);
 
                     // Log with full context
                     error!("[WEBVIEW] ❌ Server startup failed:");
@@ -93,7 +94,8 @@ pub async fn run_webview_server(
                 // Check if settings changed
                 let current_settings = webview_settings.read().await;
                 let still_enabled = current_settings.enabled;
-                let same_port = current_settings.port == port && current_settings.bind_address == bind_address;
+                let same_port =
+                    current_settings.port == port && current_settings.bind_address == bind_address;
                 drop(current_settings);
 
                 if !still_enabled || !same_port {
