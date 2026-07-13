@@ -14,10 +14,12 @@ export function debugLog(...args: unknown[]): void {
 }
 
 /**
- * Conditional debug error logging - always logs errors
+ * Conditional debug error logging - only logs in development mode
  */
 export function debugError(...args: unknown[]): void {
-  console.error(...args)
+  if (DEBUG) {
+    console.error(...args)
+  }
 }
 
 /**

@@ -4,22 +4,22 @@
 //! Uses async-openai crate with custom base URL.
 
 use async_openai::{
-    Client,
     config::OpenAIConfig,
     types::chat::{
+        ChatCompletionRequestSystemMessage, ChatCompletionRequestUserMessage,
         CreateChatCompletionRequestArgs,
-        ChatCompletionRequestSystemMessage,
-        ChatCompletionRequestUserMessage,
     },
+    Client,
 };
 use backoff::ExponentialBackoff;
 use reqwest::Client as ReqwestClient;
 use std::time::Duration;
 use tracing::{error, info};
 
-use crate::config::{AiSettings, NetworkSettings};
-use super::{AiClient, AiError};
 use super::common as ai_common;
+use super::{AiClient, AiError};
+use crate::config::{AiSettings, NetworkSettings};
+use crate::secret_log;
 
 // ============================================================================
 // ZAiClient
@@ -38,13 +38,20 @@ impl ZAiClient {
     /// # Errors
     ///
     /// Returns `AiError::NotConfigured` if URL or API key is not set.
-    pub fn new(settings: &AiSettings, _network_settings: &NetworkSettings) -> Result<Self, AiError> {
-        let api_key = settings.zai.api_key
+    pub fn new(
+        settings: &AiSettings,
+        _network_settings: &NetworkSettings,
+    ) -> Result<Self, AiError> {
+        let api_key = settings
+            .zai
+            .api_key
             .as_ref()
             .ok_or_else(|| AiError::NotConfigured("Z.ai API key not set".to_string()))?
             .clone();
 
-        let url = settings.zai.url
+        let url = settings
+            .zai
+            .url
             .as_ref()
             .ok_or_else(|| AiError::NotConfigured("Z.ai URL not set".to_string()))?
             .clone();
@@ -52,18 +59,10 @@ impl ZAiClient {
         let model = settings.zai.model.clone();
         let timeout = settings.timeout;
 
-        // Log the endpoint that will be used
-        let expected_endpoint = if url.ends_with('/') {
-            format!("{}chat/completions", url)
-        } else {
-            format!("{}/chat/completions", url)
-        };
-
         info!(
             model = &model,
-            base_url = &url,
-            expected_endpoint = &expected_endpoint,
-            api_key_prefix = &api_key[..api_key.len().min(7)],
+            safe_url = %secret_log::safe_url_for_log(&url),
+            has_api_key = true,
             timeout_secs = timeout,
             "ZAiClient created with OpenAI-compatible API"
         );
@@ -126,7 +125,6 @@ impl ZAiClient {
             .map_err(|e| {
                 let error_msg = e.to_string();
                 error!(
-                    error = %error_msg,
                     error_type = "async_openai_error",
                     "Z.ai API request failed"
                 );
@@ -206,7 +204,10 @@ mod tests {
         } else {
             format!("{}/chat/completions", url_with_slash)
         };
-        assert_eq!(expected_with_slash, "https://api.z.ai/api/paas/v4/chat/completions");
+        assert_eq!(
+            expected_with_slash,
+            "https://api.z.ai/api/paas/v4/chat/completions"
+        );
 
         let url_without_slash = "https://api.z.ai/api/paas/v4";
         let expected_without_slash = if url_without_slash.ends_with('/') {
@@ -214,6 +215,9 @@ mod tests {
         } else {
             format!("{}/chat/completions", url_without_slash)
         };
-        assert_eq!(expected_without_slash, "https://api.z.ai/api/paas/v4/chat/completions");
+        assert_eq!(
+            expected_without_slash,
+            "https://api.z.ai/api/paas/v4/chat/completions"
+        );
     }
 }

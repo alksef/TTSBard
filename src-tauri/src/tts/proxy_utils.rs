@@ -1,31 +1,39 @@
+use crate::secret_log;
 use reqwest::Client;
 use std::time::Duration;
-use tracing::{info, error};
+use tracing::{error, info};
 
 /// Parse proxy URL and create appropriate reqwest::Proxy.
 ///
 /// Supports schemes: socks5, socks5h, socks4, socks4a, http, https.
 pub fn parse_proxy_url(url: &str) -> Result<reqwest::Proxy, String> {
-    let (scheme, _rest) = url.split_once("://")
+    let (scheme, _rest) = url
+        .split_once("://")
         .ok_or_else(|| "Invalid proxy URL: missing scheme".to_string())?;
 
     let scheme_lower = scheme.to_lowercase();
-    if !matches!(scheme_lower.as_str(), "socks5" | "socks5h" | "socks4" | "socks4a" | "http" | "https") {
+    if !matches!(
+        scheme_lower.as_str(),
+        "socks5" | "socks5h" | "socks4" | "socks4a" | "http" | "https"
+    ) {
         return Err(format!("Unsupported proxy URL scheme: {}", scheme));
     }
 
     reqwest::Proxy::all(url)
         .map_err(|e| {
-            error!(error = %e, proxy_url = %url, scheme = %scheme, "Failed to create proxy");
+            error!(error = %e, proxy_scheme = %scheme, safe_url = %secret_log::safe_url_for_log(url), "Failed to create proxy");
             format!("Failed to create {} proxy: {}", scheme, e)
         })
 }
 
 /// Build a reqwest::Client with optional proxy and timeout.
-pub fn build_client_with_proxy(proxy_url: Option<&str>, timeout: Duration) -> Result<Client, String> {
+pub fn build_client_with_proxy(
+    proxy_url: Option<&str>,
+    timeout: Duration,
+) -> Result<Client, String> {
     if let Some(proxy_url) = proxy_url {
         let proxy = parse_proxy_url(proxy_url)?;
-        info!(proxy_url = %proxy_url, "Using proxy");
+        info!(has_proxy = true, safe_url = %secret_log::safe_url_for_log(proxy_url), "Using proxy");
         Client::builder()
             .proxy(proxy)
             .timeout(timeout)
@@ -36,12 +44,9 @@ pub fn build_client_with_proxy(proxy_url: Option<&str>, timeout: Duration) -> Re
             })
     } else {
         info!("Direct connection (no proxy)");
-        Client::builder()
-            .timeout(timeout)
-            .build()
-            .map_err(|e| {
-                error!(error = %e, "Failed to build client");
-                format!("Failed to build client: {}", e)
-            })
+        Client::builder().timeout(timeout).build().map_err(|e| {
+            error!(error = %e, "Failed to build client");
+            format!("Failed to build client: {}", e)
+        })
     }
 }

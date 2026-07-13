@@ -291,7 +291,7 @@ async function saveAiCompletionEnabled() {
 watch(editorSettings, (newSettings) => {
   if (!newSettings) return;
 
-  debugLog('[AI] Editor settings updated from composable:', newSettings);
+  debugLog('[AI] Editor settings updated from composable:', { ai: newSettings.ai, ai_completion: newSettings.ai_completion });
 
   // Update AI enabled state from editor settings
   if (newSettings.ai !== undefined) {
@@ -305,7 +305,7 @@ watch(editorSettings, (newSettings) => {
 watch(aiSettings, async (newSettings) => {
   if (!newSettings) return;
 
-  debugLog('[AI] Settings updated from composable:', newSettings);
+  debugLog('[AI] Settings updated from composable:', { provider: newSettings.provider, has_prompt: !!newSettings.prompt, has_openai_key: !!newSettings.openai?.api_key, has_zai_key: !!newSettings.zai?.api_key, has_zai_url: !!newSettings.zai?.url, has_deepseek_key: !!newSettings.deepseek?.api_key, has_custom_key: !!newSettings.custom?.api_key, has_custom_url: !!newSettings.custom?.url });
 
   // Update provider
   if (newSettings.provider) {

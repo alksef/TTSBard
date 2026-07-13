@@ -2,6 +2,7 @@
 import { onMounted, ref, watch, h } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { APP_VERSION } from '../version'
+import { debugError } from '../utils/debug'
 import {
   Volume2,
   Speech,
@@ -58,7 +59,7 @@ async function quitApp() {
   try {
     await invoke('quit_app')
   } catch (e) {
-    console.error('Failed to quit:', e)
+    debugError('Failed to quit:', e)
   }
 }
 

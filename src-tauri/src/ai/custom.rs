@@ -4,22 +4,22 @@
 //! Uses async-openai crate with a user-provided base URL.
 
 use async_openai::{
-    Client,
     config::OpenAIConfig,
     types::chat::{
+        ChatCompletionRequestSystemMessage, ChatCompletionRequestUserMessage,
         CreateChatCompletionRequestArgs,
-        ChatCompletionRequestSystemMessage,
-        ChatCompletionRequestUserMessage,
     },
+    Client,
 };
 use backoff::ExponentialBackoff;
 use reqwest::Client as ReqwestClient;
 use std::time::Duration;
 use tracing::{error, info};
 
-use crate::config::{AiSettings, NetworkSettings};
-use super::{AiClient, AiError};
 use super::common as ai_common;
+use super::{AiClient, AiError};
+use crate::config::{AiSettings, NetworkSettings};
+use crate::secret_log;
 
 // ============================================================================
 // CustomClient
@@ -39,13 +39,17 @@ impl CustomClient {
     ///
     /// Returns `AiError::NotConfigured` if API URL or API key is not set.
     pub fn new(settings: &AiSettings, network_settings: &NetworkSettings) -> Result<Self, AiError> {
-        let base_url = settings.custom.url
+        let base_url = settings
+            .custom
+            .url
             .as_ref()
             .filter(|url| !url.trim().is_empty())
             .ok_or_else(|| AiError::NotConfigured("Custom API URL not set".to_string()))?
             .clone();
 
-        let api_key = settings.custom.api_key
+        let api_key = settings
+            .custom
+            .api_key
             .as_ref()
             .filter(|key| !key.trim().is_empty())
             .ok_or_else(|| AiError::NotConfigured("Custom API key not set".to_string()))?
@@ -56,28 +60,38 @@ impl CustomClient {
 
         // Create HTTP client with proxy if needed
         let http_client = if settings.custom.use_proxy {
-            let proxy_url = network_settings.proxy.proxy_url
+            let proxy_url = network_settings
+                .proxy
+                .proxy_url
                 .as_ref()
                 .ok_or_else(|| AiError::InvalidProxy("Proxy enabled but URL not set".to_string()))?
                 .clone();
 
             info!(
                 model = &model,
-                proxy_url = %proxy_url,
+                has_proxy = true,
+                safe_url = %secret_log::safe_url_for_log(&proxy_url),
                 "CustomClient created with proxy"
             );
 
-            let (scheme, _rest) = proxy_url.split_once("://")
-                .ok_or_else(|| AiError::InvalidProxy("Invalid proxy URL: missing scheme".to_string()))?;
+            let (scheme, _rest) = proxy_url.split_once("://").ok_or_else(|| {
+                AiError::InvalidProxy("Invalid proxy URL: missing scheme".to_string())
+            })?;
 
             let scheme_lower = scheme.to_lowercase();
-            if !matches!(scheme_lower.as_str(), "socks5" | "socks5h" | "socks4" | "socks4a" | "http" | "https") {
-                return Err(AiError::InvalidProxy(format!("Unsupported proxy URL scheme: {}", scheme)));
+            if !matches!(
+                scheme_lower.as_str(),
+                "socks5" | "socks5h" | "socks4" | "socks4a" | "http" | "https"
+            ) {
+                return Err(AiError::InvalidProxy(format!(
+                    "Unsupported proxy URL scheme: {}",
+                    scheme
+                )));
             }
 
             let proxy = reqwest::Proxy::all(&proxy_url)
                 .map_err(|e| {
-                    error!(error = %e, proxy_url = %proxy_url, "Failed to create proxy");
+                    error!(error = %e, safe_url = %secret_log::safe_url_for_log(&proxy_url), "Failed to create proxy");
                     AiError::InvalidProxy(format!("Failed to create {} proxy: {}", scheme, e))
                 })?;
 
@@ -92,7 +106,7 @@ impl CustomClient {
         } else {
             info!(
                 model = &model,
-                base_url = %base_url,
+                safe_url = %secret_log::safe_url_for_log(&base_url),
                 "CustomClient created (direct connection)"
             );
 
@@ -146,37 +160,35 @@ impl CustomClient {
             "Sending Custom correction request"
         );
 
-        let response = self.client
-            .chat()
-            .create(request)
-            .await
-            .map_err(|e| {
-                let error_msg = e.to_string();
-                error!(
-                    error = %error_msg,
-                    error_type = "custom_api_error",
-                    "Custom API request failed"
-                );
+        let response = self.client.chat().create(request).await.map_err(|e| {
+            let error_msg = e.to_string();
+            error!(
+                error_type = "custom_api_error",
+                "Custom API request failed"
+            );
 
-                if error_msg.contains("timeout") || error_msg.contains("timed out") {
-                    error!(timeout_secs = self.timeout, "Custom request timeout");
-                    AiError::Timeout(format!("Custom timeout ({}s). Check internet or proxy settings.", self.timeout))
-                } else if error_msg.contains("connect") || error_msg.contains("connection") {
-                    error!("Custom connection failed");
-                    AiError::Connection(format!("Custom connection failed: {}", e))
-                } else if error_msg.contains("401") || error_msg.contains("unauthorized") {
-                    error!("Custom authentication failed (401)");
-                    AiError::NotConfigured("Custom API key is invalid or missing".to_string())
-                } else if error_msg.contains("429") {
-                    error!("Custom rate limit exceeded (429)");
-                    AiError::ApiError {
-                        status: 429,
-                        message: "Rate limit exceeded. Please try again later.".to_string(),
-                    }
-                } else {
-                    AiError::Network(format!("Failed to send request: {}", e))
+            if error_msg.contains("timeout") || error_msg.contains("timed out") {
+                error!(timeout_secs = self.timeout, "Custom request timeout");
+                AiError::Timeout(format!(
+                    "Custom timeout ({}s). Check internet or proxy settings.",
+                    self.timeout
+                ))
+            } else if error_msg.contains("connect") || error_msg.contains("connection") {
+                error!("Custom connection failed");
+                AiError::Connection(format!("Custom connection failed: {}", e))
+            } else if error_msg.contains("401") || error_msg.contains("unauthorized") {
+                error!("Custom authentication failed (401)");
+                AiError::NotConfigured("Custom API key is invalid or missing".to_string())
+            } else if error_msg.contains("429") {
+                error!("Custom rate limit exceeded (429)");
+                AiError::ApiError {
+                    status: 429,
+                    message: "Rate limit exceeded. Please try again later.".to_string(),
                 }
-            })?;
+            } else {
+                AiError::Network(format!("Failed to send request: {}", e))
+            }
+        })?;
 
         info!(
             choices_count = response.choices.len(),

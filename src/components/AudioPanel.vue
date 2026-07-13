@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { RefreshCw, Loader, Volume2, VolumeX, Mic, Info, Play, AudioLines, Sliders, Upload, Square, FileAudio, ShieldCheck, X, FolderOpen, TriangleAlert } from 'lucide-vue-next';
 import { useAudioSettings, useAudioEffectsSettings } from '../composables/useAppSettings';
-import { debugLog } from '../utils/debug';
+import { debugLog, debugError } from '../utils/debug';
 
 interface DeviceInfo {
   id: string;
@@ -77,7 +77,7 @@ async function loadDevices(force = false) {
     virtualMicDevices.value = virtuals;
     isDataLoaded.value = true;
   } catch (error) {
-    console.error('Failed to load devices:', error);
+    debugError('Failed to load devices:', error);
     errorMessage.value = 'Failed to load audio devices';
   }
 }
@@ -97,7 +97,7 @@ async function setSpeakerDevice(deviceId: string | null) {
     await invoke('set_speaker_device', { deviceId });
     audioSettings.value.speaker_device = deviceId;
   } catch (error) {
-    console.error('Failed to set speaker device:', error);
+    debugError('Failed to set speaker device:', error);
     errorMessage.value = error as string;
   }
 }
@@ -107,7 +107,7 @@ async function setSpeakerEnabled(enabled: boolean) {
     await invoke('set_speaker_enabled', { enabled });
     audioSettings.value.speaker_enabled = enabled;
   } catch (error) {
-    console.error('Failed to set speaker enabled:', error);
+    debugError('Failed to set speaker enabled:', error);
     errorMessage.value = error as string;
   }
 }
@@ -117,7 +117,7 @@ async function setSpeakerVolume(volume: number) {
     await invoke('set_speaker_volume', { volume });
     audioSettings.value.speaker_volume = volume;
   } catch (error) {
-    console.error('Failed to set speaker volume:', error);
+    debugError('Failed to set speaker volume:', error);
     errorMessage.value = error as string;
   }
 }
@@ -128,7 +128,7 @@ async function setVirtualMicDevice(deviceId: string | null) {
     selectedVirtualMicDevice.value = deviceId;
     audioSettings.value.virtual_mic_device = deviceId;
   } catch (error) {
-    console.error('Failed to set virtual mic device:', error);
+    debugError('Failed to set virtual mic device:', error);
     errorMessage.value = error as string;
   }
 }
@@ -150,7 +150,7 @@ async function enableVirtualMic() {
     selectedVirtualMicDevice.value = deviceId;
     audioSettings.value.virtual_mic_device = deviceId;
   } catch (error) {
-    console.error('Failed to enable virtual mic:', error);
+    debugError('Failed to enable virtual mic:', error);
     errorMessage.value = error as string;
   }
 }
@@ -160,7 +160,7 @@ async function disableVirtualMic() {
     await invoke('disable_virtual_mic');
     audioSettings.value.virtual_mic_device = null;
   } catch (error) {
-    console.error('Failed to disable virtual mic:', error);
+    debugError('Failed to disable virtual mic:', error);
     errorMessage.value = error as string;
   }
 }
@@ -170,7 +170,7 @@ async function setVirtualMicVolume(volume: number) {
     await invoke('set_virtual_mic_volume', { volume });
     audioSettings.value.virtual_mic_volume = volume;
   } catch (error) {
-    console.error('Failed to set virtual mic volume:', error);
+    debugError('Failed to set virtual mic volume:', error);
     errorMessage.value = error as string;
   }
 }
@@ -185,7 +185,7 @@ async function testSpeaker() {
       volume: audioSettings.value.speaker_volume,
     });
   } catch (error) {
-    console.error('Failed to test speaker:', error);
+    debugError('Failed to test speaker:', error);
     errorMessage.value = error as string;
   } finally {
     isTestingSpeaker.value = false;
@@ -202,7 +202,7 @@ async function testVirtualMic() {
       volume: audioSettings.value.virtual_mic_volume,
     });
   } catch (error) {
-    console.error('Failed to test virtual mic:', error);
+    debugError('Failed to test virtual mic:', error);
     errorMessage.value = error as string;
   } finally {
     isTestingVirtualMic.value = false;
@@ -389,7 +389,7 @@ onMounted(async () => {
 watch(audioSettingsFromComposable, (newSettings) => {
   if (!newSettings) return;
 
-  debugLog('[AudioPanel] Settings updated from composable:', newSettings);
+  debugLog('[AudioPanel] Settings updated from composable');
 
   if (selectedVirtualMicDevice.value === null && newSettings.virtual_mic_device) {
     selectedVirtualMicDevice.value = newSettings.virtual_mic_device;

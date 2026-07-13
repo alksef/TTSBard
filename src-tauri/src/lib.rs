@@ -1,49 +1,91 @@
-mod assets;
 mod ai;
-mod commands;
+mod assets;
 pub mod audio;
-mod signalsmith;
+mod commands;
 mod config;
 mod editor;
 mod error;
 mod event_loop;
 mod events;
+mod history;
 mod hotkeys;
+pub mod playback;
+mod playback_window;
+mod preprocessor;
+mod rate_limiter;
+mod secret_log;
 mod servers;
 mod setup;
+mod signalsmith;
 mod soundpanel;
 mod soundpanel_window;
-mod playback_window;
-mod state;
-mod preprocessor;
-mod history;
-mod tabs;
 mod spellcheck;
-pub mod playback;
+mod state;
+mod tabs;
 mod telegram;
-mod tts;
-mod window;
-mod webview;
-mod twitch;
-mod rate_limiter;
 mod thread_manager;
+mod tts;
+mod twitch;
+mod webview;
+mod window;
 
-use std::sync::Arc;
-use state::AppState;
-use commands::telegram::TelegramState;
-use config::{SettingsManager, WindowsManager};
-use tauri::Manager;
-use tracing::{info, warn, error, Level};
-use tracing_subscriber::{fmt, prelude::*, Registry, EnvFilter};
-use tracing_appender::non_blocking;
-use std::path::PathBuf;
 use anyhow::Context;
-use commands::{speak_text, speak_text_raw_export, get_tts_provider, set_tts_provider, get_local_tts_url, set_local_tts_url, get_openai_api_key, set_openai_api_key, get_openai_voice, set_openai_voice, apply_openai_proxy_settings, get_interception, set_interception, has_api_key, toggle_interception, quit_app, get_hotkey_enabled, set_hotkey_enabled, get_global_exclude_from_capture, set_global_exclude_from_capture, open_file_dialog, get_output_devices, get_virtual_mic_devices, get_audio_settings, set_speaker_device, set_speaker_enabled, set_speaker_volume, set_virtual_mic_device, enable_virtual_mic, disable_virtual_mic, set_virtual_mic_volume, test_audio_device, get_audio_effects, set_audio_effects_enabled, set_audio_effects_pitch, set_audio_effects_speed, set_audio_effects_volume, set_audio_effects_enhance_enabled, set_audio_effects_enhance_atten_db, set_audio_effects_formant_preserved, preview_audio_file, stop_preview, save_audio_effects, set_editor_quick, get_editor_quick, set_editor_spellcheck_enabled, get_editor_spellcheck_enabled, set_editor_spellcheck_source, get_editor_spellcheck_source, set_editor_height, get_editor_height, update_theme, hide_main_window, close_soundpanel_window, toggle_playback_control_window, set_show_playback_on_start, get_show_playback_on_start, window::resize_main_window, window::set_main_bounds, window::remove_main_bounds, get_main_appearance, set_main_custom_background, set_main_opacity, set_main_bg_color, set_main_custom_opacity, set_main_opacity_compact_only, set_main_compact_dims, get_main_compact_dims, get_soundpanel_appearance_source, set_soundpanel_appearance_source, get_playback_appearance_source, set_playback_appearance_source, get_hotkey_settings, set_hotkey, reset_hotkey_to_default, unregister_hotkeys, reregister_hotkeys_cmd, set_hotkey_recording};
-use commands::playback_window::{pc_get_appearance, pc_set_opacity, pc_set_bg_color};
+use commands::ai::{
+    ai_check_grammar, correct_text, get_ai_completion, get_ai_custom_model, get_ai_deepseek_model,
+    get_ai_openai_model, get_ai_zai_model, get_editor_ai, get_editor_ai_completion,
+    set_ai_custom_api_key, set_ai_custom_model, set_ai_custom_url, set_ai_custom_use_proxy,
+    set_ai_deepseek_api_key, set_ai_deepseek_model, set_ai_deepseek_use_proxy,
+    set_ai_openai_api_key, set_ai_openai_model, set_ai_openai_use_proxy, set_ai_prompt,
+    set_ai_provider, set_ai_zai_api_key, set_ai_zai_model, set_ai_zai_url, set_editor_ai,
+    set_editor_ai_completion,
+};
 use commands::logging::{get_logging_settings, save_logging_settings};
-use commands::telegram::{telegram_init, telegram_request_code, telegram_sign_in, telegram_sign_out, telegram_get_status, telegram_get_user, telegram_auto_restore};
-use commands::ai::{set_ai_provider, set_ai_prompt, set_ai_openai_api_key, set_ai_openai_use_proxy, set_ai_zai_url, set_ai_zai_api_key, correct_text, set_editor_ai, get_editor_ai, set_editor_ai_completion, get_editor_ai_completion, get_ai_completion, set_ai_openai_model, get_ai_openai_model, set_ai_zai_model, get_ai_zai_model, set_ai_deepseek_api_key, set_ai_deepseek_model, set_ai_deepseek_use_proxy, get_ai_deepseek_model, set_ai_custom_url, set_ai_custom_api_key, set_ai_custom_model, set_ai_custom_use_proxy, get_ai_custom_model, ai_check_grammar};
-use soundpanel::{sp_get_bindings, sp_add_binding, sp_remove_binding, sp_test_sound, sp_is_supported_format, sp_get_floating_appearance, sp_set_floating_opacity, sp_set_floating_bg_color, sp_set_floating_clickthrough, sp_is_floating_clickthrough_enabled, sp_get_stay_visible, sp_set_stay_visible, sp_play_binding, get_intercept_settings, set_intercept_enabled, set_intercept_binding, clear_intercept_binding, sp_get_sets, sp_get_active_set, sp_set_active_set, sp_add_set, sp_rename_set, sp_remove_set};
+use commands::playback_window::{pc_get_appearance, pc_set_bg_color, pc_set_opacity};
+use commands::telegram::TelegramState;
+use commands::telegram::{
+    telegram_auto_restore, telegram_get_status, telegram_get_user, telegram_init,
+    telegram_request_code, telegram_sign_in, telegram_sign_out,
+};
+use commands::{
+    apply_openai_proxy_settings, close_soundpanel_window, disable_virtual_mic, enable_virtual_mic,
+    get_audio_effects, get_audio_settings, get_editor_height, get_editor_quick,
+    get_editor_spellcheck_enabled, get_editor_spellcheck_source, get_global_exclude_from_capture,
+    get_hotkey_enabled, get_hotkey_settings, get_interception, get_local_tts_url,
+    get_main_appearance, get_main_compact_dims, get_openai_api_key, get_openai_voice,
+    get_output_devices, get_playback_appearance_source, get_show_playback_on_start,
+    get_soundpanel_appearance_source, get_tts_provider, get_virtual_mic_devices, has_api_key,
+    hide_main_window, open_file_dialog, preview_audio_file, quit_app, reregister_hotkeys_cmd,
+    reset_hotkey_to_default, save_audio_effects, set_audio_effects_enabled,
+    set_audio_effects_enhance_atten_db, set_audio_effects_enhance_enabled,
+    set_audio_effects_formant_preserved, set_audio_effects_pitch, set_audio_effects_speed,
+    set_audio_effects_volume, set_editor_height, set_editor_quick, set_editor_spellcheck_enabled,
+    set_editor_spellcheck_source, set_global_exclude_from_capture, set_hotkey, set_hotkey_enabled,
+    set_hotkey_recording, set_interception, set_local_tts_url, set_main_bg_color,
+    set_main_compact_dims, set_main_custom_background, set_main_custom_opacity, set_main_opacity,
+    set_main_opacity_compact_only, set_openai_api_key, set_openai_voice,
+    set_playback_appearance_source, set_show_playback_on_start, set_soundpanel_appearance_source,
+    set_speaker_device, set_speaker_enabled, set_speaker_volume, set_tts_provider,
+    set_virtual_mic_device, set_virtual_mic_volume, speak_text, speak_text_raw_export,
+    stop_preview, test_audio_device, toggle_interception, toggle_playback_control_window,
+    unregister_hotkeys, update_theme, window::remove_main_bounds, window::resize_main_window,
+    window::set_main_bounds,
+};
+use config::{SettingsManager, WindowsManager};
+use soundpanel::{
+    clear_intercept_binding, get_intercept_settings, set_intercept_binding, set_intercept_enabled,
+    sp_add_binding, sp_add_set, sp_get_active_set, sp_get_bindings, sp_get_floating_appearance,
+    sp_get_sets, sp_get_stay_visible, sp_is_floating_clickthrough_enabled, sp_is_supported_format,
+    sp_play_binding, sp_remove_binding, sp_remove_set, sp_rename_set, sp_set_active_set,
+    sp_set_floating_bg_color, sp_set_floating_clickthrough, sp_set_floating_opacity,
+    sp_set_stay_visible, sp_test_sound,
+};
+use state::AppState;
+use std::path::PathBuf;
+use std::sync::Arc;
+use tauri::Manager;
+use tracing::{error, info, warn, Level};
+use tracing_appender::non_blocking;
+use tracing_subscriber::{fmt, prelude::*, EnvFilter, Registry};
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -56,19 +98,16 @@ pub fn run() {
     // Инициализируем состояние и менеджеры ДО setup
     let mut app_state = AppState::new();
 
-    let settings_manager = SettingsManager::new()
-        .expect("Failed to create settings manager");
+    let settings_manager = SettingsManager::new().expect("Failed to create settings manager");
 
-    let windows_manager = WindowsManager::new()
-        .expect("Failed to create windows manager");
+    let windows_manager = WindowsManager::new().expect("Failed to create windows manager");
 
     // Share the cache Arc so hot-path reads stay consistent with setter writes
     app_state.settings_cache = settings_manager.cache_arc();
 
     // Load settings to configure logger
     // These settings will be passed to init_app to avoid race condition
-    let settings = settings_manager.load()
-        .expect("Failed to load settings");
+    let settings = settings_manager.load().expect("Failed to load settings");
 
     // Validate module levels (log a warning if invalid)
     if let Err(e) = commands::logging::validate_module_levels(&settings.logging.module_levels) {
@@ -76,8 +115,7 @@ pub fn run() {
     }
 
     // Initialize tracing subscriber
-    let log_dir = PathBuf::from(std::env::var("APPDATA")
-        .unwrap_or_else(|_| ".".to_string()))
+    let log_dir = PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string()))
         .join("ttsbard")
         .join("logs");
 
@@ -85,14 +123,17 @@ pub fn run() {
     if let Err(e) = std::fs::create_dir_all(&log_dir)
         .with_context(|| format!("Failed to create log directory at {:?}", log_dir))
     {
-        eprintln!("Failed to create log directory: {}. Logging to stdout only.", e);
+        eprintln!(
+            "Failed to create log directory: {}. Logging to stdout only.",
+            e
+        );
         // Continue with stdout-only logging
     }
 
     // Build env filter with per-module directives
     // In dev mode, default to TRACE level; in release mode, respect settings
     let default_level = if cfg!(debug_assertions) {
-        Level::TRACE  // Show all logs in dev mode
+        Level::TRACE // Show all logs in dev mode
     } else if settings.logging.enabled {
         match settings.logging.level.as_str() {
             "error" => Level::ERROR,
@@ -123,7 +164,9 @@ pub fn run() {
         let directive = format!("{}={}", module, module_level);
         match directive.parse() {
             Ok(d) => env_filter = env_filter.add_directive(d),
-            Err(e) => warn!(directive = %directive, error = %e, "Invalid log directive in settings, skipping"),
+            Err(e) => {
+                warn!(directive = %directive, error = %e, "Invalid log directive in settings, skipping")
+            }
         }
     }
 
@@ -152,7 +195,8 @@ pub fn run() {
                 "\n====== New session: {} | Version: {} ======\n",
                 timestamp,
                 env!("CARGO_PKG_VERSION")
-            ).ok();
+            )
+            .ok();
 
             non_blocking(log_file)
         } else {
@@ -164,17 +208,10 @@ pub fn run() {
         tracing::subscriber::set_global_default(
             Registry::default()
                 .with(env_filter)
-                .with(
-                    fmt::layer()
-                        .with_writer(std::io::stdout)
-                        .with_ansi(true)
-                )
-                .with(
-                    fmt::layer()
-                        .with_writer(non_blocking_file)
-                        .with_ansi(false)
-                )
-        ).expect("Failed to set tracing subscriber");
+                .with(fmt::layer().with_writer(std::io::stdout).with_ansi(true))
+                .with(fmt::layer().with_writer(non_blocking_file).with_ansi(false)),
+        )
+        .expect("Failed to set tracing subscriber");
 
         leaked_guard
     } else if settings.logging.enabled {
@@ -198,7 +235,8 @@ pub fn run() {
             "\n====== New session: {} | Version: {} ======\n",
             timestamp,
             env!("CARGO_PKG_VERSION")
-        ).ok();
+        )
+        .ok();
 
         let (non_blocking_file, guard) = non_blocking(log_file);
         let leaked_guard = Box::leak(Box::new(guard));
@@ -206,12 +244,9 @@ pub fn run() {
         tracing::subscriber::set_global_default(
             Registry::default()
                 .with(env_filter)
-                .with(
-                    fmt::layer()
-                        .with_writer(non_blocking_file)
-                        .with_ansi(false)
-                )
-        ).expect("Failed to set tracing subscriber");
+                .with(fmt::layer().with_writer(non_blocking_file).with_ansi(false)),
+        )
+        .expect("Failed to set tracing subscriber");
 
         leaked_guard
     } else {
@@ -219,28 +254,27 @@ pub fn run() {
         tracing::subscriber::set_global_default(
             Registry::default()
                 .with(EnvFilter::new("error"))
-                .with(
-                    fmt::layer()
-                        .with_writer(std::io::stdout)
-                        .with_ansi(true)
-                )
-        ).expect("Failed to set tracing subscriber");
+                .with(fmt::layer().with_writer(std::io::stdout).with_ansi(true)),
+        )
+        .expect("Failed to set tracing subscriber");
         // Dummy guard to satisfy the type system - won't be used
         Box::leak(Box::new(non_blocking(std::io::sink()).1))
     };
 
-    let appdata_path = std::env::var("APPDATA")
-        .unwrap_or_else(|_| ".".to_string());
+    let appdata_path = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
     let appdata_path = format!("{}\\ttsbard", appdata_path);
 
-    std::fs::create_dir_all(&appdata_path)
-        .expect("Failed to create appdata directory");
+    std::fs::create_dir_all(&appdata_path).expect("Failed to create appdata directory");
 
     let soundpanel_state = soundpanel::SoundPanelState::new(appdata_path);
 
-    let (history_path, ngram_path, phrase_path) = history::history_paths()
-        .expect("Failed to resolve history paths");
-    let history_manager = Arc::new(history::HistoryManager::new(history_path, ngram_path, phrase_path));
+    let (history_path, ngram_path, phrase_path) =
+        history::history_paths().expect("Failed to resolve history paths");
+    let history_manager = Arc::new(history::HistoryManager::new(
+        history_path,
+        ngram_path,
+        phrase_path,
+    ));
     *app_state.editor.history_manager.lock() = Some(history_manager.clone());
     let history_state = commands::history::HistoryState(history_manager);
 
@@ -466,7 +500,7 @@ pub fn run() {
             commands::is_backend_ready,
             commands::confirm_backend_ready,
             // Window commands
-resize_main_window,
+            resize_main_window,
             set_main_bounds,
             remove_main_bounds,
             // Hotkey commands
@@ -517,7 +551,10 @@ resize_main_window,
                     info!("SoundPanel lost focus - hiding");
                     let app_handle = window.app_handle();
                     if let Some(app_state) = app_handle.try_state::<AppState>() {
-                        let _ = crate::soundpanel_window::hide_soundpanel_window(&app_handle, &app_state);
+                        let _ = crate::soundpanel_window::hide_soundpanel_window(
+                            &app_handle,
+                            &app_state,
+                        );
                     }
                 }
             }
@@ -549,7 +586,11 @@ resize_main_window,
                                 info!("Window focused - initializing hotkeys...");
 
                                 // Initialize hotkeys using tauri-plugin-global-shortcut
-                                match hotkeys::initialize_hotkeys(0, app_state_inner, app_handle.clone()) {
+                                match hotkeys::initialize_hotkeys(
+                                    0,
+                                    app_state_inner,
+                                    app_handle.clone(),
+                                ) {
                                     Ok(_) => {
                                         info!("Hotkeys initialized successfully");
                                     }
@@ -566,7 +607,9 @@ resize_main_window,
                     }
                     tauri::WindowEvent::Destroyed => {
                         // Сохраняем позицию главного окна
-                        if let Some(windows_manager) = window.app_handle().try_state::<WindowsManager>() {
+                        if let Some(windows_manager) =
+                            window.app_handle().try_state::<WindowsManager>()
+                        {
                             if let Ok(pos) = window.outer_position() {
                                 let x: i32 = pos.x;
                                 let y: i32 = pos.y;

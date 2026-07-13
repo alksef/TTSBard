@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { Keyboard, RotateCcw, AppWindow, Music, MonitorPlay } from 'lucide-vue-next'
 import type { HotkeyDto } from '../types/settings'
 import { useAppSettings } from '../composables/useAppSettings'
+import { debugError } from '../utils/debug'
 
 const { settings, isLoading, reload } = useAppSettings()
 
@@ -208,7 +209,7 @@ onUnmounted(async () => {
       await invoke('set_hotkey_recording', { recording: false })
       await invoke('reregister_hotkeys_cmd')
     } catch (e) {
-      console.error('Failed to cleanup on unmount:', e)
+        debugError('Failed to cleanup on unmount:', e)
     }
   }
 })

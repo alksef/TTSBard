@@ -59,7 +59,7 @@ async function testPreprocessing() {
     const result = await invoke<string>('preview_preprocessing', { text: testInput.value })
     testOutput.value = result
   } catch (error) {
-    console.error('Failed to test preprocessing:', error)
+    debugError('Failed to test preprocessing:', error)
     testOutput.value = 'Error: ' + error
   }
 }

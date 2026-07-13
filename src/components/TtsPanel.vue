@@ -402,7 +402,13 @@ watch(showTelegramModal, async (isOpen) => {
 watch(ttsSettings, (newSettings) => {
   if (!newSettings) return;
 
-  debugLog('[TTS] Settings updated from composable:', newSettings);
+  debugLog('[TTS] Settings updated from composable:', {
+    provider: newSettings.provider,
+    has_openai: !!newSettings.openai,
+    has_local: !!newSettings.local,
+    has_fish: !!newSettings.fish,
+    has_telegram: !!newSettings.telegram,
+  });
 
   if (newSettings.provider) {
     debugLog('[TTS] Setting activeProvider to:', newSettings.provider);
