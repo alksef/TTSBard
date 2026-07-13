@@ -14,6 +14,7 @@ import PhraseHistoryList from './PhraseHistoryList.vue'
 import EditorMenu from './editor/EditorMenu.vue'
 import { useEditorTabs } from '../composables/useEditorTabs'
 import EditorTabs from './editor/EditorTabs.vue'
+import StatusMessage from './shared/StatusMessage.vue'
 
 const { showError } = useErrorHandler()
 const { tabs, activeId, active, create: createTab, close: closeTab, select: selectTab, rename: renameTab, init: initTabs, flushSave: flushTabsSave } = useEditorTabs()
@@ -41,6 +42,7 @@ const isCorrecting = ref(false)
 const isCompleting = ref(false)
 const isCheckingGrammar = ref(false)
 const showHistory = ref(false)
+const saveStatusMessage = ref('')
 const replacements = ref<Map<string, string>>(new Map())
 const usernames = ref<Map<string, string>>(new Map())
 const isMinimalMode = inject<Ref<boolean>>('isMinimalMode', ref(false))
@@ -293,6 +295,7 @@ async function saveAudio() {
     if (!filePath) return
 
     await invoke('speak_text_raw_export', { text: currentText, path: filePath })
+    saveStatusMessage.value = 'Аудио сохранено'
   } catch (e) {
     debugError('[InputPanel] Save audio failed:', e)
     showError(e as string)
@@ -440,6 +443,11 @@ function toggleHistory() {
 
 <template>
   <div class="input-panel" :class="{ 'minimal-panel': isMinimalMode }">
+    <StatusMessage
+      :message="saveStatusMessage"
+      type="success"
+      @dismiss="saveStatusMessage = ''"
+    />
     <div class="input-group">
       <div class="textarea-wrapper" :class="{ 'minimal-wrapper': isMinimalMode }">
         <EditorTabs
