@@ -346,6 +346,14 @@ impl PlaybackManager {
         if s.current.is_some()
             && (s.status == PlaybackStatus::Playing || s.status == PlaybackStatus::Paused)
         {
+            let already_current = s.current.as_ref().map(|c| c.id == id).unwrap_or(false);
+            if already_current {
+                return true;
+            }
+            let already_queued = s.queue.iter().any(|q| q.id == id);
+            if already_queued {
+                return true;
+            }
             if s.queue.len() < MAX_QUEUE {
                 s.queue.push_back(QueuedPhrase {
                     id,

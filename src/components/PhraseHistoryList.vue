@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted } from 'vue'
-import { Search, X, Trash2, ChevronDown, ChevronRight } from 'lucide-vue-next'
+import { Search, X, Trash2, ChevronDown, ChevronRight, Play } from 'lucide-vue-next'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { usePhraseHistory, type PhraseEntry } from '../composables/usePhraseHistory'
 import { relativeTime } from '../utils/time'
@@ -19,7 +19,7 @@ const emit = defineEmits<{
   'expansion-change': [expanded: boolean]
 }>()
 
-const { list, remove, clear, isLoading } = usePhraseHistory()
+const { list, remove, clear, replay, isLoading } = usePhraseHistory()
 
 const isExpanded = ref(props.expanded ?? false)
 
@@ -33,6 +33,8 @@ const phrases = ref<PhraseEntry[]>([])
 const filterDebounced = ref('')
 // Текст ошибки последней операции; пусто = нет ошибки. Без модалок — краткая строка в UI.
 const loadError = ref('')
+const replayingId = ref<string | null>(null)
+const cacheErrors = ref<Record<string, boolean>>({})
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 let unlistenTextSent: UnlistenFn | null = null
@@ -52,6 +54,7 @@ async function loadPhrases() {
   try {
     phrases.value = await list(filterDebounced.value || undefined, 100)
     loadError.value = ''
+    cacheErrors.value = {}
   } catch (e) {
     debugError('[PhraseHistory] Failed to load phrases:', e)
     loadError.value = 'Ошибка загрузки истории'
@@ -103,6 +106,27 @@ async function clearAll() {
   } catch (e) {
     debugError('[PhraseHistory] Failed to clear phrases:', e)
     loadError.value = 'Не удалось очистить историю'
+  }
+}
+
+async function replayPhrase(phrase: PhraseEntry) {
+  if (replayingId.value !== null) return
+  const phraseId = phrase.id
+  replayingId.value = phraseId
+  try {
+    await replay(phraseId)
+    const next = { ...cacheErrors.value }
+    delete next[phraseId]
+    cacheErrors.value = next
+  } catch (e: any) {
+    if (replayingId.value !== phraseId) return
+    if (String(e).includes('CacheMiss')) {
+      cacheErrors.value = { ...cacheErrors.value, [phraseId]: true }
+    }
+  } finally {
+    if (replayingId.value === phraseId) {
+      replayingId.value = null
+    }
   }
 }
 
@@ -180,7 +204,24 @@ onUnmounted(() => {
               <span class="phrase-count">{{ phrase.count }}</span>
               <span class="phrase-time">{{ relativeTime(phrase.last_used) }}</span>
             </div>
+            <div v-if="phrase.provider || phrase.voice" class="phrase-meta-secondary">
+              <template v-if="phrase.provider">{{ phrase.provider }}</template>
+              <template v-if="phrase.provider && phrase.voice"> · </template>
+              <template v-if="phrase.voice">{{ phrase.voice }}</template>
+            </div>
+            <div v-if="cacheErrors[phrase.id]" class="cache-error-pill">
+              Аудиокеш недоступен
+            </div>
           </div>
+          <button
+            class="phrase-action-btn phrase-play-btn"
+            :class="{ replaying: replayingId === phrase.id }"
+            @click.stop="replayPhrase(phrase)"
+            title="Воспроизвести из кеша"
+            aria-label="Воспроизвести из кеша"
+          >
+            <Play :size="12" />
+          </button>
           <button
             class="phrase-action-btn"
             @click.stop="replacePhraseAction(phrase)"
@@ -421,5 +462,32 @@ onUnmounted(() => {
 
 .remove-phrase:hover {
   color: var(--color-danger);
+}
+
+.phrase-meta-secondary {
+  margin-top: 0.1rem;
+  font-size: 0.65rem;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  opacity: 0.75;
+}
+
+.cache-error-pill {
+  margin-top: 0.25rem;
+  font-size: 0.65rem;
+  color: var(--color-danger);
+  font-family: var(--font-mono);
+  line-height: 1.3;
+}
+
+.phrase-play-btn.replaying {
+  opacity: 1;
+  color: var(--color-accent);
+  animation: pulse 0.8s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }
 </style>
