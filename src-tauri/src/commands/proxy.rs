@@ -203,7 +203,7 @@ pub fn get_proxy_settings(
 /// * `url` - Proxy URL (e.g., socks5://host:port, socks4://user:pass@host:port, http://host:port)
 /// * `proxy_type` - Type of proxy (Socks5, Socks4, Http)
 #[command]
-pub fn set_proxy_url(
+pub async fn set_proxy_url(
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     url: String,
@@ -221,8 +221,9 @@ pub fn set_proxy_url(
         return Err("Proxy URL must start with socks5://, socks4://, http://, or https://".to_string());
     }
 
-    settings_manager.set_proxy_url(url)
-        .map_err(|e| format!("Failed to save proxy settings: {}", e))?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_proxy_url(url)
+    }).await?;
 
     super::emit_settings_changed(&app_handle);
 
@@ -237,15 +238,16 @@ pub fn set_proxy_url(
 /// # Arguments
 /// * `enabled` - Whether OpenAI should use the unified proxy
 #[command]
-pub fn set_openai_use_proxy(
+pub async fn set_openai_use_proxy(
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     enabled: bool,
 ) -> Result<(), String> {
     info!(enabled, "Setting OpenAI use proxy");
 
-    settings_manager.set_openai_use_proxy(enabled)
-        .map_err(|e| format!("Failed to save OpenAI proxy setting: {}", e))?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_openai_use_proxy(enabled)
+    }).await?;
 
     super::emit_settings_changed(&app_handle);
 
@@ -260,15 +262,16 @@ pub fn set_openai_use_proxy(
 /// # Arguments
 /// * `mode` - Proxy mode for Telegram connection
 #[command]
-pub fn set_telegram_proxy_mode(
+pub async fn set_telegram_proxy_mode(
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     mode: ProxyMode,
 ) -> Result<(), String> {
     info!(?mode, "Setting Telegram proxy mode");
 
-    settings_manager.set_telegram_proxy_mode(mode)
-        .map_err(|e| format!("Failed to save Telegram proxy mode: {}", e))?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_telegram_proxy_mode(mode)
+    }).await?;
 
     super::emit_settings_changed(&app_handle);
 
@@ -567,7 +570,7 @@ pub fn get_mtproxy_settings(
 /// * `secret` - MTProxy secret key (hex or base64 encoded)
 /// * `dc_id` - Optional DC ID (data center ID)
 #[command]
-pub fn set_mtproxy_settings(
+pub async fn set_mtproxy_settings(
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     host: Option<String>,
@@ -598,8 +601,9 @@ pub fn set_mtproxy_settings(
         }
     }
 
-    settings_manager.set_mtproxy_settings(host, port, secret, dc_id)
-        .map_err(|e| format!("Failed to save MTProxy settings: {}", e))?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_mtproxy_settings(host, port, secret, dc_id)
+    }).await?;
 
     super::emit_settings_changed(&app_handle);
 

@@ -52,14 +52,15 @@ pub fn get_hotkey_enabled(
 
 /// Set hotkey enabled setting
 #[tauri::command]
-pub fn set_hotkey_enabled(
+pub async fn set_hotkey_enabled(
     enabled: bool,
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     state: State<'_, AppState>
 ) -> Result<(), String> {
-    settings_manager.set_hotkey_enabled(enabled)
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_hotkey_enabled(enabled)
+    }).await?;
 
     state.set_hotkey_enabled(enabled);
     super::emit_settings_changed(&app_handle);
@@ -75,15 +76,16 @@ pub fn open_file_dialog() -> Result<String, String> {
 
 /// Set global exclude from capture for all windows
 #[tauri::command]
-pub fn set_global_exclude_from_capture(
+pub async fn set_global_exclude_from_capture(
     value: bool,
     _app_handle: AppHandle,
     windows_manager: State<'_, WindowsManager>
 ) -> Result<(), String> {
     info!(value, "Setting global exclude from capture");
 
-    windows_manager.set_global_exclude_from_capture(value)
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    super::persist_blocking(windows_manager.inner(), move |mgr| {
+        mgr.set_global_exclude_from_capture(value)
+    }).await?;
 
     super::emit_settings_changed(&_app_handle);
 
@@ -103,15 +105,16 @@ pub fn get_global_exclude_from_capture(
 
 /// Update application theme
 #[tauri::command]
-pub fn update_theme(
+pub async fn update_theme(
     settings_manager: State<'_, SettingsManager>,
     app_handle: AppHandle,
     theme: Theme,
 ) -> Result<(), String> {
     info!(?theme, "Updating theme");
 
-    settings_manager.set_theme(theme)
-        .map_err(|e| format!("Failed to update theme: {}", e))?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_theme(theme)
+    }).await?;
 
     let tauri_theme = match theme {
         Theme::Light => tauri::Theme::Light,
@@ -172,13 +175,14 @@ pub fn toggle_playback_control_window(app_handle: AppHandle) -> Result<(), Strin
 
 /// Set show playback control window on start
 #[tauri::command]
-pub fn set_show_playback_on_start(
+pub async fn set_show_playback_on_start(
     value: bool,
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
-    settings_manager.set_show_playback_on_start(value)
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_show_playback_on_start(value)
+    }).await?;
     super::emit_settings_changed(&app_handle);
     Ok(())
 }
@@ -221,8 +225,11 @@ pub async fn set_hotkey(
         return Err("Этот хоткей уже используется для главного окна".to_string());
     }
 
-    settings_manager.set_hotkey(&name, &hotkey)
-        .map_err(|e| format!("Failed to save hotkey: {}", e))?;
+    let name_clone = name.clone();
+    let hotkey_clone = hotkey.clone();
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_hotkey(&name_clone, &hotkey_clone)
+    }).await?;
 
     super::emit_settings_changed(&app_handle);
 
@@ -239,8 +246,10 @@ pub async fn reset_hotkey_to_default(
     settings_manager: State<'_, SettingsManager>,
     app_handle: AppHandle,
 ) -> Result<Hotkey, String> {
-    let default = settings_manager.reset_hotkey_to_default(&name)
-        .map_err(|e| format!("Failed to reset hotkey: {}", e))?;
+    let name_clone = name.clone();
+    let default = super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.reset_hotkey_to_default(&name_clone)
+    }).await?;
 
     super::emit_settings_changed(&app_handle);
 
@@ -311,15 +320,15 @@ pub fn remove_main_bounds(app_handle: AppHandle) -> Result<(), String> {
 
 /// Set main window compact dimensions (clamped 300..500)
 #[tauri::command]
-pub fn set_main_compact_dims(
+pub async fn set_main_compact_dims(
     width: u32,
     height: u32,
     app_handle: AppHandle,
     windows_manager: State<'_, WindowsManager>,
 ) -> Result<(), String> {
-    windows_manager
-        .set_main_compact_dims(width, height)
-        .map_err(|e| format!("Failed to save compact dims: {}", e))?;
+    super::persist_blocking(windows_manager.inner(), move |mgr| {
+        mgr.set_main_compact_dims(width, height)
+    }).await?;
     super::emit_settings_changed(&app_handle);
     Ok(())
 }
@@ -366,75 +375,75 @@ pub fn get_main_appearance(
 
 /// Set whether the main window uses a custom background color
 #[tauri::command]
-pub fn set_main_custom_background(
+pub async fn set_main_custom_background(
     value: bool,
     app_handle: AppHandle,
     windows_manager: State<'_, WindowsManager>,
 ) -> Result<(), String> {
     info!(value, "Setting main custom background");
-    windows_manager
-        .set_main_custom_background(value)
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    super::persist_blocking(windows_manager.inner(), move |mgr| {
+        mgr.set_main_custom_background(value)
+    }).await?;
     emit_appearance_updates(&app_handle);
     Ok(())
 }
 
 /// Set main window opacity (10-100)
 #[tauri::command]
-pub fn set_main_opacity(
+pub async fn set_main_opacity(
     value: u8,
     app_handle: AppHandle,
     windows_manager: State<'_, WindowsManager>,
 ) -> Result<(), String> {
     info!(value, "Setting main opacity");
-    windows_manager
-        .set_main_opacity(value)
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    super::persist_blocking(windows_manager.inner(), move |mgr| {
+        mgr.set_main_opacity(value)
+    }).await?;
     emit_appearance_updates(&app_handle);
     Ok(())
 }
 
 /// Set main window background color (#RRGGBB)
 #[tauri::command]
-pub fn set_main_bg_color(
+pub async fn set_main_bg_color(
     color: String,
     app_handle: AppHandle,
     windows_manager: State<'_, WindowsManager>,
 ) -> Result<(), String> {
     info!(color, "Setting main bg color");
-    windows_manager
-        .set_main_bg_color(color)
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    super::persist_blocking(windows_manager.inner(), move |mgr| {
+        mgr.set_main_bg_color(color)
+    }).await?;
     emit_appearance_updates(&app_handle);
     Ok(())
 }
 
 /// Set whether the main window uses custom opacity
 #[tauri::command]
-pub fn set_main_custom_opacity(
+pub async fn set_main_custom_opacity(
     value: bool,
     app_handle: AppHandle,
     windows_manager: State<'_, WindowsManager>,
 ) -> Result<(), String> {
     info!(value, "Setting main custom opacity");
-    windows_manager
-        .set_main_custom_opacity(value)
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    super::persist_blocking(windows_manager.inner(), move |mgr| {
+        mgr.set_main_custom_opacity(value)
+    }).await?;
     emit_appearance_updates(&app_handle);
     Ok(())
 }
 
 /// Set whether custom opacity is applied only in compact mode
 #[tauri::command]
-pub fn set_main_opacity_compact_only(
+pub async fn set_main_opacity_compact_only(
     value: bool,
     app_handle: AppHandle,
     windows_manager: State<'_, WindowsManager>,
 ) -> Result<(), String> {
     info!(value, "Setting main opacity compact only");
-    windows_manager
-        .set_main_opacity_compact_only(value)
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    super::persist_blocking(windows_manager.inner(), move |mgr| {
+        mgr.set_main_opacity_compact_only(value)
+    }).await?;
     emit_appearance_updates(&app_handle);
     Ok(())
 }
@@ -451,15 +460,15 @@ pub fn get_soundpanel_appearance_source(
 
 /// Set soundpanel appearance source ("own" or "main")
 #[tauri::command]
-pub fn set_soundpanel_appearance_source(
+pub async fn set_soundpanel_appearance_source(
     source: String,
     app_handle: AppHandle,
     windows_manager: State<'_, WindowsManager>,
 ) -> Result<(), String> {
     info!(source, "Setting soundpanel appearance source");
-    windows_manager
-        .set_soundpanel_appearance_source(source)
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    super::persist_blocking(windows_manager.inner(), move |mgr| {
+        mgr.set_soundpanel_appearance_source(source)
+    }).await?;
     emit_appearance_updates(&app_handle);
     Ok(())
 }
@@ -474,15 +483,15 @@ pub fn get_playback_appearance_source(
 
 /// Set playback appearance source ("own" or "main")
 #[tauri::command]
-pub fn set_playback_appearance_source(
+pub async fn set_playback_appearance_source(
     source: String,
     app_handle: AppHandle,
     windows_manager: State<'_, WindowsManager>,
 ) -> Result<(), String> {
     info!(source, "Setting playback appearance source");
-    windows_manager
-        .set_playback_appearance_source(source)
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    super::persist_blocking(windows_manager.inner(), move |mgr| {
+        mgr.set_playback_appearance_source(source)
+    }).await?;
     emit_appearance_updates(&app_handle);
     Ok(())
 }

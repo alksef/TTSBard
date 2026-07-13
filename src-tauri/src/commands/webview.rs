@@ -77,14 +77,18 @@ pub async fn save_webview_settings(
     // Get SettingsManager once and persist to config
     let settings_manager = app_handle.try_state::<SettingsManager>();
     if let Some(manager) = settings_manager {
-        manager.set_webview_start_on_boot(settings.start_on_boot)
-            .map_err(|e| format!("Failed to save webview start_on_boot: {}", e))?;
-        manager.set_webview_port(settings.port)
-            .map_err(|e| format!("Failed to save webview port: {}", e))?;
-        manager.set_webview_bind_address(settings.bind_address.clone())
-            .map_err(|e| format!("Failed to save webview bind_address: {}", e))?;
-        manager.set_webview_upnp_enabled(settings.upnp_enabled)
-            .map_err(|e| format!("Failed to save webview upnp_enabled: {}", e))?;
+        let bind_addr = settings.bind_address.clone();
+        let start_on_boot = settings.start_on_boot;
+        let port = settings.port;
+        let upnp_enabled = settings.upnp_enabled;
+        super::persist_blocking(manager.inner(), move |mgr| {
+            mgr.set_webview_start_on_boot(start_on_boot)?;
+            mgr.set_webview_port(port)?;
+            mgr.set_webview_bind_address(bind_addr)?;
+            mgr.set_webview_upnp_enabled(upnp_enabled)?;
+            Ok(())
+        }).await?;
+        super::emit_settings_changed(&app_handle);
     }
 
     // Only after successful file save, update AppState (runtime state)
@@ -96,9 +100,6 @@ pub async fn save_webview_settings(
     if upnp_changed {
         state.webview.send_event(crate::events::AppEvent::ToggleUpnp(settings.upnp_enabled));
     }
-
-    // Emit settings-changed event to update UI
-    super::emit_settings_changed(&app_handle);
 
     // Trigger server restart if server settings changed
     // Note: start_on_boot changes don't require restart (only affects next boot)
@@ -215,12 +216,12 @@ pub async fn generate_webview_token(
     // Persist to settings
     let settings_manager = app_handle.try_state::<SettingsManager>();
     if let Some(manager) = settings_manager {
-        manager.set_webview_access_token(Some(token.clone()))
-            .map_err(|e| format!("Failed to save access token: {}", e))?;
+        let t = token.clone();
+        super::persist_blocking(manager.inner(), move |mgr| {
+            mgr.set_webview_access_token(Some(t))
+        }).await?;
+        super::emit_settings_changed(&app_handle);
     }
-
-    // Emit settings-changed event to update UI
-    super::emit_settings_changed(&app_handle);
 
     Ok(token)
 }
@@ -269,12 +270,12 @@ pub async fn regenerate_webview_token(
     // Persist to settings
     let settings_manager = app_handle.try_state::<SettingsManager>();
     if let Some(manager) = settings_manager {
-        manager.set_webview_access_token(Some(token.clone()))
-            .map_err(|e| format!("Failed to save access token: {}", e))?;
+        let t = token.clone();
+        super::persist_blocking(manager.inner(), move |mgr| {
+            mgr.set_webview_access_token(Some(t))
+        }).await?;
+        super::emit_settings_changed(&app_handle);
     }
-
-    // Emit settings-changed event to update UI
-    super::emit_settings_changed(&app_handle);
 
     // Restart server to apply new token
     state.webview.send_event(crate::events::AppEvent::RestartWebViewServer);
@@ -297,8 +298,9 @@ pub async fn set_webview_upnp_enabled(
     // Persist to settings
     let settings_manager = app_handle.try_state::<SettingsManager>();
     if let Some(manager) = settings_manager {
-        manager.set_webview_upnp_enabled(enabled)
-            .map_err(|e| format!("Failed to save UPnP setting: {}", e))?;
+        super::persist_blocking(manager.inner(), move |mgr| {
+            mgr.set_webview_upnp_enabled(enabled)
+        }).await?;
         super::emit_settings_changed(&app_handle);
     }
 

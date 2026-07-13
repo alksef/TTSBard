@@ -43,8 +43,10 @@ pub async fn save_twitch_settings(
     // Получаем SettingsManager один раз
     let settings_manager = app_handle.try_state::<SettingsManager>();
     if let Some(manager) = settings_manager {
-        manager.set_twitch_settings(&settings)
-            .map_err(|e| format!("Failed to save Twitch settings: {}", e))?;
+        let s = settings.clone();
+        super::persist_blocking(manager.inner(), move |mgr| {
+            mgr.set_twitch_settings(&s)
+        }).await?;
         super::emit_settings_changed(&app_handle);
     }
 

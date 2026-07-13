@@ -12,7 +12,7 @@ use tracing::{info, warn, error, debug};
 
 /// Set AI provider
 #[tauri::command]
-pub fn set_ai_provider(
+pub async fn set_ai_provider(
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     state: State<'_, AppState>,
@@ -25,10 +25,11 @@ pub fn set_ai_provider(
         "custom" => crate::config::AiProviderType::Custom,
         _ => return Err("Invalid provider".into()),
     };
-    settings_manager.set_ai_provider(provider_enum)
-        .map_err(|e| format!("Failed to save AI provider: {}", e))?;
 
-    // Invalidate AI client cache when provider changes
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_ai_provider(provider_enum)
+    }).await?;
+
     state.invalidate_ai_client();
     super::emit_settings_changed(&app_handle);
 
@@ -37,7 +38,7 @@ pub fn set_ai_provider(
 
 /// Set AI global prompt
 #[tauri::command]
-pub fn set_ai_prompt(
+pub async fn set_ai_prompt(
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     prompt: String,
@@ -45,24 +46,27 @@ pub fn set_ai_prompt(
     if prompt.trim().is_empty() {
         return Err("Prompt cannot be empty".into());
     }
-    settings_manager.set_ai_prompt(prompt)
-        .map_err(|e| format!("Failed to save AI prompt: {}", e))?;
+
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_ai_prompt(prompt)
+    }).await?;
+
     super::emit_settings_changed(&app_handle);
     Ok(())
 }
 
 /// Set OpenAI API key for AI text correction
 #[tauri::command]
-pub fn set_ai_openai_api_key(
+pub async fn set_ai_openai_api_key(
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     state: State<'_, AppState>,
     key: String,
 ) -> Result<(), String> {
-    settings_manager.set_ai_openai_api_key(Some(key))
-        .map_err(|e| format!("Failed to save API key: {}", e))?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_ai_openai_api_key(Some(key))
+    }).await?;
 
-    // Invalidate AI client cache when API key changes
     state.invalidate_ai_client();
     super::emit_settings_changed(&app_handle);
 
@@ -71,16 +75,16 @@ pub fn set_ai_openai_api_key(
 
 /// Set OpenAI use proxy for AI text correction
 #[tauri::command]
-pub fn set_ai_openai_use_proxy(
+pub async fn set_ai_openai_use_proxy(
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     state: State<'_, AppState>,
     enabled: bool,
 ) -> Result<(), String> {
-    settings_manager.set_ai_openai_use_proxy(enabled)
-        .map_err(|e| format!("Failed to save proxy setting: {}", e))?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_ai_openai_use_proxy(enabled)
+    }).await?;
 
-    // Invalidate AI client cache when proxy setting changes
     state.invalidate_ai_client();
     super::emit_settings_changed(&app_handle);
 
@@ -89,7 +93,7 @@ pub fn set_ai_openai_use_proxy(
 
 /// Set Z.ai URL
 #[tauri::command]
-pub fn set_ai_zai_url(
+pub async fn set_ai_zai_url(
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     state: State<'_, AppState>,
@@ -98,10 +102,11 @@ pub fn set_ai_zai_url(
     if url.trim().is_empty() {
         return Err("URL cannot be empty".into());
     }
-    settings_manager.set_ai_zai_url(Some(url))
-        .map_err(|e| format!("Failed to save Z.ai URL: {}", e))?;
 
-    // Invalidate AI client cache when URL changes
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_ai_zai_url(Some(url))
+    }).await?;
+
     state.invalidate_ai_client();
     super::emit_settings_changed(&app_handle);
 
@@ -110,7 +115,7 @@ pub fn set_ai_zai_url(
 
 /// Set Z.ai API key
 #[tauri::command]
-pub fn set_ai_zai_api_key(
+pub async fn set_ai_zai_api_key(
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     state: State<'_, AppState>,
@@ -119,10 +124,11 @@ pub fn set_ai_zai_api_key(
     if api_key.trim().is_empty() {
         return Err("API key cannot be empty".into());
     }
-    settings_manager.set_ai_zai_api_key(Some(api_key))
-        .map_err(|e| format!("Failed to save Z.ai API key: {}", e))?;
 
-    // Invalidate AI client cache when API key changes
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_ai_zai_api_key(Some(api_key))
+    }).await?;
+
     state.invalidate_ai_client();
     super::emit_settings_changed(&app_handle);
 
@@ -169,19 +175,17 @@ pub async fn correct_text(
 
 /// Set AI correction in editor enabled state
 #[tauri::command]
-pub fn set_editor_ai(
+pub async fn set_editor_ai(
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     enabled: bool,
 ) -> Result<(), String> {
     tracing::info!(enabled, "set_editor_ai called");
-    settings_manager.set_editor_ai(enabled)
-        .map_err(|e| {
-            tracing::error!("Failed to set editor AI: {}", e);
-            format!("Failed to save: {}", e)
-        })?;
 
-    // Emit event to notify frontend
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_editor_ai(enabled)
+    }).await?;
+
     super::emit_settings_changed(&app_handle);
 
     Ok(())
@@ -197,13 +201,15 @@ pub fn get_editor_ai(
 
 /// Set AI completion in editor enabled state
 #[tauri::command]
-pub fn set_editor_ai_completion(
+pub async fn set_editor_ai_completion(
     app_handle: tauri::AppHandle,
     settings_manager: State<'_, SettingsManager>,
     enabled: bool,
 ) -> Result<(), String> {
-    settings_manager.set_editor_ai_completion(enabled)
-        .map_err(|e| format!("Failed to save: {}", e))?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_editor_ai_completion(enabled)
+    }).await?;
+
     super::emit_settings_changed(&app_handle);
     Ok(())
 }
@@ -262,7 +268,7 @@ pub async fn get_ai_completion(
 
 /// Set OpenAI model for AI text correction
 #[tauri::command]
-pub fn set_ai_openai_model(
+pub async fn set_ai_openai_model(
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     model: String,
@@ -270,8 +276,11 @@ pub fn set_ai_openai_model(
     if model.trim().is_empty() {
         return Err("Model cannot be empty".into());
     }
-    settings_manager.set_ai_openai_model(model)
-        .map_err(|e| format!("Failed to save OpenAI model: {}", e))?;
+
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_ai_openai_model(model)
+    }).await?;
+
     super::emit_settings_changed(&app_handle);
     Ok(())
 }
@@ -286,7 +295,7 @@ pub fn get_ai_openai_model(
 
 /// Set Z.ai model for AI text correction
 #[tauri::command]
-pub fn set_ai_zai_model(
+pub async fn set_ai_zai_model(
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     model: String,
@@ -294,8 +303,11 @@ pub fn set_ai_zai_model(
     if model.trim().is_empty() {
         return Err("Model cannot be empty".into());
     }
-    settings_manager.set_ai_zai_model(model)
-        .map_err(|e| format!("Failed to save Z.ai model: {}", e))?;
+
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_ai_zai_model(model)
+    }).await?;
+
     super::emit_settings_changed(&app_handle);
     Ok(())
 }
@@ -310,7 +322,7 @@ pub fn get_ai_zai_model(
 
 /// Set DeepSeek API key for AI text correction
 #[tauri::command]
-pub fn set_ai_deepseek_api_key(
+pub async fn set_ai_deepseek_api_key(
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     state: State<'_, AppState>,
@@ -319,8 +331,10 @@ pub fn set_ai_deepseek_api_key(
     if key.trim().is_empty() {
         return Err("API key cannot be empty".into());
     }
-    settings_manager.set_ai_deepseek_api_key(Some(key))
-        .map_err(|e| format!("Failed to save DeepSeek API key: {}", e))?;
+
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_ai_deepseek_api_key(Some(key))
+    }).await?;
 
     state.invalidate_ai_client();
     super::emit_settings_changed(&app_handle);
@@ -330,7 +344,7 @@ pub fn set_ai_deepseek_api_key(
 
 /// Set DeepSeek model for AI text correction
 #[tauri::command]
-pub fn set_ai_deepseek_model(
+pub async fn set_ai_deepseek_model(
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     model: String,
@@ -338,22 +352,26 @@ pub fn set_ai_deepseek_model(
     if model.trim().is_empty() {
         return Err("Model cannot be empty".into());
     }
-    settings_manager.set_ai_deepseek_model(model)
-        .map_err(|e| format!("Failed to save DeepSeek model: {}", e))?;
+
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_ai_deepseek_model(model)
+    }).await?;
+
     super::emit_settings_changed(&app_handle);
     Ok(())
 }
 
 /// Set DeepSeek use proxy for AI text correction
 #[tauri::command]
-pub fn set_ai_deepseek_use_proxy(
+pub async fn set_ai_deepseek_use_proxy(
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     state: State<'_, AppState>,
     enabled: bool,
 ) -> Result<(), String> {
-    settings_manager.set_ai_deepseek_use_proxy(enabled)
-        .map_err(|e| format!("Failed to save DeepSeek proxy setting: {}", e))?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_ai_deepseek_use_proxy(enabled)
+    }).await?;
 
     state.invalidate_ai_client();
     super::emit_settings_changed(&app_handle);
@@ -371,7 +389,7 @@ pub fn get_ai_deepseek_model(
 
 /// Set Custom API URL for AI text correction
 #[tauri::command]
-pub fn set_ai_custom_url(
+pub async fn set_ai_custom_url(
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     state: State<'_, AppState>,
@@ -380,8 +398,11 @@ pub fn set_ai_custom_url(
     if url.trim().is_empty() {
         return Err("API URL cannot be empty".into());
     }
-    settings_manager.set_ai_custom_url(Some(url))
-        .map_err(|e| format!("Failed to save Custom API URL: {}", e))?;
+
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_ai_custom_url(Some(url))
+    }).await?;
+
     state.invalidate_ai_client();
     super::emit_settings_changed(&app_handle);
     Ok(())
@@ -389,7 +410,7 @@ pub fn set_ai_custom_url(
 
 /// Set Custom API key for AI text correction
 #[tauri::command]
-pub fn set_ai_custom_api_key(
+pub async fn set_ai_custom_api_key(
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     state: State<'_, AppState>,
@@ -398,8 +419,11 @@ pub fn set_ai_custom_api_key(
     if key.trim().is_empty() {
         return Err("API key cannot be empty".into());
     }
-    settings_manager.set_ai_custom_api_key(Some(key))
-        .map_err(|e| format!("Failed to save Custom API key: {}", e))?;
+
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_ai_custom_api_key(Some(key))
+    }).await?;
+
     state.invalidate_ai_client();
     super::emit_settings_changed(&app_handle);
     Ok(())
@@ -407,7 +431,7 @@ pub fn set_ai_custom_api_key(
 
 /// Set Custom model for AI text correction
 #[tauri::command]
-pub fn set_ai_custom_model(
+pub async fn set_ai_custom_model(
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     model: String,
@@ -415,22 +439,27 @@ pub fn set_ai_custom_model(
     if model.trim().is_empty() {
         return Err("Model cannot be empty".into());
     }
-    settings_manager.set_ai_custom_model(model)
-        .map_err(|e| format!("Failed to save Custom model: {}", e))?;
+
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_ai_custom_model(model)
+    }).await?;
+
     super::emit_settings_changed(&app_handle);
     Ok(())
 }
 
 /// Set Custom use proxy for AI text correction
 #[tauri::command]
-pub fn set_ai_custom_use_proxy(
+pub async fn set_ai_custom_use_proxy(
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     state: State<'_, AppState>,
     enabled: bool,
 ) -> Result<(), String> {
-    settings_manager.set_ai_custom_use_proxy(enabled)
-        .map_err(|e| format!("Failed to save Custom proxy setting: {}", e))?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_ai_custom_use_proxy(enabled)
+    }).await?;
+
     state.invalidate_ai_client();
     super::emit_settings_changed(&app_handle);
     Ok(())
@@ -488,8 +517,9 @@ pub async fn set_tts_provider(
 ) -> Result<(), String> {
     info!(?provider, "Switching to provider");
 
-    settings_manager.set_tts_provider(provider)
-        .map_err(|e| format!("Failed to save provider: {}", e))?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_tts_provider(provider)
+    }).await?;
 
     match provider {
         TtsProviderType::OpenAi => {
@@ -562,7 +592,7 @@ pub fn get_local_tts_url(
 
 /// Set Local TTS URL
 #[tauri::command]
-pub fn set_local_tts_url(
+pub async fn set_local_tts_url(
     app_handle: AppHandle,
     state: State<'_, AppState>,
     settings_manager: State<'_, SettingsManager>,
@@ -578,8 +608,10 @@ pub fn set_local_tts_url(
     }
 
     debug!("Saving URL to config...");
-    settings_manager.set_local_tts_url(url.clone())
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
+
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_local_tts_url(url)
+    }).await?;
 
     debug!("Updating runtime state");
 
@@ -588,18 +620,19 @@ pub fn set_local_tts_url(
         provider
     };
 
+    let url_val = settings_manager.get_local_tts_url();
     if matches!(current_provider.as_ref(), Some(TtsProvider::Local(_))) {
         info!("Local TTS is active, reinitializing with new URL");
-        state.init_local_tts(url.clone());
-        debug!(url, "Local TTS reinitialized");
+        state.init_local_tts(url_val.clone());
+        debug!(url = %url_val, "Local TTS reinitialized");
     } else {
         debug!("Local TTS is not active, skipping reinitialization");
     }
 
-    state.set_local_tts_url(url.clone());
+    state.set_local_tts_url(url_val.clone());
     super::emit_settings_changed(&app_handle);
 
-    info!(url, "Local TTS URL set successfully");
+    info!(url = %url_val, "Local TTS URL set successfully");
     Ok(())
 }
 
@@ -613,7 +646,7 @@ pub fn get_openai_api_key(
 
 /// Set OpenAI API key
 #[tauri::command]
-pub fn set_openai_api_key(
+pub async fn set_openai_api_key(
     app_handle: AppHandle,
     state: State<'_, AppState>,
     settings_manager: State<'_, SettingsManager>,
@@ -623,11 +656,15 @@ pub fn set_openai_api_key(
         return Err("Неверный формат API ключа OpenAI".into());
     }
 
-    settings_manager.set_openai_api_key(Some(key.clone()))
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_openai_api_key(Some(key))
+    }).await?;
 
-    state.set_openai_api_key(Some(key.clone()));
-    state.init_openai_tts(key.clone());
+    let saved_key = settings_manager.get_openai_api_key();
+    if let Some(ref k) = saved_key {
+        state.set_openai_api_key(Some(k.clone()));
+        state.init_openai_tts(k.clone());
+    }
     super::emit_settings_changed(&app_handle);
 
     Ok(())
@@ -643,7 +680,7 @@ pub fn get_openai_voice(
 
 /// Set OpenAI voice
 #[tauri::command]
-pub fn set_openai_voice(
+pub async fn set_openai_voice(
     app_handle: AppHandle,
     state: State<'_, AppState>,
     settings_manager: State<'_, SettingsManager>,
@@ -657,15 +694,16 @@ pub fn set_openai_voice(
         return Err("Неверный голос".into());
     }
 
-    debug!("Saving voice to config...");
-    settings_manager.set_openai_voice(voice.clone())
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_openai_voice(voice)
+    }).await?;
 
+    let saved_voice = settings_manager.get_openai_voice();
     debug!("Updating runtime state and reinitializing OpenAI TTS");
-    state.set_openai_voice(voice.clone());
+    state.set_openai_voice(saved_voice.clone());
     super::emit_settings_changed(&app_handle);
 
-    info!(voice, "OpenAI voice set successfully");
+    info!(voice = %saved_voice, "OpenAI voice set successfully");
     Ok(())
 }
 
@@ -713,7 +751,7 @@ pub fn get_fish_audio_api_key(
 
 /// Set Fish Audio API key
 #[tauri::command]
-pub fn set_fish_audio_api_key(
+pub async fn set_fish_audio_api_key(
     app_handle: AppHandle,
     state: State<'_, AppState>,
     settings_manager: State<'_, SettingsManager>,
@@ -723,11 +761,15 @@ pub fn set_fish_audio_api_key(
         return Err("API Key не может быть пустым".into());
     }
 
-    settings_manager.set_fish_audio_api_key(Some(key.clone()))
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_fish_audio_api_key(Some(key))
+    }).await?;
 
-    state.set_fish_audio_api_key(Some(key.clone()));
-    state.init_fish_audio_tts(key.clone());
+    let saved_key = settings_manager.get_fish_audio_api_key();
+    if let Some(ref k) = saved_key {
+        state.set_fish_audio_api_key(Some(k.clone()));
+        state.init_fish_audio_tts(k.clone());
+    }
     super::emit_settings_changed(&app_handle);
 
     Ok(())
@@ -743,7 +785,7 @@ pub fn get_fish_audio_reference_id(
 
 /// Set Fish Audio reference ID (voice model ID)
 #[tauri::command]
-pub fn set_fish_audio_reference_id(
+pub async fn set_fish_audio_reference_id(
     app_handle: AppHandle,
     state: State<'_, AppState>,
     settings_manager: State<'_, SettingsManager>,
@@ -753,10 +795,12 @@ pub fn set_fish_audio_reference_id(
         return Err("Reference ID не может быть пустым".into());
     }
 
-    settings_manager.set_fish_audio_reference_id(reference_id.clone())
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_fish_audio_reference_id(reference_id)
+    }).await?;
 
-    state.set_fish_audio_reference_id(reference_id.clone());
+    let saved_id = settings_manager.get_fish_audio_reference_id();
+    state.set_fish_audio_reference_id(saved_id.clone());
     super::emit_settings_changed(&app_handle);
 
     Ok(())
@@ -772,7 +816,7 @@ pub fn get_fish_audio_voices(
 
 /// Add Fish Audio voice model to saved list
 #[tauri::command]
-pub fn add_fish_audio_voice(
+pub async fn add_fish_audio_voice(
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
     voice: VoiceModel,
@@ -784,20 +828,18 @@ pub fn add_fish_audio_voice(
         return Err("Voice ID не может быть пустым".into());
     }
 
-    settings_manager.add_fish_audio_voice(voice.clone())
-        .map_err(|e| {
-            error!(error = %e, "Failed to add Fish Audio voice");
-            format!("Failed to add voice: {}", e)
-        })?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.add_fish_audio_voice(voice)
+    }).await?;
 
-    info!(voice_id = %voice.id, "Fish Audio voice added successfully");
+    info!("Fish Audio voice added successfully");
     super::emit_settings_changed(&app_handle);
     Ok(())
 }
 
 /// Remove Fish Audio voice model from saved list
 #[tauri::command]
-pub fn remove_fish_audio_voice(
+pub async fn remove_fish_audio_voice(
     app_handle: AppHandle,
     state: State<'_, AppState>,
     settings_manager: State<'_, SettingsManager>,
@@ -806,8 +848,9 @@ pub fn remove_fish_audio_voice(
     let reference_id = settings_manager.get_fish_audio_reference_id();
     let was_selected = reference_id == voice_id;
 
-    settings_manager.remove_fish_audio_voice(&voice_id)
-        .map_err(|e| format!("Failed to remove voice: {}", e))?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.remove_fish_audio_voice(&voice_id)
+    }).await?;
 
     if was_selected {
         state.set_fish_audio_reference_id(String::new());
@@ -870,22 +913,27 @@ pub async fn fetch_fish_audio_image(
 
 /// Set Fish Audio format
 #[tauri::command]
-pub fn set_fish_audio_format(
+pub async fn set_fish_audio_format(
     app_handle: AppHandle,
     state: State<'_, AppState>,
     settings_manager: State<'_, SettingsManager>,
     format: String,
 ) -> Result<(), String> {
-    settings_manager.set_fish_audio_format(format.clone())
-        .map_err(|e| format!("Failed to save format: {}", e))?;
-    state.set_fish_audio_format(format);
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_fish_audio_format(format)
+    }).await?;
+
+    let saved_format = settings_manager.load()
+        .map(|s| s.tts.fish.format.clone())
+        .unwrap_or_default();
+    state.set_fish_audio_format(saved_format);
     super::emit_settings_changed(&app_handle);
     Ok(())
 }
 
 /// Set Fish Audio temperature
 #[tauri::command]
-pub fn set_fish_audio_temperature(
+pub async fn set_fish_audio_temperature(
     app_handle: AppHandle,
     state: State<'_, AppState>,
     settings_manager: State<'_, SettingsManager>,
@@ -895,8 +943,10 @@ pub fn set_fish_audio_temperature(
         return Err("Temperature must be between 0.0 and 1.0".into());
     }
 
-    settings_manager.set_fish_audio_temperature(temperature)
-        .map_err(|e| format!("Failed to save temperature: {}", e))?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_fish_audio_temperature(temperature)
+    }).await?;
+
     state.set_fish_audio_temperature(temperature);
     super::emit_settings_changed(&app_handle);
     Ok(())
@@ -904,7 +954,7 @@ pub fn set_fish_audio_temperature(
 
 /// Set Fish Audio sample rate
 #[tauri::command]
-pub fn set_fish_audio_sample_rate(
+pub async fn set_fish_audio_sample_rate(
     app_handle: AppHandle,
     state: State<'_, AppState>,
     settings_manager: State<'_, SettingsManager>,
@@ -914,8 +964,10 @@ pub fn set_fish_audio_sample_rate(
         return Err("Sample rate cannot be zero".into());
     }
 
-    settings_manager.set_fish_audio_sample_rate(sample_rate)
-        .map_err(|e| format!("Failed to save sample rate: {}", e))?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_fish_audio_sample_rate(sample_rate)
+    }).await?;
+
     state.set_fish_audio_sample_rate(sample_rate);
     super::emit_settings_changed(&app_handle);
     Ok(())
@@ -923,13 +975,15 @@ pub fn set_fish_audio_sample_rate(
 
 /// Set Fish Audio use proxy flag
 #[tauri::command]
-pub fn set_fish_audio_use_proxy(
+pub async fn set_fish_audio_use_proxy(
     app_handle: AppHandle,
     enabled: bool,
     settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
-    settings_manager.set_fish_audio_use_proxy(enabled)
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_fish_audio_use_proxy(enabled)
+    }).await?;
+
     super::emit_settings_changed(&app_handle);
     Ok(())
 }

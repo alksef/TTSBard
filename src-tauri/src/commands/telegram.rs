@@ -154,8 +154,9 @@ pub async fn telegram_sign_in(
     };
 
     // Save to settings.json (convert u32 to i64)
-    settings_manager.set_telegram_api_id(Some(api_id_to_save as i64))
-        .map_err(|e| format!("Failed to save api_id: {}", e))?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_telegram_api_id(Some(api_id_to_save as i64))
+    }).await?;
 
     super::emit_settings_changed(&app_handle);
 
@@ -183,8 +184,9 @@ pub async fn telegram_sign_out(
     *state_guard = None;
 
     // Удаляем сохранённый api_id из settings.json
-    settings_manager.set_telegram_api_id(None)
-        .map_err(|e| format!("Failed to delete api_id: {}", e))?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_telegram_api_id(None)
+    }).await?;
 
     super::emit_settings_changed(&app_handle);
 
@@ -428,29 +430,26 @@ pub async fn telegram_set_speaker(
 
 /// Добавить голос в список сохраненных
 #[tauri::command]
-pub fn telegram_add_voice_code(
+pub async fn telegram_add_voice_code(
     settings_manager: State<'_, SettingsManager>,
     app_handle: AppHandle,
     voice: VoiceCode,
 ) -> Result<(), String> {
-    // 1. Проверить что voice.id не пустой
     if voice.id.trim().is_empty() {
         return Err("Voice ID cannot be empty".to_string());
     }
 
-    // 2. Проверить что нет дубликатов
-    let settings = settings_manager.load()
-        .map_err(|e| format!("Failed to load settings: {}", e))?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        let mut settings = mgr.load()
+            .map_err(|e| anyhow::anyhow!("Failed to load settings: {}", e))?;
 
-    if settings.tts.telegram.voices.iter().any(|v| v.id == voice.id) {
-        return Err("Voice with this ID already exists".to_string());
-    }
+        if settings.tts.telegram.voices.iter().any(|v| v.id == voice.id) {
+            return Err(anyhow::anyhow!("Voice with this ID already exists"));
+        }
 
-    // 3. Добавить в telegram.voices и сохранить
-    let mut settings = settings;
-    settings.tts.telegram.voices.push(voice);
-    settings_manager.save(&settings)
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
+        settings.tts.telegram.voices.push(voice);
+        mgr.save(&settings)
+    }).await?;
 
     super::emit_settings_changed(&app_handle);
 
@@ -459,25 +458,24 @@ pub fn telegram_add_voice_code(
 
 /// Удалить голос из списка сохраненных
 #[tauri::command]
-pub fn telegram_remove_voice_code(
+pub async fn telegram_remove_voice_code(
     settings_manager: State<'_, SettingsManager>,
     app_handle: AppHandle,
     voice_id: String,
 ) -> Result<(), String> {
-    let mut settings = settings_manager.load()
-        .map_err(|e| format!("Failed to load settings: {}", e))?;
+    let vid = voice_id.clone();
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        let mut settings = mgr.load()
+            .map_err(|e| anyhow::anyhow!("Failed to load settings: {}", e))?;
 
-    // 1. Удалить голос из telegram.voices
-    settings.tts.telegram.voices.retain(|v| v.id != voice_id);
+        settings.tts.telegram.voices.retain(|v| v.id != vid);
 
-    // 2. Если это был current_voice_id - очистить
-    if settings.tts.telegram.current_voice_id == voice_id {
-        settings.tts.telegram.current_voice_id.clear();
-    }
+        if settings.tts.telegram.current_voice_id == vid {
+            settings.tts.telegram.current_voice_id.clear();
+        }
 
-    // 3. Сохранить настройки
-    settings_manager.save(&settings)
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
+        mgr.save(&settings)
+    }).await?;
 
     super::emit_settings_changed(&app_handle);
 
@@ -502,13 +500,15 @@ pub async fn telegram_select_voice(
 
     // 2. Если успешно - обновить current_voice_id
     if success {
-        let mut settings = settings_manager.load()
-            .map_err(|e| format!("Failed to load settings: {}", e))?;
+        let vid = voice_id.clone();
+        super::persist_blocking(settings_manager.inner(), move |mgr| {
+            let mut settings = mgr.load()
+                .map_err(|e| anyhow::anyhow!("Failed to load settings: {}", e))?;
 
-        settings.tts.telegram.current_voice_id = voice_id.clone();
+            settings.tts.telegram.current_voice_id = vid;
 
-        settings_manager.save(&settings)
-            .map_err(|e| format!("Failed to save settings: {}", e))?;
+            mgr.save(&settings)
+        }).await?;
 
         super::emit_settings_changed(&app_handle);
     }
