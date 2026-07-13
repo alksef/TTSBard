@@ -107,11 +107,50 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
 
     let audio_pcm = tts_pipeline::apply_audio_effects_pipeline(audio_data, &settings)?;
 
+    let (provider_name, voice_name) = get_provider_voice_names(&settings);
+    let effects_fp = crate::history::compute_effects_fingerprint(
+        &settings.audio_effects,
+        &settings.dsp,
+    );
+    let cache_key = crate::history::build_cache_key(
+        &text,
+        &provider_name,
+        &voice_name,
+        effects_fp,
+    );
+
+    let cache_saved = crate::history::save_audio_cache(&cache_key, &audio_pcm).is_ok();
+
     state.emit_event(AppEvent::TextSentToTts(text.clone()));
 
-    tts_pipeline::enqueue_and_record(state, text, audio_pcm, &settings)?;
+    tts_pipeline::enqueue_and_record(state, text.clone(), audio_pcm, &settings)?;
+
+    if let Some(hm) = state.editor.history_manager.lock().as_ref() {
+        if cache_saved {
+            hm.record_phrase_with_meta(&text, &provider_name, &voice_name, &cache_key);
+        } else {
+            hm.record_phrase(&text);
+        }
+    }
 
     Ok(())
+}
+
+fn get_provider_voice_names(settings: &crate::config::AppSettings) -> (String, String) {
+    use crate::tts::TtsProviderType;
+    let provider_name = match settings.tts.provider {
+        TtsProviderType::OpenAi => "openai",
+        TtsProviderType::Silero => "silero",
+        TtsProviderType::Local => "local",
+        TtsProviderType::Fish => "fish",
+    };
+    let voice_name = match settings.tts.provider {
+        TtsProviderType::OpenAi => settings.tts.openai.voice.clone(),
+        TtsProviderType::Fish => settings.tts.fish.reference_id.clone(),
+        TtsProviderType::Silero => settings.tts.telegram.current_voice_id.clone(),
+        TtsProviderType::Local => String::new(),
+    };
+    (provider_name.to_string(), voice_name)
 }
 
 /// Manually trigger TTS for given text

@@ -68,3 +68,44 @@ pub fn clear_phrase_history(history_state: State<'_, HistoryState>) -> Result<()
     manager.clear_phrases();
     Ok(())
 }
+
+#[tauri::command]
+pub fn replay_phrase_from_cache(
+    phrase_id: String,
+    history_state: State<'_, HistoryState>,
+    state: State<'_, crate::state::AppState>,
+) -> Result<(), String> {
+    let entry = {
+        let manager = &history_state.0;
+        let phrases = manager.get_phrases(None, 200);
+        phrases
+            .into_iter()
+            .find(|e| e.id == phrase_id)
+            .ok_or_else(|| "CacheMiss".to_string())?
+    };
+
+    if entry.cache_key.is_empty() {
+        return Err("CacheMiss".to_string());
+    }
+
+    let pcm = crate::history::read_audio_cache(&entry.cache_key).map_err(|e| {
+        if e.to_string().contains("CacheMiss") {
+            "CacheMiss".to_string()
+        } else {
+            e.to_string()
+        }
+    })?;
+
+    let pb = state.playback_manager.lock();
+    let pb = pb
+        .as_ref()
+        .ok_or_else(|| "Playback manager not initialized".to_string())?;
+
+    let replay_id = format!("hist_{}", entry.cache_key);
+    let enqueued = pb.enqueue(replay_id.clone(), entry.text.clone(), pcm);
+    if !enqueued {
+        return Err("Playback queue full".to_string());
+    }
+
+    Ok(())
+}

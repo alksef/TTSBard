@@ -72,7 +72,7 @@ tower-http = { version = "0.5", features = ["fs", "cors"] }
 
 # WebView security
 subtle = "2.6"
-uuid = { version = "1.11", features = ["v4", "serde"] }
+uuid = { version = "1.11", features = ["v4", "v5", "serde"] }
 
 # UPnP port forwarding
 igd = "0.12"

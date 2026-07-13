@@ -410,10 +410,13 @@ pub async fn telegram_auto_restore(
 #[tauri::command]
 pub async fn telegram_set_speaker(
     state: State<'_, TelegramState>,
+    settings_manager: State<'_, SettingsManager>,
+    app_handle: AppHandle,
     voice_code: String,
 ) -> Result<bool, String> {
     // 1. Валидация voice_code (не пустой)
-    if voice_code.trim().is_empty() {
+    let voice_code = voice_code.trim().to_string();
+    if voice_code.is_empty() {
         return Err("Voice code cannot be empty".to_string());
     }
 
@@ -425,7 +428,24 @@ pub async fn telegram_set_speaker(
     let client = client_opt.ok_or_else(|| "Telegram client not initialized".to_string())?;
 
     // 3. Вызвать bot::set_speaker()
-    set_speaker(&client, &voice_code).await
+    let success = set_speaker(&client, &voice_code).await?;
+
+    // 4. Если успешно - обновить current_voice_id в настройках
+    if success {
+        let vid = voice_code;
+        super::persist_blocking(settings_manager.inner(), move |mgr| {
+            let mut settings = mgr.load()
+                .map_err(|e| anyhow::anyhow!("Failed to load settings: {}", e))?;
+
+            settings.tts.telegram.current_voice_id = vid;
+
+            mgr.save(&settings)
+        }).await?;
+
+        super::emit_settings_changed(&app_handle);
+    }
+
+    Ok(success)
 }
 
 /// Добавить голос в список сохраненных

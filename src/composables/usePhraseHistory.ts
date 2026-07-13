@@ -29,5 +29,9 @@ export function usePhraseHistory() {
     await invoke('clear_phrase_history')
   }
 
-  return { list, remove, clear, isLoading }
+  async function replay(phraseId: string): Promise<void> {
+    await invoke('replay_phrase_from_cache', { phraseId })
+  }
+
+  return { list, remove, clear, replay, isLoading }
 }
