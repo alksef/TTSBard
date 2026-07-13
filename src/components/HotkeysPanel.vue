@@ -1,28 +1,18 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { Keyboard, RotateCcw, AppWindow, Music, MonitorPlay } from 'lucide-vue-next'
-import type { HotkeyDto, HotkeySettingsDto } from '../types/settings'
+import type { HotkeyDto } from '../types/settings'
+import { useAppSettings } from '../composables/useAppSettings'
 
-const isLoading = ref(false)
-const hotkeys = ref<HotkeySettingsDto | null>(null)
+const { settings, isLoading, reload } = useAppSettings()
+
+const hotkeys = computed(() => settings.value?.hotkeys)
 const recordingFor = ref<'main_window' | 'sound_panel' | 'playback_control_window' | null>(null)
 const errorMessage = ref<string | null>(null)
 const messageState = ref<'error' | 'success' | 'warning' | null>(null)
 const currentRecording = ref<{ modifiers: HotkeyDto['modifiers']; key: string } | null>(null)
 let messageTimeoutId: ReturnType<typeof setTimeout> | null = null
-
-// Load hotkey settings
-async function loadHotkeys() {
-  try {
-    isLoading.value = true
-    hotkeys.value = await invoke<HotkeySettingsDto>('get_hotkey_settings')
-  } catch (e) {
-    showError('Ошибка загрузки: ' + (e as Error).message)
-  } finally {
-    isLoading.value = false
-  }
-}
 
 // Start recording a hotkey
 async function startRecording(name: 'main_window' | 'sound_panel' | 'playback_control_window') {
@@ -126,15 +116,7 @@ function handleKeyUp(e: KeyboardEvent) {
 async function saveHotkey(name: string, hotkey: HotkeyDto) {
   try {
     await invoke('set_hotkey', { name, hotkey })
-    if (hotkeys.value) {
-      if (name === 'main_window') {
-        hotkeys.value.main_window = hotkey
-      } else if (name === 'sound_panel') {
-        hotkeys.value.sound_panel = hotkey
-      } else if (name === 'playback_control_window') {
-        hotkeys.value.playback_control_window = hotkey
-      }
-    }
+    await reload()
     // set_hotkey уже вызывает reregister_hotkeys внутри
     // Сбрасываем флаг записи
     await invoke('set_hotkey_recording', { recording: false })
@@ -156,16 +138,8 @@ async function saveHotkey(name: string, hotkey: HotkeyDto) {
 // Reset to default
 async function resetToDefault(name: string) {
   try {
-    const defaultHotkey = await invoke<HotkeyDto>('reset_hotkey_to_default', { name })
-    if (hotkeys.value) {
-      if (name === 'main_window') {
-        hotkeys.value.main_window = defaultHotkey
-      } else if (name === 'sound_panel') {
-        hotkeys.value.sound_panel = defaultHotkey
-      } else if (name === 'playback_control_window') {
-        hotkeys.value.playback_control_window = defaultHotkey
-      }
-    }
+    await invoke('reset_hotkey_to_default', { name })
+    await reload()
     showError('Сброшено к значению по умолчанию')
   } catch (e) {
     showError('Ошибка: ' + (e as Error).message)
@@ -217,10 +191,6 @@ function showError(msg: string) {
     messageTimeoutId = null
   }, 3000)
 }
-
-onMounted(() => {
-  loadHotkeys()
-})
 
 // Cleanup on unmount
 onUnmounted(async () => {

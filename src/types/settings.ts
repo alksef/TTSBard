@@ -358,3 +358,5 @@ export interface AppSettingsContext {
 }
 
 export const APP_SETTINGS_KEY: InjectionKey<AppSettingsContext> = Symbol('app-settings')
+
+export const SETTINGS_CHANGED_EVENT = 'settings-changed'
