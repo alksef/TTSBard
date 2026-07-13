@@ -8,12 +8,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::OnceLock;
-use std::time::{SystemTime, UNIX_EPOCH};
+
+use super::persistence;
 
 use super::hotkeys::HotkeySettings;
 use super::validation::{validate_port, validate_volume};
@@ -720,51 +718,6 @@ pub struct SettingsManager {
     cache: Arc<RwLock<AppSettings>>,
 }
 
-static SETTINGS_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-fn settings_write_lock() -> &'static Mutex<()> {
-    SETTINGS_WRITE_LOCK.get_or_init(|| Mutex::new(()))
-}
-
-fn write_json_atomically(path: &Path, content: &str) -> Result<()> {
-    let parent = path
-        .parent()
-        .context("Settings path must have a parent directory")?;
-
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .context("System clock is before UNIX_EPOCH")?
-        .as_nanos();
-    let tmp_path = parent.join(format!(
-        ".{}.{}.tmp",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("settings.json"),
-        stamp
-    ));
-
-    {
-        let mut file = fs::File::create(&tmp_path)
-            .with_context(|| format!("Failed to create temp settings file at {:?}", tmp_path))?;
-        file.write_all(content.as_bytes())
-            .with_context(|| format!("Failed to write temp settings file at {:?}", tmp_path))?;
-        file.sync_all()
-            .with_context(|| format!("Failed to flush temp settings file at {:?}", tmp_path))?;
-    }
-
-    if let Err(rename_error) = fs::rename(&tmp_path, path) {
-        let _ = fs::remove_file(path);
-        fs::rename(&tmp_path, path).with_context(|| {
-            format!(
-                "Failed to replace settings file {:?} with temp file {:?}: {}",
-                path, tmp_path, rename_error
-            )
-        })?;
-    }
-
-    Ok(())
-}
-
 impl SettingsManager {
     /// Create a new SettingsManager with initialized cache
     pub fn new() -> Result<Self> {
@@ -814,8 +767,8 @@ impl SettingsManager {
                 settings.hotkeys = HotkeySettings::default();
                 // Save migrated settings
                 let content = serde_json::to_string_pretty(&settings)?;
-                let _guard = settings_write_lock().lock();
-                write_json_atomically(&path, &content)?;
+                let _guard = persistence::config_write_lock().lock();
+                persistence::write_json_atomically(&path, &content)?;
             }
 
             settings.validate();
@@ -826,8 +779,9 @@ impl SettingsManager {
             // Save defaults to disk for next time
             let content =
                 serde_json::to_string_pretty(&settings).context("Failed to serialize settings")?;
-            let _guard = settings_write_lock().lock();
-            write_json_atomically(&path, &content).context("Failed to write settings file")?;
+            let _guard = persistence::config_write_lock().lock();
+            persistence::write_json_atomically(&path, &content)
+                .context("Failed to write settings file")?;
             Ok(settings)
         }
     }
@@ -842,6 +796,15 @@ impl SettingsManager {
         Ok(self.cache.read().clone())
     }
 
+    /// Get a clone of the internal cache Arc for sharing with AppState
+    ///
+    /// This allows the hot path to read cached settings without constructing
+    /// a new SettingsManager. The returned Arc points to the same RwLock
+    /// that save/update_field write to, so cache consistency is guaranteed.
+    pub fn cache_arc(&self) -> Arc<RwLock<AppSettings>> {
+        Arc::clone(&self.cache)
+    }
+
     /// Save settings to both disk and cache
     ///
     /// This method writes to disk and updates the in-memory cache.
@@ -852,8 +815,9 @@ impl SettingsManager {
         let content =
             serde_json::to_string_pretty(settings).context("Failed to serialize settings")?;
 
-        let _guard = settings_write_lock().lock();
-        write_json_atomically(&path, &content).context("Failed to write settings file")?;
+        let _guard = persistence::config_write_lock().lock();
+        persistence::write_json_atomically(&path, &content)
+            .context("Failed to write settings file")?;
 
         // Update cache after successful disk write
         *self.cache.write() = settings.clone();
@@ -883,7 +847,7 @@ impl SettingsManager {
         T: serde::Serialize,
     {
         let path = self.settings_path();
-        let _guard = settings_write_lock().lock();
+        let _guard = persistence::config_write_lock().lock();
 
         // Read existing JSON or create default
         let mut json_value = if path.exists() {
@@ -944,7 +908,8 @@ impl SettingsManager {
         let content = serde_json::to_string_pretty(&json_value)
             .context("Failed to serialize updated settings")?;
 
-        write_json_atomically(&path, &content).context("Failed to write settings file")?;
+        persistence::write_json_atomically(&path, &content)
+            .context("Failed to write settings file")?;
 
         // Update cache after successful disk write
         let settings: AppSettings =
@@ -998,6 +963,11 @@ impl SettingsManager {
     /// Set OpenAI API key
     pub fn set_openai_api_key(&self, api_key: Option<String>) -> Result<()> {
         self.update_field("/tts/openai/api_key", &api_key)
+    }
+
+    /// Get OpenAI API key
+    pub fn get_openai_api_key(&self) -> Option<String> {
+        self.cache.read().tts.openai.api_key.clone()
     }
 
     /// Set OpenAI voice
@@ -1631,6 +1601,91 @@ mod tests {
 
         assert_eq!(settings.audio.speaker_volume, 33);
         assert!(settings.show_playback_on_start);
+
+        let _ = std::fs::remove_dir_all(&config_dir);
+    }
+
+    #[test]
+    fn openai_api_key_roundtrip() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let config_dir = std::env::temp_dir().join(format!(
+            "ttsbard-openai-key-test-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let settings_path = config_dir.join("settings.json");
+        let default_settings = AppSettings::default();
+        std::fs::write(
+            &settings_path,
+            serde_json::to_string_pretty(&default_settings).unwrap(),
+        )
+        .unwrap();
+        let manager = SettingsManager {
+            config_dir: config_dir.clone(),
+            cache: Arc::new(RwLock::new(default_settings.clone())),
+        };
+        assert!(manager.get_openai_api_key().is_none());
+
+        manager
+            .set_openai_api_key(Some("sk-test-key-12345".to_string()))
+            .unwrap();
+        assert_eq!(
+            manager.get_openai_api_key().as_deref(),
+            Some("sk-test-key-12345")
+        );
+
+        manager.set_openai_api_key(None).unwrap();
+        assert!(manager.get_openai_api_key().is_none());
+
+        let _ = std::fs::remove_dir_all(&config_dir);
+    }
+
+    #[test]
+    fn persist_error_preserves_cache() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let config_dir = std::env::temp_dir().join(format!(
+            "ttsbard-persist-err-test-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let settings_path = config_dir.join("settings.json");
+        let default_settings = AppSettings::default();
+        std::fs::write(
+            &settings_path,
+            serde_json::to_string_pretty(&default_settings).unwrap(),
+        )
+        .unwrap();
+        let cache = Arc::new(RwLock::new(default_settings));
+        let manager = SettingsManager {
+            config_dir: config_dir.clone(),
+            cache: Arc::clone(&cache),
+        };
+
+        manager.set_openai_voice("nova".to_string()).unwrap();
+        assert_eq!(manager.get_openai_voice(), "nova");
+
+        let bad_config_dir = config_dir.join("nonexistent_subdir");
+        let bad_manager = SettingsManager {
+            config_dir: bad_config_dir,
+            cache,
+        };
+        let result = bad_manager.set_openai_voice("alloy".to_string());
+        assert!(result.is_err(), "persist to nonexistent dir must fail");
+        assert_eq!(
+            bad_manager.get_openai_voice(),
+            "nova",
+            "cache must retain previous value after persist error"
+        );
 
         let _ = std::fs::remove_dir_all(&config_dir);
     }

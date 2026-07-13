@@ -175,10 +175,7 @@ pub fn enqueue_and_record(
 
 /// Export raw TTS audio bytes to a file — synthesis only, no effects, no playback.
 pub async fn synthesize_and_export(state: &AppState, text: &str, path: &str) -> Result<(), String> {
-    let settings_manager = crate::config::SettingsManager::new()
-        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
-    let settings = settings_manager.load()
-        .map_err(|e| format!("Failed to load settings: {}", e))?;
+    let settings = state.settings_cache.read().clone();
 
     let prefix_result = crate::preprocessor::parse_prefix(text);
     let text = prefix_result.text;
