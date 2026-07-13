@@ -40,9 +40,6 @@ interface DspConfig {
 
 defineProps<{
   draftDsp: DspConfig;
-  dspDirty: boolean;
-  dspSaveStatus: 'idle' | 'saving' | 'saved' | 'error';
-  dspSaveError: string;
   dspMainCollapsed: boolean;
   dspPreset: 'natural' | 'clear' | 'custom';
   dspCollapsed: { eq: boolean; compressor: boolean; limiter: boolean };
@@ -53,8 +50,6 @@ const emit = defineEmits<{
   'set-preset': [preset: 'natural' | 'clear'];
   'toggle-main': [];
   'toggle-section': [section: 'eq' | 'compressor' | 'limiter'];
-  'save': [];
-  'cancel': [];
 }>();
 </script>
 
@@ -111,105 +106,9 @@ const emit = defineEmits<{
 
     </div>
   </div>
-
-  <div class="save-section">
-    <div class="save-status-area">
-      <span v-if="dspSaveStatus === 'saved'" class="save-status saved">Сохранено</span>
-      <span v-else-if="dspSaveStatus === 'error'" class="save-status error">{{ dspSaveError }}</span>
-      <span v-else-if="dspDirty" class="save-status dirty">Изменения не сохранены</span>
-    </div>
-    <button @click="emit('cancel')" :disabled="!dspDirty || dspSaveStatus === 'saving'" class="cancel-btn">
-      Отменить
-    </button>
-    <button @click="emit('save')" :disabled="!dspDirty || dspSaveStatus === 'saving'" class="save-btn">
-      <span v-if="dspSaveStatus === 'saving'">Сохранение...</span>
-      <span v-else>Сохранить</span>
-    </button>
-  </div>
 </template>
 
 <style scoped>
-.save-section {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  justify-content: flex-end;
-}
-
-.save-status-area {
-  flex: 1;
-  min-width: 0;
-}
-
-.save-status {
-  font-size: 13px;
-}
-
-.save-status.saved {
-  color: var(--color-success);
-}
-
-.save-status.error {
-  color: var(--color-danger);
-}
-
-.save-status.dirty {
-  color: var(--color-text-muted);
-}
-
-.cancel-btn {
-  padding: 0.6rem 1.2rem;
-  background: transparent;
-  border: 1px solid var(--color-border-strong);
-  color: var(--color-text-secondary);
-  border-radius: 10px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 600;
-  font-family: inherit;
-  transition: all 0.2s;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.cancel-btn:hover:not(:disabled) {
-  color: var(--color-text-primary);
-  border-color: var(--color-accent);
-  background: var(--color-bg-field-hover);
-}
-
-.cancel-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.save-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0.6rem 1.2rem;
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  border: none;
-  color: var(--color-text-white);
-  border-radius: 10px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 600;
-  font-family: inherit;
-  transition: all 0.2s;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.save-btn:hover:not(:disabled) {
-  filter: brightness(1.06);
-}
-
-.save-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .collapse-btn {
   flex-shrink: 0;
   padding: 4px;

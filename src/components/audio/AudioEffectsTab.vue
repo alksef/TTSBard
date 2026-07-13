@@ -92,8 +92,6 @@ function createClearDsp() {
 const draftDsp = ref(createNaturalDsp());
 const savedDsp = ref(createNaturalDsp());
 const dspDirty = ref(false);
-const dspSaveStatus = ref<'idle' | 'saving' | 'saved' | 'error'>('idle');
-const dspSaveError = ref('');
 const effectsCollapsed = ref(false);
 const dspMainCollapsed = ref(false);
 const dspCollapsed = ref({ eq: false, compressor: false, limiter: false });
@@ -122,31 +120,47 @@ function setDspPreset(preset: 'natural' | 'clear') {
 
 function markDspDirty() {
   dspDirty.value = true;
-  dspSaveStatus.value = 'idle';
-  dspSaveError.value = '';
+  saveStatus.value = 'idle';
+  saveError.value = '';
   dspPreset.value = 'custom';
 }
 
-async function saveDsp() {
-  dspSaveStatus.value = 'saving';
-  dspSaveError.value = '';
+async function saveAll() {
+  saveStatus.value = 'saving';
+  saveError.value = '';
   try {
+    await invoke('save_audio_effects', {
+      enabled: draftEffects.value.enabled,
+      pitch: draftEffects.value.pitch,
+      speed: draftEffects.value.speed,
+      volume: draftEffects.value.volume,
+      enhanceEnabled: draftEffects.value.enhance_enabled,
+      enhanceAttenDb: draftEffects.value.enhance_atten_db,
+      formantPreserved: draftEffects.value.formant_preserved,
+      boundaryCleanupEnabled: draftEffects.value.boundary_cleanup_enabled,
+    });
+    savedEffects.value = { ...draftEffects.value };
+    isDirty.value = false;
+
     await invoke('save_dsp_settings', { dsp: draftDsp.value });
     savedDsp.value = JSON.parse(JSON.stringify(draftDsp.value));
     dspDirty.value = false;
-    dspSaveStatus.value = 'saved';
-    setTimeout(() => { if (dspSaveStatus.value === 'saved') dspSaveStatus.value = 'idle'; }, 3000);
+
+    saveStatus.value = 'saved';
+    setTimeout(() => { if (saveStatus.value === 'saved') saveStatus.value = 'idle'; }, 3000);
   } catch (e) {
-    dspSaveStatus.value = 'error';
-    dspSaveError.value = e as string;
+    saveStatus.value = 'error';
+    saveError.value = e as string;
   }
 }
 
-function cancelDsp() {
+function cancelAll() {
+  draftEffects.value = { ...savedEffects.value };
+  isDirty.value = false;
   draftDsp.value = JSON.parse(JSON.stringify(savedDsp.value));
   dspDirty.value = false;
-  dspSaveStatus.value = 'idle';
-  dspSaveError.value = '';
+  saveStatus.value = 'idle';
+  saveError.value = '';
   dspPreset.value = detectDspPreset();
 }
 
@@ -285,37 +299,6 @@ function stopPreviewInternal() {
   invoke('stop_preview').catch(() => {});
 }
 
-async function saveEffects() {
-  saveStatus.value = 'saving';
-  saveError.value = '';
-
-  try {
-    await invoke('save_audio_effects', {
-      enabled: draftEffects.value.enabled,
-      pitch: draftEffects.value.pitch,
-      speed: draftEffects.value.speed,
-      volume: draftEffects.value.volume,
-      enhanceEnabled: draftEffects.value.enhance_enabled,
-      enhanceAttenDb: draftEffects.value.enhance_atten_db,
-      formantPreserved: draftEffects.value.formant_preserved,
-      boundaryCleanupEnabled: draftEffects.value.boundary_cleanup_enabled,
-    });
-    savedEffects.value = { ...draftEffects.value };
-    isDirty.value = false;
-    saveStatus.value = 'saved';
-    setTimeout(() => { if (saveStatus.value === 'saved') saveStatus.value = 'idle'; }, 3000);
-  } catch (e) {
-    saveStatus.value = 'error';
-    saveError.value = e as string;
-  }
-}
-
-function cancelEffects() {
-  draftEffects.value = { ...savedEffects.value };
-  isDirty.value = false;
-  saveStatus.value = 'idle';
-  saveError.value = '';
-}
 
 const fileFormat = computed(() => {
   if (!selectedFile.value) return '';
@@ -428,16 +411,17 @@ watch(dspSettingsFromComposable, (newDsp) => {
           <div v-if="previewError" class="preview-status error">{{ previewError }}</div>
           <div v-else-if="isDirty || dspDirty" class="preview-status dirty-indicator">
             <TriangleAlert :size="12" /> Превью с несохранёнными изменениями
-          </div>
-        </div>
-      </div>
+    </div>
+    </div>
+    </div>
+  </div>
+
+    <div v-if="isDirty || dspDirty" class="draft-warning" role="status">
+      <TriangleAlert :size="18" />
+      <span>Есть несохранённые изменения.</span>
     </div>
 
     <div class="effects-scroll">
-      <div v-if="isDirty || dspDirty" class="draft-warning" role="status">
-        <TriangleAlert :size="18" />
-        <span>Есть несохранённые изменения.</span>
-      </div>
 
     <!-- Boundary cleanup section -->
     <div class="setting-section">
@@ -590,34 +574,33 @@ watch(dspSettingsFromComposable, (newDsp) => {
       <div class="model-hint">Чрезмерное подавление может вызвать артефакты речи</div>
     </div>
 
+    <div class="dsp-settings-wrapper">
+      <DspSettings
+        :draftDsp="draftDsp"
+        :dspMainCollapsed="dspMainCollapsed"
+        :dspPreset="dspPreset"
+        :dspCollapsed="dspCollapsed"
+        @mark-dirty="markDspDirty"
+        @set-preset="setDspPreset"
+        @toggle-main="dspMainCollapsed = !dspMainCollapsed"
+        @toggle-section="toggleDspCollapse"
+      />
+    </div>
+
     <div class="save-section">
       <div class="save-status-area">
         <span v-if="saveStatus === 'saved'" class="save-status saved">Сохранено</span>
         <span v-else-if="saveStatus === 'error'" class="save-status error">{{ saveError }}</span>
-        <span v-else-if="isDirty" class="save-status dirty">Изменения не сохранены</span>
+        <span v-else-if="isDirty || dspDirty" class="save-status dirty">Изменения не сохранены</span>
       </div>
-      <button @click="cancelEffects" :disabled="!isDirty || saveStatus === 'saving'" class="cancel-btn">
+      <button @click="cancelAll" :disabled="(!isDirty && !dspDirty) || saveStatus === 'saving'" class="cancel-btn">
         Отменить
       </button>
-      <button @click="saveEffects" :disabled="!isDirty || saveStatus === 'saving'" class="save-btn">
+      <button @click="saveAll" :disabled="(!isDirty && !dspDirty) || saveStatus === 'saving'" class="save-btn">
         <span v-if="saveStatus === 'saving'">Сохранение...</span>
         <span v-else>Сохранить</span>
       </button>
-    <DspSettings
-      :draftDsp="draftDsp"
-      :dspDirty="dspDirty"
-      :dspSaveStatus="dspSaveStatus"
-      :dspSaveError="dspSaveError"
-      :dspMainCollapsed="dspMainCollapsed"
-      :dspPreset="dspPreset"
-      :dspCollapsed="dspCollapsed"
-      @mark-dirty="markDspDirty"
-      @set-preset="setDspPreset"
-      @toggle-main="dspMainCollapsed = !dspMainCollapsed"
-      @toggle-section="toggleDspCollapse"
-      @save="saveDsp"
-      @cancel="cancelDsp"
-    />
+    </div>
     </div>
   </div>
 </template>
@@ -643,6 +626,21 @@ watch(dspSettingsFromComposable, (newDsp) => {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+  margin-top: 1.5rem;
+  padding-bottom: 1.5rem;
+  box-sizing: border-box;
+}
+
+.effects-scroll > .setting-section,
+.effects-scroll > .save-section {
+  width: 100%;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+}
+
+.dsp-settings-wrapper {
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .dirty-indicator {
