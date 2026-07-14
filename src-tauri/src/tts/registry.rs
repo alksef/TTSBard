@@ -93,6 +93,35 @@ impl TtsProviderRegistry {
         self.active()
             .or_else(|| self.entries.first())
     }
+
+    /// Restore a saved provider ID at startup with safe fallback.
+    /// - If `saved_id` exists in the registry → select it.
+    /// - If `saved_id` is missing (deleted Piper model, etc.) and nothing is
+    ///   active → select the first registered provider.
+    /// - If `saved_id` is missing and a built-in provider is already active →
+    ///   leave it alone (never auto-select Piper just because it was discovered).
+    /// - If `saved_id` is `None` and nothing is active → select the first provider.
+    /// - If `saved_id` is `None` and something is already active → leave it.
+    pub fn restore_saved_or_first(&mut self, saved_id: Option<&str>) {
+        match saved_id {
+            Some(id) => {
+                if self.entries.iter().any(|e| e.id == id) {
+                    self.active_id = Some(id.to_string());
+                } else if self.active_id.is_none() {
+                    if let Some(first) = self.entries.first() {
+                        self.active_id = Some(first.id.clone());
+                    }
+                }
+            }
+            None => {
+                if self.active_id.is_none() {
+                    if let Some(first) = self.entries.first() {
+                        self.active_id = Some(first.id.clone());
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl Default for TtsProviderRegistry {

@@ -370,6 +370,8 @@ pub struct TtsSettings {
     pub telegram: TelegramTtsSettings,
     #[serde(default)]
     pub network: NetworkSettings,
+    #[serde(default)]
+    pub provider_id: Option<String>,
 }
 
 impl Default for TtsSettings {
@@ -381,6 +383,7 @@ impl Default for TtsSettings {
             fish: FishAudioSettings::default(),
             telegram: TelegramTtsSettings::default(),
             network: NetworkSettings::default(),
+            provider_id: None,
         }
     }
 }
@@ -1206,6 +1209,16 @@ impl SettingsManager {
     /// Get TTS provider
     pub fn get_tts_provider(&self) -> TtsProviderType {
         self.cache.read().tts.provider
+    }
+
+    /// Set TTS provider ID
+    pub fn set_tts_provider_id(&self, provider_id: Option<String>) -> Result<()> {
+        self.update_field("/tts/provider_id", &provider_id)
+    }
+
+    /// Get TTS provider ID
+    pub fn get_tts_provider_id(&self) -> Option<String> {
+        self.cache.read().tts.provider_id.clone()
     }
 
     /// Set OpenAI API key

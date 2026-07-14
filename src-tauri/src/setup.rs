@@ -36,7 +36,7 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
     info!("=== Application setup started ===");
 
     // Get state managers
-    let _settings_manager = app.state::<SettingsManager>();
+    let settings_manager = app.state::<SettingsManager>();
     let windows_manager = app.state::<WindowsManager>();
     let app_state = app.state::<AppState>();
     let telegram_state = app.state::<TelegramState>();
@@ -193,6 +193,16 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
 
     // Register discovered Piper providers (no ONNX session created yet)
     app_state.register_piper_providers();
+
+    // Restore saved concrete provider ID with safe fallback.
+    // If the saved ID exists in the registry it is selected; if it was a
+    // deleted Piper model the current (built-in) provider is preserved.
+    // If nothing is active after fallback the first registered provider wins.
+    let saved_id = settings_manager.get_tts_provider_id();
+    {
+        let mut registry = app_state.tts_registry.lock();
+        registry.restore_saved_or_first(saved_id.as_deref());
+    }
 
     // Initialize offline spellcheck
     init_spellcheck(app, &app_state);

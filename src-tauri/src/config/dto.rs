@@ -379,6 +379,8 @@ pub struct TtsSettingsDto {
     pub fish: FishAudioSettingsDto,
     pub telegram: TelegramTtsSettingsDto,
     pub network: NetworkSettingsDto,
+    #[serde(default)]
+    pub provider_id: Option<String>,
 }
 
 impl From<TtsSettings> for TtsSettingsDto {
@@ -390,6 +392,7 @@ impl From<TtsSettings> for TtsSettingsDto {
             fish: s.fish.into(),
             telegram: s.telegram.into(),
             network: s.network.into(),
+            provider_id: s.provider_id,
         }
     }
 }
@@ -403,6 +406,7 @@ impl From<TtsSettingsDto> for TtsSettings {
             fish: dto.fish.into(),
             telegram: dto.telegram.into(),
             network: dto.network.into(),
+            provider_id: dto.provider_id,
         }
     }
 }
