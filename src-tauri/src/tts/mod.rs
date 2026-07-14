@@ -4,6 +4,7 @@ pub mod local_http_server;
 pub mod openai;
 pub mod piper;
 pub mod proxy_utils;
+pub mod registry;
 pub mod silero;
 
 // Реэкспорт VoiceModel для использования в других модулях
