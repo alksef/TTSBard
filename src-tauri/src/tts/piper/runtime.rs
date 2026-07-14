@@ -9,6 +9,7 @@ use serde::Deserialize;
 
 use crate::audio::effects::encode_wav;
 use crate::tts::engine::TtsEngine;
+use crate::tts::piper::scanner::PiperModelDescriptor;
 
 const BOS: char = '^';
 const EOS: char = '$';
@@ -59,6 +60,8 @@ pub struct LocalModelTts {
     config_path: std::path::PathBuf,
     session: Mutex<Option<Session>>,
     config: Mutex<Option<ModelConfig>>,
+    provider_id: String,
+    display_name: String,
 }
 
 impl LocalModelTts {
@@ -68,6 +71,19 @@ impl LocalModelTts {
             config_path: config_path.as_ref().to_path_buf(),
             session: Mutex::new(None),
             config: Mutex::new(None),
+            provider_id: String::new(),
+            display_name: String::new(),
+        }
+    }
+
+    pub fn from_descriptor(descriptor: &PiperModelDescriptor) -> Self {
+        Self {
+            model_path: descriptor.onnx_path.clone(),
+            config_path: descriptor.json_path.clone(),
+            session: Mutex::new(None),
+            config: Mutex::new(None),
+            provider_id: descriptor.id.clone(),
+            display_name: descriptor.display_name.clone(),
         }
     }
 
@@ -355,5 +371,27 @@ mod tests {
 
         let ids = LocalModelTts::phonemes_to_ids(&config, "a x z");
         assert_eq!(ids, vec![1, 4, 0, 2]);
+    }
+
+    #[test]
+    fn from_descriptor_lazy_loading() {
+        use std::path::PathBuf;
+
+        let desc = PiperModelDescriptor {
+            id: "local-piper:test-model".into(),
+            display_name: "Test Model".into(),
+            onnx_path: PathBuf::from("/nonexistent/model.onnx"),
+            json_path: PathBuf::from("/nonexistent/model.onnx.json"),
+            sample_rate: 22050,
+            phoneme_id_map: serde_json::json!({}),
+        };
+
+        let tts = LocalModelTts::from_descriptor(&desc);
+        assert!(
+            tts.session.lock().unwrap().is_none(),
+            "session must not be loaded during construction"
+        );
+        assert_eq!(tts.provider_id, "local-piper:test-model");
+        assert_eq!(tts.display_name, "Test Model");
     }
 }
