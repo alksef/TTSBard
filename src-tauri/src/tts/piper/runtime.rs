@@ -64,6 +64,17 @@ pub struct LocalModelTts {
     display_name: String,
 }
 
+impl std::fmt::Debug for LocalModelTts {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalModelTts")
+            .field("model_path", &self.model_path)
+            .field("config_path", &self.config_path)
+            .field("provider_id", &self.provider_id)
+            .field("display_name", &self.display_name)
+            .finish_non_exhaustive()
+    }
+}
+
 impl LocalModelTts {
     pub fn new(model_path: impl AsRef<Path>, config_path: impl AsRef<Path>) -> Self {
         Self {
