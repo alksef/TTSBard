@@ -48,16 +48,48 @@
    повреждённых JSON, отсутствующего выбранного ID, переключения и runtime
    ошибок; затем независимые `cargo check` и `vue-tsc --noEmit`.
 
-## Декомпозиция DeepSeek-задач
+## Зафиксированный DeepSeek workflow
 
-Не запускать несколько build-агентов одновременно в одном worktree: задачи
-пересекаются через `TtsProvider`, settings DTO, `AppState` и TTS panel. На каждом
-этапе DeepSeek получает только текущую задачу, после чего Codex читает diff,
-запускает проверки и создаёт следующую задачу по результатам ревью.
+Одна задача DeepSeek = один узкий результат. Нельзя объединять в одном task
+research, runtime, settings и UI.
 
-Параллельно допустимы только read-only исследования, не изменяющие рабочее
-дерево: проверка native/static ONNX Runtime под Windows и анализ текущей модели
-инициализации TTS.
+Для каждого task:
+
+1. Codex фиксирует baseline `git status` и разрешённые файлы.
+2. DeepSeek получает task на английском языке.
+3. DeepSeek обязан остановиться при неизвестном контракте, новой зависимости или
+   лицензионной неопределённости.
+4. Codex независимо читает diff и проверяет scope.
+5. Запускаются проверки, соответствующие типу задачи, плюс ручной smoke-test для
+   аудио/runtime.
+6. Только после этого создаётся отдельный коммит.
+7. Следующий task формируется по результату проверки, а не запускается заранее.
+
+Параллельно допустимы только read-only research-задачи. Build-агенты в одном
+worktree не запускаются параллельно: они пересекаются через `Cargo.toml`,
+`tts/mod.rs`, `TtsProvider`, settings DTO и TTS panel.
+
+Flash используется по умолчанию для малых задач, тестов, scanner, settings и UI.
+Pro используется только для сложного native/runtime research или если Flash
+дважды не проходит проверку.
+
+## Микроэтапы DeepSeek
+
+Уже выполнены:
+
+1. Переименование HTTP-провайдера.
+2. Scanner Piper-моделей.
+3. Embedded runtime spike и standalone smoke-test.
+
+Следующие задачи:
+
+4. Harden `LocalModelTts` API вокруг существующего descriptor; без settings/UI.
+5. Add a small runtime/provider construction test; без registry.
+6. Register discovered providers at startup; без UI.
+7. Persist selected provider ID and implement startup fallback.
+8. Expose dynamic provider data through the settings DTO.
+9. Add dynamic provider cards and selection/loading state in the TTS panel.
+10. Add end-to-end startup/switching/fallback checks.
 
 ## Критерии готовности
 
