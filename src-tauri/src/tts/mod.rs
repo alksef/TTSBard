@@ -2,6 +2,7 @@ pub mod engine;
 pub mod fish;
 pub mod local_http_server;
 pub mod openai;
+pub mod piper;
 pub mod proxy_utils;
 pub mod silero;
 
