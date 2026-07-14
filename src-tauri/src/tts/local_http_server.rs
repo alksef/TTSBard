@@ -6,16 +6,16 @@ use reqwest::Client;
 use std::time::{Duration, Instant};
 use tracing::{debug, error, info};
 
-/// Local TTS implementation using TTSVoiceWizard Locally Hosted API
-/// Compatible with TITTS.py and similar local TTS servers
+/// HTTP-server-based TTS using TTSVoiceWizard Locally Hosted API
+/// Compatible with TITTS.py and similar local HTTP TTS servers
 #[derive(Clone, Debug)]
-pub struct LocalTts {
+pub struct LocalHttpServerTts {
     server_url: String,
     event_tx: Option<EventSender>,
     timeout_secs: u64,
 }
 
-impl LocalTts {
+impl LocalHttpServerTts {
     pub fn new() -> Self {
         Self {
             server_url: "http://127.0.0.1:8124".to_string(),
@@ -51,14 +51,14 @@ impl LocalTts {
     }
 }
 
-impl Default for LocalTts {
+impl Default for LocalHttpServerTts {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[async_trait]
-impl TtsEngine for LocalTts {
+impl TtsEngine for LocalHttpServerTts {
     async fn synthesize(&self, text: &str) -> Result<Vec<u8>, String> {
         let start_time = Instant::now();
         let client = self.build_client()?;
@@ -68,7 +68,7 @@ impl TtsEngine for LocalTts {
             text_length = text.len(),
             text_preview = %text.chars().take(50).collect::<String>(),
             timeout_secs = self.timeout_secs,
-            "LocalTTS request started"
+            "LocalHttpServerTTS request started"
         );
 
         // URL encode the text for the path parameter
@@ -79,7 +79,7 @@ impl TtsEngine for LocalTts {
             encoded_text
         );
 
-        debug!(request_url = %secret_log::safe_url_for_log(&url), "Sending LocalTTS request");
+        debug!(request_url = %secret_log::safe_url_for_log(&url), "Sending LocalHttpServerTTS request");
 
         let response = client.get(&url).send().await.map_err(|e| {
             let elapsed = start_time.elapsed();
@@ -88,20 +88,20 @@ impl TtsEngine for LocalTts {
                 elapsed_secs = elapsed.as_secs_f64(),
                 timeout_secs = self.timeout_secs,
                 server_url = %self.server_url,
-                "LocalTTS request failed"
+                "LocalHttpServerTTS request failed"
             );
             if e.is_timeout() {
                 format!(
-                    "Local TTS timeout ({}s). Server at {} may be slow or unavailable.",
+                    "Local HTTP TTS timeout ({}s). Server at {} may be slow or unavailable.",
                     self.timeout_secs, self.server_url
                 )
             } else if e.is_connect() {
                 format!(
-                    "Local TTS connection failed to {}. Check if the TTS server is running.",
+                    "Local HTTP TTS connection failed to {}. Check if the TTS server is running.",
                     self.server_url
                 )
             } else {
-                format!("Failed to send TTS request to {}: {}", self.server_url, e)
+                format!("Failed to send HTTP TTS request to {}: {}", self.server_url, e)
             }
         })?;
 
@@ -113,7 +113,7 @@ impl TtsEngine for LocalTts {
             status_code = status.as_u16(),
             status_reason = %status.canonical_reason().unwrap_or_default(),
             response_time_secs = elapsed.as_secs_f64(),
-            "LocalTTS response received"
+            "LocalHttpServerTTS response received"
         );
 
         if !status.is_success() {
@@ -121,7 +121,7 @@ impl TtsEngine for LocalTts {
             error!(
                 status_code = status.as_u16(),
                 error_text = %error_text,
-                "LocalTTS request failed"
+                "LocalHttpServerTTS request failed"
             );
             return Err(format!(
                 "TTS request failed ({}): {}",
@@ -132,7 +132,7 @@ impl TtsEngine for LocalTts {
 
         // Get response as text (base64 encoded WAV data)
         let base64_data = response.text().await.map_err(|e| {
-            error!(error = %e, "Failed to read LocalTTS response text");
+            error!(error = %e, "Failed to read LocalHttpServerTTS response text");
             format!("Failed to read response text: {}", e)
         })?;
 
@@ -149,7 +149,7 @@ impl TtsEngine for LocalTts {
         info!(
             audio_bytes = audio_data.len(),
             total_time_secs = elapsed.as_secs_f64(),
-            "LocalTTS synthesis completed"
+            "LocalHttpServerTTS synthesis completed"
         );
 
         Ok(audio_data)

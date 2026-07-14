@@ -3,7 +3,7 @@ use crate::events::{AppEvent, TwitchEvent};
 use crate::secret_log;
 use crate::telegram::TelegramClient;
 use crate::tts::{
-    fish::FishTts, local::LocalTts, openai::OpenAiTts, silero::SileroTts, TtsProvider,
+    fish::FishTts, local_http_server::LocalHttpServerTts, openai::OpenAiTts, silero::SileroTts, TtsProvider,
     TtsProviderType,
 };
 use parking_lot::{Mutex, RwLock};
@@ -271,7 +271,7 @@ impl AppState {
     pub fn init_local_tts(&self, url: String) {
         info!(safe_url = %secret_log::safe_url_for_log(&url), "Initializing Local TTS");
 
-        let mut tts = LocalTts::new();
+        let mut tts = LocalHttpServerTts::new();
         tts.set_url(url);
 
         // Add event sender if available
@@ -279,7 +279,7 @@ impl AppState {
             tts = tts.with_event_tx(event_tx);
         }
 
-        info!(safe_url = %secret_log::safe_url_for_log(tts.get_url()), "Created LocalTts");
+        info!(safe_url = %secret_log::safe_url_for_log(tts.get_url()), "Created LocalHttpServerTts");
 
         *self.tts_providers.lock() = Some(TtsProvider::Local(tts));
         info!("TTS provider set to Local");

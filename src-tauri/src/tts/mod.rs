@@ -1,6 +1,6 @@
 pub mod engine;
 pub mod fish;
-pub mod local;
+pub mod local_http_server;
 pub mod openai;
 pub mod proxy_utils;
 pub mod silero;
@@ -26,7 +26,7 @@ pub enum TtsProviderType {
 pub enum TtsProvider {
     OpenAi(openai::OpenAiTts),
     Silero(silero::SileroTts),
-    Local(local::LocalTts),
+    Local(local_http_server::LocalHttpServerTts),
     Fish(fish::FishTts),
 }
 
