@@ -3,8 +3,10 @@ use crate::events::{AppEvent, TwitchEvent};
 use crate::secret_log;
 use crate::telegram::TelegramClient;
 use crate::tts::{
-    fish::FishTts, local_http_server::LocalHttpServerTts, openai::OpenAiTts, registry::TtsProviderEntry,
-    registry::TtsProviderRegistry, silero::SileroTts, TtsProvider, TtsProviderType,
+    fish::FishTts, local_http_server::LocalHttpServerTts, openai::OpenAiTts,
+    piper::runtime::LocalModelTts, piper::scanner::discover_piper_models,
+    registry::TtsProviderEntry, registry::TtsProviderRegistry, silero::SileroTts, TtsProvider,
+    TtsProviderType,
 };
 use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
@@ -526,6 +528,37 @@ impl AppState {
         self.ai_client.lock().take();
         self.ai_settings_hash
             .store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Discover and register Piper providers from the local models directory.
+    ///
+    /// Scans `{config_dir}/models/piper/` for valid `.onnx` + `.onnx.json` pairs
+    /// and registers each as a `TtsProvider::Piper` in the provider registry.
+    /// Does NOT select any Piper provider — the current built-in provider is preserved.
+    /// Does NOT create ONNX sessions (they are lazily initialized on first use).
+    pub fn register_piper_providers(&self) {
+        let config_root = match dirs::config_dir() {
+            Some(d) => d.join("ttsbard"),
+            None => {
+                warn!("Cannot register Piper providers: config directory not found");
+                return;
+            }
+        };
+
+        let descriptors = discover_piper_models(&config_root);
+        let count = descriptors.len();
+        let mut registry = self.tts_registry.lock();
+
+        for desc in &descriptors {
+            let tts = LocalModelTts::from_descriptor(desc);
+            registry.add_or_replace(TtsProviderEntry {
+                id: desc.id.clone(),
+                display_name: desc.display_name.clone(),
+                provider: TtsProvider::Piper(Arc::new(tts)),
+            });
+        }
+
+        info!(count = count, "Piper provider registration complete");
     }
 }
 

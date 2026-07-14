@@ -191,6 +191,9 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
     // Initialize TTS provider
     init_tts_provider(&app_state, &telegram_state, settings.clone());
 
+    // Register discovered Piper providers (no ONNX session created yet)
+    app_state.register_piper_providers();
+
     // Initialize offline spellcheck
     init_spellcheck(app, &app_state);
 
