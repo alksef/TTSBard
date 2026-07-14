@@ -6,7 +6,7 @@ use crate::commands::telegram::TelegramState;
 use crate::config::SettingsManager;
 use crate::secret_log;
 use crate::state::AppState;
-use crate::tts::{TtsProvider, TtsProviderType, VoiceModel};
+use crate::tts::{TtsProviderType, VoiceModel};
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 use tracing::{debug, error, info, warn};
@@ -643,13 +643,13 @@ pub async fn set_local_tts_url(
 
     debug!("Updating runtime state");
 
-    let current_provider = {
-        let provider = state.tts_providers.lock().clone();
-        provider
+    let is_local_active = {
+        let registry = state.tts_registry.lock();
+        registry.active_id() == Some("local-http")
     };
 
     let url_val = settings_manager.get_local_tts_url();
-    if matches!(current_provider.as_ref(), Some(TtsProvider::Local(_))) {
+    if is_local_active {
         info!("Local TTS is active, reinitializing with new URL");
         state.init_local_tts(url_val.clone());
         debug!(safe_url = %secret_log::safe_url_for_log(&url_val), "Local TTS reinitialized");

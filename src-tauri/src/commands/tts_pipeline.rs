@@ -52,16 +52,10 @@ pub async fn ai_correct_text(state: &AppState, text: &str, settings: &AppSetting
 
 /// 3. Этап синтеза аудиоданных через выбранный TTS-провайдер
 pub async fn synthesize_audio(state: &AppState, text: &str) -> Result<Vec<u8>, String> {
-    let provider = {
-        let providers = state.tts_providers.lock();
-        providers
-            .as_ref()
-            .ok_or_else(|| {
-                error!("TTS provider not initialized");
-                "TTS provider не инициализирован. Выберите провайдер в настройках.".to_string()
-            })?
-            .clone()
-    };
+    let provider = state.get_active_provider().ok_or_else(|| {
+        error!("TTS provider not initialized");
+        "TTS provider не инициализирован. Выберите провайдер в настройках.".to_string()
+    })?;
 
     let audio_data = provider.synthesize(text).await.map_err(|e| {
         error!(error = %e, "synthesize() error");

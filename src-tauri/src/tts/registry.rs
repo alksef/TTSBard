@@ -33,6 +33,10 @@ impl TtsProviderRegistry {
         self.entries.iter().find(|e| e.id == id)
     }
 
+    pub fn get_mut(&mut self, id: &str) -> Option<&mut TtsProviderEntry> {
+        self.entries.iter_mut().find(|e| e.id == id)
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &TtsProviderEntry> {
         self.entries.iter()
     }

@@ -3,8 +3,8 @@ use crate::events::{AppEvent, TwitchEvent};
 use crate::secret_log;
 use crate::telegram::TelegramClient;
 use crate::tts::{
-    fish::FishTts, local_http_server::LocalHttpServerTts, openai::OpenAiTts, silero::SileroTts, TtsProvider,
-    TtsProviderType,
+    fish::FishTts, local_http_server::LocalHttpServerTts, openai::OpenAiTts, registry::TtsProviderEntry,
+    registry::TtsProviderRegistry, silero::SileroTts, TtsProvider, TtsProviderType,
 };
 use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
@@ -84,8 +84,8 @@ pub struct AppState {
     /// Унифицированная конфигурация TTS ( RwLock для эффективного чтения)
     pub tts_config: Arc<RwLock<TtsConfig>>,
 
-    /// TTS провайдеры
-    pub tts_providers: Arc<Mutex<Option<TtsProvider>>>,
+    /// TTS провайдеры (registry)
+    pub tts_registry: Arc<Mutex<TtsProviderRegistry>>,
 
     /// Editor service (preprocessor, history, spellcheck)
     pub editor: Arc<crate::editor::EditorService>,
@@ -158,7 +158,7 @@ impl AppState {
             interception_enabled: Arc::new(Mutex::new(false)),
             hotkey_enabled: Arc::new(Mutex::new(true)), // default true
             tts_config: Arc::new(RwLock::new(TtsConfig::default())),
-            tts_providers: Arc::new(Mutex::new(None)),
+            tts_registry: Arc::new(Mutex::new(TtsProviderRegistry::new())),
             editor,
             active_window: Arc::new(Mutex::new(ActiveWindow::None)),
             twitch,
@@ -264,7 +264,13 @@ impl AppState {
             "Created OpenAiTts"
         );
 
-        *self.tts_providers.lock() = Some(TtsProvider::OpenAi(tts));
+        let mut registry = self.tts_registry.lock();
+        registry.add_or_replace(TtsProviderEntry {
+            id: "openai".to_string(),
+            display_name: "OpenAI TTS".to_string(),
+            provider: TtsProvider::OpenAi(tts),
+        });
+        registry.select("openai").ok();
         info!("TTS provider set to OpenAi");
     }
 
@@ -281,7 +287,13 @@ impl AppState {
 
         info!(safe_url = %secret_log::safe_url_for_log(tts.get_url()), "Created LocalHttpServerTts");
 
-        *self.tts_providers.lock() = Some(TtsProvider::Local(tts));
+        let mut registry = self.tts_registry.lock();
+        registry.add_or_replace(TtsProviderEntry {
+            id: "local-http".to_string(),
+            display_name: "Local HTTP TTS".to_string(),
+            provider: TtsProvider::Local(tts),
+        });
+        registry.select("local-http").ok();
         info!("TTS provider set to Local");
     }
 
@@ -304,7 +316,13 @@ impl AppState {
         }
 
         info!("Created SileroTts with Telegram client Arc");
-        *self.tts_providers.lock() = Some(TtsProvider::Silero(tts));
+        let mut registry = self.tts_registry.lock();
+        registry.add_or_replace(TtsProviderEntry {
+            id: "silero".to_string(),
+            display_name: "Silero TTS".to_string(),
+            provider: TtsProvider::Silero(tts),
+        });
+        registry.select("silero").ok();
         info!("TTS provider set to Silero");
     }
 
@@ -324,7 +342,13 @@ impl AppState {
             tts = tts.with_event_tx(event_tx);
         }
 
-        *self.tts_providers.lock() = Some(TtsProvider::Fish(tts));
+        let mut registry = self.tts_registry.lock();
+        registry.add_or_replace(TtsProviderEntry {
+            id: "fish".to_string(),
+            display_name: "Fish Audio TTS".to_string(),
+            provider: TtsProvider::Fish(tts),
+        });
+        registry.select("fish").ok();
     }
 
     #[allow(dead_code)]
@@ -337,18 +361,24 @@ impl AppState {
     }
 
     pub fn set_fish_audio_reference_id(&self, reference_id: String) {
-        let mut providers = self.tts_providers.lock();
-        if let Some(TtsProvider::Fish(tts)) = providers.as_mut() {
-            tts.set_reference_id(reference_id.clone());
+        let mut registry = self.tts_registry.lock();
+        if let Some(entry) = registry.get_mut("fish") {
+            if let TtsProvider::Fish(ref mut tts) = &mut entry.provider {
+                tts.set_reference_id(reference_id.clone());
+            }
         }
+        drop(registry);
         self.tts_config.write().fish_reference_id = reference_id;
     }
 
     pub fn set_fish_audio_proxy(&self, proxy_url: Option<String>) {
-        let mut providers = self.tts_providers.lock();
-        if let Some(TtsProvider::Fish(tts)) = providers.as_mut() {
-            tts.set_proxy(proxy_url.clone());
+        let mut registry = self.tts_registry.lock();
+        if let Some(entry) = registry.get_mut("fish") {
+            if let TtsProvider::Fish(ref mut tts) = &mut entry.provider {
+                tts.set_proxy(proxy_url.clone());
+            }
         }
+        drop(registry);
         self.tts_config.write().fish_proxy_url = proxy_url;
     }
 
@@ -366,20 +396,31 @@ impl AppState {
 
     /// Set OpenAI voice (simplified with unified TtsConfig)
     pub fn set_openai_voice(&self, voice: String) {
-        let mut providers = self.tts_providers.lock();
-        if let Some(TtsProvider::OpenAi(tts)) = providers.as_mut() {
-            tts.set_voice(voice.clone());
+        let mut registry = self.tts_registry.lock();
+        if let Some(entry) = registry.get_mut("openai") {
+            if let TtsProvider::OpenAi(ref mut tts) = &mut entry.provider {
+                tts.set_voice(voice.clone());
+            }
         }
+        drop(registry);
         self.tts_config.write().openai_voice = voice;
     }
 
     /// Set OpenAI proxy URL (simplified with unified TtsConfig)
     pub fn set_openai_proxy(&self, proxy_url: Option<String>) {
-        let mut providers = self.tts_providers.lock();
-        if let Some(TtsProvider::OpenAi(tts)) = providers.as_mut() {
-            tts.set_proxy(proxy_url.clone());
+        let mut registry = self.tts_registry.lock();
+        if let Some(entry) = registry.get_mut("openai") {
+            if let TtsProvider::OpenAi(ref mut tts) = &mut entry.provider {
+                tts.set_proxy(proxy_url.clone());
+            }
         }
+        drop(registry);
         self.tts_config.write().openai_proxy_url = proxy_url;
+    }
+
+    pub fn get_active_provider(&self) -> Option<TtsProvider> {
+        let registry = self.tts_registry.lock();
+        registry.active().map(|e| e.provider.clone())
     }
 
     #[allow(dead_code)]
