@@ -10,12 +10,14 @@ pub struct TtsProviderEntry {
 #[derive(Clone, Debug)]
 pub struct TtsProviderRegistry {
     entries: Vec<TtsProviderEntry>,
+    active_id: Option<String>,
 }
 
 impl TtsProviderRegistry {
     pub fn new() -> Self {
         Self {
             entries: Vec::new(),
+            active_id: None,
         }
     }
 
@@ -44,6 +46,9 @@ impl TtsProviderRegistry {
     }
 
     pub fn remove(&mut self, id: &str) -> bool {
+        if self.active_id.as_deref() == Some(id) {
+            self.active_id = None;
+        }
         let pos = self.entries.iter().position(|e| e.id == id);
         if let Some(pos) = pos {
             self.entries.remove(pos);
@@ -51,6 +56,38 @@ impl TtsProviderRegistry {
         } else {
             false
         }
+    }
+
+    pub fn select(&mut self, id: &str) -> Result<(), String> {
+        if self.entries.iter().any(|e| e.id == id) {
+            self.active_id = Some(id.to_string());
+            Ok(())
+        } else {
+            Err(format!("no provider with id '{}'", id))
+        }
+    }
+
+    pub fn select_or_first(&mut self, id: &str) {
+        if self.entries.iter().any(|e| e.id == id) {
+            self.active_id = Some(id.to_string());
+        } else if let Some(first) = self.entries.first() {
+            self.active_id = Some(first.id.clone());
+        }
+    }
+
+    pub fn active_id(&self) -> Option<&str> {
+        self.active_id.as_deref()
+    }
+
+    pub fn active(&self) -> Option<&TtsProviderEntry> {
+        self.active_id
+            .as_ref()
+            .and_then(|id| self.entries.iter().find(|e| e.id == *id))
+    }
+
+    pub fn active_or_first(&self) -> Option<&TtsProviderEntry> {
+        self.active()
+            .or_else(|| self.entries.first())
     }
 }
 
@@ -152,5 +189,118 @@ mod tests {
         }
         let count = reg.iter().count();
         assert_eq!(count, 5);
+    }
+
+    #[test]
+    fn active_id_none_initially() {
+        let reg = TtsProviderRegistry::new();
+        assert!(reg.active_id().is_none());
+        assert!(reg.active().is_none());
+    }
+
+    #[test]
+    fn select_existing_id() {
+        let mut reg = TtsProviderRegistry::new();
+        reg.add_or_replace(entry("a", "Alpha"));
+        reg.add_or_replace(entry("b", "Beta"));
+        assert!(reg.select("a").is_ok());
+        assert_eq!(reg.active_id(), Some("a"));
+        assert_eq!(reg.active().unwrap().display_name, "Alpha");
+    }
+
+    #[test]
+    fn select_missing_id_returns_error() {
+        let mut reg = TtsProviderRegistry::new();
+        reg.add_or_replace(entry("a", "Alpha"));
+        let err = reg.select("missing").unwrap_err();
+        assert!(err.contains("missing"));
+        assert!(reg.active_id().is_none());
+    }
+
+    #[test]
+    fn select_or_first_missing_falls_back() {
+        let mut reg = TtsProviderRegistry::new();
+        reg.add_or_replace(entry("a", "Alpha"));
+        reg.add_or_replace(entry("b", "Beta"));
+        reg.select_or_first("nonexistent");
+        assert_eq!(reg.active_id(), Some("a"));
+    }
+
+    #[test]
+    fn select_or_first_empty_registry() {
+        let mut reg = TtsProviderRegistry::new();
+        reg.select_or_first("anything");
+        assert!(reg.active_id().is_none());
+    }
+
+    #[test]
+    fn active_or_first_returns_active_when_set() {
+        let mut reg = TtsProviderRegistry::new();
+        reg.add_or_replace(entry("a", "Alpha"));
+        reg.add_or_replace(entry("b", "Beta"));
+        reg.select("b").unwrap();
+        let entry = reg.active_or_first().unwrap();
+        assert_eq!(entry.id, "b");
+    }
+
+    #[test]
+    fn active_or_first_falls_back_when_no_active() {
+        let mut reg = TtsProviderRegistry::new();
+        reg.add_or_replace(entry("a", "Alpha"));
+        reg.add_or_replace(entry("b", "Beta"));
+        let entry = reg.active_or_first().unwrap();
+        assert_eq!(entry.id, "a");
+    }
+
+    #[test]
+    fn active_or_first_empty_registry() {
+        let reg = TtsProviderRegistry::new();
+        assert!(reg.active_or_first().is_none());
+    }
+
+    #[test]
+    fn replace_active_keeps_selection() {
+        let mut reg = TtsProviderRegistry::new();
+        reg.add_or_replace(entry("x", "Original"));
+        reg.select("x").unwrap();
+        reg.add_or_replace(entry("x", "Updated"));
+        assert_eq!(reg.active_id(), Some("x"));
+        assert_eq!(reg.active().unwrap().display_name, "Updated");
+    }
+
+    #[test]
+    fn remove_active_clears_selection() {
+        let mut reg = TtsProviderRegistry::new();
+        reg.add_or_replace(entry("x", "Remove Me"));
+        reg.select("x").unwrap();
+        assert!(reg.remove("x"));
+        assert!(reg.active_id().is_none());
+        assert!(reg.active().is_none());
+    }
+
+    #[test]
+    fn remove_nonactive_keeps_selection() {
+        let mut reg = TtsProviderRegistry::new();
+        reg.add_or_replace(entry("a", "Keep"));
+        reg.add_or_replace(entry("b", "Remove"));
+        reg.select("a").unwrap();
+        assert!(reg.remove("b"));
+        assert_eq!(reg.active_id(), Some("a"));
+    }
+
+    #[test]
+    fn select_on_empty_registry() {
+        let mut reg = TtsProviderRegistry::new();
+        assert!(reg.select("anything").is_err());
+    }
+
+    #[test]
+    fn reselect_different_id() {
+        let mut reg = TtsProviderRegistry::new();
+        reg.add_or_replace(entry("a", "Alpha"));
+        reg.add_or_replace(entry("b", "Beta"));
+        reg.select("a").unwrap();
+        reg.select("b").unwrap();
+        assert_eq!(reg.active_id(), Some("b"));
     }
 }

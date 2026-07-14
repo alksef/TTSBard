@@ -86,12 +86,13 @@ Pro используется только для сложного native/runtime
 4. Harden `LocalModelTts` API вокруг существующего descriptor; без settings/UI.
 5. Add a small runtime/provider construction test; без registry.
 6. Add a pure multi-provider registry container and unit tests; no AppState.
-7. Migrate AppState's single active provider access behind the registry.
-8. Register discovered Piper providers during startup.
-9. Persist selected provider ID and implement startup fallback.
-10. Expose dynamic provider data through the settings DTO.
-11. Add dynamic provider cards and selection/loading state in the TTS panel.
-12. Add end-to-end startup/switching/fallback checks.
+7. Add active-ID selection/fallback methods to the pure registry; no AppState.
+8. Migrate AppState's single active provider access behind the registry.
+9. Register discovered Piper providers during startup.
+10. Persist selected provider ID and implement startup fallback.
+11. Expose dynamic provider data through the settings DTO.
+12. Add dynamic provider cards and selection/loading state in the TTS panel.
+13. Add end-to-end startup/switching/fallback checks.
 
 ## Критерии готовности
 
