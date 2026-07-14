@@ -76,6 +76,10 @@ impl std::fmt::Debug for LocalModelTts {
 }
 
 impl LocalModelTts {
+    pub fn prepare(&self) -> Result<(), String> {
+        self.ensure_loaded().map_err(|e| e.to_string())
+    }
+
     pub fn new(model_path: impl AsRef<Path>, config_path: impl AsRef<Path>) -> Self {
         Self {
             model_path: model_path.as_ref().to_path_buf(),

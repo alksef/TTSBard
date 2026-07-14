@@ -365,6 +365,28 @@ pub fn get_editor_height(settings_manager: State<'_, SettingsManager>) -> u32 {
     settings_manager.get_editor_height()
 }
 
+/// Prepare (warm up) a registered TTS provider by ID.
+/// For Piper this loads the model into memory; for network providers it is a no-op.
+#[tauri::command]
+pub async fn prepare_tts_provider_by_id(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    info!(id, "Preparing TTS provider by ID");
+
+    let provider = {
+        let registry = state.tts_registry.lock();
+        registry
+            .get(&id)
+            .map(|entry| entry.provider.clone())
+            .ok_or_else(|| format!("Unknown provider ID: {}", id))?
+    };
+
+    tokio::task::spawn_blocking(move || provider.prepare())
+        .await
+        .map_err(|e| format!("Provider preparation task failed: {}", e))?
+}
+
 /// Select an already registered TTS provider by its stable concrete ID
 #[tauri::command]
 pub async fn select_tts_provider_by_id(

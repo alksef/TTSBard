@@ -37,6 +37,13 @@ pub enum TtsProvider {
 }
 
 impl TtsProvider {
+    pub fn prepare(&self) -> Result<(), String> {
+        match self {
+            TtsProvider::Piper(tts) => tts.prepare(),
+            _ => Ok(()),
+        }
+    }
+
     pub async fn synthesize(&self, text: &str) -> Result<Vec<u8>, String> {
         match self {
             TtsProvider::OpenAi(tts) => tts.synthesize(text).await.map_err(|e| e.to_string()),
