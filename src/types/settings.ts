@@ -101,8 +101,17 @@ export interface NetworkSettingsDto {
   mtproxy: MtProxySettingsDto
 }
 
+export interface TtsProviderInfoDto {
+  id: string
+  display_name: string
+  kind: string
+  active: boolean
+}
+
 export interface TtsSettingsDto {
   provider: TtsProviderType
+  provider_id?: string
+  providers: TtsProviderInfoDto[]
   openai: OpenAiSettingsDto
   local: LocalTtsSettingsDto
   fish: FishAudioSettingsDto

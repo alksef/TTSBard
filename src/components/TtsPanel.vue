@@ -3,11 +3,13 @@ import { ref, onMounted, onUnmounted, watch, inject } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useTtsSettings, useAppSettings } from '../composables/useAppSettings';
-import type { TtsProviderType, VoiceModel } from '../types/settings';
+import type { TtsProviderType, TtsProviderInfoDto, VoiceModel } from '../types/settings';
 import { debugLog, debugError } from '../utils/debug';
 import { TELEGRAM_AUTH_KEY, type UseTelegramAuthReturn } from '../composables/useTelegramAuth';
 import TelegramAuthModal from './TelegramAuthModal.vue';
 import StatusMessage from './shared/StatusMessage.vue';
+import ProviderCard from './shared/ProviderCard.vue';
+import { Cpu } from 'lucide-vue-next';
 import TtsSileroCard from './tts/TtsSileroCard.vue';
 import TtsLocalCard from './tts/TtsLocalCard.vue';
 import TtsOpenAICard from './tts/TtsOpenAICard.vue';
@@ -20,7 +22,18 @@ interface TtsProviderState {
 }
 
 // State
-const activeProvider = ref<TtsProviderType>('silero');
+const activeProvider = ref<TtsProviderType | null>(null);
+const activeProviderId = ref<string | null>(null);
+
+const BUILTIN_PROVIDER_IDS: Record<TtsProviderType, string> = {
+  silero: 'silero',
+  openai: 'openai',
+  local: 'local-http',
+  fish: 'fish',
+};
+function getBuiltinProviderId(type: TtsProviderType): string {
+  return BUILTIN_PROVIDER_IDS[type];
+}
 const providers = ref<Record<TtsProviderType, TtsProviderState>>({
   openai: { type: 'openai', configured: false, expanded: false },
   silero: { type: 'silero', configured: false, expanded: false },
@@ -49,6 +62,12 @@ const fishAudioFormat = ref('mp3');
 const fishAudioTemperature = ref(0.7);
 const fishAudioSampleRate = ref(44100);
 const fishAudioUseProxy = ref(false);
+
+// Piper runtime providers
+const piperProviders = ref<TtsProviderInfoDto[]>([]);
+const piperLoading = ref<Record<string, boolean>>({});
+const piperError = ref<Record<string, string | null>>({});
+const activePiperId = ref<string | null>(null);
 
 // Telegram auth
 const showTelegramModal = ref(false);
@@ -257,8 +276,48 @@ async function setActiveProvider(provider: TtsProviderType) {
   try {
     await invoke('set_tts_provider', { provider });
     activeProvider.value = provider;
+    activePiperId.value = null;
+    const builtinId = getBuiltinProviderId(provider);
+    await invoke('select_tts_provider_by_id', { id: builtinId }).catch(() => {});
   } catch (error) {
     showError(error as string);
+  }
+}
+
+async function selectPiperProvider(id: string) {
+  if (piperLoading.value[id]) return;
+
+  piperLoading.value[id] = true;
+  piperError.value[id] = null;
+
+  const prevBuiltinType = activeProvider.value;
+  const prevPiperId = activePiperId.value;
+
+  try {
+    await invoke('select_tts_provider_by_id', { id });
+    await invoke('prepare_tts_provider_by_id', { id });
+    activePiperId.value = id;
+    activeProvider.value = null;
+    showSuccess('Модель загружена');
+  } catch (error) {
+    piperError.value[id] = error as string;
+    if (prevPiperId && prevPiperId !== id) {
+      try {
+        await invoke('select_tts_provider_by_id', { id: prevPiperId });
+        activePiperId.value = prevPiperId;
+        activeProvider.value = null;
+      } catch { /* best-effort */ }
+    } else if (prevBuiltinType) {
+      try {
+        await invoke('set_tts_provider', { provider: prevBuiltinType });
+        activeProvider.value = prevBuiltinType;
+        activePiperId.value = null;
+      } catch { /* best-effort */ }
+    }
+    showError(error as string);
+  } finally {
+    piperLoading.value[id] = false;
+    await reloadSettings();
   }
 }
 
@@ -410,9 +469,19 @@ watch(ttsSettings, (newSettings) => {
     has_telegram: !!newSettings.telegram,
   });
 
-  if (newSettings.provider) {
+  if (newSettings.providers) {
+    piperProviders.value = newSettings.providers.filter(p => p.kind === 'piper');
+    const activePiper = newSettings.providers.find(p => p.kind === 'piper' && p.active);
+    activePiperId.value = activePiper?.id ?? null;
+  }
+
+  if (activePiperId.value) {
+    activeProvider.value = null;
+    activeProviderId.value = activePiperId.value;
+  } else if (newSettings.provider) {
     debugLog('[TTS] Setting activeProvider to:', newSettings.provider);
     activeProvider.value = newSettings.provider;
+    activeProviderId.value = newSettings.provider_id ?? getBuiltinProviderId(newSettings.provider);
   }
 
   if (newSettings.openai) {
@@ -565,6 +634,24 @@ function dismissStatus() {
         @toggle="toggleProvider('local')"
         @save="saveLocalTtsUrl"
       />
+
+      <!-- Piper Runtime Providers -->
+      <ProviderCard
+        v-for="p in piperProviders"
+        :key="p.id"
+        :title="p.display_name"
+        :icon="Cpu"
+        :active="activeProviderId === p.id"
+        :expanded="true"
+        :disabled="!!piperLoading[p.id]"
+        @select="selectPiperProvider(p.id)"
+      >
+        <div class="piper-card-status">
+          <div v-if="piperLoading[p.id]" class="piper-status-loading">Загрузка...</div>
+          <div v-else-if="piperError[p.id]" class="piper-status-error">{{ piperError[p.id] }}</div>
+          <div v-else class="piper-status-ready">● Модель готова к работе</div>
+        </div>
+      </ProviderCard>
     </div>
 
     <!-- Telegram Auth Modal -->
@@ -582,5 +669,22 @@ function dismissStatus() {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.piper-card-status {
+  padding-top: 8px;
+  font-size: 13px;
+}
+
+.piper-status-loading {
+  color: var(--color-text-secondary);
+}
+
+.piper-status-error {
+  color: var(--color-error, #e74c3c);
+}
+
+.piper-status-ready {
+  color: var(--color-success, #2ecc71);
 }
 </style>
