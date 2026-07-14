@@ -381,6 +381,8 @@ pub struct TtsSettingsDto {
     pub network: NetworkSettingsDto,
     #[serde(default)]
     pub provider_id: Option<String>,
+    #[serde(default)]
+    pub providers: Vec<TtsProviderInfoDto>,
 }
 
 impl From<TtsSettings> for TtsSettingsDto {
@@ -393,6 +395,7 @@ impl From<TtsSettings> for TtsSettingsDto {
             telegram: s.telegram.into(),
             network: s.network.into(),
             provider_id: s.provider_id,
+            providers: Vec::new(),
         }
     }
 }
@@ -409,6 +412,15 @@ impl From<TtsSettingsDto> for TtsSettings {
             provider_id: dto.provider_id,
         }
     }
+}
+
+/// Runtime TTS provider info DTO (populated from registry, not persisted)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TtsProviderInfoDto {
+    pub id: String,
+    pub display_name: String,
+    pub kind: String,
+    pub active: bool,
 }
 
 // ============================================================================

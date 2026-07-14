@@ -11,7 +11,7 @@ mod validation;
 mod windows;
 
 pub use constants::*;
-pub use dto::{AllSourcesParams, AppSettingsDto};
+pub use dto::{AllSourcesParams, AppSettingsDto, TtsProviderInfoDto};
 pub use hotkeys::{Hotkey, HotkeyModifier, HotkeySettings};
 pub use settings::{
     AiCustomSettings, AiDeepSeekSettings, AiOpenAiSettings, AiProviderType, AiSettings,

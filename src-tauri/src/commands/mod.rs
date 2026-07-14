@@ -1,4 +1,5 @@
-use crate::config::{AppSettingsDto, SettingsManager, SpellSource, WindowsManager};
+use crate::config::{AppSettingsDto, SettingsManager, SpellSource, TtsProviderInfoDto, WindowsManager};
+use crate::tts::TtsProvider;
 use crate::events::AppEvent;
 use crate::state::AppState;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -198,7 +199,7 @@ pub async fn get_all_app_settings(
         "get_all_app_settings: Loaded soundpanel bindings"
     );
 
-    let settings = AppSettingsDto::from_all_sources(crate::config::AllSourcesParams {
+    let mut settings = AppSettingsDto::from_all_sources(crate::config::AllSourcesParams {
         config: &config,
         webview_settings: &webview_settings,
         twitch_settings: &twitch_settings,
@@ -207,6 +208,30 @@ pub async fn get_all_app_settings(
         preprocessor: preprocessor.as_ref(),
         soundpanel_bindings,
     });
+
+    // Populate runtime TTS provider info from the registry
+    {
+        let registry = app_state.tts_registry.lock();
+        let active_id = registry.active_id().map(|s| s.to_string());
+        settings.tts.providers = registry
+            .iter()
+            .map(|entry| {
+                let kind = match &entry.provider {
+                    TtsProvider::OpenAi(_) => "openai",
+                    TtsProvider::Silero(_) => "silero",
+                    TtsProvider::Local(_) => "local-http",
+                    TtsProvider::Fish(_) => "fish",
+                    TtsProvider::Piper(_) => "piper",
+                };
+                TtsProviderInfoDto {
+                    id: entry.id.clone(),
+                    display_name: entry.display_name.clone(),
+                    kind: kind.to_string(),
+                    active: Some(&entry.id) == active_id.as_ref(),
+                }
+            })
+            .collect();
+    }
 
     info!(
         tts_provider = ?settings.tts.provider,
