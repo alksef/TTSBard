@@ -364,3 +364,31 @@ pub async fn set_editor_height(
 pub fn get_editor_height(settings_manager: State<'_, SettingsManager>) -> u32 {
     settings_manager.get_editor_height()
 }
+
+/// Select an already registered TTS provider by its stable concrete ID
+#[tauri::command]
+pub async fn select_tts_provider_by_id(
+    id: String,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<(), String> {
+    info!(id, "Selecting TTS provider by ID");
+
+    // Validate and select in the registry (returns Err for unknown IDs)
+    {
+        let mut registry = state.tts_registry.lock();
+        registry.select(&id)?;
+    }
+
+    // Persist the selection to survive restarts
+    let persist_id = id;
+    persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_tts_provider_id(Some(persist_id))
+    })
+    .await?;
+
+    emit_settings_changed(&app_handle);
+
+    Ok(())
+}
