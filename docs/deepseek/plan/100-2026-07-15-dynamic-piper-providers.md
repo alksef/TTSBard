@@ -105,3 +105,5 @@ Pro используется только для сложного native/runtime
 - Один TTS-запрос использует выбранный Piper provider и проходит общий audio
   effects/playback pipeline.
 - Сборка не требует отдельного Piper exe, Python или DLL рядом с приложением.
+- Windows-сборка и ручной Windows smoke-test не входят в автоматический DeepSeek
+  workflow; они остаются отдельной пользовательской проверкой.
