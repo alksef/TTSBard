@@ -434,6 +434,39 @@ mod tests {
         assert!(models.is_empty(), "nested models should not be discovered");
     }
 
+    /// parse_sample_rate rejects sample_rate above u32::MAX.
+    #[test]
+    fn parse_sample_rate_too_large() {
+        let cfg = serde_json::json!({"audio": {"sample_rate": 4_294_967_296u64}});
+        assert!(parse_sample_rate(&cfg).is_none());
+    }
+
+    /// parse_sample_rate rejects sample_rate of 0.
+    #[test]
+    fn parse_sample_rate_zero() {
+        let cfg = serde_json::json!({"audio": {"sample_rate": 0}});
+        assert!(parse_sample_rate(&cfg).is_none());
+    }
+
+    /// parse_sample_rate returns valid rate.
+    #[test]
+    fn parse_sample_rate_valid() {
+        let cfg = serde_json::json!({"audio": {"sample_rate": 22050}});
+        assert_eq!(parse_sample_rate(&cfg), Some(22050));
+    }
+
+    /// stem_to_display_name replaces underscore and hyphen with space.
+    #[test]
+    fn stem_to_display_name_basic() {
+        assert_eq!(stem_to_display_name("ru_RU-irina-medium"), "ru RU irina medium");
+    }
+
+    /// stem_to_display_name with no separators.
+    #[test]
+    fn stem_to_display_name_no_separators() {
+        assert_eq!(stem_to_display_name("simple"), "simple");
+    }
+
     /// Phoneme_id_map that is an array (not object) is skipped.
     #[test]
     fn phoneme_map_array_skipped() {

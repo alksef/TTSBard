@@ -81,7 +81,7 @@ Pro используется только для сложного native/runtime
 2. Scanner Piper-моделей.
 3. Embedded runtime spike и standalone smoke-test.
 
-Следующие задачи:
+Выполнены все микроэтапы:
 
 4. Harden `LocalModelTts` API вокруг существующего descriptor; без settings/UI.
 5. Add a small runtime/provider construction test; без registry.
@@ -93,6 +93,9 @@ Pro используется только для сложного native/runtime
 11. Expose dynamic provider data through the settings DTO.
 12. Add dynamic provider cards and selection/loading state in the TTS panel.
 13. Add end-to-end startup/switching/fallback checks.
+
+Оставшаяся внешняя верификация — ручное Windows-тестирование пользователем
+(сборка, размещение Piper-моделей, проверка UI-состояний, синтез).
 
 ## Критерии готовности
 

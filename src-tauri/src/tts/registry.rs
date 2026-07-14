@@ -336,4 +336,67 @@ mod tests {
         reg.select("b").unwrap();
         assert_eq!(reg.active_id(), Some("b"));
     }
+
+    // --- restore_saved_or_first tests ---
+
+    #[test]
+    fn restore_saved_existing_id_selects_it() {
+        let mut reg = TtsProviderRegistry::new();
+        reg.add_or_replace(entry("saved", "Saved One"));
+        reg.add_or_replace(entry("other", "Other"));
+        reg.restore_saved_or_first(Some("saved"));
+        assert_eq!(reg.active_id(), Some("saved"));
+    }
+
+    #[test]
+    fn restore_saved_missing_with_active_leaves_it() {
+        let mut reg = TtsProviderRegistry::new();
+        reg.add_or_replace(entry("saved", "Saved One"));
+        reg.add_or_replace(entry("other", "Other"));
+        reg.select("other").unwrap();
+        reg.restore_saved_or_first(Some("nonexistent"));
+        assert_eq!(reg.active_id(), Some("other"));
+    }
+
+    #[test]
+    fn restore_saved_missing_without_active_selects_first() {
+        let mut reg = TtsProviderRegistry::new();
+        reg.add_or_replace(entry("first", "First One"));
+        reg.add_or_replace(entry("second", "Second One"));
+        reg.restore_saved_or_first(Some("nonexistent"));
+        assert_eq!(reg.active_id(), Some("first"));
+    }
+
+    #[test]
+    fn restore_no_saved_without_active_selects_first() {
+        let mut reg = TtsProviderRegistry::new();
+        reg.add_or_replace(entry("first", "First One"));
+        reg.add_or_replace(entry("second", "Second One"));
+        reg.restore_saved_or_first(None);
+        assert_eq!(reg.active_id(), Some("first"));
+    }
+
+    #[test]
+    fn restore_no_saved_with_active_leaves_it() {
+        let mut reg = TtsProviderRegistry::new();
+        reg.add_or_replace(entry("first", "First One"));
+        reg.add_or_replace(entry("second", "Second One"));
+        reg.select("second").unwrap();
+        reg.restore_saved_or_first(None);
+        assert_eq!(reg.active_id(), Some("second"));
+    }
+
+    #[test]
+    fn restore_saved_empty_registry_noop() {
+        let mut reg = TtsProviderRegistry::new();
+        reg.restore_saved_or_first(Some("anything"));
+        assert!(reg.active_id().is_none());
+    }
+
+    #[test]
+    fn restore_no_saved_empty_registry_noop() {
+        let mut reg = TtsProviderRegistry::new();
+        reg.restore_saved_or_first(None);
+        assert!(reg.active_id().is_none());
+    }
 }

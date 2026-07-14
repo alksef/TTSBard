@@ -1,7 +1,7 @@
 # Stage 36 — Динамические Piper-провайдеры из AppData
 
 **Дата:** 2026-07-15  
-**Статус:** Архитектура зафиксирована для обсуждения и последующего планирования  
+**Статус:** Backend (registry, scanner, lazy loading, settings DTO) и frontend (dynamic cards, selection, loading state) реализованы; focused tests добавлены, но Rust-тесты требуют Linux WebKitGTK dev-зависимости. Оставшаяся внешняя верификация — ручное Windows-тестирование пользователем.
 **Источник:** обсуждение динамических локальных TTS-моделей + анализ текущего TTS-кода
 
 ---

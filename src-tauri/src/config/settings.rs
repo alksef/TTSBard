@@ -2123,4 +2123,22 @@ mod tests {
         let s = AudioEffectsSettings::default();
         assert!(s.boundary_cleanup_enabled);
     }
+
+    /// Backward-compat: old settings.json without `provider_id` field in tts
+    /// must deserialize with provider_id defaulting to None.
+    #[test]
+    fn tts_settings_deserializes_without_provider_id() {
+        let old_json = r#"{
+            "provider": "openai",
+            "openai": { "api_key": null, "voice": "alloy" },
+            "local": { "url": "http://127.0.0.1:8124" },
+            "fish": { "api_key": null, "voices": [], "reference_id": "", "format": "mp3", "temperature": 0.7, "sample_rate": 44100, "use_proxy": false },
+            "telegram": { "api_id": null, "proxy_mode": "none", "voices": [], "current_voice_id": "" },
+            "network": { "proxy": { "proxy_url": null }, "mtproxy": { "host": null, "port": 8888, "secret": null, "dc_id": null } }
+        }"#;
+        let settings: TtsSettings = serde_json::from_str(old_json)
+            .expect("TtsSettings without provider_id must deserialize");
+        assert_eq!(settings.provider_id, None);
+        assert_eq!(settings.provider, TtsProviderType::OpenAi);
+    }
 }
