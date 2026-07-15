@@ -118,14 +118,13 @@ impl LocalModelTts {
             ))
         })?;
 
-        let config: ModelConfig =
-            serde_json::from_str(&config_content).map_err(|e| {
-                PiperRuntimeError::Load(format!(
-                    "Failed to parse config {}: {}",
-                    self.config_path.display(),
-                    e
-                ))
-            })?;
+        let config: ModelConfig = serde_json::from_str(&config_content).map_err(|e| {
+            PiperRuntimeError::Load(format!(
+                "Failed to parse config {}: {}",
+                self.config_path.display(),
+                e
+            ))
+        })?;
 
         let onnx_session = Session::builder()
             .map_err(|e| {
@@ -172,12 +171,33 @@ impl LocalModelTts {
 
         let mut ids = Vec::new();
         ids.push(bos_id);
-        for token in phonemes.split_whitespace() {
-            if let Some(id) = map.get(token).and_then(|v| v.first()) {
-                ids.push(*id);
-                ids.push(pad_id);
+
+        let char_indices: Vec<(usize, char)> = phonemes.char_indices().collect();
+        let mut pos = 0;
+        while pos < char_indices.len() {
+            let byte_pos = char_indices[pos].0;
+            let remaining = &phonemes[byte_pos..];
+
+            let mut best_key: Option<&str> = None;
+            let mut best_len = 0;
+            for key in map.keys() {
+                if remaining.starts_with(key.as_str()) && key.len() > best_len {
+                    best_key = Some(key.as_str());
+                    best_len = key.len();
+                }
+            }
+
+            if let Some(key) = best_key {
+                if let Some(id) = map.get(key).and_then(|v| v.first()) {
+                    ids.push(*id);
+                    ids.push(pad_id);
+                }
+                pos += key.chars().count();
+            } else {
+                pos += 1;
             }
         }
+
         ids.push(eos_id);
         ids
     }
@@ -194,32 +214,28 @@ impl LocalModelTts {
         let ids = Self::phonemes_to_ids(config, phonemes);
         let input_len = ids.len();
 
-        let input_t = Tensor::<i64>::from_array(([1, input_len], ids.into_boxed_slice()))
-            .map_err(|e| {
+        let input_t =
+            Tensor::<i64>::from_array(([1, input_len], ids.into_boxed_slice())).map_err(|e| {
                 PiperRuntimeError::Inference(format!("Failed to create input tensor: {}", e))
             })?;
 
-        let lengths_t = Tensor::<i64>::from_array((
-            [1],
-            vec![input_len as i64].into_boxed_slice(),
+        let lengths_t = Tensor::<i64>::from_array(([1], vec![input_len as i64].into_boxed_slice()))
+            .map_err(|e| {
+                PiperRuntimeError::Inference(format!("Failed to create lengths tensor: {}", e))
+            })?;
+
+        let scales_t = Tensor::<f32>::from_array((
+            [3],
+            vec![noise_scale, length_scale, noise_w].into_boxed_slice(),
         ))
         .map_err(|e| {
-            PiperRuntimeError::Inference(format!("Failed to create lengths tensor: {}", e))
+            PiperRuntimeError::Inference(format!("Failed to create scales tensor: {}", e))
         })?;
-
-        let scales_t =
-            Tensor::<f32>::from_array((
-                [3],
-                vec![noise_scale, length_scale, noise_w].into_boxed_slice(),
-            ))
-            .map_err(|e| {
-                PiperRuntimeError::Inference(format!("Failed to create scales tensor: {}", e))
-            })?;
 
         let outputs = if config.num_speakers > 1 {
             let sid = speaker_id.unwrap_or(0);
-            let sid_t = Tensor::<i64>::from_array(([1], vec![sid].into_boxed_slice()))
-                .map_err(|e| {
+            let sid_t =
+                Tensor::<i64>::from_array(([1], vec![sid].into_boxed_slice())).map_err(|e| {
                     PiperRuntimeError::Inference(format!("Failed to create sid tensor: {}", e))
                 })?;
             session
@@ -231,9 +247,9 @@ impl LocalModelTts {
                 .map_err(|e| PiperRuntimeError::Inference(format!("Inference failed: {}", e)))?
         };
 
-        let (_, audio) = outputs[0]
-            .try_extract_tensor::<f32>()
-            .map_err(|e| PiperRuntimeError::Inference(format!("Failed to extract output: {}", e)))?;
+        let (_, audio) = outputs[0].try_extract_tensor::<f32>().map_err(|e| {
+            PiperRuntimeError::Inference(format!("Failed to extract output: {}", e))
+        })?;
 
         Ok(audio.to_vec())
     }
@@ -261,7 +277,7 @@ impl TtsEngine for LocalModelTts {
         let length_scale = inf.length_scale;
         let noise_w = inf.noise_w;
 
-        let samples = {
+        let mut samples = {
             let mut session_guard = self.session.lock().unwrap();
             let session = session_guard
                 .as_mut()
@@ -277,6 +293,13 @@ impl TtsEngine for LocalModelTts {
             )
             .map_err(|e| e.to_string())?
         };
+
+        // Piper models can end a short utterance on a non-zero waveform sample.
+        // Give the playback path a small post-roll so the final phoneme is not
+        // perceived as clipped by the device/sink boundary.
+        const POST_ROLL_MS: u32 = 250;
+        let post_roll_frames = (config.audio.sample_rate as usize * POST_ROLL_MS as usize) / 1000;
+        samples.extend(std::iter::repeat_n(0.0f32, post_roll_frames));
 
         encode_wav(&samples, config.audio.sample_rate, 1)
             .map_err(|e| format!("Failed to encode WAV: {}", e))
@@ -310,13 +333,9 @@ mod tests {
             .await
             .expect("synthesize should succeed");
 
-        assert!(
-            !audio.is_empty(),
-            "synthesized audio should not be empty"
-        );
+        assert!(!audio.is_empty(), "synthesized audio should not be empty");
 
-        let pcm = crate::audio::effects::decode_audio(&audio)
-            .expect("output should be valid WAV");
+        let pcm = crate::audio::effects::decode_audio(&audio).expect("output should be valid WAV");
 
         assert!(pcm.sample_rate > 0);
         assert!(pcm.channels == 1);
@@ -386,6 +405,129 @@ mod tests {
 
         let ids = LocalModelTts::phonemes_to_ids(&config, "a x z");
         assert_eq!(ids, vec![1, 4, 0, 2]);
+    }
+
+    #[test]
+    fn test_phonemes_to_ids_single_char_ipa() {
+        let config = ModelConfig {
+            audio: AudioConfig { sample_rate: 22050 },
+            espeak: ESpeakConfig {
+                voice: "en".to_string(),
+            },
+            inference: InferenceConfig {
+                noise_scale: 0.667,
+                length_scale: 1.0,
+                noise_w: 0.8,
+            },
+            num_speakers: 1,
+            speaker_id_map: HashMap::new(),
+            phoneme_id_map: {
+                let mut map = HashMap::new();
+                map.insert("_".to_string(), vec![0]);
+                map.insert("^".to_string(), vec![1]);
+                map.insert("$".to_string(), vec![2]);
+                map.insert("b".to_string(), vec![5]);
+                map
+            },
+        };
+
+        let ids = LocalModelTts::phonemes_to_ids(&config, "b");
+        assert_eq!(ids, vec![1, 5, 0, 2]);
+    }
+
+    #[test]
+    fn test_phonemes_to_ids_two_char_ipa_greedy_match() {
+        let config = ModelConfig {
+            audio: AudioConfig { sample_rate: 22050 },
+            espeak: ESpeakConfig {
+                voice: "en".to_string(),
+            },
+            inference: InferenceConfig {
+                noise_scale: 0.667,
+                length_scale: 1.0,
+                noise_w: 0.8,
+            },
+            num_speakers: 1,
+            speaker_id_map: HashMap::new(),
+            phoneme_id_map: {
+                let mut map = HashMap::new();
+                map.insert("_".to_string(), vec![0]);
+                map.insert("^".to_string(), vec![1]);
+                map.insert("$".to_string(), vec![2]);
+                map.insert("tʃ".to_string(), vec![7]);
+                map.insert("t".to_string(), vec![8]);
+                map.insert("ʃ".to_string(), vec![9]);
+                map
+            },
+        };
+
+        let ids = LocalModelTts::phonemes_to_ids(&config, "tʃ");
+        assert_eq!(
+            ids,
+            vec![1, 7, 0, 2],
+            "two-char IPA key should match as one token, not t + ʃ"
+        );
+    }
+
+    #[test]
+    fn test_phonemes_to_ids_whitespace_between_phonemes() {
+        let config = ModelConfig {
+            audio: AudioConfig { sample_rate: 22050 },
+            espeak: ESpeakConfig {
+                voice: "en".to_string(),
+            },
+            inference: InferenceConfig {
+                noise_scale: 0.667,
+                length_scale: 1.0,
+                noise_w: 0.8,
+            },
+            num_speakers: 1,
+            speaker_id_map: HashMap::new(),
+            phoneme_id_map: {
+                let mut map = HashMap::new();
+                map.insert("_".to_string(), vec![0]);
+                map.insert("^".to_string(), vec![1]);
+                map.insert("$".to_string(), vec![2]);
+                map.insert("a".to_string(), vec![4]);
+                map.insert("ɪ".to_string(), vec![10]);
+                map
+            },
+        };
+
+        let ids = LocalModelTts::phonemes_to_ids(&config, "a   ɪ");
+        assert_eq!(ids, vec![1, 4, 0, 10, 0, 2]);
+    }
+
+    #[test]
+    fn test_phonemes_to_ids_unknown_char_skipped() {
+        let config = ModelConfig {
+            audio: AudioConfig { sample_rate: 22050 },
+            espeak: ESpeakConfig {
+                voice: "en".to_string(),
+            },
+            inference: InferenceConfig {
+                noise_scale: 0.667,
+                length_scale: 1.0,
+                noise_w: 0.8,
+            },
+            num_speakers: 1,
+            speaker_id_map: HashMap::new(),
+            phoneme_id_map: {
+                let mut map = HashMap::new();
+                map.insert("_".to_string(), vec![0]);
+                map.insert("^".to_string(), vec![1]);
+                map.insert("$".to_string(), vec![2]);
+                map.insert("a".to_string(), vec![4]);
+                map
+            },
+        };
+
+        let ids = LocalModelTts::phonemes_to_ids(&config, "q");
+        assert_eq!(
+            ids,
+            vec![1, 2],
+            "unknown char should be skipped, only BOS/EOS remain"
+        );
     }
 
     #[test]

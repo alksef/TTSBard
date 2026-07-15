@@ -1,7 +1,9 @@
-use crate::config::{AppSettingsDto, SettingsManager, SpellSource, TtsProviderInfoDto, WindowsManager};
-use crate::tts::TtsProvider;
+use crate::config::{
+    AppSettingsDto, SettingsManager, SpellSource, TtsProviderInfoDto, WindowsManager,
+};
 use crate::events::AppEvent;
 use crate::state::AppState;
+use crate::tts::TtsProvider;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tracing::info;
 
@@ -107,7 +109,7 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
 
     let audio_pcm = tts_pipeline::apply_audio_effects_pipeline(audio_data, &settings)?;
 
-    let (provider_name, voice_name) = get_provider_voice_names(&settings);
+    let (provider_name, voice_name) = get_provider_voice_names(state, &settings);
     let effects_fp =
         crate::history::compute_effects_fingerprint(&settings.audio_effects, &settings.dsp);
     let cache_key = crate::history::build_cache_key(&text, &provider_name, &voice_name, effects_fp);
@@ -129,7 +131,24 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
     Ok(())
 }
 
-fn get_provider_voice_names(settings: &crate::config::AppSettings) -> (String, String) {
+fn get_provider_voice_names(
+    state: &AppState,
+    settings: &crate::config::AppSettings,
+) -> (String, String) {
+    // The concrete provider selection lives in the runtime registry. The legacy
+    // settings enum does not have a Piper variant, so using it here would record
+    // Piper phrases as the last built-in provider (usually Silero).
+    if let Some(entry) = state.tts_registry.lock().active() {
+        let provider_name = match &entry.provider {
+            TtsProvider::OpenAi(_) => "openai",
+            TtsProvider::Silero(_) => "silero",
+            TtsProvider::Local(_) => "local",
+            TtsProvider::Fish(_) => "fish",
+            TtsProvider::Piper(_) => "piper",
+        };
+        return (provider_name.to_string(), entry.id.clone());
+    }
+
     use crate::tts::TtsProviderType;
     let provider_name = match settings.tts.provider {
         TtsProviderType::OpenAi => "openai",

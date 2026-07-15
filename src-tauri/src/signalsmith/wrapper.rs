@@ -13,9 +13,7 @@ extern "C" {
         pitch_semitones: f32,
         preserve_formants: i32,
     ) -> i32;
-    #[allow(dead_code)]
     fn signalsmith_stretch_input_latency(ptr: *mut c_void) -> i32;
-    #[allow(dead_code)]
     fn signalsmith_stretch_output_latency(ptr: *mut c_void) -> i32;
 }
 
@@ -109,16 +107,24 @@ impl StretchProcessor {
         let time_factor = time_factor.clamp(0.25, 4.0);
         let pitch_semitones = pitch_semitones.clamp(-24.0, 24.0);
 
-        let expected_output_frames = (frames as f32 / time_factor).round() as usize;
+        let input_latency = self.input_latency();
+        let output_latency = self.output_latency();
+        let min_input_frames =
+            input_latency + (time_factor * output_latency as f32).ceil() as usize;
 
-        let output_capacity = expected_output_frames.max(1);
+        let mut padded = input.to_vec();
+        let padded_frames = frames.max(min_input_frames);
+        padded.resize(padded_frames * self.channels, 0.0);
+
+        let expected_output_frames = (frames as f32 / time_factor).round() as usize;
+        let output_capacity = ((padded_frames as f32 / time_factor).round() as usize).max(1);
         let mut output = vec![0.0f32; output_capacity * self.channels];
 
         let result = unsafe {
             signalsmith_stretch_process(
                 self.ptr,
-                input.as_ptr(),
-                frames as i32,
+                padded.as_ptr(),
+                padded_frames as i32,
                 output.as_mut_ptr(),
                 output_capacity as i32,
                 time_factor,
@@ -137,15 +143,16 @@ impl StretchProcessor {
         let actual_frames = result as usize;
         output.truncate(actual_frames * self.channels);
 
+        let keep_frames = expected_output_frames.min(output.len() / self.channels);
+        output.truncate(keep_frames * self.channels);
+
         Ok(output)
     }
 
-    #[allow(dead_code)]
     pub fn input_latency(&self) -> usize {
         unsafe { signalsmith_stretch_input_latency(self.ptr) as usize }
     }
 
-    #[allow(dead_code)]
     pub fn output_latency(&self) -> usize {
         unsafe { signalsmith_stretch_output_latency(self.ptr) as usize }
     }
@@ -385,5 +392,68 @@ mod tests {
         let output = p.process(&input, 1.0, 0.0, false).unwrap();
         assert!(!output.is_empty());
         assert!(output.iter().all(|s| s.is_finite()));
+    }
+
+    // ---- regression: short PCM (shorter than latency) ----
+
+    fn generate_ramp_sample(frames: usize, channels: usize, max_amplitude: f32) -> Vec<f32> {
+        let mut samples = Vec::with_capacity(frames * channels);
+        for i in 0..frames {
+            let val = (i as f32 / frames as f32) * max_amplitude;
+            for _ in 0..channels {
+                samples.push(val);
+            }
+        }
+        samples
+    }
+
+    #[test]
+    fn test_short_mono_22k05_with_tempo_pitch() {
+        let sr = 22050u32;
+        let frames = 100usize;
+        let input = generate_ramp_sample(frames, 1, 0.5);
+
+        let mut p = StretchProcessor::new(1, sr).unwrap();
+        let lat = p.input_latency() + (1.2f32 * p.output_latency() as f32).ceil() as usize;
+        assert!(
+            frames < lat,
+            "test requires short buffer: {frames} frames, latency {lat}"
+        );
+
+        let output = p.process(&input, 1.2, 3.0, false).unwrap();
+        assert!(!output.is_empty());
+        assert!(output.iter().all(|s| s.is_finite()));
+
+        let expected_frames = (frames as f32 / 1.2).round() as usize;
+        assert_eq!(
+            output.len(),
+            expected_frames,
+            "short mono: expected {expected_frames} output frames"
+        );
+    }
+
+    #[test]
+    fn test_short_stereo_22k05_with_tempo_pitch() {
+        let sr = 22050u32;
+        let frames = 100usize;
+        let input = generate_ramp_sample(frames, 2, 0.5);
+
+        let mut p = StretchProcessor::new(2, sr).unwrap();
+        let lat = p.input_latency() + (0.8f32 * p.output_latency() as f32).ceil() as usize;
+        assert!(
+            frames < lat,
+            "test requires short buffer: {frames} frames, latency {lat}"
+        );
+
+        let output = p.process(&input, 0.8, -4.0, true).unwrap();
+        assert!(!output.is_empty());
+        assert!(output.iter().all(|s| s.is_finite()));
+
+        let expected_frames = (frames as f32 / 0.8).round() as usize;
+        assert_eq!(
+            output.len(),
+            expected_frames * 2,
+            "short stereo: expected {expected_frames} frames"
+        );
     }
 }

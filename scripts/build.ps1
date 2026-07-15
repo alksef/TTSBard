@@ -39,9 +39,9 @@ Write-Step "Repo: $repoRoot"
 # --- Проверка окружения ------------------------------------------------------
 Write-Step "Checking toolchain..."
 
-foreach ($cmd in @('node', 'npm', 'cargo')) {
+foreach ($cmd in @('node', 'npm', 'cargo', 'cmake')) {
     if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) {
-        Write-Err "$cmd not found in PATH. Установите Node.js / Rust toolchain."
+        Write-Err "$cmd not found in PATH. Установите требуемый инструмент и повторите сборку."
         exit 1
     }
 }
@@ -49,12 +49,72 @@ try {
     $nodeVer = (node -v)
     $npmVer  = (npm -v)
     $rustcVer = (rustc --version)
+    $cmakeVer = (cmake --version | Select-Object -First 1)
 } catch {
     Write-Err "Не удалось определить версии toolchain: $_"
     exit 1
 }
 Write-Ok "node $nodeVer, npm $npmVer"
 Write-Ok $rustcVer
+Write-Ok $cmakeVer
+
+# espeak-rs-sys hardcodes Release library paths. Keep its C library on the
+# default dynamic CRT; src-tauri/build.rs suppresses its extra msvcrtd input for
+# debug builds so all native code shares the same Windows heap.
+if ($Mode -eq 'debug') {
+    $env:ESPEAK_LIB_PROFILE = 'Release'
+    Remove-Item Env:ESPEAK_STATIC_CRT -ErrorAction SilentlyContinue
+    Write-Ok 'espeak-ng CMake profile: Release + dynamic CRT (shared heap)'
+}
+
+# --- Проверка libclang (нужен для espeak-rs-sys / bindgen) --------------------
+Write-Step "Checking libclang for bindgen..."
+
+# 1. Если LIBCLANG_PATH уже задан пользователем — проверить наличие libclang.dll
+if ($env:LIBCLANG_PATH) {
+    $envLibclangPath = Join-Path $env:LIBCLANG_PATH 'libclang.dll'
+    if (Test-Path $envLibclangPath -PathType Leaf) {
+        Write-Ok "LIBCLANG_PATH = $($env:LIBCLANG_PATH) (libclang.dll найден в окружении)"
+    } else {
+        Write-WarnLine "LIBCLANG_PATH задан ($($env:LIBCLANG_PATH)), но libclang.dll не найден в этом каталоге."
+        Write-Err "Проверьте переменную LIBCLANG_PATH: файл libclang.dll должен лежать в указанном каталоге."
+        exit 1
+    }
+} else {
+    # 2. Автопоиск libclang.dll в типовых каталогах LLVM
+    $candidatePaths = @(
+        'D:\LLVM\bin',
+        'C:\Program Files\LLVM\bin',
+        "$env:ProgramFiles\LLVM\bin",
+        "$env:LOCALAPPDATA\Programs\LLVM\bin"
+    )
+
+    $libclangDir = $null
+    foreach ($dir in $candidatePaths) {
+        $dllPath = Join-Path $dir 'libclang.dll'
+        if (Test-Path $dllPath -PathType Leaf) {
+            $libclangDir = $dir
+            Write-Ok "libclang.dll найден: $dllPath"
+            break
+        }
+    }
+
+    if ($libclangDir) {
+        $env:LIBCLANG_PATH = $libclangDir
+        Write-Ok "LIBCLANG_PATH установлен в $libclangDir"
+    } else {
+        Write-Err 'libclang.dll не найден.'
+        Write-Err 'Он требуется для сборки espeak-rs-sys через bindgen.'
+        Write-Err ''
+        Write-Err 'Установите LLVM одним из способов:'
+        Write-Err '  1. Скачайте установщик с https://github.com/llvm/llvm-project/releases'
+        Write-Err '     и установите LLVM в каталог по умолчанию.'
+        Write-Err '  2. Или задайте переменную окружения LIBCLANG_PATH,'
+        Write-Err '     указывающую на каталог с libclang.dll.'
+        Write-Err '     Например: $env:LIBCLANG_PATH = ''D:\LLVM\bin'''
+        exit 1
+    }
+}
 
 # --- Опциональная очистка ----------------------------------------------------
 if ($Clean) {
