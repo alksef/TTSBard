@@ -3,6 +3,7 @@ use crate::telegram::{
     bot::set_speaker, get_current_voice, get_limits, types::VoiceCode, CurrentVoice, Limits,
     ProxyStatus, SileroTtsBot, TelegramClient, TtsResult, UserInfo,
 };
+use crate::telegram::types::AuthState;
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 use tokio::sync::{Mutex, RwLock};
@@ -144,7 +145,7 @@ pub async fn telegram_sign_in(
     settings_manager: State<'_, SettingsManager>,
     app_handle: AppHandle,
     code: String,
-) -> Result<(), String> {
+) -> Result<AuthState, String> {
     if code.trim().is_empty() {
         return Err("Код не может быть пустым".to_string());
     }
@@ -156,27 +157,88 @@ pub async fn telegram_sign_in(
     let client = client_opt
         .ok_or_else(|| "Клиент не инициализирован. Сначала вызовите telegram_init.".to_string())?;
 
-    client
+    let auth_state = client
         .sign_in(&code)
         .await
         .map_err(|e| format!("Ошибка входа: {}", e))?;
 
-    // После успешного входа сохраняем api_id в settings.json
-    let api_id_to_save = {
-        let api_id_lock = client.api_id.lock().await;
-        match &*api_id_lock {
-            Some(id) => *id,
-            None => return Err("api_id not set".to_string()),
-        }
+    if let AuthState::Connected = &auth_state {
+        let api_id_to_save = {
+            let api_id_lock = client.api_id.lock().await;
+            match &*api_id_lock {
+                Some(id) => *id,
+                None => return Err("api_id not set".to_string()),
+            }
+        };
+
+        super::persist_blocking(settings_manager.inner(), move |mgr| {
+            mgr.set_telegram_api_id(Some(api_id_to_save as i64))
+        })
+        .await?;
+
+        super::emit_settings_changed(&app_handle);
+    }
+
+    Ok(auth_state)
+}
+
+/// Проверка пароля двухфакторной аутентификации
+#[tauri::command]
+pub async fn telegram_check_password(
+    state: State<'_, TelegramState>,
+    settings_manager: State<'_, SettingsManager>,
+    app_handle: AppHandle,
+    password: String,
+) -> Result<AuthState, String> {
+    if password.trim().is_empty() {
+        return Err("Пароль не может быть пустым".to_string());
+    }
+
+    let client_opt = {
+        let guard = state.client.lock().await;
+        guard.clone()
+    };
+    let client = client_opt
+        .ok_or_else(|| "Клиент не инициализирован".to_string())?;
+
+    let auth_state = client
+        .check_password(&password)
+        .await
+        .map_err(|e| format!("Ошибка 2FA: {}", e))?;
+
+    if let AuthState::Connected = &auth_state {
+        let api_id_to_save = {
+            let api_id_lock = client.api_id.lock().await;
+            match &*api_id_lock {
+                Some(id) => *id,
+                None => return Err("api_id not set".to_string()),
+            }
+        };
+
+        super::persist_blocking(settings_manager.inner(), move |mgr| {
+            mgr.set_telegram_api_id(Some(api_id_to_save as i64))
+        })
+        .await?;
+
+        super::emit_settings_changed(&app_handle);
+    }
+
+    Ok(auth_state)
+}
+
+/// Отмена незавершённого auth-flow без удаления сессии
+#[tauri::command]
+pub async fn telegram_disconnect(state: State<'_, TelegramState>) -> Result<(), String> {
+    let client_opt = {
+        let mut guard = state.client.lock().await;
+        guard.take()
     };
 
-    // Save to settings.json (convert u32 to i64)
-    super::persist_blocking(settings_manager.inner(), move |mgr| {
-        mgr.set_telegram_api_id(Some(api_id_to_save as i64))
-    })
-    .await?;
-
-    super::emit_settings_changed(&app_handle);
+    if let Some(client) = client_opt {
+        tokio::spawn(async move {
+            let _ = client.disconnect().await;
+        });
+    }
 
     Ok(())
 }

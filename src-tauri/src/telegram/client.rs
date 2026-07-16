@@ -3,11 +3,11 @@ use super::types::{AuthState, OperationResult, UserInfo};
 use crate::config::MtProxySettings;
 use crate::config::ProxyMode;
 use crate::secret_log;
-use grammers_client::client::LoginToken;
+use grammers_client::client::{LoginToken, PasswordToken};
 use grammers_client::{Client, SignInError};
 #[cfg(feature = "mtproxy")]
 use grammers_mtsender::MtProxyConfig;
-use grammers_mtsender::{ConnectionParams, SenderPool};
+use grammers_mtsender::{ConnectionParams, InvocationError, SenderPool};
 use grammers_session::storages::SqliteSession;
 use grammers_session::updates::UpdatesLike;
 use std::fmt;
@@ -142,6 +142,7 @@ pub struct TelegramClient {
     pub(crate) client: Arc<Mutex<Option<Client>>>,
     pub(crate) updates: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<UpdatesLike>>>>,
     login_token: Arc<Mutex<Option<LoginToken>>>,
+    password_token: Arc<Mutex<Option<PasswordToken>>>,
     pub(crate) api_id: Arc<Mutex<Option<u32>>>,
     api_hash: Arc<Mutex<Option<String>>>,
     phone_number: Arc<Mutex<Option<String>>>,
@@ -172,6 +173,7 @@ impl TelegramClient {
             client: Arc::new(Mutex::new(None)),
             updates: Arc::new(Mutex::new(None)),
             login_token: Arc::new(Mutex::new(None)),
+            password_token: Arc::new(Mutex::new(None)),
             api_id: Arc::new(Mutex::new(None)),
             api_hash: Arc::new(Mutex::new(None)),
             phone_number: Arc::new(Mutex::new(None)),
@@ -489,13 +491,44 @@ impl TelegramClient {
                 .ok_or_else(|| "Номер телефона не задан".to_string())?
         };
 
-        let token = tokio::time::timeout(
-            tokio::time::Duration::from_secs(15),
-            client.request_login_code(&phone_number, &api_hash),
-        )
-        .await
-        .map_err(|_| "Превышено время ожидания запроса кода. Проверьте подключение.".to_string())?
-        .map_err(|e| format!("Ошибка при запросе кода: {}", e))?;
+        let token = {
+            let mut retry_delay_ms = 250;
+            let mut retry_count = 0;
+
+            loop {
+                let result = tokio::time::timeout(
+                    tokio::time::Duration::from_secs(15),
+                    client.request_login_code(&phone_number, &api_hash),
+                )
+                .await;
+
+                match result {
+                    Ok(Ok(token)) => break token,
+                    Ok(Err(InvocationError::Rpc(error)))
+                        if error.code == 500
+                            && error.name == "AUTH_RESTART"
+                            && retry_count < 2 =>
+                    {
+                        retry_count += 1;
+                        warn!(retry_count, "Telegram requested authorization restart; retrying code request");
+                        tokio::time::sleep(tokio::time::Duration::from_millis(
+                            retry_delay_ms,
+                        ))
+                        .await;
+                        retry_delay_ms *= 2;
+                    }
+                    Ok(Err(error)) => {
+                        return Err(format!("Ошибка при запросе кода: {}", error));
+                    }
+                    Err(_) => {
+                        return Err(
+                            "Превышено время ожидания запроса кода. Проверьте подключение."
+                                .to_string(),
+                        );
+                    }
+                }
+            }
+        };
 
         *self.login_token.lock().await = Some(token);
 
@@ -561,23 +594,83 @@ impl TelegramClient {
                 tokio::time::sleep(remaining).await;
                 Ok(AuthState::Connected)
             }
-            Err(SignInError::PasswordRequired(_)) => {
-                // Add jitter to obscure timing before returning token
+            Err(SignInError::PasswordRequired(password_token)) => {
                 let jitter = rand::random::<u64>() % 500;
                 tokio::time::sleep(tokio::time::Duration::from_millis(500 + jitter)).await;
-                // Возвращаем токен обратно если нужна 2FA
-                *self.login_token.lock().await = Some(token);
-                Err(
-                    "Требуется двухфакторная аутентификация. Эта функция пока не реализована."
-                        .to_string(),
-                )
+                *self.password_token.lock().await = Some(password_token);
+                Ok(AuthState::PasswordRequired)
             }
-            Err(e) => {
-                error!("[AUTH] Sign in error: {:?}", e);
+            Err(_e) => {
+                error!("[AUTH] Sign in error (code invalid or expired)");
                 // Add jitter to obscure timing on error
                 let jitter = rand::random::<u64>() % 500;
                 tokio::time::sleep(tokio::time::Duration::from_millis(1000 + jitter)).await;
-                Err(format!("Ошибка авторизации: {}", e))
+                Err("Ошибка авторизации. Проверьте код или попробуйте позже.".to_string())
+            }
+        }
+    }
+
+    /// Проверка пароля двухфакторной аутентификации
+    pub async fn check_password(&self, password: &str) -> Result<AuthState, String> {
+        info!("[AUTH] Starting 2FA password check");
+
+        let client = {
+            let guard = self.client.lock().await;
+            guard
+                .clone()
+                .ok_or_else(|| "Клиент не инициализирован".to_string())?
+        };
+
+        let password_token = self
+            .password_token
+            .lock()
+            .await
+            .take()
+            .ok_or_else(|| "Токен 2FA не найден".to_string())?;
+
+        let start_time = std::time::Instant::now();
+
+        let result = tokio::time::timeout(
+            tokio::time::Duration::from_secs(30),
+            client.check_password(password_token, password),
+        )
+        .await;
+
+        let elapsed = start_time.elapsed();
+
+        match result {
+            Ok(Ok(_user)) => {
+                info!("[AUTH] 2FA password check successful");
+                let target_duration = std::time::Duration::from_millis(1000);
+                let remaining = target_duration.saturating_sub(elapsed);
+                tokio::time::sleep(remaining).await;
+                Ok(AuthState::Connected)
+            }
+            Ok(Err(SignInError::InvalidPassword(new_token))) => {
+                warn!("[AUTH] Invalid 2FA password");
+                let jitter = rand::random::<u64>() % 500;
+                tokio::time::sleep(tokio::time::Duration::from_millis(1000 + jitter)).await;
+                *self.password_token.lock().await = Some(new_token);
+                Err("Неверный пароль".to_string())
+            }
+            Ok(Err(SignInError::PasswordRequired(token))) => {
+                error!("[AUTH] Unexpected PasswordRequired during check_password");
+                let jitter = rand::random::<u64>() % 500;
+                tokio::time::sleep(tokio::time::Duration::from_millis(500 + jitter)).await;
+                *self.password_token.lock().await = Some(token);
+                Err("Требуется пароль 2FA".to_string())
+            }
+            Ok(Err(_other)) => {
+                error!("[AUTH] check_password error (network or API)");
+                let jitter = rand::random::<u64>() % 500;
+                tokio::time::sleep(tokio::time::Duration::from_millis(1000 + jitter)).await;
+                Err("Ошибка 2FA. Попробуйте позже.".to_string())
+            }
+            Err(_) => {
+                error!("[AUTH] check_password timed out");
+                let jitter = rand::random::<u64>() % 500;
+                tokio::time::sleep(tokio::time::Duration::from_millis(500 + jitter)).await;
+                Err("Превышено время ожидания 2FA".to_string())
             }
         }
     }
@@ -629,6 +722,7 @@ impl TelegramClient {
         *self.client.lock().await = None;
         *self.updates.lock().await = None;
         *self.login_token.lock().await = None;
+        *self.password_token.lock().await = None;
         *self.api_id.lock().await = None;
         *self.api_hash.lock().await = None;
         *self.phone_number.lock().await = None;

@@ -43,8 +43,8 @@ use commands::logging::{get_logging_settings, save_logging_settings};
 use commands::playback_window::{pc_get_appearance, pc_set_bg_color, pc_set_opacity};
 use commands::telegram::TelegramState;
 use commands::telegram::{
-    telegram_auto_restore, telegram_get_status, telegram_get_user, telegram_init,
-    telegram_request_code, telegram_sign_in, telegram_sign_out,
+    telegram_auto_restore, telegram_check_password, telegram_disconnect, telegram_get_status,
+    telegram_get_user, telegram_init, telegram_request_code, telegram_sign_in, telegram_sign_out,
 };
 use commands::{
     apply_openai_proxy_settings, close_soundpanel_window, disable_virtual_mic, enable_virtual_mic,
@@ -403,6 +403,8 @@ pub fn run() {
             telegram_init,
             telegram_request_code,
             telegram_sign_in,
+            telegram_check_password,
+            telegram_disconnect,
             telegram_sign_out,
             telegram_get_status,
             telegram_get_user,

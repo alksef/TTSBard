@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { debugLog, debugError } from '../utils/debug'
 import type { VoiceCode, AppSettingsDto } from '../types/settings'
 
-export type TelegramAuthState = 'idle' | 'loading' | 'code_required' | 'connected' | 'error'
+export type TelegramAuthState = 'idle' | 'loading' | 'code_required' | 'password_required' | 'connected' | 'error'
 
 export interface TelegramCredentials {
   phone: string
@@ -51,6 +51,7 @@ export function useTelegramAuth() {
   const isConnected = computed(() => state.value === 'connected')
   const isLoading = computed(() => state.value === 'loading' || loading.value)
   const needsCode = computed(() => state.value === 'code_required')
+  const needsPassword = computed(() => state.value === 'password_required')
   const hasError = computed(() => state.value === 'error')
   const canInit = computed(() => state.value === 'idle' || state.value === 'error')
 
@@ -131,18 +132,57 @@ export function useTelegramAuth() {
       errorMessage.value = null
       state.value = 'loading'
 
-      await invoke('telegram_sign_in', { code })
+      const result = await invoke<string>('telegram_sign_in', { code })
 
-      // Get user info after successful sign in
-      const user = await invoke<TelegramStatus>('telegram_get_user')
-      status.value = user
-      state.value = 'connected'
-      errorMessage.value = null
-      return true
+      if (result === 'Connected') {
+        const user = await invoke<TelegramStatus>('telegram_get_user')
+        status.value = user
+        state.value = 'connected'
+        errorMessage.value = null
+        return true
+      }
+
+      if (result === 'PasswordRequired') {
+        state.value = 'password_required'
+        errorMessage.value = null
+        return false
+      }
+
+      errorMessage.value = 'Неожиданный ответ от сервера'
+      state.value = 'error'
+      return false
     } catch (error) {
       debugError('Failed to sign in:', error)
       errorMessage.value = error as string
       state.value = 'error'
+      return false
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function checkPassword(password: string) {
+    try {
+      loading.value = true
+      errorMessage.value = null
+      state.value = 'loading'
+
+      const result = await invoke<string>('telegram_check_password', { password })
+
+      if (result === 'Connected') {
+        const user = await invoke<TelegramStatus>('telegram_get_user')
+        status.value = user
+        state.value = 'connected'
+        errorMessage.value = null
+        return true
+      }
+
+      errorMessage.value = 'Неожиданный ответ от сервера'
+      state.value = 'error'
+      return false
+    } catch (error) {
+      errorMessage.value = error as string
+      state.value = 'password_required'
       return false
     } finally {
       loading.value = false
@@ -264,6 +304,19 @@ export function useTelegramAuth() {
     } catch (error) {
       // Error or no session - ignore
       debugLog('[TELEGRAM] Auto-restore failed:', error)
+    }
+  }
+
+  // Cancel pending auth-flow without deleting session
+  async function cancelConnection() {
+    try {
+      await invoke('telegram_disconnect')
+    } catch (error) {
+      debugError('[TELEGRAM] Failed to cancel connection:', error)
+    } finally {
+      state.value = 'idle'
+      errorMessage.value = null
+      status.value = null
     }
   }
 
@@ -405,6 +458,7 @@ export function useTelegramAuth() {
     isConnected,
     isLoading,
     needsCode,
+    needsPassword,
     hasError,
     canInit,
 
@@ -412,11 +466,13 @@ export function useTelegramAuth() {
     init,
     requestCode,
     signIn,
+    checkPassword,
     signOut,
     getStatus,
     speak,
     refreshVoice,
     refreshLimits,
+    cancelConnection,
     reset,
     loadSavedVoices,
     addVoiceCode,
