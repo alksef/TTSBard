@@ -156,24 +156,22 @@ impl LocalModelTts {
 
     fn phonemes_to_ids(config: &ModelConfig, phonemes: &str) -> Vec<i64> {
         let map = &config.phoneme_id_map;
-        let pad_id = map
+        let pad_ids = map
             .get(&PAD.to_string())
-            .and_then(|v| v.first())
-            .copied()
-            .unwrap_or(0);
-        let bos_id = map
+            .map(|v| v.as_slice())
+            .unwrap_or(&[0]);
+        let bos_ids = map
             .get(&BOS.to_string())
-            .and_then(|v| v.first())
-            .copied()
-            .unwrap_or(0);
-        let eos_id = map
+            .map(|v| v.as_slice())
+            .unwrap_or(&[0]);
+        let eos_ids = map
             .get(&EOS.to_string())
-            .and_then(|v| v.first())
-            .copied()
-            .unwrap_or(0);
+            .map(|v| v.as_slice())
+            .unwrap_or(&[0]);
 
         let mut ids = Vec::new();
-        ids.push(bos_id);
+        ids.extend_from_slice(bos_ids);
+        ids.extend_from_slice(pad_ids);
 
         let char_indices: Vec<(usize, char)> = phonemes.char_indices().collect();
         let mut pos = 0;
@@ -191,9 +189,9 @@ impl LocalModelTts {
             }
 
             if let Some(key) = best_key {
-                if let Some(id) = map.get(key).and_then(|v| v.first()) {
-                    ids.push(*id);
-                    ids.push(pad_id);
+                if let Some(token_ids) = map.get(key) {
+                    ids.extend_from_slice(token_ids);
+                    ids.extend_from_slice(pad_ids);
                 }
                 pos += key.chars().count();
             } else {
@@ -201,7 +199,7 @@ impl LocalModelTts {
             }
         }
 
-        ids.push(eos_id);
+        ids.extend_from_slice(eos_ids);
         ids
     }
 
@@ -379,7 +377,7 @@ mod tests {
         };
 
         let ids = LocalModelTts::phonemes_to_ids(&config, "a b c");
-        assert_eq!(ids, vec![1, 4, 0, 5, 0, 6, 0, 2]);
+        assert_eq!(ids, vec![1, 0, 4, 0, 5, 0, 6, 0, 2]);
     }
 
     #[test]
@@ -407,7 +405,7 @@ mod tests {
         };
 
         let ids = LocalModelTts::phonemes_to_ids(&config, "a x z");
-        assert_eq!(ids, vec![1, 4, 0, 2]);
+        assert_eq!(ids, vec![1, 0, 4, 0, 2]);
     }
 
     #[test]
@@ -435,7 +433,7 @@ mod tests {
         };
 
         let ids = LocalModelTts::phonemes_to_ids(&config, "b");
-        assert_eq!(ids, vec![1, 5, 0, 2]);
+        assert_eq!(ids, vec![1, 0, 5, 0, 2]);
     }
 
     #[test]
@@ -467,7 +465,7 @@ mod tests {
         let ids = LocalModelTts::phonemes_to_ids(&config, "tʃ");
         assert_eq!(
             ids,
-            vec![1, 7, 0, 2],
+            vec![1, 0, 7, 0, 2],
             "two-char IPA key should match as one token, not t + ʃ"
         );
     }
@@ -498,7 +496,7 @@ mod tests {
         };
 
         let ids = LocalModelTts::phonemes_to_ids(&config, "a   ɪ");
-        assert_eq!(ids, vec![1, 4, 0, 10, 0, 2]);
+        assert_eq!(ids, vec![1, 0, 4, 0, 10, 0, 2]);
     }
 
     #[test]
@@ -528,9 +526,64 @@ mod tests {
         let ids = LocalModelTts::phonemes_to_ids(&config, "q");
         assert_eq!(
             ids,
-            vec![1, 2],
-            "unknown char should be skipped, only BOS/EOS remain"
+            vec![1, 0, 2],
+            "unknown char should be skipped, only BOS/PAD/EOS remain"
         );
+    }
+
+    #[test]
+    fn test_phonemes_to_ids_multi_id_mapping() {
+        let config = ModelConfig {
+            audio: AudioConfig { sample_rate: 22050 },
+            espeak: ESpeakConfig {
+                voice: "en".to_string(),
+            },
+            inference: InferenceConfig {
+                noise_scale: 0.667,
+                length_scale: 1.0,
+                noise_w: 0.8,
+            },
+            num_speakers: 1,
+            speaker_id_map: HashMap::new(),
+            phoneme_id_map: {
+                let mut map = HashMap::new();
+                map.insert("_".to_string(), vec![0]);
+                map.insert("^".to_string(), vec![1]);
+                map.insert("$".to_string(), vec![2]);
+                map.insert("a".to_string(), vec![4, 14]);
+                map
+            },
+        };
+
+        let ids = LocalModelTts::phonemes_to_ids(&config, "a");
+        assert_eq!(ids, vec![1, 0, 4, 14, 0, 2]);
+    }
+
+    #[test]
+    fn test_phonemes_to_ids_empty_string() {
+        let config = ModelConfig {
+            audio: AudioConfig { sample_rate: 22050 },
+            espeak: ESpeakConfig {
+                voice: "en".to_string(),
+            },
+            inference: InferenceConfig {
+                noise_scale: 0.667,
+                length_scale: 1.0,
+                noise_w: 0.8,
+            },
+            num_speakers: 1,
+            speaker_id_map: HashMap::new(),
+            phoneme_id_map: {
+                let mut map = HashMap::new();
+                map.insert("_".to_string(), vec![0]);
+                map.insert("^".to_string(), vec![1]);
+                map.insert("$".to_string(), vec![2]);
+                map
+            },
+        };
+
+        let ids = LocalModelTts::phonemes_to_ids(&config, "");
+        assert_eq!(ids, vec![1, 0, 2]);
     }
 
     #[test]
