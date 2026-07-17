@@ -453,6 +453,12 @@ const editorHeightPx = computed(() => `${editorHeight.value}px`)
 function toggleHistory() {
   showHistory.value = !showHistory.value
 }
+
+function focusEditor() {
+  editorRef.value?.focus()
+}
+
+defineExpose({ focusEditor })
 </script>
 
 <template>

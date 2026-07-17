@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, provide, computed } from 'vue'
+import { ref, onMounted, onUnmounted, watch, provide, computed, nextTick } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { invoke } from '@tauri-apps/api/core'
+import type { UnlistenFn } from '@tauri-apps/api/event'
 import Sidebar from './components/Sidebar.vue'
 import InputPanel from './components/InputPanel.vue'
 import TtsPanel from './components/TtsPanel.vue'
@@ -23,6 +24,8 @@ import { debugLog } from './utils/debug'
 type Panel = 'input' | 'tts' | 'soundpanel' | 'playback' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'settings' | 'hotkeys' | 'intercept'
 
 const currentPanel = ref<Panel>('input')
+
+const inputPanelRef = ref<InstanceType<typeof InputPanel> | null>(null)
 
 const isMinimalMode = ref(false)
 
@@ -181,6 +184,8 @@ function handleReturnFocusKeydown(event: KeyboardEvent) {
 }
 
 // Initialize Telegram session on app start
+const unlistenFocus: { current: UnlistenFn | null } = { current: null }
+
 onMounted(async () => {
   debugLog('[App] 🚀 App mounted')
   debugLog('[App] Initial state:', {
@@ -194,6 +199,13 @@ onMounted(async () => {
 
   document.addEventListener('keydown', handleReturnFocusKeydown)
 
+  getCurrentWindow().onFocusChanged(async ({ payload: focused }) => {
+    if (focused && currentPanel.value === 'input') {
+      await nextTick()
+      inputPanelRef.value?.focusEditor()
+    }
+  }).then(fn => { unlistenFocus.current = fn })
+
   try {
     await telegramAuth.init()
   } catch (error) {
@@ -203,6 +215,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   document.removeEventListener('keydown', handleReturnFocusKeydown)
+  if (unlistenFocus.current) unlistenFocus.current()
 })
 </script>
 
@@ -240,7 +253,7 @@ onUnmounted(() => {
         <Sidebar v-if="!isMinimalMode" :current-panel="currentPanel" @set-panel="setPanel" />
 
         <main class="main-content" :class="{ 'minimal-content': isMinimalMode }">
-          <InputPanel v-show="currentPanel === 'input'" />
+          <InputPanel ref="inputPanelRef" v-show="currentPanel === 'input'" />
           <TtsPanel v-show="currentPanel === 'tts'" />
           <SoundPanelTab v-show="currentPanel === 'soundpanel'" />
           <PlaybackTab v-show="currentPanel === 'playback'" />
