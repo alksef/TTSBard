@@ -9,14 +9,14 @@ import { debugError } from '../utils/debug'
 const { settings, isLoading, reload } = useAppSettings()
 
 const hotkeys = computed(() => settings.value?.hotkeys)
-const recordingFor = ref<'main_window' | 'sound_panel' | 'playback_control_window' | null>(null)
+const recordingFor = ref<'main_window' | 'sound_panel' | 'playback_control_window' | 'return_previous_window' | null>(null)
 const errorMessage = ref<string | null>(null)
 const messageState = ref<'error' | 'success' | 'warning' | null>(null)
 const currentRecording = ref<{ modifiers: HotkeyDto['modifiers']; key: string } | null>(null)
 let messageTimeoutId: ReturnType<typeof setTimeout> | null = null
 
 // Start recording a hotkey
-async function startRecording(name: 'main_window' | 'sound_panel' | 'playback_control_window') {
+async function startRecording(name: 'main_window' | 'sound_panel' | 'playback_control_window' | 'return_previous_window') {
   try {
     // Устанавливаем флаг записи (блокирует выполнение хоткеев)
     await invoke('set_hotkey_recording', { recording: true })
@@ -56,6 +56,14 @@ async function cancelRecording() {
   }
 }
 
+function codeToKey(code: string): string {
+  if (code === 'Space') return 'SPACE'
+  if (/^F\d+$/.test(code)) return code
+  if (/^Key[A-Z]$/.test(code)) return code[3]
+  if (/^Digit\d$/.test(code)) return code[5]
+  return ''
+}
+
 function handleKeyDown(e: KeyboardEvent) {
   if (!recordingFor.value) return
 
@@ -74,18 +82,27 @@ function handleKeyDown(e: KeyboardEvent) {
   if (e.altKey) modifiers.push('alt')
   if (e.metaKey) modifiers.push('super')
 
-  // Get the main key
-  let key = e.key.toUpperCase()
+  const isReturnPrev = recordingFor.value === 'return_previous_window'
 
-  // Ignore modifier-only keys - just update the modifiers display
-  if (key === 'CONTROL' || key === 'SHIFT' || key === 'ALT' || key === 'META') {
-    currentRecording.value = { modifiers, key: '' }
-    return
+  // Get the main key — use code for return_previous_window (physical key)
+  let key: string
+  if (isReturnPrev) {
+    key = codeToKey(e.code)
+    if (key === '') {
+      currentRecording.value = { modifiers, key: '' }
+      return
+    }
+  } else {
+    key = e.key.toUpperCase()
+    // Ignore modifier-only keys - just update the modifiers display
+    if (key === 'CONTROL' || key === 'SHIFT' || key === 'ALT' || key === 'META') {
+      currentRecording.value = { modifiers, key: '' }
+      return
+    }
+    // Map special keys
+    if (key === ' ') key = 'SPACE'
+    if (e.code.startsWith('F')) key = e.code
   }
-
-  // Map special keys
-  if (key === ' ') key = 'SPACE'
-  if (e.code.startsWith('F')) key = e.code
 
   // Update recording with the main key
   currentRecording.value = { modifiers, key }
@@ -94,10 +111,20 @@ function handleKeyDown(e: KeyboardEvent) {
 function handleKeyUp(e: KeyboardEvent) {
   if (!recordingFor.value || !currentRecording.value) return
 
-  // Get the key being released
-  let releasedKey = e.key.toUpperCase()
-  if (releasedKey === ' ') releasedKey = 'SPACE'
-  if (e.code.startsWith('F')) releasedKey = e.code
+  const isReturnPrev = recordingFor.value === 'return_previous_window'
+
+  // Get the key being released — use code for return_previous_window
+  let releasedKey: string
+  if (isReturnPrev) {
+    releasedKey = codeToKey(e.code)
+    if (releasedKey === '') return
+    // For return_previous_window, ignore keyup on modifier-only keys
+    if (['CONTROL', 'SHIFT', 'ALT', 'META', 'CONTROL', 'SHIFT', 'ALT', 'META'].includes(releasedKey)) return
+  } else {
+    releasedKey = e.key.toUpperCase()
+    if (releasedKey === ' ') releasedKey = 'SPACE'
+    if (e.code.startsWith('F')) releasedKey = e.code
+  }
 
   // Only finish if we're releasing the main key we captured
   if (currentRecording.value.key !== '' && releasedKey === currentRecording.value.key) {
@@ -224,6 +251,11 @@ onUnmounted(async () => {
 
     <!-- Single section for all hotkeys -->
     <div class="setting-section">
+      <div class="section-header">
+        <Keyboard :size="18" class="section-icon" />
+        <span class="section-title">Глобальные</span>
+      </div>
+
       <!-- Main Window Hotkey -->
       <div class="hotkey-row">
         <div class="hotkey-label">
@@ -356,6 +388,62 @@ onUnmounted(async () => {
             @click="resetToDefault('playback_control_window')"
             class="reset-btn"
             title="Сбросить к умолчанию"
+          >
+            <RotateCcw :size="14" />
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main window local hotkey section -->
+    <div class="setting-section" style="margin-top: 1rem;">
+      <div class="section-header">
+        <AppWindow :size="18" class="section-icon" />
+        <span class="section-title">Главное окно</span>
+      </div>
+
+      <div class="hotkey-row">
+        <div class="hotkey-label">
+          <span>Вернуть фокус в предыдущее окно</span>
+        </div>
+        <div class="hotkey-actions">
+          <span v-if="hotkeys && !recordingFor" class="hotkey-value">
+            {{ formatHotkey(hotkeys.return_previous_window) }}
+          </span>
+          <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+
+          <!-- Recording state -->
+          <div v-if="recordingFor === 'return_previous_window' && currentRecording" class="hotkey-value recording">
+            {{ formatCurrentRecording() }}
+          </div>
+
+          <button
+            @click="startRecording('return_previous_window')"
+            :disabled="recordingFor !== null || isLoading"
+            class="record-btn"
+            :class="{ recording: recordingFor === 'return_previous_window' }"
+            title="Записать клавишу"
+            aria-label="Записать клавишу"
+          >
+            <Keyboard :size="14" />
+            {{ recordingFor === 'return_previous_window' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+          </button>
+
+          <button
+            v-if="recordingFor === 'return_previous_window'"
+            @click="cancelRecording"
+            class="cancel-btn"
+            title="Отмена (Esc)"
+            aria-label="Отмена записи"
+          >
+            ✕
+          </button>
+
+          <button
+            @click="resetToDefault('return_previous_window')"
+            class="reset-btn"
+            title="Сбросить к умолчанию"
+            aria-label="Сбросить к умолчанию"
           >
             <RotateCcw :size="14" />
           </button>

@@ -1,4 +1,4 @@
-use crate::config::{AppSettingsDto, SettingsManager, SpellSource, WindowsManager};
+use crate::config::{AppSettingsDto, QuickEditorMode, SettingsManager, SpellSource, WindowsManager};
 use crate::events::AppEvent;
 use crate::state::AppState;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -247,15 +247,18 @@ pub async fn confirm_backend_ready(
     Ok(())
 }
 
-/// Set quick editor enabled
+/// Set quick editor behavior mode
 #[tauri::command]
 pub async fn set_editor_quick(
-    value: bool,
+    value: String,
     app_handle: AppHandle,
     settings_manager: State<'_, SettingsManager>,
-) -> Result<bool, String> {
+) -> Result<String, String> {
+    let mode = QuickEditorMode::from_str(&value)
+        .ok_or_else(|| format!("Invalid quick editor mode: {}", value))?;
+
     persist_blocking(settings_manager.inner(), move |mgr| {
-        mgr.set_editor_quick(value)
+        mgr.set_editor_quick(mode)
     })
     .await?;
 
@@ -264,10 +267,10 @@ pub async fn set_editor_quick(
     Ok(value)
 }
 
-/// Get quick editor enabled
+/// Get quick editor behavior mode
 #[tauri::command]
-pub fn get_editor_quick(settings_manager: State<'_, SettingsManager>) -> bool {
-    settings_manager.get_editor_quick()
+pub fn get_editor_quick(settings_manager: State<'_, SettingsManager>) -> String {
+    settings_manager.get_editor_quick().as_str().to_string()
 }
 
 /// Set spellcheck enabled

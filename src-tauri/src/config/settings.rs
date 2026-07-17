@@ -704,12 +704,83 @@ pub enum SpellSource {
     Offline,
 }
 
+/// Quick editor behavior mode
+///
+/// Controls how the main window reacts after Enter/Esc in the quick editor.
+/// Serialized as lowercase strings; deserialization also accepts legacy bool values
+/// (`false` → Disabled, `true` → Collapse) for backward compatibility.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum QuickEditorMode {
+    #[default]
+    Disabled,
+    Collapse,
+    ReturnFocus,
+}
+
+impl QuickEditorMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            QuickEditorMode::Disabled => "disabled",
+            QuickEditorMode::Collapse => "collapse",
+            QuickEditorMode::ReturnFocus => "return_focus",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "disabled" => Some(QuickEditorMode::Disabled),
+            "collapse" => Some(QuickEditorMode::Collapse),
+            "return_focus" => Some(QuickEditorMode::ReturnFocus),
+            _ => None,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for QuickEditorMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct QuickEditorModeVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for QuickEditorModeVisitor {
+            type Value = QuickEditorMode;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a boolean or string ('disabled', 'collapse', 'return_focus')")
+            }
+
+            fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                if v {
+                    Ok(QuickEditorMode::Collapse)
+                } else {
+                    Ok(QuickEditorMode::Disabled)
+                }
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                QuickEditorMode::from_str(v)
+                    .ok_or_else(|| E::unknown_variant(v, &["disabled", "collapse", "return_focus"]))
+            }
+        }
+
+        deserializer.deserialize_any(QuickEditorModeVisitor)
+    }
+}
+
 /// Editor settings for quick and AI editor modes
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct EditorSettings {
     #[serde(default)]
-    pub quick: bool,
+    pub quick: QuickEditorMode,
     #[serde(default)]
     pub ai: bool,
     #[serde(default)]
@@ -729,7 +800,7 @@ fn default_editor_height() -> u32 {
 impl Default for EditorSettings {
     fn default() -> Self {
         Self {
-            quick: false,
+            quick: QuickEditorMode::Disabled,
             ai: false,
             ai_completion: false,
             spellcheck_enabled: true,
@@ -1008,7 +1079,8 @@ impl SettingsManager {
                 || settings.hotkeys.playback_pause.key.is_empty()
                 || settings.hotkeys.playback_stop.key.is_empty()
                 || settings.hotkeys.playback_repeat.key.is_empty()
-                || settings.hotkeys.playback_control_window.key.is_empty();
+                || settings.hotkeys.playback_control_window.key.is_empty()
+                || settings.hotkeys.return_previous_window.key.is_empty();
 
             if needs_migration {
                 info!("Migrating hotkey settings from defaults");
@@ -1477,13 +1549,13 @@ impl SettingsManager {
 
     // ========== Editor Settings ==========
 
-    /// Set quick editor enabled state
-    pub fn set_editor_quick(&self, enabled: bool) -> Result<()> {
-        self.update_field("/editor/quick", &enabled)
+    /// Set quick editor behavior mode
+    pub fn set_editor_quick(&self, mode: QuickEditorMode) -> Result<()> {
+        self.update_field("/editor/quick", &mode)
     }
 
-    /// Get quick editor enabled state
-    pub fn get_editor_quick(&self) -> bool {
+    /// Get quick editor behavior mode
+    pub fn get_editor_quick(&self) -> QuickEditorMode {
         self.cache.read().editor.quick
     }
 
@@ -1716,6 +1788,7 @@ impl SettingsManager {
             "playback_stop" => settings.hotkeys.playback_stop = hotkey.clone(),
             "playback_repeat" => settings.hotkeys.playback_repeat = hotkey.clone(),
             "playback_control_window" => settings.hotkeys.playback_control_window = hotkey.clone(),
+            "return_previous_window" => settings.hotkeys.return_previous_window = hotkey.clone(),
             _ => return Err(anyhow::anyhow!("Invalid hotkey name: {}", name)),
         }
         self.save(&settings)
@@ -1733,6 +1806,7 @@ impl SettingsManager {
             "playback_stop" => super::hotkeys::Hotkey::default_playback_stop(),
             "playback_repeat" => super::hotkeys::Hotkey::default_playback_repeat(),
             "playback_control_window" => super::hotkeys::Hotkey::default_playback_control_window(),
+            "return_previous_window" => super::hotkeys::Hotkey::default_return_previous_window(),
             _ => return Err(anyhow::anyhow!("Invalid hotkey name: {}", name)),
         };
         self.set_hotkey(name, &default)?;
@@ -2109,5 +2183,92 @@ mod tests {
     fn default_audio_effects_boundary_cleanup_enabled() {
         let s = AudioEffectsSettings::default();
         assert!(s.boundary_cleanup_enabled);
+    }
+
+    // ==================== QuickEditorMode tests ====================
+
+    /// Backward-compat: old settings.json with `quick: false` → Disabled.
+    #[test]
+    fn quick_editor_mode_deserializes_bool_false() {
+        let json = r#"{"quick":false,"ai":false,"ai_completion":false,"spellcheck_enabled":true,"spellcheck_source":"offline","editor_height":340}"#;
+        let settings: EditorSettings =
+            serde_json::from_str(json).expect("bool false must deserialize");
+        assert_eq!(settings.quick, QuickEditorMode::Disabled);
+    }
+
+    /// Backward-compat: old settings.json with `quick: true` → Collapse.
+    #[test]
+    fn quick_editor_mode_deserializes_bool_true() {
+        let json = r#"{"quick":true,"ai":false,"ai_completion":false,"spellcheck_enabled":true,"spellcheck_source":"offline","editor_height":340}"#;
+        let settings: EditorSettings =
+            serde_json::from_str(json).expect("bool true must deserialize");
+        assert_eq!(settings.quick, QuickEditorMode::Collapse);
+    }
+
+    /// New format: deserialize each string variant.
+    #[test]
+    fn quick_editor_mode_deserializes_string_variants() {
+        for (json_str, expected) in [
+            (r#""disabled""#, QuickEditorMode::Disabled),
+            (r#""collapse""#, QuickEditorMode::Collapse),
+            (r#""return_focus""#, QuickEditorMode::ReturnFocus),
+        ] {
+            let mode: QuickEditorMode =
+                serde_json::from_str(json_str).unwrap_or_else(|e| panic!("{}: {}", json_str, e));
+            assert_eq!(mode, expected, "mismatch for {}", json_str);
+        }
+    }
+
+    /// Serialize all variants to correct lowercase strings.
+    #[test]
+    fn quick_editor_mode_serializes_string() {
+        assert_eq!(
+            serde_json::to_string(&QuickEditorMode::Disabled).unwrap(),
+            r#""disabled""#
+        );
+        assert_eq!(
+            serde_json::to_string(&QuickEditorMode::Collapse).unwrap(),
+            r#""collapse""#
+        );
+        assert_eq!(
+            serde_json::to_string(&QuickEditorMode::ReturnFocus).unwrap(),
+            r#""return_focus""#
+        );
+    }
+
+    /// Default is Disabled.
+    #[test]
+    fn quick_editor_mode_default_is_disabled() {
+        assert_eq!(QuickEditorMode::default(), QuickEditorMode::Disabled);
+        let settings = EditorSettings::default();
+        assert_eq!(settings.quick, QuickEditorMode::Disabled);
+    }
+
+    /// Round-trip: serialize EditorSettings with the new enum, deserialize back.
+    #[test]
+    fn editor_settings_quick_mode_round_trip() {
+        let original = EditorSettings {
+            quick: QuickEditorMode::ReturnFocus,
+            ..EditorSettings::default()
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let back: EditorSettings = serde_json::from_str(&json).expect("round-trip deserialization");
+        assert_eq!(back.quick, QuickEditorMode::ReturnFocus);
+        assert!(json.contains(r#""quick":"return_focus""#));
+    }
+
+    /// as_str / from_str helpers.
+    #[test]
+    fn quick_editor_mode_str_helpers() {
+        for mode in [
+            QuickEditorMode::Disabled,
+            QuickEditorMode::Collapse,
+            QuickEditorMode::ReturnFocus,
+        ] {
+            let s = mode.as_str();
+            let parsed = QuickEditorMode::from_str(s).expect("from_str round-trip");
+            assert_eq!(parsed, mode);
+        }
+        assert!(QuickEditorMode::from_str("bogus").is_none());
     }
 }

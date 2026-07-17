@@ -814,7 +814,7 @@ pub type SoundBindingDto = SoundBinding;
 /// Editor settings DTO
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditorSettingsDto {
-    pub quick: bool,
+    pub quick: String,
     pub ai: bool,
     pub ai_completion: bool,
     pub spellcheck_enabled: bool,
@@ -1121,6 +1121,7 @@ pub struct HotkeySettingsDto {
     pub playback_stop: HotkeyDto,
     pub playback_repeat: HotkeyDto,
     pub playback_control_window: HotkeyDto,
+    pub return_previous_window: HotkeyDto,
 }
 
 impl From<HotkeySettings> for HotkeySettingsDto {
@@ -1132,6 +1133,7 @@ impl From<HotkeySettings> for HotkeySettingsDto {
             playback_stop: h.playback_stop.into(),
             playback_repeat: h.playback_repeat.into(),
             playback_control_window: h.playback_control_window.into(),
+            return_previous_window: h.return_previous_window.into(),
         }
     }
 }
@@ -1145,6 +1147,7 @@ impl From<HotkeySettingsDto> for HotkeySettings {
             playback_stop: dto.playback_stop.into(),
             playback_repeat: dto.playback_repeat.into(),
             playback_control_window: dto.playback_control_window.into(),
+            return_previous_window: dto.return_previous_window.into(),
         }
     }
 }
@@ -1213,7 +1216,7 @@ impl AppSettingsDto {
                 params.interception_enabled,
             ),
             editor: EditorSettingsDto {
-                quick: params.config.editor.quick,
+                quick: params.config.editor.quick.as_str().to_string(),
                 ai: params.config.editor.ai,
                 ai_completion: params.config.editor.ai_completion,
                 spellcheck_enabled: params.config.editor.spellcheck_enabled,

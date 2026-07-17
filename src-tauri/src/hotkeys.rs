@@ -121,6 +121,21 @@ pub fn handle_main_window(app_handle: AppHandle) {
             return;
         }
 
+        // Сохраняем HWND внешнего окна перед активацией
+        if let Some(app_state) = app_handle.try_state::<AppState>() {
+            let fg = crate::window::get_foreground_hwnd();
+            if let Some(hwnd) = fg {
+                if !crate::window::is_own_window(hwnd) {
+                    *app_state.previous_foreground_hwnd.lock() = Some(hwnd);
+                    debug!(
+                        hwnd,
+                        action = "saved_foreground",
+                        "Saved external foreground HWND before activation"
+                    );
+                }
+            }
+        }
+
         // Показать окно если оно скрыто
         let _ = window.show();
 

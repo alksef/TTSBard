@@ -3,7 +3,55 @@ use crate::playback_window::update_playback_appearance;
 use crate::soundpanel_window::{hide_soundpanel_window, update_soundpanel_appearance};
 use crate::state::AppState;
 use tauri::{AppHandle, Manager, State};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
+
+/// Вернуть фокус в предыдущее окно (внешнее приложение)
+///
+/// Снимает always_on_top с главного окна TTSBard и активирует сохранённый
+/// внешний HWND через Win32 `SetForegroundWindow`. Окно TTSBard не скрывается.
+/// На не-Windows платформах только снимает always_on_top.
+#[tauri::command]
+pub fn return_to_previous_window(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    // Снять always_on_top с главного окна
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.set_always_on_top(false);
+    }
+
+    // Получить сохранённый HWND
+    let saved = { *state.previous_foreground_hwnd.lock() };
+    *state.previous_foreground_hwnd.lock() = None;
+
+    match saved {
+        Some(hwnd) => {
+            if !crate::window::is_window_valid(hwnd) {
+                warn!(
+                    hwnd,
+                    "Saved foreground HWND is no longer valid, window may have been closed"
+                );
+                return Err("Предыдущее окно больше не доступно (закрыто)".to_string());
+            }
+
+            let succeeded = crate::window::set_foreground_window(hwnd);
+            if succeeded {
+                info!(hwnd, action = "returned_focus", "Focus returned to previous window");
+                Ok(())
+            } else {
+                warn!(
+                    hwnd,
+                    "SetForegroundWindow failed (Windows foreground lock policy)"
+                );
+                Err("Не удалось переключить фокус (ограничение Windows). Окно TTSBard остаётся видимым.".to_string())
+            }
+        }
+        None => {
+            debug!("No saved foreground HWND to return to");
+            Ok(())
+        }
+    }
+}
 
 #[tauri::command]
 pub async fn resize_main_window(
@@ -221,11 +269,47 @@ pub async fn set_hotkey(
         .load()
         .map_err(|e| format!("Failed to load settings: {}", e))?;
 
-    if name == "main_window" && hotkey == settings.hotkeys.sound_panel {
-        return Err("Этот хоткей уже используется для звуковой панели".to_string());
-    }
-    if name == "sound_panel" && hotkey == settings.hotkeys.main_window {
-        return Err("Этот хоткей уже используется для главного окна".to_string());
+    // Проверка конфликтов со всеми остальными хоткеями
+    let all_global_names = [
+        "main_window",
+        "sound_panel",
+        "playback_pause",
+        "playback_stop",
+        "playback_repeat",
+        "playback_control_window",
+        "return_previous_window",
+    ];
+    let conflict_labels: [(&str, &str); 7] = [
+        ("main_window", "главного окна"),
+        ("sound_panel", "звуковой панели"),
+        ("playback_pause", "паузы воспроизведения"),
+        ("playback_stop", "остановки воспроизведения"),
+        ("playback_repeat", "повтора воспроизведения"),
+        ("playback_control_window", "окна управления воспроизведением"),
+        ("return_previous_window", "возврата в предыдущее окно"),
+    ];
+    for other_name in &all_global_names {
+        if *other_name == name.as_str() {
+            continue;
+        }
+        let other_hotkey = match *other_name {
+            "main_window" => &settings.hotkeys.main_window,
+            "sound_panel" => &settings.hotkeys.sound_panel,
+            "playback_pause" => &settings.hotkeys.playback_pause,
+            "playback_stop" => &settings.hotkeys.playback_stop,
+            "playback_repeat" => &settings.hotkeys.playback_repeat,
+            "playback_control_window" => &settings.hotkeys.playback_control_window,
+            "return_previous_window" => &settings.hotkeys.return_previous_window,
+            _ => continue,
+        };
+        if hotkey == *other_hotkey {
+            let label = conflict_labels
+                .iter()
+                .find(|(n, _)| *n == *other_name)
+                .map(|(_, l)| *l)
+                .unwrap_or(other_name);
+            return Err(format!("Этот хоткей уже используется для {}", label));
+        }
     }
 
     let name_clone = name.clone();

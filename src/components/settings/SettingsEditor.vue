@@ -2,18 +2,33 @@
 import { computed, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { useEditorSettings } from '../../composables/useAppSettings';
+import type { QuickEditorMode } from '../../types/settings';
 
-// Get settings from composable
 const editorSettings = useEditorSettings();
 
-// Emit error message event for parent to display
 const emit = defineEmits<{
   (e: 'show-message', message: string): void;
 }>();
 
-const quickEditorEnabled = computed(() => editorSettings.value?.quick ?? false);
+const quickEditorMode = computed<QuickEditorMode>(() => editorSettings.value?.quick ?? 'disabled');
 
 const spellcheckEnabled = computed(() => editorSettings.value?.spellcheck_enabled ?? true)
+
+const quickModeOptions: { value: QuickEditorMode; label: string }[] = [
+  { value: 'disabled', label: 'Отключено' },
+  { value: 'collapse', label: 'Сворачивать' },
+  { value: 'return_focus', label: 'Возвращать фокус предыдущему окну' },
+]
+
+async function setQuickMode(mode: QuickEditorMode) {
+  try {
+    await invoke('set_editor_quick', { value: mode });
+    emit('show-message', 'Настройка сохранена');
+  } catch (e) {
+    const errorMessage = e instanceof Error ? e.message : String(e);
+    emit('show-message', 'Ошибка переключения быстрого редактора: ' + errorMessage);
+  }
+}
 
 async function toggleSpellcheck() {
   try {
@@ -26,18 +41,6 @@ async function toggleSpellcheck() {
   }
 }
 
-async function toggleQuickEditor() {
-  try {
-    const newValue = !(editorSettings.value?.quick ?? false);
-    await invoke('set_editor_quick', { value: newValue });
-    emit('show-message', 'Настройка сохранена');
-  } catch (e) {
-    const errorMessage = e instanceof Error ? e.message : String(e);
-    emit('show-message', 'Ошибка переключения быстрого редактора: ' + errorMessage);
-  }
-}
-
-// Watch for settings changes from composable
 watch(editorSettings, (newSettings) => {
   if (!newSettings) return;
 }, { immediate: true });
@@ -46,21 +49,28 @@ watch(editorSettings, (newSettings) => {
 <template>
   <div class="settings-editor">
     <section class="settings-section">
-      <div class="setting-row">
-        <label class="setting-label checkbox-label">
+      <div class="card-header">
+        <h3 class="card-title">Быстрый редактор</h3>
+        <p class="card-desc">Реакция на Enter, Esc</p>
+      </div>
+      <div class="setting-row" v-for="opt in quickModeOptions" :key="opt.value">
+        <label class="setting-label radio-label">
           <input
-            :checked="quickEditorEnabled"
-            type="checkbox"
-            class="checkbox-input"
-            @change="toggleQuickEditor"
+            type="radio"
+            :value="opt.value"
+            :checked="quickEditorMode === opt.value"
+            class="radio-input"
+            @change="setQuickMode(opt.value)"
           />
-          <span>Быстрый редактор</span>
+          <span>{{ opt.label }}</span>
         </label>
-        <span class="setting-hint">
-          При включении скрывает окно по нажатию <code>Enter</code> (после отправки на TTS) или <code>Esc</code> в поле текста
+        <span v-if="opt.value === 'return_focus'" class="setting-hint">
+          Работает только если окно было вызвано по горячей клавише
         </span>
       </div>
+    </section>
 
+    <section class="settings-section">
       <div class="setting-row">
         <label class="setting-label checkbox-label">
           <input
@@ -75,7 +85,7 @@ watch(editorSettings, (newSettings) => {
           Подчёркивает ошибки и предлагает варианты исправления. Работает без сети (локальный словарь)
         </span>
       </div>
-      </section>
+    </section>
   </div>
 </template>
 
@@ -83,11 +93,10 @@ watch(editorSettings, (newSettings) => {
 .settings-editor {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 0.75rem;
 }
 
 .settings-section {
-  margin-bottom: 1.5rem;
   padding: 12px 16px;
   background: var(--color-bg-field);
   border: 1px solid var(--color-border);
@@ -95,12 +104,27 @@ watch(editorSettings, (newSettings) => {
   backdrop-filter: blur(8px);
 }
 
-.settings-section:last-child {
-  margin-bottom: 0;
+.card-header {
+  margin-bottom: 0.75rem;
 }
 
-.setting-row {
-  margin-bottom: 1rem;
+.card-title {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.card-desc {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+.settings-editor .setting-row {
+  display: block;
+  margin-bottom: 0.5rem;
 }
 
 .setting-row:last-child {
@@ -118,7 +142,19 @@ watch(editorSettings, (newSettings) => {
   color: var(--color-text-primary);
 }
 
+.radio-label {
+  font-weight: 500;
+  padding: 0.25rem 0;
+}
+
 .checkbox-input {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: var(--color-accent);
+}
+
+.radio-input {
   width: 18px;
   height: 18px;
   cursor: pointer;

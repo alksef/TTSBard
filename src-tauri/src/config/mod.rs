@@ -17,8 +17,8 @@ pub use settings::{
     AiCustomSettings, AiDeepSeekSettings, AiOpenAiSettings, AiProviderType, AiSettings,
     AiZAiSettings, AppSettings, AudioEffectsSettings, AudioSettings, DspCompressorSettings,
     DspEqBandSettings, DspEqSettings, DspLimiterSettings, DspSettings, LoggingSettings,
-    MtProxySettings, NetworkSettings, ProxyMode, ProxyType, SettingsManager, SpellSource, Theme,
-    TwitchSettings,
+    MtProxySettings, NetworkSettings, ProxyMode, ProxyType, QuickEditorMode, SettingsManager,
+    SpellSource, Theme, TwitchSettings,
 };
 pub use validation::is_valid_hex_color;
 pub use windows::{WindowsManager, WindowsSettings};

@@ -5,7 +5,7 @@ import { listen, UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { save } from '@tauri-apps/plugin-dialog'
 import { useEditorSettings, useAppSettings, useTtsSettings, useAiSettings } from '../composables/useAppSettings'
-import { SETTINGS_CHANGED_EVENT } from '../types/settings'
+import { SETTINGS_CHANGED_EVENT, type QuickEditorMode } from '../types/settings'
 import { useErrorHandler } from '../composables/useErrorHandler'
 import { debugLog, debugError } from '../utils/debug'
 import { compactModeState, initCompactDims } from '../composables/compactModeState'
@@ -53,7 +53,7 @@ const ttsSettings = useTtsSettings()
 
 const appSettingsContext = useAppSettings()
 
-const quickEditorEnabled = computed(() => editorSettings.value?.quick ?? false)
+const quickEditorMode = computed<QuickEditorMode>(() => editorSettings.value?.quick ?? 'disabled')
 
 const aiEditorEnabled = computed(() => editorSettings.value?.ai ?? false)
 
@@ -348,26 +348,40 @@ async function handleEnter() {
 
   if (!currentText.trim()) return
 
-  const quickEditorEnabledValue = editorSettings.value?.quick ?? false
-  if (quickEditorEnabledValue && !currentText.trim()) return
+  const mode = editorSettings.value?.quick ?? 'disabled'
 
-  if (quickEditorEnabledValue) {
-    speak(currentText)
-    const tab = tabs.value.find(t => t.id === senderTabId)
-    if (tab) tab.text = ''
-    await hideMainWindow()
-  } else {
+  if (mode === 'disabled') {
     await speak(currentText)
     const tab = tabs.value.find(t => t.id === senderTabId)
     if (tab) tab.text = ''
+  } else if (mode === 'collapse') {
+    await speak(currentText)
+    const tab = tabs.value.find(t => t.id === senderTabId)
+    if (tab) tab.text = ''
+    await hideMainWindow()
+  } else if (mode === 'return_focus') {
+    await speak(currentText)
+    const tab = tabs.value.find(t => t.id === senderTabId)
+    if (tab) tab.text = ''
+    try {
+      await invoke('return_to_previous_window')
+    } catch (e) {
+      debugError('[InputPanel] Failed to return focus:', e)
+    }
   }
 }
 
 async function handleEsc() {
-  const quickEditorEnabledValue = editorSettings.value?.quick ?? false
+  const mode = editorSettings.value?.quick ?? 'disabled'
 
-  if (quickEditorEnabledValue) {
+  if (mode === 'collapse') {
     hideMainWindow()
+  } else if (mode === 'return_focus') {
+    try {
+      await invoke('return_to_previous_window')
+    } catch (e) {
+      debugError('[InputPanel] Failed to return focus:', e)
+    }
   }
 }
 
@@ -526,7 +540,7 @@ function toggleHistory() {
         @append="appendPhrase"
         @replace="replacePhrase"
       />
-      <div v-if="quickEditorEnabled" class="quick-editor-hint">
+      <div v-if="quickEditorMode !== 'disabled'" class="quick-editor-hint">
         Режим быстрого редактора
       </div>
       <div v-if="aiEditorEnabled" class="ai-editor-hint">

@@ -68,7 +68,7 @@ use commands::{
     set_virtual_mic_device, set_virtual_mic_volume, speak_text, speak_text_raw_export,
     stop_preview, test_audio_device, toggle_interception, toggle_playback_control_window,
     unregister_hotkeys, update_theme, window::remove_main_bounds, window::resize_main_window,
-    window::set_main_bounds,
+    window::return_to_previous_window, window::set_main_bounds,
 };
 use config::{SettingsManager, WindowsManager};
 use soundpanel::{
@@ -528,6 +528,7 @@ pub fn run() {
             set_main_opacity_compact_only,
             set_main_compact_dims,
             get_main_compact_dims,
+            return_to_previous_window,
             get_soundpanel_appearance_source,
             set_soundpanel_appearance_source,
             get_playback_appearance_source,
