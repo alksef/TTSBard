@@ -119,11 +119,13 @@ if (-not $libclangDir) {
 }
 
 # --- Опциональная очистка ----------------------------------------------------
+$targetDir = Join-Path $repoRoot 'src-tauri\target'
+$distDir   = Join-Path $repoRoot 'dist'
+$espeakDstDir = Join-Path $repoRoot 'src-tauri\resources\espeak-ng-data'
+
 if ($Clean) {
     Write-Step "Cleaning build artifacts..."
-    $targetDir = Join-Path $repoRoot 'src-tauri\target'
-    $distDir   = Join-Path $repoRoot 'dist'
-    foreach ($d in @($targetDir, $distDir)) {
+    foreach ($d in @($targetDir, $distDir, $espeakDstDir)) {
         if (Test-Path $d) {
             Remove-Item -Recurse -Force $d
             Write-Ok "removed $d"
@@ -141,6 +143,119 @@ if (-not (Test-Path $nodeModules)) {
     Write-Ok "npm install done"
 } else {
     Write-Ok "node_modules exists, skipping install"
+}
+
+# --- Подготовка espeak-ng-data в ресурсы (ДО tauri build) ---------------------
+
+function Find-RegistrySource {
+    $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE '.cargo' }
+    $registryPattern = Join-Path $cargoHome 'registry\src\*\espeak-rs-sys-*'
+    $candidates = @(Get-ChildItem -Path $registryPattern -Directory -ErrorAction SilentlyContinue |
+        ForEach-Object { Join-Path $_.FullName 'espeak-ng\espeak-ng-data' } |
+        Where-Object { Test-Path $_ -PathType Container } |
+        Sort-Object { (Get-Item $_).LastWriteTime } -Descending)
+    if ($candidates) { return $candidates[0] }
+    return $null
+}
+
+function Find-CompiledOutput {
+    $targetProfile = if ($Mode -eq 'debug') { 'debug' } else { 'release' }
+    $candidate = Get-ChildItem -Path "$repoRoot\src-tauri\target\$targetProfile\build\espeak-rs-sys-*\out\share\espeak-ng-data" -Directory -ErrorAction SilentlyContinue |
+        Sort-Object -Property LastWriteTime -Descending |
+        Select-Object -First 1
+    if ($candidate) { return $candidate.FullName }
+    return $null
+}
+
+function Test-ValidEspeakData($path) {
+    $voicesOk = Test-Path (Join-Path $path 'voices')
+    $dictOk   = Test-Path (Join-Path $path 'en_dict')
+    return ($voicesOk -and $dictOk)
+}
+
+function Invoke-BootstrapAndCompile {
+    # Step 1 — bootstrap from Cargo registry (has voices/, NOT en_dict)
+    Write-Step "Bootstrapping espeak-ng-data from Cargo registry..."
+    $regSrc = Find-RegistrySource
+    if (-not $regSrc) {
+        Write-Step "Registry source not found — running cargo fetch in src-tauri..."
+        Push-Location (Join-Path $repoRoot 'src-tauri')
+        try {
+            cargo fetch
+            if ($LASTEXITCODE -ne 0) { Write-Err "cargo fetch failed"; exit 1 }
+        } finally { Pop-Location }
+        Write-Ok "cargo fetch done"
+        $regSrc = Find-RegistrySource
+    }
+    if (-not $regSrc) {
+        Write-Err "espeak-ng-data not found in Cargo registry after fetch."
+        exit 1
+    }
+    Write-Ok "registry source: $regSrc"
+
+    if (Test-Path $espeakDstDir) { Remove-Item -Recurse -Force $espeakDstDir }
+    Copy-Item -Recurse -Force $regSrc $espeakDstDir
+
+    if (-not (Test-Path (Join-Path $espeakDstDir 'voices'))) {
+        Write-Err "Bootstrap copy missing voices/ — aborting."
+        exit 1
+    }
+    Write-Ok "bootstrap espeak-ng-data with voices/ from registry"
+
+    # Step 2 — compile espeak-rs-sys to generate en_dict
+    Write-Step "Compiling espeak-rs-sys to generate dictionaries..."
+    $cargoArgs = @('build', '-p', 'espeak-rs-sys')
+    if ($Mode -eq 'release') { $cargoArgs += '--release' }
+    Push-Location (Join-Path $repoRoot 'src-tauri')
+    try {
+        & 'cargo' $cargoArgs
+        if ($LASTEXITCODE -ne 0) { Write-Err "cargo build -p espeak-rs-sys failed"; exit 1 }
+    } finally { Pop-Location }
+    Write-Ok "espeak-rs-sys compiled"
+
+    # Step 3 — find compiled output, replace bootstrap, validate voices/ + en_dict
+    Write-Step "Installing compiled espeak-ng-data with generated dictionaries..."
+    $compiled = Find-CompiledOutput
+    if (-not $compiled) {
+        Write-Err "Compiled espeak-ng-data not found in target build output."
+        exit 1
+    }
+    Write-Ok "compiled output: $compiled"
+
+    Remove-Item -Recurse -Force $espeakDstDir
+    Copy-Item -Recurse -Force $compiled $espeakDstDir
+
+    if (-not (Test-ValidEspeakData $espeakDstDir)) {
+        $voicesOk = Test-Path (Join-Path $espeakDstDir 'voices')
+        $dictOk   = Test-Path (Join-Path $espeakDstDir 'en_dict')
+        Write-Err "Compiled espeak-ng-data missing required subdirectories."
+        Write-Err "  voices exists: $voicesOk"
+        Write-Err "  en_dict exists: $dictOk"
+        exit 1
+    }
+    $fileCount = (Get-ChildItem -Recurse -File -Path $espeakDstDir | Measure-Object).Count
+    Write-Ok "installed compiled espeak-ng-data ($fileCount files) with en_dict"
+}
+
+# Decide which path to take:
+#   - If valid compiled output exists for this profile → reuse it directly
+#   - Otherwise → bootstrap from registry, compile, replace
+Write-Step "Preparing espeak-ng-data..."
+
+$currentCompiled = Find-CompiledOutput
+if ($currentCompiled -and (Test-ValidEspeakData $currentCompiled)) {
+    Write-Ok "found valid compiled espeak-ng-data for '$Mode' profile: $currentCompiled"
+    if (Test-Path $espeakDstDir) { Remove-Item -Recurse -Force $espeakDstDir }
+    Copy-Item -Recurse -Force $currentCompiled $espeakDstDir
+    $fileCount = (Get-ChildItem -Recurse -File -Path $espeakDstDir | Measure-Object).Count
+    Write-Ok "copied compiled espeak-ng-data ($fileCount files) with en_dict"
+} else {
+    if ($currentCompiled) {
+        Write-WarnLine "compiled output exists but is incomplete (missing voices/ or en_dict)"
+    } else {
+        Write-WarnLine "no compiled espeak-ng-data for '$Mode' profile"
+    }
+    Invoke-BootstrapAndCompile
 }
 
 # --- Сборка ------------------------------------------------------------------

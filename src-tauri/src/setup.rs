@@ -194,6 +194,18 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
     // Register discovered Piper providers (no ONNX session created yet)
     app_state.register_piper_providers();
 
+    // Initialize espeak-ng data path for Piper phonemization
+    {
+        let resource_dir = match app.path().resource_dir() {
+            Ok(dir) => Some(dir),
+            Err(e) => {
+                warn!(error = %e, "resource_dir() failed, espeak-ng data not initialised");
+                None
+            }
+        };
+        crate::tts::piper::runtime::LocalModelTts::init_espeak_data(resource_dir);
+    }
+
     // Restore saved concrete provider ID with safe fallback.
     // If the saved ID exists in the registry it is selected; if it was a
     // deleted Piper model the current (built-in) provider is preserved.

@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::env;
 #[cfg(test)]
 use std::path::Path;
-use std::sync::Mutex;
+use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
 
 use async_trait::async_trait;
 use ort::session::Session;
@@ -15,6 +17,8 @@ use crate::tts::piper::scanner::PiperModelDescriptor;
 const BOS: char = '^';
 const EOS: char = '$';
 const PAD: char = '_';
+
+static ESPEAKNG_DATA_INIT: OnceLock<()> = OnceLock::new();
 
 #[derive(Debug, thiserror::Error)]
 pub enum PiperRuntimeError {
@@ -49,19 +53,21 @@ struct ModelConfig {
     espeak: ESpeakConfig,
     inference: InferenceConfig,
     num_speakers: u32,
-    // Retained for multi-speaker Piper models; runtime speaker selection is not
-    // exposed in the UI yet.
     #[serde(default)]
     #[allow(dead_code)]
     speaker_id_map: HashMap<String, i64>,
     phoneme_id_map: HashMap<String, Vec<i64>>,
 }
 
+struct ModelState {
+    session: Session,
+    config: ModelConfig,
+}
+
 pub struct LocalModelTts {
     model_path: std::path::PathBuf,
     config_path: std::path::PathBuf,
-    session: Mutex<Option<Session>>,
-    config: Mutex<Option<ModelConfig>>,
+    model: Mutex<Option<ModelState>>,
     provider_id: String,
     display_name: String,
 }
@@ -71,13 +77,64 @@ impl std::fmt::Debug for LocalModelTts {
         f.debug_struct("LocalModelTts")
             .field("model_path", &self.model_path)
             .field("config_path", &self.config_path)
+            .field("model", &"<lazy>")
             .field("provider_id", &self.provider_id)
             .field("display_name", &self.display_name)
-            .finish_non_exhaustive()
+            .finish()
     }
 }
 
 impl LocalModelTts {
+    pub fn init_espeak_data(resource_dir: Option<PathBuf>) {
+        ESPEAKNG_DATA_INIT.get_or_init(|| {
+            let candidate = resource_dir.and_then(|dir| {
+                let p = dir.join("espeak-ng-data");
+                if p.join("voices").exists() && p.join("en_dict").exists() {
+                    Some(p)
+                } else {
+                    None
+                }
+            });
+
+            if let Some(data_dir) = candidate {
+                env::set_var("PIPER_ESPEAKNG_DATA_DIRECTORY", &data_dir);
+                tracing::info!(
+                    dir = %data_dir.display(),
+                    "espeak-ng data directory set"
+                );
+                return;
+            }
+
+            if let Ok(cwd) = env::current_dir() {
+                let p = cwd.join("espeak-ng-data");
+                if p.join("voices").exists() && p.join("en_dict").exists() {
+                    env::set_var("PIPER_ESPEAKNG_DATA_DIRECTORY", &p);
+                    tracing::info!(
+                        dir = %p.display(),
+                        "espeak-ng data directory set (from cwd)"
+                    );
+                    return;
+                }
+            }
+
+            if let Ok(exe) = env::current_exe() {
+                if let Some(exe_dir) = exe.parent() {
+                    let p = exe_dir.join("espeak-ng-data");
+                    if p.join("voices").exists() && p.join("en_dict").exists() {
+                        env::set_var("PIPER_ESPEAKNG_DATA_DIRECTORY", &p);
+                        tracing::info!(
+                            dir = %p.display(),
+                            "espeak-ng data directory set (next to exe)"
+                        );
+                        return;
+                    }
+                }
+            }
+
+            tracing::warn!("espeak-ng data directory not found; Piper phonemization may fail");
+        });
+    }
+
     pub fn prepare(&self) -> Result<(), String> {
         self.ensure_loaded().map_err(|e| e.to_string())
     }
@@ -87,8 +144,7 @@ impl LocalModelTts {
         Self {
             model_path: model_path.as_ref().to_path_buf(),
             config_path: config_path.as_ref().to_path_buf(),
-            session: Mutex::new(None),
-            config: Mutex::new(None),
+            model: Mutex::new(None),
             provider_id: String::new(),
             display_name: String::new(),
         }
@@ -98,20 +154,19 @@ impl LocalModelTts {
         Self {
             model_path: descriptor.onnx_path.clone(),
             config_path: descriptor.json_path.clone(),
-            session: Mutex::new(None),
-            config: Mutex::new(None),
+            model: Mutex::new(None),
             provider_id: descriptor.id.clone(),
             display_name: descriptor.display_name.clone(),
         }
     }
 
     fn ensure_loaded(&self) -> Result<(), PiperRuntimeError> {
-        {
-            let session = self.session.lock().unwrap();
-            if session.is_some() {
-                return Ok(());
-            }
+        let mut guard = self.model.lock().unwrap();
+        if guard.is_some() {
+            return Ok(());
         }
+
+        Self::init_espeak_data(None);
 
         let config_content = std::fs::read_to_string(&self.config_path).map_err(|e| {
             PiperRuntimeError::Load(format!(
@@ -129,7 +184,7 @@ impl LocalModelTts {
             ))
         })?;
 
-        let onnx_session = Session::builder()
+        let session = Session::builder()
             .map_err(|e| {
                 PiperRuntimeError::Load(format!("Failed to create session builder: {}", e))
             })?
@@ -142,15 +197,7 @@ impl LocalModelTts {
                 ))
             })?;
 
-        {
-            let mut session = self.session.lock().unwrap();
-            *session = Some(onnx_session);
-        }
-        {
-            let mut cfg = self.config.lock().unwrap();
-            *cfg = Some(config);
-        }
-
+        *guard = Some(ModelState { session, config });
         Ok(())
     }
 
@@ -261,31 +308,32 @@ impl TtsEngine for LocalModelTts {
     async fn synthesize(&self, text: &str) -> Result<Vec<u8>, String> {
         self.ensure_loaded().map_err(|e| e.to_string())?;
 
-        let config = {
-            let guard = self.config.lock().unwrap();
-            guard
-                .clone()
-                .ok_or_else(|| PiperRuntimeError::NotLoaded.to_string())?
+        let (voice, noise_scale, length_scale, noise_w, sample_rate) = {
+            let guard = self.model.lock().unwrap();
+            let state = guard
+                .as_ref()
+                .ok_or_else(|| PiperRuntimeError::NotLoaded.to_string())?;
+            (
+                state.config.espeak.voice.clone(),
+                state.config.inference.noise_scale,
+                state.config.inference.length_scale,
+                state.config.inference.noise_w,
+                state.config.audio.sample_rate,
+            )
         };
 
-        let voice = &config.espeak.voice;
-        let phonemes = espeak_rs::text_to_phonemes(text, voice, None)
+        let phonemes = espeak_rs::text_to_phonemes(text, &voice, None)
             .map_err(|e| format!("Phonemization failed: {}", e))?
             .join(" ");
 
-        let inf = &config.inference;
-        let noise_scale = inf.noise_scale;
-        let length_scale = inf.length_scale;
-        let noise_w = inf.noise_w;
-
         let mut samples = {
-            let mut session_guard = self.session.lock().unwrap();
-            let session = session_guard
+            let mut guard = self.model.lock().unwrap();
+            let state = guard
                 .as_mut()
                 .ok_or_else(|| PiperRuntimeError::NotLoaded.to_string())?;
             Self::run_inference(
-                session,
-                &config,
+                &mut state.session,
+                &state.config,
                 &phonemes,
                 noise_scale,
                 length_scale,
@@ -294,16 +342,11 @@ impl TtsEngine for LocalModelTts {
             )
             .map_err(|e| e.to_string())?
         };
-
-        // Piper models can end a short utterance on a non-zero waveform sample.
-        // Give the playback path a small post-roll so the final phoneme is not
-        // perceived as clipped by the device/sink boundary.
         const POST_ROLL_MS: u32 = 250;
-        let post_roll_frames = (config.audio.sample_rate as usize * POST_ROLL_MS as usize) / 1000;
+        let post_roll_frames = (sample_rate as usize * POST_ROLL_MS as usize) / 1000;
         samples.extend(std::iter::repeat_n(0.0f32, post_roll_frames));
 
-        encode_wav(&samples, config.audio.sample_rate, 1)
-            .map_err(|e| format!("Failed to encode WAV: {}", e))
+        encode_wav(&samples, sample_rate, 1).map_err(|e| format!("Failed to encode WAV: {}", e))
     }
 }
 
@@ -601,8 +644,8 @@ mod tests {
 
         let tts = LocalModelTts::from_descriptor(&desc);
         assert!(
-            tts.session.lock().unwrap().is_none(),
-            "session must not be loaded during construction"
+            tts.model.lock().unwrap().is_none(),
+            "model must not be loaded during construction"
         );
         assert_eq!(tts.provider_id, "local-piper:test-model");
         assert_eq!(tts.display_name, "Test Model");
