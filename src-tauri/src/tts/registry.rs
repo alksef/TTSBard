@@ -41,14 +41,17 @@ impl TtsProviderRegistry {
         self.entries.iter()
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
+    #[cfg(test)]
     pub fn remove(&mut self, id: &str) -> bool {
         if self.active_id.as_deref() == Some(id) {
             self.active_id = None;
@@ -71,6 +74,7 @@ impl TtsProviderRegistry {
         }
     }
 
+    #[cfg(test)]
     pub fn select_or_first(&mut self, id: &str) {
         if self.entries.iter().any(|e| e.id == id) {
             self.active_id = Some(id.to_string());
@@ -89,6 +93,7 @@ impl TtsProviderRegistry {
             .and_then(|id| self.entries.iter().find(|e| e.id == *id))
     }
 
+    #[cfg(test)]
     pub fn active_or_first(&self) -> Option<&TtsProviderEntry> {
         self.active()
             .or_else(|| self.entries.first())

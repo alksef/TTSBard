@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+#[cfg(test)]
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -19,8 +20,6 @@ const PAD: char = '_';
 pub enum PiperRuntimeError {
     #[error("Failed to load model: {0}")]
     Load(String),
-    #[error("Phonemization error: {0}")]
-    Phonemization(String),
     #[error("Inference error: {0}")]
     Inference(String),
     #[error("Model not loaded")]
@@ -50,7 +49,10 @@ struct ModelConfig {
     espeak: ESpeakConfig,
     inference: InferenceConfig,
     num_speakers: u32,
+    // Retained for multi-speaker Piper models; runtime speaker selection is not
+    // exposed in the UI yet.
     #[serde(default)]
+    #[allow(dead_code)]
     speaker_id_map: HashMap<String, i64>,
     phoneme_id_map: HashMap<String, Vec<i64>>,
 }
@@ -80,6 +82,7 @@ impl LocalModelTts {
         self.ensure_loaded().map_err(|e| e.to_string())
     }
 
+    #[cfg(test)]
     pub fn new(model_path: impl AsRef<Path>, config_path: impl AsRef<Path>) -> Self {
         Self {
             model_path: model_path.as_ref().to_path_buf(),

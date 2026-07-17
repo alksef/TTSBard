@@ -10,7 +10,10 @@ pub struct PiperModelDescriptor {
     pub display_name: String,
     pub onnx_path: PathBuf,
     pub json_path: PathBuf,
+    // Validated at discovery time and retained for future model-detail UI.
+    #[allow(dead_code)]
     pub sample_rate: u32,
+    #[allow(dead_code)]
     pub phoneme_id_map: serde_json::Value,
 }
 
