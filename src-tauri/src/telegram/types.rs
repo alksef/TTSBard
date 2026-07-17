@@ -7,6 +7,7 @@ pub enum AuthState {
     CodeRequired,
     Connected,
     PasswordRequired,
+    RestartRequired,
     Error(String),
 }
 

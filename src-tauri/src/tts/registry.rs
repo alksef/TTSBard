@@ -95,8 +95,7 @@ impl TtsProviderRegistry {
 
     #[cfg(test)]
     pub fn active_or_first(&self) -> Option<&TtsProviderEntry> {
-        self.active()
-            .or_else(|| self.entries.first())
+        self.active().or_else(|| self.entries.first())
     }
 
     /// Restore a saved provider ID at startup with safe fallback.
@@ -190,7 +189,10 @@ mod tests {
         reg.add_or_replace(entry("piper-en", "English Piper"));
         reg.add_or_replace(entry("piper-en", "English Piper v2"));
         assert_eq!(reg.len(), 1);
-        assert_eq!(reg.get("piper-en").unwrap().display_name, "English Piper v2");
+        assert_eq!(
+            reg.get("piper-en").unwrap().display_name,
+            "English Piper v2"
+        );
     }
 
     #[test]

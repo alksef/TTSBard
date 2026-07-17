@@ -41,6 +41,7 @@ async function onSelect(id: string) {
 const isCorrecting = ref(false)
 const isCompleting = ref(false)
 const isCheckingGrammar = ref(false)
+const isSpeakingInFlight = ref(false)
 const showHistory = ref(false)
 const saveStatusMessage = ref('')
 const replacements = ref<Map<string, string>>(new Map())
@@ -218,7 +219,9 @@ async function recordHistory(textToRecord: string) {
 
 async function speak(textToSend: string) {
   if (!textToSend.trim()) return
+  if (isSpeakingInFlight.value) return
 
+  isSpeakingInFlight.value = true
   try {
     debugLog('[InputPanel] Speaking:', textToSend)
     await invoke('speak_text', { text: textToSend })
@@ -226,6 +229,8 @@ async function speak(textToSend: string) {
   } catch (e) {
     debugError('[InputPanel] Failed to speak:', e)
     showError(e as string)
+  } finally {
+    isSpeakingInFlight.value = false
   }
 }
 
@@ -345,28 +350,38 @@ watch(() => appSettingsContext.settings.value?.windows?.main, (main) => {
 async function handleEnter() {
   const currentText = text.value
   const senderTabId = activeId.value
+  const mode = editorSettings.value?.quick ?? 'disabled'
 
   if (!currentText.trim()) return
-
-  const mode = editorSettings.value?.quick ?? 'disabled'
+  if (isSpeakingInFlight.value) return
 
   if (mode === 'disabled') {
     await speak(currentText)
     const tab = tabs.value.find(t => t.id === senderTabId)
     if (tab) tab.text = ''
-  } else if (mode === 'collapse') {
-    await speak(currentText)
+  } else {
+    isSpeakingInFlight.value = true
+    invoke('speak_text', { text: currentText })
+      .then(() => recordHistory(currentText))
+      .catch((e) => {
+        debugError('[InputPanel] Failed to speak:', e)
+        showError(e as string)
+      })
+      .finally(() => {
+        isSpeakingInFlight.value = false
+      })
+
     const tab = tabs.value.find(t => t.id === senderTabId)
     if (tab) tab.text = ''
-    await hideMainWindow()
-  } else if (mode === 'return_focus') {
-    await speak(currentText)
-    const tab = tabs.value.find(t => t.id === senderTabId)
-    if (tab) tab.text = ''
-    try {
-      await invoke('return_to_previous_window')
-    } catch (e) {
-      debugError('[InputPanel] Failed to return focus:', e)
+
+    if (mode === 'collapse') {
+      await hideMainWindow()
+    } else if (mode === 'return_focus') {
+      try {
+        await invoke('return_to_previous_window')
+      } catch (e) {
+        debugError('[InputPanel] Failed to return focus:', e)
+      }
     }
   }
 }

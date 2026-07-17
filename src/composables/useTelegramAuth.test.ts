@@ -179,7 +179,7 @@ describe('useTelegramAuth', () => {
       expect(mockInvoke).toHaveBeenCalledWith('telegram_request_code')
     })
 
-    it('transitions to error on failure', async () => {
+    it('transitions to error on Error rejection', async () => {
       mockInvoke.mockRejectedValueOnce(new Error('auth failed'))
 
       const { requestCode, state, hasError } = useTelegramAuth()
@@ -188,6 +188,16 @@ describe('useTelegramAuth', () => {
       expect(result).toBe(false)
       expect(state.value).toBe('error')
       expect(hasError.value).toBe(true)
+    })
+
+    it('transitions to error on string rejection', async () => {
+      mockInvoke.mockRejectedValueOnce('string error')
+
+      const { requestCode, state } = useTelegramAuth()
+      const result = await requestCode(credentials)
+
+      expect(result).toBe(false)
+      expect(state.value).toBe('error')
     })
   })
 
@@ -220,6 +230,17 @@ describe('useTelegramAuth', () => {
       expect(errorMessage.value).toBeNull()
     })
 
+    it('transitions to idle on RestartRequired', async () => {
+      mockInvoke.mockResolvedValueOnce('RestartRequired')
+
+      const { signIn, state, errorMessage } = useTelegramAuth()
+      const result = await signIn('12345')
+
+      expect(result).toBe(false)
+      expect(state.value).toBe('idle')
+      expect(errorMessage.value).toBe('Сессия устарела. Пожалуйста, запросите код заново.')
+    })
+
     it('transitions to error on unexpected response', async () => {
       mockInvoke.mockResolvedValueOnce('SomethingElse')
 
@@ -231,7 +252,7 @@ describe('useTelegramAuth', () => {
       expect(errorMessage.value).toBe('Неожиданный ответ от сервера')
     })
 
-    it('transitions to error on invoke failure', async () => {
+    it('transitions to error on Error rejection', async () => {
       mockInvoke.mockRejectedValueOnce(new Error('network error'))
 
       const { signIn, state } = useTelegramAuth()
@@ -285,8 +306,29 @@ describe('useTelegramAuth', () => {
       expect(errorMessage.value).toBe('Неожиданный ответ от сервера')
     })
 
-    it('stays in password_required on error', async () => {
-      mockInvoke.mockRejectedValueOnce(new Error('invalid password'))
+    it('transitions to idle on RestartRequired (explicit state)', async () => {
+      mockInvoke.mockResolvedValueOnce('RestartRequired')
+
+      const { checkPassword, state, errorMessage } = useTelegramAuth()
+      const result = await checkPassword('mypassword')
+
+      expect(result).toBe(false)
+      expect(state.value).toBe('idle')
+      expect(errorMessage.value).toBe('Сессия устарела. Пожалуйста, запросите код заново.')
+    })
+
+    it('stays in password_required on invalid password Error rejection', async () => {
+      mockInvoke.mockRejectedValueOnce(new Error('Неверный пароль'))
+
+      const { checkPassword, state } = useTelegramAuth()
+      const result = await checkPassword('mypassword')
+
+      expect(result).toBe(false)
+      expect(state.value).toBe('password_required')
+    })
+
+    it('stays in password_required on string rejection', async () => {
+      mockInvoke.mockRejectedValueOnce('Неверный пароль')
 
       const { checkPassword, state } = useTelegramAuth()
       const result = await checkPassword('mypassword')
@@ -316,6 +358,178 @@ describe('useTelegramAuth', () => {
 
       expect(result).toBe(false)
       expect(state.value).toBe('error')
+    })
+  })
+
+  describe('operation guard', () => {
+    it('cancelConnection invalidates in-flight requestCode', async () => {
+      let resolveInit!: (value: unknown) => void
+      mockInvoke.mockImplementationOnce(() => new Promise(r => { resolveInit = r }))
+
+      const { requestCode, cancelConnection, state, loading } = useTelegramAuth()
+      const promise = requestCode(credentials)
+
+      await new Promise(r => setTimeout(r, 10))
+      await cancelConnection()
+
+      expect(state.value).toBe('idle')
+
+      resolveInit(undefined)
+      await promise
+
+      expect(state.value).toBe('idle')
+      expect(loading.value).toBe(false)
+    })
+
+    it('reset invalidates in-flight requestCode', async () => {
+      let resolveInit!: (value: unknown) => void
+      mockInvoke.mockImplementationOnce(() => new Promise(r => { resolveInit = r }))
+
+      const { requestCode, reset, state, loading } = useTelegramAuth()
+      const promise = requestCode(credentials)
+
+      await new Promise(r => setTimeout(r, 10))
+      reset()
+
+      expect(state.value).toBe('idle')
+
+      resolveInit(undefined)
+      await promise
+
+      expect(state.value).toBe('idle')
+      expect(loading.value).toBe(false)
+    })
+
+    it('cancelConnection invalidates in-flight signIn', async () => {
+      let resolveSignIn!: (value: unknown) => void
+      mockInvoke.mockImplementationOnce(() => new Promise(r => { resolveSignIn = r }))
+
+      const { signIn, cancelConnection, state, loading } = useTelegramAuth()
+      const promise = signIn('12345')
+
+      await new Promise(r => setTimeout(r, 10))
+      await cancelConnection()
+
+      expect(state.value).toBe('idle')
+
+      resolveSignIn('Connected')
+      await promise
+
+      expect(state.value).toBe('idle')
+      expect(loading.value).toBe(false)
+    })
+
+    it('reset invalidates in-flight signIn', async () => {
+      let resolveSignIn!: (value: unknown) => void
+      mockInvoke.mockImplementationOnce(() => new Promise(r => { resolveSignIn = r }))
+
+      const { signIn, reset, state, loading } = useTelegramAuth()
+      const promise = signIn('12345')
+
+      await new Promise(r => setTimeout(r, 10))
+      reset()
+
+      expect(state.value).toBe('idle')
+
+      resolveSignIn('Connected')
+      await promise
+
+      expect(state.value).toBe('idle')
+      expect(loading.value).toBe(false)
+    })
+
+    it('cancelConnection prevents stale writes from in-flight checkPassword', async () => {
+      let resolveCheck!: (value: unknown) => void
+      mockInvoke.mockImplementationOnce(() => new Promise(r => { resolveCheck = r }))
+
+      const { checkPassword, cancelConnection, state, loading } = useTelegramAuth()
+      const promise = checkPassword('mypass')
+
+      await new Promise(r => setTimeout(r, 10))
+      await cancelConnection()
+
+      expect(state.value).toBe('idle')
+
+      resolveCheck('Connected')
+      await promise
+
+      expect(state.value).toBe('idle')
+      expect(loading.value).toBe(false)
+    })
+
+    it('reset invalidates in-flight checkPassword', async () => {
+      let resolveCheck!: (value: unknown) => void
+      mockInvoke.mockImplementationOnce(() => new Promise(r => { resolveCheck = r }))
+
+      const { checkPassword, reset, state, loading } = useTelegramAuth()
+      const promise = checkPassword('mypass')
+
+      await new Promise(r => setTimeout(r, 10))
+      reset()
+
+      expect(state.value).toBe('idle')
+
+      resolveCheck('Connected')
+      await promise
+
+      expect(state.value).toBe('idle')
+      expect(loading.value).toBe(false)
+    })
+
+    it('cancel guards state and errorMessage against stale Error in signIn', async () => {
+      let resolveSignIn!: (value: unknown) => void
+      mockInvoke.mockImplementationOnce(() => new Promise(r => { resolveSignIn = r }))
+
+      const { signIn, cancelConnection, state, errorMessage } = useTelegramAuth()
+      const promise = signIn('12345')
+
+      await new Promise(r => setTimeout(r, 10))
+      await cancelConnection()
+
+      expect(state.value).toBe('idle')
+      const savedError = errorMessage.value
+
+      resolveSignIn(Promise.reject(new Error('stale error')))
+      await promise
+
+      expect(state.value).toBe('idle')
+      expect(errorMessage.value).toBe(savedError)
+    })
+
+    it('deferred disconnect: cancelConnection sets idle/loading=false before disconnect await yields', async () => {
+      let resolveInit!: (value: unknown) => void
+      let resolveDisconnect!: (value: unknown) => void
+      mockInvoke
+        .mockImplementationOnce(() => new Promise(r => { resolveInit = r }))
+        .mockImplementationOnce(() => new Promise(r => { resolveDisconnect = r }))
+
+      const { requestCode, cancelConnection, state, loading, errorMessage, status } = useTelegramAuth()
+      const reqPromise = requestCode(credentials)
+
+      await new Promise(r => setTimeout(r, 10))
+      expect(state.value).toBe('loading')
+      expect(loading.value).toBe(true)
+
+      const cancelPromise = cancelConnection()
+
+      expect(state.value).toBe('idle')
+      expect(loading.value).toBe(false)
+      expect(errorMessage.value).toBeNull()
+      expect(status.value).toBeNull()
+
+      resolveInit(undefined)
+      await reqPromise
+
+      expect(state.value).toBe('idle')
+      expect(loading.value).toBe(false)
+
+      resolveDisconnect(undefined)
+      await cancelPromise
+
+      expect(state.value).toBe('idle')
+      expect(loading.value).toBe(false)
+      expect(errorMessage.value).toBeNull()
+      expect(status.value).toBeNull()
     })
   })
 

@@ -26,7 +26,7 @@ fn write_json_atomically(path: &Path, content: &str) -> std::io::Result<()> {
 
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?
+        .map_err(|e| std::io::Error::other(e.to_string()))?
         .as_nanos();
     let tmp_path = parent.join(format!(
         ".{}.{}.tmp",
@@ -45,10 +45,10 @@ fn write_json_atomically(path: &Path, content: &str) -> std::io::Result<()> {
     if let Err(rename_error) = fs::rename(&tmp_path, path) {
         let _ = fs::remove_file(path);
         fs::rename(&tmp_path, path).map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Replace failed: {} (original: {})", e, rename_error),
-            )
+            std::io::Error::other(format!(
+                "Replace failed: {} (original: {})",
+                e, rename_error
+            ))
         })?;
     }
 
@@ -62,7 +62,7 @@ fn write_binary_atomically(path: &Path, data: &[u8]) -> std::io::Result<()> {
 
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?
+        .map_err(|e| std::io::Error::other(e.to_string()))?
         .as_nanos();
     let tmp_path = parent.join(format!(
         ".{}.{}.tmp",
@@ -81,10 +81,10 @@ fn write_binary_atomically(path: &Path, data: &[u8]) -> std::io::Result<()> {
     if let Err(rename_error) = fs::rename(&tmp_path, path) {
         let _ = fs::remove_file(path);
         fs::rename(&tmp_path, path).map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Replace failed: {} (original: {})", e, rename_error),
-            )
+            std::io::Error::other(format!(
+                "Replace failed: {} (original: {})",
+                e, rename_error
+            ))
         })?;
     }
 
@@ -319,7 +319,7 @@ impl HistoryManager {
             }
         }
 
-        suggestions.sort_by(|a, b| b.count.cmp(&a.count));
+        suggestions.sort_by_key(|b| std::cmp::Reverse(b.count));
         suggestions.truncate(limit);
         suggestions
     }
@@ -429,7 +429,7 @@ impl HistoryManager {
             phrases.clone()
         };
 
-        results.sort_by(|a, b| b.last_used.cmp(&a.last_used));
+        results.sort_by_key(|b| std::cmp::Reverse(b.last_used));
         results.truncate(limit);
         results
     }

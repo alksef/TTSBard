@@ -505,16 +505,15 @@ impl TelegramClient {
                 match result {
                     Ok(Ok(token)) => break token,
                     Ok(Err(InvocationError::Rpc(error)))
-                        if error.code == 500
-                            && error.name == "AUTH_RESTART"
-                            && retry_count < 2 =>
+                        if error.code == 500 && error.name == "AUTH_RESTART" && retry_count < 2 =>
                     {
                         retry_count += 1;
-                        warn!(retry_count, "Telegram requested authorization restart; retrying code request");
-                        tokio::time::sleep(tokio::time::Duration::from_millis(
-                            retry_delay_ms,
-                        ))
-                        .await;
+                        warn!(
+                            retry_count,
+                            "Telegram requested authorization restart; retrying code request"
+                        );
+                        tokio::time::sleep(tokio::time::Duration::from_millis(retry_delay_ms))
+                            .await;
                         retry_delay_ms *= 2;
                     }
                     Ok(Err(error)) => {
@@ -573,12 +572,19 @@ impl TelegramClient {
             Ok(result) => result,
             Err(_) => {
                 error!("[AUTH] Sign in timed out after 30 seconds");
-                // Add jitter to obscure timing even on timeout
                 let jitter = rand::random::<u64>() % 500;
                 tokio::time::sleep(tokio::time::Duration::from_millis(500 + jitter)).await;
-                return Err(
-                    "Превышено время ожидания. Проверьте подключение к интернету.".to_string(),
-                );
+                let auth_check = tokio::time::timeout(
+                    tokio::time::Duration::from_secs(5),
+                    client.is_authorized(),
+                )
+                .await;
+                if matches!(auth_check, Ok(Ok(true))) {
+                    info!("[AUTH] Sign in recovered after timeout: already authorized");
+                    return Ok(AuthState::Connected);
+                }
+                warn!("[AUTH] Sign in timed out and client not authorized — restart required");
+                return Ok(AuthState::RestartRequired);
             }
         };
 
@@ -602,10 +608,20 @@ impl TelegramClient {
             }
             Err(_e) => {
                 error!("[AUTH] Sign in error (code invalid or expired)");
-                // Add jitter to obscure timing on error
                 let jitter = rand::random::<u64>() % 500;
                 tokio::time::sleep(tokio::time::Duration::from_millis(1000 + jitter)).await;
-                Err("Ошибка авторизации. Проверьте код или попробуйте позже.".to_string())
+                let auth_check = tokio::time::timeout(
+                    tokio::time::Duration::from_secs(5),
+                    client.is_authorized(),
+                )
+                .await;
+                if matches!(auth_check, Ok(Ok(true))) {
+                    info!("[AUTH] Sign in recovered: already authorized");
+                    Ok(AuthState::Connected)
+                } else {
+                    warn!("[AUTH] Sign in failed and client not authorized — restart required");
+                    Ok(AuthState::RestartRequired)
+                }
             }
         }
     }
@@ -664,13 +680,37 @@ impl TelegramClient {
                 error!("[AUTH] check_password error (network or API)");
                 let jitter = rand::random::<u64>() % 500;
                 tokio::time::sleep(tokio::time::Duration::from_millis(1000 + jitter)).await;
-                Err("Ошибка 2FA. Попробуйте позже.".to_string())
+                let auth_check = tokio::time::timeout(
+                    tokio::time::Duration::from_secs(5),
+                    client.is_authorized(),
+                )
+                .await;
+                if matches!(auth_check, Ok(Ok(true))) {
+                    info!("[AUTH] check_password recovered: already authorized");
+                    Ok(AuthState::Connected)
+                } else {
+                    warn!(
+                        "[AUTH] check_password failed and client not authorized — restart required"
+                    );
+                    Ok(AuthState::RestartRequired)
+                }
             }
             Err(_) => {
                 error!("[AUTH] check_password timed out");
                 let jitter = rand::random::<u64>() % 500;
                 tokio::time::sleep(tokio::time::Duration::from_millis(500 + jitter)).await;
-                Err("Превышено время ожидания 2FA".to_string())
+                let auth_check = tokio::time::timeout(
+                    tokio::time::Duration::from_secs(5),
+                    client.is_authorized(),
+                )
+                .await;
+                if matches!(auth_check, Ok(Ok(true))) {
+                    info!("[AUTH] check_password recovered after timeout: already authorized");
+                    Ok(AuthState::Connected)
+                } else {
+                    warn!("[AUTH] check_password timed out and client not authorized — restart required");
+                    Ok(AuthState::RestartRequired)
+                }
             }
         }
     }
@@ -823,5 +863,154 @@ impl TelegramClient {
 impl Default for TelegramClient {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn proxy_config_validate_none() {
+        assert!(ProxyConfig::None.validate().is_ok());
+    }
+
+    #[test]
+    fn proxy_config_validate_socks5_valid() {
+        let config = ProxyConfig::Socks5("socks5://127.0.0.1:1080".to_string());
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn proxy_config_validate_socks5_no_port() {
+        let config = ProxyConfig::Socks5("socks5://127.0.0.1".to_string());
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn proxy_config_validate_socks5_bad_prefix() {
+        let config = ProxyConfig::Socks5("http://127.0.0.1:1080".to_string());
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn proxy_config_mode_none() {
+        assert_eq!(ProxyConfig::None.mode(), ProxyMode::None);
+    }
+
+    #[test]
+    fn proxy_config_mode_socks5() {
+        let config = ProxyConfig::Socks5("socks5://127.0.0.1:1080".to_string());
+        assert_eq!(config.mode(), ProxyMode::Socks5);
+    }
+
+    #[test]
+    fn proxy_config_proxy_url_string_none() {
+        assert_eq!(ProxyConfig::None.proxy_url_string(), None);
+    }
+
+    #[test]
+    fn proxy_config_proxy_url_string_socks5() {
+        let config = ProxyConfig::Socks5("socks5://127.0.0.1:1080".to_string());
+        assert_eq!(
+            config.proxy_url_string(),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+    }
+
+    #[test]
+    fn proxy_config_to_connection_params_none() {
+        let params = ProxyConfig::None.to_connection_params();
+        assert!(params.proxy_url.is_none());
+    }
+
+    #[test]
+    fn proxy_config_to_connection_params_socks5() {
+        let config = ProxyConfig::Socks5("socks5://127.0.0.1:1080".to_string());
+        let params = config.to_connection_params();
+        assert_eq!(
+            params.proxy_url,
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+    }
+
+    #[test]
+    fn validate_proxy_url_valid_socks5() {
+        assert!(
+            TelegramClient::validate_proxy_url("socks5://127.0.0.1:1080", &ProxyMode::Socks5,)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn validate_proxy_url_socks5_with_auth() {
+        assert!(TelegramClient::validate_proxy_url(
+            "socks5://user:pass@127.0.0.1:1080",
+            &ProxyMode::Socks5,
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn validate_proxy_url_socks5_missing_prefix() {
+        assert!(TelegramClient::validate_proxy_url("127.0.0.1:1080", &ProxyMode::Socks5,).is_err());
+    }
+
+    #[test]
+    fn validate_proxy_url_socks5_missing_port() {
+        assert!(
+            TelegramClient::validate_proxy_url("socks5://127.0.0.1", &ProxyMode::Socks5,).is_err()
+        );
+    }
+
+    #[test]
+    fn validate_proxy_url_none_mode() {
+        assert!(TelegramClient::validate_proxy_url("anything", &ProxyMode::None,).is_err());
+    }
+
+    #[test]
+    fn validate_proxy_url_mtproxy_mode() {
+        assert!(TelegramClient::validate_proxy_url("anything", &ProxyMode::MtProxy,).is_err());
+    }
+
+    #[test]
+    fn client_new_creates_with_default_state() {
+        let client = TelegramClient::new();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        rt.block_on(async {
+            assert!(client.pool_task.lock().await.is_none());
+            assert!(client.client.lock().await.is_none());
+            assert!(client.updates.lock().await.is_none());
+            assert!(client.login_token.lock().await.is_none());
+            assert!(client.password_token.lock().await.is_none());
+            assert!(client.api_id.lock().await.is_none());
+            assert!(client.api_hash.lock().await.is_none());
+            assert!(client.phone_number.lock().await.is_none());
+            assert!(client.session_path.lock().await.is_none());
+        });
+    }
+
+    #[test]
+    fn client_default_proxy_status() {
+        let client = TelegramClient::new();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        rt.block_on(async {
+            let status = client.get_proxy_status().await;
+            assert_eq!(status.mode, ProxyMode::None);
+            assert!(status.proxy_url.is_none());
+        });
+    }
+
+    /// AuthState-flow methods (request_code, sign_in, check_password) are NOT
+    /// unit-testable in isolation because they depend on a live
+    /// `grammers_client::Client` and an active `SqliteSession`.
+    /// They can only be verified via integration/end-to-end tests with a real
+    /// Telegram account.
+    #[test]
+    fn auth_state_flow_mockability_limitation() {
+        // This test exists to document the limitation explicitly.
+        // No compile-pass stub — the limitation is architectural.
     }
 }

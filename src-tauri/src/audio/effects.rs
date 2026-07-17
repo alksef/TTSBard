@@ -37,13 +37,13 @@ fn get_df_model(channels: usize) -> Result<DfTract, String> {
     DF_TEMPLATES.with(|templates| {
         let mut guard = templates.borrow_mut();
 
-        if !guard.contains_key(&channels) {
+        if let std::collections::hash_map::Entry::Vacant(e) = guard.entry(channels) {
             tracing::info!(channels, "Initializing DeepFilterNet model (one-time)");
             let rp = RuntimeParams::default_with_ch(channels);
             let df_params = DfParams::default();
             let df = DfTract::new(df_params, &rp)
                 .map_err(|e| format!("Failed to initialize DeepFilterNet: {:#}", e))?;
-            guard.insert(channels, df);
+            e.insert(df);
         }
 
         Ok(guard
@@ -76,7 +76,7 @@ impl AudioPcm {
         if sample_rate == 0 {
             return Err("sample_rate must be > 0".to_string());
         }
-        if samples.len() % channels != 0 {
+        if !samples.len().is_multiple_of(channels) {
             return Err(format!(
                 "samples length {} not divisible by channels {}",
                 samples.len(),

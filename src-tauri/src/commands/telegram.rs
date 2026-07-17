@@ -1,9 +1,9 @@
 use crate::config::{ProxyMode, SettingsManager};
+use crate::telegram::types::AuthState;
 use crate::telegram::{
     bot::set_speaker, get_current_voice, get_limits, types::VoiceCode, CurrentVoice, Limits,
     ProxyStatus, SileroTtsBot, TelegramClient, TtsResult, UserInfo,
 };
-use crate::telegram::types::AuthState;
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 use tokio::sync::{Mutex, RwLock};
@@ -198,8 +198,7 @@ pub async fn telegram_check_password(
         let guard = state.client.lock().await;
         guard.clone()
     };
-    let client = client_opt
-        .ok_or_else(|| "Клиент не инициализирован".to_string())?;
+    let client = client_opt.ok_or_else(|| "Клиент не инициализирован".to_string())?;
 
     let auth_state = client
         .check_password(&password)

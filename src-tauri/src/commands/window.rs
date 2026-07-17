@@ -5,28 +5,28 @@ use crate::state::AppState;
 use tauri::{AppHandle, Manager, State};
 use tracing::{debug, info, warn};
 
-/// Вернуть фокус в предыдущее окно (внешнее приложение)
+/// Тестируемое ядро `return_to_previous_window`.
 ///
-/// Снимает always_on_top с главного окна TTSBard и активирует сохранённый
-/// внешний HWND через Win32 `SetForegroundWindow`. Окно TTSBard не скрывается.
-/// На не-Windows платформах только снимает always_on_top.
-#[tauri::command]
-pub fn return_to_previous_window(
-    app_handle: AppHandle,
-    state: State<'_, AppState>,
+/// Атомарно читает и очищает HWND под одной блокировкой, проверяет валидность
+/// и при успехе оставляет ячейку пустой. При транзиентной ошибке
+/// `SetForegroundWindow` восстанавливает HWND (только если другой поток не
+/// сохранил новый HWND за это время).
+fn return_previous_hwnd_core(
+    state: &AppState,
+    is_valid: impl FnOnce(isize) -> bool,
+    set_foreground: impl FnOnce(isize) -> bool,
 ) -> Result<(), String> {
-    // Снять always_on_top с главного окна
-    if let Some(window) = app_handle.get_webview_window("main") {
-        let _ = window.set_always_on_top(false);
-    }
-
-    // Получить сохранённый HWND
-    let saved = { *state.previous_foreground_hwnd.lock() };
-    *state.previous_foreground_hwnd.lock() = None;
-
-    match saved {
+    // Единый guard: читаем HWND, чистим ячейку и проверяем валидность,
+    // чтобы другой поток не мог вклиниться между read и clear.
+    let hwnd = {
+        let mut guard = state.previous_foreground_hwnd.lock();
+        let value = *guard;
+        *guard = None;
+        value
+    };
+    match hwnd {
         Some(hwnd) => {
-            if !crate::window::is_window_valid(hwnd) {
+            if !is_valid(hwnd) {
                 warn!(
                     hwnd,
                     "Saved foreground HWND is no longer valid, window may have been closed"
@@ -34,11 +34,20 @@ pub fn return_to_previous_window(
                 return Err("Предыдущее окно больше не доступно (закрыто)".to_string());
             }
 
-            let succeeded = crate::window::set_foreground_window(hwnd);
-            if succeeded {
-                info!(hwnd, action = "returned_focus", "Focus returned to previous window");
+            if set_foreground(hwnd) {
+                info!(
+                    hwnd,
+                    action = "returned_focus",
+                    "Focus returned to previous window"
+                );
                 Ok(())
             } else {
+                // Transient failure — восстанавливаем HWND для retry,
+                // но только если другой поток не сохранил новый HWND.
+                let mut guard = state.previous_foreground_hwnd.lock();
+                if guard.is_none() {
+                    *guard = Some(hwnd);
+                }
                 warn!(
                     hwnd,
                     "SetForegroundWindow failed (Windows foreground lock policy)"
@@ -51,6 +60,26 @@ pub fn return_to_previous_window(
             Ok(())
         }
     }
+}
+
+/// Вернуть фокус в предыдущее окно (внешнее приложение)
+///
+/// Снимает always_on_top с главного окна TTSBard и активирует сохранённый
+/// внешний HWND через Win32 `SetForegroundWindow`. Окно TTSBard не скрывается.
+/// На не-Windows платформах только снимает always_on_top.
+#[tauri::command]
+pub fn return_to_previous_window(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.set_always_on_top(false);
+    }
+    return_previous_hwnd_core(
+        &state,
+        crate::window::is_window_valid,
+        crate::window::set_foreground_window,
+    )
 }
 
 #[tauri::command]
@@ -285,7 +314,10 @@ pub async fn set_hotkey(
         ("playback_pause", "паузы воспроизведения"),
         ("playback_stop", "остановки воспроизведения"),
         ("playback_repeat", "повтора воспроизведения"),
-        ("playback_control_window", "окна управления воспроизведением"),
+        (
+            "playback_control_window",
+            "окна управления воспроизведением",
+        ),
         ("return_previous_window", "возврата в предыдущее окно"),
     ];
     for other_name in &all_global_names {
@@ -596,4 +628,125 @@ pub async fn set_playback_appearance_source(
     .await?;
     emit_appearance_updates(&app_handle);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    fn set_hwnd(state: &AppState, value: isize) {
+        let mut guard = state.previous_foreground_hwnd.lock();
+        *guard = Some(value);
+    }
+
+    fn get_hwnd(state: &AppState) -> Option<isize> {
+        let guard = state.previous_foreground_hwnd.lock();
+        *guard
+    }
+
+    /// HWND guard is cleared after successful SetForegroundWindow.
+    #[test]
+    fn hwnd_success_clears_guard() {
+        let state = AppState::new();
+        set_hwnd(&state, 42);
+
+        let result = return_previous_hwnd_core(
+            &state,
+            |hwnd| {
+                assert_eq!(hwnd, 42);
+                true
+            },
+            |hwnd| {
+                assert_eq!(hwnd, 42);
+                true
+            },
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(get_hwnd(&state), None);
+    }
+
+    /// HWND guard is cleared when the saved window is confirmed invalid.
+    #[test]
+    fn hwnd_invalid_is_cleared() {
+        let state = AppState::new();
+        set_hwnd(&state, 42);
+
+        let result = return_previous_hwnd_core(&state, |_| false, |_| unreachable!());
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("Предыдущее окно больше не доступно"));
+        assert_eq!(get_hwnd(&state), None);
+    }
+
+    /// HWND guard is preserved for retry on transient SetForegroundWindow failure.
+    #[test]
+    fn transient_failure_restores_hwnd() {
+        let state = AppState::new();
+        set_hwnd(&state, 42);
+
+        let result = return_previous_hwnd_core(&state, |_| true, |_| false);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Не удалось переключить фокус"));
+        // Guard is restored for retry
+        assert_eq!(get_hwnd(&state), Some(42));
+    }
+
+    /// When no HWND was ever saved, the return is OK without clearing anything.
+    #[test]
+    fn no_saved_hwnd_returns_ok() {
+        let state = AppState::new();
+
+        let result = return_previous_hwnd_core(&state, |_| unreachable!(), |_| unreachable!());
+
+        assert!(result.is_ok());
+        assert_eq!(get_hwnd(&state), None);
+    }
+
+    /// Concurrent HWND save is NOT overwritten by a transient-failure restore.
+    ///
+    /// Thread A takes HWND 42 and enters set_foreground (which reports
+    /// transient failure). Thread B saves HWND 99 concurrently.  After
+    /// thread A's restore attempt, HWND 99 must survive.
+    #[test]
+    fn concurrent_hwnd_save_not_overwritten_on_transient_failure() {
+        let state = AppState::new();
+        set_hwnd(&state, 42);
+
+        let entered_set_fg = Arc::new(AtomicBool::new(false));
+        let flag = entered_set_fg.clone();
+        let state_clone = state.clone();
+
+        let thread = std::thread::spawn(move || {
+            while !flag.load(Ordering::Acquire) {
+                std::thread::yield_now();
+            }
+            // Concurrent save while main thread is in set_foreground
+            let mut guard = state_clone.previous_foreground_hwnd.lock();
+            *guard = Some(99);
+        });
+
+        let result = return_previous_hwnd_core(
+            &state,
+            |_| true,
+            |_| {
+                entered_set_fg.store(true, Ordering::Release);
+                std::thread::sleep(Duration::from_millis(50));
+                false // transient failure
+            },
+        );
+
+        thread.join().unwrap();
+
+        assert!(result.is_err());
+        // HWND 99 must be preserved — the restore of 42 is skipped because
+        // the slot was no longer empty.
+        assert_eq!(get_hwnd(&state), Some(99));
+    }
 }

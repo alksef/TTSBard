@@ -292,7 +292,7 @@ impl Default for DspLimiterSettings {
 ///
 /// Contains independent `enabled` flags for EQ, compressor, and limiter.
 /// Each block can be bypassed individually at runtime.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct DspSettings {
     #[serde(default)]
     pub eq: DspEqSettings,
@@ -300,16 +300,6 @@ pub struct DspSettings {
     pub compressor: DspCompressorSettings,
     #[serde(default)]
     pub limiter: DspLimiterSettings,
-}
-
-impl Default for DspSettings {
-    fn default() -> Self {
-        Self {
-            eq: DspEqSettings::default(),
-            compressor: DspCompressorSettings::default(),
-            limiter: DspLimiterSettings::default(),
-        }
-    }
 }
 
 impl DspSettings {
@@ -2025,7 +2015,7 @@ mod tests {
             .filter(|e| {
                 e.file_name()
                     .to_str()
-                    .map_or(false, |n| n.contains(".bak.") && n.ends_with(".json"))
+                    .is_some_and(|n| n.contains(".bak.") && n.ends_with(".json"))
             })
             .count();
         assert_eq!(backup_count, 1, "a single backup file should exist");
@@ -2065,7 +2055,7 @@ mod tests {
             .filter(|e| {
                 e.file_name()
                     .to_str()
-                    .map_or(false, |n| n.contains(".bak.") && n.ends_with(".json"))
+                    .is_some_and(|n| n.contains(".bak.") && n.ends_with(".json"))
             })
             .count();
         assert_eq!(backup_count, 1);

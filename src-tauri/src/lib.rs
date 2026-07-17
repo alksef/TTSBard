@@ -54,18 +54,18 @@ use commands::{
     get_main_appearance, get_main_compact_dims, get_openai_api_key, get_openai_voice,
     get_output_devices, get_playback_appearance_source, get_show_playback_on_start,
     get_soundpanel_appearance_source, get_tts_provider, get_virtual_mic_devices, has_api_key,
-    hide_main_window, open_file_dialog, preview_audio_file, quit_app, reregister_hotkeys_cmd,
-    reset_hotkey_to_default, save_audio_effects, save_dsp_settings, set_audio_effects_enabled,
-    set_audio_effects_enhance_atten_db, set_audio_effects_enhance_enabled,
-    set_audio_effects_formant_preserved, set_audio_effects_pitch, set_audio_effects_speed,
-    set_audio_effects_volume, set_editor_height, set_editor_quick, set_editor_spellcheck_enabled,
-    set_editor_spellcheck_source, set_global_exclude_from_capture, set_hotkey, set_hotkey_enabled,
-    set_hotkey_recording, set_interception, set_local_tts_url, set_main_bg_color,
-    set_main_compact_dims, set_main_custom_background, set_main_custom_opacity, set_main_opacity,
+    hide_main_window, open_file_dialog, prepare_tts_provider_by_id, preview_audio_file, quit_app,
+    reregister_hotkeys_cmd, reset_hotkey_to_default, save_audio_effects, save_dsp_settings,
+    select_tts_provider_by_id, set_audio_effects_enabled, set_audio_effects_enhance_atten_db,
+    set_audio_effects_enhance_enabled, set_audio_effects_formant_preserved,
+    set_audio_effects_pitch, set_audio_effects_speed, set_audio_effects_volume, set_editor_height,
+    set_editor_quick, set_editor_spellcheck_enabled, set_editor_spellcheck_source,
+    set_global_exclude_from_capture, set_hotkey, set_hotkey_enabled, set_hotkey_recording,
+    set_interception, set_local_tts_url, set_main_bg_color, set_main_compact_dims,
+    set_main_custom_background, set_main_custom_opacity, set_main_opacity,
     set_main_opacity_compact_only, set_openai_api_key, set_openai_voice,
     set_playback_appearance_source, set_show_playback_on_start, set_soundpanel_appearance_source,
-    set_speaker_device, set_speaker_enabled, set_speaker_volume, select_tts_provider_by_id,
-    prepare_tts_provider_by_id, set_tts_provider,
+    set_speaker_device, set_speaker_enabled, set_speaker_volume, set_tts_provider,
     set_virtual_mic_device, set_virtual_mic_volume, speak_text, speak_text_raw_export,
     stop_preview, test_audio_device, toggle_interception, toggle_playback_control_window,
     unregister_hotkeys, update_theme, window::remove_main_bounds, window::resize_main_window,
@@ -627,7 +627,7 @@ pub fn run() {
                             info!("Soundpanel lost focus - hiding via hide_on_blur");
                             let app_state = window.app_handle().state::<AppState>();
                             let _ = soundpanel_window::hide_soundpanel_window(
-                                &window.app_handle(),
+                                window.app_handle(),
                                 &app_state,
                             );
                         }
@@ -639,8 +639,8 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app_handle, event| {
             if let tauri::RunEvent::ExitRequested { .. } = event {
-                crate::playback_window::save_playback_position(&app_handle);
-                crate::soundpanel_window::save_soundpanel_position(&app_handle);
+                crate::playback_window::save_playback_position(app_handle);
+                crate::soundpanel_window::save_soundpanel_position(app_handle);
             }
         });
 }

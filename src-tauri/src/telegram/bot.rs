@@ -1097,6 +1097,37 @@ fn parse_message_text_with_validation(text: &str) -> bool {
     }
 }
 
+/// Парсит текст ответа бота для set_speaker
+/// Возвращает Ok(true) если успешно, Err если неверный код
+fn parse_set_speaker_response(text: &str) -> Result<bool, String> {
+    trace!("Parsing set_speaker response text: '{}'", text);
+
+    // Проверить варианты успешного ответа
+    if text.contains("Успешно выбран спикер")
+        || text.contains("Успішно обрано спікера")
+        || text.contains("Successfully selected speaker")
+    {
+        trace!("Matched success pattern 'Успешно выбран спикер'");
+        return Ok(true);
+    }
+
+    if text.contains("Успешно выбран тот же самый спикер")
+        || text.contains("Успішно обрано того самого спікера")
+    {
+        trace!("Matched success pattern 'Успешно выбран тот же самый спикер'");
+        return Ok(true);
+    }
+
+    if text.contains("Указан неверный голос") || text.contains("Вказано невірний голос")
+    {
+        trace!("Matched error pattern 'Указан неверный голос'");
+        return Err("Invalid voice code".to_string());
+    }
+
+    trace!("No pattern matched, returning unknown format error");
+    Err("Unknown response format".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1350,35 +1381,4 @@ mod tests {
         assert!(!parse_message_text_with_validation("Указан неверный")); // near-miss
         assert!(!parse_message_text_with_validation(""));
     }
-}
-
-/// Парсит текст ответа бота для set_speaker
-/// Возвращает Ok(true) если успешно, Err если неверный код
-fn parse_set_speaker_response(text: &str) -> Result<bool, String> {
-    trace!("Parsing set_speaker response text: '{}'", text);
-
-    // Проверить варианты успешного ответа
-    if text.contains("Успешно выбран спикер")
-        || text.contains("Успішно обрано спікера")
-        || text.contains("Successfully selected speaker")
-    {
-        trace!("Matched success pattern 'Успешно выбран спикер'");
-        return Ok(true);
-    }
-
-    if text.contains("Успешно выбран тот же самый спикер")
-        || text.contains("Успішно обрано того самого спікера")
-    {
-        trace!("Matched success pattern 'Успешно выбран тот же самый спикер'");
-        return Ok(true);
-    }
-
-    if text.contains("Указан неверный голос") || text.contains("Вказано невірний голос")
-    {
-        trace!("Matched error pattern 'Указан неверный голос'");
-        return Err("Invalid voice code".to_string());
-    }
-
-    trace!("No pattern matched, returning unknown format error");
-    Err("Unknown response format".to_string())
 }

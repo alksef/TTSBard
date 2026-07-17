@@ -175,6 +175,7 @@ impl CompressorState {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compress_sample(
     x: f32,
     threshold_linear: f32,
@@ -209,7 +210,7 @@ fn compress_sample(
         (threshold_db - env_db) * (1.0 - 1.0 / ratio)
     } else {
         let diff = env_db - threshold_db + knee_db / 2.0;
-        ((diff * diff) / (2.0 * knee_db)) * (1.0 - 1.0 / ratio) * -1.0
+        -(((diff * diff) / (2.0 * knee_db)) * (1.0 - 1.0 / ratio))
     };
 
     let gr_linear = 10.0_f32.powf(gain_reduction_db / 20.0);
@@ -357,21 +358,11 @@ impl Default for LimiterConfig {
 }
 
 /// Full DSP configuration.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct DspConfig {
     pub eq: EqConfig,
     pub compressor: CompressorConfig,
     pub limiter: LimiterConfig,
-}
-
-impl Default for DspConfig {
-    fn default() -> Self {
-        Self {
-            eq: EqConfig::default(),
-            compressor: CompressorConfig::default(),
-            limiter: LimiterConfig::default(),
-        }
-    }
 }
 
 // ============================================================================
@@ -428,7 +419,7 @@ pub fn process_dsp(
 fn apply_eq(samples: &mut [f32], sample_rate: u32, channels: usize, cfg: &EqConfig) {
     let mut biquads: Vec<(BiquadCoeffs, Vec<BiquadState>)> = Vec::new();
 
-    let q_low_cut = 0.7071; // Butterworth Q
+    let q_low_cut = std::f32::consts::FRAC_1_SQRT_2; // Butterworth Q
     if cfg.low_cut_enabled && cfg.low_cut_hz > 0.0 && cfg.low_cut_hz < sample_rate as f32 * 0.45 {
         let coeffs = BiquadCoeffs::low_cut(sample_rate, cfg.low_cut_hz, q_low_cut);
         let states = vec![BiquadState::default(); channels];
@@ -457,7 +448,7 @@ fn apply_eq(samples: &mut [f32], sample_rate: u32, channels: usize, cfg: &EqConf
             sample_rate,
             cfg.high_shelf_hz,
             cfg.high_shelf_gain_db,
-            0.7071,
+            std::f32::consts::FRAC_1_SQRT_2,
         );
         let states = vec![BiquadState::default(); channels];
         biquads.push((coeffs, states));
@@ -497,8 +488,9 @@ fn apply_compressor(
 
     let frames = samples.len() / channels;
     for f in 0..frames {
-        for ch in 0..channels {
-            let idx = f * channels + ch;
+        let frame_start = f * channels;
+        for (ch, state) in states.iter_mut().enumerate() {
+            let idx = frame_start + ch;
             samples[idx] = compress_sample(
                 samples[idx],
                 threshold_linear,
@@ -507,7 +499,7 @@ fn apply_compressor(
                 makeup_linear,
                 attack_coeff,
                 release_coeff,
-                &mut states[ch],
+                state,
             );
         }
     }
@@ -521,10 +513,10 @@ fn apply_limiter(samples: &mut [f32], sample_rate: u32, channels: usize, cfg: &L
 
     let frames = samples.len() / channels;
     for f in 0..frames {
-        for ch in 0..channels {
-            let idx = f * channels + ch;
-            samples[idx] =
-                limit_sample(samples[idx], ceiling_linear, release_coeff, &mut states[ch]);
+        let frame_start = f * channels;
+        for (ch, state) in states.iter_mut().enumerate() {
+            let idx = frame_start + ch;
+            samples[idx] = limit_sample(samples[idx], ceiling_linear, release_coeff, state);
         }
     }
 }
@@ -557,9 +549,9 @@ mod tests {
         let mono = make_sine(freq, sample_rate, duration_secs, amplitude);
         let frames = mono.len();
         let mut interleaved = Vec::with_capacity(frames * channels);
-        for i in 0..frames {
+        for &sample in &mono {
             for _ in 0..channels {
-                interleaved.push(mono[i]);
+                interleaved.push(sample);
             }
         }
         interleaved
@@ -591,7 +583,6 @@ mod tests {
                     EqBand::default(),
                     EqBand::default(),
                 ],
-                ..Default::default()
             },
             ..Default::default()
         };
@@ -1006,21 +997,21 @@ mod tests {
 
     #[test]
     fn biquad_low_shelf_coeffs_finite() {
-        let coeffs = BiquadCoeffs::low_shelf(48000, 200.0, 3.0, 0.7071);
+        let coeffs = BiquadCoeffs::low_shelf(48000, 200.0, 3.0, std::f32::consts::FRAC_1_SQRT_2);
         assert!(coeffs.b0.is_finite());
         assert!(coeffs.b1.is_finite());
     }
 
     #[test]
     fn biquad_high_shelf_coeffs_finite() {
-        let coeffs = BiquadCoeffs::high_shelf(48000, 8000.0, -3.0, 0.7071);
+        let coeffs = BiquadCoeffs::high_shelf(48000, 8000.0, -3.0, std::f32::consts::FRAC_1_SQRT_2);
         assert!(coeffs.b0.is_finite());
         assert!(coeffs.b1.is_finite());
     }
 
     #[test]
     fn biquad_low_cut_coeffs_finite() {
-        let coeffs = BiquadCoeffs::low_cut(48000, 80.0, 0.7071);
+        let coeffs = BiquadCoeffs::low_cut(48000, 80.0, std::f32::consts::FRAC_1_SQRT_2);
         assert!(coeffs.b0.is_finite());
         assert!(coeffs.b1.is_finite());
     }

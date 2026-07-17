@@ -106,7 +106,7 @@ fn known_roots() -> Vec<(String, PathBuf)> {
     }
 
     // Sort longest-path-first so more specific roots match before broader ones
-    roots.sort_by(|a, b| b.1.as_os_str().len().cmp(&a.1.as_os_str().len()));
+    roots.sort_by_key(|b| std::cmp::Reverse(b.1.as_os_str().len()));
 
     roots
 }

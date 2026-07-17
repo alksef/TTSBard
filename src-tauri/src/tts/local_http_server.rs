@@ -101,7 +101,10 @@ impl TtsEngine for LocalHttpServerTts {
                     self.server_url
                 )
             } else {
-                format!("Failed to send HTTP TTS request to {}: {}", self.server_url, e)
+                format!(
+                    "Failed to send HTTP TTS request to {}: {}",
+                    self.server_url, e
+                )
             }
         })?;
 

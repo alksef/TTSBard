@@ -355,6 +355,7 @@ fn preview_state() -> &'static StdMutex<PreviewState> {
 
 /// Preview audio file through speaker with applied effects
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn preview_audio_file(
     file_path: String,
     speaker_device: Option<String>,
@@ -447,6 +448,7 @@ pub fn stop_preview() -> Result<(), String> {
 
 /// Atomically save all audio effects settings
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn save_audio_effects(
     enabled: bool,
     pitch: i16,

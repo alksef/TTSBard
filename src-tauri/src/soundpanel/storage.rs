@@ -235,9 +235,9 @@ mod tests {
 
         // Simulate parsing logic
         let content = old_json;
-        let sets = if let Ok(parsed) = serde_json::from_str::<SoundSets>(&content) {
+        let sets = if let Ok(parsed) = serde_json::from_str::<SoundSets>(content) {
             parsed
-        } else if let Ok(old_bindings) = serde_json::from_str::<Vec<SoundBinding>>(&content) {
+        } else if let Ok(old_bindings) = serde_json::from_str::<Vec<SoundBinding>>(content) {
             let id = uuid::Uuid::new_v4().to_string();
             SoundSets {
                 active_set_id: id.clone(),

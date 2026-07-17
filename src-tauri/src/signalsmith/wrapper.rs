@@ -93,7 +93,7 @@ impl StretchProcessor {
         preserve_formants: bool,
     ) -> Result<Vec<f32>, StretchError> {
         let frames = input.len() / self.channels;
-        if input.len() % self.channels != 0 {
+        if !input.len().is_multiple_of(self.channels) {
             return Err(StretchError(
                 "input length not divisible by channel count".into(),
             ));

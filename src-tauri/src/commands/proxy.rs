@@ -430,10 +430,8 @@ fn validate_mtproxy_secret(secret: &str) -> Result<(), String> {
     }
 
     // Hex format: even length, ≥32 chars = ≥16 bytes
-    if len >= 32 && len % 2 == 0 {
-        if hex::decode(secret).is_ok() {
-            return Ok(());
-        }
+    if len >= 32 && len.is_multiple_of(2) && hex::decode(secret).is_ok() {
+        return Ok(());
     }
 
     Err(format!(

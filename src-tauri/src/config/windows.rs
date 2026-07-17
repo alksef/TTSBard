@@ -683,7 +683,7 @@ mod tests {
             .filter(|e| {
                 e.file_name()
                     .to_str()
-                    .map_or(false, |n| n.contains(".bak.") && n.ends_with(".json"))
+                    .is_some_and(|n| n.contains(".bak.") && n.ends_with(".json"))
             })
             .count();
         assert_eq!(backup_count, 1, "a single backup file should exist");
@@ -722,7 +722,7 @@ mod tests {
             .filter(|e| {
                 e.file_name()
                     .to_str()
-                    .map_or(false, |n| n.contains(".bak.") && n.ends_with(".json"))
+                    .is_some_and(|n| n.contains(".bak.") && n.ends_with(".json"))
             })
             .count();
         assert_eq!(backup_count, 1);

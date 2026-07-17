@@ -228,7 +228,7 @@ pub fn sp_set_hide_on_blur(
 #[tauri::command]
 pub fn sp_play_binding(key: String, app_handle: AppHandle) -> Result<(), String> {
     let key_char = key.chars().next().ok_or("Key is empty")?;
-    if !key_char.is_ascii_uppercase() || key_char < 'A' || key_char > 'Z' {
+    if !key_char.is_ascii_uppercase() {
         return Err("Key must be A-Z".to_string());
     }
     let state = app_handle.state::<SoundPanelState>();

@@ -182,11 +182,7 @@ mod tests {
         let tmp_files: Vec<_> = fs::read_dir(&dir)
             .unwrap()
             .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.file_name()
-                    .to_str()
-                    .map_or(false, |n| n.ends_with(".tmp"))
-            })
+            .filter(|e| e.file_name().to_str().is_some_and(|n| n.ends_with(".tmp")))
             .collect();
         assert!(
             tmp_files.is_empty(),
@@ -242,7 +238,7 @@ mod tests {
             .filter(|e| {
                 e.file_name()
                     .to_str()
-                    .map_or(false, |n| n.contains(".bak.") && n.ends_with(".json"))
+                    .is_some_and(|n| n.contains(".bak.") && n.ends_with(".json"))
             })
             .collect();
         assert_eq!(backup_files.len(), 1, "expected exactly one backup file");
@@ -345,7 +341,7 @@ mod tests {
             .filter(|e| {
                 e.file_name()
                     .to_str()
-                    .map_or(false, |n| n.contains(".bak.") && n.ends_with(".json"))
+                    .is_some_and(|n| n.contains(".bak.") && n.ends_with(".json"))
             })
             .count();
         assert_eq!(backup_count, 2, "each recovery must produce one backup");

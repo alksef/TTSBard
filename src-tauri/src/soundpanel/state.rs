@@ -60,11 +60,10 @@ impl SoundSets {
 
     /// Найти индекс активного набора, с fallback на 0
     pub fn find_active_index(&self) -> usize {
-        if let Some(idx) = self.sets.iter().position(|s| s.id == self.active_set_id) {
-            idx
-        } else {
-            0
-        }
+        self.sets
+            .iter()
+            .position(|s| s.id == self.active_set_id)
+            .unwrap_or_default()
     }
 }
 
@@ -186,7 +185,7 @@ impl SoundPanelState {
             .and_then(|sets| {
                 sets.find_active().map(|active| {
                     let mut bindings: Vec<_> = active.bindings.clone();
-                    bindings.sort_by(|a, b| a.key.cmp(&b.key));
+                    bindings.sort_by_key(|a| a.key);
                     bindings
                 })
             })

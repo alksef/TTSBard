@@ -156,10 +156,7 @@ pub fn discover_piper_models(root: &Path) -> Vec<PiperModelDescriptor> {
 
     let count = results.len();
     if count > 0 {
-        tracing::info!(
-            count = count,
-            "Piper model discovery complete"
-        );
+        tracing::info!(count = count, "Piper model discovery complete");
     }
 
     results
@@ -174,7 +171,7 @@ fn parse_sample_rate(config: &serde_json::Value) -> Option<u32> {
 }
 
 fn stem_to_display_name(stem: &str) -> String {
-    stem.replace('_', " ").replace('-', " ")
+    stem.replace(['_', '-'], " ")
 }
 
 #[cfg(test)]
@@ -461,7 +458,10 @@ mod tests {
     /// stem_to_display_name replaces underscore and hyphen with space.
     #[test]
     fn stem_to_display_name_basic() {
-        assert_eq!(stem_to_display_name("ru_RU-irina-medium"), "ru RU irina medium");
+        assert_eq!(
+            stem_to_display_name("ru_RU-irina-medium"),
+            "ru RU irina medium"
+        );
     }
 
     /// stem_to_display_name with no separators.

@@ -22,7 +22,7 @@ fn write_json_atomically(path: &Path, content: &str) -> std::io::Result<()> {
 
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?
+        .map_err(|e| std::io::Error::other(e.to_string()))?
         .as_nanos();
     let tmp_path = parent.join(format!(
         ".{}.{}.tmp",
@@ -41,10 +41,10 @@ fn write_json_atomically(path: &Path, content: &str) -> std::io::Result<()> {
     if let Err(rename_error) = fs::rename(&tmp_path, path) {
         let _ = fs::remove_file(path);
         fs::rename(&tmp_path, path).map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Replace failed: {} (original: {})", e, rename_error),
-            )
+            std::io::Error::other(format!(
+                "Replace failed: {} (original: {})",
+                e, rename_error
+            ))
         })?;
     }
 

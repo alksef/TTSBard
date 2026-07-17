@@ -210,9 +210,9 @@ fn apply_fade_in(samples: &mut [f32], channels: usize, fade_frames: usize) {
     if fade_count < 2 {
         return;
     }
-    for i in 0..fade_count {
+    for (i, sample) in samples.iter_mut().enumerate().take(fade_count) {
         let gain = i as f32 / (fade_count - 1) as f32;
-        samples[i] *= gain;
+        *sample *= gain;
     }
 }
 
@@ -272,8 +272,8 @@ mod tests {
         let mut samples: Vec<f32> = vec![0.0; frames];
         samples[0] = 0.95; // sharp jump
                            // Fill the rest with reasonable audio.
-        for i in 1..frames {
-            samples[i] = (2.0 * std::f32::consts::PI * 440.0 * i as f32 / sr as f32).sin() * 0.5;
+        for (i, sample) in samples.iter_mut().enumerate().skip(1) {
+            *sample = (2.0 * std::f32::consts::PI * 440.0 * i as f32 / sr as f32).sin() * 0.5;
         }
         let pcm = make_pcm(samples.clone(), sr, channels);
         let result = process_boundaries(&pcm);
@@ -290,9 +290,9 @@ mod tests {
         );
         // Samples beyond the fade-in region (5 ms = 240 frames) should be untouched.
         let fade_margin = (0.005 * sr as f32) as usize * 2; // twice the fade length for safety
-        for i in fade_margin..frames {
+        for (i, sample) in samples.iter().enumerate().skip(fade_margin) {
             assert!(
-                (result.samples[i] - samples[i]).abs() < 0.001,
+                (result.samples[i] - sample).abs() < 0.001,
                 "non-faded region changed at sample {i}"
             );
         }
@@ -321,9 +321,9 @@ mod tests {
         );
         // Early samples outside the fade-out region should be untouched.
         let fade_margin = (0.005 * sr as f32) as usize * 2;
-        for i in 0..(frames - fade_margin) {
+        for (i, sample) in samples.iter().enumerate().take(frames - fade_margin) {
             assert!(
-                (result.samples[i] - samples[i]).abs() < 0.001,
+                (result.samples[i] - sample).abs() < 0.001,
                 "non-faded region changed at sample {i}"
             );
         }
