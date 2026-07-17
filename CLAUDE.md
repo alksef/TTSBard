@@ -87,6 +87,20 @@ Detailed rules in `.claude/rules/`:
 > Примечание: `build.ps1` сохранён как **UTF-8 с BOM** — требование PS 5.1 для
 > кириллицы. При правках скрипта не удаляйте BOM.
 
+## Release Tags и GitHub Actions
+
+Для релизной сборки тег нужно отправлять одновременно с веткой, чтобы GitHub
+создал событие `push` для workflow:
+
+```powershell
+git push origin master refs/tags/v0.14.0
+```
+
+Заменяйте `v0.14.0` на актуальную версию. Не ограничивайтесь отдельным
+`git push origin vX.Y.Z`: после переименования или пересоздания тегов GitHub
+может не запустить `Build and Release`. В таком случае workflow запускается
+вручную через **Actions → Build and Release → Run workflow**, выбрав нужный тег.
+
 ## Skills
 Available skills in `.claude/skills/`:
 - css-development - CSS conventions, variables, theming
