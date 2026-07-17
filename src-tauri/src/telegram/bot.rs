@@ -1097,6 +1097,261 @@ fn parse_message_text_with_validation(text: &str) -> bool {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── parse_voice_info ──────────────────────────────────────────────
+
+    #[test]
+    fn parse_voice_info_ru_both_fields() {
+        let text = "Выбранный голос: /speaker hamster_clerk\nНаходится в паке: Хомяки";
+        let v = parse_voice_info(text).expect("must parse");
+        assert_eq!(v.id, "hamster_clerk");
+        assert_eq!(v.name, "Хомяки");
+    }
+
+    #[test]
+    fn parse_voice_info_ua_both_fields() {
+        let text = "Выбраний голос: /speaker baya\nЗнаходиться в паке: Бая";
+        let v = parse_voice_info(text).expect("must parse");
+        assert_eq!(v.id, "baya");
+        assert_eq!(v.name, "Бая");
+    }
+
+    #[test]
+    fn parse_voice_info_ua_lowercase_name_label() {
+        // The UA name label has a registered lowercase variant in production:
+        //   line.contains("знаходиться в паке:")
+        let text = "Выбраний голос: /speaker xenia\nзнаходиться в паке: Ксенія";
+        let v = parse_voice_info(text).expect("must parse");
+        assert_eq!(v.id, "xenia");
+        assert_eq!(v.name, "Ксенія");
+    }
+
+    #[test]
+    fn parse_voice_info_ua_lowercase_name_label_no_match() {
+        // The UA voice label does NOT have a lowercase variant registered.
+        // Only the name label has both uppercase and lowercase patterns.
+        let text = "вибраний голос: /speaker dog_bark\nЗнаходиться в паке: Гавкуни";
+        assert!(parse_voice_info(text).is_none());
+    }
+
+    #[test]
+    fn parse_voice_info_whitespace_and_noise() {
+        let text = "  \tВыбранный голос: /speaker   glide  \n  extra junk  \n  Находится в паке:  Плавный  \n";
+        let v = parse_voice_info(text).expect("must parse");
+        assert_eq!(v.id, "glide");
+        assert_eq!(v.name, "Плавный");
+    }
+
+    #[test]
+    fn parse_voice_info_missing_id() {
+        let text = "Выбранный голос: \nНаходится в паке: Хомяки";
+        assert!(parse_voice_info(text).is_none());
+    }
+
+    #[test]
+    fn parse_voice_info_missing_name() {
+        let text = "Выбранный голос: /speaker dog\n";
+        assert!(parse_voice_info(text).is_none());
+    }
+
+    #[test]
+    fn parse_voice_info_empty_values() {
+        let text = "Выбранный голос: /speaker \nНаходится в паке: ";
+        assert!(parse_voice_info(text).is_none());
+    }
+
+    #[test]
+    fn parse_voice_info_unrelated_input() {
+        assert!(parse_voice_info("Hello world").is_none());
+        assert!(parse_voice_info("/limits 0 / 666").is_none());
+        assert!(parse_voice_info("").is_none());
+    }
+
+    // ── parse_limits_info ──────────────────────────────────────────────
+
+    #[test]
+    fn parse_limits_info_ru_both_sections() {
+        let text = "🔓 Открытые голоса: 0 / 666 символов;\n🪩 Кружки/гифки: 0 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must parse");
+        assert_eq!(l.voices, "0 / 666");
+        assert_eq!(l.gifs, "0 / 10");
+    }
+
+    #[test]
+    fn parse_limits_info_ua_both_sections() {
+        let text = "🔓 Відкриті голоси: 5 / 333 символів;\n🪩 Кружки/гіфки: 2 / 10 повідомлень;";
+        let l = parse_limits_info(text).expect("must parse");
+        assert_eq!(l.voices, "5 / 333");
+        assert_eq!(l.gifs, "2 / 10");
+    }
+
+    #[test]
+    fn parse_limits_info_gifs_label_gifki() {
+        let text = "Открытые голоса: 1 / 500 символов;\nГифки: 3 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must parse");
+        assert_eq!(l.voices, "1 / 500");
+        assert_eq!(l.gifs, "3 / 10");
+    }
+
+    #[test]
+    fn parse_limits_info_whitespace_variations() {
+        let text =
+            "  \tОткрытые голоса:  10  /  200  символов;  \nextra stuff\nКружки/гифки:  7  /  15  сообщений;  ";
+        let l = parse_limits_info(text).expect("must parse");
+        assert_eq!(l.voices, "10 / 200");
+        assert_eq!(l.gifs, "7 / 15");
+    }
+
+    #[test]
+    fn parse_limits_info_missing_voices() {
+        let text = "Кружки/гифки: 0 / 10 сообщений;";
+        assert!(parse_limits_info(text).is_none());
+    }
+
+    #[test]
+    fn parse_limits_info_missing_gifs() {
+        let text = "Открытые голоса: 0 / 666 символов;";
+        assert!(parse_limits_info(text).is_none());
+    }
+
+    #[test]
+    fn parse_limits_info_malformed_no_slash_voices() {
+        let text = "Открытые голоса: 666 символов;\nКружки/гифки: 0 / 10 сообщений;";
+        assert!(parse_limits_info(text).is_none());
+    }
+
+    #[test]
+    fn parse_limits_info_malformed_no_slash_gifs() {
+        let text = "Открытые голоса: 0 / 666 символов;\nКружки/гифки: 10 сообщений;";
+        assert!(parse_limits_info(text).is_none());
+    }
+
+    #[test]
+    fn parse_limits_info_unrelated_input() {
+        assert!(parse_limits_info("Hello world").is_none());
+        assert!(parse_limits_info("random text").is_none());
+        assert!(parse_limits_info("").is_none());
+    }
+
+    // ── parse_set_speaker_response ────────────────────────────────────
+
+    #[test]
+    fn parse_set_speaker_success_ru() {
+        assert_eq!(
+            parse_set_speaker_response("Успешно выбран спикер"),
+            Ok(true)
+        );
+    }
+
+    #[test]
+    fn parse_set_speaker_success_ua() {
+        assert_eq!(
+            parse_set_speaker_response("Успішно обрано спікера"),
+            Ok(true)
+        );
+    }
+
+    #[test]
+    fn parse_set_speaker_success_en() {
+        assert_eq!(
+            parse_set_speaker_response("Successfully selected speaker"),
+            Ok(true)
+        );
+    }
+
+    #[test]
+    fn parse_set_speaker_success_same_ru() {
+        assert_eq!(
+            parse_set_speaker_response("Успешно выбран тот же самый спикер"),
+            Ok(true)
+        );
+    }
+
+    #[test]
+    fn parse_set_speaker_success_same_ua() {
+        assert_eq!(
+            parse_set_speaker_response("Успішно обрано того самого спікера"),
+            Ok(true)
+        );
+    }
+
+    #[test]
+    fn parse_set_speaker_invalid_ru() {
+        assert_eq!(
+            parse_set_speaker_response("Указан неверный голос"),
+            Err("Invalid voice code".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_set_speaker_invalid_ua() {
+        assert_eq!(
+            parse_set_speaker_response("Вказано невірний голос"),
+            Err("Invalid voice code".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_set_speaker_unknown_text() {
+        assert_eq!(
+            parse_set_speaker_response("random garbage"),
+            Err("Unknown response format".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_set_speaker_near_miss() {
+        // substring but not exact match => unknown format
+        assert_eq!(
+            parse_set_speaker_response("Успешно выбран"),
+            Err("Unknown response format".to_string())
+        );
+        assert_eq!(
+            parse_set_speaker_response("Указан неверный"),
+            Err("Unknown response format".to_string())
+        );
+    }
+
+    // ── parse_message_text_with_validation ────────────────────────────
+
+    #[test]
+    fn validation_success_phrases_return_true() {
+        assert!(parse_message_text_with_validation("Успешно выбран спикер"));
+        assert!(parse_message_text_with_validation("Успішно обрано спікера"));
+        assert!(parse_message_text_with_validation(
+            "Successfully selected speaker"
+        ));
+        assert!(parse_message_text_with_validation(
+            "Успешно выбран тот же самый спикер"
+        ));
+        assert!(parse_message_text_with_validation(
+            "Успішно обрано того самого спікера"
+        ));
+    }
+
+    #[test]
+    fn validation_invalid_voice_returns_false() {
+        assert!(!parse_message_text_with_validation("Указан неверный голос"));
+        assert!(!parse_message_text_with_validation(
+            "Вказано невірний голос"
+        ));
+    }
+
+    #[test]
+    fn validation_unknown_and_near_miss_returns_false() {
+        // production contract: anything not matching a known success phrase
+        // returns false (which causes the caller to keep waiting or fall
+        // through to error).
+        assert!(!parse_message_text_with_validation("random"));
+        assert!(!parse_message_text_with_validation("Успешно выбран")); // near-miss
+        assert!(!parse_message_text_with_validation("Указан неверный")); // near-miss
+        assert!(!parse_message_text_with_validation(""));
+    }
+}
+
 /// Парсит текст ответа бота для set_speaker
 /// Возвращает Ok(true) если успешно, Err если неверный код
 fn parse_set_speaker_response(text: &str) -> Result<bool, String> {

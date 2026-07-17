@@ -620,3 +620,130 @@ pub async fn set_mtproxy_settings(
     info!("MTProxy settings updated successfully");
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::Engine;
+
+    // ---------- validate_mtproxy_secret ----------
+
+    #[test]
+    fn valid_16_byte_hex() {
+        let secret = hex::encode([0xA1u8; 16]);
+        assert!(validate_mtproxy_secret(&secret).is_ok());
+    }
+
+    #[test]
+    fn valid_17_byte_hex() {
+        let secret = hex::encode([0xA1u8; 17]);
+        assert!(validate_mtproxy_secret(&secret).is_ok());
+    }
+
+    #[test]
+    fn valid_longer_hex() {
+        let secret = hex::encode([0xA1u8; 25]);
+        assert!(validate_mtproxy_secret(&secret).is_ok());
+    }
+
+    #[test]
+    fn valid_16_byte_base64() {
+        let secret = base64::engine::general_purpose::STANDARD.encode([0xAAu8; 16]);
+        assert!(validate_mtproxy_secret(&secret).is_ok());
+    }
+
+    #[test]
+    fn valid_17_byte_base64() {
+        let secret = base64::engine::general_purpose::STANDARD.encode([0xBBu8; 17]);
+        assert!(validate_mtproxy_secret(&secret).is_ok());
+    }
+
+    #[test]
+    fn valid_longer_base64() {
+        let secret = base64::engine::general_purpose::STANDARD.encode([0xCCu8; 32]);
+        assert!(validate_mtproxy_secret(&secret).is_ok());
+    }
+
+    #[test]
+    fn trimmed_secret_accepted() {
+        let hex_val = hex::encode([0u8; 16]);
+        let secret = format!("  {}  ", hex_val);
+        assert!(validate_mtproxy_secret(&secret).is_ok());
+    }
+
+    #[test]
+    fn odd_hex_fails() {
+        let secret = format!("{}0", hex::encode([0u8; 16]));
+        assert!(validate_mtproxy_secret(&secret).is_err());
+    }
+
+    #[test]
+    fn invalid_hex_alphabet_fails() {
+        let secret = "~".repeat(32);
+        assert!(
+            validate_mtproxy_secret(&secret).is_err(),
+            "non-hex char should fail"
+        );
+    }
+
+    #[test]
+    fn invalid_base64_alphabet_fails() {
+        let secret = "!!!!!".repeat(5);
+        assert!(secret.len() >= 24);
+        assert!(validate_mtproxy_secret(&secret).is_err());
+    }
+
+    #[test]
+    fn base64_decode_below_16_bytes_fails() {
+        let secret = "AAAAAAAAAAAAAAAAAAAAA===";
+        assert_eq!(secret.len(), 24);
+        assert!(validate_mtproxy_secret(secret).is_err());
+    }
+
+    #[test]
+    fn empty_fails() {
+        assert!(validate_mtproxy_secret("").is_err());
+    }
+
+    #[test]
+    fn boundary_31_hex_chars_fails() {
+        let secret = "a".repeat(31);
+        assert!(validate_mtproxy_secret(&secret).is_err());
+    }
+
+    #[test]
+    fn boundary_32_hex_chars_succeeds() {
+        let secret = hex::encode([0u8; 16]);
+        assert!(validate_mtproxy_secret(&secret).is_ok());
+    }
+
+    #[test]
+    fn boundary_23_base64_chars_fails() {
+        let secret = "A".repeat(23);
+        assert!(validate_mtproxy_secret(&secret).is_err());
+    }
+
+    #[test]
+    fn boundary_24_base64_chars_16_bytes_succeeds() {
+        let secret = base64::engine::general_purpose::STANDARD.encode([0x42u8; 16]);
+        assert!(validate_mtproxy_secret(&secret).is_ok());
+    }
+
+    #[test]
+    fn short_string_fails() {
+        let cases = ["a", "ab", "abc", "short", "123456789012345"];
+        for s in &cases {
+            assert!(
+                validate_mtproxy_secret(s).is_err(),
+                "expected Err for {:?}",
+                s
+            );
+        }
+    }
+
+    #[test]
+    fn hex_below_16_bytes_fails() {
+        let secret = hex::encode([0u8; 15]);
+        assert!(validate_mtproxy_secret(&secret).is_err());
+    }
+}

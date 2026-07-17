@@ -50,3 +50,81 @@ pub fn build_client_with_proxy(
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    // ---------- parse_proxy_url ----------
+
+    #[test]
+    fn parse_accepted_schemes() {
+        let cases = [
+            "socks5://127.0.0.1:1080",
+            "socks5h://127.0.0.1:1080",
+            "socks4://127.0.0.1:1080",
+            "socks4a://127.0.0.1:1080",
+            "http://127.0.0.1:8080",
+            "https://127.0.0.1:8443",
+            "socks5://user:pass@127.0.0.1:1080",
+            "http://[::1]:8080",
+            "http://[2001:db8::1]:8080",
+            "socks5://proxy.example.com:1080",
+        ];
+        for url in &cases {
+            assert!(parse_proxy_url(url).is_ok(), "expected Ok for: {}", url);
+        }
+    }
+
+    #[test]
+    fn parse_scheme_case_insensitive() {
+        let cases = [
+            "SOCKs5://127.0.0.1:1080",
+            "SOCks5H://127.0.0.1:1080",
+            "SOCKS4://127.0.0.1:1080",
+            "SOCKS4A://127.0.0.1:1080",
+            "HTTP://127.0.0.1:8080",
+            "HTTPS://127.0.0.1:8443",
+        ];
+        for url in &cases {
+            assert!(parse_proxy_url(url).is_ok(), "expected Ok for: {}", url);
+        }
+    }
+
+    #[test]
+    fn parse_missing_scheme_fails() {
+        assert!(parse_proxy_url("127.0.0.1:1080").is_err());
+    }
+
+    #[test]
+    fn parse_unsupported_scheme_fails() {
+        assert!(parse_proxy_url("ftp://127.0.0.1:21").is_err());
+    }
+
+    #[test]
+    fn parse_malformed_url_fails() {
+        assert!(parse_proxy_url("socks5://a b:1080").is_err());
+    }
+
+    // ---------- build_client_with_proxy ----------
+
+    #[test]
+    fn build_client_direct_mode_succeeds() {
+        let result = build_client_with_proxy(None, Duration::from_secs(30));
+        assert!(result.is_ok(), "direct mode should succeed");
+    }
+
+    #[test]
+    fn build_client_valid_proxy_succeeds() {
+        let result =
+            build_client_with_proxy(Some("socks5://127.0.0.1:1080"), Duration::from_secs(30));
+        assert!(result.is_ok(), "valid proxy should succeed");
+    }
+
+    #[test]
+    fn build_client_invalid_proxy_fails() {
+        let result = build_client_with_proxy(Some("ftp://127.0.0.1:21"), Duration::from_secs(30));
+        assert!(result.is_err(), "invalid proxy scheme should fail");
+    }
+}
