@@ -26,7 +26,7 @@ All subagents should be launched using the **glm-4.** model (use `model: "sonnet
 ### Build-fix size rule
 
 - Codex fixes minor build errors and warnings directly when the change is small and localized.
-- For substantial changes, Codex writes a concrete task in `docs/deepseek/tasks/` and immediately runs it non-interactively with `opencode run --model deepseek/deepseek-v4-pro`.
+- For substantial changes, Codex writes a concrete task in `docs/deepseek/tasks/` and runs it non-interactively through OpenCode. Choose the model by complexity: use `deepseek/deepseek-v4-flash` for a small isolated implementation, reserve `deepseek/deepseek-v4-pro` for work spanning several files, requiring a plan/refactor, or containing non-obvious behavior, and use `deepseek/deepseek-reasoner` only for algorithmic or research-heavy analysis.
 - After DeepSeek finishes, Codex independently reviews the diff and reruns the relevant checks/build; DeepSeek checklist marks are not accepted as verification.
 
 **Codex does NOT write implementation code.** Codex's role is planning and review only.
