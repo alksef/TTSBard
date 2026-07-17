@@ -44,7 +44,9 @@ opencode.json
 images
 docs/ideas
 docs/images
-docs/reviews
+# Review reports are local artifacts. Keep only the reusable review prompt.
+docs/reviews/*
+!docs/reviews/review-prompt.md
 docs/works
 notes/
 promts/
