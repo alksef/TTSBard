@@ -75,6 +75,107 @@ struct Shared {
     audio_cache: VecDeque<CachedPhrase>,
 }
 
+enum EnqueueState {
+    SendToThread(QueuedPhrase),
+    Queued,
+    Rejected,
+}
+
+impl Shared {
+    fn enqueue_state(&mut self, id: String, text: String, audio: Arc<AudioPcm>) -> EnqueueState {
+        let ts = Utc::now().timestamp();
+        self.audio_cache.retain(|c| c.id != id);
+        self.audio_cache.push_back(CachedPhrase {
+            id: id.clone(),
+            text: text.clone(),
+            audio: Arc::clone(&audio),
+            timestamp: ts,
+        });
+        if self.audio_cache.len() > AUDIO_CACHE_SIZE {
+            self.audio_cache.pop_front();
+        }
+
+        if self.current.is_some()
+            && (self.status == PlaybackStatus::Playing || self.status == PlaybackStatus::Paused)
+        {
+            let already_current = self.current.as_ref().map(|c| c.id == id).unwrap_or(false);
+            if already_current {
+                return EnqueueState::Queued;
+            }
+            let already_queued = self.queue.iter().any(|q| q.id == id);
+            if already_queued {
+                return EnqueueState::Queued;
+            }
+            if self.queue.len() < MAX_QUEUE {
+                self.queue.push_back(QueuedPhrase { id, text, audio });
+                return EnqueueState::Queued;
+            }
+            return EnqueueState::Rejected;
+        }
+
+        let phrase = QueuedPhrase {
+            id: id.clone(),
+            text,
+            audio,
+        };
+        self.current = Some(phrase.clone());
+        EnqueueState::SendToThread(phrase)
+    }
+
+    fn can_pause(&self) -> bool {
+        self.current.is_some()
+    }
+
+    fn can_resume(&self) -> bool {
+        self.current.is_some() && self.status == PlaybackStatus::Paused
+    }
+
+    fn can_stop(&self) -> bool {
+        self.current.is_some()
+    }
+
+    fn can_repeat(&self) -> bool {
+        self.current.is_some()
+    }
+
+    fn finish_inner(&mut self) -> Option<QueuedPhrase> {
+        if let Some(next) = self.queue.pop_front() {
+            self.current = Some(next.clone());
+            Some(next)
+        } else {
+            self.current = None;
+            self.status = PlaybackStatus::Idle;
+            None
+        }
+    }
+
+    fn get_state_dto(&self) -> PlaybackStateDto {
+        PlaybackStateDto {
+            status: self.status.clone(),
+            current: self.current.as_ref().map(|p| p.text.clone()),
+            queue: self.queue.iter().map(|p| p.text.clone()).collect(),
+            recent: self
+                .audio_cache
+                .iter()
+                .rev()
+                .take(5)
+                .map(|c| RecentPhrase {
+                    id: c.id.clone(),
+                    text: c.text.clone(),
+                    timestamp: c.timestamp,
+                })
+                .collect(),
+        }
+    }
+
+    fn find_in_cache(&self, id: &str) -> Option<(String, String, Arc<AudioPcm>)> {
+        self.audio_cache
+            .iter()
+            .find(|c| c.id == id)
+            .map(|c| (c.id.clone(), c.text.clone(), Arc::clone(&c.audio)))
+    }
+}
+
 pub struct PlaybackManager {
     cmd_tx: mpsc::Sender<Cmd>,
     state: Arc<RwLock<Shared>>,
@@ -327,59 +428,22 @@ impl PlaybackManager {
     pub fn enqueue(&self, id: String, text: String, audio: AudioPcm) -> bool {
         let arc_audio = Arc::new(audio);
         let mut s = self.state.write();
-
-        let ts = Utc::now().timestamp();
-        // Дедуп по id: если фраза уже в кеше (например, при replay_from_cache передаётся
-        // тот же id) — обновить, а не добавлять дубликат (иначе replay плодит копии в «Недавних»).
-        // Обычный speak_text каждый раз создаёт новый id → дедуп его не затрагивает.
-        s.audio_cache.retain(|c| c.id != id);
-        s.audio_cache.push_back(CachedPhrase {
-            id: id.clone(),
-            text: text.clone(),
-            audio: Arc::clone(&arc_audio),
-            timestamp: ts,
-        });
-        if s.audio_cache.len() > AUDIO_CACHE_SIZE {
-            s.audio_cache.pop_front();
+        match s.enqueue_state(id, text, arc_audio) {
+            EnqueueState::SendToThread(phrase) => {
+                drop(s);
+                let _ = self.cmd_tx.send(Cmd::Enqueue(phrase));
+                true
+            }
+            EnqueueState::Queued => true,
+            EnqueueState::Rejected => {
+                warn!("Playback queue full ({MAX_QUEUE}), phrase dropped");
+                false
+            }
         }
-
-        if s.current.is_some()
-            && (s.status == PlaybackStatus::Playing || s.status == PlaybackStatus::Paused)
-        {
-            let already_current = s.current.as_ref().map(|c| c.id == id).unwrap_or(false);
-            if already_current {
-                return true;
-            }
-            let already_queued = s.queue.iter().any(|q| q.id == id);
-            if already_queued {
-                return true;
-            }
-            if s.queue.len() < MAX_QUEUE {
-                s.queue.push_back(QueuedPhrase {
-                    id,
-                    text,
-                    audio: arc_audio,
-                });
-                return true;
-            }
-            warn!("Playback queue full ({MAX_QUEUE}), phrase dropped");
-            return false;
-        }
-
-        let phrase = QueuedPhrase {
-            id: id.clone(),
-            text: text.clone(),
-            audio: arc_audio,
-        };
-        s.current = Some(phrase.clone());
-        drop(s);
-
-        let _ = self.cmd_tx.send(Cmd::Enqueue(phrase));
-        true
     }
 
     pub fn pause(&self) -> bool {
-        if self.state.read().current.is_none() {
+        if !self.state.read().can_pause() {
             return false;
         }
         let _ = self.cmd_tx.send(Cmd::Pause);
@@ -387,17 +451,15 @@ impl PlaybackManager {
     }
 
     pub fn resume(&self) -> bool {
-        let s = self.state.read();
-        if s.current.is_none() || s.status != PlaybackStatus::Paused {
+        if !self.state.read().can_resume() {
             return false;
         }
-        drop(s);
         let _ = self.cmd_tx.send(Cmd::Resume);
         true
     }
 
     pub fn stop(&self) -> bool {
-        if self.state.read().current.is_none() {
+        if !self.state.read().can_stop() {
             return false;
         }
         let _ = self.cmd_tx.send(Cmd::Stop);
@@ -405,7 +467,7 @@ impl PlaybackManager {
     }
 
     pub fn repeat(&self) -> bool {
-        if self.state.read().current.is_none() {
+        if !self.state.read().can_repeat() {
             return false;
         }
         let _ = self.cmd_tx.send(Cmd::Repeat);
@@ -413,13 +475,7 @@ impl PlaybackManager {
     }
 
     pub fn replay_from_cache(&self, id: &str) {
-        let replay: Option<(String, String, Arc<AudioPcm>)> = {
-            let s = self.state.read();
-            s.audio_cache
-                .iter()
-                .find(|c| c.id == id)
-                .map(|c| (c.id.clone(), c.text.clone(), Arc::clone(&c.audio)))
-        };
+        let replay = self.state.read().find_in_cache(id);
         if let Some((id, text, audio)) = replay {
             self.enqueue(id, text, (*audio).clone());
         }
@@ -427,38 +483,414 @@ impl PlaybackManager {
 
     pub fn on_playback_finished(&self) {
         let mut s = self.state.write();
-        if let Some(next) = s.queue.pop_front() {
+        if let Some(next) = s.finish_inner() {
             let id = next.id.clone();
             let text = next.text.clone();
-            s.current = Some(next.clone());
             let audio = next.audio.clone();
             drop(s);
             let _ = self
                 .cmd_tx
                 .send(Cmd::Enqueue(QueuedPhrase { id, text, audio }));
-        } else {
-            s.current = None;
-            s.status = PlaybackStatus::Idle;
         }
     }
 
     pub fn get_state(&self) -> PlaybackStateDto {
-        let s = self.state.read();
-        PlaybackStateDto {
-            status: s.status.clone(),
-            current: s.current.as_ref().map(|p| p.text.clone()),
-            queue: s.queue.iter().map(|p| p.text.clone()).collect(),
-            recent: s
-                .audio_cache
-                .iter()
-                .rev()
-                .take(5)
-                .map(|c| RecentPhrase {
-                    id: c.id.clone(),
-                    text: c.text.clone(),
-                    timestamp: c.timestamp,
-                })
-                .collect(),
+        self.state.read().get_state_dto()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dummy_audio() -> AudioPcm {
+        AudioPcm {
+            samples: vec![0.0_f32; 100],
+            sample_rate: 24000,
+            channels: 1,
         }
+    }
+
+    fn make_shared() -> Shared {
+        Shared {
+            status: PlaybackStatus::Idle,
+            current: None,
+            queue: VecDeque::new(),
+            audio_cache: VecDeque::with_capacity(AUDIO_CACHE_SIZE),
+        }
+    }
+
+    fn make_shared_playing() -> Shared {
+        let mut s = Shared {
+            status: PlaybackStatus::Playing,
+            current: Some(QueuedPhrase {
+                id: "current".into(),
+                text: "current text".into(),
+                audio: Arc::new(dummy_audio()),
+            }),
+            queue: VecDeque::new(),
+            audio_cache: VecDeque::with_capacity(AUDIO_CACHE_SIZE),
+        };
+        s.audio_cache.push_back(CachedPhrase {
+            id: "current".into(),
+            text: "current text".into(),
+            audio: Arc::new(dummy_audio()),
+            timestamp: 1000,
+        });
+        s
+    }
+
+    fn make_shared_paused() -> Shared {
+        let mut s = Shared {
+            status: PlaybackStatus::Paused,
+            current: Some(QueuedPhrase {
+                id: "paused_id".into(),
+                text: "paused text".into(),
+                audio: Arc::new(dummy_audio()),
+            }),
+            queue: VecDeque::new(),
+            audio_cache: VecDeque::with_capacity(AUDIO_CACHE_SIZE),
+        };
+        s.audio_cache.push_back(CachedPhrase {
+            id: "paused_id".into(),
+            text: "paused text".into(),
+            audio: Arc::new(dummy_audio()),
+            timestamp: 2000,
+        });
+        s
+    }
+
+    // ── enqueue_state ──
+
+    #[test]
+    fn enqueue_sets_current_when_idle() {
+        let mut s = make_shared();
+        let audio = Arc::new(dummy_audio());
+        match s.enqueue_state("id1".into(), "hello".into(), Arc::clone(&audio)) {
+            EnqueueState::SendToThread(p) => {
+                assert_eq!(p.id, "id1");
+                assert_eq!(p.text, "hello");
+            }
+            _ => panic!("expected SendToThread"),
+        }
+        assert_eq!(s.current.as_ref().unwrap().id, "id1");
+    }
+
+    #[test]
+    fn enqueue_queues_when_playing() {
+        let mut s = make_shared_playing();
+        let audio = Arc::new(dummy_audio());
+        match s.enqueue_state("new_id".into(), "new text".into(), audio) {
+            EnqueueState::Queued => {}
+            _ => panic!("expected Queued"),
+        }
+        assert_eq!(s.queue.len(), 1);
+        assert_eq!(s.queue[0].id, "new_id");
+        assert_eq!(s.current.as_ref().unwrap().id, "current");
+    }
+
+    #[test]
+    fn enqueue_queues_when_paused() {
+        let mut s = make_shared_paused();
+        let audio = Arc::new(dummy_audio());
+        match s.enqueue_state("new_id".into(), "new text".into(), audio) {
+            EnqueueState::Queued => {}
+            _ => panic!("expected Queued"),
+        }
+        assert_eq!(s.queue.len(), 1);
+    }
+
+    #[test]
+    fn enqueue_dedup_current_id() {
+        let mut s = make_shared_playing();
+        let audio = Arc::new(dummy_audio());
+        match s.enqueue_state("current".into(), "current text".into(), audio) {
+            EnqueueState::Queued => {}
+            _ => panic!("expected Queued"),
+        }
+        assert!(s.queue.is_empty());
+    }
+
+    #[test]
+    fn enqueue_dedup_already_queued() {
+        let mut s = make_shared_playing();
+        s.queue.push_back(QueuedPhrase {
+            id: "queued".into(),
+            text: "queued text".into(),
+            audio: Arc::new(dummy_audio()),
+        });
+        let audio = Arc::new(dummy_audio());
+        match s.enqueue_state("queued".into(), "queued text".into(), audio) {
+            EnqueueState::Queued => {}
+            _ => panic!("expected Queued"),
+        }
+        assert_eq!(s.queue.len(), 1);
+    }
+
+    #[test]
+    fn enqueue_queue_limit() {
+        let mut s = make_shared_playing();
+        for i in 0..MAX_QUEUE {
+            s.queue.push_back(QueuedPhrase {
+                id: format!("q{i}"),
+                text: format!("text{i}"),
+                audio: Arc::new(dummy_audio()),
+            });
+        }
+        let audio = Arc::new(dummy_audio());
+        match s.enqueue_state("over".into(), "over text".into(), audio) {
+            EnqueueState::Rejected => {}
+            _ => panic!("expected Rejected"),
+        }
+        assert_eq!(s.queue.len(), MAX_QUEUE);
+    }
+
+    #[test]
+    fn enqueue_queue_fifo_order() {
+        let mut s = make_shared_playing();
+        for i in 0..3 {
+            let audio = Arc::new(dummy_audio());
+            s.enqueue_state(format!("id{i}"), format!("text{i}"), audio);
+        }
+        assert_eq!(s.queue.len(), 3);
+        assert_eq!(s.queue[0].id, "id0");
+        assert_eq!(s.queue[1].id, "id1");
+        assert_eq!(s.queue[2].id, "id2");
+    }
+
+    // ── cache ──
+
+    #[test]
+    fn cache_eviction() {
+        let mut s = make_shared();
+        for i in 0..(AUDIO_CACHE_SIZE + 5) {
+            let audio = Arc::new(dummy_audio());
+            s.enqueue_state(format!("id{i}"), format!("text{i}"), audio);
+        }
+        assert_eq!(s.audio_cache.len(), AUDIO_CACHE_SIZE);
+        assert_eq!(s.audio_cache[0].id, "id5");
+        assert_eq!(
+            s.audio_cache[AUDIO_CACHE_SIZE - 1].id,
+            format!("id{}", AUDIO_CACHE_SIZE + 4)
+        );
+    }
+
+    #[test]
+    fn cache_dedup_refreshes_position() {
+        let mut s = make_shared();
+        {
+            let audio = Arc::new(dummy_audio());
+            s.enqueue_state("id1".into(), "text1".into(), audio);
+        }
+        for i in 0..5 {
+            let audio = Arc::new(dummy_audio());
+            s.enqueue_state(format!("fill{i}"), format!("text{i}"), audio);
+        }
+        {
+            let audio = Arc::new(dummy_audio());
+            s.enqueue_state("id1".into(), "text1".into(), audio);
+        }
+        assert_eq!(s.audio_cache.back().unwrap().id, "id1");
+        let count = s.audio_cache.iter().filter(|c| c.id == "id1").count();
+        assert_eq!(count, 1);
+    }
+
+    // ── finish_inner ──
+
+    #[test]
+    fn finish_inner_pops_next_from_queue() {
+        let mut s = make_shared_playing();
+        s.queue.push_back(QueuedPhrase {
+            id: "next".into(),
+            text: "next text".into(),
+            audio: Arc::new(dummy_audio()),
+        });
+        let result = s.finish_inner();
+        assert!(result.is_some());
+        let next = result.unwrap();
+        assert_eq!(next.id, "next");
+        assert_eq!(s.current.as_ref().unwrap().id, "next");
+        assert!(s.queue.is_empty());
+    }
+
+    #[test]
+    fn finish_inner_empty_queue_goes_idle() {
+        let mut s = make_shared_playing();
+        let result = s.finish_inner();
+        assert!(result.is_none());
+        assert!(s.current.is_none());
+        assert_eq!(s.status, PlaybackStatus::Idle);
+    }
+
+    #[test]
+    fn finish_inner_multiple_preserves_order() {
+        let mut s = make_shared_playing();
+        for i in 0..3 {
+            s.queue.push_back(QueuedPhrase {
+                id: format!("q{i}"),
+                text: format!("text{i}"),
+                audio: Arc::new(dummy_audio()),
+            });
+        }
+        let r1 = s.finish_inner().unwrap();
+        assert_eq!(r1.id, "q0");
+        assert_eq!(s.current.as_ref().unwrap().id, "q0");
+
+        let r2 = s.finish_inner().unwrap();
+        assert_eq!(r2.id, "q1");
+
+        let r3 = s.finish_inner().unwrap();
+        assert_eq!(r3.id, "q2");
+
+        let r4 = s.finish_inner();
+        assert!(r4.is_none());
+        assert!(s.current.is_none());
+        assert_eq!(s.status, PlaybackStatus::Idle);
+    }
+
+    // ── get_state_dto ──
+
+    #[test]
+    fn get_state_dto_idle() {
+        let s = make_shared();
+        let dto = s.get_state_dto();
+        assert_eq!(dto.status, PlaybackStatus::Idle);
+        assert!(dto.current.is_none());
+        assert!(dto.queue.is_empty());
+        assert!(dto.recent.is_empty());
+    }
+
+    #[test]
+    fn get_state_dto_playing() {
+        let s = make_shared_playing();
+        let dto = s.get_state_dto();
+        assert_eq!(dto.status, PlaybackStatus::Playing);
+        assert_eq!(dto.current.as_deref(), Some("current text"));
+        assert!(dto.queue.is_empty());
+    }
+
+    #[test]
+    fn get_state_dto_with_queue() {
+        let mut s = make_shared_playing();
+        s.queue.push_back(QueuedPhrase {
+            id: "q1".into(),
+            text: "first".into(),
+            audio: Arc::new(dummy_audio()),
+        });
+        s.queue.push_back(QueuedPhrase {
+            id: "q2".into(),
+            text: "second".into(),
+            audio: Arc::new(dummy_audio()),
+        });
+        let dto = s.get_state_dto();
+        assert_eq!(dto.queue, vec!["first", "second"]);
+    }
+
+    #[test]
+    fn get_state_dto_recent_last_5_reversed() {
+        let mut s = make_shared();
+        for i in 0..10 {
+            s.audio_cache.push_back(CachedPhrase {
+                id: format!("c{i}"),
+                text: format!("cache{i}"),
+                audio: Arc::new(dummy_audio()),
+                timestamp: (1000 + i) as i64,
+            });
+        }
+        let dto = s.get_state_dto();
+        assert_eq!(dto.recent.len(), 5);
+        assert_eq!(dto.recent[0].id, "c9");
+        assert_eq!(dto.recent[1].id, "c8");
+        assert_eq!(dto.recent[4].id, "c5");
+    }
+
+    #[test]
+    fn get_state_dto_recent_less_than_5() {
+        let mut s = make_shared();
+        s.audio_cache.push_back(CachedPhrase {
+            id: "only".into(),
+            text: "only text".into(),
+            audio: Arc::new(dummy_audio()),
+            timestamp: 42,
+        });
+        let dto = s.get_state_dto();
+        assert_eq!(dto.recent.len(), 1);
+        assert_eq!(dto.recent[0].id, "only");
+        assert_eq!(dto.recent[0].timestamp, 42);
+    }
+
+    // ── guards ──
+
+    #[test]
+    fn can_pause_no_current() {
+        assert!(!make_shared().can_pause());
+    }
+
+    #[test]
+    fn can_pause_with_current() {
+        assert!(make_shared_playing().can_pause());
+    }
+
+    #[test]
+    fn can_pause_when_paused() {
+        assert!(make_shared_paused().can_pause());
+    }
+
+    #[test]
+    fn can_resume_no_current() {
+        assert!(!make_shared().can_resume());
+    }
+
+    #[test]
+    fn can_resume_playing() {
+        assert!(!make_shared_playing().can_resume());
+    }
+
+    #[test]
+    fn can_resume_paused() {
+        assert!(make_shared_paused().can_resume());
+    }
+
+    #[test]
+    fn can_stop_no_current() {
+        assert!(!make_shared().can_stop());
+    }
+
+    #[test]
+    fn can_stop_with_current() {
+        assert!(make_shared_playing().can_stop());
+    }
+
+    #[test]
+    fn can_repeat_no_current() {
+        assert!(!make_shared().can_repeat());
+    }
+
+    #[test]
+    fn can_repeat_with_current() {
+        assert!(make_shared_playing().can_repeat());
+    }
+
+    // ── find_in_cache ──
+
+    #[test]
+    fn find_in_cache_returns_item() {
+        let mut s = make_shared();
+        s.audio_cache.push_back(CachedPhrase {
+            id: "find_me".into(),
+            text: "found text".into(),
+            audio: Arc::new(dummy_audio()),
+            timestamp: 999,
+        });
+        let result = s.find_in_cache("find_me");
+        assert!(result.is_some());
+        let (id, text, _audio) = result.unwrap();
+        assert_eq!(id, "find_me");
+        assert_eq!(text, "found text");
+    }
+
+    #[test]
+    fn find_in_cache_missing_returns_none() {
+        assert!(make_shared().find_in_cache("nonexistent").is_none());
     }
 }
