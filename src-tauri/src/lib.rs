@@ -43,8 +43,8 @@ use commands::logging::{get_logging_settings, save_logging_settings};
 use commands::playback_window::{pc_get_appearance, pc_set_bg_color, pc_set_opacity};
 use commands::telegram::TelegramState;
 use commands::telegram::{
-    telegram_auto_restore, telegram_get_status, telegram_get_user, telegram_init,
-    telegram_request_code, telegram_sign_in, telegram_sign_out,
+    telegram_auto_restore, telegram_check_password, telegram_disconnect, telegram_get_status,
+    telegram_get_user, telegram_init, telegram_request_code, telegram_sign_in, telegram_sign_out,
 };
 use commands::{
     apply_openai_proxy_settings, close_soundpanel_window, disable_virtual_mic, enable_virtual_mic,
@@ -69,7 +69,7 @@ use commands::{
     set_virtual_mic_device, set_virtual_mic_volume, speak_text, speak_text_raw_export,
     stop_preview, test_audio_device, toggle_interception, toggle_playback_control_window,
     unregister_hotkeys, update_theme, window::remove_main_bounds, window::resize_main_window,
-    window::set_main_bounds,
+    window::return_to_previous_window, window::set_main_bounds,
 };
 use config::{SettingsManager, WindowsManager};
 use soundpanel::{
@@ -406,6 +406,8 @@ pub fn run() {
             telegram_init,
             telegram_request_code,
             telegram_sign_in,
+            telegram_check_password,
+            telegram_disconnect,
             telegram_sign_out,
             telegram_get_status,
             telegram_get_user,
@@ -529,6 +531,7 @@ pub fn run() {
             set_main_opacity_compact_only,
             set_main_compact_dims,
             get_main_compact_dims,
+            return_to_previous_window,
             get_soundpanel_appearance_source,
             set_soundpanel_appearance_source,
             get_playback_appearance_source,

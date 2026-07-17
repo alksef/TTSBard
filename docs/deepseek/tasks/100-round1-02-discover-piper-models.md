@@ -10,7 +10,7 @@ or register dynamic providers yet.
 
 The architecture is documented in:
 
-- `docs/stage/36-dynamic-piper-tts-providers.md`
+- `docs/stage/38-dynamic-piper-tts-providers.md`
 - `docs/deepseek/plan/100-2026-07-15-dynamic-piper-providers.md`
 
 The application is Windows-only. Models belong in:

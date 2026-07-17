@@ -25,7 +25,6 @@ dist-ssr
 
 # Rust / Tauri
 src-tauri/target
-Cargo.lock
 
 # Temporary files
 nul

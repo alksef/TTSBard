@@ -37,6 +37,7 @@ pub struct HotkeySettings {
     pub playback_stop: Hotkey,
     pub playback_repeat: Hotkey,
     pub playback_control_window: Hotkey,
+    pub return_previous_window: Hotkey,
 }
 
 impl Default for HotkeySettings {
@@ -48,6 +49,7 @@ impl Default for HotkeySettings {
             playback_stop: Hotkey::default_playback_stop(),
             playback_repeat: Hotkey::default_playback_repeat(),
             playback_control_window: Hotkey::default_playback_control_window(),
+            return_previous_window: Hotkey::default_return_previous_window(),
         }
     }
 }
@@ -90,6 +92,14 @@ impl Hotkey {
         Self {
             modifiers: vec![HotkeyModifier::Ctrl, HotkeyModifier::Shift],
             key: "F6".to_string(),
+        }
+    }
+
+    /// Create a hotkey with Ctrl+F (return to previous window default)
+    pub fn default_return_previous_window() -> Self {
+        Self {
+            modifiers: vec![HotkeyModifier::Ctrl],
+            key: "F".to_string(),
         }
     }
 
@@ -271,5 +281,21 @@ mod tests {
         assert_eq!(settings.playback_pause.key, "F4");
         assert_eq!(settings.playback_stop.key, "F5");
         assert_eq!(settings.playback_repeat.key, "F6");
+        // Недостающее поле return_previous_window берётся из Default.
+        assert_eq!(settings.return_previous_window.key, "F");
+        assert_eq!(settings.return_previous_window.modifiers.len(), 1);
+        assert_eq!(
+            settings.return_previous_window.modifiers[0],
+            HotkeyModifier::Ctrl
+        );
+    }
+
+    #[test]
+    fn test_default_return_previous_window() {
+        let hotkey = Hotkey::default_return_previous_window();
+        assert_eq!(hotkey.key, "F");
+        assert_eq!(hotkey.modifiers.len(), 1);
+        assert_eq!(hotkey.modifiers[0], HotkeyModifier::Ctrl);
+        assert_eq!(hotkey.format_display(), "Ctrl+F");
     }
 }

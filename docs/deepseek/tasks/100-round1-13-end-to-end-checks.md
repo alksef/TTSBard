@@ -10,7 +10,7 @@ without Windows packaging or a GUI build.
 - `src-tauri/src/tts/registry.rs`
 - `src-tauri/src/tts/piper/scanner.rs`
 - `src-tauri/src/config/settings.rs`
-- `docs/stage/36-dynamic-piper-tts-providers.md`
+- `docs/stage/38-dynamic-piper-tts-providers.md`
 - `docs/deepseek/plan/100-2026-07-15-dynamic-piper-providers.md`
 
 ## Requirements

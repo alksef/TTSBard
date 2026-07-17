@@ -24,6 +24,7 @@ export interface HotkeySettingsDto {
   playback_stop: HotkeyDto
   playback_repeat: HotkeyDto
   playback_control_window: HotkeyDto
+  return_previous_window: HotkeyDto
 }
 
 // ============================================================================
@@ -309,8 +310,10 @@ export interface PreprocessorSettingsDto {
 // Editor Settings Types
 // ============================================================================
 
+export type QuickEditorMode = 'disabled' | 'collapse' | 'return_focus'
+
 export interface EditorSettingsDto {
-  quick: boolean
+  quick: QuickEditorMode
   ai: boolean
   ai_completion: boolean
   spellcheck_enabled: boolean

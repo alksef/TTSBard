@@ -87,7 +87,7 @@ async function toggleMinimalMode() {
   padding-bottom: 0.25rem;
   padding-right: 0.25rem;
   transition: background 0.2s ease, color 0.2s ease;
-  z-index: 10000;
+  z-index: 100;
   clip-path: polygon(100% 0, 0 100%, 100% 100%);
 }
 

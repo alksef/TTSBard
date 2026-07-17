@@ -1,4 +1,4 @@
-# Stage 37 — Feasibility встроенного Piper runtime
+# Stage 39 — Feasibility встроенного Piper runtime
 
 **Дата:** 2026-07-15  
 **Статус:** Техническая возможность подтверждена; лицензирование phonemizer требует решения

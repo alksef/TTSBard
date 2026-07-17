@@ -2,7 +2,7 @@
 
 **Дата:** 2026-07-15  
 **Тип:** feature / backend + settings + UI  
-**Источник:** `docs/stage/36-dynamic-piper-tts-providers.md`
+**Источник:** `docs/stage/38-dynamic-piper-tts-providers.md`
 
 ## Цель
 

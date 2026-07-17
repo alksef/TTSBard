@@ -23,11 +23,14 @@ const {
   isConnected,
   isLoading,
   needsCode,
+  needsPassword,
   hasError,
   canInit,
   requestCode,
   signIn,
+  checkPassword,
   signOut,
+  cancelConnection,
   reset,
 } = telegramAuth
 
@@ -39,19 +42,30 @@ const credentials = ref<TelegramCredentials>({
 })
 
 const code = ref('')
+const password = ref('')
+const showPassword = ref(false)
+const showPhone = ref(false)
+const showApiId = ref(false)
 const showApiHash = ref(false)
 
 // Watch for modal open to init status
 watch(() => props.modelValue, async (isOpen) => {
   if (isOpen) {
     await reset()
-    // Reset form
     credentials.value = { phone: '', api_id: '', api_hash: '' }
     code.value = ''
+    password.value = ''
   }
 })
 
-function close() {
+async function close() {
+  password.value = ''
+  showPassword.value = false
+
+  if (state.value !== 'connected' && state.value !== 'idle') {
+    await cancelConnection()
+  }
+
   emit('update:modelValue', false)
 }
 
@@ -88,11 +102,24 @@ async function handleSignIn() {
   }
 }
 
+async function handleCheckPassword() {
+  if (!password.value.trim()) {
+    errorMessage.value = 'Введите пароль 2FA'
+    return
+  }
+
+  const success = await checkPassword(password.value)
+  password.value = ''
+  if (success) {
+    close()
+  }
+}
+
 async function handleRetry() {
-  // Clear error and reset to initial state
   reset()
   credentials.value = { phone: '', api_id: '', api_hash: '' }
   code.value = ''
+  password.value = ''
 }
 
 async function handleDisableAndClose() {
@@ -110,7 +137,7 @@ async function handleSignOut() {
 </script>
 
 <template>
-  <div v-if="modelValue" class="modal-overlay" @click.self="close">
+  <div v-if="modelValue" class="modal-overlay">
     <div class="modal-container">
       <!-- Header -->
       <div class="modal-header">
@@ -142,26 +169,48 @@ async function handleSignOut() {
 
           <div class="form-group">
             <label for="phone">Номер телефона</label>
-            <input
-              id="phone"
-              v-model="credentials.phone"
-              type="tel"
-              placeholder="+79991234567"
-              :disabled="isLoading"
-              @keypress.enter="handleRequestCode"
-            />
+            <div class="input-with-toggle">
+              <input
+                id="phone"
+                v-model="credentials.phone"
+                :type="showPhone ? 'tel' : 'password'"
+                placeholder="+79991234567"
+                :disabled="isLoading"
+                @keypress.enter="handleRequestCode"
+              />
+              <button
+                type="button"
+                class="toggle-button"
+                @click="showPhone = !showPhone"
+                :title="showPhone ? 'Скрыть' : 'Показать'"
+              >
+                <Eye v-if="!showPhone" :size="16" />
+                <EyeOff v-else :size="16" />
+              </button>
+            </div>
           </div>
 
-          <div class="form-group">
+          <div class="form-group password-group">
             <label for="api_id">API ID</label>
-            <input
-              id="api_id"
-              v-model="credentials.api_id"
-              type="text"
-              placeholder="12345678"
-              :disabled="isLoading"
-              @keypress.enter="handleRequestCode"
-            />
+            <div class="input-with-toggle">
+              <input
+                id="api_id"
+                v-model="credentials.api_id"
+                :type="showApiId ? 'text' : 'password'"
+                placeholder="12345678"
+                :disabled="isLoading"
+                @keypress.enter="handleRequestCode"
+              />
+              <button
+                type="button"
+                class="toggle-button"
+                @click="showApiId = !showApiId"
+                :title="showApiId ? 'Скрыть' : 'Показать'"
+              >
+                <Eye v-if="!showApiId" :size="16" />
+                <EyeOff v-else :size="16" />
+              </button>
+            </div>
           </div>
 
           <div class="form-group password-group">
@@ -200,7 +249,6 @@ async function handleSignOut() {
         <div v-else-if="needsCode" class="auth-form">
           <div class="form-info">
             <p>Введите код подтверждения, который пришел в Telegram.</p>
-            <p class="phone-display">На номер: {{ credentials.phone }}</p>
           </div>
 
           <div class="form-group">
@@ -225,6 +273,49 @@ async function handleSignOut() {
           </button>
 
           <button class="back-button" :disabled="isLoading" @click="reset">
+            Назад
+          </button>
+        </div>
+
+        <!-- State 2.5: Enter 2FA Password -->
+        <div v-else-if="needsPassword" class="auth-form">
+          <div class="form-info">
+            <p>Введите пароль двухфакторной аутентификации, установленный в настройках Telegram.</p>
+          </div>
+
+          <div class="form-group password-group">
+            <label for="tg-password">Пароль 2FA</label>
+            <div class="input-with-toggle">
+              <input
+                id="tg-password"
+                v-model="password"
+                :type="showPassword ? 'text' : 'password'"
+                placeholder="Ваш пароль 2FA"
+                :disabled="isLoading"
+                @keypress.enter="handleCheckPassword"
+                autofocus
+              />
+              <button
+                type="button"
+                class="toggle-button"
+                @click="showPassword = !showPassword"
+                :title="showPassword ? 'Скрыть' : 'Показать'"
+              >
+                <Eye v-if="!showPassword" :size="16" />
+                <EyeOff v-else :size="16" />
+              </button>
+            </div>
+          </div>
+
+          <button
+            class="submit-button"
+            :disabled="isLoading"
+            @click="handleCheckPassword"
+          >
+            {{ isLoading ? 'Проверка...' : 'Подтвердить' }}
+          </button>
+
+          <button class="back-button" :disabled="isLoading" @click="handleRetry">
             Назад
           </button>
         </div>
@@ -447,6 +538,11 @@ async function handleSignOut() {
 
 .form-group input::placeholder {
   color: var(--color-text-muted);
+}
+
+/* Use the app's visibility toggle instead of WebView2's native reveal icon. */
+.form-group input[type='password']::-ms-reveal {
+  display: none;
 }
 
 /* Override browser autofill styles */

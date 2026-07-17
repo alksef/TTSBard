@@ -18,14 +18,14 @@ The target distribution is one `ttsbard.exe`:
 Static linking of the native inference/runtime dependencies is required. If the
 chosen implementation cannot satisfy this constraint, stop before adding a
 dependency and write a short feasibility report to
-`docs/stage/37-piper-runtime-feasibility.md` instead of weakening the
+`docs/stage/39-piper-runtime-feasibility.md` instead of weakening the
 architecture silently.
 
 ## Context
 
 Read first:
 
-- `docs/stage/36-dynamic-piper-tts-providers.md`
+- `docs/stage/38-dynamic-piper-tts-providers.md`
 - `docs/deepseek/plan/100-2026-07-15-dynamic-piper-providers.md`
 - `src-tauri/src/tts/engine.rs`
 - `src-tauri/src/tts/mod.rs`

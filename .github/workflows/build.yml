@@ -32,6 +32,11 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -58,6 +63,18 @@ jobs:
 
       - name: Set version
         run: node scripts/set-version.cjs "${{ steps.get_version.outputs.VERSION }}" "${{ github.sha }}"
+
+      - name: Verify native build tools
+        shell: pwsh
+        run: |
+          cmake --version
+          $libclang = @(
+            'C:\Program Files\LLVM\bin\libclang.dll',
+            'C:\Program Files\Microsoft Visual Studio\*\*\VC\Tools\Llvm\x64\bin\libclang.dll'
+          ) | ForEach-Object { Get-ChildItem $_ -ErrorAction SilentlyContinue } | Select-Object -First 1
+          if (-not $libclang) { throw 'libclang.dll not found for espeak-rs-sys bindgen' }
+          "LIBCLANG_PATH=$($libclang.DirectoryName)" >> $env:GITHUB_ENV
+          Write-Host "Using $($libclang.FullName)"
 
       - name: Build application
         run: npm run tauri build -- --target ${{ matrix.target }}
@@ -102,7 +119,6 @@ jobs:
           files: |
             artifacts/**/*.exe
             artifacts/**/*.zip
-            artifacts/**/*.msi
           draft: false
           prerelease: false
         env:

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, provide, computed } from 'vue'
+import { ref, onMounted, onUnmounted, watch, provide, computed } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { invoke } from '@tauri-apps/api/core'
 import Sidebar from './components/Sidebar.vue'
 import InputPanel from './components/InputPanel.vue'
 import TtsPanel from './components/TtsPanel.vue'
@@ -145,6 +146,40 @@ watch(() => appSettings.settings.value?.general?.theme, (newTheme, oldTheme) => 
   debugLog('[App] Theme applied:', document.documentElement.getAttribute('data-theme'))
 }, { immediate: true })
 
+function keyToCode(key: string): string {
+  if (key === 'SPACE') return 'Space'
+  if (/^F\d+$/.test(key)) return key
+  if (/^[A-Z]$/.test(key)) return `Key${key}`
+  if (/^[0-9]$/.test(key)) return `Digit${key}`
+  return key
+}
+
+function modifiersMatch(event: KeyboardEvent, hotkeyModifiers: string[]): boolean {
+  if (hotkeyModifiers.includes('ctrl') !== event.ctrlKey) return false
+  if (hotkeyModifiers.includes('shift') !== event.shiftKey) return false
+  if (hotkeyModifiers.includes('alt') !== event.altKey) return false
+  if (hotkeyModifiers.includes('super') !== event.metaKey) return false
+  // Ensure no extra modifiers are pressed
+  const expectedCount = hotkeyModifiers.length
+  let actualCount = 0
+  if (event.ctrlKey) actualCount++
+  if (event.shiftKey) actualCount++
+  if (event.altKey) actualCount++
+  if (event.metaKey) actualCount++
+  return expectedCount === actualCount
+}
+
+function handleReturnFocusKeydown(event: KeyboardEvent) {
+  const hotkey = appSettings.settings.value?.hotkeys?.return_previous_window
+  if (!hotkey || !hotkey.key) return
+
+  const expectedCode = keyToCode(hotkey.key)
+  if (event.code === expectedCode && modifiersMatch(event, hotkey.modifiers)) {
+    event.preventDefault()
+    invoke('return_to_previous_window').catch(() => {})
+  }
+}
+
 // Initialize Telegram session on app start
 onMounted(async () => {
   debugLog('[App] 🚀 App mounted')
@@ -157,11 +192,17 @@ onMounted(async () => {
     savedThemeInSettings: appSettings.settings.value?.general?.theme
   })
 
+  document.addEventListener('keydown', handleReturnFocusKeydown)
+
   try {
     await telegramAuth.init()
   } catch (error) {
     debugLog('[APP] Telegram auto-init failed or no session:', error)
   }
+})
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleReturnFocusKeydown)
 })
 </script>
 

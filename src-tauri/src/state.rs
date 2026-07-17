@@ -133,6 +133,9 @@ pub struct AppState {
 
     /// Токен отмены для всех фоновых серверов
     pub shutdown: CancellationToken,
+
+    /// Сохранённый HWND внешнего окна, бывшего на переднем плане перед активацией TTSBard
+    pub previous_foreground_hwnd: Arc<Mutex<Option<isize>>>,
 }
 
 impl AppState {
@@ -176,6 +179,7 @@ impl AppState {
             settings_cache: Arc::new(RwLock::new(Default::default())),
             soundpanel_hook: Arc::new(Mutex::new(None)),
             shutdown: CancellationToken::new(),
+            previous_foreground_hwnd: Arc::new(Mutex::new(None)),
         }
     }
 
