@@ -70,17 +70,20 @@ if ($Mode -eq 'debug') {
 # --- Проверка libclang (нужен для espeak-rs-sys / bindgen) --------------------
 Write-Step "Checking libclang for bindgen..."
 
-# 1. Если LIBCLANG_PATH уже задан пользователем — проверить наличие libclang.dll
+# 1. Если LIBCLANG_PATH уже задан пользователем — проверить наличие libclang.dll.
+# Устаревшее значение не должно мешать автопоиску в D:\LLVM и типовых путях.
+$libclangDir = $null
 if ($env:LIBCLANG_PATH) {
     $envLibclangPath = Join-Path $env:LIBCLANG_PATH 'libclang.dll'
     if (Test-Path $envLibclangPath -PathType Leaf) {
+        $libclangDir = $env:LIBCLANG_PATH
         Write-Ok "LIBCLANG_PATH = $($env:LIBCLANG_PATH) (libclang.dll найден в окружении)"
     } else {
         Write-WarnLine "LIBCLANG_PATH задан ($($env:LIBCLANG_PATH)), но libclang.dll не найден в этом каталоге."
-        Write-Err "Проверьте переменную LIBCLANG_PATH: файл libclang.dll должен лежать в указанном каталоге."
-        exit 1
     }
-} else {
+}
+
+if (-not $libclangDir) {
     # 2. Автопоиск libclang.dll в типовых каталогах LLVM
     $candidatePaths = @(
         'D:\LLVM\bin',
@@ -89,7 +92,6 @@ if ($env:LIBCLANG_PATH) {
         "$env:LOCALAPPDATA\Programs\LLVM\bin"
     )
 
-    $libclangDir = $null
     foreach ($dir in $candidatePaths) {
         $dllPath = Join-Path $dir 'libclang.dll'
         if (Test-Path $dllPath -PathType Leaf) {
