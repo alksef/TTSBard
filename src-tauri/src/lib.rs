@@ -441,6 +441,7 @@ pub fn run() {
             commands::webview::regenerate_webview_token,
             commands::webview::set_webview_upnp_enabled,
             commands::webview::get_webview_upnp_enabled,
+            commands::webview::set_webview_typing,
             commands::webview::get_external_ip,
             // Twitch commands
             commands::twitch::get_twitch_settings,

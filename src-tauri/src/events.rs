@@ -65,8 +65,17 @@ pub enum AppEvent {
     PlaybackStopped,
     /// Очередь изменилась
     QueueChanged,
+    /// WebView typing state changed (service-owned, routed to WebView server)
+    WebViewTypingChanged(bool),
     /// Завершение работы приложения
     Quit,
+}
+
+/// Typed WebView SSE broadcast payload
+#[derive(Debug, Clone)]
+pub enum WebViewSseEvent {
+    Text(String),
+    Typing(bool),
 }
 
 /// События для управления Twitch клиентом
@@ -125,6 +134,7 @@ impl AppEvent {
             AppEvent::RestartWebViewServer => "restart-webview-server",
             AppEvent::ReloadWebViewTemplates => "reload-webview-templates",
             AppEvent::ToggleUpnp(_) => "toggle-upnp",
+            AppEvent::WebViewTypingChanged(_) => "webview-typing-changed",
             AppEvent::TwitchStatusChanged(_) => "twitch-status-changed",
             AppEvent::PlaybackStarted { .. } => "playback-started",
             AppEvent::PlaybackFinished => "playback-finished",

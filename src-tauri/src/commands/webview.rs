@@ -330,6 +330,15 @@ pub async fn get_webview_upnp_enabled(state: State<'_, AppState>) -> Result<bool
     Ok(state.webview.settings.read().await.upnp_enabled)
 }
 
+/// Forward typing state to WebView SSE (consumer adapter for the editor typing burst)
+#[tauri::command]
+pub async fn set_webview_typing(typing: bool, state: State<'_, AppState>) -> Result<(), String> {
+    state
+        .webview
+        .send_event(crate::events::AppEvent::WebViewTypingChanged(typing));
+    Ok(())
+}
+
 /// Get external/public IP address with fallback
 #[tauri::command]
 pub async fn get_external_ip() -> Result<String, String> {

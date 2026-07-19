@@ -3,6 +3,7 @@ use super::{
     templates::{default_css, default_html},
     WebViewSettings,
 };
+use crate::events::WebViewSseEvent;
 use crate::webview::security::{is_local_network, validate_token};
 use axum::{
     extract::{ConnectInfo, Query, State},
@@ -18,7 +19,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 
-pub type SseSender = broadcast::Sender<String>;
+pub type SseSender = broadcast::Sender<WebViewSseEvent>;
 
 const AUTH_COOKIE_NAME: &str = "webview_auth";
 
@@ -208,9 +209,11 @@ impl WebViewServer {
     }
 
     pub async fn broadcast_text(&self, text: &str) {
-        if let Err(e) = self.sse_tx.send(text.to_string()) {
-            tracing::debug!(error = %e, "Failed to broadcast (no receivers)");
-        }
+        let _ = self.sse_tx.send(WebViewSseEvent::Text(text.to_string()));
+    }
+
+    pub async fn broadcast_typing(&self, typing: bool) {
+        let _ = self.sse_tx.send(WebViewSseEvent::Typing(typing));
     }
 
     /// Stop the server and clean up resources (including UPnP)
@@ -241,6 +244,21 @@ impl WebViewServer {
 #[derive(Deserialize)]
 struct AuthQuery {
     token: Option<String>,
+}
+
+/// Maps a `WebViewSseEvent` to an Axum `Event` for SSE serialization.
+/// This is the single source of truth for wire format used by both `sse_handler` and tests.
+fn to_sse_event(event: &WebViewSseEvent) -> Event {
+    match event {
+        WebViewSseEvent::Text(text) => {
+            let json = serde_json::json!({"text": text}).to_string();
+            Event::default().data(json)
+        }
+        WebViewSseEvent::Typing(typing) => {
+            let json = serde_json::json!({"typing": typing}).to_string();
+            Event::default().event("typing").data(json)
+        }
+    }
 }
 
 // Helper function to extract cookie from headers
@@ -309,10 +327,7 @@ async fn sse_handler(
 
     let stream = futures::stream::unfold(rx, move |mut rx| async move {
         match rx.recv().await {
-            Ok(text) => {
-                let json = serde_json::json!({"text": text}).to_string();
-                Some((Ok(Event::default().data(json)), rx))
-            }
+            Ok(sse_event) => Some((Ok(to_sse_event(&sse_event)), rx)),
             Err(_) => None,
         }
     });
@@ -388,11 +403,12 @@ async fn index(
 mod tests {
     use super::*;
     use axum::{
-        body::Body,
+        body::{to_bytes, Body},
         http::{Request, StatusCode},
         routing::get,
         Router,
     };
+    use std::convert::Infallible;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use tower::ServiceExt;
 
@@ -412,6 +428,57 @@ mod tests {
             .route("/auth", get(auth_handler))
             .route("/sse", get(sse_handler))
             .with_state(state)
+    }
+
+    #[tokio::test]
+    async fn test_to_sse_event_text_produces_exact_wire_format() {
+        let sse_event = WebViewSseEvent::Text("hello".to_string());
+        let event = to_sse_event(&sse_event);
+        let sse = Sse::new(futures::stream::once(
+            async move { Ok::<_, Infallible>(event) },
+        ));
+        let body = to_bytes(sse.into_response().into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let wire = String::from_utf8(body.to_vec()).unwrap();
+        assert_eq!(
+            wire, "data: {\"text\":\"hello\"}\n\n",
+            "text SSE must be unnamed with exact Axum spacing"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_to_sse_event_typing_true_produces_exact_wire_format() {
+        let sse_event = WebViewSseEvent::Typing(true);
+        let event = to_sse_event(&sse_event);
+        let sse = Sse::new(futures::stream::once(
+            async move { Ok::<_, Infallible>(event) },
+        ));
+        let body = to_bytes(sse.into_response().into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let wire = String::from_utf8(body.to_vec()).unwrap();
+        assert_eq!(
+            wire, "event: typing\ndata: {\"typing\":true}\n\n",
+            "typing true SSE must be named with exact Axum spacing"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_to_sse_event_typing_false_produces_exact_wire_format() {
+        let sse_event = WebViewSseEvent::Typing(false);
+        let event = to_sse_event(&sse_event);
+        let sse = Sse::new(futures::stream::once(
+            async move { Ok::<_, Infallible>(event) },
+        ));
+        let body = to_bytes(sse.into_response().into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let wire = String::from_utf8(body.to_vec()).unwrap();
+        assert_eq!(
+            wire, "event: typing\ndata: {\"typing\":false}\n\n",
+            "typing false SSE must be named with exact Axum spacing"
+        );
     }
 
     #[tokio::test]

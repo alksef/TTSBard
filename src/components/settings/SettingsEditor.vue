@@ -120,8 +120,8 @@ watch(editorSettings, (newSettings) => {
 
     <section class="settings-section">
       <div class="card-header">
-        <h3 class="card-title">VTube Studio — завершение набора</h3>
-        <p class="card-desc">Через сколько мс без правок параметр TTSBardTyping вернётся в 0</p>
+        <h3 class="card-title">Статус набора</h3>
+        <p class="card-desc">Через сколько мс без правок завершать набор для VTube Studio и WebView</p>
       </div>
       <div class="setting-row typing-row">
         <label class="setting-label">Задержка (мс):</label>

@@ -81,9 +81,26 @@ SSE endpoint for receiving real-time text updates.
 - `401 Unauthorized` - Authentication failed (external connections only)
 
 **Event Format:**
+
+The server sends two kinds of SSE events:
+
+1. **Unnamed text event** (default `onmessage`):
+
 ```
-data: {"text": "Your message here"}
+data: {"text":"Your message here"}
 ```
+
+No `event:` line — received by `EventSource.onmessage`. Backward-compatible.
+
+2. **Named typing event** (uses `addEventListener('typing', ...)`):
+
+```
+event: typing
+data: {"typing":true}
+```
+
+Sent when the editor typing state changes. Named events do not fire `onmessage`,
+so old templates remain compatible.
 
 ## Security Model
 
@@ -152,6 +169,36 @@ Templates are stored in your config directory:
 2. Edit HTML or CSS files in your preferred editor
 3. Click **Reload** in the app to apply changes
 4. Refresh the browser source in OBS
+
+**Existing template files are never overwritten automatically.** Each default file is
+created only when that specific file does not exist. Upgrading or restarting the
+server will not replace your custom `index.html` or `style.css`.
+
+### Typing indicator (`html.is-typing` CSS hook)
+
+The default `index.html` template adds an `is-typing` class to `<html>` while the
+user is actively typing. No visual change is applied by default — this is a pure
+CSS/JS extension hook.
+
+To add a visual indicator to your custom template, add this listener:
+
+```javascript
+evtSource.addEventListener('typing', (event) => {
+    const data = JSON.parse(event.data);
+    document.documentElement.classList.toggle('is-typing', data.typing === true);
+});
+```
+
+Example CSS:
+
+```css
+html.is-typing .connection-indicator {
+    background: #60a5fa;
+    border-color: #3b82f6;
+    box-shadow: 0 0 8px rgba(96, 165, 250, 0.6);
+    animation: pulse 0.4s ease-in-out infinite;
+}
+```
 
 ### Default Template Structure
 

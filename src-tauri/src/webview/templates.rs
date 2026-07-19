@@ -40,6 +40,7 @@ pub fn default_html() -> String {
         evtSource.onopen = () => {
             console.log('SSE connection established');
             updateConnectionStatus('connected');
+            document.documentElement.classList.remove('is-typing');
         };
 
         evtSource.onmessage = (event) => {
@@ -91,6 +92,7 @@ pub fn default_html() -> String {
         evtSource.onerror = async (error) => {
             console.error('SSE error:', error);
             updateConnectionStatus('disconnected');
+            document.documentElement.classList.remove('is-typing');
 
             if (evtSource.readyState === EventSource.CLOSED) {
                 reconnectAttempts++;
@@ -124,6 +126,17 @@ pub fn default_html() -> String {
                 }
             }
         };
+
+        evtSource.addEventListener('typing', (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (typeof data.typing === 'boolean') {
+                    document.documentElement.classList.toggle('is-typing', data.typing);
+                }
+            } catch (_) {
+                // ignore invalid JSON
+            }
+        });
     </script>
 </body>
 </html>"#
@@ -295,5 +308,67 @@ mod tests {
         assert!(html.contains("textContent"));
         // Ensure the SSE script does not use innerHTML for output
         assert!(!html.contains("innerHTML"));
+    }
+
+    #[test]
+    fn test_default_template_has_onmessage_text_listener() {
+        let html = default_html();
+        assert!(
+            html.contains("evtSource.onmessage"),
+            "template must keep the onmessage text listener"
+        );
+        assert!(
+            html.contains("showText(data.text)"),
+            "onmessage handler must call showText with data.text"
+        );
+    }
+
+    #[test]
+    fn test_default_template_has_typing_named_listener() {
+        let html = default_html();
+        assert!(
+            html.contains("addEventListener('typing'"),
+            "template must have a named typing event listener"
+        );
+        assert!(
+            html.contains("typeof data.typing === 'boolean'"),
+            "typing listener must validate the payload type"
+        );
+        assert!(
+            html.contains("classList.toggle('is-typing', data.typing)"),
+            "typing listener must toggle the is-typing class"
+        );
+    }
+
+    #[test]
+    fn test_default_template_clears_is_typing_on_open() {
+        let html = default_html();
+        let open_body = html
+            .split("evtSource.onopen")
+            .nth(1)
+            .unwrap()
+            .split("};")
+            .next()
+            .unwrap();
+        assert!(
+            open_body.contains("classList.remove('is-typing')"),
+            "onopen must clear is-typing class"
+        );
+    }
+
+    #[test]
+    fn test_default_template_clears_is_typing_on_error() {
+        let html = default_html();
+        let error_body = html
+            .split("evtSource.onerror")
+            .nth(1)
+            .unwrap()
+            .split("if (evtSource.readyState")
+            .next()
+            .unwrap();
+        assert!(
+            error_body.contains("classList.remove('is-typing')"),
+            "onerror must clear is-typing class"
+        );
     }
 }

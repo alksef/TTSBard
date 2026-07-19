@@ -1,6 +1,5 @@
-export interface UseTypingBurstCallbacks {
-  onStart: () => Promise<void> | void
-  onStop: () => Promise<void> | void
+export interface TypingConsumer {
+  setTyping(active: boolean): Promise<void> | void
 }
 
 export interface UseTypingBurstReturn {
@@ -11,19 +10,26 @@ export interface UseTypingBurstReturn {
 
 export function useTypingBurst(
   getTimeoutMs: () => number,
-  callbacks: UseTypingBurstCallbacks,
+  consumers: TypingConsumer[],
 ): UseTypingBurstReturn {
   let generation = 0
   let idleTimer: ReturnType<typeof setTimeout> | null = null
   let active = false
-  let transitionQueue: Promise<void> = Promise.resolve()
 
-  function enqueueTransition(fn: () => Promise<void> | void) {
-    transitionQueue = transitionQueue
+  const queues: Promise<void>[] = consumers.map(() => Promise.resolve())
+
+  function enqueueTransition(idx: number, fn: () => Promise<void> | void) {
+    queues[idx] = queues[idx]
       .then(() => fn())
-      .catch((err: unknown) => {
-        console.error('[useTypingBurst] transition error:', err)
+      .catch((err) => {
+        console.error(`[useTypingBurst] consumer ${idx} transition error:`, err)
       })
+  }
+
+  function broadcastTyping(newActive: boolean) {
+    consumers.forEach((consumer, idx) => {
+      enqueueTransition(idx, () => consumer.setTyping(newActive))
+    })
   }
 
   function scheduleStop(expectedGen: number) {
@@ -35,7 +41,7 @@ export function useTypingBurst(
       if (generation !== expectedGen) return
       active = false
       idleTimer = null
-      enqueueTransition(() => callbacks.onStop())
+      broadcastTyping(false)
     }, timeout)
   }
 
@@ -44,7 +50,7 @@ export function useTypingBurst(
     const gen = generation
     if (!active) {
       active = true
-      enqueueTransition(() => callbacks.onStart())
+      broadcastTyping(true)
     }
     scheduleStop(gen)
   }
@@ -58,7 +64,7 @@ export function useTypingBurst(
     }
     if (active) {
       active = false
-      enqueueTransition(() => callbacks.onStop())
+      broadcastTyping(false)
     }
   }
 
@@ -69,7 +75,7 @@ export function useTypingBurst(
     }
     if (active) {
       active = false
-      enqueueTransition(() => callbacks.onStop())
+      broadcastTyping(false)
     }
   }
 

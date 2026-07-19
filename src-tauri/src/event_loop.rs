@@ -92,6 +92,12 @@ impl EventHandler {
             AppEvent::ToggleUpnp(enabled) => {
                 debug!(enabled, "[EVENT] Toggle UPnP requested");
             }
+            AppEvent::WebViewTypingChanged(typing) => {
+                debug!(
+                    typing,
+                    "[EVENT] WebView typing changed (service-owned, forwarded to WebView loop)"
+                );
+            }
             AppEvent::TwitchStatusChanged(status) => {
                 debug!(?status, "[EVENT] Twitch status changed");
             }

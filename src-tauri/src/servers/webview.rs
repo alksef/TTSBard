@@ -10,7 +10,7 @@ use crate::webview::WebViewSettings;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 /// Run WebView server in async context
 /// This function is called from a dedicated thread with tokio runtime
@@ -168,6 +168,10 @@ pub async fn run_webview_server(
                                             info!("[WEBVIEW] 🔄 Toggling UPnP: {}", enabled);
                                             server.toggle_upnp(enabled);
                                         }
+                                        AppEvent::WebViewTypingChanged(typing) => {
+                                            debug!("[WEBVIEW] ⌨️ Typing changed: {}", typing);
+                                            server.broadcast_typing(typing).await;
+                                        }
                                         _ => {
                                             info!("[WEBVIEW] ℹ️  Ignoring event: {:?}", std::mem::discriminant(&event));
                                         }
@@ -215,6 +219,9 @@ pub async fn run_webview_server(
                                 // Ignore TTS events while disabled but log them
                                 let preview = text.chars().take(30).collect::<String>();
                                 info!("[WEBVIEW] Ignoring TTS text (server disabled): '{}'...", preview);
+                            }
+                            Ok(Some(AppEvent::WebViewTypingChanged(typing))) => {
+                                debug!("[WEBVIEW] Ignoring typing change (server disabled): {}", typing);
                             }
                             Err(_) => {
                                 // Timeout - check if enabled now

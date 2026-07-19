@@ -92,15 +92,37 @@ const eventSource = new EventSource('http://your-ip:10100/sse', {
 
 ### Event Format
 
-Each SSE event contains a JSON payload:
+The server sends two kinds of SSE events:
 
-```json
-{"text": "Hello, world!"}
+#### Unnamed text event (compatible since v1)
+
+Each text broadcast uses the default (unnamed) event:
+
+```
+data: {"text":"Hello, world!"}
 ```
 
-- The event `data` field contains the JSON string
-- No event names are used (default event)
-- No event IDs are used
+- No `event:` line — this is the classic `onmessage` event.
+- The JSON payload contains a `"text"` field with the broadcast string.
+- This format has not changed and remains backward-compatible.
+
+#### Named typing event
+
+When the user starts or stops typing in the editor, a named event is sent:
+
+```
+event: typing
+data: {"typing":true}
+```
+
+```
+event: typing
+data: {"typing":false}
+```
+
+- The `typing` field is a boolean.
+- Named events **do not** fire `EventSource.onmessage`. Old templates that only use
+  `onmessage` are unaffected and continue to work without changes.
 
 ### Example Connection (JavaScript - Local)
 
@@ -205,6 +227,41 @@ The HTML and CSS templates are stored in:
 You can edit these files to customize the appearance. Changes take effect when:
 1. The server restarts, or
 2. You click the **"Reload templates"** button in the WebView Source panel
+
+**Existing template files are never overwritten automatically.** When you enable the
+server for the first time, the application creates default template files only if they
+do not exist. Upgrading or restarting the server will not replace your custom templates.
+
+#### Typing indicator (optional CSS hook)
+
+The default template adds an `is-typing` class to the `<html>` element while the user
+is actively typing. This is a CSS-only hook — no visual change is applied by default.
+
+Example CSS for a typing indicator:
+
+```css
+html.is-typing .connection-indicator {
+    background: #60a5fa;
+    border-color: #3b82f6;
+    box-shadow: 0 0 8px rgba(96, 165, 250, 0.6);
+    animation: pulse 0.4s ease-in-out infinite;
+}
+```
+
+#### Using typing events in existing custom templates
+
+If you have a custom `index.html` template created before this feature, your
+template will continue to work. Named `typing` events do not fire `onmessage`,
+so old templates are unaffected.
+
+To opt in to typing events, add this listener to your template's JavaScript:
+
+```javascript
+evtSource.addEventListener('typing', (event) => {
+    const data = JSON.parse(event.data);
+    document.documentElement.classList.toggle('is-typing', data.typing === true);
+});
+```
 
 ## Broadcasting
 
