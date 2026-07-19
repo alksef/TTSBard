@@ -497,6 +497,11 @@ onUnmounted(() => {
   cursor: pointer;
 }
 
+.action-select option {
+  background: var(--select-bg);
+  color: var(--color-text-primary);
+}
+
 .remove-btn {
   padding: 0.3rem 0.4rem;
   background: transparent;
