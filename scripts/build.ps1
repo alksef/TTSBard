@@ -58,13 +58,15 @@ Write-Ok "node $nodeVer, npm $npmVer"
 Write-Ok $rustcVer
 Write-Ok $cmakeVer
 
-# espeak-rs-sys hardcodes Release library paths. Keep its C library on the
-# default dynamic CRT; src-tauri/build.rs suppresses its extra msvcrtd input for
-# debug builds so all native code shares the same Windows heap.
+# espeak-rs-sys v0.2.0 hardcodes Release library paths. Keep its C library on the
+# default dynamic CRT (Release profile). A local espeak-rs-sys patch (prepared
+# per docs/dev/windows-debug-crt.md) removes the erroneous debug-only `msvcrtd`
+# link directive, so native components use compatible release-CRT allocator
+# bookkeeping. The patch is developer-local and not committed.
 if ($Mode -eq 'debug') {
     $env:ESPEAK_LIB_PROFILE = 'Release'
     Remove-Item Env:ESPEAK_STATIC_CRT -ErrorAction SilentlyContinue
-    Write-Ok 'espeak-ng CMake profile: Release + dynamic CRT (shared heap)'
+    Write-Ok 'espeak-ng CMake profile: Release + compatible dynamic CRT'
 }
 
 # --- Проверка libclang (нужен для espeak-rs-sys / bindgen) --------------------
