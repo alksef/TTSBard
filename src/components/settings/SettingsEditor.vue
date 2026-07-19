@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue';
+import { computed, watch, ref, onUnmounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { useEditorSettings } from '../../composables/useAppSettings';
 import type { QuickEditorMode } from '../../types/settings';
+import { normalizeTypingTimeout } from '../../utils/validateTypingTimeout';
 
 const editorSettings = useEditorSettings();
 
@@ -14,11 +15,41 @@ const quickEditorMode = computed<QuickEditorMode>(() => editorSettings.value?.qu
 
 const spellcheckEnabled = computed(() => editorSettings.value?.spellcheck_enabled ?? true)
 
+const typingTimeoutInput = ref(editorSettings.value?.typing_idle_timeout_ms ?? 800)
+
+watch(() => editorSettings.value?.typing_idle_timeout_ms, (newVal) => {
+  if (newVal !== undefined) {
+    typingTimeoutInput.value = newVal
+  }
+})
+
+onUnmounted(() => {
+  typingTimeoutInput.value = editorSettings.value?.typing_idle_timeout_ms ?? 800
+})
+
 const quickModeOptions: { value: QuickEditorMode; label: string }[] = [
   { value: 'disabled', label: 'Отключено' },
   { value: 'collapse', label: 'Сворачивать' },
   { value: 'return_focus', label: 'Возвращать фокус предыдущему окну' },
 ]
+
+async function onTypingTimeoutChange() {
+  const raw = typingTimeoutInput.value
+  const normalized = normalizeTypingTimeout(raw)
+  if (normalized === null) {
+    typingTimeoutInput.value = editorSettings.value?.typing_idle_timeout_ms ?? 800
+    return
+  }
+  typingTimeoutInput.value = normalized
+  try {
+    await invoke('set_editor_typing_idle_timeout_ms', { ms: normalized })
+    emit('show-message', 'Настройка сохранена')
+  } catch (e) {
+    const errorMessage = e instanceof Error ? e.message : String(e)
+    emit('show-message', 'Ошибка сохранения задержки набора: ' + errorMessage)
+    typingTimeoutInput.value = editorSettings.value?.typing_idle_timeout_ms ?? 800
+  }
+}
 
 async function setQuickMode(mode: QuickEditorMode) {
   try {
@@ -83,6 +114,28 @@ watch(editorSettings, (newSettings) => {
         </label>
         <span class="setting-hint">
           Подчёркивает ошибки и предлагает варианты исправления. Работает без сети (локальный словарь)
+        </span>
+      </div>
+    </section>
+
+    <section class="settings-section">
+      <div class="card-header">
+        <h3 class="card-title">VTube Studio — завершение набора</h3>
+        <p class="card-desc">Через сколько мс без правок параметр TTSBardTyping вернётся в 0</p>
+      </div>
+      <div class="setting-row typing-row">
+        <label class="setting-label">Задержка (мс):</label>
+        <input
+          type="number"
+          v-model="typingTimeoutInput"
+          @change="onTypingTimeoutChange"
+          class="number-input"
+          :min="200"
+          :max="5000"
+          :step="100"
+        />
+        <span class="setting-hint typing-hint">
+          Начало набора передаётся сразу, задержка отсчитывается после последней пользовательской правки.
         </span>
       </div>
     </section>
@@ -176,5 +229,40 @@ watch(editorSettings, (newSettings) => {
   border-radius: 4px;
   font-family: var(--font-mono);
   font-size: 0.85em;
+}
+
+.typing-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.typing-row label {
+  min-width: 110px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+}
+
+.typing-row .number-input {
+  width: 120px;
+  padding: 0.5rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 10px;
+  font-size: 14px;
+  background: var(--color-bg-field);
+  color: var(--color-text-primary);
+}
+
+.typing-row .number-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
+}
+
+.typing-hint {
+  margin-left: 0 !important;
+  width: 100%;
 }
 </style>

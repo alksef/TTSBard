@@ -15,6 +15,7 @@ import EditorMenu from './editor/EditorMenu.vue'
 import { useEditorTabs } from '../composables/useEditorTabs'
 import EditorTabs from './editor/EditorTabs.vue'
 import StatusMessage from './shared/StatusMessage.vue'
+import { useTypingBurst } from '../composables/useTypingBurst'
 
 const { showError } = useErrorHandler()
 const { tabs, activeId, active, create: createTab, close: closeTab, select: selectTab, rename: renameTab, init: initTabs, flushSave: flushTabsSave } = useEditorTabs()
@@ -90,41 +91,21 @@ let unlistenSettings: UnlistenFn | null = null
 let previousCompactHeight = 0
 let compactSaveTimer: ReturnType<typeof setTimeout> | null = null
 
-let vtsTypingGeneration = 0
-let vtsTypingTimer: ReturnType<typeof setTimeout> | null = null
-
-function notifyVtsTypingStart() {
-  vtsTypingGeneration++
-  const gen = vtsTypingGeneration
-  invoke('set_vtube_studio_typing', { typing: true }).catch((e) => {
-    debugError('[InputPanel] VTS typing true failed:', e)
-  })
-  scheduleVtsTypingEnd(gen)
-}
-
-function scheduleVtsTypingEnd(gen: number) {
-  if (vtsTypingTimer !== null) {
-    clearTimeout(vtsTypingTimer)
-  }
-  vtsTypingTimer = setTimeout(() => {
-    if (gen !== vtsTypingGeneration) return
-    invoke('set_vtube_studio_typing', { typing: false }).catch((e) => {
-      debugError('[InputPanel] VTS typing false failed:', e)
-    })
-    vtsTypingTimer = null
-  }, 800)
-}
-
-function notifyVtsTypingEnd() {
-  vtsTypingGeneration++
-  if (vtsTypingTimer !== null) {
-    clearTimeout(vtsTypingTimer)
-    vtsTypingTimer = null
-  }
-  invoke('set_vtube_studio_typing', { typing: false }).catch((e) => {
-    debugError('[InputPanel] VTS typing false failed:', e)
-  })
-}
+const vtsTypingBurst = useTypingBurst(
+  () => editorSettings.value?.typing_idle_timeout_ms ?? 800,
+  {
+    onStart: () => {
+      return invoke('set_vtube_studio_typing', { typing: true }).then(() => {}).catch((e) => {
+        debugError('[InputPanel] VTS typing true failed:', e)
+      })
+    },
+    onStop: () => {
+      return invoke('set_vtube_studio_typing', { typing: false }).then(() => {}).catch((e) => {
+        debugError('[InputPanel] VTS typing false failed:', e)
+      })
+    },
+  },
+)
 
 async function reloadPreprocessorData() {
   try {
@@ -235,11 +216,7 @@ vueOnUnmounted(async () => {
     unlistenSettings()
   }
   window.removeEventListener('preprocessor-data-changed', onPreprocessorChanged)
-  if (vtsTypingTimer !== null) {
-    clearTimeout(vtsTypingTimer)
-    vtsTypingTimer = null
-  }
-  notifyVtsTypingEnd()
+  vtsTypingBurst.dispose()
 })
 
 async function hideMainWindow() {
@@ -262,7 +239,7 @@ async function speak(textToSend: string) {
   if (!textToSend.trim()) return
   if (isSpeakingInFlight.value) return
 
-  notifyVtsTypingEnd()
+  vtsTypingBurst.stop()
   isSpeakingInFlight.value = true
   try {
     debugLog('[InputPanel] Speaking:', textToSend)
@@ -397,7 +374,7 @@ async function handleEnter() {
   if (!currentText.trim()) return
   if (isSpeakingInFlight.value) return
 
-  notifyVtsTypingEnd()
+  vtsTypingBurst.stop()
 
   if (mode === 'disabled') {
     await speak(currentText)
@@ -432,6 +409,8 @@ async function handleEnter() {
 
 async function handleEsc() {
   const mode = editorSettings.value?.quick ?? 'disabled'
+
+  vtsTypingBurst.stop()
 
   if (mode === 'collapse') {
     hideMainWindow()
@@ -544,7 +523,7 @@ defineExpose({ focusEditor })
           :replacements="replacementsRecord"
           :usernames="usernamesRecord"
           :editor-height-px="editorHeightPx"
-          @user-edit="notifyVtsTypingStart"
+          @user-edit="vtsTypingBurst.edit()"
           @enter="handleEnter"
           @esc="handleEsc"
         />

@@ -836,6 +836,7 @@ pub struct EditorSettingsDto {
     pub spellcheck_enabled: bool,
     pub spellcheck_source: SpellSourceDto,
     pub editor_height: u32,
+    pub typing_idle_timeout_ms: u32,
 }
 
 /// Spell check source DTO
@@ -1262,6 +1263,7 @@ impl AppSettingsDto {
                     crate::config::SpellSource::Offline => SpellSourceDto::Offline,
                 },
                 editor_height: params.config.editor.editor_height,
+                typing_idle_timeout_ms: params.config.editor.typing_idle_timeout_ms,
             },
             logging: params.config.logging.clone(),
             preprocessor: PreprocessorSettingsDto::from_preprocessor(params.preprocessor),

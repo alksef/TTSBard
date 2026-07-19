@@ -7,6 +7,7 @@ const {
   busy,
   status,
   message,
+  portError,
   save,
   testConnection,
 } = useVTubeStudio()
@@ -16,8 +17,8 @@ const {
   <div class="vtube-panel">
     <div v-if="message" class="message-box" :class="{
       error: status === 'Ошибка' || message.includes('Invalid') || message.includes('failed') || message.includes('Error'),
-      success: message.includes('saved') || message.includes('сохранен') || message.includes('Подключено') || message.includes('Successfully'),
-      info: message.includes('disabled') || message.includes('отключена')
+      success: message.includes('saved') || message.includes('сохранен') || message.includes('успешно') || message.includes('Successfully') || status === 'Проверено',
+      info: message.includes('disabled') || message.includes('отключена') || message.includes('Отключено')
     }">
       {{ message }}
     </div>
@@ -27,11 +28,12 @@ const {
         <h2>Подключение</h2>
         <div class="server-status">
           <span class="status-indicator" :class="{
-            running: status === 'Подключено',
+            running: status === 'Проверено',
             connecting: status === 'Проверка…',
-            error: status === 'Ошибка'
+            error: status === 'Ошибка',
+            off: !settings.enabled
           }">
-            {{ status }}
+            {{ settings.enabled ? status : 'Отключено' }}
           </span>
           <button
             @click="testConnection"
@@ -39,6 +41,7 @@ const {
             :disabled="busy || !settings.enabled"
             :class="{ disabled: busy || !settings.enabled }"
             aria-label="Проверить подключение"
+            title="Проверить подключение"
           >
             <Play :size="14" />
           </button>
@@ -58,26 +61,41 @@ const {
           type="number"
           v-model.number="settings.port"
           class="text-input"
+          :class="{ 'input-error': portError }"
           :min="1024"
           :max="65535"
           placeholder="8001"
         />
+        <span v-if="portError" class="error-text">{{ portError }}</span>
       </div>
 
       <div class="setting-row button-row">
-        <button
-          @click="testConnection"
-          class="test-button"
-          :disabled="busy || !settings.enabled"
-          :class="{ disabled: busy || !settings.enabled }"
-        >Проверить подключение</button>
-        <button
-          @click="save"
-          class="save-button-inline"
-          :disabled="busy"
-          :class="{ disabled: busy }"
-        >Сохранить</button>
+        <button @click="save" class="save-button-inline" :disabled="busy" :class="{ disabled: busy }">
+          Сохранить
+        </button>
       </div>
+    </section>
+
+    <section class="settings-section info-section">
+      <h2>Статус набора</h2>
+      <div class="info-card">
+        <div class="info-row">
+          <span class="info-label">Параметр</span>
+          <code class="info-code">TTSBardTyping</code>
+        </div>
+        <div class="info-row">
+          <span class="info-label">1</span>
+          <span class="info-desc">печатает</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">0</span>
+          <span class="info-desc">ожидание</span>
+        </div>
+      </div>
+      <p class="info-hint">
+        Интервал бездействия настраивается в <em>Настройки → Редактор</em>.
+        Начало набора передаётся сразу; задержка отсчитывается после последней правки.
+      </p>
     </section>
 
     <section class="settings-section help-section">
@@ -166,6 +184,12 @@ h2 {
   border-color: var(--danger-border);
 }
 
+.status-indicator.off {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-field);
+  border-color: var(--color-border);
+}
+
 .status-button {
   width: 32px;
   height: 32px;
@@ -195,20 +219,26 @@ h2 {
 }
 
 .message-box {
+  position: fixed;
+  top: 20px;
+  left: calc(50% + 100px);
+  transform: translateX(-50%);
   padding: 0.4rem 0.75rem;
   border-radius: 8px;
   font-size: 12px;
   font-weight: 500;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(8px);
+  z-index: 1000;
+  box-shadow: var(--dialog-shadow);
+  backdrop-filter: blur(10px);
   animation: slideDownFade 0.3s ease-out;
-  margin-bottom: 0.75rem;
-  word-break: break-word;
+  max-width: 80vw;
+  overflow-wrap: break-word;
+  white-space: normal;
 }
 
 .message-box.success {
   background: var(--success-bg);
-  border: 1px solid var(--success-border, rgba(74, 222, 128, 0.4));
+  border: 1px solid var(--success-shadow);
   color: var(--success-text);
 }
 
@@ -228,11 +258,11 @@ h2 {
 @keyframes slideDownFade {
   from {
     opacity: 0;
-    transform: translateY(-20px);
+    transform: translateX(-50%) translateY(-20px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateX(-50%) translateY(0);
   }
 }
 
@@ -273,43 +303,33 @@ h2 {
   border-top: 1px solid var(--color-border);
 }
 
-.save-button-inline,
-.test-button {
+.save-button-inline {
   padding: 0.6rem 1.2rem;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
+  color: var(--color-text-white);
   border: none;
   border-radius: 10px;
   cursor: pointer;
-  font-weight: 600;
+  font-weight: 500;
   font-size: 14px;
   transition: all 0.2s;
 }
 
-.save-button-inline {
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: var(--color-text-white);
-}
-
 .save-button-inline:hover {
   filter: brightness(1.06);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px var(--focus-glow);
 }
 
-.test-button {
-  background: var(--btn-accent-bg);
-  color: var(--color-text-white);
+.save-button-inline:active {
+  transform: translateY(0);
 }
 
-.test-button:hover {
-  background: var(--btn-accent-bg-hover);
-}
-
-.test-button.disabled {
-  background: var(--btn-disabled-bg);
+.save-button-inline:disabled {
+  background: var(--color-border);
+  color: var(--color-text-secondary);
   cursor: not-allowed;
   opacity: 0.6;
-}
-
-.test-button.disabled:hover {
-  background: var(--btn-disabled-bg);
 }
 
 .checkbox-label {
@@ -328,7 +348,7 @@ h2 {
 
 .text-input {
   flex: 1;
-  max-width: 400px;
+  max-width: 200px;
   padding: 0.5rem;
   border: 1px solid var(--color-border-strong);
   border-radius: 10px;
@@ -337,13 +357,78 @@ h2 {
   color: var(--color-text-primary);
 }
 
+.text-input.input-error {
+  border-color: var(--danger-border-strong);
+  background: var(--card-error-bg);
+}
+
+.text-input.input-error:focus {
+  border-color: var(--danger-gradient-start);
+  outline: none;
+}
+
 .text-input:focus {
   outline: none;
   border-color: var(--color-accent);
   box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
-.help-section {
+.error-text {
+  color: var(--danger-text-weak);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.info-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.info-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.info-label {
+  min-width: 90px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  font-size: 14px;
+}
+
+.info-code {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--color-info);
+  background: var(--info-bg-weak);
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  border: 1px solid var(--info-border);
+}
+
+.info-desc {
+  color: var(--color-text-secondary);
+  font-size: 14px;
+}
+
+.info-hint {
+  margin: 0.6rem 0 0;
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+.info-hint em {
+  font-style: normal;
+  font-weight: 500;
+  color: var(--color-text-secondary);
 }
 
 .help-text {
@@ -369,5 +454,26 @@ h2 {
   font-family: var(--font-mono);
   color: var(--color-info);
   border: 1px solid var(--info-border);
+}
+
+@media (max-width: 600px) {
+  .setting-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .setting-row label {
+    min-width: auto;
+  }
+
+  .text-input {
+    max-width: 100%;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .status-indicator {
+    font-size: 12px;
+  }
 }
 </style>

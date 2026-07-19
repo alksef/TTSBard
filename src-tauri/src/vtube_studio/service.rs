@@ -89,36 +89,59 @@ impl VTubeStudioService {
             self.stop_typing_keepalive_locked(&mut inner);
 
             if let Some(ref mut ws) = inner.ws {
-                inject_typing(ws, self.next_id(), 0.0).await?;
-            } else if !stored_token.is_empty() {
-                drop(inner);
-                match connect_ws(port).await {
-                    Ok(mut ws) => {
-                        let auth_id = self.next_id();
-                        if let Err(e) =
-                            perform_authentication(&mut ws, auth_id, Some(stored_token)).await
-                        {
-                            debug!(error = %e, "VTS one-shot stop auth failed");
-                        } else {
-                            let _ = inject_typing(&mut ws, self.next_id(), 0.0).await;
-                        }
-                    }
-                    Err(e) => debug!(error = %e, "VTS one-shot stop connect failed"),
+                if let Err(e) = inject_typing(ws, self.next_id(), 0.0).await {
+                    debug!(error = %e, "VTS inject typing=false failed, discarding broken socket");
+                    inner.ws = None;
+                    self.is_authenticated.store(false, Ordering::SeqCst);
                 }
             }
             return Ok(());
         }
 
+        if stored_token.is_empty() {
+            return Ok(());
+        }
+
         if inner.ws.is_none() {
-            let mut ws = connect_ws(port).await?;
-            let _ = perform_authentication(&mut ws, self.next_id(), Some(stored_token)).await?;
-            create_typing_param(&mut ws, self.next_id()).await?;
+            let mut ws = match connect_ws(port).await {
+                Ok(ws) => ws,
+                Err(e) => {
+                    debug!(error = %e, "VTS connect for typing=true failed");
+                    return Err(e);
+                }
+            };
+
+            match perform_authentication(&mut ws, self.next_id(), Some(stored_token)).await {
+                Ok(_) => {}
+                Err(e) => {
+                    debug!(error = %e, "VTS auth for typing=true failed, discarding broken socket");
+                    self.is_authenticated.store(false, Ordering::SeqCst);
+                    return Err(e);
+                }
+            }
+
+            if let Err(e) = create_typing_param(&mut ws, self.next_id()).await {
+                debug!(error = %e, "VTS create param for typing=true failed, discarding broken socket");
+                self.is_authenticated.store(false, Ordering::SeqCst);
+                return Err(e);
+            }
+
             inner.ws = Some(ws);
         }
 
         self.stop_typing_keepalive_locked(&mut inner);
 
-        inject_typing(inner.ws.as_mut().unwrap(), self.next_id(), 1.0).await?;
+        let ws = match inner.ws.as_mut() {
+            Some(ws) => ws,
+            None => return Ok(()),
+        };
+
+        if let Err(e) = inject_typing(ws, self.next_id(), 1.0).await {
+            debug!(error = %e, "VTS inject typing=true failed, discarding broken socket");
+            inner.ws = None;
+            self.is_authenticated.store(false, Ordering::SeqCst);
+            return Err(e);
+        }
 
         let cancel = CancellationToken::new();
         let cancel_ct = cancel.clone();
@@ -143,13 +166,18 @@ impl VTubeStudioService {
                 let id = Uuid::new_v4().to_string();
                 if let Some(ref mut ws) = inner_guard.ws {
                     if let Err(e) = inject_typing(ws, id, 1.0).await {
-                        debug!(error = %e, "VTS typing keep-alive inject failed");
+                        debug!(error = %e, "VTS typing keep-alive inject failed, discarding broken socket");
+                        inner_guard.ws = None;
+                        auth_flag.store(false, Ordering::SeqCst);
+                        break;
                     }
                 } else {
                     break;
                 }
             }
-            auth_flag.store(false, Ordering::SeqCst);
+            if !cancel_ct.is_cancelled() {
+                auth_flag.store(false, Ordering::SeqCst);
+            }
             debug!("VTS typing keep-alive stopped");
         });
 
@@ -448,6 +476,21 @@ mod tests {
         rt.block_on(async {
             let result = svc.set_typing(false, 8001, "").await;
             assert!(result.is_ok());
+        });
+    }
+
+    #[test]
+    fn set_typing_true_with_empty_token_is_noop() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        rt.block_on(async {
+            let result = svc.set_typing(true, 8001, "").await;
+            assert!(result.is_ok());
+            let inner = svc.inner.lock().await;
+            assert!(inner.ws.is_none());
         });
     }
 

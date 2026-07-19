@@ -62,7 +62,7 @@ function mockSettings(): AppSettingsDto {
     logging: { enabled: true, level: 'info', module_levels: {} },
     preprocessor: { enabled: false, replacements_count: 0 },
     soundpanel_bindings: [],
-    editor: { quick: 'disabled', ai: false, ai_completion: false, spellcheck_enabled: false, spellcheck_source: 'online', editor_height: 200 },
+    editor: { quick: 'disabled', ai: false, ai_completion: false, spellcheck_enabled: false, spellcheck_source: 'online', editor_height: 200, typing_idle_timeout_ms: 800 },
     ai: {
       provider: 'openai',
       openai: { api_key: undefined, use_proxy: false, model: undefined },

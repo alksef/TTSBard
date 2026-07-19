@@ -811,10 +811,23 @@ pub struct EditorSettings {
     pub spellcheck_source: SpellSource,
     #[serde(default = "default_editor_height")]
     pub editor_height: u32,
+    #[serde(default = "default_typing_idle_timeout_ms")]
+    pub typing_idle_timeout_ms: u32,
 }
 
 fn default_editor_height() -> u32 {
     340
+}
+
+fn default_typing_idle_timeout_ms() -> u32 {
+    800
+}
+
+const TYPING_IDLE_TIMEOUT_MIN_MS: u32 = 200;
+const TYPING_IDLE_TIMEOUT_MAX_MS: u32 = 5000;
+
+pub fn normalize_typing_idle_timeout_ms(ms: u32) -> u32 {
+    ms.clamp(TYPING_IDLE_TIMEOUT_MIN_MS, TYPING_IDLE_TIMEOUT_MAX_MS)
 }
 
 impl Default for EditorSettings {
@@ -826,6 +839,7 @@ impl Default for EditorSettings {
             spellcheck_enabled: true,
             spellcheck_source: SpellSource::Offline,
             editor_height: 340,
+            typing_idle_timeout_ms: 800,
         }
     }
 }
@@ -1643,6 +1657,17 @@ impl SettingsManager {
         self.cache.read().editor.editor_height
     }
 
+    /// Set VTS typing idle timeout (ms)
+    pub fn set_editor_typing_idle_timeout_ms(&self, ms: u32) -> Result<()> {
+        let validated = normalize_typing_idle_timeout_ms(ms);
+        self.update_field("/editor/typing_idle_timeout_ms", &validated)
+    }
+
+    /// Get VTS typing idle timeout (ms)
+    pub fn get_editor_typing_idle_timeout_ms(&self) -> u32 {
+        self.cache.read().editor.typing_idle_timeout_ms
+    }
+
     // ========== AI Settings ==========
 
     /// Set AI provider
@@ -2333,6 +2358,85 @@ mod tests {
             assert_eq!(parsed, mode);
         }
         assert!(QuickEditorMode::from_str("bogus").is_none());
+    }
+
+    /// Backward-compat: EditorSettings without typing_idle_timeout_ms field defaults to 800.
+    #[test]
+    fn editor_settings_deserializes_without_typing_idle_timeout() {
+        let json = r#"{"quick":false,"ai":false,"ai_completion":false,"spellcheck_enabled":true,"spellcheck_source":"offline","editor_height":340}"#;
+        let settings: EditorSettings =
+            serde_json::from_str(json).expect("must deserialize without typing_idle_timeout_ms");
+        assert_eq!(settings.typing_idle_timeout_ms, 800);
+    }
+
+    /// EditorSettings default is 800.
+    #[test]
+    fn editor_settings_default_typing_timeout_is_800() {
+        let s = EditorSettings::default();
+        assert_eq!(s.typing_idle_timeout_ms, 800);
+    }
+
+    /// EditorSettings serializes typing_idle_timeout_ms.
+    #[test]
+    fn editor_settings_serializes_typing_idle_timeout() {
+        let s = EditorSettings::default();
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(json.contains("typing_idle_timeout_ms"), "json: {}", json);
+    }
+
+    /// normalize_typing_idle_timeout_ms: default value 800 passes through.
+    #[test]
+    fn normalize_typing_idle_timeout_default() {
+        assert_eq!(normalize_typing_idle_timeout_ms(800), 800);
+    }
+
+    /// normalize_typing_idle_timeout_ms: below min is clamped to 200.
+    #[test]
+    fn normalize_typing_idle_timeout_below_min() {
+        assert_eq!(normalize_typing_idle_timeout_ms(100), 200);
+        assert_eq!(normalize_typing_idle_timeout_ms(0), 200);
+    }
+
+    /// normalize_typing_idle_timeout_ms: above max is clamped to 5000.
+    #[test]
+    fn normalize_typing_idle_timeout_above_max() {
+        assert_eq!(normalize_typing_idle_timeout_ms(10000), 5000);
+        assert_eq!(normalize_typing_idle_timeout_ms(u32::MAX), 5000);
+    }
+
+    /// normalize_typing_idle_timeout_ms: boundary values pass through.
+    #[test]
+    fn normalize_typing_idle_timeout_boundaries() {
+        assert_eq!(
+            normalize_typing_idle_timeout_ms(TYPING_IDLE_TIMEOUT_MIN_MS),
+            200
+        );
+        assert_eq!(
+            normalize_typing_idle_timeout_ms(TYPING_IDLE_TIMEOUT_MAX_MS),
+            5000
+        );
+    }
+
+    /// AppSettings without typing_idle_timeout_ms in editor defaults to 800.
+    #[test]
+    fn app_settings_deserializes_old_editor_without_typing_timeout() {
+        let old_json = r#"{
+            "audio": { "speaker_device": null, "speaker_enabled": true, "speaker_volume": 80, "virtual_mic_device": null, "virtual_mic_volume": 100 },
+            "tts": { "provider": "openai", "openai": { "api_key": null, "voice": "alloy" }, "local": { "url": "http://127.0.0.1:8124" }, "fish": { "api_key": null, "voices": [], "reference_id": "", "format": "mp3", "temperature": 0.7, "sample_rate": 44100, "use_proxy": false }, "telegram": { "api_id": null, "proxy_mode": "none", "voices": [], "current_voice_id": "" }, "network": { "proxy": { "proxy_url": null }, "mtproxy": { "host": null, "port": 8888, "secret": null, "dc_id": null } } },
+            "audio_effects": { "enabled": false, "pitch": 0, "speed": 0, "volume": 100, "enhance_enabled": false, "enhance_atten_db": 12.0, "formant_preserved": true },
+            "hotkey_enabled": true,
+            "editor": { "quick": false, "ai": false, "ai_completion": false, "spellcheck_enabled": true, "spellcheck_source": "offline", "editor_height": 340 },
+            "theme": "dark",
+            "twitch": { "enabled": false, "username": "", "token": "", "channel": "", "start_on_boot": false },
+            "webview": { "enabled": false, "start_on_boot": false, "port": 10100, "bind_address": "0.0.0.0", "access_token": null, "upnp_enabled": false },
+            "logging": { "enabled": false, "level": "info", "module_levels": {} },
+            "ai": { "provider": "openai", "openai": { "api_key": null, "use_proxy": false, "model": "gpt-4o-mini" }, "zai": { "url": null, "api_key": null, "model": "glm-4.5" }, "deepseek": { "api_key": null, "use_proxy": false, "model": "deepseek-chat" }, "custom": { "url": null, "api_key": null, "use_proxy": false, "model": "deepseek-chat" }, "prompt": "test", "timeout": 20 },
+            "hotkeys": { "main_window": { "modifiers": ["ctrl"], "key": "F12" }, "sound_panel": { "modifiers": ["alt"], "key": "F12" }, "playback_pause": { "modifiers": [], "key": "" }, "playback_stop": { "modifiers": [], "key": "" }, "playback_repeat": { "modifiers": [], "key": "" }, "playback_control_window": { "modifiers": [], "key": "" } },
+            "show_playback_on_start": false
+        }"#;
+        let settings: AppSettings = serde_json::from_str(old_json)
+            .expect("old AppSettings without typing_idle_timeout_ms must deserialize");
+        assert_eq!(settings.editor.typing_idle_timeout_ms, 800);
     }
 
     /// Backward-compat: old settings.json without `vtube_studio` field must deserialize.

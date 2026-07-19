@@ -35,6 +35,49 @@
 
 ---
 
+## Stage 2 — аудит typing pipeline и UI интеграции (2026-07-19)
+
+### Что подтвердил аудит
+
+- VTube Studio typing pipeline уже существует: CodeMirror эмитит только
+  пользовательские `user-edit`, frontend вызывает Tauri-команду, Rust держит
+  авторизованный WebSocket и передаёт `TTSBardTyping = 1|0`.
+- WebView не передаёт typing-state и не является его источником. Он получает
+  только готовый `AppEvent::TextSentToTts` и публикует SSE payload с текстом
+  после отправки фразы. **WebView SSE не имеет typing-status протокола и не
+  расширялся в этом stage.**
+- Текущий frontend ошибочно вызывал `typing=true` на каждую правку. Таймер
+  откладывал только `false`, поэтому backend повторно inject-ил `1` и
+  перезапускал keep-alive для каждого символа.
+
+### Что реализовано в Stage 2
+
+1. **Burst controller** (`useTypingBurst`): один `true` в начале burst, последующие
+   правки только перезапускают idle timer (читаемый динамически из Editor settings),
+   один упорядоченный `false` в конце. Enter, Escape/hide и unmount гарантированно
+   завершают typing. Promise-очередь сериализует async IPC-переходы, поэтому
+   отложенный `true` не может завершиться после поставленного вслед за ним `false`;
+   генерационный счётчик отвечает только за актуальность idle timer.
+2. **Idle timeout в Editor settings**: поле `typing_idle_timeout_ms`, default 800,
+   диапазон 200–5000, UI step 100. Persisted через `SettingsManager`, отдаётся в
+   `AppSettingsDto.editor`, доступен в Settings → Editor.
+3. **VTS transport recovery**: при ошибке inject_typing (как в set_typing, так и в
+   keep-alive loop) или ошибке аутентификации сбрасываются cached WebSocket и
+   auth-флаг, чтобы следующий `start` мог создать новое соединение. `typing=false`
+   без активного WebSocket не создаёт новое соединение (no-op).
+4. **VTube Studio panel UI**: честный статус последней проверки (`Проверено`, не
+   `Подключено`), валидация порта 1024–65535 до Tauri invoke, одна кнопка
+   проверки в header, информационная карточка `TTSBardTyping` со значениями, fixed
+   toast как у WebView/Twitch, semantic CSS variables, responsive.
+5. **Граница WebView не расширялась** — черновик редактора наружу не передаётся,
+   typing-state не добавлялся в SSE.
+
+### Граница Stage 2 (реализовано)
+
+Все пять пунктов реализованы. Подробный контракт: `docs/stage/42-vtube-studio-typing-ui.md`.
+
+---
+
 ## 1. Цель
 
 Исследование `02-vtuber-studio-integration-research.md` описывает прямой lip-sync:

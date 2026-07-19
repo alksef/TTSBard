@@ -319,6 +319,7 @@ export interface EditorSettingsDto {
   spellcheck_enabled: boolean
   spellcheck_source: 'online' | 'offline'
   editor_height: number
+  typing_idle_timeout_ms: number
 }
 
 // ============================================================================

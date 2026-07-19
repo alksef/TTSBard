@@ -1,6 +1,6 @@
 use crate::config::{
-    AppSettingsDto, QuickEditorMode, SettingsManager, SpellSource, TtsProviderInfoDto,
-    WindowsManager,
+    normalize_typing_idle_timeout_ms, AppSettingsDto, QuickEditorMode, SettingsManager,
+    SpellSource, TtsProviderInfoDto, WindowsManager,
 };
 use crate::events::AppEvent;
 use crate::state::AppState;
@@ -386,6 +386,28 @@ pub async fn set_editor_height(
 #[tauri::command]
 pub fn get_editor_height(settings_manager: State<'_, SettingsManager>) -> u32 {
     settings_manager.get_editor_height()
+}
+
+/// Set VTS typing idle timeout in milliseconds
+#[tauri::command]
+pub async fn set_editor_typing_idle_timeout_ms(
+    ms: u32,
+    app_handle: AppHandle,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<u32, String> {
+    persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_editor_typing_idle_timeout_ms(ms)
+    })
+    .await?;
+
+    emit_settings_changed(&app_handle);
+    Ok(normalize_typing_idle_timeout_ms(ms))
+}
+
+/// Get VTS typing idle timeout in milliseconds
+#[tauri::command]
+pub fn get_editor_typing_idle_timeout_ms(settings_manager: State<'_, SettingsManager>) -> u32 {
+    settings_manager.get_editor_typing_idle_timeout_ms()
 }
 
 /// Prepare (warm up) a registered TTS provider by ID.
