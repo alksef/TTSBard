@@ -98,6 +98,9 @@ pub struct AppState {
     /// Twitch service (settings, connection status, event sender)
     pub twitch: Arc<crate::twitch::TwitchService>,
 
+    /// VTube Studio service (settings, connection, typing state)
+    pub vtube_studio: Arc<crate::vtube_studio::VTubeStudioService>,
+
     /// Backend ready flag - set to true when all initialization is complete
     pub backend_ready: Arc<AtomicBool>,
 
@@ -153,6 +156,8 @@ impl AppState {
                 .expect("Failed to create tokio runtime"),
         );
 
+        let vtube_studio = Arc::new(crate::vtube_studio::VTubeStudioService::new());
+
         let editor = Arc::new(crate::editor::EditorService::new());
 
         let webview = Arc::new(crate::webview::service::WebViewService::new());
@@ -167,6 +172,7 @@ impl AppState {
             editor,
             active_window: Arc::new(Mutex::new(ActiveWindow::None)),
             twitch,
+            vtube_studio,
             backend_ready: Arc::new(AtomicBool::new(false)),
             playback_manager: Arc::new(Mutex::new(None)),
             hotkey_recording_in_progress: Arc::new(AtomicBool::new(false)),

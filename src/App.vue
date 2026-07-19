@@ -15,13 +15,14 @@ import TwitchPanel from './components/TwitchPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import HotkeysPanel from './components/HotkeysPanel.vue'
 import InterceptPanel from './components/InterceptPanel.vue'
+import VTubeStudioPanel from './components/VTubeStudioPanel.vue'
 import ErrorToasts from './components/ErrorToasts.vue'
 import MinimalModeButton from './components/MinimalModeButton.vue'
 import { useTelegramAuth, TELEGRAM_AUTH_KEY } from './composables/useTelegramAuth'
 import { provideAppSettings } from './composables/useAppSettings'
 import { debugLog } from './utils/debug'
 
-type Panel = 'input' | 'tts' | 'soundpanel' | 'playback' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'settings' | 'hotkeys' | 'intercept'
+type Panel = 'input' | 'tts' | 'soundpanel' | 'playback' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'vtube-studio' | 'settings' | 'hotkeys' | 'intercept'
 
 const currentPanel = ref<Panel>('input')
 
@@ -261,6 +262,7 @@ onUnmounted(() => {
           <PreprocessorPanel v-show="currentPanel === 'preprocessor'" />
           <WebViewPanel v-show="currentPanel === 'webview'" />
           <TwitchPanel v-show="currentPanel === 'twitch'" />
+          <VTubeStudioPanel v-show="currentPanel === 'vtube-studio'" />
           <SettingsPanel v-show="currentPanel === 'settings'" />
           <HotkeysPanel v-show="currentPanel === 'hotkeys'" />
           <InterceptPanel v-show="currentPanel === 'intercept'" />

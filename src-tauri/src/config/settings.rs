@@ -635,6 +635,33 @@ impl TwitchSettings {
     }
 }
 
+// ==================== VTube Studio Settings ====================
+
+fn default_vtube_port() -> u16 {
+    8001
+}
+
+/// VTube Studio integration settings
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VTubeStudioSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_vtube_port")]
+    pub port: u16,
+    #[serde(default)]
+    pub token: Option<String>,
+}
+
+impl Default for VTubeStudioSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            port: default_vtube_port(),
+            token: None,
+        }
+    }
+}
+
 // ==================== WebView Settings ====================
 // WebView server settings are defined in webview module and re-exported here
 use crate::webview::WebViewSettings;
@@ -971,6 +998,8 @@ pub struct AppSettings {
     pub ai: AiSettings,
     #[serde(default)]
     pub hotkeys: HotkeySettings,
+    #[serde(default)]
+    pub vtube_studio: VTubeStudioSettings,
     /// Показывать окно управления воспроизведением при запуске
     #[serde(default)]
     pub show_playback_on_start: bool,
@@ -991,6 +1020,7 @@ impl Default for AppSettings {
             logging: LoggingSettings::default(),
             ai: AiSettings::default(),
             hotkeys: HotkeySettings::default(),
+            vtube_studio: VTubeStudioSettings::default(),
             show_playback_on_start: false,
         }
     }
@@ -1827,6 +1857,18 @@ impl SettingsManager {
     pub fn set_show_playback_on_start(&self, value: bool) -> Result<()> {
         self.update_field("/show_playback_on_start", &value)
     }
+
+    // ========== VTube Studio Settings ==========
+
+    pub fn get_vtube_studio_settings(&self) -> VTubeStudioSettings {
+        self.cache.read().vtube_studio.clone()
+    }
+
+    pub fn set_vtube_studio_settings(&self, settings: &VTubeStudioSettings) -> Result<()> {
+        let mut app_settings = self.load()?;
+        app_settings.vtube_studio = settings.clone();
+        self.save(&app_settings)
+    }
 }
 
 #[cfg(test)]
@@ -2291,5 +2333,55 @@ mod tests {
             assert_eq!(parsed, mode);
         }
         assert!(QuickEditorMode::from_str("bogus").is_none());
+    }
+
+    /// Backward-compat: old settings.json without `vtube_studio` field must deserialize.
+    #[test]
+    fn app_settings_deserializes_without_vtube_studio_field() {
+        let old_json = r#"{
+            "audio": { "speaker_device": null, "speaker_enabled": true, "speaker_volume": 80, "virtual_mic_device": null, "virtual_mic_volume": 100 },
+            "tts": { "provider": "openai", "openai": { "api_key": null, "voice": "alloy" }, "local": { "url": "http://127.0.0.1:8124" }, "fish": { "api_key": null, "voices": [], "reference_id": "", "format": "mp3", "temperature": 0.7, "sample_rate": 44100, "use_proxy": false }, "telegram": { "api_id": null, "proxy_mode": "none", "voices": [], "current_voice_id": "" }, "network": { "proxy": { "proxy_url": null }, "mtproxy": { "host": null, "port": 8888, "secret": null, "dc_id": null } } },
+            "audio_effects": { "enabled": false, "pitch": 0, "speed": 0, "volume": 100, "enhance_enabled": false, "enhance_atten_db": 12.0, "formant_preserved": true },
+            "hotkey_enabled": true,
+            "editor": { "quick": false, "ai": false, "ai_completion": false, "spellcheck_enabled": true, "spellcheck_source": "offline", "editor_height": 340 },
+            "theme": "dark",
+            "twitch": { "enabled": false, "username": "", "token": "", "channel": "", "start_on_boot": false },
+            "webview": { "enabled": false, "start_on_boot": false, "port": 10100, "bind_address": "0.0.0.0", "access_token": null, "upnp_enabled": false },
+            "logging": { "enabled": false, "level": "info", "module_levels": {} },
+            "ai": { "provider": "openai", "openai": { "api_key": null, "use_proxy": false, "model": "gpt-4o-mini" }, "zai": { "url": null, "api_key": null, "model": "glm-4.5" }, "deepseek": { "api_key": null, "use_proxy": false, "model": "deepseek-chat" }, "custom": { "url": null, "api_key": null, "use_proxy": false, "model": "deepseek-chat" }, "prompt": "test", "timeout": 20 },
+            "hotkeys": { "main_window": { "modifiers": ["ctrl"], "key": "F12" }, "sound_panel": { "modifiers": ["alt"], "key": "F12" }, "playback_pause": { "modifiers": [], "key": "" }, "playback_stop": { "modifiers": [], "key": "" }, "playback_repeat": { "modifiers": [], "key": "" }, "playback_control_window": { "modifiers": [], "key": "" } },
+            "show_playback_on_start": false
+        }"#;
+        let settings: AppSettings = serde_json::from_str(old_json)
+            .expect("old AppSettings (without vtube_studio field) must deserialize");
+        assert!(!settings.vtube_studio.enabled);
+        assert_eq!(settings.vtube_studio.port, 8001);
+        assert!(settings.vtube_studio.token.is_none());
+    }
+
+    /// VTubeStudioSettings defaults: disabled, port 8001, no token.
+    #[test]
+    fn vtube_studio_settings_defaults() {
+        let s = VTubeStudioSettings::default();
+        assert!(!s.enabled);
+        assert_eq!(s.port, 8001);
+        assert!(s.token.is_none());
+    }
+
+    /// VTubeStudioSettings round-trip: token is persisted to and loaded from disk.
+    #[test]
+    fn vtube_studio_settings_token_round_trip() {
+        let original = VTubeStudioSettings {
+            enabled: true,
+            port: 8002,
+            token: Some("secret-token".to_string()),
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        // Token must NOT be skip_serialized on the settings struct (it's persisted to disk)
+        assert!(json.contains("secret-token"));
+        let back: VTubeStudioSettings = serde_json::from_str(&json).unwrap();
+        assert!(back.enabled);
+        assert_eq!(back.port, 8002);
+        assert_eq!(back.token.as_deref(), Some("secret-token"));
     }
 }

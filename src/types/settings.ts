@@ -372,6 +372,18 @@ export interface AiSettingsDto {
 }
 
 // ============================================================================
+// VTube Studio Settings Types
+// ============================================================================
+
+/**
+ * VTube Studio settings DTO (safe — no token exposed to frontend)
+ */
+export interface VTubeStudioSettingsDto {
+  enabled: boolean
+  port: number
+}
+
+// ============================================================================
 // Main App Settings DTO
 // ============================================================================
 
@@ -394,6 +406,7 @@ export interface AppSettingsDto {
   editor: EditorSettingsDto
   ai: AiSettingsDto
   hotkeys: HotkeySettingsDto
+  vtube_studio: VTubeStudioSettingsDto
 }
 
 // ============================================================================

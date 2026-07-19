@@ -90,6 +90,42 @@ let unlistenSettings: UnlistenFn | null = null
 let previousCompactHeight = 0
 let compactSaveTimer: ReturnType<typeof setTimeout> | null = null
 
+let vtsTypingGeneration = 0
+let vtsTypingTimer: ReturnType<typeof setTimeout> | null = null
+
+function notifyVtsTypingStart() {
+  vtsTypingGeneration++
+  const gen = vtsTypingGeneration
+  invoke('set_vtube_studio_typing', { typing: true }).catch((e) => {
+    debugError('[InputPanel] VTS typing true failed:', e)
+  })
+  scheduleVtsTypingEnd(gen)
+}
+
+function scheduleVtsTypingEnd(gen: number) {
+  if (vtsTypingTimer !== null) {
+    clearTimeout(vtsTypingTimer)
+  }
+  vtsTypingTimer = setTimeout(() => {
+    if (gen !== vtsTypingGeneration) return
+    invoke('set_vtube_studio_typing', { typing: false }).catch((e) => {
+      debugError('[InputPanel] VTS typing false failed:', e)
+    })
+    vtsTypingTimer = null
+  }, 800)
+}
+
+function notifyVtsTypingEnd() {
+  vtsTypingGeneration++
+  if (vtsTypingTimer !== null) {
+    clearTimeout(vtsTypingTimer)
+    vtsTypingTimer = null
+  }
+  invoke('set_vtube_studio_typing', { typing: false }).catch((e) => {
+    debugError('[InputPanel] VTS typing false failed:', e)
+  })
+}
+
 async function reloadPreprocessorData() {
   try {
     debugLog('[InputPanel] Reloading preprocessor data...')
@@ -199,6 +235,11 @@ vueOnUnmounted(async () => {
     unlistenSettings()
   }
   window.removeEventListener('preprocessor-data-changed', onPreprocessorChanged)
+  if (vtsTypingTimer !== null) {
+    clearTimeout(vtsTypingTimer)
+    vtsTypingTimer = null
+  }
+  notifyVtsTypingEnd()
 })
 
 async function hideMainWindow() {
@@ -221,6 +262,7 @@ async function speak(textToSend: string) {
   if (!textToSend.trim()) return
   if (isSpeakingInFlight.value) return
 
+  notifyVtsTypingEnd()
   isSpeakingInFlight.value = true
   try {
     debugLog('[InputPanel] Speaking:', textToSend)
@@ -354,6 +396,8 @@ async function handleEnter() {
 
   if (!currentText.trim()) return
   if (isSpeakingInFlight.value) return
+
+  notifyVtsTypingEnd()
 
   if (mode === 'disabled') {
     await speak(currentText)
@@ -500,6 +544,7 @@ defineExpose({ focusEditor })
           :replacements="replacementsRecord"
           :usernames="usernamesRecord"
           :editor-height-px="editorHeightPx"
+          @user-edit="notifyVtsTypingStart"
           @enter="handleEnter"
           @esc="handleEsc"
         />

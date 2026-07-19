@@ -50,6 +50,10 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
     info!("Loading Twitch settings...");
     *app_state.inner().twitch.settings.blocking_write() = settings.twitch.clone();
 
+    // Load VTube Studio settings into AppState
+    info!("Loading VTube Studio settings...");
+    *app_state.inner().vtube_studio.settings.blocking_write() = settings.vtube_studio.clone();
+
     // Load WebView settings into AppState
     info!("Loading WebView settings...");
     *app_state.inner().webview.settings.blocking_write() = crate::webview::WebViewSettings {

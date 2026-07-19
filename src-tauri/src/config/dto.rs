@@ -1169,6 +1169,25 @@ impl From<HotkeySettingsDto> for HotkeySettings {
 }
 
 // ============================================================================
+// VTube Studio Settings DTO
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VTubeStudioSettingsDto {
+    pub enabled: bool,
+    pub port: u16,
+}
+
+impl From<crate::config::VTubeStudioSettings> for VTubeStudioSettingsDto {
+    fn from(s: crate::config::VTubeStudioSettings) -> Self {
+        Self {
+            enabled: s.enabled,
+            port: s.port,
+        }
+    }
+}
+
+// ============================================================================
 // Main App Settings DTO
 // ============================================================================
 
@@ -1214,6 +1233,8 @@ pub struct AppSettingsDto {
     pub ai: AiSettingsDto,
     /// Hotkey settings
     pub hotkeys: HotkeySettingsDto,
+    /// VTube Studio settings (safe — no token)
+    pub vtube_studio: VTubeStudioSettingsDto,
 }
 
 impl AppSettingsDto {
@@ -1247,6 +1268,7 @@ impl AppSettingsDto {
             soundpanel_bindings: params.soundpanel_bindings,
             ai: params.config.ai.clone().into(),
             hotkeys: params.config.hotkeys.clone().into(),
+            vtube_studio: params.config.vtube_studio.clone().into(),
         }
     }
 }

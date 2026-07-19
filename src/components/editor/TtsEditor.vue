@@ -36,6 +36,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
+  'user-edit': []
   enter: []
   esc: []
 }>()
@@ -351,6 +352,7 @@ function createState() {
         const isExternal = update.transactions.some(tr => tr.annotation(ExternalUpdate) !== undefined)
         if (isExternal) return
         emit('update:modelValue', update.state.doc.toString())
+        emit('user-edit')
       }),
       EditorView.theme({
         '&': { height: 'auto' },

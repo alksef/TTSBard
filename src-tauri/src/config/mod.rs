@@ -11,14 +11,14 @@ mod validation;
 mod windows;
 
 pub use constants::*;
-pub use dto::{AllSourcesParams, AppSettingsDto, TtsProviderInfoDto};
+pub use dto::{AllSourcesParams, AppSettingsDto, TtsProviderInfoDto, VTubeStudioSettingsDto};
 pub use hotkeys::{Hotkey, HotkeyModifier, HotkeySettings};
 pub use settings::{
     AiCustomSettings, AiDeepSeekSettings, AiOpenAiSettings, AiProviderType, AiSettings,
     AiZAiSettings, AppSettings, AudioEffectsSettings, AudioSettings, DspCompressorSettings,
     DspEqBandSettings, DspEqSettings, DspLimiterSettings, DspSettings, LoggingSettings,
     MtProxySettings, NetworkSettings, ProxyMode, ProxyType, QuickEditorMode, SettingsManager,
-    SpellSource, Theme, TwitchSettings,
+    SpellSource, Theme, TwitchSettings, VTubeStudioSettings,
 };
 pub use validation::is_valid_hex_color;
 pub use windows::{WindowsManager, WindowsSettings};

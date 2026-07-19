@@ -26,6 +26,7 @@ mod telegram;
 mod thread_manager;
 mod tts;
 mod twitch;
+mod vtube_studio;
 mod webview;
 mod window;
 
@@ -447,6 +448,11 @@ pub fn run() {
             commands::twitch::disconnect_twitch,
             commands::twitch::restart_twitch,
             commands::twitch::get_twitch_status,
+            // VTube Studio commands
+            commands::vtube_studio::get_vtube_studio_settings,
+            commands::vtube_studio::save_vtube_studio_settings,
+            commands::vtube_studio::test_vtube_studio_connection,
+            commands::vtube_studio::set_vtube_studio_typing,
             // Logging commands
             get_logging_settings,
             save_logging_settings,

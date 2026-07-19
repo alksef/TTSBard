@@ -292,3 +292,8 @@ export function useDspSettings(): ComputedRef<AppSettingsDto['dsp'] | undefined>
   const { settings } = useAppSettings()
   return computed(() => settings.value?.dsp)
 }
+
+export function useVTubeStudioSettings(): ComputedRef<AppSettingsDto['vtube_studio'] | undefined> {
+  const { settings } = useAppSettings()
+  return computed(() => settings.value?.vtube_studio)
+}
