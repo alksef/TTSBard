@@ -81,7 +81,7 @@ function mockSettings(): AppSettingsDto {
       playback_control_window: { modifiers: [], key: '' },
       return_previous_window: { modifiers: [], key: '' },
     },
-    vtube_studio: { enabled: false, port: 8001 },
+    vtube_studio: { enabled: false, port: 8001, start_on_boot: false },
   }
 }
 

@@ -2,16 +2,36 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.stubGlobal('window', globalThis)
 
-const { mockInvoke } = vi.hoisted(() => ({
-  mockInvoke: vi.fn(),
-}))
+const {
+  mockInvoke,
+  listenMock,
+  mockUnlistenFn,
+  setCapturedListenCallback,
+  getCapturedListenCallback,
+} = vi.hoisted(() => {
+  let capturedListenCallback: ((event: unknown) => void) | null = null
+  const listenMock = vi.fn()
+  const mockUnlistenFn = vi.fn()
+  return {
+    mockInvoke: vi.fn(),
+    listenMock,
+    mockUnlistenFn,
+    setCapturedListenCallback: (cb: ((event: unknown) => void) | null) => {
+      capturedListenCallback = cb
+    },
+    getCapturedListenCallback: () => capturedListenCallback,
+  }
+})
+
+let capturedOnMountedCb: (() => void) | null = null
+let capturedOnUnmountedCb: (() => void) | null = null
 
 vi.mock('vue', async () => {
   const actual = await vi.importActual<typeof import('vue')>('vue')
   return {
     ...actual,
-    onMounted: (cb: () => void) => cb(),
-    onUnmounted: () => {},
+    onMounted: (cb: () => void) => { capturedOnMountedCb = cb },
+    onUnmounted: (cb: () => void) => { capturedOnUnmountedCb = cb },
   }
 })
 
@@ -19,9 +39,13 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: mockInvoke,
 }))
 
-const mockVtubeSettingsRef = { value: { enabled: false, port: 8001 }, __v_isRef: true }
+const mockVtubeSettingsRef = { value: { enabled: false, port: 8001, start_on_boot: false }, __v_isRef: true }
 vi.mock('./useAppSettings', () => ({
   useVTubeStudioSettings: vi.fn(() => mockVtubeSettingsRef),
+}))
+
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: listenMock,
 }))
 
 vi.mock('../utils/debug', () => ({
@@ -30,395 +54,690 @@ vi.mock('../utils/debug', () => ({
 }))
 
 import { useVTubeStudio } from './useVTubeStudio'
+import type { VTubeStudioSettings } from './useVTubeStudio'
 
 function flushMicrotasks() {
   return new Promise<void>(resolve => queueMicrotask(resolve))
 }
 
+function setupBaseMock(settings?: Partial<VTubeStudioSettings>, status?: string) {
+  mockInvoke.mockImplementation(async (cmd: string) => {
+    if (cmd === 'get_vtube_studio_settings') {
+      return {
+        enabled: false,
+        port: 8001,
+        start_on_boot: false,
+        ...settings,
+      }
+    }
+    if (cmd === 'get_vtube_studio_status') {
+      return status ?? 'Disconnected'
+    }
+    return undefined
+  })
+}
+
+async function setupAndMount(settings?: Partial<VTubeStudioSettings>, status?: string) {
+  setupBaseMock(settings, status)
+  const composable = useVTubeStudio()
+  if (capturedOnMountedCb) {
+    await capturedOnMountedCb()
+  }
+  return composable
+}
+
 describe('useVTubeStudio', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.useFakeTimers()
-    mockVtubeSettingsRef.value = { enabled: false, port: 8001 }
+    mockVtubeSettingsRef.value = { enabled: false, port: 8001, start_on_boot: false }
+    capturedOnMountedCb = null
+    capturedOnUnmountedCb = null
+    setCapturedListenCallback(null)
+    listenMock.mockImplementation(async (_event: string, cb: (event: unknown) => void) => {
+      setCapturedListenCallback(cb)
+      return mockUnlistenFn
+    })
   })
 
   afterEach(() => {
-    vi.useRealTimers()
   })
 
   describe('port validation', () => {
-    it('validatePort returns false for port < 1024', () => {
-      mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === 'get_vtube_studio_settings') return { enabled: false, port: 8001 }
-        return undefined
-      })
-      const { settings, validatePort } = useVTubeStudio()
+    it('validatePort returns false for port < 1024 and sets portError', async () => {
+      const { settings, validatePort, portError } = await setupAndMount()
       settings.value.port = 80
       const valid = validatePort()
       expect(valid).toBe(false)
+      expect(portError.value).toContain('1024')
     })
 
-    it('validatePort returns false for port > 65535', () => {
-      mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === 'get_vtube_studio_settings') return { enabled: false, port: 8001 }
-        return undefined
-      })
-      const { settings, validatePort, portError } = useVTubeStudio()
+    it('validatePort returns false for port > 65535', async () => {
+      const { settings, validatePort, portError } = await setupAndMount()
       settings.value.port = 70000
-      const valid = validatePort()
-      expect(valid).toBe(false)
-      expect(portError.value).toBe('Порт должен быть от 1024 до 65535')
+      expect(validatePort()).toBe(false)
+      expect(portError.value).not.toBeNull()
     })
 
-    it('validatePort returns true for valid port', () => {
-      mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === 'get_vtube_studio_settings') return { enabled: false, port: 8001 }
-        return undefined
-      })
-      const { settings, validatePort, portError } = useVTubeStudio()
+    it('validatePort returns true and clears portError for valid port', async () => {
+      const { settings, validatePort, portError } = await setupAndMount()
       settings.value.port = 8001
-      const valid = validatePort()
-      expect(valid).toBe(true)
+      expect(validatePort()).toBe(true)
       expect(portError.value).toBeNull()
     })
 
-    it('validatePort returns false for non-integer port', () => {
-      mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === 'get_vtube_studio_settings') return { enabled: false, port: 8001 }
-        return undefined
-      })
-      const { settings, validatePort } = useVTubeStudio()
+    it('validatePort returns false for non-integer port', async () => {
+      const { settings, validatePort } = await setupAndMount()
       settings.value.port = 8001.5
-      const valid = validatePort()
-      expect(valid).toBe(false)
+      expect(validatePort()).toBe(false)
     })
 
     it('save does not invoke backend when port is invalid', async () => {
-      mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === 'get_vtube_studio_settings') return { enabled: true, port: 8001 }
-        return undefined
-      })
-      const { settings, save } = useVTubeStudio()
-      await flushMicrotasks()
-      mockInvoke.mockClear()
+      const { settings, save, validatePort } = await setupAndMount({ enabled: true })
+      setupBaseMock()
       settings.value.port = 80
+      expect(validatePort()).toBe(false)
       await save()
       await flushMicrotasks()
-      expect(mockInvoke).not.toHaveBeenCalledWith(
-        'save_vtube_studio_settings',
-        expect.anything()
-      )
+      expect(mockInvoke).not.toHaveBeenCalledWith('save_vtube_studio_settings', expect.anything())
     })
   })
 
-  describe('testConnection with unsaved settings', () => {
-    it('saves settings before test when form differs from lastAppliedSettings', async () => {
-      mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === 'get_vtube_studio_settings') return { enabled: true, port: 8001 }
-        if (cmd === 'save_vtube_studio_settings') return 'VTube Studio settings saved'
-        if (cmd === 'test_vtube_studio_connection') return 'Successfully connected'
-        return undefined
-      })
+  describe('status listener', () => {
+    it('registers listener for vtube-studio-status-changed and unlistens on unmount', async () => {
+      await setupAndMount()
+      expect(listenMock).toHaveBeenCalledWith('vtube-studio-status-changed', expect.any(Function))
+      const cb = getCapturedListenCallback()
+      expect(cb).not.toBeNull()
 
-      const { testConnection, settings } = useVTubeStudio()
-      await flushMicrotasks()
-
-      mockInvoke.mockClear()
-      settings.value = { enabled: true, port: 9001 }
-
-      await testConnection()
-      await flushMicrotasks()
-
-      const calls = mockInvoke.mock.calls.map((c: unknown[]) => c[0])
-      const saveIdx = calls.indexOf('save_vtube_studio_settings')
-      const testIdx = calls.indexOf('test_vtube_studio_connection')
-      expect(saveIdx).toBeGreaterThanOrEqual(0)
-      expect(testIdx).toBeGreaterThanOrEqual(0)
-      expect(saveIdx).toBeLessThan(testIdx)
+      capturedOnUnmountedCb?.()
+      expect(mockUnlistenFn).toHaveBeenCalled()
     })
 
-    it('does not call test backend after save error', async () => {
-      mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === 'get_vtube_studio_settings') return { enabled: true, port: 8001 }
-        if (cmd === 'save_vtube_studio_settings') throw new Error('Save failed')
-        if (cmd === 'test_vtube_studio_connection') return 'Successfully connected'
-        return undefined
-      })
+    it('listener callback converts Rust enum and updates status', async () => {
+      const { currentStatus } = await setupAndMount()
+      const cb = getCapturedListenCallback()
+      expect(cb).not.toBeNull()
 
-      const { testConnection, status, settings } = useVTubeStudio()
+      cb!({ payload: { Connecting: null } })
       await flushMicrotasks()
+      expect(currentStatus.value).toBe('Connecting')
 
-      mockInvoke.mockClear()
-      settings.value = { enabled: true, port: 9001 }
-
-      await testConnection()
+      cb!({ payload: { Connected: null } })
       await flushMicrotasks()
+      expect(currentStatus.value).toBe('Connected')
 
-      expect(mockInvoke).toHaveBeenCalledWith(
-        'save_vtube_studio_settings',
-        expect.objectContaining({ enabled: true, port: 9001 })
-      )
-      expect(mockInvoke).not.toHaveBeenCalledWith('test_vtube_studio_connection')
-      expect(status.value).toBe('Ошибка')
+      cb!({ payload: { Error: null } })
+      await flushMicrotasks()
+      expect(currentStatus.value).toBe('Error')
     })
 
-    it('does not save when settings already match lastAppliedSettings', async () => {
-      mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === 'get_vtube_studio_settings') return { enabled: true, port: 8001 }
-        if (cmd === 'test_vtube_studio_connection') return 'Successfully connected'
-        return undefined
-      })
+    it('listener callback handles string payload statuses', async () => {
+      const { currentStatus } = await setupAndMount()
+      const cb = getCapturedListenCallback()
+      expect(cb).not.toBeNull()
 
-      const { testConnection } = useVTubeStudio()
+      cb!({ payload: 'Connecting' })
       await flushMicrotasks()
+      expect(currentStatus.value).toBe('Connecting')
 
-      mockInvoke.mockClear()
-
-      await testConnection()
+      cb!({ payload: 'Connected' })
       await flushMicrotasks()
+      expect(currentStatus.value).toBe('Connected')
+    })
 
-      expect(mockInvoke).not.toHaveBeenCalledWith(
-        'save_vtube_studio_settings',
-        expect.anything()
-      )
-      expect(mockInvoke).toHaveBeenCalledWith('test_vtube_studio_connection')
+    it('listener callback handles unknown payload gracefully', async () => {
+      const { currentStatus } = await setupAndMount()
+      const cb = getCapturedListenCallback()
+      expect(cb).not.toBeNull()
+
+      cb!({ payload: { UnknownThing: 42 } })
+      await flushMicrotasks()
+      expect(currentStatus.value).toBe('Disconnected')
     })
   })
 
-  describe('testConnection basic behaviour', () => {
-    it('sets status to Проверено on success', async () => {
-      mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === 'get_vtube_studio_settings') return { enabled: true, port: 8001 }
-        if (cmd === 'test_vtube_studio_connection') return 'Successfully connected'
-        return undefined
-      })
+  describe('loadStatus conversion', () => {
+    it('converts Rust enum Connected via loadStatus', async () => {
+      const { loadStatus, currentStatus } = await setupAndMount()
+      setupBaseMock(undefined, undefined)
+      mockInvoke.mockResolvedValueOnce({ Connected: null })
 
-      const { testConnection, status } = useVTubeStudio()
+      await loadStatus()
       await flushMicrotasks()
-
-      await testConnection()
-      await flushMicrotasks()
-
-      expect(status.value).toBe('Проверено')
+      expect(currentStatus.value).toBe('Connected')
     })
 
-    it('sets status to error on failure', async () => {
-      mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === 'get_vtube_studio_settings') return { enabled: true, port: 8001 }
-        if (cmd === 'test_vtube_studio_connection') throw new Error('Connection refused')
-        return undefined
-      })
+    it('converts Rust enum Error via loadStatus', async () => {
+      const { loadStatus, currentStatus, errorMessage } = await setupAndMount()
+      errorMessage.value = null
+      setupBaseMock(undefined, undefined)
+      mockInvoke.mockResolvedValueOnce({ Error: null })
 
-      const { testConnection, status } = useVTubeStudio()
+      await loadStatus()
       await flushMicrotasks()
-
-      await testConnection()
-      await flushMicrotasks()
-
-      expect(status.value).toBe('Ошибка')
+      expect(currentStatus.value).toBe('Error')
+      expect(errorMessage.value).toContain('Ошибка подключения')
     })
 
-    it('does nothing when integration is disabled', async () => {
-      mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === 'get_vtube_studio_settings') return { enabled: false, port: 8001 }
-        return undefined
-      })
+    it('converts string status via loadStatus', async () => {
+      const { loadStatus, currentStatus } = await setupAndMount()
+      setupBaseMock(undefined, undefined)
+      mockInvoke.mockResolvedValueOnce('Connected')
 
-      const { testConnection, status } = useVTubeStudio()
+      await loadStatus()
       await flushMicrotasks()
-
-      mockInvoke.mockClear()
-
-      await testConnection()
-      await flushMicrotasks()
-
-      expect(mockInvoke).not.toHaveBeenCalledWith('test_vtube_studio_connection')
-      expect(status.value).toBe('Не проверено')
-    })
-
-    it('does nothing when busy', async () => {
-      mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === 'get_vtube_studio_settings') return { enabled: true, port: 8001 }
-        return undefined
-      })
-
-      const { testConnection, busy } = useVTubeStudio()
-      await flushMicrotasks()
-
-      mockInvoke.mockClear()
-      busy.value = true
-
-      await testConnection()
-      await flushMicrotasks()
-
-      expect(mockInvoke).not.toHaveBeenCalledWith('test_vtube_studio_connection')
-    })
-
-    it('does not test when port is invalid', async () => {
-      mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === 'get_vtube_studio_settings') return { enabled: true, port: 8001 }
-        return undefined
-      })
-
-      const { testConnection, settings } = useVTubeStudio()
-      await flushMicrotasks()
-
-      mockInvoke.mockClear()
-      settings.value.port = 80
-
-      await testConnection()
-      await flushMicrotasks()
-
-      expect(mockInvoke).not.toHaveBeenCalledWith('test_vtube_studio_connection')
+      expect(currentStatus.value).toBe('Connected')
     })
   })
 
-  describe('status reset on form change', () => {
-    it('changes to enabled after successful check resets status to Не проверено', async () => {
-      mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === 'get_vtube_studio_settings') return { enabled: true, port: 8001 }
-        if (cmd === 'test_vtube_studio_connection') return 'Connected'
-        return undefined
-      })
-
-      const { testConnection, status, settings } = useVTubeStudio()
-      await flushMicrotasks()
-      mockInvoke.mockClear()
-
-      await testConnection()
-      await flushMicrotasks()
-
-      expect(status.value).toBe('Проверено')
-
-      settings.value.enabled = false
-      await flushMicrotasks()
-
-      expect(status.value).toBe('Не проверено')
-    })
-
-    it('changes to port after successful check resets status to Не проверено', async () => {
-      mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === 'get_vtube_studio_settings') return { enabled: true, port: 8001 }
-        if (cmd === 'test_vtube_studio_connection') return 'Connected'
-        return undefined
-      })
-
-      const { testConnection, status, settings } = useVTubeStudio()
-      await flushMicrotasks()
-      mockInvoke.mockClear()
-
-      await testConnection()
-      await flushMicrotasks()
-
-      expect(status.value).toBe('Проверено')
-
-      settings.value.port = 9001
-      await flushMicrotasks()
-
-      expect(status.value).toBe('Не проверено')
-    })
-  })
-
-  describe('stale test guard', () => {
-    function deferredPromise<T = void>() {
-      let resolve!: (value: T | PromiseLike<T>) => void
-      const promise = new Promise<T>((res) => { resolve = res })
-      return { promise, resolve }
-    }
-
-    it('does not set Проверено when form changes during in-flight testConnection', async () => {
-      const deferred = deferredPromise<string>()
+  describe('start/stop/restart commands', () => {
+    it('startVTubeStudio immediately sets Connecting then calls connect', async () => {
+      setupBaseMock()
+      mockInvoke.mockResolvedValue('Подключено к VTube Studio')
+      const { startVTubeStudio, currentStatus } = await setupAndMount()
+      setupBaseMock()
 
       mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === 'get_vtube_studio_settings') return { enabled: true, port: 8001 }
-        if (cmd === 'save_vtube_studio_settings') return 'Saved'
-        if (cmd === 'test_vtube_studio_connection') return deferred.promise
-        return undefined
-      })
-
-      const { testConnection, status, settings } = useVTubeStudio()
-      await flushMicrotasks()
-
-      mockInvoke.mockClear()
-
-      settings.value = { enabled: true, port: 9001 }
-
-      const testPromise = testConnection()
-      await flushMicrotasks()
-
-      expect(status.value).toBe('Проверка…')
-
-      settings.value = { enabled: true, port: 9999 }
-      deferred.resolve('Connected')
-
-      await testPromise
-      await flushMicrotasks()
-
-      expect(status.value).not.toBe('Проверено')
-      expect(status.value).toBe('Не проверено')
-    })
-
-    it('does not set Проверено when form changes before save completes in testConnection', async () => {
-      const saveDeferred = deferredPromise<string>()
-      let saveResolved = false
-
-      mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === 'get_vtube_studio_settings') return { enabled: true, port: 8001 }
-        if (cmd === 'save_vtube_studio_settings') {
-          const result = await saveDeferred.promise
-          saveResolved = true
-          return result
+        if (cmd === 'connect_vtube_studio') {
+          await new Promise(r => setTimeout(r, 0))
+          return 'Подключено к VTube Studio'
         }
-        if (cmd === 'test_vtube_studio_connection') return 'Connected'
         return undefined
       })
 
-      const { testConnection, status, settings } = useVTubeStudio()
+      const startPromise = startVTubeStudio()
+      expect(currentStatus.value).toBe('Connecting')
+      await startPromise
       await flushMicrotasks()
+      expect(mockInvoke).toHaveBeenCalledWith('connect_vtube_studio')
+      expect(currentStatus.value).toBe('Connected')
+    })
 
+    it('stopVTubeStudio calls disconnect_vtube_studio', async () => {
+      const { stopVTubeStudio, currentStatus } = await setupAndMount()
+      setupBaseMock()
+      mockInvoke.mockResolvedValue('Disconnected from VTube Studio')
+
+      await stopVTubeStudio()
+      await flushMicrotasks()
+      expect(mockInvoke).toHaveBeenCalledWith('disconnect_vtube_studio')
+      expect(currentStatus.value).toBe('Disconnected')
+    })
+
+    it('restartVTubeStudio immediately sets Connecting then calls restart', async () => {
+      setupBaseMock()
+      const { restartVTubeStudio, currentStatus } = await setupAndMount()
+      setupBaseMock()
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'restart_vtube_studio') {
+          await new Promise(r => setTimeout(r, 0))
+          return 'Restarted VTube Studio'
+        }
+        return undefined
+      })
+
+      const restartPromise = restartVTubeStudio()
+      expect(currentStatus.value).toBe('Connecting')
+      await restartPromise
+      await flushMicrotasks()
+      expect(mockInvoke).toHaveBeenCalledWith('restart_vtube_studio')
+      expect(currentStatus.value).toBe('Connected')
+    })
+
+    it('stopVTubeStudio failure retains previous status and shows error', async () => {
+      const { stopVTubeStudio, currentStatus, errorMessage } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      setupBaseMock()
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'disconnect_vtube_studio') throw new Error('Already disconnected')
+        return undefined
+      })
+
+      await stopVTubeStudio()
+      await flushMicrotasks()
+      expect(currentStatus.value).toBe('Connected')
+      expect(errorMessage.value).toBeTruthy()
+      expect(errorMessage.value).toContain('Failed to disconnect')
+    })
+
+    it('restartVTubeStudio failure sets Error', async () => {
+      const { restartVTubeStudio, currentStatus, errorMessage } = await setupAndMount()
+      setupBaseMock()
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'restart_vtube_studio') throw new Error('Restart failed')
+        return undefined
+      })
+
+      const restartPromise = restartVTubeStudio()
+      expect(currentStatus.value).toBe('Connecting')
+      await restartPromise
+      await flushMicrotasks()
+      expect(errorMessage.value).toBeTruthy()
+      expect(errorMessage.value).toContain('Failed to restart')
+      expect(currentStatus.value).toBe('Error')
+    })
+
+    it('startVTubeStudio shows error and sets Error on failure', async () => {
+      const { startVTubeStudio, errorMessage, currentStatus } = await setupAndMount()
+      setupBaseMock()
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'connect_vtube_studio') throw new Error('Connection refused')
+        return undefined
+      })
+
+      await startVTubeStudio()
+      await flushMicrotasks()
+      expect(errorMessage.value).toBeTruthy()
+      expect(errorMessage.value).toContain('Failed to connect')
+      expect(currentStatus.value).toBe('Error')
+    })
+  })
+
+  describe('busy guards', () => {
+    it('busy guard prevents double start', async () => {
+      let resolveDelay: () => void
+      const delay = new Promise<void>(r => { resolveDelay = r })
+      const { startVTubeStudio } = await setupAndMount()
       mockInvoke.mockClear()
+      setupBaseMock()
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'connect_vtube_studio') {
+          await delay
+          return 'Connected'
+        }
+        return undefined
+      })
 
-      settings.value = { enabled: true, port: 9001 }
+      const p1 = startVTubeStudio()
+      const p2 = startVTubeStudio()
+      resolveDelay!()
+      await Promise.all([p1, p2])
+      await flushMicrotasks()
+      expect(mockInvoke).toHaveBeenCalledTimes(1)
+      expect(mockInvoke).toHaveBeenCalledWith('connect_vtube_studio')
+    })
 
-      const testPromise = testConnection()
+    it('busy guard prevents double stop', async () => {
+      let resolveDelay: () => void
+      const delay = new Promise<void>(r => { resolveDelay = r })
+      const { stopVTubeStudio } = await setupAndMount()
+      mockInvoke.mockClear()
+      setupBaseMock()
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'disconnect_vtube_studio') {
+          await delay
+          return 'Disconnected'
+        }
+        return undefined
+      })
+
+      const p1 = stopVTubeStudio()
+      const p2 = stopVTubeStudio()
+      resolveDelay!()
+      await Promise.all([p1, p2])
+      await flushMicrotasks()
+      expect(mockInvoke).toHaveBeenCalledTimes(1)
+      expect(mockInvoke).toHaveBeenCalledWith('disconnect_vtube_studio')
+    })
+
+    it('start called while busy is ignored and busy stays true', async () => {
+      let resolveDelay: () => void
+      const delay = new Promise<void>(r => { resolveDelay = r })
+      const { startVTubeStudio, busy } = await setupAndMount()
+      mockInvoke.mockClear()
+      setupBaseMock()
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'connect_vtube_studio') {
+          await delay
+          return 'Connected'
+        }
+        return undefined
+      })
+
+      const p1 = startVTubeStudio()
+      expect(busy.value).toBe(true)
+      const p2 = startVTubeStudio()
+      resolveDelay!()
+      await Promise.all([p1, p2])
+      await flushMicrotasks()
+      expect(mockInvoke).toHaveBeenCalledTimes(1)
+      expect(mockInvoke).toHaveBeenCalledWith('connect_vtube_studio')
+    })
+  })
+
+  describe('saveStartOnBoot', () => {
+    it('saves start_on_boot immediately', async () => {
+      const { settings, saveStartOnBoot } = await setupAndMount({ enabled: true, port: 8001, start_on_boot: false })
+      setupBaseMock()
+      mockInvoke.mockResolvedValue('VTube Studio settings saved')
+
+      settings.value.start_on_boot = true
+      await saveStartOnBoot()
       await flushMicrotasks()
 
-      expect(status.value).toBe('Проверка…')
-
-      settings.value = { enabled: true, port: 9999 }
-
-      saveDeferred.resolve('Saved')
-      await testPromise
-      await flushMicrotasks()
-
-      expect(saveResolved).toBe(true)
-      expect(mockInvoke).not.toHaveBeenCalledWith('test_vtube_studio_connection')
-      expect(status.value).toBe('Не проверено')
+      expect(mockInvoke).toHaveBeenCalledWith('save_vtube_studio_settings', expect.objectContaining({
+        enabled: true,
+        port: 8001,
+        startOnBoot: true,
+      }))
     })
   })
 
   describe('save', () => {
     it('invokes save_vtube_studio_settings with current form values', async () => {
-      mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === 'get_vtube_studio_settings') return { enabled: false, port: 8001 }
-        if (cmd === 'save_vtube_studio_settings') return 'VTube Studio settings saved'
-        return undefined
-      })
+      const { save, settings } = await setupAndMount()
+      setupBaseMock()
+      mockInvoke.mockResolvedValue('VTube Studio settings saved')
 
-      const { save, settings } = useVTubeStudio()
-      await flushMicrotasks()
-
-      settings.value = { enabled: true, port: 9001 }
-
-      mockInvoke.mockClear()
-
+      settings.value = { enabled: true, port: 9001, start_on_boot: true }
       await save()
       await flushMicrotasks()
 
       expect(mockInvoke).toHaveBeenCalledWith(
         'save_vtube_studio_settings',
-        expect.objectContaining({ enabled: true, port: 9001 })
+        expect.objectContaining({ enabled: true, port: 9001, startOnBoot: true })
       )
+    })
+
+    it('busy guard prevents double save', async () => {
+      let resolveDelay: () => void
+      const delay = new Promise<void>(r => { resolveDelay = r })
+      const { save, settings } = await setupAndMount()
+      mockInvoke.mockClear()
+      setupBaseMock()
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'save_vtube_studio_settings') {
+          await delay
+          return 'VTube Studio settings saved'
+        }
+        return undefined
+      })
+
+      settings.value = { enabled: true, port: 9001, start_on_boot: true }
+      const p1 = save()
+      const p2 = save()
+      resolveDelay!()
+      await Promise.all([p1, p2])
+      await flushMicrotasks()
+      expect(mockInvoke).toHaveBeenCalledTimes(1)
+      expect(mockInvoke).toHaveBeenCalledWith('save_vtube_studio_settings', expect.objectContaining({ enabled: true, port: 9001, startOnBoot: true }))
+    })
+  })
+
+  describe('testTypingParameter', () => {
+    it('calls test_vtube_studio_typing with default refs (800, 1)', async () => {
+      const { testTypingParameter, currentStatus } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      setupBaseMock()
+      mockInvoke.mockResolvedValue('Тест параметра выполнен: 1 повторов с таймаутом 800 мс')
+
+      await testTypingParameter()
+      await flushMicrotasks()
+
+      expect(mockInvoke).toHaveBeenCalledWith('test_vtube_studio_typing', {
+        timeoutMs: 800,
+        repeatCount: 1,
+      })
+    })
+
+    it('calls test_vtube_studio_typing with custom ref values', async () => {
+      const { testTypingParameter, currentStatus, typingTimeout, typingRepeats } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      typingTimeout.value = 500
+      typingRepeats.value = 3
+      setupBaseMock()
+      mockInvoke.mockResolvedValue('ok')
+
+      await testTypingParameter()
+      await flushMicrotasks()
+
+      expect(mockInvoke).toHaveBeenCalledWith('test_vtube_studio_typing', {
+        timeoutMs: 500,
+        repeatCount: 3,
+      })
+    })
+
+    it('does not invoke when status is not Connected', async () => {
+      const { testTypingParameter, currentStatus } = await setupAndMount(undefined, 'Disconnected')
+      currentStatus.value = 'Disconnected'
+      setupBaseMock()
+      mockInvoke.mockResolvedValue('ok')
+
+      await testTypingParameter()
+      await flushMicrotasks()
+
+      expect(mockInvoke).not.toHaveBeenCalledWith('test_vtube_studio_typing', expect.anything())
+    })
+
+    it('does not invoke when busy', async () => {
+      const { testTypingParameter, currentStatus, busy } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      busy.value = true
+      setupBaseMock()
+      mockInvoke.mockResolvedValue('ok')
+
+      await testTypingParameter()
+      await flushMicrotasks()
+
+      expect(mockInvoke).not.toHaveBeenCalledWith('test_vtube_studio_typing', expect.anything())
+    })
+
+    it('does not invoke when typingTimeout is invalid (99)', async () => {
+      const { testTypingParameter, currentStatus, typingTimeout, typingTimeoutError } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      typingTimeout.value = 99
+      setupBaseMock()
+      mockInvoke.mockResolvedValue('ok')
+
+      await testTypingParameter()
+      await flushMicrotasks()
+
+      expect(typingTimeoutError.value).not.toBeNull()
+      expect(mockInvoke).not.toHaveBeenCalledWith('test_vtube_studio_typing', expect.anything())
+    })
+
+    it('does not invoke when typingTimeout is invalid (5001)', async () => {
+      const { testTypingParameter, currentStatus, typingTimeout, typingTimeoutError } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      typingTimeout.value = 5001
+      setupBaseMock()
+      mockInvoke.mockResolvedValue('ok')
+
+      await testTypingParameter()
+      await flushMicrotasks()
+
+      expect(typingTimeoutError.value).not.toBeNull()
+      expect(mockInvoke).not.toHaveBeenCalledWith('test_vtube_studio_typing', expect.anything())
+    })
+
+    it('does not invoke when typingTimeout is non-integer', async () => {
+      const { testTypingParameter, currentStatus, typingTimeout, typingTimeoutError } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      typingTimeout.value = 800.5
+      setupBaseMock()
+      mockInvoke.mockResolvedValue('ok')
+
+      await testTypingParameter()
+      await flushMicrotasks()
+
+      expect(typingTimeoutError.value).not.toBeNull()
+      expect(mockInvoke).not.toHaveBeenCalledWith('test_vtube_studio_typing', expect.anything())
+    })
+
+    it('does not invoke when typingRepeats is invalid (0)', async () => {
+      const { testTypingParameter, currentStatus, typingRepeats, typingRepeatsError } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      typingRepeats.value = 0
+      setupBaseMock()
+      mockInvoke.mockResolvedValue('ok')
+
+      await testTypingParameter()
+      await flushMicrotasks()
+
+      expect(typingRepeatsError.value).not.toBeNull()
+      expect(mockInvoke).not.toHaveBeenCalledWith('test_vtube_studio_typing', expect.anything())
+    })
+
+    it('does not invoke when typingRepeats is invalid (11)', async () => {
+      const { testTypingParameter, currentStatus, typingRepeats, typingRepeatsError } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      typingRepeats.value = 11
+      setupBaseMock()
+      mockInvoke.mockResolvedValue('ok')
+
+      await testTypingParameter()
+      await flushMicrotasks()
+
+      expect(typingRepeatsError.value).not.toBeNull()
+      expect(mockInvoke).not.toHaveBeenCalledWith('test_vtube_studio_typing', expect.anything())
+    })
+
+    it('does not invoke when typingRepeats is non-integer', async () => {
+      const { testTypingParameter, currentStatus, typingRepeats, typingRepeatsError } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      typingRepeats.value = 3.5
+      setupBaseMock()
+      mockInvoke.mockResolvedValue('ok')
+
+      await testTypingParameter()
+      await flushMicrotasks()
+
+      expect(typingRepeatsError.value).not.toBeNull()
+      expect(mockInvoke).not.toHaveBeenCalledWith('test_vtube_studio_typing', expect.anything())
+    })
+
+    it('shows backend success message on success', async () => {
+      const { testTypingParameter, currentStatus, errorMessage } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      setupBaseMock()
+      mockInvoke.mockResolvedValue('Тест параметра выполнен: 1 повторов с таймаутом 800 мс')
+
+      await testTypingParameter()
+      await flushMicrotasks()
+      expect(errorMessage.value).toContain('Тест параметра выполнен')
+    })
+
+    it('shows backend error message on failure', async () => {
+      const { testTypingParameter, currentStatus, errorMessage } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      setupBaseMock()
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'test_vtube_studio_typing') throw new Error('VTube Studio not connected')
+        return undefined
+      })
+
+      await testTypingParameter()
+      await flushMicrotasks()
+      expect(errorMessage.value).toContain('VTube Studio not connected')
+    })
+
+    it('does not overwrite currentStatus on success', async () => {
+      const { testTypingParameter, currentStatus } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      setupBaseMock()
+      mockInvoke.mockResolvedValue('Тест параметра выполнен: 1 повторов с таймаутом 800 мс')
+
+      await testTypingParameter()
+      await flushMicrotasks()
+      expect(currentStatus.value).toBe('Connected')
+    })
+
+    it('does not overwrite currentStatus on error', async () => {
+      const { testTypingParameter, currentStatus } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      setupBaseMock()
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'test_vtube_studio_typing') throw new Error('fail')
+        return undefined
+      })
+
+      await testTypingParameter()
+      await flushMicrotasks()
+      expect(currentStatus.value).toBe('Connected')
+    })
+
+    it('does not invoke save or test_connection commands', async () => {
+      const { testTypingParameter, currentStatus } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      setupBaseMock()
+      mockInvoke.mockResolvedValue('ok')
+
+      await testTypingParameter()
+      await flushMicrotasks()
+
+      expect(mockInvoke).not.toHaveBeenCalledWith('save_vtube_studio_settings', expect.anything())
+      expect(mockInvoke).not.toHaveBeenCalledWith('test_vtube_studio_connection')
+      expect(mockInvoke).not.toHaveBeenCalledWith('connect_vtube_studio')
+      expect(mockInvoke).not.toHaveBeenCalledWith('restart_vtube_studio')
+    })
+
+    it('concurrent calls invoke the command only once', async () => {
+      let resolveDelay: () => void
+      const delay = new Promise<void>(r => { resolveDelay = r })
+      const { testTypingParameter, currentStatus } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      mockInvoke.mockClear()
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'test_vtube_studio_typing') {
+          await delay
+          return 'ok'
+        }
+        return undefined
+      })
+
+      const p1 = testTypingParameter()
+      const p2 = testTypingParameter()
+      resolveDelay!()
+      await Promise.all([p1, p2])
+      await flushMicrotasks()
+      expect(mockInvoke).toHaveBeenCalledTimes(1)
+      expect(mockInvoke).toHaveBeenCalledWith('test_vtube_studio_typing', {
+        timeoutMs: 800,
+        repeatCount: 1,
+      })
+    })
+
+    it('defaults are 800 timeout and 1 repeat', async () => {
+      const { typingTimeout, typingRepeats } = await setupAndMount()
+      expect(typingTimeout.value).toBe(800)
+      expect(typingRepeats.value).toBe(1)
+    })
+
+    it('canTestTyping is false when not Connected', async () => {
+      const { canTestTyping, currentStatus } = await setupAndMount(undefined, 'Disconnected')
+      currentStatus.value = 'Disconnected'
+      expect(canTestTyping.value).toBe(false)
+    })
+
+    it('canTestTyping is false when busy', async () => {
+      const { canTestTyping, currentStatus, busy } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      busy.value = true
+      expect(canTestTyping.value).toBe(false)
+    })
+
+    it('typingTimeoutError is null for valid timeout 800', async () => {
+      const { typingTimeoutError } = await setupAndMount()
+      expect(typingTimeoutError.value).toBeNull()
+    })
+
+    it('typingRepeatsError is null for valid repeat 1', async () => {
+      const { typingRepeatsError } = await setupAndMount()
+      expect(typingRepeatsError.value).toBeNull()
+    })
+  })
+
+  describe('settings loading', () => {
+    it('loadSettings updates settings from backend', async () => {
+      const { settings } = await setupAndMount({ enabled: true, port: 9001, start_on_boot: true })
+      expect(settings.value.enabled).toBe(true)
+      expect(settings.value.port).toBe(9001)
+      expect(settings.value.start_on_boot).toBe(true)
+    })
+
+    it('loads initial status as Disconnected', async () => {
+      const { currentStatus } = await setupAndMount()
+      expect(currentStatus.value).toBe('Disconnected')
     })
   })
 })

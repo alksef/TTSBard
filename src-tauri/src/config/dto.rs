@@ -1177,6 +1177,7 @@ impl From<HotkeySettingsDto> for HotkeySettings {
 pub struct VTubeStudioSettingsDto {
     pub enabled: bool,
     pub port: u16,
+    pub start_on_boot: bool,
 }
 
 impl From<crate::config::VTubeStudioSettings> for VTubeStudioSettingsDto {
@@ -1184,6 +1185,7 @@ impl From<crate::config::VTubeStudioSettings> for VTubeStudioSettingsDto {
         Self {
             enabled: s.enabled,
             port: s.port,
+            start_on_boot: s.start_on_boot,
         }
     }
 }

@@ -238,6 +238,9 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
     // Initialize Twitch client
     init_twitch_client(&app_state, app.handle().clone());
 
+    // Initialize VTube Studio autostart
+    init_vtube_studio(&app_state, app.handle().clone());
+
     // Initialize window protection (Windows only)
     #[cfg(windows)]
     init_window_protection(app, &windows_manager);
@@ -538,6 +541,70 @@ fn init_window_protection(app: &App, windows_manager: &WindowsManager) {
             }
         }
     }
+}
+
+fn init_vtube_studio(app_state: &AppState, app_handle: AppHandle) {
+    let start_on_boot = {
+        let settings = app_state.vtube_studio.settings.blocking_read();
+        settings.start_on_boot
+    };
+
+    if !start_on_boot {
+        info!("VTube Studio autostart disabled (start_on_boot=false)");
+        return;
+    }
+
+    info!("VTube Studio: auto-start on boot");
+
+    let app_handle_clone = app_handle.clone();
+    let app_state_clone = app_state.clone();
+
+    app_state.runtime.spawn(async move {
+        let (port, stored_token) = {
+            let settings = app_state_clone.vtube_studio.settings.read().await;
+            (settings.port, settings.token.clone())
+        };
+
+        info!(
+            port,
+            has_token = stored_token.is_some(),
+            "VTube Studio: attempting autostart connection"
+        );
+
+        let result = app_state_clone
+            .vtube_studio
+            .connect(port, stored_token.as_deref())
+            .await;
+
+        let status = app_state_clone.vtube_studio.get_connection_status();
+        let _ = app_handle_clone.emit("vtube-studio-status-changed", &status);
+
+        match result {
+            Ok(new_token) => {
+                info!("VTube Studio: autostart connected successfully");
+                if let Some(ref tok) = new_token {
+                    let mut s = app_state_clone.vtube_studio.settings.write().await;
+                    s.token = Some(tok.clone());
+                    drop(s);
+
+                    let mgr_opt = app_handle_clone.try_state::<SettingsManager>();
+                    if let Some(mgr) = mgr_opt {
+                        let inner = mgr.inner().clone();
+                        let tok_clone = tok.clone();
+                        let _ = crate::commands::persist_blocking(&inner, move |m| {
+                            let mut vts = m.get_vtube_studio_settings();
+                            vts.token = Some(tok_clone);
+                            m.set_vtube_studio_settings(&vts)
+                        })
+                        .await;
+                    }
+                }
+            }
+            Err(e) => {
+                info!(error = %e, "VTube Studio: autostart connection failed (non-fatal)");
+            }
+        }
+    });
 }
 
 /// Parse WebView server startup errors and provide user-friendly messages

@@ -98,6 +98,15 @@ pub enum TwitchConnectionStatus {
     Error(String),
 }
 
+/// Статус подключения к VTube Studio
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum VTubeStudioConnectionStatus {
+    Disconnected,
+    Connecting,
+    Connected,
+    Error,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq)]
 pub enum InputLayout {
     English,

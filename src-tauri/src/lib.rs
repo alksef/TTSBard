@@ -456,7 +456,12 @@ pub fn run() {
             commands::vtube_studio::get_vtube_studio_settings,
             commands::vtube_studio::save_vtube_studio_settings,
             commands::vtube_studio::test_vtube_studio_connection,
+            commands::vtube_studio::test_vtube_studio_typing,
             commands::vtube_studio::set_vtube_studio_typing,
+            commands::vtube_studio::connect_vtube_studio,
+            commands::vtube_studio::disconnect_vtube_studio,
+            commands::vtube_studio::restart_vtube_studio,
+            commands::vtube_studio::get_vtube_studio_status,
             // Logging commands
             get_logging_settings,
             save_logging_settings,

@@ -650,6 +650,8 @@ pub struct VTubeStudioSettings {
     pub port: u16,
     #[serde(default)]
     pub token: Option<String>,
+    #[serde(default)]
+    pub start_on_boot: bool,
 }
 
 impl Default for VTubeStudioSettings {
@@ -658,6 +660,7 @@ impl Default for VTubeStudioSettings {
             enabled: false,
             port: default_vtube_port(),
             token: None,
+            start_on_boot: false,
         }
     }
 }
@@ -2461,15 +2464,17 @@ mod tests {
         assert!(!settings.vtube_studio.enabled);
         assert_eq!(settings.vtube_studio.port, 8001);
         assert!(settings.vtube_studio.token.is_none());
+        assert!(!settings.vtube_studio.start_on_boot);
     }
 
-    /// VTubeStudioSettings defaults: disabled, port 8001, no token.
+    /// VTubeStudioSettings defaults: disabled, port 8001, no token, start_on_boot false.
     #[test]
     fn vtube_studio_settings_defaults() {
         let s = VTubeStudioSettings::default();
         assert!(!s.enabled);
         assert_eq!(s.port, 8001);
         assert!(s.token.is_none());
+        assert!(!s.start_on_boot);
     }
 
     /// VTubeStudioSettings round-trip: token is persisted to and loaded from disk.
@@ -2479,6 +2484,7 @@ mod tests {
             enabled: true,
             port: 8002,
             token: Some("secret-token".to_string()),
+            start_on_boot: true,
         };
         let json = serde_json::to_string(&original).unwrap();
         // Token must NOT be skip_serialized on the settings struct (it's persisted to disk)
@@ -2487,5 +2493,16 @@ mod tests {
         assert!(back.enabled);
         assert_eq!(back.port, 8002);
         assert_eq!(back.token.as_deref(), Some("secret-token"));
+        assert!(back.start_on_boot);
+    }
+
+    #[test]
+    fn vtube_studio_settings_start_on_boot_default_deserialize() {
+        let json = r#"{"enabled": true, "port": 8001}"#;
+        let s: VTubeStudioSettings = serde_json::from_str(json).unwrap();
+        assert!(s.enabled);
+        assert_eq!(s.port, 8001);
+        assert!(s.token.is_none());
+        assert!(!s.start_on_boot);
     }
 }

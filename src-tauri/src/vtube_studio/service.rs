@@ -7,10 +7,10 @@ use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info};
-use uuid::Uuid;
 
 use super::messages::{self, VtsErrorData, VtsRequest, VtsResponse};
 use crate::config::VTubeStudioSettings;
+use crate::events::VTubeStudioConnectionStatus;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(12);
@@ -28,6 +28,8 @@ pub struct VTubeStudioService {
     pub settings: Arc<tokio::sync::RwLock<VTubeStudioSettings>>,
     inner: Arc<tokio::sync::Mutex<InnerState>>,
     is_authenticated: Arc<AtomicBool>,
+    desired_running: Arc<AtomicBool>,
+    connection_status: Arc<parking_lot::Mutex<VTubeStudioConnectionStatus>>,
 }
 
 impl VTubeStudioService {
@@ -40,7 +42,28 @@ impl VTubeStudioService {
                 typing_handle: None,
             })),
             is_authenticated: Arc::new(AtomicBool::new(false)),
+            desired_running: Arc::new(AtomicBool::new(false)),
+            connection_status: Arc::new(parking_lot::Mutex::new(
+                VTubeStudioConnectionStatus::Disconnected,
+            )),
         }
+    }
+
+    pub fn set_connection_status(&self, status: VTubeStudioConnectionStatus) {
+        *self.connection_status.lock() = status;
+    }
+
+    pub fn get_connection_status(&self) -> VTubeStudioConnectionStatus {
+        self.connection_status.lock().clone()
+    }
+
+    pub fn set_desired_running(&self, value: bool) {
+        self.desired_running.store(value, Ordering::SeqCst);
+        info!(value, "VTube Studio desired_running set");
+    }
+
+    pub fn is_desired_running(&self) -> bool {
+        self.desired_running.load(Ordering::SeqCst)
     }
 
     #[allow(dead_code)]
@@ -49,7 +72,7 @@ impl VTubeStudioService {
     }
 
     fn next_id(&self) -> String {
-        Uuid::new_v4().to_string()
+        uuid::Uuid::new_v4().to_string()
     }
 
     #[allow(dead_code)]
@@ -73,7 +96,58 @@ impl VTubeStudioService {
         inject_typing(&mut ws, self.next_id(), 1.0).await?;
         inject_typing(&mut ws, self.next_id(), 0.0).await?;
 
+        if self.is_desired_running() {
+            inner.ws = Some(ws);
+        }
+        // When desired_running is false (diagnostic test), socket is dropped
+        // so the test does not create a persistent connection.
+        Ok(new_token)
+    }
+
+    pub async fn connect(
+        &self,
+        port: u16,
+        stored_token: Option<&str>,
+    ) -> Result<Option<String>, String> {
+        self.set_desired_running(true);
+        self.set_connection_status(VTubeStudioConnectionStatus::Connecting);
+
+        let mut inner = self.inner.lock().await;
+        self.stop_typing_keepalive_locked(&mut inner);
+        inner.ws = None;
+
+        let ws_result = connect_ws(port).await;
+        let mut ws = match ws_result {
+            Ok(ws) => ws,
+            Err(e) => {
+                self.is_authenticated.store(false, Ordering::SeqCst);
+                self.set_desired_running(false);
+                self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                return Err(e);
+            }
+        };
+
+        let auth_result = perform_authentication(&mut ws, self.next_id(), stored_token).await;
+        let new_token = match auth_result {
+            Ok(token) => token,
+            Err(e) => {
+                self.is_authenticated.store(false, Ordering::SeqCst);
+                self.set_desired_running(false);
+                self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                return Err(e);
+            }
+        };
+
+        if let Err(e) = create_typing_param(&mut ws, self.next_id()).await {
+            self.is_authenticated.store(false, Ordering::SeqCst);
+            self.set_desired_running(false);
+            self.set_connection_status(VTubeStudioConnectionStatus::Error);
+            return Err(format!("Create parameter failed: {}", e));
+        }
+
         inner.ws = Some(ws);
+        self.is_authenticated.store(true, Ordering::SeqCst);
+        self.set_connection_status(VTubeStudioConnectionStatus::Connected);
         Ok(new_token)
     }
 
@@ -102,11 +176,19 @@ impl VTubeStudioService {
             return Ok(());
         }
 
+        if !self.is_desired_running() {
+            debug!("VTS: typing=true ignored — desired_running is false");
+            return Ok(());
+        }
+
         if inner.ws.is_none() {
+            self.set_connection_status(VTubeStudioConnectionStatus::Connecting);
+
             let mut ws = match connect_ws(port).await {
                 Ok(ws) => ws,
                 Err(e) => {
                     debug!(error = %e, "VTS connect for typing=true failed");
+                    self.set_connection_status(VTubeStudioConnectionStatus::Error);
                     return Err(e);
                 }
             };
@@ -116,6 +198,7 @@ impl VTubeStudioService {
                 Err(e) => {
                     debug!(error = %e, "VTS auth for typing=true failed, discarding broken socket");
                     self.is_authenticated.store(false, Ordering::SeqCst);
+                    self.set_connection_status(VTubeStudioConnectionStatus::Error);
                     return Err(e);
                 }
             }
@@ -123,10 +206,12 @@ impl VTubeStudioService {
             if let Err(e) = create_typing_param(&mut ws, self.next_id()).await {
                 debug!(error = %e, "VTS create param for typing=true failed, discarding broken socket");
                 self.is_authenticated.store(false, Ordering::SeqCst);
+                self.set_connection_status(VTubeStudioConnectionStatus::Error);
                 return Err(e);
             }
 
             inner.ws = Some(ws);
+            self.set_connection_status(VTubeStudioConnectionStatus::Connected);
         }
 
         self.stop_typing_keepalive_locked(&mut inner);
@@ -140,6 +225,7 @@ impl VTubeStudioService {
             debug!(error = %e, "VTS inject typing=true failed, discarding broken socket");
             inner.ws = None;
             self.is_authenticated.store(false, Ordering::SeqCst);
+            self.set_connection_status(VTubeStudioConnectionStatus::Error);
             return Err(e);
         }
 
@@ -149,6 +235,7 @@ impl VTubeStudioService {
 
         let inner_arc = Arc::clone(&self.inner);
         let auth_flag = Arc::clone(&self.is_authenticated);
+        let status_arc = Arc::clone(&self.connection_status);
 
         let handle = tokio::spawn(async move {
             loop {
@@ -163,12 +250,13 @@ impl VTubeStudioService {
                 }
 
                 let mut inner_guard = inner_arc.lock().await;
-                let id = Uuid::new_v4().to_string();
+                let id = uuid::Uuid::new_v4().to_string();
                 if let Some(ref mut ws) = inner_guard.ws {
                     if let Err(e) = inject_typing(ws, id, 1.0).await {
                         debug!(error = %e, "VTS typing keep-alive inject failed, discarding broken socket");
                         inner_guard.ws = None;
                         auth_flag.store(false, Ordering::SeqCst);
+                        *status_arc.lock() = VTubeStudioConnectionStatus::Error;
                         break;
                     }
                 } else {
@@ -187,12 +275,14 @@ impl VTubeStudioService {
 
     pub async fn disconnect(&self) {
         let mut inner = self.inner.lock().await;
+        self.set_desired_running(false);
         self.stop_typing_keepalive_locked(&mut inner);
         if let Some(ref mut ws) = inner.ws {
             let _ = inject_typing(ws, self.next_id(), 0.0).await;
         }
         inner.ws = None;
         self.is_authenticated.store(false, Ordering::SeqCst);
+        self.set_connection_status(VTubeStudioConnectionStatus::Disconnected);
         info!("VTube Studio disconnected");
     }
 
@@ -203,6 +293,83 @@ impl VTubeStudioService {
         if let Some(handle) = inner.typing_handle.take() {
             handle.abort();
         }
+    }
+
+    pub async fn test_typing_parameter(
+        &self,
+        timeout_ms: u64,
+        repeat_count: u64,
+    ) -> Result<String, String> {
+        if timeout_ms < 100 || timeout_ms > 5000 {
+            return Err("Таймаут должен быть от 100 до 5000 мс".to_string());
+        }
+        if repeat_count < 1 || repeat_count > 10 {
+            return Err("Повторы должны быть от 1 до 10".to_string());
+        }
+
+        if !self.is_desired_running() {
+            return Err("VTube Studio is not running. Start the connection first.".to_string());
+        }
+
+        let status = self.get_connection_status();
+        if status != VTubeStudioConnectionStatus::Connected {
+            return Err(format!(
+                "VTube Studio is not connected (status: {:?}). Must be Connected.",
+                status
+            ));
+        }
+
+        let mut inner = self.inner.lock().await;
+
+        if inner.ws.is_none() {
+            return Err("VTube Studio WebSocket is not available.".to_string());
+        }
+
+        self.stop_typing_keepalive_locked(&mut inner);
+
+        let timeout_dur = Duration::from_millis(timeout_ms);
+
+        for i in 0..repeat_count {
+            let ws = inner.ws.as_mut().unwrap();
+
+            if let Err(e) = inject_typing(ws, self.next_id(), 1.0).await {
+                inner.ws = None;
+                self.is_authenticated.store(false, Ordering::SeqCst);
+                self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                return Err(format!(
+                    "VTube Studio test failed at repeat {} (inject 1): {}",
+                    i + 1,
+                    e
+                ));
+            }
+
+            tokio::time::sleep(timeout_dur).await;
+
+            let ws = inner.ws.as_mut().unwrap();
+
+            if let Err(e) = inject_typing(ws, self.next_id(), 0.0).await {
+                inner.ws = None;
+                self.is_authenticated.store(false, Ordering::SeqCst);
+                self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                return Err(format!(
+                    "VTube Studio test failed at repeat {} (inject 0): {}",
+                    i + 1,
+                    e
+                ));
+            }
+
+            if i + 1 < repeat_count {
+                tokio::time::sleep(timeout_dur).await;
+            }
+        }
+
+        // Final zero is already sent by the last iteration.
+        // desired_running is NOT changed during or after the test.
+
+        Ok(format!(
+            "Тест параметра выполнен: {} повторов с таймаутом {} мс",
+            repeat_count, timeout_ms
+        ))
     }
 }
 
@@ -430,6 +597,11 @@ mod tests {
             assert_eq!(settings.port, 8001);
             assert!(settings.token.is_none());
         });
+        assert!(!svc.is_desired_running());
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Disconnected
+        );
     }
 
     #[test]
@@ -457,6 +629,7 @@ mod tests {
             .build()
             .unwrap();
         let svc = VTubeStudioService::new();
+        svc.set_desired_running(true);
         rt.block_on(async {
             svc.disconnect().await;
             let inner = svc.inner.lock().await;
@@ -464,6 +637,11 @@ mod tests {
             assert!(inner.typing_cancel.is_none());
             assert!(inner.typing_handle.is_none());
         });
+        assert!(!svc.is_desired_running());
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Disconnected
+        );
     }
 
     #[test]
@@ -486,12 +664,66 @@ mod tests {
             .build()
             .unwrap();
         let svc = VTubeStudioService::new();
+        svc.set_desired_running(true);
         rt.block_on(async {
             let result = svc.set_typing(true, 8001, "").await;
             assert!(result.is_ok());
             let inner = svc.inner.lock().await;
             assert!(inner.ws.is_none());
         });
+    }
+
+    #[test]
+    fn set_typing_true_ignored_when_not_desired_running() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        assert!(!svc.is_desired_running());
+        rt.block_on(async {
+            let result = svc.set_typing(true, 8001, "test-token").await;
+            assert!(result.is_ok());
+            let inner = svc.inner.lock().await;
+            assert!(inner.ws.is_none());
+        });
+    }
+
+    #[test]
+    fn desired_running_flags() {
+        let svc = VTubeStudioService::new();
+        assert!(!svc.is_desired_running());
+        svc.set_desired_running(true);
+        assert!(svc.is_desired_running());
+        svc.set_desired_running(false);
+        assert!(!svc.is_desired_running());
+    }
+
+    #[test]
+    fn connection_status_transitions() {
+        let svc = VTubeStudioService::new();
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Disconnected
+        );
+
+        svc.set_connection_status(VTubeStudioConnectionStatus::Connecting);
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Connecting
+        );
+
+        svc.set_connection_status(VTubeStudioConnectionStatus::Connected);
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Connected
+        );
+
+        svc.set_connection_status(VTubeStudioConnectionStatus::Error);
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Error
+        );
     }
 
     fn make_response(msg_type: &str, request_id: &str, data: serde_json::Value) -> VtsResponse {
@@ -688,5 +920,267 @@ mod tests {
             }
             _ => panic!("InjectParameterData APIError on reset must produce Error"),
         }
+    }
+
+    #[test]
+    fn disconnect_resets_desired_running() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_desired_running(true);
+        assert!(svc.is_desired_running());
+        rt.block_on(async {
+            svc.disconnect().await;
+        });
+        assert!(!svc.is_desired_running());
+    }
+
+    #[test]
+    fn connect_failure_clears_desired_running() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        rt.block_on(async {
+            let result = svc.connect(8001, None).await;
+            assert!(result.is_err());
+        });
+        assert!(!svc.is_desired_running());
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Error
+        );
+    }
+
+    #[test]
+    fn test_typing_parameter_fails_when_not_desired_running() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        assert!(!svc.is_desired_running());
+        rt.block_on(async {
+            let result = svc.test_typing_parameter(800, 1).await;
+            assert!(result.is_err());
+            let msg = result.unwrap_err();
+            assert!(
+                msg.contains("not running") || msg.contains("Start the connection"),
+                "error should mention not running: {}",
+                msg
+            );
+        });
+        assert!(!svc.is_desired_running());
+    }
+
+    #[test]
+    fn test_typing_parameter_fails_when_disconnected() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_desired_running(true);
+        assert!(svc.is_desired_running());
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Disconnected
+        );
+        rt.block_on(async {
+            let result = svc.test_typing_parameter(800, 1).await;
+            assert!(result.is_err());
+            let msg = result.unwrap_err();
+            assert!(
+                msg.contains("not connected"),
+                "error should mention not connected: {}",
+                msg
+            );
+        });
+        assert!(
+            svc.is_desired_running(),
+            "desired_running must remain unchanged"
+        );
+    }
+
+    #[test]
+    fn test_typing_parameter_rejects_timeout_99() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        rt.block_on(async {
+            let result = svc.test_typing_parameter(99, 1).await;
+            assert!(result.is_err());
+            let msg = result.unwrap_err();
+            assert!(
+                msg.contains("100") && (msg.contains("5000") || msg.contains("до")),
+                "error should mention 100–5000 range, got: {}",
+                msg
+            );
+        });
+        assert!(!svc.is_desired_running());
+    }
+
+    #[test]
+    fn test_typing_parameter_rejects_timeout_5001() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        rt.block_on(async {
+            let result = svc.test_typing_parameter(5001, 1).await;
+            assert!(result.is_err());
+            let msg = result.unwrap_err();
+            assert!(
+                msg.contains("100") && (msg.contains("5000") || msg.contains("до")),
+                "error should mention 100–5000 range, got: {}",
+                msg
+            );
+        });
+        assert!(!svc.is_desired_running());
+    }
+
+    #[test]
+    fn test_typing_parameter_rejects_repeat_0() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        rt.block_on(async {
+            let result = svc.test_typing_parameter(800, 0).await;
+            assert!(result.is_err());
+            let msg = result.unwrap_err();
+            assert!(
+                msg.contains("1") && (msg.contains("10") || msg.contains("до")),
+                "error should mention 1–10 range, got: {}",
+                msg
+            );
+        });
+        assert!(!svc.is_desired_running());
+    }
+
+    #[test]
+    fn test_typing_parameter_rejects_repeat_11() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        rt.block_on(async {
+            let result = svc.test_typing_parameter(800, 11).await;
+            assert!(result.is_err());
+            let msg = result.unwrap_err();
+            assert!(
+                msg.contains("1") && (msg.contains("10") || msg.contains("до")),
+                "error should mention 1–10 range, got: {}",
+                msg
+            );
+        });
+        assert!(!svc.is_desired_running());
+    }
+
+    #[test]
+    fn test_typing_parameter_boundary_100_passes_validation() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_desired_running(true);
+        rt.block_on(async {
+            let result = svc.test_typing_parameter(100, 1).await;
+            assert!(result.is_err());
+            let msg = result.unwrap_err();
+            assert!(
+                msg.contains("not connected") || msg.contains("Start the connection"),
+                "boundary timeout 100 should pass validation and fail on lifecycle: {}",
+                msg
+            );
+        });
+        assert!(svc.is_desired_running());
+    }
+
+    #[test]
+    fn test_typing_parameter_boundary_5000_passes_validation() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_desired_running(true);
+        rt.block_on(async {
+            let result = svc.test_typing_parameter(5000, 1).await;
+            assert!(result.is_err());
+            let msg = result.unwrap_err();
+            assert!(
+                msg.contains("not connected") || msg.contains("Start the connection"),
+                "boundary timeout 5000 should pass validation and fail on lifecycle: {}",
+                msg
+            );
+        });
+        assert!(svc.is_desired_running());
+    }
+
+    #[test]
+    fn test_typing_parameter_boundary_repeat_1_passes_validation() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_desired_running(true);
+        rt.block_on(async {
+            let result = svc.test_typing_parameter(800, 1).await;
+            assert!(result.is_err());
+            let msg = result.unwrap_err();
+            assert!(
+                msg.contains("not connected") || msg.contains("Start the connection"),
+                "boundary repeat 1 should pass validation and fail on lifecycle: {}",
+                msg
+            );
+        });
+        assert!(svc.is_desired_running());
+    }
+
+    #[test]
+    fn test_typing_parameter_boundary_repeat_10_passes_validation() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_desired_running(true);
+        rt.block_on(async {
+            let result = svc.test_typing_parameter(800, 10).await;
+            assert!(result.is_err());
+            let msg = result.unwrap_err();
+            assert!(
+                msg.contains("not connected") || msg.contains("Start the connection"),
+                "boundary repeat 10 should pass validation and fail on lifecycle: {}",
+                msg
+            );
+        });
+        assert!(svc.is_desired_running());
+    }
+
+    #[test]
+    fn test_typing_parameter_keeps_desired_running_on_failure() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_desired_running(true);
+        rt.block_on(async {
+            let result = svc.test_typing_parameter(800, 1).await;
+            assert!(result.is_err());
+        });
+        assert!(svc.is_desired_running());
     }
 }

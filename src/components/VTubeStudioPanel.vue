@@ -1,26 +1,35 @@
 <script setup lang="ts">
-import { Play } from 'lucide-vue-next'
+import { Play, Square, RotateCw } from 'lucide-vue-next'
 import { useVTubeStudio } from '../composables/useVTubeStudio'
 
 const {
   settings,
-  busy,
-  status,
-  message,
+  errorMessage,
   portError,
+  currentStatus,
+  busy,
+  typingTimeout,
+  typingRepeats,
+  typingTimeoutError,
+  typingRepeatsError,
+  canTestTyping,
   save,
-  testConnection,
+  testTypingParameter,
+  startVTubeStudio,
+  stopVTubeStudio,
+  restartVTubeStudio,
+  saveStartOnBoot,
 } = useVTubeStudio()
 </script>
 
 <template>
   <div class="vtube-panel">
-    <div v-if="message" class="message-box" :class="{
-      error: status === 'Ошибка' || message.includes('Invalid') || message.includes('failed') || message.includes('Error'),
-      success: message.includes('saved') || message.includes('сохранен') || message.includes('успешно') || message.includes('Successfully') || status === 'Проверено',
-      info: message.includes('disabled') || message.includes('отключена') || message.includes('Отключено')
+    <div v-if="errorMessage" class="message-box" :class="{
+      error: errorMessage.includes('Failed') || errorMessage.includes('failed') || errorMessage.includes('Error') || errorMessage.includes('Ошибка'),
+      success: errorMessage.includes('saved') || errorMessage.includes('сохранен') || errorMessage.includes('Подключено к') || errorMessage.includes('Connected') || errorMessage.includes('Restarted') || errorMessage.includes('Disconnected'),
+      info: errorMessage.includes('Отключено') || errorMessage.includes('disconnect') || errorMessage.includes('Stopped') || errorMessage.includes('Disconnected')
     }">
-      {{ message }}
+      {{ errorMessage }}
     </div>
 
     <section class="settings-section">
@@ -28,30 +37,38 @@ const {
         <h2>Подключение</h2>
         <div class="server-status">
           <span class="status-indicator" :class="{
-            running: status === 'Проверено',
-            connecting: status === 'Проверка…',
-            error: status === 'Ошибка',
-            off: !settings.enabled
+            running: currentStatus === 'Connected',
+            connecting: currentStatus === 'Connecting',
+            error: currentStatus === 'Error'
           }">
-            {{ settings.enabled ? status : 'Отключено' }}
+            {{ currentStatus === 'Connected' ? 'Подключено' :
+               currentStatus === 'Connecting' ? 'Подключение...' :
+               currentStatus === 'Error' ? 'Ошибка' :
+               'Отключено' }}
           </span>
-          <button
-            @click="testConnection"
-            class="status-button start"
-            :disabled="busy || !settings.enabled"
-            :class="{ disabled: busy || !settings.enabled }"
-            aria-label="Проверить подключение"
-            title="Проверить подключение"
-          >
-            <Play :size="14" />
-          </button>
+          <template v-if="currentStatus === 'Connected'">
+            <button @click="restartVTubeStudio" class="status-button refresh" title="Перезапустить" aria-label="Перезапустить">
+              <RotateCw :size="14" />
+            </button>
+            <button @click="stopVTubeStudio" class="status-button stop" title="Отключиться" aria-label="Отключиться">
+              <Square :size="14" />
+            </button>
+          </template>
+          <template v-else>
+            <button @click="startVTubeStudio" class="status-button start" :disabled="currentStatus === 'Connecting'" :class="{ disabled: currentStatus === 'Connecting' }" title="Подключиться" aria-label="Подключиться">
+              <Play :size="14" />
+            </button>
+            <button class="status-button stop disabled" title="Отключиться" aria-label="Отключиться" disabled>
+              <Square :size="14" />
+            </button>
+          </template>
         </div>
       </div>
 
       <div class="setting-row">
         <label class="checkbox-label">
-          <input type="checkbox" v-model="settings.enabled" />
-          <span>Включить интеграцию</span>
+          <input type="checkbox" v-model="settings.start_on_boot" @change="saveStartOnBoot" />
+          <span>Запускать при старте приложения</span>
         </label>
       </div>
 
@@ -61,19 +78,61 @@ const {
           type="number"
           v-model.number="settings.port"
           class="text-input"
-          :class="{ 'input-error': portError }"
+          :class="{ 'text-input-error': portError }"
           :min="1024"
           :max="65535"
           placeholder="8001"
         />
-        <span v-if="portError" class="error-text">{{ portError }}</span>
       </div>
+      <div v-if="portError" class="port-error">{{ portError }}</div>
 
       <div class="setting-row button-row">
         <button @click="save" class="save-button-inline" :disabled="busy" :class="{ disabled: busy }">
           Сохранить
         </button>
       </div>
+    </section>
+
+    <section class="settings-section">
+      <h2>Тест параметра</h2>
+      <div class="setting-row test-parameters-row">
+        <label>Таймаут, мс:</label>
+        <input
+          type="number"
+          v-model.number="typingTimeout"
+          class="text-input"
+          :class="{ 'text-input-error': typingTimeoutError }"
+          :min="100"
+          :max="5000"
+        />
+        <label>Повторы:</label>
+        <input
+          type="number"
+          v-model.number="typingRepeats"
+          class="text-input"
+          :class="{ 'text-input-error': typingRepeatsError }"
+          :min="1"
+          :max="10"
+        />
+      </div>
+      <div v-if="typingTimeoutError" class="test-error">{{ typingTimeoutError }}</div>
+      <div v-if="typingRepeatsError" class="test-error">{{ typingRepeatsError }}</div>
+      <div class="setting-row button-row">
+        <button
+          @click="testTypingParameter()"
+          class="save-button-inline"
+          :disabled="!canTestTyping"
+          :class="{ disabled: !canTestTyping }"
+          title="Проверить параметр TTSBardTyping в активной сессии"
+          aria-label="Проверить"
+        >
+          Проверить
+        </button>
+      </div>
+      <p class="info-hint">
+        Каждый повтор отправляет <code>TTSBardTyping=1</code>, ждёт таймаут, затем отправляет <code>0</code>.
+        Между повторами — пауза той же длительности.
+      </p>
     </section>
 
     <section class="settings-section info-section">
@@ -101,10 +160,13 @@ const {
     <section class="settings-section help-section">
       <h2>Помощь</h2>
       <p class="help-text">
-        Включите <strong>Plugin API</strong> в VTube Studio. При первой проверке откроется окно подтверждения разрешений.
+        Включите <strong>Plugin API</strong> в VTube Studio. При первом подключении откроется окно подтверждения разрешений.
       </p>
       <p class="help-text">
         Затем привяжите <code>TTSBardTyping</code> к нужному параметру модели.
+      </p>
+      <p class="help-text">
+        <strong>Тест параметра</strong> отправляет сигналы <code>TTSBardTyping</code> в активной сессии. Параметр должен быть привязан к выражению модели для видимого движения.
       </p>
       <a href="https://github.com/DenchiSoft/VTubeStudio/wiki/Plugins" target="_blank" rel="noopener noreferrer" class="help-link">
         https://github.com/DenchiSoft/VTubeStudio/wiki/Plugins
@@ -184,12 +246,6 @@ h2 {
   border-color: var(--danger-border);
 }
 
-.status-indicator.off {
-  color: var(--color-text-secondary);
-  background: var(--color-bg-field);
-  border-color: var(--color-border);
-}
-
 .status-button {
   width: 32px;
   height: 32px;
@@ -212,6 +268,22 @@ h2 {
   filter: brightness(1.06);
 }
 
+.status-button.stop {
+  background: var(--danger-bg-weak);
+}
+
+.status-button.stop:hover {
+  background: var(--danger-bg-hover);
+}
+
+.status-button.refresh {
+  background: var(--btn-accent-bg);
+}
+
+.status-button.refresh:hover {
+  background: var(--btn-accent-bg-hover);
+}
+
 .status-button.disabled {
   background: var(--btn-disabled-bg);
   cursor: not-allowed;
@@ -223,22 +295,22 @@ h2 {
   top: 20px;
   left: calc(50% + 100px);
   transform: translateX(-50%);
+  max-width: 460px;
   padding: 0.4rem 0.75rem;
   border-radius: 8px;
   font-size: 12px;
   font-weight: 500;
   z-index: 1000;
-  box-shadow: var(--dialog-shadow);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   backdrop-filter: blur(10px);
   animation: slideDownFade 0.3s ease-out;
-  max-width: 80vw;
+  word-wrap: break-word;
   overflow-wrap: break-word;
-  white-space: normal;
 }
 
 .message-box.success {
   background: var(--success-bg);
-  border: 1px solid var(--success-shadow);
+  border: 1px solid var(--success-border, rgba(74, 222, 128, 0.4));
   color: var(--success-text);
 }
 
@@ -295,6 +367,20 @@ h2 {
   font-size: 14px;
 }
 
+.test-parameters-row {
+  flex-wrap: wrap;
+}
+
+.test-parameters-row label {
+  min-width: 50px;
+}
+
+.test-parameters-row .text-input {
+  flex: 1;
+  min-width: 80px;
+  max-width: 140px;
+}
+
 .setting-row.button-row {
   justify-content: flex-end;
   gap: 0.75rem;
@@ -310,19 +396,13 @@ h2 {
   border: none;
   border-radius: 10px;
   cursor: pointer;
-  font-weight: 500;
+  font-weight: 600;
   font-size: 14px;
   transition: all 0.2s;
 }
 
 .save-button-inline:hover {
   filter: brightness(1.06);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px var(--focus-glow);
-}
-
-.save-button-inline:active {
-  transform: translateY(0);
 }
 
 .save-button-inline:disabled {
@@ -357,26 +437,30 @@ h2 {
   color: var(--color-text-primary);
 }
 
-.text-input.input-error {
-  border-color: var(--danger-border-strong);
-  background: var(--card-error-bg);
-}
-
-.text-input.input-error:focus {
-  border-color: var(--danger-gradient-start);
-  outline: none;
-}
-
 .text-input:focus {
   outline: none;
   border-color: var(--color-accent);
   box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
-.error-text {
+.text-input-error {
+  border-color: var(--danger-border) !important;
+  box-shadow: 0 0 0 3px var(--danger-shadow, rgba(255, 71, 87, 0.15)) !important;
+}
+
+.port-error {
   color: var(--danger-text-weak);
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 12px;
+  margin-top: -0.5rem;
+  margin-bottom: 1rem;
+  padding-left: 82px;
+}
+
+.test-error {
+  color: var(--danger-text-weak);
+  font-size: 12px;
+  margin-top: -0.5rem;
+  margin-bottom: 1rem;
 }
 
 .info-card {
@@ -462,6 +546,11 @@ h2 {
     align-items: flex-start;
   }
 
+  .test-parameters-row {
+    flex-direction: row;
+    align-items: center;
+  }
+
   .setting-row label {
     min-width: auto;
   }
@@ -470,6 +559,12 @@ h2 {
     max-width: 100%;
     width: 100%;
     box-sizing: border-box;
+  }
+
+  .test-parameters-row .text-input {
+    width: auto;
+    min-width: 80px;
+    max-width: 140px;
   }
 
   .status-indicator {

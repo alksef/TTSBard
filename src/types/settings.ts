@@ -382,6 +382,7 @@ export interface AiSettingsDto {
 export interface VTubeStudioSettingsDto {
   enabled: boolean
   port: number
+  start_on_boot: boolean
 }
 
 // ============================================================================
