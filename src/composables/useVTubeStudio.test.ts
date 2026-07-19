@@ -703,17 +703,17 @@ describe('useVTubeStudio', () => {
       expect(typingRepeats.value).toBe(1)
     })
 
-    it('canTestTyping is false when not Connected', async () => {
-      const { canTestTyping, currentStatus } = await setupAndMount(undefined, 'Disconnected')
+    it('canTestAction is false when not Connected', async () => {
+      const { canTestAction, currentStatus } = await setupAndMount(undefined, 'Disconnected')
       currentStatus.value = 'Disconnected'
-      expect(canTestTyping.value).toBe(false)
+      expect(canTestAction.value).toBe(false)
     })
 
-    it('canTestTyping is false when busy', async () => {
-      const { canTestTyping, currentStatus, busy } = await setupAndMount(undefined, 'Connected')
+    it('canTestAction is false when busy', async () => {
+      const { canTestAction, currentStatus, busy } = await setupAndMount(undefined, 'Connected')
       currentStatus.value = 'Connected'
       busy.value = true
-      expect(canTestTyping.value).toBe(false)
+      expect(canTestAction.value).toBe(false)
     })
 
     it('typingTimeoutError is null for valid timeout 800', async () => {
@@ -738,6 +738,432 @@ describe('useVTubeStudio', () => {
     it('loads initial status as Disconnected', async () => {
       const { currentStatus } = await setupAndMount()
       expect(currentStatus.value).toBe('Disconnected')
+    })
+  })
+
+  describe('typingAction draft loading', () => {
+    it('loads typingAction from settings and sets drafts', async () => {
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'get_vtube_studio_settings') {
+          return {
+            enabled: false,
+            port: 8001,
+            start_on_boot: false,
+            typingAction: {
+              outputMode: 'Hotkeys', parameterName: '', startHotkeyId: 'hk1', stopHotkeyId: 'hk2',
+              startHotkeyName: 'Начать говорить', stopHotkeyName: 'Перестать говорить',
+            },
+          }
+        }
+        if (cmd === 'get_vtube_studio_status') {
+          return 'Disconnected'
+        }
+        return undefined
+      })
+
+      const composable = useVTubeStudio()
+      if (capturedOnMountedCb) {
+        await capturedOnMountedCb()
+      }
+
+      expect(composable.typingMode.value).toBe('Hotkeys')
+      expect(composable.eventName.value).toBe('')
+      expect(composable.hotkeys.value).toEqual([
+        { hotkeyID: 'hk1', name: 'Начать говорить', type: 'Сохранённая', description: '' },
+        { hotkeyID: 'hk2', name: 'Перестать говорить', type: 'Сохранённая', description: '' },
+      ])
+      expect(composable.startHotkeyId.value).toBe('hk1')
+      expect(composable.stopHotkeyId.value).toBe('hk2')
+      expect(composable.savedTypingAction.value.outputMode).toBe('Hotkeys')
+    })
+
+    it('defaults drafts to Event / TTSBardTyping when no typingAction in response', async () => {
+      const { typingMode, eventName, startHotkeyId, stopHotkeyId } = await setupAndMount()
+      expect(typingMode.value).toBe('Event')
+      expect(eventName.value).toBe('TTSBardTyping')
+      expect(startHotkeyId.value).toBe('')
+      expect(stopHotkeyId.value).toBe('')
+    })
+  })
+
+  describe('typingActionValid', () => {
+    it('is false when Event mode with empty eventName', async () => {
+      const { typingActionValid, eventName } = await setupAndMount()
+      eventName.value = ''
+      expect(typingActionValid.value).toBe(false)
+    })
+
+    it('is true when Event mode with non-empty eventName', async () => {
+      const { typingActionValid } = await setupAndMount()
+      expect(typingActionValid.value).toBe(true)
+    })
+
+    it('is false when Event mode with whitespace-only eventName', async () => {
+      const { typingActionValid, eventName } = await setupAndMount()
+      eventName.value = '   '
+      expect(typingActionValid.value).toBe(false)
+    })
+
+    it('is false when Hotkeys mode with empty startHotkeyId', async () => {
+      const { typingActionValid, typingMode, startHotkeyId, stopHotkeyId } = await setupAndMount()
+      typingMode.value = 'Hotkeys'
+      startHotkeyId.value = ''
+      stopHotkeyId.value = 'hk-stop'
+      expect(typingActionValid.value).toBe(false)
+    })
+
+    it('is false when Hotkeys mode with empty stopHotkeyId', async () => {
+      const { typingActionValid, typingMode, startHotkeyId, stopHotkeyId } = await setupAndMount()
+      typingMode.value = 'Hotkeys'
+      startHotkeyId.value = 'hk-start'
+      stopHotkeyId.value = ''
+      expect(typingActionValid.value).toBe(false)
+    })
+
+    it('is true when Hotkeys mode with both IDs non-empty', async () => {
+      const { typingActionValid, typingMode, startHotkeyId, stopHotkeyId } = await setupAndMount()
+      typingMode.value = 'Hotkeys'
+      startHotkeyId.value = 'hk-start'
+      stopHotkeyId.value = 'hk-stop'
+      expect(typingActionValid.value).toBe(true)
+    })
+  })
+
+  describe('saveTypingAction', () => {
+    it('invokes save_vtube_studio_typing_action with trimmed values in Hotkeys mode', async () => {
+      const { saveTypingAction, currentStatus, typingMode, eventName, startHotkeyId, stopHotkeyId } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      typingMode.value = 'Hotkeys'
+      eventName.value = '  param  '
+      startHotkeyId.value = '  hk1  '
+      stopHotkeyId.value = '  hk2  '
+      setupBaseMock()
+      mockInvoke.mockResolvedValue('VTube Studio typing action saved')
+
+      await saveTypingAction()
+      await flushMicrotasks()
+
+      expect(mockInvoke).toHaveBeenCalledWith('save_vtube_studio_typing_action', {
+        outputMode: 'Hotkeys',
+        parameterName: 'param',
+        startHotkeyId: 'hk1',
+        stopHotkeyId: 'hk2',
+        startHotkeyName: '',
+        stopHotkeyName: '',
+      })
+    })
+
+    it('invokes save_vtube_studio_typing_action with empty hotkey IDs in Event mode', async () => {
+      const { saveTypingAction, currentStatus, typingMode, eventName } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      typingMode.value = 'Event'
+      eventName.value = 'MyParam'
+      setupBaseMock()
+      mockInvoke.mockResolvedValue('saved')
+
+      await saveTypingAction()
+      await flushMicrotasks()
+
+      expect(mockInvoke).toHaveBeenCalledWith('save_vtube_studio_typing_action', {
+        outputMode: 'Event',
+        parameterName: 'MyParam',
+        startHotkeyId: '',
+        stopHotkeyId: '',
+        startHotkeyName: '',
+        stopHotkeyName: '',
+      })
+    })
+
+    it('shows backend success message on save', async () => {
+      const { saveTypingAction, currentStatus, errorMessage } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      setupBaseMock()
+      mockInvoke.mockResolvedValue('VTube Studio typing action saved')
+
+      await saveTypingAction()
+      await flushMicrotasks()
+
+      expect(errorMessage.value).toContain('VTube Studio typing action saved')
+    })
+
+    it('shows backend error message on failure', async () => {
+      const { saveTypingAction, currentStatus, errorMessage } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      setupBaseMock()
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'save_vtube_studio_typing_action') throw new Error('Parameter name required')
+        return undefined
+      })
+
+      await saveTypingAction()
+      await flushMicrotasks()
+
+      expect(errorMessage.value).toContain('Parameter name required')
+    })
+
+    it('updates saved action and normalizes the visible draft on success', async () => {
+      const { saveTypingAction, savedTypingAction, currentStatus, typingMode, eventName, startHotkeyId, stopHotkeyId } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      typingMode.value = 'Hotkeys'
+      eventName.value = '  x  '
+      startHotkeyId.value = '  a  '
+      stopHotkeyId.value = '  b  '
+      setupBaseMock()
+      mockInvoke.mockResolvedValue('saved')
+
+      await saveTypingAction()
+      await flushMicrotasks()
+
+      expect(savedTypingAction.value.outputMode).toBe('Hotkeys')
+      expect(savedTypingAction.value.startHotkeyId).toBe('a')
+      expect(savedTypingAction.value.stopHotkeyId).toBe('b')
+      expect(eventName.value).toBe('x')
+      expect(startHotkeyId.value).toBe('a')
+      expect(stopHotkeyId.value).toBe('b')
+    })
+
+    it('busy guard prevents double save', async () => {
+      let resolveDelay: () => void
+      const delay = new Promise<void>(r => { resolveDelay = r })
+      const { saveTypingAction, currentStatus } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      mockInvoke.mockClear()
+      setupBaseMock()
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'save_vtube_studio_typing_action') {
+          await delay
+          return 'ok'
+        }
+        return undefined
+      })
+
+      const p1 = saveTypingAction()
+      const p2 = saveTypingAction()
+      resolveDelay!()
+      await Promise.all([p1, p2])
+      await flushMicrotasks()
+      expect(mockInvoke).toHaveBeenCalledTimes(1)
+      expect(mockInvoke).toHaveBeenCalledWith('save_vtube_studio_typing_action', expect.anything())
+    })
+
+    it('rejects empty Event eventName with client-side validation error', async () => {
+      const { saveTypingAction, currentStatus, typingMode, eventName, errorMessage } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      typingMode.value = 'Event'
+      eventName.value = ''
+      mockInvoke.mockClear()
+      mockInvoke.mockResolvedValue('ok')
+
+      await saveTypingAction()
+      await flushMicrotasks()
+
+      expect(mockInvoke).not.toHaveBeenCalledWith('save_vtube_studio_typing_action', expect.anything())
+      expect(errorMessage.value).toContain('Имя параметра не может быть пустым')
+    })
+
+    it('rejects whitespace-only eventName with client-side validation error', async () => {
+      const { saveTypingAction, currentStatus, typingMode, eventName, errorMessage } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      typingMode.value = 'Event'
+      eventName.value = '   '
+      mockInvoke.mockClear()
+      mockInvoke.mockResolvedValue('ok')
+
+      await saveTypingAction()
+      await flushMicrotasks()
+
+      expect(mockInvoke).not.toHaveBeenCalledWith('save_vtube_studio_typing_action', expect.anything())
+      expect(errorMessage.value).toContain('Имя параметра не может быть пустым')
+    })
+
+    it('rejects empty Hotkeys IDs with client-side validation error', async () => {
+      const { saveTypingAction, currentStatus, typingMode, startHotkeyId, stopHotkeyId, errorMessage } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      typingMode.value = 'Hotkeys'
+      startHotkeyId.value = ''
+      stopHotkeyId.value = ''
+      mockInvoke.mockClear()
+      mockInvoke.mockResolvedValue('ok')
+
+      await saveTypingAction()
+      await flushMicrotasks()
+
+      expect(mockInvoke).not.toHaveBeenCalledWith('save_vtube_studio_typing_action', expect.anything())
+      expect(errorMessage.value).toContain('ID горячих клавиш не могут быть пустыми')
+    })
+
+    it('rejects Hotkeys mode with only one empty ID', async () => {
+      const { saveTypingAction, currentStatus, typingMode, startHotkeyId, stopHotkeyId, errorMessage } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      typingMode.value = 'Hotkeys'
+      startHotkeyId.value = 'hk-start'
+      stopHotkeyId.value = ''
+      mockInvoke.mockClear()
+      mockInvoke.mockResolvedValue('ok')
+
+      await saveTypingAction()
+      await flushMicrotasks()
+
+      expect(mockInvoke).not.toHaveBeenCalledWith('save_vtube_studio_typing_action', expect.anything())
+      expect(errorMessage.value).toContain('ID горячих клавиш не могут быть пустыми')
+    })
+  })
+
+  describe('loadHotkeys', () => {
+    it('invokes get_vtube_studio_current_model_hotkeys when Connected', async () => {
+      const { loadHotkeys, currentStatus, hotkeys } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      setupBaseMock()
+      mockInvoke.mockResolvedValue([{ hotkeyID: '1', name: 'HK1', type: 'Typing', description: 'desc' }])
+
+      await loadHotkeys()
+      await flushMicrotasks()
+
+      expect(mockInvoke).toHaveBeenCalledWith('get_vtube_studio_current_model_hotkeys')
+      expect(hotkeys.value).toHaveLength(1)
+      expect(hotkeys.value[0].hotkeyID).toBe('1')
+    })
+
+    it('sets hotkeysLoading during fetch and clears after', async () => {
+      let resolveDelay: () => void
+      const delay = new Promise<void>(r => { resolveDelay = r })
+      const { loadHotkeys, hotkeysLoading, currentStatus } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      mockInvoke.mockClear()
+      setupBaseMock()
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'get_vtube_studio_current_model_hotkeys') {
+          await delay
+          return []
+        }
+        return undefined
+      })
+
+      const p = loadHotkeys()
+      expect(hotkeysLoading.value).toBe(true)
+      resolveDelay!()
+      await p
+      await flushMicrotasks()
+      expect(hotkeysLoading.value).toBe(false)
+    })
+
+    it('does not invoke when not Connected', async () => {
+      const { loadHotkeys, currentStatus } = await setupAndMount(undefined, 'Disconnected')
+      currentStatus.value = 'Disconnected'
+      setupBaseMock()
+      mockInvoke.mockResolvedValue([])
+
+      await loadHotkeys()
+      await flushMicrotasks()
+
+      expect(mockInvoke).not.toHaveBeenCalledWith('get_vtube_studio_current_model_hotkeys', expect.anything())
+    })
+
+    it('does not invoke when busy', async () => {
+      const { loadHotkeys, currentStatus, busy } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      busy.value = true
+      setupBaseMock()
+
+      await loadHotkeys()
+      await flushMicrotasks()
+
+      expect(mockInvoke).not.toHaveBeenCalledWith('get_vtube_studio_current_model_hotkeys', expect.anything())
+    })
+
+    it('sets hotkeysError on backend failure', async () => {
+      const { loadHotkeys, hotkeysError, currentStatus } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      setupBaseMock()
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'get_vtube_studio_current_model_hotkeys') throw new Error('Not connected')
+        return undefined
+      })
+
+      await loadHotkeys()
+      await flushMicrotasks()
+
+      expect(hotkeysError.value).toContain('Not connected')
+    })
+
+    it('clears hotkeysError before fetch', async () => {
+      const { loadHotkeys, hotkeysError, currentStatus } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      hotkeysError.value = 'old error'
+      setupBaseMock()
+      mockInvoke.mockResolvedValue([])
+
+      await loadHotkeys()
+      await flushMicrotasks()
+
+      expect(hotkeysError.value).toBeNull()
+    })
+
+    it('updates hotkeys on subsequent fetch', async () => {
+      const { loadHotkeys, hotkeys, currentStatus } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      setupBaseMock()
+      mockInvoke
+        .mockResolvedValueOnce([{ hotkeyID: 'first', name: 'First', type: 'Typing', description: '' }])
+        .mockResolvedValueOnce([{ hotkeyID: 'second', name: 'Second', type: 'Typing', description: '' }])
+
+      await loadHotkeys()
+      await flushMicrotasks()
+      expect(hotkeys.value[0].hotkeyID).toBe('first')
+
+      await loadHotkeys()
+      await flushMicrotasks()
+      expect(hotkeys.value[0].hotkeyID).toBe('second')
+    })
+
+    it('clears previous error on retry', async () => {
+      const { loadHotkeys, hotkeysError, currentStatus } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      setupBaseMock()
+      mockInvoke
+        .mockRejectedValueOnce(new Error('temp error'))
+        .mockResolvedValueOnce([])
+
+      await loadHotkeys()
+      await flushMicrotasks()
+      expect(hotkeysError.value).toContain('temp error')
+
+      await loadHotkeys()
+      await flushMicrotasks()
+      expect(hotkeysError.value).toBeNull()
+    })
+  })
+
+  describe('canLoadHotkeys', () => {
+    it('is true when Connected and not busy', async () => {
+      const { canLoadHotkeys, currentStatus } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      expect(canLoadHotkeys.value).toBe(true)
+    })
+
+    it('is false when not Connected', async () => {
+      const { canLoadHotkeys, currentStatus } = await setupAndMount(undefined, 'Disconnected')
+      currentStatus.value = 'Disconnected'
+      expect(canLoadHotkeys.value).toBe(false)
+    })
+
+    it('is false when busy', async () => {
+      const { canLoadHotkeys, currentStatus, busy } = await setupAndMount(undefined, 'Connected')
+      currentStatus.value = 'Connected'
+      busy.value = true
+      expect(canLoadHotkeys.value).toBe(false)
+    })
+  })
+
+  describe('hotkeysLoading / hotkeysError defaults', () => {
+    it('hotkeysLoading starts as false', async () => {
+      const { hotkeysLoading } = await setupAndMount()
+      expect(hotkeysLoading.value).toBe(false)
+    })
+
+    it('hotkeysError starts as null', async () => {
+      const { hotkeysError } = await setupAndMount()
+      expect(hotkeysError.value).toBeNull()
     })
   })
 })

@@ -7,6 +7,7 @@ use crate::config::settings::AudioEffectsSettings;
 use crate::config::settings::{
     FishAudioSettings, LocalTtsSettings, MtProxySettings, NetworkSettings, OpenAiSettings,
     ProxyMode, ProxySettings, ProxyType, Socks5Settings, TelegramTtsSettings, TtsSettings,
+    VTubeStudioTypingMode,
 };
 use crate::config::windows::{
     GlobalSettings, MainWindowSettings, PlaybackWindowSettings, SoundPanelWindowSettings,
@@ -1174,10 +1175,36 @@ impl From<HotkeySettingsDto> for HotkeySettings {
 // ============================================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VTubeStudioTypingActionDto {
+    pub output_mode: VTubeStudioTypingMode,
+    pub parameter_name: String,
+    pub start_hotkey_id: String,
+    pub stop_hotkey_id: String,
+    pub start_hotkey_name: String,
+    pub stop_hotkey_name: String,
+}
+
+impl From<&crate::config::VTubeStudioTypingAction> for VTubeStudioTypingActionDto {
+    fn from(a: &crate::config::VTubeStudioTypingAction) -> Self {
+        Self {
+            output_mode: a.output_mode.clone(),
+            parameter_name: a.parameter_name.clone(),
+            start_hotkey_id: a.start_hotkey_id.clone(),
+            stop_hotkey_id: a.stop_hotkey_id.clone(),
+            start_hotkey_name: a.start_hotkey_name.clone(),
+            stop_hotkey_name: a.stop_hotkey_name.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VTubeStudioSettingsDto {
     pub enabled: bool,
     pub port: u16,
     pub start_on_boot: bool,
+    #[serde(rename = "typingAction")]
+    pub typing_action: VTubeStudioTypingActionDto,
 }
 
 impl From<crate::config::VTubeStudioSettings> for VTubeStudioSettingsDto {
@@ -1186,8 +1213,20 @@ impl From<crate::config::VTubeStudioSettings> for VTubeStudioSettingsDto {
             enabled: s.enabled,
             port: s.port,
             start_on_boot: s.start_on_boot,
+            typing_action: (&s.typing_action).into(),
         }
     }
+}
+
+/// Hotkey info from VTube Studio API (for UI selection)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VtsHotkeyInfoDto {
+    #[serde(rename = "hotkeyID")]
+    pub hotkey_id: String,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub hotkey_type: String,
+    pub description: String,
 }
 
 // ============================================================================

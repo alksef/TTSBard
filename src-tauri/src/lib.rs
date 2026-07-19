@@ -455,6 +455,8 @@ pub fn run() {
             // VTube Studio commands
             commands::vtube_studio::get_vtube_studio_settings,
             commands::vtube_studio::save_vtube_studio_settings,
+            commands::vtube_studio::save_vtube_studio_typing_action,
+            commands::vtube_studio::get_vtube_studio_current_model_hotkeys,
             commands::vtube_studio::test_vtube_studio_connection,
             commands::vtube_studio::test_vtube_studio_typing,
             commands::vtube_studio::set_vtube_studio_typing,

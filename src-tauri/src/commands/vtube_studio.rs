@@ -1,4 +1,7 @@
-use crate::config::{SettingsManager, VTubeStudioSettings, VTubeStudioSettingsDto};
+use crate::config::{
+    SettingsManager, VTubeStudioSettings, VTubeStudioSettingsDto, VTubeStudioTypingAction,
+    VTubeStudioTypingMode, VtsHotkeyInfoDto,
+};
 use crate::events::VTubeStudioConnectionStatus;
 use crate::state::AppState;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -15,11 +18,7 @@ pub async fn get_vtube_studio_settings(
     state: State<'_, AppState>,
 ) -> Result<VTubeStudioSettingsDto, String> {
     let settings = state.vtube_studio.settings.read().await;
-    Ok(VTubeStudioSettingsDto {
-        enabled: settings.enabled,
-        port: settings.port,
-        start_on_boot: settings.start_on_boot,
-    })
+    Ok(VTubeStudioSettingsDto::from(settings.clone()))
 }
 
 #[tauri::command]
@@ -48,9 +47,9 @@ pub async fn save_vtube_studio_settings(
         .try_state::<SettingsManager>()
         .ok_or_else(|| "SettingsManager not available".to_string())?;
 
-    let token = {
+    let (token, typing_action) = {
         let s = state.vtube_studio.settings.read().await;
-        s.token.clone()
+        (s.token.clone(), s.typing_action.clone())
     };
 
     let persist_settings = VTubeStudioSettings {
@@ -58,6 +57,7 @@ pub async fn save_vtube_studio_settings(
         port,
         token: token.clone(),
         start_on_boot,
+        typing_action,
     };
 
     let mgr = settings_manager.inner().clone();
@@ -82,7 +82,123 @@ pub async fn save_vtube_studio_settings(
         info!("VTube Studio connection cleared due to port change");
     }
 
-    Ok("VTube Studio settings saved".to_string())
+    Ok("Настройки подключения VTube Studio сохранены".to_string())
+}
+
+#[tauri::command]
+pub async fn save_vtube_studio_typing_action(
+    output_mode: String,
+    parameter_name: String,
+    start_hotkey_id: String,
+    stop_hotkey_id: String,
+    start_hotkey_name: String,
+    stop_hotkey_name: String,
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<String, String> {
+    let mode = match output_mode.as_str() {
+        "Event" => VTubeStudioTypingMode::Event,
+        "Hotkeys" => VTubeStudioTypingMode::Hotkeys,
+        other => {
+            return Err(format!(
+                "Invalid output mode: '{}'. Must be 'Event' or 'Hotkeys'.",
+                other
+            ));
+        }
+    };
+
+    let trimmed_parameter_name = parameter_name.trim().to_string();
+    let trimmed_start = start_hotkey_id.trim().to_string();
+    let trimmed_stop = stop_hotkey_id.trim().to_string();
+
+    match mode {
+        VTubeStudioTypingMode::Event => {
+            if trimmed_parameter_name.is_empty() {
+                return Err("Parameter name must be non-empty.".to_string());
+            }
+        }
+        VTubeStudioTypingMode::Hotkeys => {
+            if trimmed_start.is_empty() {
+                return Err("Start hotkey ID must be non-empty for Hotkeys mode.".to_string());
+            }
+            if trimmed_stop.is_empty() {
+                return Err("Stop hotkey ID must be non-empty for Hotkeys mode.".to_string());
+            }
+        }
+    }
+
+    let typing_action = VTubeStudioTypingAction {
+        output_mode: mode,
+        parameter_name: trimmed_parameter_name,
+        start_hotkey_id: trimmed_start,
+        stop_hotkey_id: trimmed_stop,
+        start_hotkey_name: start_hotkey_name.trim().to_string(),
+        stop_hotkey_name: stop_hotkey_name.trim().to_string(),
+    };
+
+    info!(?typing_action, "Saving VTube Studio typing action");
+
+    let settings_manager = app_handle
+        .try_state::<SettingsManager>()
+        .ok_or_else(|| "SettingsManager not available".to_string())?;
+
+    let (enabled, port, token, start_on_boot) = {
+        let s = state.vtube_studio.settings.read().await;
+        (s.enabled, s.port, s.token.clone(), s.start_on_boot)
+    };
+
+    let persist_settings = VTubeStudioSettings {
+        enabled,
+        port,
+        token,
+        start_on_boot,
+        typing_action: typing_action.clone(),
+    };
+
+    let mgr = settings_manager.inner().clone();
+    crate::commands::persist_blocking(&mgr, move |mgr| {
+        mgr.set_vtube_studio_settings(&persist_settings)
+    })
+    .await?;
+
+    {
+        let mut s = state.vtube_studio.settings.write().await;
+        s.typing_action = typing_action;
+    }
+
+    crate::commands::emit_settings_changed(&app_handle);
+
+    Ok("Действие при наборе сохранено".to_string())
+}
+
+#[tauri::command]
+pub async fn get_vtube_studio_current_model_hotkeys(
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<Vec<VtsHotkeyInfoDto>, String> {
+    info!("Requesting VTS current model hotkeys");
+
+    let hotkeys = state
+        .vtube_studio
+        .get_current_model_hotkeys()
+        .await
+        .map_err(|e| {
+            let status = state.vtube_studio.get_connection_status();
+            emit_vts_status(&app_handle, &status);
+            e
+        })?;
+
+    let dtos: Vec<VtsHotkeyInfoDto> = hotkeys
+        .into_iter()
+        .map(|h| VtsHotkeyInfoDto {
+            hotkey_id: h.hotkey_id,
+            name: h.name,
+            hotkey_type: h.hotkey_type,
+            description: h.description,
+        })
+        .collect();
+
+    Ok(dtos)
 }
 
 #[tauri::command]
@@ -128,10 +244,7 @@ pub async fn test_vtube_studio_connection(
                 .await?;
             }
 
-            Ok(
-                "Successfully connected to VTube Studio. A brief test signal was sent to TTSBardTyping; bind this parameter to a model parameter/expression in VTube Studio for visible avatar movement."
-                    .to_string(),
-            )
+            Ok("Successfully connected to VTube Studio.".to_string())
         }
         Err(e) => {
             state.vtube_studio.mark_authenticated(false);
@@ -271,14 +384,11 @@ pub async fn test_vtube_studio_typing(
         return Err("Повторы должны быть от 1 до 10".to_string());
     }
 
-    info!(
-        timeout_ms,
-        repeat_count, "Testing VTube Studio typing parameter"
-    );
+    info!(timeout_ms, repeat_count, "Testing VTube Studio typing");
 
     let result = state
         .vtube_studio
-        .test_typing_parameter(timeout_ms, repeat_count)
+        .test_typing_action(timeout_ms, repeat_count)
         .await;
 
     match result {

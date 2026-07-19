@@ -376,6 +376,24 @@ export interface AiSettingsDto {
 // VTube Studio Settings Types
 // ============================================================================
 
+export type VTubeStudioTypingMode = 'Event' | 'Hotkeys'
+
+export interface VTubeStudioTypingActionDto {
+  outputMode: VTubeStudioTypingMode
+  parameterName: string
+  startHotkeyId: string
+  stopHotkeyId: string
+  startHotkeyName: string
+  stopHotkeyName: string
+}
+
+export interface VtsHotkeyInfoDto {
+  hotkeyID: string
+  name: string
+  type: string
+  description: string
+}
+
 /**
  * VTube Studio settings DTO (safe — no token exposed to frontend)
  */
@@ -383,6 +401,7 @@ export interface VTubeStudioSettingsDto {
   enabled: boolean
   port: number
   start_on_boot: boolean
+  typingAction: VTubeStudioTypingActionDto
 }
 
 // ============================================================================

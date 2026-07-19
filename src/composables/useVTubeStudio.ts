@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useVTubeStudioSettings } from './useAppSettings'
 import { debugLog, debugError } from '../utils/debug'
+import type { VtsHotkeyInfoDto, VTubeStudioTypingActionDto, VTubeStudioTypingMode } from '../types/settings'
 
 export type VTubeStatus = 'Disconnected' | 'Connecting' | 'Connected' | 'Error'
 
@@ -29,6 +30,8 @@ export interface VTubeStudioSettings {
   port: number
   start_on_boot: boolean
 }
+
+interface TypingActionDraft extends VTubeStudioTypingActionDto {}
 
 function isRustEnumDisconnected(obj: unknown): obj is RustEnumDisconnected {
   return typeof obj === 'object' && obj !== null && 'Disconnected' in obj
@@ -83,6 +86,18 @@ export function useVTubeStudio() {
 
   const typingTimeout = ref(800)
   const typingRepeats = ref(1)
+  const typingMode = ref<VTubeStudioTypingMode>('Event')
+  const eventName = ref('TTSBardTyping')
+  const startHotkeyId = ref('')
+  const stopHotkeyId = ref('')
+  const savedTypingAction = ref<TypingActionDraft>({
+    outputMode: 'Event', parameterName: 'TTSBardTyping',
+    startHotkeyId: '', stopHotkeyId: '', startHotkeyName: '', stopHotkeyName: '',
+  })
+  const hotkeys = ref<VtsHotkeyInfoDto[]>([])
+  const hotkeysLoading = ref(false)
+  const hotkeysError = ref<string | null>(null)
+  let hotkeyLoadGeneration = 0
 
   const typingTimeoutError = computed(() => {
     const v = typingTimeout.value
@@ -106,6 +121,17 @@ export function useVTubeStudio() {
       && typingTimeoutError.value === null
       && typingRepeatsError.value === null
   })
+  const canTestAction = canTestTyping
+  const canLoadHotkeys = computed(() => currentStatus.value === 'Connected' && !busy.value)
+  const canSaveTypingAction = computed(() => typingMode.value === 'Event' ? eventName.value.trim().length > 0 : startHotkeyId.value.trim().length > 0 && stopHotkeyId.value.trim().length > 0)
+  const typingActionValid = canSaveTypingAction
+  const draftOutputMode = typingMode
+  const draftParameterName = eventName
+  const draftStartHotkeyId = startHotkeyId
+  const draftStopHotkeyId = stopHotkeyId
+  const hotkeyList = hotkeys
+  const hotkeyListLoading = hotkeysLoading
+  const hotkeyListError = hotkeysError
 
   function isValidPort(port: number): boolean {
     return Number.isFinite(port) && port >= 1024 && port <= 65535 && Number.isInteger(port)
@@ -141,8 +167,23 @@ export function useVTubeStudio() {
 
   async function loadSettings() {
     try {
-      const data = await invoke<VTubeStudioSettings>('get_vtube_studio_settings')
+      const data = await invoke<VTubeStudioSettings & { typingAction: TypingActionDraft }>('get_vtube_studio_settings')
       settings.value = { enabled: data.enabled, port: data.port, start_on_boot: data.start_on_boot }
+      savedTypingAction.value = data.typingAction
+      typingMode.value = data.typingAction.outputMode
+      eventName.value = data.typingAction.parameterName
+      startHotkeyId.value = data.typingAction.startHotkeyId
+      stopHotkeyId.value = data.typingAction.stopHotkeyId
+      if (data.typingAction.outputMode === 'Hotkeys') {
+        const savedHotkeys: VtsHotkeyInfoDto[] = []
+        if (data.typingAction.startHotkeyId && data.typingAction.startHotkeyName) {
+          savedHotkeys.push({ hotkeyID: data.typingAction.startHotkeyId, name: data.typingAction.startHotkeyName, type: 'Сохранённая', description: '' })
+        }
+        if (data.typingAction.stopHotkeyId && data.typingAction.stopHotkeyName && data.typingAction.stopHotkeyId !== data.typingAction.startHotkeyId) {
+          savedHotkeys.push({ hotkeyID: data.typingAction.stopHotkeyId, name: data.typingAction.stopHotkeyName, type: 'Сохранённая', description: '' })
+        }
+        hotkeys.value = savedHotkeys
+      }
       debugLog('[VTubeStudio] Loaded settings:', settings.value)
     } catch (e) {
       debugError('[VTubeStudio] Failed to load settings:', e)
@@ -279,6 +320,90 @@ export function useVTubeStudio() {
     }
   }
 
+  const testAction = testTypingParameter
+
+  async function loadHotkeys() {
+    if (!canLoadHotkeys.value) return
+    const generation = ++hotkeyLoadGeneration
+    hotkeysLoading.value = true
+    hotkeysError.value = null
+    try {
+      const result = await invoke<VtsHotkeyInfoDto[]>('get_vtube_studio_current_model_hotkeys')
+      if (generation === hotkeyLoadGeneration) {
+        hotkeys.value = result
+        if (typingMode.value === 'Hotkeys') {
+          const saved = savedTypingAction.value
+          const startHotkeyName = result.find(h => h.hotkeyID === startHotkeyId.value)?.name ?? saved.startHotkeyName
+          const stopHotkeyName = result.find(h => h.hotkeyID === stopHotkeyId.value)?.name ?? saved.stopHotkeyName
+          savedTypingAction.value = {
+            ...saved,
+            startHotkeyName,
+            stopHotkeyName,
+          }
+          if (startHotkeyName !== saved.startHotkeyName || stopHotkeyName !== saved.stopHotkeyName) {
+            try {
+              await invoke<string>('save_vtube_studio_typing_action', {
+                outputMode: saved.outputMode,
+                parameterName: saved.parameterName,
+                startHotkeyId: saved.startHotkeyId,
+                stopHotkeyId: saved.stopHotkeyId,
+                startHotkeyName,
+                stopHotkeyName,
+              })
+            } catch (e) {
+              debugError('[VTubeStudio] Failed to refresh saved hotkey names:', e)
+            }
+          }
+        }
+      }
+    } catch (e) {
+      if (generation === hotkeyLoadGeneration) hotkeysError.value = e instanceof Error ? e.message : String(e)
+    } finally {
+      if (generation === hotkeyLoadGeneration) hotkeysLoading.value = false
+    }
+  }
+
+  async function saveTypingAction() {
+    if (busy.value) return
+    if (!canSaveTypingAction.value) {
+      showError(typingMode.value === 'Event'
+        ? 'Имя параметра не может быть пустым'
+        : 'ID горячих клавиш не могут быть пустыми')
+      return
+    }
+    const gen = startOperation()
+    const parameterName = eventName.value.trim()
+    const startId = startHotkeyId.value.trim()
+    const stopId = stopHotkeyId.value.trim()
+    const startHotkeyName = hotkeys.value.find(h => h.hotkeyID === startId)?.name ?? ''
+    const stopHotkeyName = hotkeys.value.find(h => h.hotkeyID === stopId)?.name ?? ''
+    try {
+      const result = await invoke<string>('save_vtube_studio_typing_action', {
+        outputMode: typingMode.value, parameterName,
+        startHotkeyId: typingMode.value === 'Hotkeys' ? startId : '',
+        stopHotkeyId: typingMode.value === 'Hotkeys' ? stopId : '',
+        startHotkeyName: typingMode.value === 'Hotkeys' ? startHotkeyName : '',
+        stopHotkeyName: typingMode.value === 'Hotkeys' ? stopHotkeyName : '',
+      })
+      if (!isStaleOp(gen)) {
+        // The backend persists trimmed values. Reflect those exact values in the
+        // editable controls too, so the visible draft never differs from saved state.
+        eventName.value = parameterName
+        startHotkeyId.value = startId
+        stopHotkeyId.value = stopId
+        savedTypingAction.value = {
+          outputMode: typingMode.value, parameterName, startHotkeyId: startId, stopHotkeyId: stopId,
+          startHotkeyName, stopHotkeyName,
+        }
+        showError(result)
+      }
+    } catch (e) {
+      if (!isStaleOp(gen)) showError(e instanceof Error ? e.message : String(e))
+    } finally { endOperation() }
+  }
+
+  const loadCurrentModelHotkeys = loadHotkeys
+
   async function saveStartOnBoot() {
     try {
       await invoke<string>('save_vtube_studio_settings', {
@@ -329,7 +454,30 @@ export function useVTubeStudio() {
     typingTimeoutError,
     typingRepeatsError,
     canTestTyping,
+    canTestAction,
+    canLoadHotkeys,
+    canSaveTypingAction,
+    typingActionValid,
+    typingMode,
+    eventName,
+    startHotkeyId,
+    stopHotkeyId,
+    savedTypingAction,
+    hotkeys,
+    hotkeysLoading,
+    hotkeysError,
+    draftOutputMode,
+    draftParameterName,
+    draftStartHotkeyId,
+    draftStopHotkeyId,
+    hotkeyList,
+    hotkeyListLoading,
+    hotkeyListError,
     save,
+    saveTypingAction,
+    loadHotkeys,
+    loadCurrentModelHotkeys,
+    testAction,
     testTypingParameter,
     startVTubeStudio,
     stopVTubeStudio,

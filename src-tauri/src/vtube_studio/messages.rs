@@ -4,7 +4,6 @@ pub(crate) const API_NAME: &str = "VTubeStudioPublicAPI";
 pub(crate) const API_VERSION: &str = "1.0";
 pub(crate) const PLUGIN_NAME: &str = "TTSBard";
 pub(crate) const PLUGIN_DEVELOPER: &str = "TTSBard";
-pub(crate) const TYPING_PARAMETER_NAME: &str = "TTSBardTyping";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct VtsRequest {
@@ -93,6 +92,43 @@ pub(crate) struct InjectParameterDataRequestData {
     pub parameter_values: Vec<ParameterValue>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct HotkeysInCurrentModelRequestData {
+    #[serde(rename = "modelID")]
+    pub model_id: String,
+}
+
+/// A single hotkey returned by VTube Studio's HotkeysInCurrentModelResponse
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HotkeyInfo {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub hotkey_type: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(rename = "hotkeyID")]
+    pub hotkey_id: String,
+}
+
+/// Response data for HotkeysInCurrentModelRequest
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct HotkeysInCurrentModelResponseData {
+    #[serde(rename = "modelLoaded")]
+    pub model_loaded: bool,
+    #[serde(rename = "modelName")]
+    pub model_name: String,
+    #[serde(rename = "modelID")]
+    pub model_id: String,
+    #[serde(rename = "availableHotkeys")]
+    pub available_hotkeys: Vec<HotkeyInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct HotkeyTriggerRequestData {
+    #[serde(rename = "hotkeyID")]
+    pub hotkey_id: String,
+}
+
 impl VtsRequest {
     pub(crate) fn new(message_type: &str, request_id: &str, data: serde_json::Value) -> Self {
         Self {
@@ -123,10 +159,13 @@ impl VtsRequest {
         Self::new("AuthenticationRequest", request_id, data)
     }
 
-    pub(crate) fn parameter_creation_request(request_id: &str) -> Self {
+    pub(crate) fn parameter_creation_request(request_id: &str, parameter_name: &str) -> Self {
         let data = serde_json::to_value(ParameterCreationRequestData {
-            parameter_name: TYPING_PARAMETER_NAME.to_string(),
-            explanation: "TTSBard typing indicator (0=idle, 1=typing)".to_string(),
+            parameter_name: parameter_name.to_string(),
+            explanation: format!(
+                "TTSBard typing indicator (0=idle, 1=typing) — {}",
+                parameter_name
+            ),
             min: 0.0,
             max: 1.0,
             default_value: 0.0,
@@ -135,16 +174,36 @@ impl VtsRequest {
         Self::new("ParameterCreationRequest", request_id, data)
     }
 
-    pub(crate) fn inject_parameter_request(request_id: &str, value: f64) -> Self {
+    pub(crate) fn inject_parameter_request(
+        request_id: &str,
+        parameter_name: &str,
+        value: f64,
+    ) -> Self {
         let data = serde_json::to_value(InjectParameterDataRequestData {
             mode: "set".to_string(),
             parameter_values: vec![ParameterValue {
-                id: TYPING_PARAMETER_NAME.to_string(),
+                id: parameter_name.to_string(),
                 value,
             }],
         })
         .unwrap();
         Self::new("InjectParameterDataRequest", request_id, data)
+    }
+
+    pub(crate) fn hotkeys_in_current_model_request(request_id: &str) -> Self {
+        let data = serde_json::to_value(HotkeysInCurrentModelRequestData {
+            model_id: String::new(),
+        })
+        .unwrap();
+        Self::new("HotkeysInCurrentModelRequest", request_id, data)
+    }
+
+    pub(crate) fn hotkey_trigger_request(request_id: &str, hotkey_id: &str) -> Self {
+        let data = serde_json::to_value(HotkeyTriggerRequestData {
+            hotkey_id: hotkey_id.to_string(),
+        })
+        .unwrap();
+        Self::new("HotkeyTriggerRequest", request_id, data)
     }
 }
 
@@ -191,7 +250,7 @@ mod tests {
 
     #[test]
     fn parameter_creation_request_payload() {
-        let req = VtsRequest::parameter_creation_request("req-3");
+        let req = VtsRequest::parameter_creation_request("req-3", "TTSBardTyping");
         let json = serde_json::to_string(&req).unwrap();
         let expected = serde_json::json!({
             "apiName": "VTubeStudioPublicAPI",
@@ -200,7 +259,7 @@ mod tests {
             "messageType": "ParameterCreationRequest",
             "data": {
                 "parameterName": "TTSBardTyping",
-                "explanation": "TTSBard typing indicator (0=idle, 1=typing)",
+                "explanation": "TTSBard typing indicator (0=idle, 1=typing) — TTSBardTyping",
                 "min": 0.0,
                 "max": 1.0,
                 "defaultValue": 0.0
@@ -212,7 +271,7 @@ mod tests {
 
     #[test]
     fn inject_parameter_request_payload() {
-        let req = VtsRequest::inject_parameter_request("req-4", 1.0);
+        let req = VtsRequest::inject_parameter_request("req-4", "TTSBardTyping", 1.0);
         let json = serde_json::to_string(&req).unwrap();
         let expected = serde_json::json!({
             "apiName": "VTubeStudioPublicAPI",
@@ -291,7 +350,7 @@ mod tests {
 
     #[test]
     fn inject_param_zero_payload() {
-        let req = VtsRequest::inject_parameter_request("inj-0", 0.0);
+        let req = VtsRequest::inject_parameter_request("inj-0", "TTSBardTyping", 0.0);
         let json = serde_json::to_string(&req).unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(
@@ -378,8 +437,8 @@ mod tests {
     }
 
     #[test]
-    fn test_connection_pulse_sequence() {
-        let pulse = VtsRequest::inject_parameter_request("pulse-1", 1.0);
+    fn inject_param_pair_start_stop() {
+        let pulse = VtsRequest::inject_parameter_request("pulse-1", "TTSBardTyping", 1.0);
         let pulse_json = serde_json::to_string(&pulse).unwrap();
         let pulse_v: serde_json::Value = serde_json::from_str(&pulse_json).unwrap();
         assert_eq!(
@@ -393,7 +452,7 @@ mod tests {
             "InjectParameterDataRequest"
         );
 
-        let reset = VtsRequest::inject_parameter_request("reset-1", 0.0);
+        let reset = VtsRequest::inject_parameter_request("reset-1", "TTSBardTyping", 0.0);
         let reset_json = serde_json::to_string(&reset).unwrap();
         let reset_v: serde_json::Value = serde_json::from_str(&reset_json).unwrap();
         assert_eq!(
@@ -410,7 +469,7 @@ mod tests {
 
     #[test]
     fn parameter_creation_id_is_typing_param() {
-        let req = VtsRequest::parameter_creation_request("create-1");
+        let req = VtsRequest::parameter_creation_request("create-1", "TTSBardTyping");
         let json = serde_json::to_string(&req).unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(
@@ -424,9 +483,139 @@ mod tests {
 
     #[test]
     fn inject_param_mode_is_set() {
-        let req = VtsRequest::inject_parameter_request("mode-1", 0.5);
+        let req = VtsRequest::inject_parameter_request("mode-1", "TTSBardTyping", 0.5);
         let json = serde_json::to_string(&req).unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["data"]["mode"].as_str().unwrap(), "set");
+    }
+
+    #[test]
+    fn hotkey_trigger_request_payload() {
+        let req = VtsRequest::hotkey_trigger_request("hk-trig-1", "my-hotkey-id");
+        let json = serde_json::to_string(&req).unwrap();
+        let expected = serde_json::json!({
+            "apiName": "VTubeStudioPublicAPI",
+            "apiVersion": "1.0",
+            "requestID": "hk-trig-1",
+            "messageType": "HotkeyTriggerRequest",
+            "data": {
+                "hotkeyID": "my-hotkey-id"
+            }
+        });
+        let actual: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn hotkey_trigger_request_empty_id() {
+        let req = VtsRequest::hotkey_trigger_request("ht-empt", "");
+        let json = serde_json::to_string(&req).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["data"]["hotkeyID"].as_str().unwrap(), "");
+        assert_eq!(v["messageType"].as_str().unwrap(), "HotkeyTriggerRequest");
+    }
+
+    #[test]
+    fn hotkeys_in_current_model_request_payload() {
+        let req = VtsRequest::hotkeys_in_current_model_request("hk-model-1");
+        let json = serde_json::to_string(&req).unwrap();
+        let expected = serde_json::json!({
+            "apiName": "VTubeStudioPublicAPI",
+            "apiVersion": "1.0",
+            "requestID": "hk-model-1",
+            "messageType": "HotkeysInCurrentModelRequest",
+            "data": {
+                "modelID": ""
+            }
+        });
+        let actual: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn hotkeys_in_current_model_response_deserializes() {
+        let json = r#"{
+            "apiName": "VTubeStudioPublicAPI",
+            "apiVersion": "1.0",
+            "requestID": "hk-model-2",
+            "messageType": "HotkeysInCurrentModelResponse",
+            "data": {
+                "modelLoaded": true,
+                "modelName": "TestModel",
+                "modelID": "model-123",
+                "availableHotkeys": [
+                    {
+                        "name": "Toggle Glasses",
+                        "type": "ToggleExpression",
+                        "description": "Toggles glasses on/off",
+                        "hotkeyID": "hotkey-1"
+                    }
+                ]
+            }
+        }"#;
+        let resp: VtsResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.message_type, "HotkeysInCurrentModelResponse");
+        let data: HotkeysInCurrentModelResponseData = serde_json::from_value(resp.data).unwrap();
+        assert!(data.model_loaded);
+        assert_eq!(data.model_name, "TestModel");
+        assert_eq!(data.model_id, "model-123");
+        assert_eq!(data.available_hotkeys.len(), 1);
+        assert_eq!(data.available_hotkeys[0].hotkey_id, "hotkey-1");
+        assert_eq!(data.available_hotkeys[0].name, "Toggle Glasses");
+        assert_eq!(data.available_hotkeys[0].hotkey_type, "ToggleExpression");
+        assert_eq!(
+            data.available_hotkeys[0].description,
+            "Toggles glasses on/off"
+        );
+    }
+
+    #[test]
+    fn hotkeys_in_current_model_response_no_model() {
+        let json = r#"{
+            "apiName": "VTubeStudioPublicAPI",
+            "apiVersion": "1.0",
+            "requestID": "hk-model-3",
+            "messageType": "HotkeysInCurrentModelResponse",
+            "data": {
+                "modelLoaded": false,
+                "modelName": "",
+                "modelID": "",
+                "availableHotkeys": []
+            }
+        }"#;
+        let resp: VtsResponse = serde_json::from_str(json).unwrap();
+        let data: HotkeysInCurrentModelResponseData = serde_json::from_value(resp.data).unwrap();
+        assert!(!data.model_loaded);
+        assert!(data.available_hotkeys.is_empty());
+    }
+
+    #[test]
+    fn parameter_creation_dynamic_name() {
+        let req = VtsRequest::parameter_creation_request("dyn-1", "MyCustomParam");
+        let json = serde_json::to_string(&req).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            v["data"]["parameterName"].as_str().unwrap(),
+            "MyCustomParam"
+        );
+        assert!(v["data"]["explanation"]
+            .as_str()
+            .unwrap()
+            .contains("MyCustomParam"));
+    }
+
+    #[test]
+    fn inject_parameter_dynamic_name() {
+        let req = VtsRequest::inject_parameter_request("dyn-inj", "AnotherParam", 0.75);
+        let json = serde_json::to_string(&req).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            v["data"]["parameterValues"][0]["id"].as_str().unwrap(),
+            "AnotherParam"
+        );
+        assert_eq!(
+            v["data"]["parameterValues"][0]["value"].as_f64().unwrap(),
+            0.75
+        );
     }
 }

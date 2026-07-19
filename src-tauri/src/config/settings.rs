@@ -641,6 +641,39 @@ fn default_vtube_port() -> u16 {
     8001
 }
 
+/// VTube Studio typing output mode
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum VTubeStudioTypingMode {
+    Event,
+    Hotkeys,
+}
+
+/// VTube Studio typing action configuration
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VTubeStudioTypingAction {
+    pub output_mode: VTubeStudioTypingMode,
+    pub parameter_name: String,
+    pub start_hotkey_id: String,
+    pub stop_hotkey_id: String,
+    #[serde(default)]
+    pub start_hotkey_name: String,
+    #[serde(default)]
+    pub stop_hotkey_name: String,
+}
+
+impl Default for VTubeStudioTypingAction {
+    fn default() -> Self {
+        Self {
+            output_mode: VTubeStudioTypingMode::Event,
+            parameter_name: "TTSBardTyping".to_string(),
+            start_hotkey_id: String::new(),
+            stop_hotkey_id: String::new(),
+            start_hotkey_name: String::new(),
+            stop_hotkey_name: String::new(),
+        }
+    }
+}
+
 /// VTube Studio integration settings
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct VTubeStudioSettings {
@@ -652,6 +685,8 @@ pub struct VTubeStudioSettings {
     pub token: Option<String>,
     #[serde(default)]
     pub start_on_boot: bool,
+    #[serde(default)]
+    pub typing_action: VTubeStudioTypingAction,
 }
 
 impl Default for VTubeStudioSettings {
@@ -661,6 +696,7 @@ impl Default for VTubeStudioSettings {
             port: default_vtube_port(),
             token: None,
             start_on_boot: false,
+            typing_action: VTubeStudioTypingAction::default(),
         }
     }
 }
@@ -2467,7 +2503,8 @@ mod tests {
         assert!(!settings.vtube_studio.start_on_boot);
     }
 
-    /// VTubeStudioSettings defaults: disabled, port 8001, no token, start_on_boot false.
+    /// VTubeStudioSettings defaults: disabled, port 8001, no token, start_on_boot false,
+    /// typing mode Event, param name TTSBardTyping, empty hotkey IDs.
     #[test]
     fn vtube_studio_settings_defaults() {
         let s = VTubeStudioSettings::default();
@@ -2475,9 +2512,13 @@ mod tests {
         assert_eq!(s.port, 8001);
         assert!(s.token.is_none());
         assert!(!s.start_on_boot);
+        assert_eq!(s.typing_action.output_mode, VTubeStudioTypingMode::Event);
+        assert_eq!(s.typing_action.parameter_name, "TTSBardTyping");
+        assert!(s.typing_action.start_hotkey_id.is_empty());
+        assert!(s.typing_action.stop_hotkey_id.is_empty());
     }
 
-    /// VTubeStudioSettings round-trip: token is persisted to and loaded from disk.
+    /// VTubeStudioSettings round-trip: all fields including typing_action are persisted.
     #[test]
     fn vtube_studio_settings_token_round_trip() {
         let original = VTubeStudioSettings {
@@ -2485,6 +2526,14 @@ mod tests {
             port: 8002,
             token: Some("secret-token".to_string()),
             start_on_boot: true,
+            typing_action: VTubeStudioTypingAction {
+                output_mode: VTubeStudioTypingMode::Hotkeys,
+                parameter_name: "CustomParam".to_string(),
+                start_hotkey_id: "hotkey-start-1".to_string(),
+                stop_hotkey_id: "hotkey-stop-1".to_string(),
+                start_hotkey_name: "Start".to_string(),
+                stop_hotkey_name: "Stop".to_string(),
+            },
         };
         let json = serde_json::to_string(&original).unwrap();
         // Token must NOT be skip_serialized on the settings struct (it's persisted to disk)
@@ -2494,15 +2543,107 @@ mod tests {
         assert_eq!(back.port, 8002);
         assert_eq!(back.token.as_deref(), Some("secret-token"));
         assert!(back.start_on_boot);
+        assert_eq!(
+            back.typing_action.output_mode,
+            VTubeStudioTypingMode::Hotkeys
+        );
+        assert_eq!(back.typing_action.parameter_name, "CustomParam");
+        assert_eq!(back.typing_action.start_hotkey_id, "hotkey-start-1");
+        assert_eq!(back.typing_action.stop_hotkey_id, "hotkey-stop-1");
+        assert_eq!(back.typing_action.start_hotkey_name, "Start");
+        assert_eq!(back.typing_action.stop_hotkey_name, "Stop");
     }
 
+    /// VTubeStudioTypingMode is serialized as camelCase Event/Hotkeys.
     #[test]
-    fn vtube_studio_settings_start_on_boot_default_deserialize() {
-        let json = r#"{"enabled": true, "port": 8001}"#;
-        let s: VTubeStudioSettings = serde_json::from_str(json).unwrap();
+    fn vtube_studio_typing_mode_serde() {
+        assert_eq!(
+            serde_json::to_string(&VTubeStudioTypingMode::Event).unwrap(),
+            "\"Event\""
+        );
+        let m: VTubeStudioTypingMode = serde_json::from_str("\"Hotkeys\"").unwrap();
+        assert_eq!(m, VTubeStudioTypingMode::Hotkeys);
+    }
+
+    /// VTubeStudioTypingAction fresh defaults.
+    #[test]
+    fn vtube_studio_typing_action_defaults() {
+        let a = VTubeStudioTypingAction::default();
+        assert_eq!(a.output_mode, VTubeStudioTypingMode::Event);
+        assert_eq!(a.parameter_name, "TTSBardTyping");
+        assert!(a.start_hotkey_id.is_empty());
+        assert!(a.stop_hotkey_id.is_empty());
+    }
+
+    /// Existing settings without the later typing action use the safe Event default.
+    #[test]
+    fn vtube_studio_settings_defaults_without_typing_action() {
+        let json = r#"{
+            "enabled": true,
+            "port": 8001,
+            "token": null,
+            "start_on_boot": false
+        }"#;
+        let settings: VTubeStudioSettings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.typing_action, VTubeStudioTypingAction::default());
+    }
+
+    /// JSON with `vtube_studio` present and correct `typing_action` with snake_case
+    /// field names must deserialize successfully.
+    #[test]
+    fn vtube_studio_settings_deserializes_with_typing_action_snake_case() {
+        let json = r#"{
+            "enabled": true,
+            "port": 8002,
+            "token": "tok",
+            "start_on_boot": false,
+            "typing_action": {
+                "output_mode": "Hotkeys",
+                "parameter_name": "Custom",
+                "start_hotkey_id": "s1",
+                "stop_hotkey_id": "s2"
+            }
+        }"#;
+        let s: VTubeStudioSettings =
+            serde_json::from_str(json).expect("snake_case typing_action must deserialize");
         assert!(s.enabled);
-        assert_eq!(s.port, 8001);
-        assert!(s.token.is_none());
-        assert!(!s.start_on_boot);
+        assert_eq!(s.port, 8002);
+        assert_eq!(s.typing_action.output_mode, VTubeStudioTypingMode::Hotkeys);
+        assert_eq!(s.typing_action.parameter_name, "Custom");
+        assert_eq!(s.typing_action.start_hotkey_id, "s1");
+        assert_eq!(s.typing_action.stop_hotkey_id, "s2");
+    }
+
+    /// JSON with camelCase field names in typing_action must FAIL (schema is snake_case).
+    #[test]
+    fn vtube_studio_settings_fails_with_camelcase_typing_action() {
+        let json = r#"{
+            "enabled": true,
+            "port": 8001,
+            "token": null,
+            "start_on_boot": false,
+            "typing_action": {
+                "outputMode": "Event",
+                "parameterName": "X",
+                "startHotkeyId": "",
+                "stopHotkeyId": ""
+            }
+        }"#;
+        let result: Result<VTubeStudioSettings, _> = serde_json::from_str(json);
+        assert!(
+            result.is_err(),
+            "camelCase typing_action must fail to deserialize with snake_case schema"
+        );
+    }
+
+    /// VTubeStudioTypingAction serializes with snake_case field names.
+    #[test]
+    fn vtube_studio_typing_action_serializes_snake_case() {
+        let a = VTubeStudioTypingAction::default();
+        let json = serde_json::to_string(&a).unwrap();
+        assert!(json.contains("output_mode"), "json: {}", json);
+        assert!(json.contains("parameter_name"), "json: {}", json);
+        assert!(json.contains("start_hotkey_id"), "json: {}", json);
+        assert!(json.contains("stop_hotkey_id"), "json: {}", json);
     }
 }

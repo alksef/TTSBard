@@ -8,8 +8,10 @@ use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info};
 
-use super::messages::{self, VtsErrorData, VtsRequest, VtsResponse};
-use crate::config::VTubeStudioSettings;
+use super::messages::{
+    self, HotkeyInfo, HotkeysInCurrentModelResponseData, VtsRequest, VtsResponse,
+};
+use crate::config::{VTubeStudioSettings, VTubeStudioTypingMode};
 use crate::events::VTubeStudioConnectionStatus;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
@@ -22,6 +24,7 @@ struct InnerState {
     ws: Option<WsStream>,
     typing_cancel: Option<CancellationToken>,
     typing_handle: Option<tokio::task::JoinHandle<()>>,
+    typing_active: bool,
 }
 
 pub struct VTubeStudioService {
@@ -40,6 +43,7 @@ impl VTubeStudioService {
                 ws: None,
                 typing_cancel: None,
                 typing_handle: None,
+                typing_active: false,
             })),
             is_authenticated: Arc::new(AtomicBool::new(false)),
             desired_running: Arc::new(AtomicBool::new(false)),
@@ -88,19 +92,15 @@ impl VTubeStudioService {
         let mut inner = self.inner.lock().await;
 
         self.stop_typing_keepalive_locked(&mut inner);
+        inner.typing_active = false;
         inner.ws = None;
 
         let mut ws = connect_ws(port).await?;
         let new_token = perform_authentication(&mut ws, self.next_id(), stored_token).await?;
-        create_typing_param(&mut ws, self.next_id()).await?;
-        inject_typing(&mut ws, self.next_id(), 1.0).await?;
-        inject_typing(&mut ws, self.next_id(), 0.0).await?;
 
         if self.is_desired_running() {
             inner.ws = Some(ws);
         }
-        // When desired_running is false (diagnostic test), socket is dropped
-        // so the test does not create a persistent connection.
         Ok(new_token)
     }
 
@@ -114,6 +114,7 @@ impl VTubeStudioService {
 
         let mut inner = self.inner.lock().await;
         self.stop_typing_keepalive_locked(&mut inner);
+        inner.typing_active = false;
         inner.ws = None;
 
         let ws_result = connect_ws(port).await;
@@ -138,13 +139,6 @@ impl VTubeStudioService {
             }
         };
 
-        if let Err(e) = create_typing_param(&mut ws, self.next_id()).await {
-            self.is_authenticated.store(false, Ordering::SeqCst);
-            self.set_desired_running(false);
-            self.set_connection_status(VTubeStudioConnectionStatus::Error);
-            return Err(format!("Create parameter failed: {}", e));
-        }
-
         inner.ws = Some(ws);
         self.is_authenticated.store(true, Ordering::SeqCst);
         self.set_connection_status(VTubeStudioConnectionStatus::Connected);
@@ -157,16 +151,31 @@ impl VTubeStudioService {
         port: u16,
         stored_token: &str,
     ) -> Result<(), String> {
+        let typing_action = { self.settings.read().await.typing_action.clone() };
+
         let mut inner = self.inner.lock().await;
 
         if !typing {
             self.stop_typing_keepalive_locked(&mut inner);
+            inner.typing_active = false;
 
-            if let Some(ref mut ws) = inner.ws {
-                if let Err(e) = inject_typing(ws, self.next_id(), 0.0).await {
-                    debug!(error = %e, "VTS inject typing=false failed, discarding broken socket");
-                    inner.ws = None;
-                    self.is_authenticated.store(false, Ordering::SeqCst);
+            if typing_action.output_mode == VTubeStudioTypingMode::Event {
+                if let Some(ref mut ws) = inner.ws {
+                    let param_name = typing_action.parameter_name.clone();
+                    if let Err(e) = inject_typing(ws, self.next_id(), &param_name, 0.0).await {
+                        debug!(error = %e, "VTS inject typing=false failed, discarding broken socket");
+                        inner.ws = None;
+                        self.is_authenticated.store(false, Ordering::SeqCst);
+                    }
+                }
+            } else {
+                if let Some(ref mut ws) = inner.ws {
+                    let stop_id = typing_action.stop_hotkey_id.clone();
+                    if let Err(e) = trigger_hotkey(ws, self.next_id(), &stop_id).await {
+                        debug!(error = %e, "VTS hotkey stop trigger failed, discarding broken socket");
+                        inner.ws = None;
+                        self.is_authenticated.store(false, Ordering::SeqCst);
+                    }
                 }
             }
             return Ok(());
@@ -203,11 +212,14 @@ impl VTubeStudioService {
                 }
             }
 
-            if let Err(e) = create_typing_param(&mut ws, self.next_id()).await {
-                debug!(error = %e, "VTS create param for typing=true failed, discarding broken socket");
-                self.is_authenticated.store(false, Ordering::SeqCst);
-                self.set_connection_status(VTubeStudioConnectionStatus::Error);
-                return Err(e);
+            if typing_action.output_mode == VTubeStudioTypingMode::Event {
+                let param_name = typing_action.parameter_name.clone();
+                if let Err(e) = create_typing_param(&mut ws, self.next_id(), &param_name).await {
+                    debug!(error = %e, "VTS create param for typing=true failed, discarding broken socket");
+                    self.is_authenticated.store(false, Ordering::SeqCst);
+                    self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                    return Err(e);
+                }
             }
 
             inner.ws = Some(ws);
@@ -215,71 +227,124 @@ impl VTubeStudioService {
         }
 
         self.stop_typing_keepalive_locked(&mut inner);
+        inner.typing_active = true;
 
-        let ws = match inner.ws.as_mut() {
-            Some(ws) => ws,
-            None => return Ok(()),
-        };
+        match typing_action.output_mode {
+            VTubeStudioTypingMode::Event => {
+                let param_name = typing_action.parameter_name.clone();
+                let ws = match inner.ws.as_mut() {
+                    Some(ws) => ws,
+                    None => {
+                        inner.typing_active = false;
+                        return Ok(());
+                    }
+                };
 
-        if let Err(e) = inject_typing(ws, self.next_id(), 1.0).await {
-            debug!(error = %e, "VTS inject typing=true failed, discarding broken socket");
-            inner.ws = None;
-            self.is_authenticated.store(false, Ordering::SeqCst);
-            self.set_connection_status(VTubeStudioConnectionStatus::Error);
-            return Err(e);
+                if let Err(e) = inject_typing(ws, self.next_id(), &param_name, 1.0).await {
+                    debug!(error = %e, "VTS inject typing=true failed, discarding broken socket");
+                    inner.ws = None;
+                    inner.typing_active = false;
+                    self.is_authenticated.store(false, Ordering::SeqCst);
+                    self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                    return Err(e);
+                }
+
+                let cancel = CancellationToken::new();
+                let cancel_ct = cancel.clone();
+                inner.typing_cancel = Some(cancel);
+
+                let inner_arc = Arc::clone(&self.inner);
+                let auth_flag = Arc::clone(&self.is_authenticated);
+                let status_arc = Arc::clone(&self.connection_status);
+
+                let handle = tokio::spawn(async move {
+                    loop {
+                        if cancel_ct.is_cancelled() {
+                            break;
+                        }
+
+                        tokio::time::sleep(Duration::from_millis(TYPING_KEEPALIVE_MS)).await;
+
+                        if cancel_ct.is_cancelled() {
+                            break;
+                        }
+
+                        let mut inner_guard = inner_arc.lock().await;
+                        let id = uuid::Uuid::new_v4().to_string();
+                        if let Some(ref mut ws) = inner_guard.ws {
+                            if let Err(e) = inject_typing(ws, id, &param_name, 1.0).await {
+                                debug!(error = %e, "VTS typing keep-alive inject failed, discarding broken socket");
+                                inner_guard.ws = None;
+                                inner_guard.typing_active = false;
+                                auth_flag.store(false, Ordering::SeqCst);
+                                *status_arc.lock() = VTubeStudioConnectionStatus::Error;
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                    if !cancel_ct.is_cancelled() {
+                        auth_flag.store(false, Ordering::SeqCst);
+                    }
+                    debug!("VTS typing keep-alive stopped");
+                });
+
+                inner.typing_handle = Some(handle);
+            }
+            VTubeStudioTypingMode::Hotkeys => {
+                let start_id = typing_action.start_hotkey_id.clone();
+                let ws = match inner.ws.as_mut() {
+                    Some(ws) => ws,
+                    None => {
+                        inner.typing_active = false;
+                        return Ok(());
+                    }
+                };
+
+                if let Err(e) = trigger_hotkey(ws, self.next_id(), &start_id).await {
+                    debug!(error = %e, "VTS hotkey start trigger failed, discarding broken socket");
+                    inner.ws = None;
+                    inner.typing_active = false;
+                    self.is_authenticated.store(false, Ordering::SeqCst);
+                    self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                    return Err(e);
+                }
+            }
         }
 
-        let cancel = CancellationToken::new();
-        let cancel_ct = cancel.clone();
-        inner.typing_cancel = Some(cancel);
-
-        let inner_arc = Arc::clone(&self.inner);
-        let auth_flag = Arc::clone(&self.is_authenticated);
-        let status_arc = Arc::clone(&self.connection_status);
-
-        let handle = tokio::spawn(async move {
-            loop {
-                if cancel_ct.is_cancelled() {
-                    break;
-                }
-
-                tokio::time::sleep(Duration::from_millis(TYPING_KEEPALIVE_MS)).await;
-
-                if cancel_ct.is_cancelled() {
-                    break;
-                }
-
-                let mut inner_guard = inner_arc.lock().await;
-                let id = uuid::Uuid::new_v4().to_string();
-                if let Some(ref mut ws) = inner_guard.ws {
-                    if let Err(e) = inject_typing(ws, id, 1.0).await {
-                        debug!(error = %e, "VTS typing keep-alive inject failed, discarding broken socket");
-                        inner_guard.ws = None;
-                        auth_flag.store(false, Ordering::SeqCst);
-                        *status_arc.lock() = VTubeStudioConnectionStatus::Error;
-                        break;
-                    }
-                } else {
-                    break;
-                }
-            }
-            if !cancel_ct.is_cancelled() {
-                auth_flag.store(false, Ordering::SeqCst);
-            }
-            debug!("VTS typing keep-alive stopped");
-        });
-
-        inner.typing_handle = Some(handle);
         Ok(())
     }
 
     pub async fn disconnect(&self) {
         let mut inner = self.inner.lock().await;
         self.set_desired_running(false);
+
+        let typing_active = inner.typing_active;
+        let typing_action = { self.settings.read().await.typing_action.clone() };
+
         self.stop_typing_keepalive_locked(&mut inner);
-        if let Some(ref mut ws) = inner.ws {
-            let _ = inject_typing(ws, self.next_id(), 0.0).await;
+        inner.typing_active = false;
+
+        if typing_active {
+            if let Some(ref mut ws) = inner.ws {
+                match typing_action.output_mode {
+                    VTubeStudioTypingMode::Event => {
+                        let _ =
+                            inject_typing(ws, self.next_id(), &typing_action.parameter_name, 0.0)
+                                .await;
+                    }
+                    VTubeStudioTypingMode::Hotkeys => {
+                        if !typing_action.stop_hotkey_id.is_empty() {
+                            let _ =
+                                trigger_hotkey(ws, self.next_id(), &typing_action.stop_hotkey_id)
+                                    .await;
+                        }
+                    }
+                }
+            }
         }
+
         inner.ws = None;
         self.is_authenticated.store(false, Ordering::SeqCst);
         self.set_connection_status(VTubeStudioConnectionStatus::Disconnected);
@@ -295,11 +360,54 @@ impl VTubeStudioService {
         }
     }
 
-    pub async fn test_typing_parameter(
+    pub async fn get_current_model_hotkeys(&self) -> Result<Vec<HotkeyInfo>, String> {
+        if !self.is_desired_running() {
+            return Err("VTube Studio is not running.".to_string());
+        }
+
+        let status = self.get_connection_status();
+        if status != VTubeStudioConnectionStatus::Connected {
+            return Err(format!(
+                "VTube Studio is not connected (status: {:?}).",
+                status
+            ));
+        }
+
+        if !self.is_authenticated.load(Ordering::SeqCst) {
+            return Err("VTube Studio is not authenticated.".to_string());
+        }
+
+        let mut inner = self.inner.lock().await;
+        let ws = inner
+            .ws
+            .as_mut()
+            .ok_or_else(|| "VTube Studio WebSocket is not available.".to_string())?;
+
+        let req = VtsRequest::hotkeys_in_current_model_request(&self.next_id());
+        let req_id = req.request_id.clone();
+        let json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+
+        let value = send_and_recv(ws, &json, &req_id, "HotkeysInCurrentModelResponse")
+            .await
+            .map_err(|e| format!("Hotkeys request failed: {}", e))?;
+
+        let data: HotkeysInCurrentModelResponseData =
+            serde_json::from_value(value).map_err(|e| format!("Parse hotkeys response: {}", e))?;
+
+        if !data.model_loaded {
+            return Err("No model is currently loaded in VTube Studio.".to_string());
+        }
+
+        Ok(data.available_hotkeys)
+    }
+
+    pub async fn test_typing_action(
         &self,
         timeout_ms: u64,
         repeat_count: u64,
     ) -> Result<String, String> {
+        let typing_action = self.settings.read().await.typing_action.clone();
+
         if timeout_ms < 100 || timeout_ms > 5000 {
             return Err("Таймаут должен быть от 100 до 5000 мс".to_string());
         }
@@ -332,30 +440,66 @@ impl VTubeStudioService {
         for i in 0..repeat_count {
             let ws = inner.ws.as_mut().unwrap();
 
-            if let Err(e) = inject_typing(ws, self.next_id(), 1.0).await {
-                inner.ws = None;
-                self.is_authenticated.store(false, Ordering::SeqCst);
-                self.set_connection_status(VTubeStudioConnectionStatus::Error);
-                return Err(format!(
-                    "VTube Studio test failed at repeat {} (inject 1): {}",
-                    i + 1,
-                    e
-                ));
+            match typing_action.output_mode {
+                VTubeStudioTypingMode::Event => {
+                    let param_name = typing_action.parameter_name.clone();
+                    if let Err(e) = inject_typing(ws, self.next_id(), &param_name, 1.0).await {
+                        inner.ws = None;
+                        self.is_authenticated.store(false, Ordering::SeqCst);
+                        self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                        return Err(format!(
+                            "VTube Studio action test failed at repeat {} (start): {}",
+                            i + 1,
+                            e
+                        ));
+                    }
+                }
+                VTubeStudioTypingMode::Hotkeys => {
+                    let start_id = typing_action.start_hotkey_id.clone();
+                    if let Err(e) = trigger_hotkey(ws, self.next_id(), &start_id).await {
+                        inner.ws = None;
+                        self.is_authenticated.store(false, Ordering::SeqCst);
+                        self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                        return Err(format!(
+                            "VTube Studio action test failed at repeat {} (start): {}",
+                            i + 1,
+                            e
+                        ));
+                    }
+                }
             }
 
             tokio::time::sleep(timeout_dur).await;
 
             let ws = inner.ws.as_mut().unwrap();
 
-            if let Err(e) = inject_typing(ws, self.next_id(), 0.0).await {
-                inner.ws = None;
-                self.is_authenticated.store(false, Ordering::SeqCst);
-                self.set_connection_status(VTubeStudioConnectionStatus::Error);
-                return Err(format!(
-                    "VTube Studio test failed at repeat {} (inject 0): {}",
-                    i + 1,
-                    e
-                ));
+            match typing_action.output_mode {
+                VTubeStudioTypingMode::Event => {
+                    let param_name = typing_action.parameter_name.clone();
+                    if let Err(e) = inject_typing(ws, self.next_id(), &param_name, 0.0).await {
+                        inner.ws = None;
+                        self.is_authenticated.store(false, Ordering::SeqCst);
+                        self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                        return Err(format!(
+                            "VTube Studio action test failed at repeat {} (stop): {}",
+                            i + 1,
+                            e
+                        ));
+                    }
+                }
+                VTubeStudioTypingMode::Hotkeys => {
+                    let stop_id = typing_action.stop_hotkey_id.clone();
+                    if let Err(e) = trigger_hotkey(ws, self.next_id(), &stop_id).await {
+                        inner.ws = None;
+                        self.is_authenticated.store(false, Ordering::SeqCst);
+                        self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                        return Err(format!(
+                            "VTube Studio action test failed at repeat {} (stop): {}",
+                            i + 1,
+                            e
+                        ));
+                    }
+                }
             }
 
             if i + 1 < repeat_count {
@@ -363,11 +507,8 @@ impl VTubeStudioService {
             }
         }
 
-        // Final zero is already sent by the last iteration.
-        // desired_running is NOT changed during or after the test.
-
         Ok(format!(
-            "Тест параметра выполнен: {} повторов с таймаутом {} мс",
+            "Тест действия выполнен: повторов — {}, таймаут — {} мс",
             repeat_count, timeout_ms
         ))
     }
@@ -459,27 +600,52 @@ async fn perform_authentication(
     Ok(Some(token))
 }
 
-async fn create_typing_param(ws: &mut WsStream, request_id: String) -> Result<(), String> {
-    let req = VtsRequest::parameter_creation_request(&request_id);
+async fn create_typing_param(
+    ws: &mut WsStream,
+    request_id: String,
+    parameter_name: &str,
+) -> Result<(), String> {
+    let req = VtsRequest::parameter_creation_request(&request_id, parameter_name);
     let json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
 
     let _value = send_and_recv(ws, &json, &request_id, "ParameterCreationResponse")
         .await
         .map_err(|e| format!("Create parameter failed: {}", e))?;
 
-    debug!("TTSBardTyping parameter ensured");
+    debug!(parameter_name, "Parameter ensured");
     Ok(())
 }
 
-async fn inject_typing(ws: &mut WsStream, request_id: String, value: f64) -> Result<(), String> {
-    let req = VtsRequest::inject_parameter_request(&request_id, value);
+async fn inject_typing(
+    ws: &mut WsStream,
+    request_id: String,
+    parameter_name: &str,
+    value: f64,
+) -> Result<(), String> {
+    let req = VtsRequest::inject_parameter_request(&request_id, parameter_name, value);
     let json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
 
     let _value = send_and_recv(ws, &json, &request_id, "InjectParameterDataResponse")
         .await
         .map_err(|e| format!("Inject parameter failed: {}", e))?;
 
-    debug!(value, "TTSBardTyping injected");
+    debug!(parameter_name, value, "Parameter injected");
+    Ok(())
+}
+
+async fn trigger_hotkey(
+    ws: &mut WsStream,
+    request_id: String,
+    hotkey_id: &str,
+) -> Result<(), String> {
+    let req = VtsRequest::hotkey_trigger_request(&request_id, hotkey_id);
+    let json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+
+    let _value = send_and_recv(ws, &json, &request_id, "HotkeyTriggerResponse")
+        .await
+        .map_err(|e| format!("Hotkey trigger failed: {}", e))?;
+
+    debug!(hotkey_id, "Hotkey triggered");
     Ok(())
 }
 
@@ -496,7 +662,7 @@ fn classify_vts_response(
 ) -> RecvResult {
     if resp.message_type == "APIError" {
         if resp.request_id == expected_id {
-            match serde_json::from_value::<VtsErrorData>(resp.data.clone()) {
+            match serde_json::from_value::<messages::VtsErrorData>(resp.data.clone()) {
                 Ok(err) => RecvResult::Error(format!("VTS error {}", err.error_id)),
                 Err(e) => RecvResult::Error(format!("Parse error data: {}", e)),
             }
@@ -596,6 +762,11 @@ mod tests {
             assert!(!settings.enabled);
             assert_eq!(settings.port, 8001);
             assert!(settings.token.is_none());
+            assert_eq!(
+                settings.typing_action.output_mode,
+                VTubeStudioTypingMode::Event
+            );
+            assert_eq!(settings.typing_action.parameter_name, "TTSBardTyping");
         });
         assert!(!svc.is_desired_running());
         assert_eq!(
@@ -636,6 +807,7 @@ mod tests {
             assert!(inner.ws.is_none());
             assert!(inner.typing_cancel.is_none());
             assert!(inner.typing_handle.is_none());
+            assert!(!inner.typing_active);
         });
         assert!(!svc.is_desired_running());
         assert_eq!(
@@ -654,6 +826,8 @@ mod tests {
         rt.block_on(async {
             let result = svc.set_typing(false, 8001, "").await;
             assert!(result.is_ok());
+            let inner = svc.inner.lock().await;
+            assert!(!inner.typing_active);
         });
     }
 
@@ -797,6 +971,33 @@ mod tests {
     }
 
     #[test]
+    fn classify_hotkeys_in_current_model_response() {
+        let resp = make_response(
+            "HotkeysInCurrentModelResponse",
+            "req-hk",
+            serde_json::json!({
+                "modelLoaded": true,
+                "modelName": "test",
+                "modelID": "id",
+                "availableHotkeys": []
+            }),
+        );
+        match classify_vts_response(&resp, "req-hk", "HotkeysInCurrentModelResponse") {
+            RecvResult::Match(_) => {}
+            _ => panic!("expected Match for HotkeysInCurrentModelResponse"),
+        }
+    }
+
+    #[test]
+    fn classify_hotkey_trigger_response_matches() {
+        let resp = make_response("HotkeyTriggerResponse", "req-ht", serde_json::json!({}));
+        match classify_vts_response(&resp, "req-ht", "HotkeyTriggerResponse") {
+            RecvResult::Match(_) => {}
+            _ => panic!("expected Match for HotkeyTriggerResponse"),
+        }
+    }
+
+    #[test]
     fn classify_api_error_sanitizes_to_numeric_id() {
         let resp = make_response(
             "APIError",
@@ -923,6 +1124,21 @@ mod tests {
     }
 
     #[test]
+    fn hotkey_trigger_error_classifies() {
+        let resp = make_response(
+            "APIError",
+            "hk-err",
+            serde_json::json!({"errorID": 5, "message": "invalid hotkey"}),
+        );
+        match classify_vts_response(&resp, "hk-err", "HotkeyTriggerResponse") {
+            RecvResult::Error(e) => {
+                assert!(e.contains("VTS error 5"), "got: {}", e);
+            }
+            _ => panic!("HotkeyTriggerResponse APIError must produce Error"),
+        }
+    }
+
+    #[test]
     fn disconnect_resets_desired_running() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -956,7 +1172,7 @@ mod tests {
     }
 
     #[test]
-    fn test_typing_parameter_fails_when_not_desired_running() {
+    fn test_typing_action_fails_when_not_desired_running() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -964,7 +1180,7 @@ mod tests {
         let svc = VTubeStudioService::new();
         assert!(!svc.is_desired_running());
         rt.block_on(async {
-            let result = svc.test_typing_parameter(800, 1).await;
+            let result = svc.test_typing_action(800, 1).await;
             assert!(result.is_err());
             let msg = result.unwrap_err();
             assert!(
@@ -977,7 +1193,7 @@ mod tests {
     }
 
     #[test]
-    fn test_typing_parameter_fails_when_disconnected() {
+    fn test_typing_action_fails_when_disconnected() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -990,7 +1206,7 @@ mod tests {
             VTubeStudioConnectionStatus::Disconnected
         );
         rt.block_on(async {
-            let result = svc.test_typing_parameter(800, 1).await;
+            let result = svc.test_typing_action(800, 1).await;
             assert!(result.is_err());
             let msg = result.unwrap_err();
             assert!(
@@ -1006,14 +1222,14 @@ mod tests {
     }
 
     #[test]
-    fn test_typing_parameter_rejects_timeout_99() {
+    fn test_typing_action_rejects_timeout_99() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap();
         let svc = VTubeStudioService::new();
         rt.block_on(async {
-            let result = svc.test_typing_parameter(99, 1).await;
+            let result = svc.test_typing_action(99, 1).await;
             assert!(result.is_err());
             let msg = result.unwrap_err();
             assert!(
@@ -1026,14 +1242,14 @@ mod tests {
     }
 
     #[test]
-    fn test_typing_parameter_rejects_timeout_5001() {
+    fn test_typing_action_rejects_timeout_5001() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap();
         let svc = VTubeStudioService::new();
         rt.block_on(async {
-            let result = svc.test_typing_parameter(5001, 1).await;
+            let result = svc.test_typing_action(5001, 1).await;
             assert!(result.is_err());
             let msg = result.unwrap_err();
             assert!(
@@ -1046,14 +1262,14 @@ mod tests {
     }
 
     #[test]
-    fn test_typing_parameter_rejects_repeat_0() {
+    fn test_typing_action_rejects_repeat_0() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap();
         let svc = VTubeStudioService::new();
         rt.block_on(async {
-            let result = svc.test_typing_parameter(800, 0).await;
+            let result = svc.test_typing_action(800, 0).await;
             assert!(result.is_err());
             let msg = result.unwrap_err();
             assert!(
@@ -1066,14 +1282,14 @@ mod tests {
     }
 
     #[test]
-    fn test_typing_parameter_rejects_repeat_11() {
+    fn test_typing_action_rejects_repeat_11() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap();
         let svc = VTubeStudioService::new();
         rt.block_on(async {
-            let result = svc.test_typing_parameter(800, 11).await;
+            let result = svc.test_typing_action(800, 11).await;
             assert!(result.is_err());
             let msg = result.unwrap_err();
             assert!(
@@ -1086,7 +1302,7 @@ mod tests {
     }
 
     #[test]
-    fn test_typing_parameter_boundary_100_passes_validation() {
+    fn test_typing_action_boundary_100_passes_validation() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -1094,7 +1310,7 @@ mod tests {
         let svc = VTubeStudioService::new();
         svc.set_desired_running(true);
         rt.block_on(async {
-            let result = svc.test_typing_parameter(100, 1).await;
+            let result = svc.test_typing_action(100, 1).await;
             assert!(result.is_err());
             let msg = result.unwrap_err();
             assert!(
@@ -1107,7 +1323,7 @@ mod tests {
     }
 
     #[test]
-    fn test_typing_parameter_boundary_5000_passes_validation() {
+    fn test_typing_action_boundary_5000_passes_validation() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -1115,7 +1331,7 @@ mod tests {
         let svc = VTubeStudioService::new();
         svc.set_desired_running(true);
         rt.block_on(async {
-            let result = svc.test_typing_parameter(5000, 1).await;
+            let result = svc.test_typing_action(5000, 1).await;
             assert!(result.is_err());
             let msg = result.unwrap_err();
             assert!(
@@ -1128,7 +1344,7 @@ mod tests {
     }
 
     #[test]
-    fn test_typing_parameter_boundary_repeat_1_passes_validation() {
+    fn test_typing_action_boundary_repeat_1_passes_validation() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -1136,7 +1352,7 @@ mod tests {
         let svc = VTubeStudioService::new();
         svc.set_desired_running(true);
         rt.block_on(async {
-            let result = svc.test_typing_parameter(800, 1).await;
+            let result = svc.test_typing_action(800, 1).await;
             assert!(result.is_err());
             let msg = result.unwrap_err();
             assert!(
@@ -1149,7 +1365,7 @@ mod tests {
     }
 
     #[test]
-    fn test_typing_parameter_boundary_repeat_10_passes_validation() {
+    fn test_typing_action_boundary_repeat_10_passes_validation() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -1157,7 +1373,7 @@ mod tests {
         let svc = VTubeStudioService::new();
         svc.set_desired_running(true);
         rt.block_on(async {
-            let result = svc.test_typing_parameter(800, 10).await;
+            let result = svc.test_typing_action(800, 10).await;
             assert!(result.is_err());
             let msg = result.unwrap_err();
             assert!(
@@ -1170,7 +1386,7 @@ mod tests {
     }
 
     #[test]
-    fn test_typing_parameter_keeps_desired_running_on_failure() {
+    fn test_typing_action_keeps_desired_running_on_failure() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -1178,9 +1394,225 @@ mod tests {
         let svc = VTubeStudioService::new();
         svc.set_desired_running(true);
         rt.block_on(async {
-            let result = svc.test_typing_parameter(800, 1).await;
+            let result = svc.test_typing_action(800, 1).await;
             assert!(result.is_err());
         });
         assert!(svc.is_desired_running());
+    }
+
+    #[test]
+    fn get_current_model_hotkeys_fails_when_not_desired_running() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        rt.block_on(async {
+            let result = svc.get_current_model_hotkeys().await;
+            assert!(result.is_err());
+        });
+    }
+
+    #[test]
+    fn get_current_model_hotkeys_fails_when_disconnected() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_desired_running(true);
+        rt.block_on(async {
+            let result = svc.get_current_model_hotkeys().await;
+            assert!(result.is_err());
+        });
+    }
+
+    #[test]
+    fn typing_action_default_is_event_mode() {
+        let svc = VTubeStudioService::new();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let s = svc.settings.read().await;
+            assert_eq!(s.typing_action.output_mode, VTubeStudioTypingMode::Event);
+            assert_eq!(s.typing_action.parameter_name, "TTSBardTyping");
+            assert!(s.typing_action.start_hotkey_id.is_empty());
+            assert!(s.typing_action.stop_hotkey_id.is_empty());
+        });
+    }
+
+    #[test]
+    fn get_current_model_hotkeys_fails_when_not_authenticated() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_desired_running(true);
+        svc.set_connection_status(VTubeStudioConnectionStatus::Connected);
+        assert!(!svc.is_authenticated.load(Ordering::SeqCst));
+        rt.block_on(async {
+            let result = svc.get_current_model_hotkeys().await;
+            assert!(result.is_err());
+            let msg = result.unwrap_err();
+            assert!(
+                msg.contains("not authenticated"),
+                "should fail with not authenticated: {}",
+                msg
+            );
+        });
+    }
+
+    #[test]
+    fn get_current_model_hotkeys_fails_when_no_live_socket() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_desired_running(true);
+        svc.set_connection_status(VTubeStudioConnectionStatus::Connected);
+        svc.is_authenticated.store(true, Ordering::SeqCst);
+        rt.block_on(async {
+            let result = svc.get_current_model_hotkeys().await;
+            assert!(result.is_err());
+            let msg = result.unwrap_err();
+            assert!(
+                msg.contains("not available"),
+                "should fail with not available: {}",
+                msg
+            );
+        });
+    }
+
+    #[test]
+    fn connect_is_transport_only_no_side_effects() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        rt.block_on(async {
+            let result = svc.connect(8001, None).await;
+            assert!(result.is_err());
+        });
+        assert!(!svc.is_desired_running());
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Error
+        );
+        assert!(!svc.is_authenticated.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn disconnect_with_hotkeys_config_cleans_state() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_desired_running(true);
+        rt.block_on(async {
+            {
+                let mut s = svc.settings.write().await;
+                s.typing_action.output_mode = VTubeStudioTypingMode::Hotkeys;
+                s.typing_action.start_hotkey_id = "hk-start".to_string();
+                s.typing_action.stop_hotkey_id = "hk-stop".to_string();
+            }
+            svc.disconnect().await;
+            let inner = svc.inner.lock().await;
+            assert!(inner.ws.is_none());
+            assert!(inner.typing_cancel.is_none());
+            assert!(inner.typing_handle.is_none());
+            assert!(!inner.typing_active);
+        });
+        assert!(!svc.is_desired_running());
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Disconnected
+        );
+    }
+
+    #[test]
+    fn test_typing_action_fails_when_ws_not_available() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_desired_running(true);
+        svc.set_connection_status(VTubeStudioConnectionStatus::Connected);
+        rt.block_on(async {
+            let result = svc.test_typing_action(800, 1).await;
+            assert!(result.is_err());
+            let msg = result.unwrap_err();
+            assert!(
+                msg.contains("not available"),
+                "should fail with not available: {}",
+                msg
+            );
+        });
+        assert!(svc.is_desired_running());
+    }
+
+    #[test]
+    fn classification_roundtrip_all_response_types() {
+        let cases = vec![
+            ("AuthenticationTokenResponse", "APIResponse"),
+            ("AuthenticationResponse", "AuthenticationResponse"),
+            ("AuthenticationResponse", "APIResponse"),
+            ("ParameterCreationResponse", "ParameterCreationResponse"),
+            ("InjectParameterDataResponse", "InjectParameterDataResponse"),
+            (
+                "HotkeysInCurrentModelResponse",
+                "HotkeysInCurrentModelResponse",
+            ),
+            ("HotkeyTriggerResponse", "HotkeyTriggerResponse"),
+        ];
+        let req_id = "rtt";
+
+        for (msg_type, expected_match) in cases {
+            let resp = make_response(msg_type, req_id, serde_json::json!({}));
+            let expected_msg_type = if expected_match == "APIResponse" {
+                if msg_type == "AuthenticationTokenResponse" {
+                    "AuthenticationTokenResponse"
+                } else {
+                    "AuthenticationResponse"
+                }
+            } else {
+                msg_type
+            };
+            match classify_vts_response(&resp, req_id, expected_msg_type) {
+                RecvResult::Match(_) => {
+                    assert!(
+                        msg_type == expected_msg_type
+                            || (expected_match == "APIResponse" && msg_type == expected_match)
+                            || msg_type == expected_match,
+                        "expected Match for {}/expecting {}, but got Match from msg_type={}",
+                        expected_msg_type,
+                        expected_match,
+                        msg_type
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn hotkey_trigger_api_error_skipped_when_wrong_expected_type() {
+        let resp = make_response(
+            "APIError",
+            "hk-err-2",
+            serde_json::json!({"errorID": 99, "message": "bad"}),
+        );
+        match classify_vts_response(&resp, "hk-err-2", "InjectParameterDataResponse") {
+            RecvResult::Error(e) => {
+                assert!(e.contains("VTS error 99"), "got: {}", e);
+            }
+            _ => panic!("expected Error"),
+        }
     }
 }

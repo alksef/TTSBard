@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { Play, Square, RotateCw } from 'lucide-vue-next'
 import { useVTubeStudio } from '../composables/useVTubeStudio'
 
@@ -12,22 +12,35 @@ const {
   typingRepeats,
   typingTimeoutError,
   typingRepeatsError,
-  canTestTyping,
+  canTestAction,
+  canLoadHotkeys,
+  canSaveTypingAction,
+  typingMode,
+  eventName,
+  startHotkeyId,
+  stopHotkeyId,
+  savedTypingAction,
+  hotkeys,
+  hotkeysLoading,
+  hotkeysError,
   save,
-  testTypingParameter,
+  saveTypingAction,
+  loadHotkeys,
+  testAction,
   startVTubeStudio,
   stopVTubeStudio,
   restartVTubeStudio,
   saveStartOnBoot,
 } = useVTubeStudio()
+
 </script>
 
 <template>
   <div class="vtube-panel">
     <div v-if="errorMessage" class="message-box" :class="{
       error: errorMessage.includes('Failed') || errorMessage.includes('failed') || errorMessage.includes('Error') || errorMessage.includes('Ошибка'),
-      success: errorMessage.includes('saved') || errorMessage.includes('сохранен') || errorMessage.includes('Подключено к') || errorMessage.includes('Connected') || errorMessage.includes('Restarted') || errorMessage.includes('Disconnected'),
-      info: errorMessage.includes('Отключено') || errorMessage.includes('disconnect') || errorMessage.includes('Stopped') || errorMessage.includes('Disconnected')
+      success: errorMessage.includes('saved') || errorMessage.includes('сохранен') || errorMessage.includes('Сохранено') || errorMessage.includes('Подключено к') || errorMessage.includes('Connected') || errorMessage.includes('Restarted') || errorMessage.includes('Disconnected'),
+      info: errorMessage.includes('Отключено') || errorMessage.includes('disconnect') || errorMessage.includes('Stopped') || errorMessage.includes('Disconnected') || errorMessage.includes('Тест действия выполнен')
     }">
       {{ errorMessage }}
     </div>
@@ -72,12 +85,12 @@ const {
         </label>
       </div>
 
-      <div class="setting-row">
+      <div class="setting-row port-setting-row">
         <label>Порт:</label>
         <input
           type="number"
           v-model.number="settings.port"
-          class="text-input"
+          class="text-input port-input"
           :class="{ 'text-input-error': portError }"
           :min="1024"
           :max="65535"
@@ -94,7 +107,84 @@ const {
     </section>
 
     <section class="settings-section">
-      <h2>Тест параметра</h2>
+      <h2>Действие при наборе</h2>
+
+      <div class="setting-row typing-action-row">
+        <label>Способ:</label>
+        <select v-model="typingMode" class="text-input typing-mode-select" :disabled="busy">
+          <option value="Event">Событие</option>
+          <option value="Hotkeys">Горячие клавиши</option>
+        </select>
+      </div>
+
+      <template v-if="typingMode === 'Event'">
+        <div class="setting-row typing-action-row">
+          <label>Имя события:</label>
+          <input
+            type="text"
+            v-model="eventName"
+            class="text-input"
+            :disabled="busy"
+            placeholder="TTSBardTyping"
+          />
+        </div>
+      </template>
+
+      <template v-else>
+        <div class="setting-row">
+          <button
+            @click="loadHotkeys()"
+            class="save-button-inline secondary"
+            :disabled="!canLoadHotkeys"
+            :class="{ disabled: !canLoadHotkeys }"
+            :title="!canLoadHotkeys && currentStatus !== 'Connected' ? 'Подключитесь к VTube Studio для загрузки hotkeys' : 'Загрузить список горячих клавиш текущей модели'"
+            aria-label="Загрузить Hotkey"
+          >
+            <Download :size="14" class="icon-left" />
+            Загрузить Hotkey
+          </button>
+        </div>
+
+        <div v-if="hotkeysLoading" class="hotkey-status loading">Загрузка списка горячих клавиш...</div>
+        <div v-if="hotkeysError" class="hotkey-status error">{{ hotkeysError }}</div>
+
+        <div class="setting-row typing-action-row">
+          <label>Начало набора:</label>
+          <select v-model="startHotkeyId" class="text-input" :disabled="busy">
+            <option value="" disabled>— выберите —</option>
+            <option v-for="h in hotkeys" :key="h.hotkeyID" :value="h.hotkeyID">
+              {{ h.name }}<template v-if="h.type !== 'Сохранённая'"> ({{ h.type }})</template>
+            </option>
+          </select>
+        </div>
+
+        <div class="setting-row typing-action-row">
+          <label>Окончание набора:</label>
+          <select v-model="stopHotkeyId" class="text-input" :disabled="busy">
+            <option value="" disabled>— выберите —</option>
+            <option v-for="h in hotkeys" :key="h.hotkeyID" :value="h.hotkeyID">
+              {{ h.name }}<template v-if="h.type !== 'Сохранённая'"> ({{ h.type }})</template>
+            </option>
+          </select>
+        </div>
+      </template>
+
+      <div class="setting-row button-row">
+        <button
+          @click="saveTypingAction()"
+          class="save-button-inline"
+          :disabled="busy || !canSaveTypingAction"
+          :class="{ disabled: busy || !canSaveTypingAction }"
+          title="Сохранить выбранное действие набора"
+          aria-label="Сохранить действие"
+        >
+          Сохранить действие
+        </button>
+      </div>
+    </section>
+
+    <section class="settings-section">
+      <h2>Тест действия</h2>
       <div class="setting-row test-parameters-row">
         <label>Таймаут, мс:</label>
         <input
@@ -119,18 +209,21 @@ const {
       <div v-if="typingRepeatsError" class="test-error">{{ typingRepeatsError }}</div>
       <div class="setting-row button-row">
         <button
-          @click="testTypingParameter()"
+          @click="testAction()"
           class="save-button-inline"
-          :disabled="!canTestTyping"
-          :class="{ disabled: !canTestTyping }"
-          title="Проверить параметр TTSBardTyping в активной сессии"
+          :disabled="!canTestAction"
+          :class="{ disabled: !canTestAction }"
+          title="Запустить сохранённое действие набора: старт → пауза → стоп"
           aria-label="Проверить"
         >
           Проверить
         </button>
       </div>
       <p class="info-hint">
-        Каждый повтор отправляет <code>TTSBardTyping=1</code>, ждёт таймаут, затем отправляет <code>0</code>.
+        <strong>Запускает сохранённое действие.</strong>
+      </p>
+      <p class="info-hint">
+        Каждый повтор отправляет старт, ждёт таймаут, затем отправляет стоп.
         Между повторами — пауза той же длительности.
       </p>
     </section>
@@ -139,17 +232,33 @@ const {
       <h2>Статус набора</h2>
       <div class="info-card">
         <div class="info-row">
-          <span class="info-label">Параметр</span>
-          <code class="info-code">TTSBardTyping</code>
+          <span class="info-label">Способ</span>
+          <code class="info-code">{{ savedTypingAction.outputMode === 'Event' ? 'Событие' : 'Горячие клавиши' }}</code>
         </div>
-        <div class="info-row">
-          <span class="info-label">1</span>
-          <span class="info-desc">печатает</span>
+        <div v-if="savedTypingAction.outputMode === 'Event'" class="info-row">
+          <span class="info-label">Событие</span>
+          <code class="info-code">{{ savedTypingAction.parameterName || '(не задано)' }}</code>
         </div>
-        <div class="info-row">
-          <span class="info-label">0</span>
-          <span class="info-desc">ожидание</span>
-        </div>
+        <template v-else>
+          <div class="info-row">
+            <span class="info-label">Начало набора</span>
+            <code class="info-code">{{ savedTypingAction.startHotkeyName || savedTypingAction.startHotkeyId || '(не задан)' }}</code>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Окончание набора</span>
+            <code class="info-code">{{ savedTypingAction.stopHotkeyName || savedTypingAction.stopHotkeyId || '(не задан)' }}</code>
+          </div>
+        </template>
+        <template v-if="savedTypingAction.outputMode === 'Event'">
+          <div class="info-row">
+            <span class="info-label">1</span>
+            <span class="info-desc">начало набора</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">0</span>
+            <span class="info-desc">окончание набора</span>
+          </div>
+        </template>
       </div>
       <p class="info-hint">
         Интервал бездействия настраивается в <em>Настройки → Редактор</em>.
@@ -163,10 +272,11 @@ const {
         Включите <strong>Plugin API</strong> в VTube Studio. При первом подключении откроется окно подтверждения разрешений.
       </p>
       <p class="help-text">
-        Затем привяжите <code>TTSBardTyping</code> к нужному параметру модели.
+        Для режима <strong>Событие</strong> привяжите указанное имя параметра к нужному выражению модели.
+        Для режима <strong>Горячие клавиши</strong> выберите стартовый и стоповый Hotkey текущей модели после подключения.
       </p>
       <p class="help-text">
-        <strong>Тест параметра</strong> отправляет сигналы <code>TTSBardTyping</code> в активной сессии. Параметр должен быть привязан к выражению модели для видимого движения.
+        <strong>Тест действия</strong> запускает сохранённое действие в активной сессии для проверки.
       </p>
       <a href="https://github.com/DenchiSoft/VTubeStudio/wiki/Plugins" target="_blank" rel="noopener noreferrer" class="help-link">
         https://github.com/DenchiSoft/VTubeStudio/wiki/Plugins
@@ -367,6 +477,29 @@ h2 {
   font-size: 14px;
 }
 
+.typing-action-row label {
+  min-width: 130px;
+}
+
+/* A long event name must not look truncated in the compact settings panel.
+   If there is not enough room beside the label, the control moves to its own
+   line instead of shrinking to an unreadable width. */
+.typing-action-row .text-input {
+  flex: 1 1 180px;
+  min-width: 180px;
+}
+
+.typing-action-row .typing-mode-select {
+  flex: 0 0 130px;
+  min-width: 130px;
+  max-width: 130px;
+}
+
+.port-setting-row .port-input {
+  flex: 0 0 100px;
+  max-width: 100px;
+}
+
 .test-parameters-row {
   flex-wrap: wrap;
 }
@@ -399,9 +532,21 @@ h2 {
   font-weight: 600;
   font-size: 14px;
   transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
 }
 
-.save-button-inline:hover {
+.save-button-inline.secondary {
+  background: var(--btn-accent-bg);
+  font-weight: 500;
+}
+
+.save-button-inline.secondary:hover:not(.disabled) {
+  background: var(--btn-accent-bg-hover);
+}
+
+.save-button-inline:hover:not(.disabled) {
   filter: brightness(1.06);
 }
 
@@ -410,6 +555,10 @@ h2 {
   color: var(--color-text-secondary);
   cursor: not-allowed;
   opacity: 0.6;
+}
+
+.icon-left {
+  flex-shrink: 0;
 }
 
 .checkbox-label {
@@ -448,6 +597,10 @@ h2 {
   box-shadow: 0 0 0 3px var(--danger-shadow, rgba(255, 71, 87, 0.15)) !important;
 }
 
+select.text-input {
+  max-width: 260px;
+}
+
 .port-error {
   color: var(--danger-text-weak);
   font-size: 12px;
@@ -461,6 +614,26 @@ h2 {
   font-size: 12px;
   margin-top: -0.5rem;
   margin-bottom: 1rem;
+}
+
+.hotkey-status {
+  font-size: 13px;
+  margin-bottom: 0.75rem;
+  margin-top: -0.5rem;
+  padding: 0.3rem 0.75rem;
+  border-radius: 6px;
+}
+
+.hotkey-status.loading {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+}
+
+.hotkey-status.error {
+  color: var(--danger-text-weak);
+  background: var(--danger-bg-weak);
+  border: 1px solid var(--danger-border);
 }
 
 .info-card {
@@ -495,6 +668,10 @@ h2 {
   padding: 0.15rem 0.4rem;
   border-radius: 4px;
   border: 1px solid var(--info-border);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 300px;
 }
 
 .info-desc {
@@ -559,6 +736,10 @@ h2 {
     max-width: 100%;
     width: 100%;
     box-sizing: border-box;
+  }
+
+  select.text-input {
+    max-width: 100%;
   }
 
   .test-parameters-row .text-input {

@@ -11,7 +11,9 @@ mod validation;
 mod windows;
 
 pub use constants::*;
-pub use dto::{AllSourcesParams, AppSettingsDto, TtsProviderInfoDto, VTubeStudioSettingsDto};
+pub use dto::{
+    AllSourcesParams, AppSettingsDto, TtsProviderInfoDto, VTubeStudioSettingsDto, VtsHotkeyInfoDto,
+};
 pub use hotkeys::{Hotkey, HotkeyModifier, HotkeySettings};
 pub use settings::{
     normalize_typing_idle_timeout_ms, AiCustomSettings, AiDeepSeekSettings, AiOpenAiSettings,
@@ -19,6 +21,7 @@ pub use settings::{
     DspCompressorSettings, DspEqBandSettings, DspEqSettings, DspLimiterSettings, DspSettings,
     LoggingSettings, MtProxySettings, NetworkSettings, ProxyMode, ProxyType, QuickEditorMode,
     SettingsManager, SpellSource, Theme, TwitchSettings, VTubeStudioSettings,
+    VTubeStudioTypingAction, VTubeStudioTypingMode,
 };
 pub use validation::is_valid_hex_color;
 pub use windows::{WindowsManager, WindowsSettings};
