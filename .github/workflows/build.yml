@@ -77,14 +77,15 @@ jobs:
           Write-Host "Using $($libclang.FullName)"
 
       - name: Build application
-        run: npm run tauri build -- --target ${{ matrix.target }}
+        run: .\scripts\build.ps1 -Mode release
+        shell: pwsh
         env:
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
 
       - name: Create resources zip
         run: |
-          cd src-tauri/target/${{ matrix.target }}/release
+          cd src-tauri/target/release
           7z a resources.zip resources
         shell: bash
 
@@ -93,9 +94,9 @@ jobs:
         with:
           name: app-windows-${{ matrix.target }}
           path: |
-            src-tauri/target/${{ matrix.target }}/release/*.exe
-            src-tauri/target/${{ matrix.target }}/release/resources.zip
-            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+            src-tauri/target/release/*.exe
+            src-tauri/target/release/resources.zip
+            src-tauri/target/release/bundle/nsis/*.exe
 
   release:
     needs: build
