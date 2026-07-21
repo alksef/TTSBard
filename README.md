@@ -299,6 +299,16 @@ TTSBard использует **Windows Low-Level Keyboard Hook** (`WH_KEYBOARD_L
 
 ---
 
+## Документация
+
+- [Руководство пользователя](docs/user/README.md)
+- [Документация разработки](docs/development/README.md)
+- [Архитектура](docs/development/architecture.md)
+- [Дорожная карта](docs/roadmap/README.md)
+- [Полная карта документации](docs/README.md)
+
+---
+
 ## Лицензия
 
 MIT

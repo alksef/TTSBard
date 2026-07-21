@@ -1,8 +1,11 @@
-# BUG-02: Онлайн-режим проверки орфографии вызывает несуществующую команду
+# TASK-118 — Исправить неработающий online spellcheck
 
-- **Дата:** 2026-07-08
-- **Компонент:** редактор → проверка орфографии (`src/composables/useSpellcheck.ts`)
-- **Статус:** подтверждён, не исправлен
+**Статус:** `planned` — frontend вызывает отсутствующую backend-команду
+**Связано:** [ROADMAP-007](../roadmap/completed/007-editor-menu-ai-history-spellcheck.md),
+[ROADMAP-008](../roadmap/completed/008-offline-spellcheck-hunspell-codemirror.md)
+
+**Дата обнаружения:** 2026-07-08
+**Компонент:** редактор → проверка орфографии (`src/composables/useSpellcheck.ts`)
 
 ## Симптом
 

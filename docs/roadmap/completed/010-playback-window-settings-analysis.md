@@ -1,7 +1,7 @@
 # ROADMAP-010 — Настройки окна управления воспроизведением
 
 **Дата:** 2026-06-30
-**Статус:** ✅ РЕШЕНО (на уровне stage; реализация — план 88)
+**Статус:** `completed` — анализ и реализация завершены
 **Метод:** read-only research сабагентом — как soundpanel реализует appearance (opacity/цвет) +
 position + UI панель. Эталон для playback-control.
 **Связано:** plan 84 (окно), stage 09 (capabilities).

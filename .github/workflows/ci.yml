@@ -9,6 +9,15 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  check-docs:
+    name: Check documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check links, statuses and artifacts
+        shell: pwsh
+        run: ./scripts/check-docs.ps1
+
   check-fmt:
     name: Check Rust formatting
     runs-on: ubuntu-latest

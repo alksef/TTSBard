@@ -1,7 +1,7 @@
 # ROADMAP-030 — Инвариант sample rate после DeepFilterNet
 
 **Дата:** 2026-07-13  
-**Статус:** stage завершён / вариант A реализован и проверен  
+**Статус:** `completed` — вариант A реализован и проверен
 **Связано:** `src-tauri/src/audio/effects.rs`, [ROADMAP-025](./025-playback-pcm-pipeline.md), [ROADMAP-029](./029-dsp-audio-postprocessing.md), [ROADMAP-031](../active/031-resemble-enhance-research.md)
 
 ## 1. Проблема

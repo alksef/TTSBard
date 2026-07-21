@@ -28,6 +28,15 @@ cargo check --manifest-path src-tauri/Cargo.toml
 Проверки выбираются по риску изменения. `npm run build` уже выполняет
 `vue-tsc --noEmit`; Rust-тесты по возможности сначала запускаются точечно.
 
+Структура документации проверяется отдельно:
+
+```powershell
+./scripts/check-docs.ps1
+```
+
+Проверка валидирует локальные Markdown-ссылки, lifecycle-статусы и отсутствие
+tracked scratch-артефактов. Она также запускается в GitHub Actions.
+
 ## Сборка приложения на Windows
 
 ```powershell
