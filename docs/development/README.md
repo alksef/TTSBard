@@ -20,6 +20,8 @@ PowerShell-wrapper запуска агента. Постоянные планы 
 
 ## Документы
 
+- [AI-assisted development workflow](./ai-workflow.md) — постановка локальных
+  задач DeepSeek, запуск OpenCode и независимая проверка результата.
 - [Архитектура](./architecture.md) — устройство приложения и основные
   инженерные паттерны.
 - [Сборка Windows в GitHub Actions](./github-actions-build.md) — устройство CI

@@ -23,32 +23,17 @@ All subagents should be launched using the **glm-4.** model (use `model: "sonnet
 
 ## Implementation Workflow (Codex → DeepSeek)
 
-### Build-fix size rule
-
-- Codex fixes minor build errors and warnings directly when the change is small and localized.
-- For substantial changes, Codex writes a concrete task in `docs/deepseek/tasks/` and runs it non-interactively through OpenCode. Choose the model by complexity: use `deepseek/deepseek-v4-flash` for a small isolated implementation, reserve `deepseek/deepseek-v4-pro` for work spanning several files, requiring a plan/refactor, or containing non-obvious behavior, and use `deepseek/deepseek-reasoner` only for algorithmic or research-heavy analysis.
-- After DeepSeek finishes, Codex independently reviews the diff and reruns the relevant checks/build; DeepSeek checklist marks are not accepted as verification.
-
 **Codex does NOT write implementation code.** Codex's role is planning and review only.
 
-Workflow:
-1. Codex researches the problem (codebase, web search via Perplexity) and produces a detailed implementation plan.
-2. The plan is written to `docs/deepseek/plan/` (one file per task/feature).
-3. **DeepSeek writes the code** from the plan — this saves Codex tokens.
-4. Codex may review the result (via `code-review-changes` skill), but does not author the implementation.
+Temporary plans, tasks, reviews and logs live only in gitignored
+`.work/ai/<work-id>/`. Durable product direction belongs in
+`docs/roadmap/active/`; a local DeepSeek prompt is not committed as project
+documentation.
 
-When the user asks to "implement", "add", "fix", or "write" a feature, Codex should:
-- Form a plan in `docs/deepseek/plan/` instead of editing source files directly.
-- Only do direct edits for trivial/non-implementation tasks (typos, docs, config tweaks unrelated to feature code).
-
-Use `docs/roadmap/active/` for durable product research and direction. Keep temporary analysis and AI execution notes in the gitignored `.work/ai/` workspace.
-
-### Iteration loop (task → DeepSeek → review)
-
-DeepSeek runs **non-interactively from Codex's Bash tool** via `opencode run`
-(no user clicks needed). Full mechanism, paths, and the "never trust DeepSeek's
-`[x]` checklist" rule: **see [`docs/deepseek/WORKFLOW.md`](docs/deepseek/WORKFLOW.md).**
-Iteration task-files live in `docs/deepseek/tasks/`, verdicts in `docs/deepseek/reviews/`.
+Follow [`docs/development/ai-workflow.md`](docs/development/ai-workflow.md) for
+task decomposition, model selection, the PowerShell `opencode run` command,
+independent review and validation. Codex may directly edit only trivial
+non-implementation work and localized build fixes allowed by these instructions.
 
 ## Research and Problem Solving
 

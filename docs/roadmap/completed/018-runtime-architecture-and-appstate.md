@@ -225,7 +225,8 @@ commit: refactor: consolidate WebView/Twitch to single Tokio runtime
 commit: refactor: unified CancellationToken shutdown for all servers
 ```
 
-План DeepSeek-задач для Шагов 1–2: `docs/deepseek/plan/114-...` и `115-...`.
+Шаги 1–2 были реализованы через локальные DeepSeek-задачи; execution-артефакты
+удалены после завершения.
 
 ---
 

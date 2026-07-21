@@ -1,3 +1,0 @@
-You must edit the repository now; do not only inspect or report. Implement this change in `src/components/AudioPanel.vue`.
-
-Remove the direct `invoke('get_audio_effects')` read and the `loadDraftEffects()` function/call. The initial and external read source for effects must be the existing typed `useAudioEffectsSettings()` composable (`audioEffectsFromComposable`). Preserve the current draft/dirty behavior: the existing watcher must update draft/saved only while `isDirty` is false; after successful save, keep saved state synchronized. Do not change backend, DTOs, security fields, or write commands. Run `npx vue-tsc --noEmit` after editing.

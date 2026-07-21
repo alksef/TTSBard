@@ -23,32 +23,17 @@ All subagents should be launched using the **glm-4.** model (use `model: "sonnet
 
 ## Implementation Workflow (Claude → DeepSeek)
 
-### Build-fix size rule
-
-- Claude fixes minor build errors and warnings directly when the change is small and localized.
-- For substantial changes, Claude writes a concrete task in `docs/deepseek/tasks/` and immediately runs it non-interactively with `opencode run --model deepseek/deepseek-v4-pro`.
-- After DeepSeek finishes, Claude independently reviews the diff and reruns the relevant checks/build; DeepSeek checklist marks are not accepted as verification.
-
 **Claude does NOT write implementation code.** Claude's role is planning and review only.
 
-Workflow:
-1. Claude researches the problem (codebase, web search via Perplexity) and produces a detailed implementation plan.
-2. The plan is written to `docs/deepseek/plan/` (one file per task/feature).
-3. **DeepSeek writes the code** from the plan — this saves Claude tokens.
-4. Claude may review the result (via `code-review-changes` skill), but does not author the implementation.
+Temporary plans, tasks, reviews and logs live only in gitignored
+`.work/ai/<work-id>/`. Durable product direction belongs in
+`docs/roadmap/active/`; a local DeepSeek prompt is not committed as project
+documentation.
 
-When the user asks to "implement", "add", "fix", or "write" a feature, Claude should:
-- Form a plan in `docs/deepseek/plan/` instead of editing source files directly.
-- Only do direct edits for trivial/non-implementation tasks (typos, docs, config tweaks unrelated to feature code).
-
-Use `docs/roadmap/active/` for durable product research and direction. Keep temporary analysis and AI execution notes in the gitignored `.work/ai/` workspace.
-
-### Iteration loop (task → DeepSeek → review)
-
-DeepSeek runs **non-interactively from Claude's Bash tool** via `opencode run`
-(no user clicks needed). Full mechanism, paths, and the "never trust DeepSeek's
-`[x]` checklist" rule: **see [`docs/deepseek/WORKFLOW.md`](docs/deepseek/WORKFLOW.md).**
-Iteration task-files live in `docs/deepseek/tasks/`, verdicts in `docs/deepseek/reviews/`.
+Follow [`docs/development/ai-workflow.md`](docs/development/ai-workflow.md) for
+task decomposition, model selection, the PowerShell `opencode run` command,
+independent review and validation. Claude may directly edit only trivial
+non-implementation work and localized build fixes allowed by these instructions.
 
 ## Research and Problem Solving
 
