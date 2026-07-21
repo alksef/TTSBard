@@ -1,52 +1,30 @@
 # Build Validation Skill
 
-## When to Use
-- After completing code changes
-- Before creating commits
-- After merging branches
-- Verifying fixes
+Используйте после изменения кода и перед коммитом. Набор проверок выбирается по
+риску, а не запускается механически целиком.
 
-## Process
+## Матрица
 
-### Step 1: TypeScript Check
-```bash
-npx vue-tsc --noEmit
-```
-**Expected:** No errors
+| Изменение | Минимальная проверка |
+|---|---|
+| TypeScript/Vue | `npm test` для затронутой логики, затем `npm run build` |
+| Rust | целевые тесты, затем `cargo check --manifest-path src-tauri/Cargo.toml` |
+| Rust lint | `cargo clippy --manifest-path src-tauri/Cargo.toml` для существенного изменения |
+| UI/runtime | релевантный ручной сценарий, включая error/cancel/retry |
+| Packaging/native deps | `./scripts/build.ps1 -Mode debug` |
+| Release | `./scripts/build.ps1 -Mode release` |
 
-### Step 2: Rust Check
-```bash
-cargo check --manifest-path src-tauri/Cargo.toml
-```
-**Expected:** No errors, minimal warnings
+`npm run build` уже включает `vue-tsc --noEmit`. Полную Tauri-сборку не нужно
+запускать для документации или изолированной правки, не затрагивающей runtime и
+packaging.
 
-### Step 3: Full Build (optional)
-```bash
-npm run build
-```
-**Expected:** Successful build in `dist/`
+## Оценка результата
 
-## Validation Criteria
+- Проверить exit code и полный вывод, а не только последнюю строку.
+- Не исправлять несвязанные baseline warnings в рамках текущей задачи.
+- Если проверка не запускалась или среда её блокирует, явно указать это в
+  verdict.
+- Не использовать `cargo clean` без доказанной проблемы кэша.
 
-| Check | Pass Criteria |
-|-------|---------------|
-| TypeScript | 0 errors |
-| Rust | 0 errors |
-| Build | Completes successfully |
-
-## Troubleshooting
-
-### TypeScript Errors
-- Check type definitions in `src/types/`
-- Verify Vue component props/emits
-- Run `npm install` if modules missing
-
-### Rust Errors
-- Check imports and module paths
-- Verify Cargo.toml dependencies
-- Run `cargo clean` if cache issues
-
-### Build Errors
-- Check Vite config
-- Verify all entry points exist
-- Review console output for details
+Каноническая матрица и порядок независимой проверки описаны в
+[`docs/development/ai-workflow.md`](../../docs/development/ai-workflow.md).

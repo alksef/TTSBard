@@ -1,3 +1,5 @@
-# Ignore patterns for context exploration
-docs/plans/
-docs/img*.png
+# Generated and local-only context
+.work/
+node_modules/
+dist/
+target/

@@ -1,5 +1,5 @@
-# Claude Code context exclusions
-docs/plans/
-docs/reviews/
-docs/ideas/
-docs/works/
+# Generated and local-only context
+.work/
+node_modules/
+dist/
+target/

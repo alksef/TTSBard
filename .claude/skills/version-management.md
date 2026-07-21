@@ -1,34 +1,22 @@
 # Version Management Skill
 
-## When to Use
-- Updating application version
-- Before releases
-- When version appears in UI
+Версия меняется штатным скриптом из корня репозитория:
 
-- When committing version changes
-- When updating multiple files
+```powershell
+node scripts/set-version.cjs <version> [commit-sha]
+```
 
-## Files to Update
+Скрипт синхронизирует:
 
-When updating the application version, **ALL** of the following files must be updated:
+- `package.json`;
+- `src-tauri/Cargo.toml`;
+- `src-tauri/tauri.conf.json`;
+- `src/version.ts`.
 
-| File | Variable/Field | Purpose |
-|------|------------------|---------|
-| `src/version.ts` | `APP_VERSION_BASE` | Frontend version display (local dev) |
-| `package.json` | `version` | Node.js package version |
-| `src-tauri/Cargo.toml` | `version` | Rust crate version |
-| `src-tauri/tauri.conf.json` | `version` | Tauri app version |
-| `.github/workflows/build.yml` | `APP_VERSION_BASE` | CI/CD base version |
+После запуска просмотрите scoped diff и выполните `npm run build` и
+`cargo check --manifest-path src-tauri/Cargo.toml`. Не редактируйте версию в
+`.github/workflows/build.yml`: CI получает её из тега `vX.Y.Z` и вызывает тот
+же скрипт.
 
-## Process
-
-1. Update `APP_VERSION_BASE` in `src/version.ts`
-2. Update `version` in `package.json`
-3. Update `version` in `src-tauri/Cargo.toml`
-4. Update `version` in `src-tauri/tauri.conf.json`
-5. Update `APP_VERSION_BASE` in `.github/workflows/build.yml`
-6. Run `npm run build` to verify
-
-## Notes
-
-The `scripts/set-version.cjs` script auto-generates `src/version.ts` during CI builds by combining `APP_VERSION_BASE` with the commit SHA. For local development, update `src/version.ts` manually.
+Создание и публикация релиза описаны в
+[`docs/development/github-actions-build.md`](../../docs/development/github-actions-build.md).

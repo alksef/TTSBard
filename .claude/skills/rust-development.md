@@ -1,61 +1,36 @@
 # Rust Development Skill
 
-## When to Use
-- Adding Tauri commands
-- Modifying backend logic
-- Working with state
-- Adding new modules
+Используйте для Tauri commands, backend services, runtime state и новых Rust
+модулей.
 
-## Process
+## Проектные границы
 
-1. **Plan module location**: Choose appropriate directory
-2. **Define types**: Create DTOs in `config/dto.rs` if needed
-3. **Implement command**: Use `#[tauri::command]` attribute
-4. **Register command**: Add to `lib.rs` invoke_handler
-5. **Add error handling**: Use `Result<T, String>` return type
+- Tauri command — тонкая IPC-граница: валидирует вход, вызывает доменный API и
+  возвращает стабильный frontend payload.
+- Доменный service владеет settings, status, channels и блокировками.
+  `AppState` служит composition container, а не хранилищем публичных mutable
+  полей.
+- Lock guard не должен пересекать длительную операцию или `await`.
+- Внутри backend сохраняются contextual errors и structured `tracing`; на IPC
+  boundary они преобразуются в безопасное для UI сообщение.
+- Background producers используют typed `AppEvent`; frontend-visible payload
+  считается частью контракта.
+- Новая command регистрируется в Tauri invoke handler и получает тесты для
+  чистой логики, когда это возможно.
 
-## Patterns
+Источники: [архитектура](../../docs/development/architecture.md),
+[commands/events](../../docs/decisions/003-commands-and-events.md),
+[service-owned state](../../docs/decisions/004-service-owned-state.md) и
+[ошибки/проверка](../../docs/decisions/014-errors-and-validation.md).
 
-### Command Structure
-```rust
-#[tauri::command]
-async fn my_command(
-    param: String,
-    state: State<'_, AppState>,
-) -> Result<MyResponse, String> {
-    let mut state = state.lock().await;
-    // Implementation
-    Ok(response)
-}
-```
+## Проверки
 
-### Error Handling
-```rust
-// Use thiserror for custom errors
-#[derive(Debug, thiserror::Error)]
-pub enum MyError {
-    #[error("Operation failed: {0}")]
-    OperationFailed(String),
-}
-```
-
-### State Access
-```rust
-// Async state
-let mut state = state.lock().await;
-
-// Sync state (if needed)
-let state = state.lock().map_err(|e| e.to_string())?;
-```
-
-## Commands
-```bash
-# Check compilation
-cargo check --manifest-path src-tauri/Cargo.toml
-
-# Run with warnings
-cargo clippy --manifest-path src-tauri/Cargo.toml
-
-# Run tests
+```powershell
 cargo test --manifest-path src-tauri/Cargo.toml
+cargo check --manifest-path src-tauri/Cargo.toml
+cargo clippy --manifest-path src-tauri/Cargo.toml
 ```
+
+Выбирайте целевые тесты до полного suite и не удаляйте dead code автоматически:
+сначала выясните, является ли он незавершённым API, platform-specific веткой или
+действительно лишним кодом.

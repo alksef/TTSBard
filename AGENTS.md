@@ -1,80 +1,34 @@
 # Codex Instructions
 
-## Subagent Model Configuration
+## Роль
 
-All subagents should be launched using the **glm-4.** model (use `model: "sonnet").
+Codex исследует код, формулирует задачи и независимо проверяет результат.
+Продуктовую реализацию выполняет DeepSeek через OpenCode по процессу из
+[`docs/development/ai-workflow.md`](docs/development/ai-workflow.md).
 
-## When to Use Subagents vs Direct Edits
+Напрямую допустимы мелкие правки документации и конфигурации, опечатки и
+локализованные исправления сборки. Для более существенного изменения создаётся
+task в `.work/ai/<work-id>/`, а не tracked prompt в `docs/`.
 
-**Use direct edits (Read/Edit tools) for:**
-- Simple file modifications (type fixes, small refactors)
-- Adding/removing imports or constants
-- Fixing typos and minor bugs
-- Changes that affect 1-2 files
+## Работа с репозиторием
 
-**Use subagents (Task tool) for:**
-- Multiple independent tasks that can run in parallel
-- Code exploration and research across many files
-- Complex multi-step operations
-- Tasks requiring autonomous decision-making
-- Long-running operations (builds, tests)
+- Перед началом зафиксировать baseline и не смешивать с задачей существующие
+  пользовательские изменения.
+- Ограничить разрешённые пути и проверять task-scoped diff.
+- Не считать ответ или checklist агента подтверждением готовности.
+- Коммиты и значимые архитектурные решения требуют явного одобрения
+  пользователя.
+- Актуальные внешние сведения проверять доступными research-инструментами;
+  технические выводы основывать прежде всего на первичных источниках.
 
-**Rationale:** Direct edits are faster and provide immediate feedback for simple changes. Subagents add overhead but excel at complex, parallel, or exploratory work.
+## Источники правил
 
-## Implementation Workflow (Codex → DeepSeek)
+- [Карта документации](docs/README.md)
+- [AI-assisted workflow](docs/development/ai-workflow.md)
+- [Сборка и проверки](docs/development/README.md)
+- [Архитектура](docs/development/architecture.md)
+- [Инженерные решения](docs/decisions/README.md)
 
-**Codex does NOT write implementation code.** Codex's role is planning and review only.
-
-Temporary plans, tasks, reviews and logs live only in gitignored
-`.work/ai/<work-id>/`. Durable product direction belongs in
-`docs/roadmap/active/`; a local DeepSeek prompt is not committed as project
-documentation.
-
-Follow [`docs/development/ai-workflow.md`](docs/development/ai-workflow.md) for
-task decomposition, model selection, the PowerShell `opencode run` command,
-independent review and validation. Codex may directly edit only trivial
-non-implementation work and localized build fixes allowed by these instructions.
-
-## Research and Problem Solving
-
-Use MCP Perplexity tools for web search:
-- `mcp__perplexity__perplexity_search` - General search
-- `mcp__perplexity__perplexity_search_citations` - Search with detailed citations
-- `mcp__perplexity__perplexity_search_scientific` - search for scientific/academic information
-
-## Version Management
-
-See `.Codex/skills/version-management.md` for details.
-
-## Rules
-Detailed rules in `.Codex/rules/`:
-- context.md - project analysis guidelines
-- planning.md - planning workflow
-- code-review.md - code review process
-- code-review-changes.md - review only changed code
-
-## Build Scripts (Windows)
-
-Сборка приложения — через PowerShell-скрипты в `scripts/` (Tauri + Vite + Cargo):
-
-- `scripts/build.ps1 -Mode debug` — debug-сборка (`tauri build --debug`): runnable
-  `src-tauri/target/debug/ttsbard.exe`, **без** инсталляторов. Быстро, для проверки.
-- `scripts/build.ps1 -Mode release` (по умолчанию) — полная релизная сборка: exe +
-  инсталляторы (`src-tauri/target/release/bundle/{nsis,msi}/`).
-- `-Clean` — очистить `src-tauri/target/` и `dist/` перед сборкой.
-- `scripts/build-debug.bat` / `scripts/build-release.bat` — обёртки для двойного клика.
-
-Скрипт проверяет toolchain (node/npm/cargo), ставит npm-зависимости при отсутствии,
-после сборки показывает пути и размеры артефактов.
-Для быстрых проверок без полного билда см. skill `build-validation`
-(`cargo check` / `vue-tsc --noEmit`).
-
-> Примечание: `build.ps1` сохранён как **UTF-8 с BOM** — требование PS 5.1 для
-> кириллицы. При правках скрипта не удаляйте BOM.
-
-## Skills
-Available skills in `.Codex/skills/`:
-- css-development - CSS conventions, variables, theming
-- rust-development - Tauri commands, state, error handling
-- build-validation - TypeScript/Rust checks, build commands
-- code-review-changes - review only modified files (invoke: `/code-review-changes`)
+Временные prompts, ревью, логи и скриншоты хранятся только в gitignored
+`.work/ai/`. Roadmap, задачи, решения и research добавляются в `docs/` лишь
+тогда, когда полезны после завершения конкретной сессии.
