@@ -3,7 +3,7 @@
 **Дата:** 2026-07-13  
 **Автор:** Antigravity (research)  
 **Статус:** research note / обзор технологий  
-**Связано:** [04-audio-enhancement-postprocessing-2026-07-11.md](file:///home/aefimov/ProjectsMy/TTSBard/docs/research/04-audio-enhancement-postprocessing-2026-07-11.md), [effects.rs](file:///home/aefimov/ProjectsMy/TTSBard/src-tauri/src/audio/effects.rs), [silero.rs](file:///home/aefimov/ProjectsMy/TTSBard/src-tauri/src/tts/silero.rs)
+**Связано:** [архитектура улучшения аудиопотока](./08-audio-stream-enhancement-research.md), [effects.rs](../../src-tauri/src/audio/effects.rs), [silero.rs](../../src-tauri/src/tts/silero.rs)
 
 ---
 
@@ -159,12 +159,12 @@ graph TD
 
 ## 6. Рекомендации по интеграции в TTSBard
 
-С учетом архитектуры TTS-конвейера в [effects.rs](file:///home/aefimov/ProjectsMy/TTSBard/src-tauri/src/audio/effects.rs):
+С учетом архитектуры TTS-конвейера в [effects.rs](../../src-tauri/src/audio/effects.rs):
 
 ### Рекомендация 1: Локальное шумоподавление (DeepFilterNet)
 Если целью является удаление артефактов и фонового шума (например, при захвате голоса пользователя или очистке пережатого MP3 от Silero Telegram bot):
 * **Выбор:** **DeepFilterNet v3**
-* **Как реализовать:** Подключить крейт `deep-filter` напрямую в [Cargo.toml](file:///home/aefimov/ProjectsMy/TTSBard/src-tauri/Cargo.toml). Интегрировать в [effects.rs](file:///home/aefimov/ProjectsMy/TTSBard/src-tauri/src/audio/effects.rs) в качестве опционального шага постобработки с ограничением подавления `atten_lim_db=10` (чтобы избежать «бульканья» на чистом TTS-звуку).
+* **Как реализовать:** Подключить крейт `deep-filter` напрямую в [Cargo.toml](../../src-tauri/Cargo.toml). Интегрировать в [effects.rs](../../src-tauri/src/audio/effects.rs) в качестве опционального шага постобработки с ограничением подавления `atten_lim_db=10` (чтобы избежать «бульканья» на чистом TTS-звуку).
 
 ### Рекомендация 2: Апсэмплинг и улучшение тембра (Resemble Enhance / Vocos)
 Если нужно превратить глуховатый 16 kHz / 24 kHz звук Silero в сочный 44.1/48 kHz:
@@ -177,12 +177,12 @@ graph TD
 ### Рекомендация 3: DSP-постобработка (Без нейросетей)
 Для придания «студийности» TTS-звуку (добавления «воздуха» и плотности) часто достаточно классического звукового процессора:
 * **Выбор:** Параметрический эквалайзер (High-shelf filter для частот выше 8 kHz) + мягкий компрессор (Ratio 2:1) + лимитер.
-* **Плюсы:** RTF < 0.001, нулевой вес приложения, 100% стабильность, пишется на чистом Rust в [effects.rs](file:///home/aefimov/ProjectsMy/TTSBard/src-tauri/src/audio/effects.rs).
+* **Плюсы:** RTF < 0.001, нулевой вес приложения, 100% стабильность, пишется на чистом Rust в [effects.rs](../../src-tauri/src/audio/effects.rs).
 
 ---
 
 ## 7. Следующие шаги для исследования
 
-1. **Тест DSP-цепочки:** Добавить базовый эквалайзер и компрессор в [effects.rs](file:///home/aefimov/ProjectsMy/TTSBard/src-tauri/src/audio/effects.rs) и оценить субъективное улучшение Silero-голосов.
+1. **Тест DSP-цепочки:** Добавить базовый эквалайзер и компрессор в [effects.rs](../../src-tauri/src/audio/effects.rs) и оценить субъективное улучшение Silero-голосов.
 2. **Проверка `deep-filter` crate:** Попробовать скомпилировать тестовый бинарник на Rust с использованием `deep-filter` и прогнать через него WAV файлы, сгенерированные локальным Silero.
 3. **ONNX-эксперимент:** Изучить возможность конвертации `resemble-enhance` в ONNX для потенциального использования в будущем.

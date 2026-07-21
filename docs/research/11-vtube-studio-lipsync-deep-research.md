@@ -2,7 +2,7 @@
 
 **Дата:** 2026-07-18  
 **Статус:** углублённое исследование / product and technical validation  
-**Связано:** `02-vtuber-studio-integration-research.md`, `10-vtube-studio-reactive-avatar-research.md`, `src-tauri/src/commands/tts_pipeline.rs`, `src-tauri/src/playback.rs`
+**Связано:** [ROADMAP-042](../roadmap/completed/042-vtube-studio-typing-ui.md), [ROADMAP-045](../roadmap/completed/045-vtube-studio-typing-output-modes.md), [tts_pipeline.rs](../../src-tauri/src/commands/tts_pipeline.rs), [playback.rs](../../src-tauri/src/playback.rs)
 
 ---
 
@@ -824,7 +824,7 @@ Lipsync через virtual mic.
 
 ## 13. Уточнения к предыдущим исследованиям
 
-### К `02-vtuber-studio-integration-research.md`
+### К раннему исследованию VTube Studio
 
 Следует считать предварительными, а не подтверждёнными:
 
@@ -841,7 +841,7 @@ Lipsync через virtual mic.
 - current final `AudioPcm` позволяет precompute timeline;
 - API update rate и sync offset требуют измерения.
 
-### К `10-vtube-studio-reactive-avatar-research.md`
+### К исследованию реактивного аватара
 
 Главный вывод остаётся: интеграция ценнее как event-to-action layer. Lip-sync
 следует представить одним из режимов, а не единственной причиной подключения.
@@ -943,4 +943,4 @@ TTSBard final PCM -> calibrated MFCC -> VTS A/I/U/E/O
 - `src-tauri/src/audio/effects.rs`
 - `src-tauri/src/playback.rs`
 - `src-tauri/src/tts/fish.rs`
-- `docs/KEY_DECISIONS.md`
+- [Архитектурные решения](../decisions/README.md)

@@ -42,13 +42,7 @@ opencode.json
 .codex/
 
 images
-docs/ideas
-docs/images
-# Review reports are local artifacts. Keep only the reusable review prompt.
-docs/reviews/*
-!docs/reviews/review-prompt.md
-docs/works
-notes/
+.work/images
 promts/
 .scripts/
 

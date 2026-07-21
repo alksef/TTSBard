@@ -3,7 +3,7 @@
 **Дата:** 2026-06-28
 **Автор:** Claude (research)
 **Статус:** research note
-**Связано:** `PROBLEMS.md`, `docs/KEY_DECISIONS.md`, [ROADMAP-001](../roadmap/completed/001-monaco-vs-codemirror-editor-research.md), [ROADMAP-002](../roadmap/completed/002-local-history-autocomplete.md), [ROADMAP-003](../roadmap/completed/003-text-completion-without-ai.md)
+**Связано:** `PROBLEMS.md`, [решения](../decisions/README.md), [ROADMAP-001](../roadmap/completed/001-monaco-vs-codemirror-editor-research.md), [ROADMAP-002](../roadmap/completed/002-local-history-autocomplete.md), [ROADMAP-003](../roadmap/completed/003-text-completion-without-ai.md)
 
 ---
 
@@ -17,7 +17,7 @@
 
 ## 2. Что уже есть в проекте (сильные стороны)
 
-По `README.md` / `docs/KEY_DECISIONS.md` (27 архитектурных решений) проект уже покрывает:
+По `README.md` и текущим [архитектурным решениям](../decisions/README.md) проект уже покрывает:
 
 | Категория | Реализовано |
 |---|---|
@@ -86,7 +86,7 @@ Windows-only, с упором на стримеров/мессенджеры).
 - **Идея:** пользовательский словарь `слово → фонетика/произношение` (или `слово → замена`),
   применяемый перед отправкой в TTS (как препроцессор, но для звучания).
 - Конкуренты: «custom word dictionaries (lexicon)» у TTSLabs; SSML-произношение у Inworld.
-- *Связь:* естественно расширяет существующий Text Preprocessor (`docs/KEY_DECISIONS.md` #9).
+- *Связь:* естественно расширяет существующий [текстовый pipeline](../decisions/007-text-pipeline-and-ai.md).
 
 **C. История отправленных фраз (Persistent Phrase History)**
 - Сейчас история — только в сессии (`PROBLEMS.md:86`) и пресеты вручную.
