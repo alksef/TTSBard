@@ -17,3 +17,14 @@ New-Item -ItemType Directory -Force .work/ai | Out-Null
 После унификации workflow этот каталог должен автоматически создавать
 PowerShell-wrapper запуска агента. Постоянные планы и решения в `.work/` не
 хранятся.
+
+## Документы
+
+- [Архитектура](./architecture.md) — устройство приложения и основные
+  инженерные паттерны.
+- [Сборка Windows в GitHub Actions](./github-actions-build.md) — устройство CI
+  и нативные зависимости.
+- [Локальный ONNX Runtime для Piper](./debug-piper-onnx-runtime.md) — подготовка
+  debug-сборки.
+- [Смешанная CRT в debug-сборке Windows](./windows-debug-crt.md) — диагностика
+  и проверка Windows runtime.
