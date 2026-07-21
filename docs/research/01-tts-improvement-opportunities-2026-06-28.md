@@ -3,7 +3,7 @@
 **Дата:** 2026-06-28
 **Автор:** Claude (research)
 **Статус:** research note
-**Связано:** `PROBLEMS.md`, `docs/KEY_DECISIONS.md`, `docs/stage/01..03`, `docs/plans/71..73`
+**Связано:** `PROBLEMS.md`, `docs/KEY_DECISIONS.md`, [ROADMAP-001](../roadmap/completed/001-monaco-vs-codemirror-editor-research.md), [ROADMAP-002](../roadmap/completed/002-local-history-autocomplete.md), [ROADMAP-003](../roadmap/completed/003-text-completion-without-ai.md), `docs/plans/71..73`
 
 ---
 

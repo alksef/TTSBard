@@ -74,7 +74,7 @@
 
 ### Граница Stage 2 (реализовано)
 
-Все пять пунктов реализованы. Подробный контракт: `docs/stage/42-vtube-studio-typing-ui.md`.
+Все пять пунктов реализованы. Подробный контракт: [ROADMAP-042](../roadmap/completed/042-vtube-studio-typing-ui.md).
 
 ---
 

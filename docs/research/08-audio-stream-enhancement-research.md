@@ -2,7 +2,7 @@
 
 **Дата:** 2026-07-13  
 **Статус:** research / без немедленной реализации  
-**Связано:** `docs/stage/29-dsp-audio-postprocessing.md`, `docs/stage/30-resemble-enhance-research.md`, `docs/stage/31-deepfilternet-resampling-invariant.md`, `src-tauri/src/audio/player.rs`
+**Связано:** [ROADMAP-029](../roadmap/completed/029-dsp-audio-postprocessing.md), [ROADMAP-030](../roadmap/completed/030-deepfilternet-resampling-invariant.md), [ROADMAP-031](../roadmap/active/031-resemble-enhance-research.md), `src-tauri/src/audio/player.rs`
 
 ## 1. Вывод
 

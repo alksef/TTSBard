@@ -64,8 +64,8 @@ try {
    падает; настройка `spellcheck_source = online` по сути бесполезна, пока не
    реализован провайдер.
 3. **Бэкенд и фронт рассинхронизированы** — фронт обещает онлайн (Stage 07:
-   `docs/stage/07-editor-menu-ai-history-spellcheck.md`), а бэкенд реализовал
-   только офлайн (Stage 08: `docs/stage/08-offline-spellcheck-hunspell-codemirror.md`).
+   [ROADMAP-007](../roadmap/completed/007-editor-menu-ai-history-spellcheck.md)), а бэкенд реализовал
+   только офлайн ([ROADMAP-008](../roadmap/completed/008-offline-spellcheck-hunspell-codemirror.md)).
 
 ## Возможные подходы к исправлению (для плана)
 

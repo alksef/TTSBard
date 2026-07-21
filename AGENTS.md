@@ -41,7 +41,7 @@ When the user asks to "implement", "add", "fix", or "write" a feature, Codex sho
 - Form a plan in `docs/deepseek/plan/` instead of editing source files directly.
 - Only do direct edits for trivial/non-implementation tasks (typos, docs, config tweaks unrelated to feature code).
 
-Use `docs/stage/` for research/analysis notes and option comparisons that feed into plans.
+Use `docs/roadmap/active/` for durable product research and direction. Keep temporary analysis and AI execution notes in the gitignored `.work/ai/` workspace.
 
 ### Iteration loop (task → DeepSeek → review)
 
