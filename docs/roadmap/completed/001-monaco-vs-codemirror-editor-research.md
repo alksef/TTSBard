@@ -10,7 +10,8 @@
 ## Контекст
 
 Сейчас ввод текста в приложении — обычный HTML `<textarea>` (в WebView-шаблонах даже с
-`spellcheck="false"`, см. `docs/plans/22-2026-03-06-webview-source.md`).
+`spellcheck="false"`; историческая implementation task WebView удалена после
+завершения).
 
 Пользователь хочет заменить `<textarea>` на «продвинутый редактор», и читал, что **Monaco**
 ближе всех к VSCode (потому что Monaco — это и есть движок VSCode). Цель этого файла —

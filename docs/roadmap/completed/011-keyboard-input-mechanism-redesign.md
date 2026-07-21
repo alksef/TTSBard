@@ -3,7 +3,7 @@
 **Дата:** 2026-07-08
 **Статус:** `completed` — архитектура и двухэтапный механизм реализованы
 **Метод:** анализ текущего механизма → выбор подхода → план #91
-**Связанные:** `docs/notes/keyboard-input-two-stage-mechanism.md`, план `docs/plans/91-...`
+**Связанные:** `docs/notes/keyboard-input-two-stage-mechanism.md`
 
 ---
 

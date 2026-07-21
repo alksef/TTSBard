@@ -4,7 +4,10 @@
 **Статус:** research / ✅ РЕШЕНО
 **Решение:** **Вариант 1** — PlaybackManager + новое плавающее окно `playback-control`.
 **Из research:** `docs/research/01-...` → идея **A** (Speech Queue + Interrupt)
-**Связано:** `05-phrase-history.md`, `docs/plans/71..73` (редактор готов)
+**Связано:** [ROADMAP-005](./005-phrase-history.md),
+[ROADMAP-001](./001-monaco-vs-codemirror-editor-research.md),
+[ROADMAP-002](./002-local-history-autocomplete.md),
+[ROADMAP-003](./003-text-completion-without-ai.md)
 
 ## Цель (запрос пользователя)
 - **Отдельное плавающее окно поверх всех окон во время воспроизведения** фразы.
@@ -110,7 +113,7 @@
 **Вариант 1** (PlaybackManager + новое окно `playback-control`), окно показано **всегда**,
 5 фраз из persistent-истории с кликом-повтором, оба replay (🔁 текущей + клик в списке),
 пауза = остановка (очередь не продолжается), видимость очереди. Реализация —
-постоянный план `docs/plans/74-...`; локальные DeepSeek-артефакты удалены.
+историческая task 74; execution-артефакты удалены после завершения.
 
 > Уточнение vs первоначальной рекомендации: rodio Sink pause/resume не используется —
 > т.к. `AudioPlayer` пересоздаёт Sink на каждое воспроизведение и решено «пауза = остановка»,

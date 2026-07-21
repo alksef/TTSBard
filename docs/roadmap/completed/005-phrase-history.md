@@ -5,7 +5,7 @@
 **Решение:** хранение **A** (`phrase_history.json`) + UX **Вариант 2c** (история как черновики:
 список фраз в InputPanel, клик → загрузить в редактор для правки перед отправкой).
 **Из research:** `docs/research/01-...` → идея **C** (Persistent Phrase History)
-**Связано:** `04-playback-control-floating-window.md`, `docs/plans/71..74`
+**Связано:** [ROADMAP-004](./004-playback-control-floating-window.md)
 
 ## Цель (запрос пользователя)
 - Главная задача истории — **не вводить фразу заново, а достать её целиком** из журнала и

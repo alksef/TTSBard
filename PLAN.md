@@ -82,7 +82,8 @@
   - Сделано: CRITICAL 1,2,4 + MINOR (PhraseHistoryList.vue, usePhraseHistory.ts, history.rs,
     commands/history.rs). vue-tsc 0 ошибок, cargo check 0 ошибок/0 warnings.
   - Осталось DeepSeek (нетривиально): CRITICAL 3 (race spawn_save_phrases) + SECURITY
-    (валидация размера фразы/filter). См. docs/plans/76 «Статус выполнения».
+    (валидация размера фразы/filter). Историческая task 76 завершена; детали
+    доступны в Git history.
 - [x] Задача #4 — арх-ревью (review-019)
 
 ## Правило итерационного цикла (после реализации планов 06/07/08)
