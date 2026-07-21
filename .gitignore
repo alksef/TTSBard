@@ -51,3 +51,6 @@ docs/works
 notes/
 promts/
 .scripts/
+
+# Local work artifacts (AI tasks, reviews, logs, screenshots)
+.work/
