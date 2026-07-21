@@ -16,7 +16,6 @@
 | [ROADMAP-031 — Resemble Enhance](./active/031-resemble-enhance-research.md) | `deferred` | Вернуться после DSP A/B и отдельного proof-of-concept |
 | [ROADMAP-037 — Hotkeys и возврат фокуса](./active/037-application-hotkeys-and-previous-window-focus.md) | `in_progress` | Ручная проверка runtime-сценариев |
 | [ROADMAP-038 — Dynamic Piper providers](./active/038-dynamic-piper-tts-providers.md) | `in_progress` | Ручная проверка на Windows |
-| [ROADMAP-039 — Embedded Piper runtime](./active/039-piper-runtime-feasibility.md) | `exploring` | Решить лицензирование phonemizer |
 | [ROADMAP-040 — Test coverage gaps](./active/040-test-coverage-gaps.md) | `in_progress` | P1/P2: composables, playback seam, HTTP contracts |
 | [ROADMAP-041 — Review 021 remediation](./active/041-review-021-remediation.md) | `in_progress` | Сверить оставшийся scope и закрыть item |
 
@@ -67,6 +66,7 @@
 - [ROADMAP-019 — custom AI provider](./completed/019-custom-ai-provider.md)
 - [ROADMAP-028 — secret-safe logging](./completed/028-secret-safe-logging.md)
 - [ROADMAP-036 — Telegram auth polish](./completed/036-telegram-auth-flow-polish.md)
+- [ROADMAP-039 — Embedded Piper runtime и лицензирование](./completed/039-piper-runtime-feasibility.md)
 - [ROADMAP-046 — Documentation migration](./completed/046-documentation-structure-migration.md)
 
 ### VTube Studio и WebView

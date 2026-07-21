@@ -2,7 +2,8 @@
 name = "ttsbard"
 version = "0.3.0-dev"
 description = "Fast text-to-speech for communication and streaming — for people with speech limitations and streamers"
-authors = ["you"]
+authors = ["Aleksey Efimov"]
+license = "GPL-3.0-only"
 edition = "2021"
 
 [lints.rust]

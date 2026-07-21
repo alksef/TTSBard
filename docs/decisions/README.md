@@ -22,6 +22,7 @@ implementation details и журналы обсуждений сюда не по
 - [DECISION-012 — CSS tokens и темы](./012-css-tokens.md)
 - [DECISION-013 — Сетевая конфигурация](./013-network-configuration.md)
 - [DECISION-014 — Ошибки и проверка](./014-errors-and-validation.md)
+- [DECISION-017 — Лицензия GPL-3.0-only](./017-gpl-3-license.md)
 
 ## Заменённые решения
 

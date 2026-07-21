@@ -311,4 +311,8 @@ TTSBard использует **Windows Low-Level Keyboard Hook** (`WH_KEYBOARD_L
 
 ## Лицензия
 
-MIT
+Copyright © 2026 Aleksey Efimov.
+
+Исходный код TTSBard распространяется на условиях
+[GNU General Public License v3.0 only](LICENSE) (`GPL-3.0-only`). Сторонние
+библиотеки, словари, модели и другие компоненты сохраняют собственные лицензии.

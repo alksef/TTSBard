@@ -57,6 +57,8 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "license": "GPL-3.0-only",
+    "licenseFile": "../LICENSE",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
