@@ -615,4 +615,90 @@ mod tests {
         let legacy_mic_vol = 0.6 * legacy_effects_volume.unwrap_or(1.0);
         assert_eq!(mic.unwrap().volume, legacy_mic_vol);
     }
+
+    // ── Snapshot identity / cache key separation tests ──
+
+    #[test]
+    fn cache_key_differs_for_openai_voices_same_text() {
+        let fp = crate::history::compute_effects_fingerprint(
+            &crate::config::AudioEffectsSettings::default(),
+            &crate::config::DspSettings::default(),
+        );
+        let key_alloy = crate::history::build_cache_key("hello world", "openai", "alloy", fp);
+        let key_echo = crate::history::build_cache_key("hello world", "openai", "echo", fp);
+        assert_ne!(key_alloy, key_echo);
+    }
+
+    #[test]
+    fn cache_key_differs_for_fish_reference_ids_same_text() {
+        let fp = crate::history::compute_effects_fingerprint(
+            &crate::config::AudioEffectsSettings::default(),
+            &crate::config::DspSettings::default(),
+        );
+        let key_a = crate::history::build_cache_key("hello world", "fish", "ref-aaa", fp);
+        let key_b = crate::history::build_cache_key("hello world", "fish", "ref-bbb", fp);
+        assert_ne!(key_a, key_b);
+    }
+
+    #[test]
+    fn snapshot_identity_reflects_provider_voice_not_registry_id() {
+        use crate::config::{
+            AiSettings, AudioEffectsSettings, AudioSettings, DspSettings, NetworkSettings,
+        };
+
+        let mut alloy_tts = crate::tts::openai::OpenAiTts::new("sk-test".into());
+        alloy_tts.set_voice("alloy".to_string());
+        let snapshot_alloy = Snapshot {
+            provider: "openai".into(),
+            voice: alloy_tts.voice().to_string(),
+            skip_twitch: false,
+            skip_webview: false,
+            ai_enabled: false,
+            audio_effects: AudioEffectsSettings::default(),
+            dsp: DspSettings::default(),
+            audio: AudioSettings::default(),
+            ai: AiSettings::default(),
+            tts_provider: crate::tts::TtsProvider::OpenAi(alloy_tts),
+            preprocessor: None,
+            network_settings: NetworkSettings::default(),
+        };
+
+        let mut echo_tts = crate::tts::openai::OpenAiTts::new("sk-test".into());
+        echo_tts.set_voice("echo".to_string());
+        let snapshot_echo = Snapshot {
+            provider: "openai".into(),
+            voice: echo_tts.voice().to_string(),
+            skip_twitch: false,
+            skip_webview: false,
+            ai_enabled: false,
+            audio_effects: AudioEffectsSettings::default(),
+            dsp: DspSettings::default(),
+            audio: AudioSettings::default(),
+            ai: AiSettings::default(),
+            tts_provider: crate::tts::TtsProvider::OpenAi(echo_tts),
+            preprocessor: None,
+            network_settings: NetworkSettings::default(),
+        };
+
+        assert_ne!(snapshot_alloy.voice, snapshot_echo.voice);
+        assert_ne!(snapshot_alloy.provider, "openai-entry-id");
+        assert_ne!(snapshot_echo.provider, "openai-entry-id");
+        assert_eq!(snapshot_alloy.voice, "alloy");
+        assert_eq!(snapshot_echo.voice, "echo");
+    }
+
+    #[test]
+    fn snapshot_identity_distinct_cache_for_same_text_different_openai() {
+        let fp = crate::history::compute_effects_fingerprint(
+            &crate::config::AudioEffectsSettings::default(),
+            &crate::config::DspSettings::default(),
+        );
+        let text = "the quick brown fox";
+        let key_alloy = crate::history::build_cache_key(text, "openai", "alloy", fp);
+        let key_echo = crate::history::build_cache_key(text, "openai", "echo", fp);
+        let key_fable = crate::history::build_cache_key(text, "openai", "fable", fp);
+        assert_ne!(key_alloy, key_echo);
+        assert_ne!(key_alloy, key_fable);
+        assert_ne!(key_echo, key_fable);
+    }
 }

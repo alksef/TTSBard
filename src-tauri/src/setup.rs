@@ -115,10 +115,24 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
         let sq_state = app.state::<SpeechQueueState>();
         let worker_queue = sq_state.queue_arc();
         let worker_notify = sq_state.notifier();
-        let worker_state = app_state.inner().clone();
         let worker_handle = app.handle().clone();
+        let worker_shutdown = app_state.inner().shutdown.clone();
+        let worker_editor = app_state.inner().editor.clone();
+        let worker_playback = app_state.inner().playback_manager.clone();
+        let worker_webview = app_state.inner().webview.clone();
+        let worker_twitch = app_state.inner().twitch.clone();
         app_state.inner().runtime.spawn(async move {
-            speech_worker(worker_queue, worker_notify, worker_state, worker_handle).await;
+            speech_worker(
+                worker_queue,
+                worker_notify,
+                worker_handle,
+                worker_shutdown,
+                worker_editor,
+                worker_playback,
+                worker_webview,
+                worker_twitch,
+            )
+            .await;
         });
         info!("Speech queue worker started");
     }
@@ -670,11 +684,14 @@ pub(crate) fn parse_webview_server_error(
 async fn speech_worker(
     queue: Arc<parking_lot::Mutex<crate::speech_queue::SpeechQueue>>,
     notify: Arc<tokio::sync::Notify>,
-    app_state: AppState,
     app_handle: AppHandle,
+    shutdown: tokio_util::sync::CancellationToken,
+    editor: Arc<crate::editor::EditorService>,
+    playback_manager: Arc<parking_lot::Mutex<Option<Arc<crate::playback::PlaybackManager>>>>,
+    webview: Arc<crate::webview::service::WebViewService>,
+    twitch: Arc<crate::twitch::TwitchService>,
 ) {
     use crate::commands::tts_pipeline;
-    use crate::event_loop::route_processed_text;
 
     loop {
         let work_item = {
@@ -696,8 +713,15 @@ async fn speech_worker(
         let work_item = match work_item {
             Some(item) => item,
             None => {
-                notify.notified().await;
-                continue;
+                tokio::select! {
+                    _ = notify.notified() => {
+                        continue;
+                    }
+                    _ = shutdown.cancelled() => {
+                        info!("Speech worker exiting on shutdown (idle wait)");
+                        return;
+                    }
+                }
             }
         };
 
@@ -712,7 +736,24 @@ async fn speech_worker(
         let snapshot = work_item.snapshot;
         let original_text = work_item.original_text;
 
-        match tts_pipeline::prepare_speech(&snapshot, &original_text).await {
+        let preparation = tts_pipeline::prepare_speech(&snapshot, &original_text);
+        let prepared = tokio::select! {
+            result = preparation => result,
+            _ = shutdown.cancelled() => {
+                let mut q = queue.lock();
+                let _ = q.fail_generation(
+                    job_id,
+                    "Speech preparation cancelled (shutdown)".to_string(),
+                );
+                let dto = q.state();
+                drop(q);
+                let _ = app_handle.emit("speech-queue-changed", dto);
+                info!("Speech worker exiting on shutdown (during preparation)");
+                return;
+            }
+        };
+
+        match prepared {
             Ok(prepared) => {
                 let (speaker, mic) =
                     tts_pipeline::compute_output_configs(&snapshot.audio, &snapshot.audio_effects);
@@ -740,7 +781,7 @@ async fn speech_worker(
                 }
 
                 let handoff_accepted = {
-                    let pb_guard = app_state.playback_manager.lock();
+                    let pb_guard = playback_manager.lock();
                     if let Some(pb) = pb_guard.as_ref() {
                         pb.enqueue_with_outputs(
                             job_id.to_string(),
@@ -766,15 +807,20 @@ async fn speech_worker(
                     continue;
                 }
 
-                // Route processed text AFTER successful handoff acceptance,
-                // via spawn_blocking to avoid blocking_read on async runtime.
                 {
                     let text = processed_text.clone();
-                    let state = app_state.clone();
+                    let webview_svc = webview.clone();
+                    let twitch_svc = twitch.clone();
                     let skip_twitch = snapshot.skip_twitch;
                     let skip_webview = snapshot.skip_webview;
                     let join_handle = tokio::task::spawn_blocking(move || {
-                        route_processed_text(&state, &text, skip_twitch, skip_webview);
+                        route_processed_text_from_handles(
+                            &webview_svc,
+                            &twitch_svc,
+                            &text,
+                            skip_twitch,
+                            skip_webview,
+                        );
                     });
                     if let Err(e) = join_handle.await {
                         warn!(error = %e, "route_processed_text join failed");
@@ -782,7 +828,7 @@ async fn speech_worker(
                 }
 
                 {
-                    if let Some(hm) = app_state.editor.history_manager.lock().as_ref() {
+                    if let Some(hm) = editor.history_manager.lock().as_ref() {
                         if prepared.cache_saved || prepared.cache_hit {
                             hm.record_phrase_with_meta(
                                 &processed_text,
@@ -796,6 +842,10 @@ async fn speech_worker(
                     }
                 }
 
+                let history_event = crate::events::AppEvent::TextSentToTts(processed_text.clone());
+                let event_name = history_event.to_tauri_event();
+                let _ = app_handle.emit(event_name, &history_event);
+
                 loop {
                     let status = {
                         let q = queue.lock();
@@ -806,8 +856,15 @@ async fn speech_worker(
                         Some(JobStatus::Playing) => break,
                         Some(JobStatus::Failed) => break,
                         Some(JobStatus::Ready) => {
-                            notify.notified().await;
-                            continue;
+                            tokio::select! {
+                                _ = notify.notified() => {
+                                    continue;
+                                }
+                                _ = shutdown.cancelled() => {
+                                    info!("Speech worker exiting on shutdown (waiting for Playing)");
+                                    return;
+                                }
+                            }
                         }
                         _ => {
                             warn!(?status, job_id = %job_id, "Unexpected status waiting for Playing");
@@ -824,6 +881,25 @@ async fn speech_worker(
                 let _ = app_handle.emit("speech-queue-changed", dto);
                 warn!(error = %e, job_id = %job_id, "Speech preparation failed, worker waiting for retry/skip");
             }
+        }
+    }
+}
+
+fn route_processed_text_from_handles(
+    webview: &crate::webview::service::WebViewService,
+    twitch: &crate::twitch::TwitchService,
+    text: &str,
+    skip_twitch: bool,
+    skip_webview: bool,
+) {
+    if !skip_webview {
+        webview.send_event(crate::events::AppEvent::TextSentToTts(text.to_string()));
+    }
+    if !skip_twitch {
+        let settings = twitch.settings.blocking_read();
+        if settings.enabled {
+            drop(settings);
+            twitch.send_event(crate::events::TwitchEvent::SendMessage(text.to_string()));
         }
     }
 }

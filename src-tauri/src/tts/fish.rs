@@ -126,6 +126,10 @@ impl FishTts {
         self.sample_rate = sample_rate;
     }
 
+    pub fn reference_id(&self) -> &str {
+        &self.reference_id
+    }
+
     /// Загрузить изображение через прокси (возвращает base64 data URL)
     pub async fn fetch_image(image_url: &str, proxy_url: Option<&str>) -> Result<String, String> {
         debug!(safe_url = %secret_log::safe_url_for_log(image_url), "Fetching Fish Audio image");

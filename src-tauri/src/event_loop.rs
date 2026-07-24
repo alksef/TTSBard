@@ -11,28 +11,6 @@ use tauri::{AppHandle, Emitter, Manager};
 use tracing::{debug, error, info};
 use uuid::Uuid;
 
-/// Synchronous routing helper for processed TTS text.
-/// Uses the snapshot's captured skip flags, not the mutable global prefix flags.
-pub(crate) fn route_processed_text(
-    app_state: &AppState,
-    text: &str,
-    skip_twitch: bool,
-    skip_webview: bool,
-) {
-    if !skip_webview {
-        app_state
-            .webview
-            .send_event(AppEvent::TextSentToTts(text.to_string()));
-    }
-    if !skip_twitch {
-        let settings = app_state.twitch.settings.blocking_read();
-        if settings.enabled {
-            drop(settings);
-            app_state.send_twitch_event(TwitchEvent::SendMessage(text.to_string()));
-        }
-    }
-}
-
 /// Update tray icon based on interception state
 fn update_tray_icon(_app_handle: &AppHandle, is_intercepting: bool) {
     debug!(

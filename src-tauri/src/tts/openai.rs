@@ -54,6 +54,10 @@ impl OpenAiTts {
         self.proxy_url.as_deref()
     }
 
+    pub fn voice(&self) -> &str {
+        &self.voice
+    }
+
     fn build_client(&self) -> Result<Client, String> {
         let timeout = Duration::from_secs(self.timeout_secs);
         proxy_utils::build_client_with_proxy(self.proxy_url.as_deref(), timeout)
