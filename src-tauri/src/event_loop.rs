@@ -104,11 +104,17 @@ impl EventHandler {
             AppEvent::PlaybackStarted { .. } => {
                 debug!("[EVENT] Playback started");
             }
-            AppEvent::PlaybackFinished => {
-                debug!("[EVENT] Playback finished");
+            AppEvent::PlaybackFinished { ref text_id } => {
+                debug!(text_id = %text_id, "[EVENT] Playback finished");
                 if let Some(pb) = self.state.playback_manager.lock().as_ref() {
                     pb.on_playback_finished();
                 }
+            }
+            AppEvent::PlaybackFailed {
+                ref text_id,
+                ref error,
+            } => {
+                debug!(text_id = %text_id, error = %error, "[EVENT] Playback failed");
             }
             AppEvent::PlaybackPaused => {
                 debug!("[EVENT] Playback paused");

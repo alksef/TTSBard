@@ -1,15 +1,32 @@
 use crate::audio::{
     apply_effects, decode_audio, process_boundaries, AudioEffects, AudioPcm, OutputConfig,
 };
-use crate::config::AppSettings;
+use crate::config::{AiSettings, AppSettings, AudioEffectsSettings, DspSettings, NetworkSettings};
+use crate::speech_queue::Snapshot;
 use crate::state::AppState;
+use crate::tts::TtsProvider;
 use std::fs;
 use tracing::{debug, error, info, warn};
 
-/// 1. Этап предварительной подготовки текста (препроцессор + замена чисел)
-pub fn preprocess_text(state: &AppState, text: &str) -> String {
-    let text = if let Some(preprocessor) = state.editor.get_preprocessor() {
-        let processed = preprocessor.process(text);
+#[derive(Debug, Clone)]
+pub struct PreparedSpeech {
+    pub processed_text: String,
+    pub audio: AudioPcm,
+    pub provider_name: String,
+    pub voice_name: String,
+    pub cache_key: String,
+    pub cache_hit: bool,
+    pub cache_saved: bool,
+}
+
+// ── Snapshot-friendly inner helpers ──
+
+pub(crate) fn preprocess_text_with_preprocessor(
+    text: &str,
+    preprocessor: Option<&crate::preprocessor::TextPreprocessor>,
+) -> String {
+    let text = if let Some(p) = preprocessor {
+        let processed = p.process(text);
         if processed != text {
             debug!(text, processed, "Replacements applied");
         }
@@ -18,6 +35,191 @@ pub fn preprocess_text(state: &AppState, text: &str) -> String {
         text.to_string()
     };
     crate::preprocessor::process_numbers(&text)
+}
+
+pub(crate) async fn ai_correct_text_with_settings(
+    text: &str,
+    ai_enabled: bool,
+    ai_settings: &AiSettings,
+    network_settings: &NetworkSettings,
+) -> Result<String, String> {
+    if !ai_enabled {
+        return Ok(text.to_string());
+    }
+    let client = crate::ai::create_ai_client(ai_settings, network_settings)
+        .map_err(|e| format!("Failed to create AI client: {}", e))?;
+    match client.correct(text, &ai_settings.prompt).await {
+        Ok(corrected) => {
+            if corrected != text {
+                info!(
+                    original = text.len(),
+                    corrected = corrected.len(),
+                    "AI correction applied"
+                );
+            }
+            Ok(corrected)
+        }
+        Err(e) => {
+            warn!("AI correction failed, using original text: {}", e);
+            Ok(text.to_string())
+        }
+    }
+}
+
+pub(crate) async fn synthesize_with_provider(
+    provider: &TtsProvider,
+    text: &str,
+) -> Result<Vec<u8>, String> {
+    let audio_data = provider.synthesize(text).await.map_err(|e| {
+        error!(error = %e, "synthesize() error");
+        format!("Ошибка синтеза: {}", e)
+    })?;
+    debug!(bytes = audio_data.len(), "Audio synthesized");
+    Ok(audio_data)
+}
+
+pub(crate) fn apply_audio_effects_pipeline_with_settings(
+    audio_data: Vec<u8>,
+    audio_effects: &AudioEffectsSettings,
+    dsp: &DspSettings,
+) -> Result<AudioPcm, String> {
+    let pcm = if audio_effects.enabled {
+        let effects = AudioEffects::new(
+            audio_effects.pitch,
+            audio_effects.speed,
+            audio_effects.volume,
+        )
+        .with_enhance(
+            audio_effects.enhance_enabled,
+            audio_effects.enhance_atten_db,
+        )
+        .with_formant_preserved(audio_effects.formant_preserved);
+
+        let original_len = audio_data.len();
+        let dsp_config = dsp.to_dsp_config();
+        match apply_effects(&audio_data, &effects, Some(&dsp_config)) {
+            Ok(pcm) => {
+                debug!(
+                    original = original_len,
+                    frames = pcm.frame_count(),
+                    "Audio effects applied"
+                );
+                pcm
+            }
+            Err(e) => {
+                error!(error = %e, "Failed to apply audio effects");
+                return Err(format!("Не удалось применить аудио эффекты: {}", e));
+            }
+        }
+    } else {
+        decode_audio(&audio_data).map_err(|e| format!("Audio decode failed: {}", e))?
+    };
+
+    if audio_effects.boundary_cleanup_enabled {
+        let cleaned = process_boundaries(&pcm);
+        if !cleaned.samples.is_empty()
+            && cleaned.sample_rate == pcm.sample_rate
+            && cleaned.channels == pcm.channels
+            && cleaned.frame_count() == pcm.frame_count()
+        {
+            debug!(frames = cleaned.frame_count(), "Boundary cleanup applied");
+            return Ok(cleaned);
+        }
+        warn!("Boundary cleanup produced invalid result, falling back to original PCM");
+    }
+
+    Ok(pcm)
+}
+
+// ── Snapshot-driven preparation (pure, no side effects) ──
+
+pub async fn prepare_speech(
+    snapshot: &Snapshot,
+    original_text: &str,
+) -> Result<PreparedSpeech, String> {
+    let prefix_result = crate::preprocessor::parse_prefix(original_text);
+    if prefix_result.skip_twitch != snapshot.skip_twitch
+        || prefix_result.skip_webview != snapshot.skip_webview
+    {
+        return Err(
+            "Internal error: prefix flags mismatch between snapshot and parsed text".to_string(),
+        );
+    }
+    let text = prefix_result.text;
+
+    let text = preprocess_text_with_preprocessor(&text, snapshot.preprocessor.as_ref());
+
+    let text = match ai_correct_text_with_settings(
+        &text,
+        snapshot.ai_enabled,
+        &snapshot.ai,
+        &snapshot.network_settings,
+    )
+    .await
+    {
+        Ok(corrected) => corrected,
+        Err(e) => {
+            warn!(
+                "AI client construction failed, using uncorrected text: {}",
+                e
+            );
+            text
+        }
+    };
+
+    let effects_fp =
+        crate::history::compute_effects_fingerprint(&snapshot.audio_effects, &snapshot.dsp);
+    let cache_key =
+        crate::history::build_cache_key(&text, &snapshot.provider, &snapshot.voice, effects_fp);
+
+    match crate::history::read_audio_cache(&cache_key) {
+        Ok(pcm) => {
+            return Ok(PreparedSpeech {
+                processed_text: text,
+                audio: pcm,
+                provider_name: snapshot.provider.clone(),
+                voice_name: snapshot.voice.clone(),
+                cache_key,
+                cache_hit: true,
+                cache_saved: false,
+            });
+        }
+        Err(e) => {
+            let err_str = e.to_string();
+            if !err_str.contains("CacheMiss") {
+                return Err(format!(
+                    "Cache read error (corrupted/unreadable): {}",
+                    err_str
+                ));
+            }
+        }
+    }
+
+    let audio_data = synthesize_with_provider(&snapshot.tts_provider, &text).await?;
+    let audio = apply_audio_effects_pipeline_with_settings(
+        audio_data,
+        &snapshot.audio_effects,
+        &snapshot.dsp,
+    )?;
+
+    let cache_saved = crate::history::save_audio_cache(&cache_key, &audio).is_ok();
+
+    Ok(PreparedSpeech {
+        processed_text: text,
+        audio,
+        provider_name: snapshot.provider.clone(),
+        voice_name: snapshot.voice.clone(),
+        cache_key,
+        cache_hit: false,
+        cache_saved,
+    })
+}
+
+// ── Public helpers (original API wrappers for backward compatibility) ──
+
+/// 1. Этап предварительной подготовки текста (препроцессор + замена чисел)
+pub fn preprocess_text(state: &AppState, text: &str) -> String {
+    preprocess_text_with_preprocessor(text, state.editor.get_preprocessor().as_ref())
 }
 
 /// 2. Этап AI-исправления грамматики (с безопасным fallback)
@@ -57,13 +259,7 @@ pub async fn synthesize_audio(state: &AppState, text: &str) -> Result<Vec<u8>, S
         "TTS provider не инициализирован. Выберите провайдер в настройках.".to_string()
     })?;
 
-    let audio_data = provider.synthesize(text).await.map_err(|e| {
-        error!(error = %e, "synthesize() error");
-        format!("Ошибка синтеза: {}", e)
-    })?;
-
-    debug!(bytes = audio_data.len(), "Audio synthesized");
-    Ok(audio_data)
+    synthesize_with_provider(&provider, text).await
 }
 
 /// 4. Этап применения аудио-эффектов (pitch, speed, volume,
@@ -81,54 +277,7 @@ pub fn apply_audio_effects_pipeline(
     audio_data: Vec<u8>,
     settings: &AppSettings,
 ) -> Result<AudioPcm, String> {
-    let pcm = if settings.audio_effects.enabled {
-        let effects = AudioEffects::new(
-            settings.audio_effects.pitch,
-            settings.audio_effects.speed,
-            settings.audio_effects.volume,
-        )
-        .with_enhance(
-            settings.audio_effects.enhance_enabled,
-            settings.audio_effects.enhance_atten_db,
-        )
-        .with_formant_preserved(settings.audio_effects.formant_preserved);
-
-        let original_len = audio_data.len();
-        let dsp_config = settings.dsp.to_dsp_config();
-        match apply_effects(&audio_data, &effects, Some(&dsp_config)) {
-            Ok(pcm) => {
-                debug!(
-                    original = original_len,
-                    frames = pcm.frame_count(),
-                    "Audio effects applied"
-                );
-                pcm
-            }
-            Err(e) => {
-                error!(error = %e, "Failed to apply audio effects");
-                return Err(format!("Не удалось применить аудио эффекты: {}", e));
-            }
-        }
-    } else {
-        decode_audio(&audio_data).map_err(|e| format!("Audio decode failed: {}", e))?
-    };
-
-    // Step 5: Per-phrase boundary cleanup (DC offset + fade-in/out).
-    // Safe optional cleanup — on error, fall back to the original PCM.
-    if settings.audio_effects.boundary_cleanup_enabled {
-        let cleaned = process_boundaries(&pcm);
-        if !cleaned.samples.is_empty()
-            && cleaned.sample_rate == pcm.sample_rate
-            && cleaned.channels == pcm.channels
-            && cleaned.frame_count() == pcm.frame_count()
-        {
-            debug!(frames = cleaned.frame_count(), "Boundary cleanup applied");
-            return Ok(cleaned);
-        }
-        warn!("Boundary cleanup produced invalid result, falling back to original PCM");
-    }
-
-    Ok(pcm)
+    apply_audio_effects_pipeline_with_settings(audio_data, &settings.audio_effects, &settings.dsp)
 }
 
 /// 5. Отправка звука в плеер
@@ -321,5 +470,54 @@ mod tests {
         assert_eq!(result.sample_rate, sample_rate);
         assert_eq!(result.channels, channels);
         assert_eq!(result.frame_count(), frames);
+    }
+
+    // ── Focused snapshot/preparation tests ──
+
+    fn make_snapshot(skip_twitch: bool, skip_webview: bool, ai_enabled: bool) -> Snapshot {
+        use crate::config::{
+            AiSettings, AudioEffectsSettings, AudioSettings, DspSettings, NetworkSettings,
+        };
+        Snapshot {
+            provider: "test-provider".into(),
+            voice: "test-voice".into(),
+            skip_twitch,
+            skip_webview,
+            ai_enabled,
+            audio_effects: AudioEffectsSettings::default(),
+            dsp: DspSettings::default(),
+            audio: AudioSettings::default(),
+            ai: AiSettings::default(),
+            tts_provider: crate::tts::TtsProvider::Local(
+                crate::tts::local_http_server::LocalHttpServerTts::new(),
+            ),
+            preprocessor: None,
+            network_settings: NetworkSettings::default(),
+        }
+    }
+
+    /// Prefix flag mismatch between snapshot and text fails before synthesis.
+    #[tokio::test]
+    async fn prefix_flag_mismatch_fails_before_synthesis() {
+        let snapshot = make_snapshot(true, false, false);
+        let err = prepare_speech(&snapshot, "hello world").await.unwrap_err();
+        assert!(
+            err.contains("prefix flags mismatch"),
+            "expected prefix mismatch error, got: {err}"
+        );
+    }
+
+    /// ai_correct_text_with_settings with ai_enabled=false returns unchanged text.
+    #[tokio::test]
+    async fn ai_disabled_helper_returns_unchanged_text() {
+        let result = ai_correct_text_with_settings(
+            "hello world",
+            false,
+            &crate::config::AiSettings::default(),
+            &crate::config::NetworkSettings::default(),
+        )
+        .await
+        .expect("AI-disabled helper should never fail");
+        assert_eq!(result, "hello world");
     }
 }

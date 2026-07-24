@@ -134,22 +134,23 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
     Ok(())
 }
 
+pub(crate) fn provider_kind(provider: &TtsProvider) -> &'static str {
+    match provider {
+        TtsProvider::OpenAi(_) => "openai",
+        TtsProvider::Silero(_) => "silero",
+        TtsProvider::Local(_) => "local",
+        TtsProvider::Fish(_) => "fish",
+        TtsProvider::Piper(_) => "piper",
+    }
+}
+
 pub(crate) fn get_provider_voice_names(
     state: &AppState,
     settings: &crate::config::AppSettings,
 ) -> (String, String) {
-    // The concrete provider selection lives in the runtime registry. The legacy
-    // settings enum does not have a Piper variant, so using it here would record
-    // Piper phrases as the last built-in provider (usually Silero).
     if let Some(entry) = state.tts_registry.lock().active() {
-        let provider_name = match &entry.provider {
-            TtsProvider::OpenAi(_) => "openai",
-            TtsProvider::Silero(_) => "silero",
-            TtsProvider::Local(_) => "local",
-            TtsProvider::Fish(_) => "fish",
-            TtsProvider::Piper(_) => "piper",
-        };
-        return (provider_name.to_string(), entry.id.clone());
+        let provider_name = provider_kind(&entry.provider).to_string();
+        return (provider_name, entry.id.clone());
     }
 
     use crate::tts::TtsProviderType;

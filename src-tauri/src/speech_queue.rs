@@ -1,4 +1,8 @@
-use crate::config::{AiSettings, AudioEffectsSettings, AudioSettings, DspSettings};
+use crate::config::{
+    AiSettings, AudioEffectsSettings, AudioSettings, DspSettings, NetworkSettings,
+};
+use crate::preprocessor::TextPreprocessor;
+use crate::tts::TtsProvider;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -16,7 +20,7 @@ pub struct AcceptedJob {
 
 // ── Snapshot: settings frozen at submit time ──
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Clone)]
 pub struct Snapshot {
     pub provider: String,
     pub voice: String,
@@ -27,6 +31,9 @@ pub struct Snapshot {
     pub dsp: DspSettings,
     pub audio: AudioSettings,
     pub ai: AiSettings,
+    pub tts_provider: TtsProvider,
+    pub preprocessor: Option<TextPreprocessor>,
+    pub network_settings: NetworkSettings,
 }
 
 // ── Job status ──
@@ -45,7 +52,7 @@ pub enum JobStatus {
 
 // ── SpeechJob ──
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone)]
 pub struct SpeechJob {
     pub job_id: Uuid,
     pub original_text: String,
@@ -348,6 +355,11 @@ mod tests {
             dsp: DspSettings::default(),
             audio: AudioSettings::default(),
             ai: AiSettings::default(),
+            tts_provider: TtsProvider::Local(
+                crate::tts::local_http_server::LocalHttpServerTts::new(),
+            ),
+            preprocessor: None,
+            network_settings: NetworkSettings::default(),
         }
     }
 
@@ -1221,6 +1233,11 @@ mod tests {
                 },
                 ..Default::default()
             },
+            tts_provider: TtsProvider::Local(
+                crate::tts::local_http_server::LocalHttpServerTts::new(),
+            ),
+            preprocessor: None,
+            network_settings: NetworkSettings::default(),
         };
         let mut q = SpeechQueue::new();
         q.submit("hello", snapshot).unwrap();

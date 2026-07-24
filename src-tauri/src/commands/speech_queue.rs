@@ -1,4 +1,4 @@
-use crate::commands::get_provider_voice_names;
+use crate::commands::provider_kind;
 use crate::speech_queue::{AcceptedJob, Snapshot, SpeechQueue, SpeechQueueStateDto};
 use crate::state::AppState;
 use parking_lot::Mutex;
@@ -14,13 +14,23 @@ fn emit_queue_changed(app_handle: &AppHandle, dto: SpeechQueueStateDto) {
     let _ = app_handle.emit(SPEECH_QUEUE_CHANGED, dto);
 }
 
-fn build_snapshot(state: &AppState, text: &str) -> Snapshot {
+pub(crate) fn build_snapshot(state: &AppState, text: &str) -> Result<Snapshot, String> {
     let settings = state.settings_cache.read().clone();
     let prefix_result = crate::preprocessor::parse_prefix(text);
 
-    let (provider, voice) = get_provider_voice_names(state, &settings);
+    let registry = state.tts_registry.lock();
+    let entry = registry
+        .active()
+        .ok_or_else(|| "No active TTS provider configured".to_string())?;
+    let provider = provider_kind(&entry.provider).to_string();
+    let voice = entry.id.clone();
+    let tts_provider = entry.provider.clone();
+    drop(registry);
 
-    Snapshot {
+    let preprocessor = state.editor.get_preprocessor();
+    let network_settings = settings.tts.network.clone();
+
+    Ok(Snapshot {
         provider,
         voice,
         skip_twitch: prefix_result.skip_twitch,
@@ -30,7 +40,10 @@ fn build_snapshot(state: &AppState, text: &str) -> Snapshot {
         dsp: settings.dsp,
         audio: settings.audio,
         ai: settings.ai,
-    }
+        tts_provider,
+        preprocessor,
+        network_settings,
+    })
 }
 
 #[tauri::command]
@@ -40,7 +53,7 @@ pub fn submit_speech(
     queue: State<'_, SpeechQueueState>,
     text: String,
 ) -> Result<AcceptedJob, String> {
-    let snapshot = build_snapshot(&state, &text);
+    let snapshot = build_snapshot(&state, &text).map_err(|e| format!("Snapshot error: {}", e))?;
     let mut q = queue.0.lock();
     let job_id = q.submit(&text, snapshot).map_err(|e| e.to_string())?;
     let dto = q.state();

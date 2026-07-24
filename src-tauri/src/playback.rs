@@ -27,6 +27,8 @@ pub struct QueuedPhrase {
     pub id: String,
     pub text: String,
     pub audio: Arc<AudioPcm>,
+    pub speaker: Option<OutputConfig>,
+    pub mic: Option<OutputConfig>,
 }
 
 #[derive(Clone)]
@@ -82,7 +84,14 @@ enum EnqueueState {
 }
 
 impl Shared {
-    fn enqueue_state(&mut self, id: String, text: String, audio: Arc<AudioPcm>) -> EnqueueState {
+    fn enqueue_state(
+        &mut self,
+        id: String,
+        text: String,
+        audio: Arc<AudioPcm>,
+        speaker: Option<OutputConfig>,
+        mic: Option<OutputConfig>,
+    ) -> EnqueueState {
         let ts = Utc::now().timestamp();
         self.audio_cache.retain(|c| c.id != id);
         self.audio_cache.push_back(CachedPhrase {
@@ -107,7 +116,13 @@ impl Shared {
                 return EnqueueState::Queued;
             }
             if self.queue.len() < MAX_QUEUE {
-                self.queue.push_back(QueuedPhrase { id, text, audio });
+                self.queue.push_back(QueuedPhrase {
+                    id,
+                    text,
+                    audio,
+                    speaker,
+                    mic,
+                });
                 return EnqueueState::Queued;
             }
             return EnqueueState::Rejected;
@@ -117,6 +132,8 @@ impl Shared {
             id: id.clone(),
             text,
             audio,
+            speaker,
+            mic,
         };
         self.current = Some(phrase.clone());
         EnqueueState::SendToThread(phrase)
@@ -180,6 +197,7 @@ pub struct PlaybackManager {
     cmd_tx: mpsc::Sender<Cmd>,
     state: Arc<RwLock<Shared>>,
     pub audio_config: Arc<RwLock<AudioOutputsConfig>>,
+    app_handle: AppHandle,
 }
 
 impl PlaybackManager {
@@ -202,12 +220,13 @@ impl PlaybackManager {
         let th_audio = Arc::clone(&audio_config);
         let th_devices = cached_devices.clone();
         let th_cmd_tx = cmd_tx.clone();
+        let th_app = app_handle.clone();
 
         thread::spawn(move || {
             Self::thread_loop(
                 cmd_rx,
                 th_cmd_tx,
-                app_handle,
+                th_app,
                 internal_ev,
                 th_state,
                 th_audio,
@@ -219,6 +238,7 @@ impl PlaybackManager {
             cmd_tx,
             state,
             audio_config,
+            app_handle,
         }
     }
 
@@ -228,7 +248,7 @@ impl PlaybackManager {
         app: AppHandle,
         internal_ev: mpsc::Sender<crate::events::AppEvent>,
         state: Arc<RwLock<Shared>>,
-        audio_config: Arc<RwLock<AudioOutputsConfig>>,
+        _audio_config: Arc<RwLock<AudioOutputsConfig>>, // held; no longer read directly — phrases carry their own outputs
         cached_devices: Option<Arc<RwLock<HashMap<String, cpal::Device>>>>,
     ) {
         let mut sink_spk: Option<Sink> = None;
@@ -256,11 +276,11 @@ impl PlaybackManager {
                     }
                     stopped = false;
 
-                    // Читаем актуальную конфигурацию на каждый Enqueue (C1-дыра)
-                    let cfg = audio_config.read().clone();
+                    let spk_cfg = phrase.speaker.clone();
+                    let mic_cfg = phrase.mic.clone();
                     let audio = phrase.audio.clone();
 
-                    if let Some(ref c) = cfg.speaker {
+                    if let Some(ref c) = spk_cfg {
                         match resolve_output_device(&c.device_id, &cached_devices) {
                             Ok(dev) => match open_sink_on_device_pcm(&dev, &audio, c.volume) {
                                 Ok((s, sink)) => {
@@ -276,7 +296,7 @@ impl PlaybackManager {
                             }
                         }
                     }
-                    if let Some(ref c) = cfg.mic {
+                    if let Some(ref c) = mic_cfg {
                         match resolve_output_device(&c.device_id, &cached_devices) {
                             Ok(dev) => match open_sink_on_device_pcm(&dev, &audio, c.volume) {
                                 Ok((s, sink)) => {
@@ -311,6 +331,19 @@ impl PlaybackManager {
                         info!(target: "playback", "PlaybackStarted emitted");
                     } else {
                         warn!(target: "playback", "No output sink — playback NOT started (speaker+mic both failed)");
+                        let failed_id = phrase.id.clone();
+                        let _ = internal_ev.send(crate::events::AppEvent::PlaybackFailed {
+                            text_id: failed_id.clone(),
+                            error: "No output sink could be opened (speaker and mic both failed)"
+                                .to_string(),
+                        });
+                        let _ = app.emit(
+                            "playback-failed",
+                            serde_json::json!({
+                                "text_id": failed_id,
+                                "error": "No output sink could be opened",
+                            }),
+                        );
                     }
                 }
                 Ok(Cmd::Pause) => {
@@ -407,9 +440,19 @@ impl PlaybackManager {
                     sink_mic.take();
                     _stream_spk.take();
                     _stream_mic.take();
-                    state.write().status = PlaybackStatus::Idle;
-                    info!(target: "playback", "PlaybackFinished, playing reset");
-                    let _ = internal_ev.send(crate::events::AppEvent::PlaybackFinished);
+                    let finished_id = {
+                        let mut s = state.write();
+                        let id = s.current.as_ref().map(|p| p.id.clone());
+                        s.status = PlaybackStatus::Idle;
+                        id
+                    };
+                    if let Some(id) = finished_id {
+                        info!(target: "playback", text_id=%id, "PlaybackFinished, playing reset");
+                        let _ = internal_ev
+                            .send(crate::events::AppEvent::PlaybackFinished { text_id: id });
+                    } else {
+                        warn!(target: "playback", "Sink drain with no current phrase — invariant violated");
+                    }
                     let _ = app.emit("queue-changed", ());
                 }
             }
@@ -424,17 +467,49 @@ impl PlaybackManager {
         *self.audio_config.write() = AudioOutputsConfig { speaker, mic };
     }
 
-    /// Добавить фразу в очередь. Возвращает `true` если фраза принята, `false` если очередь полна.
+    /// Добавить фразу в очередь. Snapshots текущий глобальный `audio_config` —
+    /// compatibility wrapper для legacy вызовов без явного per-phrase output config.
+    /// Возвращает `true` если фраза принята, `false` если очередь полна.
     pub fn enqueue(&self, id: String, text: String, audio: AudioPcm) -> bool {
+        let cfg = self.audio_config.read().clone();
+        self.enqueue_inner(id, text, audio, cfg.speaker, cfg.mic)
+    }
+
+    /// Добавить фразу с явным per-phrase output config. Выходные устройства
+    /// фиксируются в QueuedPhrase и воспроизводятся потоком без доступа к глобальному
+    /// `audio_config` во время playback.
+    pub fn enqueue_with_outputs(
+        &self,
+        id: String,
+        text: String,
+        audio: AudioPcm,
+        speaker: Option<OutputConfig>,
+        mic: Option<OutputConfig>,
+    ) -> bool {
+        self.enqueue_inner(id, text, audio, speaker, mic)
+    }
+
+    fn enqueue_inner(
+        &self,
+        id: String,
+        text: String,
+        audio: AudioPcm,
+        speaker: Option<OutputConfig>,
+        mic: Option<OutputConfig>,
+    ) -> bool {
         let arc_audio = Arc::new(audio);
         let mut s = self.state.write();
-        match s.enqueue_state(id, text, arc_audio) {
+        match s.enqueue_state(id, text, arc_audio, speaker, mic) {
             EnqueueState::SendToThread(phrase) => {
                 drop(s);
                 let _ = self.cmd_tx.send(Cmd::Enqueue(phrase));
+                let _ = self.app_handle.emit("queue-changed", ());
                 true
             }
-            EnqueueState::Queued => true,
+            EnqueueState::Queued => {
+                let _ = self.app_handle.emit("queue-changed", ());
+                true
+            }
             EnqueueState::Rejected => {
                 warn!("Playback queue full ({MAX_QUEUE}), phrase dropped");
                 false
@@ -477,6 +552,7 @@ impl PlaybackManager {
     pub fn replay_from_cache(&self, id: &str) {
         let replay = self.state.read().find_in_cache(id);
         if let Some((id, text, audio)) = replay {
+            // Cached replay uses current global config — existing contract.
             self.enqueue(id, text, (*audio).clone());
         }
     }
@@ -487,10 +563,16 @@ impl PlaybackManager {
             let id = next.id.clone();
             let text = next.text.clone();
             let audio = next.audio.clone();
+            let speaker = next.speaker.clone();
+            let mic = next.mic.clone();
             drop(s);
-            let _ = self
-                .cmd_tx
-                .send(Cmd::Enqueue(QueuedPhrase { id, text, audio }));
+            let _ = self.cmd_tx.send(Cmd::Enqueue(QueuedPhrase {
+                id,
+                text,
+                audio,
+                speaker,
+                mic,
+            }));
         }
     }
 
@@ -527,6 +609,8 @@ mod tests {
                 id: "current".into(),
                 text: "current text".into(),
                 audio: Arc::new(dummy_audio()),
+                speaker: None,
+                mic: None,
             }),
             queue: VecDeque::new(),
             audio_cache: VecDeque::with_capacity(AUDIO_CACHE_SIZE),
@@ -547,6 +631,8 @@ mod tests {
                 id: "paused_id".into(),
                 text: "paused text".into(),
                 audio: Arc::new(dummy_audio()),
+                speaker: None,
+                mic: None,
             }),
             queue: VecDeque::new(),
             audio_cache: VecDeque::with_capacity(AUDIO_CACHE_SIZE),
@@ -566,7 +652,7 @@ mod tests {
     fn enqueue_sets_current_when_idle() {
         let mut s = make_shared();
         let audio = Arc::new(dummy_audio());
-        match s.enqueue_state("id1".into(), "hello".into(), Arc::clone(&audio)) {
+        match s.enqueue_state("id1".into(), "hello".into(), Arc::clone(&audio), None, None) {
             EnqueueState::SendToThread(p) => {
                 assert_eq!(p.id, "id1");
                 assert_eq!(p.text, "hello");
@@ -580,20 +666,18 @@ mod tests {
     fn enqueue_queues_when_playing() {
         let mut s = make_shared_playing();
         let audio = Arc::new(dummy_audio());
-        match s.enqueue_state("new_id".into(), "new text".into(), audio) {
+        match s.enqueue_state("new_id".into(), "new text".into(), audio, None, None) {
             EnqueueState::Queued => {}
             _ => panic!("expected Queued"),
         }
         assert_eq!(s.queue.len(), 1);
-        assert_eq!(s.queue[0].id, "new_id");
-        assert_eq!(s.current.as_ref().unwrap().id, "current");
     }
 
     #[test]
     fn enqueue_queues_when_paused() {
         let mut s = make_shared_paused();
         let audio = Arc::new(dummy_audio());
-        match s.enqueue_state("new_id".into(), "new text".into(), audio) {
+        match s.enqueue_state("new_id".into(), "new text".into(), audio, None, None) {
             EnqueueState::Queued => {}
             _ => panic!("expected Queued"),
         }
@@ -604,7 +688,7 @@ mod tests {
     fn enqueue_dedup_current_id() {
         let mut s = make_shared_playing();
         let audio = Arc::new(dummy_audio());
-        match s.enqueue_state("current".into(), "current text".into(), audio) {
+        match s.enqueue_state("current".into(), "current text".into(), audio, None, None) {
             EnqueueState::Queued => {}
             _ => panic!("expected Queued"),
         }
@@ -618,9 +702,11 @@ mod tests {
             id: "queued".into(),
             text: "queued text".into(),
             audio: Arc::new(dummy_audio()),
+            speaker: None,
+            mic: None,
         });
         let audio = Arc::new(dummy_audio());
-        match s.enqueue_state("queued".into(), "queued text".into(), audio) {
+        match s.enqueue_state("queued".into(), "queued text".into(), audio, None, None) {
             EnqueueState::Queued => {}
             _ => panic!("expected Queued"),
         }
@@ -635,10 +721,12 @@ mod tests {
                 id: format!("q{i}"),
                 text: format!("text{i}"),
                 audio: Arc::new(dummy_audio()),
+                speaker: None,
+                mic: None,
             });
         }
         let audio = Arc::new(dummy_audio());
-        match s.enqueue_state("over".into(), "over text".into(), audio) {
+        match s.enqueue_state("over".into(), "over text".into(), audio, None, None) {
             EnqueueState::Rejected => {}
             _ => panic!("expected Rejected"),
         }
@@ -650,7 +738,7 @@ mod tests {
         let mut s = make_shared_playing();
         for i in 0..3 {
             let audio = Arc::new(dummy_audio());
-            s.enqueue_state(format!("id{i}"), format!("text{i}"), audio);
+            s.enqueue_state(format!("id{i}"), format!("text{i}"), audio, None, None);
         }
         assert_eq!(s.queue.len(), 3);
         assert_eq!(s.queue[0].id, "id0");
@@ -665,7 +753,7 @@ mod tests {
         let mut s = make_shared();
         for i in 0..(AUDIO_CACHE_SIZE + 5) {
             let audio = Arc::new(dummy_audio());
-            s.enqueue_state(format!("id{i}"), format!("text{i}"), audio);
+            s.enqueue_state(format!("id{i}"), format!("text{i}"), audio, None, None);
         }
         assert_eq!(s.audio_cache.len(), AUDIO_CACHE_SIZE);
         assert_eq!(s.audio_cache[0].id, "id5");
@@ -680,15 +768,15 @@ mod tests {
         let mut s = make_shared();
         {
             let audio = Arc::new(dummy_audio());
-            s.enqueue_state("id1".into(), "text1".into(), audio);
+            s.enqueue_state("id1".into(), "text1".into(), audio, None, None);
         }
         for i in 0..5 {
             let audio = Arc::new(dummy_audio());
-            s.enqueue_state(format!("fill{i}"), format!("text{i}"), audio);
+            s.enqueue_state(format!("fill{i}"), format!("text{i}"), audio, None, None);
         }
         {
             let audio = Arc::new(dummy_audio());
-            s.enqueue_state("id1".into(), "text1".into(), audio);
+            s.enqueue_state("id1".into(), "text1".into(), audio, None, None);
         }
         assert_eq!(s.audio_cache.back().unwrap().id, "id1");
         let count = s.audio_cache.iter().filter(|c| c.id == "id1").count();
@@ -704,6 +792,8 @@ mod tests {
             id: "next".into(),
             text: "next text".into(),
             audio: Arc::new(dummy_audio()),
+            speaker: None,
+            mic: None,
         });
         let result = s.finish_inner();
         assert!(result.is_some());
@@ -730,6 +820,8 @@ mod tests {
                 id: format!("q{i}"),
                 text: format!("text{i}"),
                 audio: Arc::new(dummy_audio()),
+                speaker: None,
+                mic: None,
             });
         }
         let r1 = s.finish_inner().unwrap();
@@ -776,11 +868,15 @@ mod tests {
             id: "q1".into(),
             text: "first".into(),
             audio: Arc::new(dummy_audio()),
+            speaker: None,
+            mic: None,
         });
         s.queue.push_back(QueuedPhrase {
             id: "q2".into(),
             text: "second".into(),
             audio: Arc::new(dummy_audio()),
+            speaker: None,
+            mic: None,
         });
         let dto = s.get_state_dto();
         assert_eq!(dto.queue, vec!["first", "second"]);
@@ -892,5 +988,134 @@ mod tests {
     #[test]
     fn find_in_cache_missing_returns_none() {
         assert!(make_shared().find_in_cache("nonexistent").is_none());
+    }
+
+    // ── per-phrase output config ──
+
+    #[test]
+    fn queued_phrases_retain_different_output_configs() {
+        let cfg_a = Some(OutputConfig {
+            device_id: Some("dev_a".into()),
+            volume: 0.8,
+        });
+        let cfg_b = Some(OutputConfig {
+            device_id: Some("dev_b".into()),
+            volume: 0.5,
+        });
+        let mut s = make_shared_playing();
+        let audio = Arc::new(dummy_audio());
+        s.enqueue_state(
+            "id_a".into(),
+            "text a".into(),
+            Arc::clone(&audio),
+            cfg_a.clone(),
+            None,
+        );
+        s.enqueue_state(
+            "id_b".into(),
+            "text b".into(),
+            Arc::clone(&audio),
+            cfg_b.clone(),
+            Some(OutputConfig {
+                device_id: Some("mic_x".into()),
+                volume: 0.3,
+            }),
+        );
+        assert_eq!(s.queue.len(), 2);
+        assert_eq!(
+            s.queue[0].speaker.as_ref().map(|c| &c.device_id),
+            cfg_a.as_ref().map(|c| &c.device_id)
+        );
+        assert_eq!(
+            s.queue[1].speaker.as_ref().map(|c| &c.device_id),
+            cfg_b.as_ref().map(|c| &c.device_id)
+        );
+        assert!(s.queue[1].mic.is_some());
+        assert_eq!(
+            s.queue[1].mic.as_ref().and_then(|c| c.device_id.as_deref()),
+            Some("mic_x")
+        );
+    }
+
+    #[test]
+    fn finish_inner_preserves_output_configs() {
+        let mut s = make_shared_playing();
+        let cfg = Some(OutputConfig {
+            device_id: Some("my_dev".into()),
+            volume: 0.9,
+        });
+        s.queue.push_back(QueuedPhrase {
+            id: "next".into(),
+            text: "next".into(),
+            audio: Arc::new(dummy_audio()),
+            speaker: cfg.clone(),
+            mic: None,
+        });
+        let result = s.finish_inner().unwrap();
+        assert_eq!(result.id, "next");
+        assert_eq!(
+            result.speaker.as_ref().map(|c| &c.device_id),
+            cfg.as_ref().map(|c| &c.device_id)
+        );
+        let current = s.current.as_ref().unwrap();
+        assert_eq!(
+            current.speaker.as_ref().map(|c| &c.device_id),
+            cfg.as_ref().map(|c| &c.device_id)
+        );
+    }
+
+    #[test]
+    fn enqueue_queue_limit_unchanged_with_configs() {
+        let mut s = make_shared_playing();
+        for i in 0..MAX_QUEUE {
+            s.queue.push_back(QueuedPhrase {
+                id: format!("q{i}"),
+                text: format!("text{i}"),
+                audio: Arc::new(dummy_audio()),
+                speaker: None,
+                mic: None,
+            });
+        }
+        let audio = Arc::new(dummy_audio());
+        match s.enqueue_state(
+            "over".into(),
+            "over text".into(),
+            audio,
+            Some(OutputConfig {
+                device_id: Some("d".into()),
+                volume: 0.5,
+            }),
+            None,
+        ) {
+            EnqueueState::Rejected => {}
+            _ => panic!("expected Rejected"),
+        }
+        assert_eq!(s.queue.len(), MAX_QUEUE);
+    }
+
+    #[test]
+    fn enqueue_state_sends_idle_with_configs() {
+        let mut s = make_shared();
+        let audio = Arc::new(dummy_audio());
+        let cfg = Some(OutputConfig {
+            device_id: Some("dev_id".into()),
+            volume: 0.7,
+        });
+        match s.enqueue_state(
+            "id1".into(),
+            "hello".into(),
+            Arc::clone(&audio),
+            cfg.clone(),
+            None,
+        ) {
+            EnqueueState::SendToThread(p) => {
+                assert_eq!(p.id, "id1");
+                assert_eq!(
+                    p.speaker.as_ref().map(|c| &c.device_id),
+                    cfg.as_ref().map(|c| &c.device_id)
+                );
+            }
+            _ => panic!("expected SendToThread"),
+        }
     }
 }

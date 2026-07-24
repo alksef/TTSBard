@@ -56,7 +56,9 @@ pub enum AppEvent {
     /// Воспроизведение началось
     PlaybackStarted { text_id: String, text: String },
     /// Воспроизведение фразы завершено
-    PlaybackFinished,
+    PlaybackFinished { text_id: String },
+    /// Ошибка воспроизведения (не удалось открыть ни одного output sink)
+    PlaybackFailed { text_id: String, error: String },
     /// Воспроизведение приостановлено
     PlaybackPaused,
     /// Воспроизведение возобновлено
@@ -146,7 +148,8 @@ impl AppEvent {
             AppEvent::WebViewTypingChanged(_) => "webview-typing-changed",
             AppEvent::TwitchStatusChanged(_) => "twitch-status-changed",
             AppEvent::PlaybackStarted { .. } => "playback-started",
-            AppEvent::PlaybackFinished => "playback-finished",
+            AppEvent::PlaybackFinished { .. } => "playback-finished",
+            AppEvent::PlaybackFailed { .. } => "playback-failed",
             AppEvent::PlaybackPaused => "playback-paused",
             AppEvent::PlaybackResumed => "playback-resumed",
             AppEvent::PlaybackStopped => "playback-stopped",
