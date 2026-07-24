@@ -216,25 +216,30 @@ async function toggleDeepSeekUseProxy() {
 async function saveCustomSettings() {
   debugLog('[AI] Saving Custom settings...');
 
-  if (!customUrl.value.trim()) {
+  // Each invoke emits settings-changed, so refs may refresh between awaits.
+  const url = customUrl.value;
+  const apiKey = customApiKey.value;
+  const model = customModel.value;
+
+  if (!url.trim()) {
     showError('API URL не может быть пустым');
     return;
   }
 
-  if (!customApiKey.value.trim()) {
+  if (!apiKey.trim()) {
     showError('Ключ API не может быть пустым');
     return;
   }
 
-  if (!customModel.value.trim()) {
+  if (!model.trim()) {
     showError('Модель не может быть пустой');
     return;
   }
 
   try {
-    await invoke('set_ai_custom_url', { url: customUrl.value });
-    await invoke('set_ai_custom_api_key', { key: customApiKey.value });
-    await invoke('set_ai_custom_model', { model: customModel.value });
+    await invoke('set_ai_custom_url', { url });
+    await invoke('set_ai_custom_api_key', { key: apiKey });
+    await invoke('set_ai_custom_model', { model });
     providers.value.custom.configured = true;
     debugLog('[AI] Custom settings saved successfully');
     showSuccess('Настройки сохранены');
@@ -638,18 +643,12 @@ function dismissStatus() {
                 v-model="customModel"
                 type="text"
                 class="zai-input"
-                placeholder="deepseek-chat"
               />
             </div>
           </div>
 
-          <!-- Buttons Row -->
-          <div class="button-row">
-            <button @click="saveCustomSettings" class="save-button-inline zai-save-button">Сохранить</button>
-          </div>
-
-          <!-- Proxy -->
-          <div class="setting-group">
+          <!-- Actions -->
+          <div class="button-row custom-actions-row">
             <div class="proxy-checkbox-container">
               <input
                 id="ai-custom-use-proxy"
@@ -659,9 +658,10 @@ function dismissStatus() {
                 class="proxy-checkbox"
               />
               <label for="ai-custom-use-proxy" class="proxy-checkbox-label">
-                Использовать системный прокси
+                Использовать SOCKS5
               </label>
             </div>
+            <button @click="saveCustomSettings" class="save-button-inline zai-save-button">Сохранить</button>
           </div>
         </div>
       </ProviderCard>
@@ -790,6 +790,14 @@ function dismissStatus() {
   margin-top: 0.5rem;
   padding-top: 0.5rem;
   border-top: 1px solid var(--color-border);
+}
+
+.custom-actions-row {
+  justify-content: space-between;
+}
+
+.custom-actions-row .proxy-checkbox-container {
+  margin-bottom: 0;
 }
 
 .save-button-inline {

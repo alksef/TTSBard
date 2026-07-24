@@ -992,12 +992,8 @@ pub struct AiCustomSettingsDto {
     pub api_key: Option<String>,
     #[serde(default)]
     pub use_proxy: bool,
-    #[serde(default = "default_custom_model_dto")]
+    #[serde(default)]
     pub model: String,
-}
-
-fn default_custom_model_dto() -> String {
-    "deepseek-chat".to_string()
 }
 
 impl From<crate::config::AiCustomSettings> for AiCustomSettingsDto {

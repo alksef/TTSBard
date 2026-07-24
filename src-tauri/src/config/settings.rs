@@ -958,12 +958,8 @@ pub struct AiCustomSettings {
     pub api_key: Option<String>,
     #[serde(default)]
     pub use_proxy: bool,
-    #[serde(default = "default_custom_model")]
+    #[serde(default)]
     pub model: String,
-}
-
-fn default_custom_model() -> String {
-    "deepseek-chat".to_string()
 }
 
 impl Default for AiCustomSettings {
@@ -972,7 +968,7 @@ impl Default for AiCustomSettings {
             url: None,
             api_key: None,
             use_proxy: false,
-            model: default_custom_model(),
+            model: String::new(),
         }
     }
 }
@@ -1994,6 +1990,17 @@ mod tests {
         let p: AiProviderType = serde_json::from_str("\"deepseek\"").unwrap();
         assert_eq!(p, AiProviderType::DeepSeek);
     }
+
+    #[test]
+    fn custom_ai_model_defaults_to_empty() {
+        assert!(AiCustomSettings::default().model.is_empty());
+
+        let settings: AiCustomSettings =
+            serde_json::from_str(r#"{"url":null,"api_key":null,"use_proxy":false}"#)
+                .expect("Custom AI settings without model must deserialize");
+        assert!(settings.model.is_empty());
+    }
+
     #[test]
     fn concurrent_updates_preserve_both_fields() {
         let unique = std::time::SystemTime::now()
