@@ -16,6 +16,11 @@ import { useEditorTabs } from '../composables/useEditorTabs'
 import EditorTabs from './editor/EditorTabs.vue'
 import StatusMessage from './shared/StatusMessage.vue'
 import { useTypingBurst, type TypingConsumer } from '../composables/useTypingBurst'
+import { acceptClear } from './inputAcceptance'
+
+interface AcceptedJob {
+  job_id: string
+}
 
 const { showError } = useErrorHandler()
 const { tabs, activeId, active, create: createTab, close: closeTab, select: selectTab, rename: renameTab, init: initTabs, flushSave: flushTabsSave } = useEditorTabs()
@@ -239,24 +244,6 @@ async function recordHistory(textToRecord: string) {
   }
 }
 
-async function speak(textToSend: string) {
-  if (!textToSend.trim()) return
-  if (isSpeakingInFlight.value) return
-
-  typingBurst.stop()
-  isSpeakingInFlight.value = true
-  try {
-    debugLog('[InputPanel] Speaking:', textToSend)
-    await invoke('speak_text', { text: textToSend })
-    recordHistory(textToSend)
-  } catch (e) {
-    debugError('[InputPanel] Failed to speak:', e)
-    showError(e as string)
-  } finally {
-    isSpeakingInFlight.value = false
-  }
-}
-
 async function correctText() {
   if (!text.value.trim()) return
   isCorrecting.value = true
@@ -379,25 +366,12 @@ async function handleEnter() {
   if (isSpeakingInFlight.value) return
 
   typingBurst.stop()
+  isSpeakingInFlight.value = true
 
-  if (mode === 'disabled') {
-    await speak(currentText)
-    const tab = tabs.value.find(t => t.id === senderTabId)
-    if (tab) tab.text = ''
-  } else {
-    isSpeakingInFlight.value = true
-    invoke('speak_text', { text: currentText })
-      .then(() => recordHistory(currentText))
-      .catch((e) => {
-        debugError('[InputPanel] Failed to speak:', e)
-        showError(e as string)
-      })
-      .finally(() => {
-        isSpeakingInFlight.value = false
-      })
-
-    const tab = tabs.value.find(t => t.id === senderTabId)
-    if (tab) tab.text = ''
+  try {
+    await invoke<AcceptedJob>('submit_speech', { text: currentText })
+    recordHistory(currentText)
+    tabs.value = acceptClear(tabs.value, senderTabId, currentText)
 
     if (mode === 'collapse') {
       await hideMainWindow()
@@ -408,6 +382,11 @@ async function handleEnter() {
         debugError('[InputPanel] Failed to return focus:', e)
       }
     }
+  } catch (e) {
+    debugError('[InputPanel] Failed to speak:', e)
+    showError(e as string)
+  } finally {
+    isSpeakingInFlight.value = false
   }
 }
 
