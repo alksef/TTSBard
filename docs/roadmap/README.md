@@ -61,6 +61,7 @@ related_tasks: []
 - [ROADMAP-027 — layout, history и export](./completed/027-text-editor-layout-history-and-export.md)
 - [ROADMAP-033 — phrase audio cache](./completed/033-phrase-history-audio-cache.md)
 - [ROADMAP-034 — Silero metadata и recent dedup](./completed/034-silero-voice-and-playback-recent-dedup.md)
+- [ROADMAP-048 — Enter/Escape и autocomplete](./completed/048-editor-autocomplete-enter-escape.md)
 
 ### Окна, ввод и sound panel
 

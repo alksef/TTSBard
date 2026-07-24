@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, shallowRef } from 'vue'
 import { EditorView, keymap } from '@codemirror/view'
-import { EditorState, Annotation } from '@codemirror/state'
+import { EditorState, Annotation, Prec } from '@codemirror/state'
 import { defaultKeymap, historyKeymap } from '@codemirror/commands'
 import {
   autocompletion,
+  closeCompletion,
   completionStatus,
+  selectedCompletionIndex,
   type CompletionSource,
   type CompletionContext,
   type Completion,
@@ -17,6 +19,7 @@ import { useEditorSettings } from '../../composables/useAppSettings'
 import { createSpellLinter } from './spellLinter'
 import { useSpellcheck } from '../../composables/useSpellcheck'
 import { debounceAsync } from '../../utils/debounce'
+import { shouldEnterSubmit, shouldEscapeSubmit } from './keymapArbitration'
 
 const props = withDefaults(
   defineProps<{
@@ -269,21 +272,15 @@ const presetSource: CompletionSource = (context: CompletionContext) => {
 }
 
 function createKeymap() {
-  return keymap.of([
+  const baseBindings = keymap.of([
     {
       key: 'Enter',
       run: (targetView) => {
-        if (completionStatus(targetView.state) === 'active') return false
-        emit('enter')
-        return true
-      },
-    },
-    {
-      key: 'Escape',
-      run: (targetView) => {
-        if (completionStatus(targetView.state) === 'active') return false
-        emit('esc')
-        return true
+        if (shouldEnterSubmit(completionStatus(targetView.state), selectedCompletionIndex(targetView.state))) {
+          emit('enter')
+          return true
+        }
+        return false
       },
     },
     {
@@ -329,6 +326,30 @@ function createKeymap() {
     ...defaultKeymap,
     ...historyKeymap,
   ])
+
+  const escapeBinding = Prec.highest(
+    keymap.of([
+      {
+        key: 'Escape',
+        run: (targetView) => {
+          const status = completionStatus(targetView.state)
+          const selIndex = selectedCompletionIndex(targetView.state)
+
+          if (status === 'active' || status === 'pending') {
+            closeCompletion(targetView)
+          }
+
+          if (shouldEscapeSubmit(status, selIndex)) {
+            emit('esc')
+          }
+
+          return true
+        },
+      },
+    ]),
+  )
+
+  return [baseBindings, escapeBinding]
 }
 
 function createState() {
@@ -339,7 +360,7 @@ function createState() {
       spellLinter,
       EditorView.lineWrapping,
       EditorState.readOnly.of(false),
-      createKeymap(),
+      ...createKeymap(),
       autocompletion({
         override: [hybridSource, presetSource],
         closeOnBlur: true,
