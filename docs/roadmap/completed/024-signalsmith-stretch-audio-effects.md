@@ -1,7 +1,17 @@
+---
+id: ROADMAP-024
+status: completed
+created: 2026-07-12
+updated: 2026-07-25
+related_tasks: []
+---
+
 # ROADMAP-024 — Переход pitch/tempo на Signalsmith Stretch
 
-- **Дата:** 2026-07-12
-**Статус:** `completed` — pitch/tempo переведены на Signalsmith Stretch
+## Outcome
+
+Pitch/tempo переведены на Signalsmith Stretch.
+
 - **Область:** обработка готового TTS-аудио в `src-tauri/src/audio/effects.rs`
 
 ## Цель

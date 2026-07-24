@@ -34,3 +34,21 @@ NG под GPLv3. В bundle также входят Hunspell-словарь и ve
 - Инсталлятор содержит GPLv3 и third-party notices.
 - Проверка воспроизводимо строится из lockfiles и явного списка ресурсов.
 - Неизвестная или несовместимая лицензия блокирует release job.
+
+## Проверки
+
+Реализация добавляет два стабильных entry point:
+`scripts/generate-third-party-notices.ps1` для генерации и
+`scripts/check-third-party-notices.ps1` для проверки актуальности и полноты.
+После их добавления выполняются:
+
+```powershell
+./scripts/generate-third-party-notices.ps1
+./scripts/check-third-party-notices.ps1
+./scripts/build.ps1 -Mode release
+```
+
+После release-сборки вручную проверить наличие корневой GPLv3 и сгенерированных
+third-party notices в NSIS bundle. CI запускает check-entry-point и должен
+завершаться ошибкой при неизвестной лицензии или изменившемся lockfile без
+обновления notices.

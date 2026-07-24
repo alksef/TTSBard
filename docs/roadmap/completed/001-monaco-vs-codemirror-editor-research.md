@@ -1,7 +1,17 @@
+---
+id: ROADMAP-001
+status: completed
+created: 2026-06-28
+updated: 2026-07-25
+related_tasks: []
+---
+
 # ROADMAP-001 — Переход на продвинутый редактор
 
-**Дата:** 2026-06-28
-**Статус:** `completed` — исследование завершено, CodeMirror выбран
+## Outcome
+
+Исследование завершено, CodeMirror выбран.
+
 **Решение:** **CodeMirror 6** (подтверждено пользователем)
 **Связано:** `02-local-history-autocomplete.md`, `03-text-completion-without-ai.md`
 

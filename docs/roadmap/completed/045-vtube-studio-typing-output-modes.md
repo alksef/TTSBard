@@ -1,6 +1,16 @@
+---
+id: ROADMAP-045
+status: completed
+created: 2026-07-22
+updated: 2026-07-25
+related_tasks: []
+---
+
 # ROADMAP-045 — VTube Studio typing output modes
 
-**Статус:** `completed` — настраиваемые typing actions реализованы
+## Outcome
+
+Настраиваемые typing actions реализованы.
 
 ## Проблема
 

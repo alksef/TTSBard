@@ -1,6 +1,16 @@
+---
+id: ROADMAP-042
+status: completed
+created: 2026-07-22
+updated: 2026-07-25
+related_tasks: []
+---
+
 # ROADMAP-042 — VTube Studio typing-state и UI
 
-**Статус:** `completed` — typing-state и UI интеграции реализованы
+## Outcome
+
+Typing-state и UI интеграции реализованы.
 
 ## Что поставляем
 

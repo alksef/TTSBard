@@ -1,7 +1,17 @@
+---
+id: ROADMAP-002
+status: completed
+created: 2026-06-28
+updated: 2026-07-25
+related_tasks: []
+---
+
 # ROADMAP-002 — Локальная история ввода и автодополнение
 
-**Дата:** 2026-06-28
-**Статус:** `completed` — исследование завершено, локальная история реализована
+## Outcome
+
+Исследование завершено, локальная история реализована.
+
 **Решения:** Persistent (между запусками) · хранение в **Tauri-стор** (Rust, `%APPDATA%\ttsbard\`)
 · **Trie** (взвешенный) · поиск **по подстроке**
 **Связано:** `01-monaco-vs-codemirror-editor-research.md`, `03-text-completion-without-ai.md`

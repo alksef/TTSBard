@@ -11,7 +11,7 @@
 
 В настройках редактора поддерживается выбор источника проверки орфографии
 `online`/`offline` (поле `spellcheck_source`, бэкенд `SpellSource::Online|Offline`,
-`src-tauri/src/config/settings.rs:435-441`). Если пользователь включает режим
+`src-tauri/src/config/settings.rs`). Если пользователь включает режим
 **online**, проверка орфографии **молча не работает**: слова не подчёркиваются,
 quick-fix варианты замены не появляются — интерфейс ведёт себя так, будто
 орфография выключена, без какого-либо сообщения об ошибке.
@@ -22,7 +22,7 @@ quick-fix варианты замены не появляются — интер
 
 Фронт `useSpellcheck.ts` выбирает имя команды в зависимости от источника:
 
-`src/composables/useSpellcheck.ts:16-20`:
+`src/composables/useSpellcheck.ts`:
 ```ts
 async function checkWords(words: string[]): Promise<SpellResult[]> {
   if (source.value === 'off' || words.length === 0) return []
@@ -32,9 +32,8 @@ async function checkWords(words: string[]): Promise<SpellResult[]> {
 ```
 
 Команда **`check_spelling_online` в бэкенде не существует** — никогда не была
-реализована. В `invoke_handler` зарегистрирована только офлайн-команда:
-
-`src-tauri/src/lib.rs:451`:
+реализована. В `invoke_handler` из `src-tauri/src/lib.rs` зарегистрирована
+только офлайн-команда:
 ```rust
 commands::spellcheck::spellcheck,
 ```
@@ -46,7 +45,7 @@ commands::spellcheck::spellcheck,
 Следовательно, при `source === 'online'` `invoke('check_spelling_online')`
 падает с ошибкой «command not found» — но эта ошибка **глушится** в linter:
 
-`src/components/editor/spellLinter.ts:24-29`:
+`src/components/editor/spellLinter.ts`:
 ```ts
 let results: SpellResult[]
 try {
@@ -70,36 +69,37 @@ try {
    [ROADMAP-007](../roadmap/completed/007-editor-menu-ai-history-spellcheck.md)), а бэкенд реализовал
    только офлайн ([ROADMAP-008](../roadmap/completed/008-offline-spellcheck-hunspell-codemirror.md)).
 
-## Возможные подходы к исправлению (для плана)
+## Выбранное направление
 
-Решить в плане DeepSeek — выбрать один:
+До появления отдельного online-провайдера включённая проверка орфографии всегда
+использует существующую команду `spellcheck`. Значение настройки `online`,
+которое могло сохраниться в старом `settings.json`, временно трактуется как
+offline и больше не вызывает несуществующую Tauri-команду.
 
-- **A. Реализовать онлайн-провайдер (полноценный фикс).** Добавить
-  `#[tauri::command] check_spelling_online(words) -> Vec<SpellResult>`: HTTP-запрос
-  к LanguageTool или Yandex.Speller, с учётом сетевого прокси (по образцу
-  OpenAI/AI-запросов, `/tts/network/proxy`) и кэшем. Так описано в Stage 07.
-  Это «средняя/крупная» задача (HTTP + прокси + кэш + парсинг ответа).
-- **B. Убрать онлайн-режим из UI, пока провайдер не реализован.** Не давать
-  пользователю выбрать `online` (только off/offline), либо если выбран — трактовать
-  как off с предупреждением. Быстрый фикс, откладывает полноценную реализацию.
-- **C. Гибрид:** реализовать B сейчас (честное поведение) и завести отдельный
-  план на A.
+Это небольшой совместимый фикс: он устраняет гарантированный command-not-found,
+не вводит новый сетевой контракт и не требует миграции пользовательских настроек.
 
-Рекомендация — **B или C**: пока онлайн-провайдера нет, режим `online` не должен
-тихо падать. Полноценный провайдер (A) — отдельная задача со своим планом.
+## Scope
 
-> Связано: при добавлении UI-переключателя online/offline
-> (`SettingsAiPanel.vue`) важно учесть этот баг — переключатель не должен
-> предлагать нерабочий `online` без оговорки.
+- убрать выбор `check_spelling_online` из `src/composables/useSpellcheck.ts`;
+- сохранить состояния `off` и включённой offline-проверки;
+- добавить frontend-тесты для `offline`, legacy `online`, выключенного режима и
+  пустого списка слов;
+- при ошибке реальной команды не выдавать её за успешную online-проверку;
+  существующая политика отображения runtime-ошибки меняется только отдельной
+  задачей.
+
+## Не входит в задачу
+
+- реализация LanguageTool, Yandex.Speller или другого сетевого провайдера;
+- добавление новой Tauri-команды и сетевого proxy/cache слоя;
+- удаление `SpellSource::Online` из Rust DTO и миграция `settings.json`;
+- новый переключатель источника в UI.
 
 ## Затронутые файлы
 
-- `src/composables/useSpellcheck.ts:16-20` — выбор имени команды по `source`.
-- `src/components/editor/spellLinter.ts:24-29` — `catch { return [] }` глушит сбой.
-- `src-tauri/src/lib.rs:451` — `invoke_handler` (есть только `spellcheck`).
-- `src-tauri/src/commands/spellcheck.rs` — отсутствует `check_spelling_online`.
-- `src-tauri/src/config/settings.rs:435-456` — `SpellSource::Online|Offline`,
-  поле `spellcheck_source` (настройка живёт, команды для онлайн — нет).
+- `src/composables/useSpellcheck.ts` — выбор существующей команды;
+- frontend test-файл composable — regression-сценарии источника и выключения.
 
 ## Шаги воспроизведения
 
@@ -111,3 +111,20 @@ try {
 4. Ввести в редактор слово с намеренной ошибкой (например «приывет»).
 5. Наблюдать: подчёркивание **не появляется**, quick-fix недоступен — хотя
    орфография «включена». В офлайн-режиме то же слово подчёркивается.
+
+## Критерии готовности
+
+- при `spellcheck_enabled = true` значения `online` и `offline` вызывают только
+  зарегистрированную команду `spellcheck`;
+- при выключенной проверке и пустом списке слов IPC не вызывается;
+- существующий offline-сценарий не изменён;
+- в frontend отсутствует строка `check_spelling_online`;
+- regression-тесты и TypeScript build проходят.
+
+## Проверки
+
+```powershell
+rg -n "check_spelling_online" src src-tauri/src
+npm test
+npm run build
+```

@@ -1,7 +1,17 @@
+---
+id: ROADMAP-012
+status: completed
+created: 2026-07-08
+updated: 2026-07-25
+related_tasks: []
+---
+
 # ROADMAP-012 — Сохранение вкладок редактора
 
-**Дата:** 2026-07-08
-**Статус:** `completed` — исследование и persistence вкладок завершены
+## Outcome
+
+Исследование и persistence вкладок завершены.
+
 **Решение:** persist через **отдельный `tabs.json`** (HistoryManager-стиль), новый
 `TabManager` на бэкенде; фронт `useEditorTabs` переключается на `invoke`. Это **меняет**
 ранее зафиксированное в `06` решение «только в памяти сессии».

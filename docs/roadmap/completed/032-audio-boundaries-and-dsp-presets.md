@@ -1,7 +1,16 @@
+---
+id: ROADMAP-032
+status: completed
+created: 2026-07-13
+updated: 2026-07-25
+related_tasks: []
+---
+
 # ROADMAP-032 — Границы аудиофраз и DSP-пресеты
 
-**Дата:** 2026-07-13  
-**Статус:** `completed` — основной scope реализован; overlap-crossfade и lookahead отложены
+## Outcome
+
+Основной scope реализован; overlap-crossfade и lookahead отложены.
 
 ## 1. Цель
 

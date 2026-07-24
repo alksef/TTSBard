@@ -9,6 +9,33 @@
 - [`rejected/`](./rejected/) — осознанно отклонённые направления с причиной и
   условиями возможного пересмотра.
 
+## Формат roadmap item
+
+Каждый item начинается с canonical YAML front matter:
+
+```yaml
+---
+id: ROADMAP-047
+status: completed
+created: 2026-07-24
+updated: 2026-07-25
+related_tasks: []
+---
+```
+
+Номер в `id` совпадает с трёхзначным префиксом имени файла. `related_tasks`
+содержит только идентификаторы долговечных задач вида `TASK-NNN`.
+
+- В `active/` допустимы `exploring`, `planned`, `in_progress` и `deferred`.
+- В `completed/` допустимы `completed` и `superseded`; завершённый item содержит
+  непустой раздел `Outcome`.
+- В `rejected/` допустимы `rejected` и `superseded`; отклонённый item содержит
+  раздел `Reconsider when`.
+- `superseded` item обязательно ссылается на заменивший roadmap item или
+  decision.
+
+Формат и соответствие каталога статусу проверяет `scripts/check-docs.ps1`.
+
 ## Активные направления
 
 | Item | Статус | Следующий шаг |

@@ -22,3 +22,9 @@ scope. В dirty worktree команда `git diff HEAD` без ограниче�
 несвязанные изменения в commit. При замечаниях формулируется следующий узкий
 corrective task; исправлять их можно только в соответствии с текущей ролью и
 разрешённым scope.
+
+Канонический порядок независимой проверки задан в
+[`docs/development/ai-workflow.md`](../../docs/development/ai-workflow.md), а
+профиль рисков и формат локального verdict — в
+[шаблоне code review](../../docs/development/templates/code-review.md). Этот
+skill уточняет task-scoped работу с diff и не заменяет эти документы.

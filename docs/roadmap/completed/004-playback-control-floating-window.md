@@ -1,7 +1,17 @@
+---
+id: ROADMAP-004
+status: completed
+created: 2026-06-28
+updated: 2026-07-25
+related_tasks: []
+---
+
 # ROADMAP-004 — Очередь и управление воспроизведением
 
-**Дата:** 2026-06-28
-**Статус:** `completed` — исследование и основной scope завершены
+## Outcome
+
+Исследование и основной scope завершены.
+
 **Решение:** **Вариант 1** — PlaybackManager + новое плавающее окно `playback-control`.
 **Из research:** `docs/research/01-...` → идея **A** (Speech Queue + Interrupt)
 **Связано:** [ROADMAP-005](./005-phrase-history.md),

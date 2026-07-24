@@ -1,7 +1,15 @@
+---
+id: ROADMAP-031
+status: deferred
+created: 2026-07-13
+updated: 2026-07-25
+related_tasks: []
+---
+
 # ROADMAP-031 — Исследование Resemble Enhance для TTSBard
 
-**Дата:** 2026-07-13  
-**Статус:** `deferred` — исследование завершено, реализация отложена до отдельного proof-of-concept
+Исследование завершено, реализация отложена до отдельного proof-of-concept.
+
 **Источник:** [официальный репозиторий Resemble Enhance](https://github.com/resemble-ai/resemble-enhance)
 
 ## 1. Вывод для обсуждения

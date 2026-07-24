@@ -1,6 +1,16 @@
+---
+id: ROADMAP-035
+status: completed
+created: 2026-07-22
+updated: 2026-07-25
+related_tasks: []
+---
+
 # ROADMAP-035 — Декомпозиция AudioPanel на подпанели
 
-**Статус:** `completed` — AudioPanel разделён на тематические подпанели
+## Outcome
+
+AudioPanel разделён на тематические подпанели.
 
 ## Наблюдение
 

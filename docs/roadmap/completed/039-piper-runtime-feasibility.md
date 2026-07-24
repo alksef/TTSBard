@@ -1,7 +1,16 @@
+---
+id: ROADMAP-039
+status: completed
+created: 2026-07-15
+updated: 2026-07-25
+related_tasks: []
+---
+
 # ROADMAP-039 — Feasibility встроенного Piper runtime
 
-**Дата:** 2026-07-15  
-**Статус:** `completed` — runtime реализован, лицензирование разрешено переходом на GPL-3.0-only
+## Outcome
+
+Runtime реализован, лицензирование разрешено переходом на GPL-3.0-only.
 
 ## Результат проверки
 
@@ -18,9 +27,10 @@ HTTP-сервера.
   → WAV
 ```
 
-На модели из `/home/aefimov/ProjectsMy/loca_tts` standalone smoke-test успешно
-получил phonemes для `Привет мир`, выполнил ONNX inference и получил 1280 samples
-при 22050 Hz.
+На локальной тестовой Piper-модели standalone smoke-test успешно получил
+phonemes для `Привет мир`, выполнил ONNX inference и получил 1280 samples при
+22050 Hz. Абсолютный путь разработчика не является частью воспроизводимого
+контракта.
 
 ## Выбранный технический стек для spike
 

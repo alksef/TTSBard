@@ -1,6 +1,16 @@
+---
+id: ROADMAP-044
+status: completed
+created: 2026-07-22
+updated: 2026-07-25
+related_tasks: []
+---
+
 # ROADMAP-044 — VTube Studio lifecycle подключения
 
-**Статус:** `completed` — runtime lifecycle и UI-управление подключением реализованы
+## Outcome
+
+Runtime lifecycle и UI-управление подключением реализованы.
 
 ## Проблема
 

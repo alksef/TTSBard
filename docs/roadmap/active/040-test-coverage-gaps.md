@@ -1,8 +1,14 @@
+---
+id: ROADMAP-040
+status: in_progress
+created: 2026-07-18
+updated: 2026-07-25
+related_tasks: []
+---
+
 # ROADMAP-040 — Пробелы тестового покрытия
 
-Дата: 2026-07-18
-
-**Статус:** `in_progress` — Round 1 завершён, P1/P2 остаются в roadmap
+Round 1 завершён, P1/P2 остаются в roadmap.
 
 ## Текущее состояние
 
@@ -64,4 +70,3 @@ Round 1 завершён 2026-07-18:
   `debounceAsync`; production-дефект исправлен минимально;
 - независимо подтверждены `npm test` (10/10), `npm run build`,
   `cargo test --lib` (359/359) и `cargo check --locked`.
-

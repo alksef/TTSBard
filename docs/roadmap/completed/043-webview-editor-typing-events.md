@@ -1,6 +1,16 @@
+---
+id: ROADMAP-043
+status: completed
+created: 2026-07-22
+updated: 2026-07-25
+related_tasks: []
+---
+
 # ROADMAP-043 — Единый typing-state для VTube Studio и WebView
 
-**Статус:** `completed` — typing-state раздаётся независимым consumers
+## Outcome
+
+Typing-state раздаётся независимым consumers.
 
 ## Цель
 

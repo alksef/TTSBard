@@ -1,7 +1,17 @@
+---
+id: ROADMAP-029
+status: completed
+created: 2026-07-13
+updated: 2026-07-25
+related_tasks: []
+---
+
 # ROADMAP-029 — DSP-постобработка TTS
 
-**Дата:** 2026-07-13  
-**Статус:** `completed` — DSP-постобработка и настройки реализованы
+## Outcome
+
+DSP-постобработка и настройки реализованы.
+
 **Область:** `src-tauri/src/audio/effects.rs`, настройки аудиоэффектов, `AudioPanel.vue`
 
 ## 1. Зачем это нужно

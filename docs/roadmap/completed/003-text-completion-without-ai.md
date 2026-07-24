@@ -1,7 +1,17 @@
+---
+id: ROADMAP-003
+status: completed
+created: 2026-06-28
+updated: 2026-07-25
+related_tasks: []
+---
+
 # ROADMAP-003 — Автодополнение и продолжение текста
 
-**Дата:** 2026-06-28
-**Статус:** `completed` — исследование завершено
+## Outcome
+
+Исследование завершено.
+
 **Решение:** **Гибрид со слоями** (по рекомендации) — базовый слой без AI + опциональный AI-слой.
 **Связано:** `01-monaco-vs-codemirror-editor-research.md`, `02-local-history-autocomplete.md`
 

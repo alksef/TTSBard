@@ -1,7 +1,17 @@
+---
+id: ROADMAP-025
+status: completed
+created: 2026-07-12
+updated: 2026-07-25
+related_tasks: []
+---
+
 # ROADMAP-025 — PCM между audio-effects и playback
 
-- **Дата:** 2026-07-12
-**Статус:** `completed` — реализовано в PCM playback pipeline
+## Outcome
+
+Реализовано в PCM playback pipeline.
+
 - **Область:** `src-tauri/src/commands/tts_pipeline.rs`, audio playback pipeline
 
 ## Цель

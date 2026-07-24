@@ -1,7 +1,16 @@
+---
+id: ROADMAP-022
+status: completed
+created: 2026-07-12
+updated: 2026-07-25
+related_tasks: []
+---
+
 # ROADMAP-022 — Вкладки эффектов и предпрослушивание
 
-**Статус:** `completed` — вкладки эффектов и inline preview реализованы
-**Дата:** 2026-07-12
+## Outcome
+
+Вкладки эффектов и inline preview реализованы.
 
 ## Проблема текущего интерфейса
 

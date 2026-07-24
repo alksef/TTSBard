@@ -1,6 +1,16 @@
+---
+id: ROADMAP-034
+status: completed
+created: 2026-07-22
+updated: 2026-07-25
+related_tasks: []
+---
+
 # ROADMAP-034 — Silero voice metadata и playback recent dedup
 
-**Статус:** `completed` — metadata голоса и дедупликация реализованы
+## Outcome
+
+Metadata голоса и дедупликация реализованы.
 
 ## Scope
 

@@ -1,7 +1,16 @@
+---
+id: ROADMAP-036
+status: completed
+created: 2026-07-17
+updated: 2026-07-25
+related_tasks: []
+---
+
 # ROADMAP-036 — Доработки Telegram-подключения
 
-**Дата:** 2026-07-17
-**Статус:** `completed` — основной auth flow реализован
+## Outcome
+
+Основной auth flow реализован.
 
 ## Цель
 
