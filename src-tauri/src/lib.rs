@@ -19,6 +19,7 @@ mod setup;
 mod signalsmith;
 mod soundpanel;
 mod soundpanel_window;
+pub mod speech_queue;
 mod spellcheck;
 mod state;
 mod tabs;
@@ -285,6 +286,10 @@ pub fn run() {
     let tab_manager = Arc::new(tabs::TabManager::new(tabs_path));
     let tabs_state = commands::tabs::TabsState(tab_manager);
 
+    let speech_queue = commands::speech_queue::SpeechQueueState(Arc::new(parking_lot::Mutex::new(
+        speech_queue::SpeechQueue::new(),
+    )));
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -296,6 +301,7 @@ pub fn run() {
         .manage(soundpanel_state)
         .manage(history_state)
         .manage(tabs_state)
+        .manage(speech_queue)
         .invoke_handler(tauri::generate_handler![
             greet,
             speak_text,
@@ -566,6 +572,12 @@ pub fn run() {
             commands::playback::get_playback_state,
             // Spellcheck command
             commands::spellcheck::spellcheck,
+            // Speech queue commands
+            commands::speech_queue::submit_speech,
+            commands::speech_queue::get_speech_queue_state,
+            commands::speech_queue::retry_speech_job,
+            commands::speech_queue::cancel_speech_job,
+            commands::speech_queue::skip_speech_job,
         ])
         .setup({
             let settings_clone = settings.clone();

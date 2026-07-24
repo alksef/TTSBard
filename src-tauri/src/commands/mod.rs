@@ -15,6 +15,7 @@ pub mod playback;
 pub mod playback_window;
 pub mod preprocessor;
 pub mod proxy;
+pub mod speech_queue;
 pub mod spellcheck;
 pub mod tabs;
 pub mod telegram;
@@ -133,7 +134,7 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
     Ok(())
 }
 
-fn get_provider_voice_names(
+pub(crate) fn get_provider_voice_names(
     state: &AppState,
     settings: &crate::config::AppSettings,
 ) -> (String, String) {
