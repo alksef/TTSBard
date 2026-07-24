@@ -13,7 +13,7 @@ use grammers_session::updates::UpdatesLike;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{broadcast, Mutex};
 use tracing::{debug, error, info, warn};
 
 // NOTE: api_id is now stored in settings.json (settings.tts.telegram.api_id)
@@ -140,7 +140,8 @@ impl ProxyConfig {
 pub struct TelegramClient {
     pub(crate) pool_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     pub(crate) client: Arc<Mutex<Option<Client>>>,
-    pub(crate) updates: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<UpdatesLike>>>>,
+    dispatcher_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    broadcast_tx: Arc<Mutex<Option<tokio::sync::broadcast::Sender<Arc<UpdatesLike>>>>>,
     login_token: Arc<Mutex<Option<LoginToken>>>,
     password_token: Arc<Mutex<Option<PasswordToken>>>,
     pub(crate) api_id: Arc<Mutex<Option<u32>>>,
@@ -149,6 +150,8 @@ pub struct TelegramClient {
     session_path: Arc<Mutex<Option<PathBuf>>>,
     /// Current proxy status
     proxy_status: Arc<Mutex<ProxyStatus>>,
+    /// Serializes /limits request-response pairs so only one active at a time
+    pub(crate) limits_mutex: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl fmt::Debug for TelegramClient {
@@ -171,7 +174,8 @@ impl TelegramClient {
         Self {
             pool_task: Arc::new(Mutex::new(None)),
             client: Arc::new(Mutex::new(None)),
-            updates: Arc::new(Mutex::new(None)),
+            dispatcher_handle: Arc::new(Mutex::new(None)),
+            broadcast_tx: Arc::new(Mutex::new(None)),
             login_token: Arc::new(Mutex::new(None)),
             password_token: Arc::new(Mutex::new(None)),
             api_id: Arc::new(Mutex::new(None)),
@@ -179,6 +183,7 @@ impl TelegramClient {
             phone_number: Arc::new(Mutex::new(None)),
             session_path: Arc::new(Mutex::new(None)),
             proxy_status: Arc::new(Mutex::new(ProxyStatus::default())),
+            limits_mutex: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -359,6 +364,24 @@ impl TelegramClient {
             .map_err(|e| format!("Не удалось создать сессию: {}", e))?;
         let session = Arc::new(session);
 
+        // Abort old dispatcher and pool task on reinitialization
+        {
+            let mut old_disp = self.dispatcher_handle.lock().await;
+            if let Some(handle) = old_disp.take() {
+                handle.abort();
+            }
+        }
+        {
+            let mut old_pool = self.pool_task.lock().await;
+            if let Some(handle) = old_pool.take() {
+                handle.abort();
+            }
+        }
+        // Drop old broadcast sender so pending subscribers get Closed
+        {
+            *self.broadcast_tx.lock().await = None;
+        }
+
         // Создаём SenderPool with appropriate configuration
         let conn_params = proxy_config.to_connection_params();
         let SenderPool {
@@ -381,8 +404,28 @@ impl TelegramClient {
             }
         };
 
+        // Create broadcast channel for update fan-out
+        let (broadcast_tx, _) = broadcast::channel(256);
+
         // Создаём клиент
         let client = Client::new(handle);
+
+        // Spawn dispatcher: reads from UnboundedReceiver, fans out via broadcast
+        let dispatcher_tx = broadcast_tx.clone();
+        let dispatcher = tokio::spawn(async move {
+            let mut rx = updates;
+            loop {
+                match rx.recv().await {
+                    Some(update) => {
+                        let _ = dispatcher_tx.send(Arc::new(update));
+                    }
+                    None => {
+                        debug!("Update dispatcher: raw receiver closed, exiting");
+                        break;
+                    }
+                }
+            }
+        });
 
         // Запускаем runner
         let pool_task = tokio::spawn(async move {
@@ -391,7 +434,8 @@ impl TelegramClient {
 
         *self.pool_task.lock().await = Some(pool_task);
         *self.client.lock().await = Some(client);
-        *self.updates.lock().await = Some(updates);
+        *self.broadcast_tx.lock().await = Some(broadcast_tx);
+        *self.dispatcher_handle.lock().await = Some(dispatcher);
 
         // Проверяем, авторизован ли уже пользователь (только если есть phone)
         if phone.is_some() {
@@ -752,6 +796,17 @@ impl TelegramClient {
 
     /// Отключение клиента
     pub async fn disconnect(&self) -> Result<OperationResult, String> {
+        // Abort dispatcher so it stops reading the raw receiver
+        {
+            let mut old_disp = self.dispatcher_handle.lock().await;
+            if let Some(handle) = old_disp.take() {
+                handle.abort();
+            }
+        }
+        // Drop broadcast sender so pending subscribers get Closed
+        {
+            *self.broadcast_tx.lock().await = None;
+        }
         // Завершаем задачу пула
         let mut pool_task = self.pool_task.lock().await;
         if let Some(task) = pool_task.take() {
@@ -760,7 +815,6 @@ impl TelegramClient {
 
         // Сбрасываем состояние
         *self.client.lock().await = None;
-        *self.updates.lock().await = None;
         *self.login_token.lock().await = None;
         *self.password_token.lock().await = None;
         *self.api_id.lock().await = None;
@@ -857,6 +911,18 @@ impl TelegramClient {
     /// Get current proxy status
     pub async fn get_proxy_status(&self) -> ProxyStatus {
         self.proxy_status.lock().await.clone()
+    }
+
+    /// Subscribe to Telegram updates via the broadcast dispatcher.
+    /// Returns an error if the update stream is not initialized.
+    pub async fn subscribe_updates(
+        &self,
+    ) -> Result<tokio::sync::broadcast::Receiver<Arc<UpdatesLike>>, String> {
+        let guard = self.broadcast_tx.lock().await;
+        guard
+            .as_ref()
+            .map(|tx| tx.subscribe())
+            .ok_or_else(|| "Update stream not initialized".to_string())
     }
 }
 
@@ -981,7 +1047,8 @@ mod tests {
         rt.block_on(async {
             assert!(client.pool_task.lock().await.is_none());
             assert!(client.client.lock().await.is_none());
-            assert!(client.updates.lock().await.is_none());
+            assert!(client.dispatcher_handle.lock().await.is_none());
+            assert!(client.broadcast_tx.lock().await.is_none());
             assert!(client.login_token.lock().await.is_none());
             assert!(client.password_token.lock().await.is_none());
             assert!(client.api_id.lock().await.is_none());

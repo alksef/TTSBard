@@ -2,6 +2,8 @@ use super::client::TelegramClient;
 use super::types::{CurrentVoice, Limits, TtsResult};
 use grammers_session::updates::UpdatesLike;
 use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::sync::broadcast;
 use tracing::{debug, error, info, trace, warn};
 
 /// Имя бота Silero TTS в Telegram
@@ -28,9 +30,8 @@ impl SileroTtsBot {
     /// Синтез речи через Telegram бота
     /// Возвращает путь к скачанному аудиофайлу
     pub async fn synthesize(client: &TelegramClient, text: &str) -> Result<TtsResult, String> {
-        info!(text, "Starting TTS synthesis");
+        info!("Starting TTS synthesis");
 
-        // Валидация входного текста
         let text = text.trim();
         if text.is_empty() {
             return Ok(TtsResult::error("Text cannot be empty".to_string()));
@@ -42,11 +43,12 @@ impl SileroTtsBot {
             ));
         }
 
-        // 1. Отправляем текст боту
-        Self::send_text_to_bot(client, text).await?;
+        let mut rx = client.subscribe_updates().await?;
 
-        // 2. Ждем голосовое сообщение от бота
-        let voice_result = Self::wait_for_voice_message(client, 30).await?;
+        let (sent_msg_id, bot_user_id) = Self::send_text_to_bot(client, text).await?;
+
+        let voice_result =
+            Self::wait_for_voice_message(&mut rx, 30, sent_msg_id, bot_user_id).await?;
 
         // 3. Скачиваем аудиофайл во временную папку
         let audio_path = Self::download_voice_to_temp(client, &voice_result).await?;
@@ -57,24 +59,28 @@ impl SileroTtsBot {
     }
 
     /// Отправить текст боту
-    async fn send_text_to_bot(client: &TelegramClient, text: &str) -> Result<(), String> {
-        info!(text, "Sending text to bot");
+    /// Возвращает (message_id, bot_user_id)
+    async fn send_text_to_bot(client: &TelegramClient, text: &str) -> Result<(i32, i64), String> {
+        info!("Sending text to bot");
 
-        let client_inner = client.client.lock().await;
-        let client_inner = client_inner
-            .as_ref()
-            .ok_or_else(|| "Client not initialized".to_string())?;
+        let client_inner = {
+            let guard = client.client.lock().await;
+            guard
+                .clone()
+                .ok_or_else(|| "Client not initialized".to_string())?
+        };
 
-        // Разрешаем username бота
         let bot = client_inner
             .resolve_username(BOT_USERNAME)
             .await
             .map_err(|e| format!("Failed to resolve bot: {}", e))?
             .ok_or_else(|| "Bot not found".to_string())?;
 
-        debug!(username = ?bot.username(), "Bot resolved");
+        let bot_user_id = bot
+            .id()
+            .bare_id()
+            .ok_or_else(|| "Bot PeerId is the self-user sentinel".to_string())?;
 
-        // Отправляем сообщение - используем bot.to_ref() для получения PeerRef
         let bot_ref = bot
             .to_ref()
             .await
@@ -84,30 +90,24 @@ impl SileroTtsBot {
             .await
             .map_err(|e| format!("Failed to send message: {}", e))?;
 
-        trace!(?result, "Message sent");
+        let msg_id = result.id();
 
-        Ok(())
+        Ok((msg_id, bot_user_id))
     }
 
     /// Ожидать голосовое сообщение от бота с таймаутом
     async fn wait_for_voice_message(
-        client: &TelegramClient,
+        rx: &mut broadcast::Receiver<Arc<UpdatesLike>>,
         timeout_secs: u64,
+        sent_msg_id: i32,
+        bot_user_id: i64,
     ) -> Result<VoiceMessageResult, String> {
-        use tokio::sync::mpsc::UnboundedReceiver;
-
-        info!(timeout_secs, "Waiting for voice message");
+        info!(timeout_secs, sent_msg_id, "Waiting for voice message");
 
         let start_time = std::time::Instant::now();
         let total_timeout = std::time::Duration::from_secs(timeout_secs);
 
         loop {
-            let mut updates_opt = client.updates.lock().await;
-            let updates: &mut UnboundedReceiver<UpdatesLike> = updates_opt
-                .as_mut()
-                .ok_or_else(|| "Updates channel not initialized".to_string())?;
-
-            // Проверяем общий таймаут
             let elapsed = start_time.elapsed();
             if elapsed >= total_timeout {
                 warn!("Timeout waiting for voice message");
@@ -116,9 +116,11 @@ impl SileroTtsBot {
 
             let remaining = total_timeout.saturating_sub(elapsed);
 
-            match tokio::time::timeout(remaining, updates.recv()).await {
-                Ok(Some(update_like)) => {
-                    if let Some(result) = Self::extract_voice_from_update(&update_like) {
+            match tokio::time::timeout(remaining, rx.recv()).await {
+                Ok(Ok(update)) => {
+                    if let Some(result) =
+                        Self::extract_voice_from_update(&update, sent_msg_id, bot_user_id)
+                    {
                         debug!(
                             "[SILORO] Voice message found: file_id={}, msg_id={}, mime={}",
                             result.file_id, result.msg_id, result.mime_type
@@ -126,9 +128,13 @@ impl SileroTtsBot {
                         return Ok(result);
                     }
                 }
-                Ok(None) => {
-                    warn!("Updates channel closed");
-                    return Err("Updates channel closed".to_string());
+                Ok(Err(broadcast::error::RecvError::Closed)) => {
+                    warn!("Update stream closed");
+                    return Err("Update stream closed".to_string());
+                }
+                Ok(Err(broadcast::error::RecvError::Lagged(n))) => {
+                    warn!(skipped = n, "Broadcast receiver lagged");
+                    return Err(format!("Update stream lagged (skipped {} messages)", n));
                 }
                 Err(_) => {
                     // Таймаут одной итерации - продолжаем ждать
@@ -140,13 +146,16 @@ impl SileroTtsBot {
 
     /// Извлечь информацию о голосовом сообщении из обновления
     #[allow(clippy::collapsible_match)]
-    fn extract_voice_from_update(update_like: &UpdatesLike) -> Option<VoiceMessageResult> {
+    fn extract_voice_from_update(
+        update_like: &UpdatesLike,
+        sent_msg_id: i32,
+        bot_user_id: i64,
+    ) -> Option<VoiceMessageResult> {
         if let UpdatesLike::Updates(updates_enum) = update_like {
             if let grammers_tl_types::enums::Updates::Updates(u) = updates_enum {
                 for update in &u.updates {
                     if let grammers_tl_types::enums::Update::NewMessage(msg) = update {
                         if let grammers_tl_types::enums::Message::Message(m) = &msg.message {
-                            // Проверяем, что это сообщение от бота и содержит голосовое
                             if let Some(media) = &m.media {
                                 if let grammers_tl_types::enums::MessageMedia::Document(doc_media) =
                                     media
@@ -154,13 +163,44 @@ impl SileroTtsBot {
                                     if let Some(grammers_tl_types::enums::Document::Document(doc)) =
                                         &doc_media.document
                                     {
-                                        let mime = &doc.mime_type;
-                                        // Принимаем и OGG и MP3
-                                        if mime == "audio/ogg" || mime == "audio/mpeg" {
+                                        let peer_user_id = match &m.peer_id {
+                                            grammers_tl_types::enums::Peer::User(u) => {
+                                                Some(u.user_id)
+                                            }
+                                            _ => None,
+                                        };
+                                        let reply_to_msg_id = match &m.reply_to {
+                                            Some(
+                                                grammers_tl_types::enums::MessageReplyHeader::Header(h),
+                                            ) => h.reply_to_msg_id,
+                                            _ => None,
+                                        };
+                                        let matches_request = is_matching_audio_response(
+                                            m.out,
+                                            m.id,
+                                            peer_user_id,
+                                            reply_to_msg_id,
+                                            &doc.mime_type,
+                                            sent_msg_id,
+                                            bot_user_id,
+                                        );
+                                        trace!(
+                                            target: "silero_correlation",
+                                            candidate_msg_id = m.id,
+                                            sent_msg_id,
+                                            peer_user_id,
+                                            bot_user_id,
+                                            reply_to_msg_id,
+                                            outgoing = m.out,
+                                            mime = %doc.mime_type,
+                                            matches_request,
+                                            "Evaluated Silero audio response candidate"
+                                        );
+                                        if matches_request {
                                             return Some(VoiceMessageResult {
                                                 file_id: doc.id.to_string(),
                                                 msg_id: m.id,
-                                                mime_type: mime.clone(),
+                                                mime_type: doc.mime_type.clone(),
                                             });
                                         }
                                     }
@@ -184,12 +224,13 @@ impl SileroTtsBot {
             voice.file_id, voice.msg_id, voice.mime_type
         );
 
-        let client_inner = client.client.lock().await;
-        let client_inner = client_inner
-            .as_ref()
-            .ok_or_else(|| "Client not initialized".to_string())?;
+        let client_inner = {
+            let guard = client.client.lock().await;
+            guard
+                .clone()
+                .ok_or_else(|| "Client not initialized".to_string())?
+        };
 
-        // Разрешаем бота
         let bot = client_inner
             .resolve_username(BOT_USERNAME)
             .await
@@ -299,6 +340,83 @@ impl SileroTtsBot {
     }
 }
 
+/// Pure matching rules for Silero audio responses.
+/// Checks peer, message ID ordering, reply-to header, and MIME type.
+fn is_matching_audio_response(
+    msg_out: bool,
+    msg_id: i32,
+    peer_user_id: Option<i64>,
+    reply_to_msg_id: Option<i32>,
+    mime_type: &str,
+    sent_msg_id: i32,
+    bot_user_id: i64,
+) -> bool {
+    if msg_out {
+        return false;
+    }
+    if mime_type != "audio/ogg" && mime_type != "audio/mpeg" {
+        return false;
+    }
+    if peer_user_id != Some(bot_user_id) {
+        return false;
+    }
+    if msg_id <= sent_msg_id {
+        return false;
+    }
+    if reply_to_msg_id != Some(sent_msg_id) {
+        return false;
+    }
+    true
+}
+
+/// Pure matching rules for reply-less /limits responses.
+/// Checks direction, peer, message ID ordering, absence of media and inline menu,
+/// and that text parses as limits.
+fn is_matching_limits_response(
+    msg_out: bool,
+    msg_id: i32,
+    peer_user_id: Option<i64>,
+    has_media: bool,
+    has_reply_markup: bool,
+    text: &str,
+    sent_msg_id: i32,
+    bot_user_id: i64,
+) -> bool {
+    if msg_out {
+        return false;
+    }
+    if peer_user_id != Some(bot_user_id) {
+        return false;
+    }
+    if msg_id <= sent_msg_id {
+        return false;
+    }
+    if has_media || has_reply_markup {
+        return false;
+    }
+    if text.is_empty() {
+        return false;
+    }
+    parse_limits_info(text).is_some()
+}
+
+/// Pure matching rules for text replies (used by set-speaker).
+/// Checks direction, peer user ID, message ID ordering, and reply-to header.
+/// Shared by full message (NewMessage/EditMessage) and short message (UpdateShortMessage) paths.
+fn is_matching_text_reply(
+    msg_out: bool,
+    msg_id: i32,
+    user_id: i64,
+    reply_to_msg_id: Option<i32>,
+    expected_msg_id: i32,
+    bot_user_id: i64,
+) -> bool {
+    !msg_out
+        && user_id == bot_user_id
+        && msg_id > expected_msg_id
+        && reply_to_msg_id == Some(expected_msg_id)
+}
+
 impl Default for SileroTtsBot {
     fn default() -> Self {
         Self::new()
@@ -309,12 +427,13 @@ impl Default for SileroTtsBot {
 /// Парсит: "Выбранный голос: /speaker hamster_clerk\nНаходится в паке: Хомяки"
 /// Таймаут 1 минута на ожидание ответа
 pub async fn get_current_voice(client: &TelegramClient) -> Result<Option<CurrentVoice>, String> {
-    use tokio::sync::mpsc::UnboundedReceiver;
-
     info!("Getting current voice from bot");
 
-    // 1. Отправляем /speaker и получаем ID сообщения
-    let sent_message_id = send_speaker_command(client).await?;
+    // 0. Subscribe BEFORE sending to avoid missing fast response
+    let mut rx = client.subscribe_updates().await?;
+
+    // 1. Отправляем /speaker и получаем ID сообщения и bot_user_id
+    let (sent_message_id, bot_user_id) = send_speaker_command(client).await?;
 
     info!(sent_message_id, "/speaker sent, waiting for text response");
 
@@ -323,12 +442,6 @@ pub async fn get_current_voice(client: &TelegramClient) -> Result<Option<Current
     let total_timeout = std::time::Duration::from_secs(60); // 1 минута
 
     loop {
-        let mut updates_opt = client.updates.lock().await;
-        let updates: &mut UnboundedReceiver<UpdatesLike> = updates_opt
-            .as_mut()
-            .ok_or_else(|| "Updates channel not initialized".to_string())?;
-
-        // Проверяем общий таймаут
         let elapsed = start_time.elapsed();
         if elapsed >= total_timeout {
             warn!("Timeout (60s) waiting for voice info");
@@ -337,26 +450,25 @@ pub async fn get_current_voice(client: &TelegramClient) -> Result<Option<Current
 
         let remaining = total_timeout.saturating_sub(elapsed);
 
-        match tokio::time::timeout(remaining, updates.recv()).await {
-            Ok(Some(update_like)) => {
-                // Логируем все incoming updates для отладки
-                trace!(?update_like, "Received update");
-
-                // Проверяем, есть ли текстовое сообщение с информацией о голосе
-                // Передаем expected_msg_id чтобы проверить что это ответ на наше сообщение
+        match tokio::time::timeout(remaining, rx.recv()).await {
+            Ok(Ok(update)) => {
+                trace!("Received update");
                 if let Some(voice_info) =
-                    extract_voice_info_from_update(&update_like, sent_message_id)
+                    extract_voice_info_from_update(&update, sent_message_id, bot_user_id)
                 {
-                    info!(voice_info.name, voice_info.id, "Voice info found");
-                    return Ok(Some(voice_info)); // Нашли - возвращаем Some
+                    info!("Voice info found");
+                    return Ok(Some(voice_info));
                 }
             }
-            Ok(None) => {
-                warn!("Updates channel closed");
-                return Err("Updates channel closed".to_string());
+            Ok(Err(broadcast::error::RecvError::Closed)) => {
+                warn!("Update stream closed");
+                return Err("Update stream closed".to_string());
+            }
+            Ok(Err(broadcast::error::RecvError::Lagged(n))) => {
+                warn!(skipped = n, "Broadcast receiver lagged");
+                return Err(format!("Update stream lagged (skipped {} messages)", n));
             }
             Err(_) => {
-                // Таймаут одной итерации - продолжаем ждать
                 continue;
             }
         }
@@ -364,25 +476,28 @@ pub async fn get_current_voice(client: &TelegramClient) -> Result<Option<Current
 }
 
 /// Отправить команду /speaker боту
-/// Возвращает ID отправленного сообщения
-async fn send_speaker_command(client: &TelegramClient) -> Result<i32, String> {
+/// Возвращает (sent_message_id, bot_user_id)
+async fn send_speaker_command(client: &TelegramClient) -> Result<(i32, i64), String> {
     info!("Sending /speaker to bot");
 
-    let client_inner = client.client.lock().await;
-    let client_inner = client_inner
-        .as_ref()
-        .ok_or_else(|| "Client not initialized".to_string())?;
+    let client_inner = {
+        let guard = client.client.lock().await;
+        guard
+            .clone()
+            .ok_or_else(|| "Client not initialized".to_string())?
+    };
 
-    // Разрешаем username бота
     let bot = client_inner
         .resolve_username(BOT_USERNAME)
         .await
         .map_err(|e| format!("Failed to resolve bot: {}", e))?
         .ok_or_else(|| "Bot not found".to_string())?;
 
-    debug!(username = ?bot.username(), "Bot resolved");
+    let bot_user_id = bot
+        .id()
+        .bare_id()
+        .ok_or_else(|| "Bot PeerId is the self-user sentinel".to_string())?;
 
-    // Отправляем сообщение
     let bot_ref = bot
         .to_ref()
         .await
@@ -393,18 +508,19 @@ async fn send_speaker_command(client: &TelegramClient) -> Result<i32, String> {
         .map_err(|e| format!("Failed to send message: {}", e))?;
 
     let msg_id = result.id();
-    trace!(msg_id, "Message sent");
 
-    Ok(msg_id)
+    Ok((msg_id, bot_user_id))
 }
 
 /// Извлечь информацию о текущем голосе из текстового сообщения
 /// Парсит: "Выбранный голос: /speaker hamster_clerk\nНаходится в паке: Хомяки"
-/// Проверяет что сообщение является ответом на сообщение с expected_msg_id
+/// Проверяет что сообщение является ответом на сообщение с expected_msg_id,
+/// что оно входящее, и от Silero бота.
 #[allow(clippy::collapsible_match)]
 fn extract_voice_info_from_update(
     update_like: &UpdatesLike,
     expected_msg_id: i32,
+    bot_user_id: i64,
 ) -> Option<CurrentVoice> {
     if let UpdatesLike::Updates(updates_enum) = update_like {
         if let grammers_tl_types::enums::Updates::Updates(u) = updates_enum {
@@ -417,6 +533,20 @@ fn extract_voice_info_from_update(
                             continue;
                         }
 
+                        // Validate peer is Silero bot
+                        let peer_user_id = match &m.peer_id {
+                            grammers_tl_types::enums::Peer::User(u) => Some(u.user_id),
+                            _ => None,
+                        };
+                        if peer_user_id != Some(bot_user_id) {
+                            trace!(
+                                peer_user_id,
+                                bot_user_id,
+                                "Skipping message from wrong peer"
+                            );
+                            continue;
+                        }
+
                         // Проверяем что это ответ на наше сообщение
                         match &m.reply_to {
                             Some(grammers_tl_types::enums::MessageReplyHeader::Header(h))
@@ -425,7 +555,6 @@ fn extract_voice_info_from_update(
                                 // Это ответ на наше сообщение - обрабатываем
                             }
                             _ => {
-                                // Не ответ на наше сообщение - пропускаем
                                 trace!(
                                     has_reply_to = m.reply_to.is_some(),
                                     expected = expected_msg_id,
@@ -448,7 +577,7 @@ fn extract_voice_info_from_update(
                             // В TL типе Message текст находится в поле message
                             let text = &m.message;
                             if !text.is_empty() {
-                                trace!(text, "Attempting to parse voice info");
+                                trace!("Attempting to parse voice info");
                                 // Парсим текст
                                 if let Some(voice) = parse_voice_info(text) {
                                     return Some(voice);
@@ -466,7 +595,7 @@ fn extract_voice_info_from_update(
 /// Парсит текст ответа бота для получения информации о голосе
 /// Формат: "Выбранный голос: /speaker hamster_clerk\nНаходится в паке: Хомяки"
 fn parse_voice_info(text: &str) -> Option<CurrentVoice> {
-    trace!(text, "Parsing text");
+    trace!("Parsing voice info");
 
     // Ищем строки с ключевыми словами
     let mut voice_id: Option<String> = None;
@@ -506,7 +635,7 @@ fn parse_voice_info(text: &str) -> Option<CurrentVoice> {
 
     // Возвращаем результат если нашли оба поля
     if let (Some(id), Some(name)) = (voice_id, voice_name) {
-        trace!(id, name, "Parsed voice info");
+        trace!("Parsed voice info");
         Some(CurrentVoice { name, id })
     } else {
         warn!("Failed to parse voice info from text");
@@ -517,49 +646,54 @@ fn parse_voice_info(text: &str) -> Option<CurrentVoice> {
 /// Отправить /limits и дождаться текстового ответа с лимитами
 /// Парсит: "🔓 Открытые голоса: 0 / 666 символов;" и "🪩 Кружки/гифки: 0 / 10 сообщений;"
 /// Таймаут 60 секунд на ожидание ответа
+/// Serialized via TelegramClient::limits_mutex to prevent two concurrent /
+/// limits calls from accepting each other's responses.
 pub async fn get_limits(client: &TelegramClient) -> Result<Option<Limits>, String> {
-    use tokio::sync::mpsc::UnboundedReceiver;
+    // Serialize all /limits request-response pairs
+    let _limits_guard = client.limits_mutex.lock().await;
 
     info!("Getting limits from bot");
 
+    // 0. Subscribe BEFORE sending
+    let mut rx = client.subscribe_updates().await?;
+
     // 1. Отправляем /limits
-    send_limits_command(client).await?;
+    let (sent_msg_id, bot_user_id) = send_limits_command(client).await?;
 
-    info!("/limits sent, waiting for text response");
+    info!(sent_msg_id, "/limits sent, waiting for text response");
 
-    // 2. Ждем текстовое сообщение (не меню, не голос)
+    // 2. Ждем текстовое сообщение (не меню, не голос), от Silero бота, incoming,
+    //    msg_id > sent_msg_id
     let start_time = std::time::Instant::now();
     let total_timeout = std::time::Duration::from_secs(60); // 60 секунд
 
     loop {
-        let mut updates_opt = client.updates.lock().await;
-        let updates: &mut UnboundedReceiver<UpdatesLike> = updates_opt
-            .as_mut()
-            .ok_or_else(|| "Updates channel not initialized".to_string())?;
-
-        // Проверяем общий таймаут
         let elapsed = start_time.elapsed();
         if elapsed >= total_timeout {
             warn!("Timeout (60s) waiting for limits info");
-            return Ok(None); // Таймаут - возвращаем None
+            return Ok(None);
         }
 
         let remaining = total_timeout.saturating_sub(elapsed);
 
-        match tokio::time::timeout(remaining, updates.recv()).await {
-            Ok(Some(update_like)) => {
-                // Проверяем, есть ли текстовое сообщение с информацией о лимитах
-                if let Some(limits_info) = extract_limits_info_from_update(&update_like) {
+        match tokio::time::timeout(remaining, rx.recv()).await {
+            Ok(Ok(update)) => {
+                if let Some(limits_info) =
+                    extract_limits_info_from_update(&update, sent_msg_id, bot_user_id)
+                {
                     info!(limits_info.voices, limits_info.gifs, "Limits info found");
-                    return Ok(Some(limits_info)); // Нашли - возвращаем Some
+                    return Ok(Some(limits_info));
                 }
             }
-            Ok(None) => {
-                warn!("Updates channel closed");
-                return Err("Updates channel closed".to_string());
+            Ok(Err(broadcast::error::RecvError::Closed)) => {
+                warn!("Update stream closed");
+                return Err("Update stream closed".to_string());
+            }
+            Ok(Err(broadcast::error::RecvError::Lagged(n))) => {
+                warn!(skipped = n, "Broadcast receiver lagged");
+                return Err(format!("Update stream lagged (skipped {} messages)", n));
             }
             Err(_) => {
-                // Таймаут одной итерации - продолжаем ждать
                 continue;
             }
         }
@@ -567,24 +701,28 @@ pub async fn get_limits(client: &TelegramClient) -> Result<Option<Limits>, Strin
 }
 
 /// Отправить команду /limits боту
-async fn send_limits_command(client: &TelegramClient) -> Result<(), String> {
+/// Возвращает (sent_message_id, bot_user_id)
+async fn send_limits_command(client: &TelegramClient) -> Result<(i32, i64), String> {
     info!("Sending /limits to bot");
 
-    let client_inner = client.client.lock().await;
-    let client_inner = client_inner
-        .as_ref()
-        .ok_or_else(|| "Client not initialized".to_string())?;
+    let client_inner = {
+        let guard = client.client.lock().await;
+        guard
+            .clone()
+            .ok_or_else(|| "Client not initialized".to_string())?
+    };
 
-    // Разрешаем username бота
     let bot = client_inner
         .resolve_username(BOT_USERNAME)
         .await
         .map_err(|e| format!("Failed to resolve bot: {}", e))?
         .ok_or_else(|| "Bot not found".to_string())?;
 
-    debug!(username = ?bot.username(), "Bot resolved");
+    let bot_user_id = bot
+        .id()
+        .bare_id()
+        .ok_or_else(|| "Bot PeerId is the self-user sentinel".to_string())?;
 
-    // Отправляем сообщение
     let bot_ref = bot
         .to_ref()
         .await
@@ -594,30 +732,40 @@ async fn send_limits_command(client: &TelegramClient) -> Result<(), String> {
         .await
         .map_err(|e| format!("Failed to send message: {}", e))?;
 
-    trace!(?result, "Message sent");
+    let msg_id = result.id();
 
-    Ok(())
+    Ok((msg_id, bot_user_id))
 }
 
-/// Извлечь информацию о лимитах из текстового сообщения
-/// Парсит: "🔓 Открытые голоса: 0 / 666 символов;" и "🪩 Кружки/гифки: 0 / 10 сообщений;"
-#[allow(clippy::collapsible_match)]
-fn extract_limits_info_from_update(update_like: &UpdatesLike) -> Option<Limits> {
+/// Извлечь информацию о лимитах из текстового сообщения.
+/// Delegates policy to `is_matching_limits_response` to avoid duplicating
+/// matching rules.
+fn extract_limits_info_from_update(
+    update_like: &UpdatesLike,
+    sent_msg_id: i32,
+    bot_user_id: i64,
+) -> Option<Limits> {
     if let UpdatesLike::Updates(updates_enum) = update_like {
         if let grammers_tl_types::enums::Updates::Updates(u) = updates_enum {
             for update in &u.updates {
                 if let grammers_tl_types::enums::Update::NewMessage(msg) = update {
                     if let grammers_tl_types::enums::Message::Message(m) = &msg.message {
-                        // Ищем текстовое сообщение (без медиа, без меню)
-                        if m.media.is_none() && m.reply_markup.is_none() {
-                            // В TL типе Message текст находится в поле message
-                            let text = &m.message;
-                            if !text.is_empty() {
-                                // Парсим текст
-                                if let Some(limits) = parse_limits_info(text) {
-                                    return Some(limits);
-                                }
-                            }
+                        let peer_user_id = match &m.peer_id {
+                            grammers_tl_types::enums::Peer::User(u) => Some(u.user_id),
+                            _ => None,
+                        };
+                        if is_matching_limits_response(
+                            m.out,
+                            m.id,
+                            peer_user_id,
+                            m.media.is_some(),
+                            m.reply_markup.is_some(),
+                            &m.message,
+                            sent_msg_id,
+                            bot_user_id,
+                        ) {
+                            // parse_limits_info will succeed since is_matching_limits_response validated it
+                            return parse_limits_info(&m.message);
                         }
                     }
                 }
@@ -630,7 +778,7 @@ fn extract_limits_info_from_update(update_like: &UpdatesLike) -> Option<Limits> 
 /// Парсит текст ответа бота для получения информации о лимитах
 /// Формат: "🔓 Открытые голоса: 0 / 666 символов;" и "🪩 Кружки/гифки: 0 / 10 сообщений;"
 fn parse_limits_info(text: &str) -> Option<Limits> {
-    trace!(text, "Parsing text");
+    trace!("Parsing limits info");
 
     let mut voices: Option<String> = None;
     let mut gifs: Option<String> = None;
@@ -712,29 +860,21 @@ impl FindWhitespace for &str {
 /// Отправить "/speaker {code}" боту и дождаться текстового ответа
 /// Возвращает true если успешно, иначе ошибку
 pub async fn set_speaker(client: &TelegramClient, voice_code: &str) -> Result<bool, String> {
-    use tokio::sync::mpsc::UnboundedReceiver;
+    info!("Setting speaker voice");
 
-    info!("Setting speaker to '{}'", voice_code);
+    // 0. Subscribe BEFORE sending
+    let mut rx = client.subscribe_updates().await?;
 
-    // 1. Сначала получаем receiver для updates, чтобы не пропустить ответ
-    let mut updates_opt = client.updates.lock().await;
-    let updates: &mut UnboundedReceiver<UpdatesLike> = updates_opt
-        .as_mut()
-        .ok_or_else(|| "Updates channel not initialized".to_string())?;
-
-    trace!("Updates receiver locked, ready to send command");
-
-    // 2. Отправить "/speaker {code}" и получить ID сообщения
-    let sent_message_id = send_speaker_command_with_code(client, voice_code).await?;
+    // 1. Отправить "/speaker {code}" и получить ID сообщения и bot_user_id
+    let (sent_message_id, bot_user_id) = send_speaker_command_with_code(client, voice_code).await?;
 
     info!("Waiting for bot response to msg_id={}", sent_message_id);
 
-    // 3. Ждем текстовое сообщение (ответ на наше сообщение)
+    // 2. Ждем текстовое сообщение (ответ на наше сообщение)
     let start_time = std::time::Instant::now();
     let total_timeout = std::time::Duration::from_secs(30); // 30 секунд
 
     loop {
-        // Проверяем общий таймаут
         let elapsed = start_time.elapsed();
         if elapsed >= total_timeout {
             warn!("Timeout (30s) waiting for set_speaker response");
@@ -743,12 +883,10 @@ pub async fn set_speaker(client: &TelegramClient, voice_code: &str) -> Result<bo
 
         let remaining = total_timeout.saturating_sub(elapsed);
 
-        match tokio::time::timeout(remaining, updates.recv()).await {
-            Ok(Some(update_like)) => {
-                trace!("Received update while waiting for set_speaker response");
-                // Проверяем, есть ли текстовое сообщение с ответом на наше сообщение
+        match tokio::time::timeout(remaining, rx.recv()).await {
+            Ok(Ok(update)) => {
                 if let Some(result) =
-                    extract_set_speaker_response_from_update(&update_like, sent_message_id)
+                    extract_set_speaker_response_from_update(&update, sent_message_id, bot_user_id)
                 {
                     info!("Set speaker response: {}", result);
                     if result {
@@ -758,12 +896,15 @@ pub async fn set_speaker(client: &TelegramClient, voice_code: &str) -> Result<bo
                     }
                 }
             }
-            Ok(None) => {
-                warn!("Updates channel closed");
-                return Err("Updates channel closed".to_string());
+            Ok(Err(broadcast::error::RecvError::Closed)) => {
+                warn!("Update stream closed");
+                return Err("Update stream closed".to_string());
+            }
+            Ok(Err(broadcast::error::RecvError::Lagged(n))) => {
+                warn!(skipped = n, "Broadcast receiver lagged");
+                return Err(format!("Update stream lagged (skipped {} messages)", n));
             }
             Err(_) => {
-                // Таймаут одной итерации - продолжаем ждать
                 continue;
             }
         }
@@ -771,32 +912,33 @@ pub async fn set_speaker(client: &TelegramClient, voice_code: &str) -> Result<bo
 }
 
 /// Отправить команду "/speaker {code}" боту
-/// Возвращает ID отправленного сообщения
+/// Возвращает (sent_message_id, bot_user_id)
 async fn send_speaker_command_with_code(
     client: &TelegramClient,
     voice_code: &str,
-) -> Result<i32, String> {
-    info!("Sending /speaker {} to bot", voice_code);
+) -> Result<(i32, i64), String> {
+    info!("Sending set_speaker command to bot");
 
-    let client_inner = client.client.lock().await;
-    let client_inner = client_inner
-        .as_ref()
-        .ok_or_else(|| "Client not initialized".to_string())?;
+    let client_inner = {
+        let guard = client.client.lock().await;
+        guard
+            .clone()
+            .ok_or_else(|| "Client not initialized".to_string())?
+    };
 
-    // Разрешаем username бота
     let bot = client_inner
         .resolve_username(BOT_USERNAME)
         .await
         .map_err(|e| format!("Failed to resolve bot: {}", e))?
         .ok_or_else(|| "Bot not found".to_string())?;
 
-    debug!(username = ?bot.username(), "Bot resolved");
+    let bot_user_id = bot
+        .id()
+        .bare_id()
+        .ok_or_else(|| "Bot PeerId is the self-user sentinel".to_string())?;
 
-    // Формируем команду
     let command = format!("/speaker {}", voice_code);
-    trace!("Sending command: '{}'", command);
 
-    // Отправляем сообщение
     let bot_ref = bot
         .to_ref()
         .await
@@ -809,322 +951,154 @@ async fn send_speaker_command_with_code(
     let msg_id = result.id();
     info!(
         msg_id,
-        "Sent /speaker {} msg_id={}, waiting for text response", voice_code, msg_id
+        "Sent set_speaker command, waiting for text response"
     );
 
-    Ok(msg_id)
+    Ok((msg_id, bot_user_id))
 }
 
-/// Извлечь ответ об установке спикера из текстового сообщения
-/// Проверяет что сообщение является ответом на сообщение с expected_msg_id
+/// Извлечь ответ об установке спикера из текстового сообщения.
+/// Validates peer, direction, ID ordering, and reply-to match via
+/// `is_matching_text_reply`. Rejects `UpdateShortChatMessage` entirely
+/// (a chat update is not the private Silero user peer).
 fn extract_set_speaker_response_from_update(
     update_like: &UpdatesLike,
     expected_msg_id: i32,
+    bot_user_id: i64,
 ) -> Option<bool> {
-    trace!(
-        "Extracting set_speaker response, expected_msg_id={}",
-        expected_msg_id
-    );
-
     match update_like {
-        // UpdatesLike::Updates - enum с массивом updates
-        UpdatesLike::Updates(updates_enum) => {
-            trace!(
-                "Processing UpdatesLike::Updates, variant: {:?}",
-                std::mem::discriminant(updates_enum)
-            );
-            match updates_enum {
-                grammers_tl_types::enums::Updates::Updates(u) => {
-                    trace!("Processing updates enum, {} updates", u.updates.len());
-                    for (idx, update) in u.updates.iter().enumerate() {
-                        trace!("Update[{}]: checking type", idx);
-
-                        // Паттерн-матчинг для всех типов Update которые могут содержать текст
-                        match update {
-                            // NewMessage - обычное сообщение
-                            grammers_tl_types::enums::Update::NewMessage(msg) => {
-                                trace!("Update[{}]: is NewMessage", idx);
-                                if let Some(result) =
-                                    process_message(&msg.message, expected_msg_id, idx)
-                                {
-                                    return Some(result);
-                                }
-                            }
-
-                            // NewChannelMessage - сообщение в канале/супергруппе
-                            grammers_tl_types::enums::Update::NewChannelMessage(msg) => {
-                                trace!("Update[{}]: is NewChannelMessage", idx);
-                                if let Some(result) =
-                                    process_message(&msg.message, expected_msg_id, idx)
-                                {
-                                    return Some(result);
-                                }
-                            }
-
-                            // EditMessage - редактированное сообщение
-                            grammers_tl_types::enums::Update::EditMessage(msg) => {
-                                trace!("Update[{}]: is EditMessage", idx);
-                                if let Some(result) =
-                                    process_message(&msg.message, expected_msg_id, idx)
-                                {
-                                    return Some(result);
-                                }
-                            }
-
-                            // EditChannelMessage - редактированное сообщение в канале
-                            grammers_tl_types::enums::Update::EditChannelMessage(msg) => {
-                                trace!("Update[{}]: is EditChannelMessage", idx);
-                                if let Some(result) =
-                                    process_message(&msg.message, expected_msg_id, idx)
-                                {
-                                    return Some(result);
-                                }
-                            }
-
-                            // Other types - логируем детально для отладки
-                            other => {
-                                // Подробное логирование unhandled types
-                                trace!(
-                                    "Update[{}]: is unhandled type: {:?}, full data: {:?}",
-                                    idx,
-                                    std::mem::discriminant(other),
-                                    other
-                                );
+        UpdatesLike::Updates(updates_enum) => match updates_enum {
+            grammers_tl_types::enums::Updates::Updates(u) => {
+                for update in &u.updates {
+                    match update {
+                        grammers_tl_types::enums::Update::NewMessage(msg) => {
+                            if let Some(result) =
+                                process_message(&msg.message, expected_msg_id, bot_user_id)
+                            {
+                                return Some(result);
                             }
                         }
-                    }
-                }
-                grammers_tl_types::enums::Updates::UpdateShortMessage(msg) => {
-                    trace!("Processing Updates::UpdateShortMessage");
-                    trace!(
-                        "UpdateShortMessage: out={}, message='{}', reply_to={:?}",
-                        msg.out,
-                        msg.message,
-                        msg.reply_to
-                    );
-
-                    // Игнорируем исходящие сообщения
-                    if msg.out {
-                        trace!("Skipping outgoing UpdateShortMessage");
-                        return None;
-                    }
-
-                    // Проверяем что это ответ на наше сообщение
-                    let is_reply_to_our_msg = match &msg.reply_to {
-                        Some(grammers_tl_types::enums::MessageReplyHeader::Header(h))
-                            if h.reply_to_msg_id == Some(expected_msg_id) =>
-                        {
-                            trace!(
-                                "UpdateShortMessage IS a reply to our message (expected_msg_id={})",
-                                expected_msg_id
-                            );
-                            true
+                        grammers_tl_types::enums::Update::NewChannelMessage(msg) => {
+                            if let Some(result) =
+                                process_message(&msg.message, expected_msg_id, bot_user_id)
+                            {
+                                return Some(result);
+                            }
                         }
-                        _ => {
-                            trace!("UpdateShortMessage is NOT a reply to our message, reply_to={:?}, expected_msg_id={}",
-                                msg.reply_to.as_ref().and_then(|h| {
-                                    if let grammers_tl_types::enums::MessageReplyHeader::Header(header) = h {
-                                        header.reply_to_msg_id
-                                    } else {
-                                        None
-                                    }
-                                }), expected_msg_id);
-                            false
+                        grammers_tl_types::enums::Update::EditMessage(msg) => {
+                            if let Some(result) =
+                                process_message(&msg.message, expected_msg_id, bot_user_id)
+                            {
+                                return Some(result);
+                            }
                         }
-                    };
-
-                    if is_reply_to_our_msg && !msg.message.is_empty() {
-                        trace!("Parsing text from UpdateShortMessage: '{}'", msg.message);
-                        let result = parse_message_text_with_validation(&msg.message);
-                        return Some(result);
+                        grammers_tl_types::enums::Update::EditChannelMessage(msg) => {
+                            if let Some(result) =
+                                process_message(&msg.message, expected_msg_id, bot_user_id)
+                            {
+                                return Some(result);
+                            }
+                        }
+                        _ => {}
                     }
-                }
-                grammers_tl_types::enums::Updates::UpdateShortChatMessage(msg) => {
-                    trace!("Processing Updates::UpdateShortChatMessage");
-                    trace!(
-                        "UpdateShortChatMessage: out={}, message='{}'",
-                        msg.out,
-                        msg.message
-                    );
-
-                    // Игнорируем исходящие сообщения
-                    if msg.out {
-                        trace!("Skipping outgoing UpdateShortChatMessage");
-                        return None;
-                    }
-
-                    // UpdateShortChatMessage не содержит reply_to, поэтому проверяем по другому
-                    // Для простоты просто парсим текст
-                    if !msg.message.is_empty() {
-                        trace!(
-                            "Parsing text from UpdateShortChatMessage: '{}'",
-                            msg.message
-                        );
-                        let result = parse_message_text_with_validation(&msg.message);
-                        return Some(result);
-                    }
-                }
-                other => {
-                    trace!("Updates is not Updates::Updates, UpdateShortMessage, or UpdateShortChatMessage, it's: {:?}", std::mem::discriminant(other));
-                    trace!("Full data: {:?}", other);
                 }
             }
-        }
-
-        // Other variants
-        other => {
-            trace!(
-                "Unhandled UpdatesLike variant: {:?}",
-                std::mem::discriminant(other)
-            );
-            trace!("Full data: {:?}", other);
-        }
+            grammers_tl_types::enums::Updates::UpdateShortMessage(msg) => {
+                let reply_to_msg_id = match &msg.reply_to {
+                    Some(grammers_tl_types::enums::MessageReplyHeader::Header(h)) => {
+                        h.reply_to_msg_id
+                    }
+                    _ => None,
+                };
+                if is_matching_text_reply(
+                    msg.out,
+                    msg.id,
+                    msg.user_id,
+                    reply_to_msg_id,
+                    expected_msg_id,
+                    bot_user_id,
+                ) && !msg.message.is_empty()
+                {
+                    return Some(parse_message_text_with_validation(&msg.message));
+                }
+            }
+            grammers_tl_types::enums::Updates::UpdateShortChatMessage(_) => {
+                // Chat update: not the private Silero user peer, reject.
+            }
+            _ => {}
+        },
+        _ => {}
     }
-
-    trace!("No valid set_speaker response found in this update");
     None
 }
 
 /// Обработать Message enum (используется для NewMessage, EditMessage и т.д.)
+/// Uses `is_matching_text_reply` for peer/direction/id/reply validation,
+/// then checks for plain text (no media).
 fn process_message(
     message: &grammers_tl_types::enums::Message,
     expected_msg_id: i32,
-    idx: usize,
+    bot_user_id: i64,
 ) -> Option<bool> {
     match message {
         grammers_tl_types::enums::Message::Message(m) => {
-            trace!(
-                "Update[{}]: is Message, out={}, msg_id={}",
-                idx,
+            // Extract user_id from peer
+            let user_id = match &m.peer_id {
+                grammers_tl_types::enums::Peer::User(u) => u.user_id,
+                _ => return None,
+            };
+            let reply_to_msg_id = match &m.reply_to {
+                Some(grammers_tl_types::enums::MessageReplyHeader::Header(h)) => h.reply_to_msg_id,
+                _ => None,
+            };
+            if !is_matching_text_reply(
                 m.out,
-                m.id
-            );
-
-            // Игнорируем исходящие сообщения (наши собственные)
-            if m.out {
-                trace!("Skipping outgoing message msg_id={}", m.id);
+                m.id,
+                user_id,
+                reply_to_msg_id,
+                expected_msg_id,
+                bot_user_id,
+            ) {
                 return None;
             }
-
-            trace!(
-                "Processing incoming message msg_id={}, has_reply_to={}",
-                m.id,
-                m.reply_to.is_some()
-            );
-
-            // Проверяем что это ответ на наше сообщение
-            match &m.reply_to {
-                Some(grammers_tl_types::enums::MessageReplyHeader::Header(h))
-                    if h.reply_to_msg_id == Some(expected_msg_id) =>
-                {
-                    trace!(
-                        "Message IS a reply to our message (expected_msg_id={})",
-                        expected_msg_id
-                    );
-                    // Это ответ на наше сообщение - обрабатываем
-                }
-                other => {
-                    // Не ответ на наше сообщение - пропускаем
-                    let reply_to_id = other.as_ref().and_then(|h| {
-                        if let grammers_tl_types::enums::MessageReplyHeader::Header(header) = h {
-                            header.reply_to_msg_id
-                        } else {
-                            None
-                        }
-                    });
-                    trace!("Skipping message - not a reply to our message, reply_to={:?}, expected_msg_id={}",
-                        reply_to_id, expected_msg_id);
-                    return None;
-                }
-            }
-
-            trace!(
-                "Message has_media={}, message_len={}",
-                m.media.is_some(),
-                m.message.len()
-            );
-
-            // Ищем текстовое сообщение (без медиа)
-            // reply_markup может быть (инлайн-кнопки бота)
-            if m.media.is_none() {
-                let text = &m.message;
-                if !text.is_empty() {
-                    trace!("Parsing text from reply: '{}'", text);
-                    // Парсим ответ
-                    return Some(parse_message_text_with_validation(text));
-                } else {
-                    trace!("Reply message has empty text, continuing");
-                }
-            } else {
-                trace!("Reply message has media, skipping");
+            if m.media.is_none() && !m.message.is_empty() {
+                return Some(parse_message_text_with_validation(&m.message));
             }
         }
-        other => {
-            trace!(
-                "Update[{}]: Message variant is not Message, it's {:?}",
-                idx,
-                std::mem::discriminant(other)
-            );
-        }
+        _ => {}
     }
     None
 }
 
 /// Спарсить текст сообщения с валидацией
 fn parse_message_text_with_validation(text: &str) -> bool {
-    trace!("Parsing text: '{}'", text);
     match parse_set_speaker_response(text) {
-        Ok(result) => {
-            info!(
-                "Successfully parsed set_speaker response: result={}",
-                result
-            );
-            result
-        }
-        Err(_) => {
-            trace!("Failed to parse as known response format, checking for invalid voice error");
-            // Для ошибки "Invalid voice code" возвращаем false
-            if text.contains("Указан неверный голос") || text.contains("Вказано невірний голос")
-            {
-                info!("Detected 'invalid voice' error in response");
-                false
-            } else {
-                trace!("Unknown response format, continuing to wait");
-                // Неизвестный формат - возвращаем false чтобы caller продолжил ждать
-                false
-            }
-        }
+        Ok(result) => result,
+        Err(_) => false,
     }
 }
 
 /// Парсит текст ответа бота для set_speaker
 /// Возвращает Ok(true) если успешно, Err если неверный код
 fn parse_set_speaker_response(text: &str) -> Result<bool, String> {
-    trace!("Parsing set_speaker response text: '{}'", text);
-
-    // Проверить варианты успешного ответа
     if text.contains("Успешно выбран спикер")
         || text.contains("Успішно обрано спікера")
         || text.contains("Successfully selected speaker")
     {
-        trace!("Matched success pattern 'Успешно выбран спикер'");
         return Ok(true);
     }
 
     if text.contains("Успешно выбран тот же самый спикер")
         || text.contains("Успішно обрано того самого спікера")
     {
-        trace!("Matched success pattern 'Успешно выбран тот же самый спикер'");
         return Ok(true);
     }
 
     if text.contains("Указан неверный голос") || text.contains("Вказано невірний голос")
     {
-        trace!("Matched error pattern 'Указан неверный голос'");
         return Err("Invalid voice code".to_string());
     }
 
-    trace!("No pattern matched, returning unknown format error");
     Err("Unknown response format".to_string())
 }
 
@@ -1380,5 +1354,296 @@ mod tests {
         assert!(!parse_message_text_with_validation("Успешно выбран")); // near-miss
         assert!(!parse_message_text_with_validation("Указан неверный")); // near-miss
         assert!(!parse_message_text_with_validation(""));
+    }
+
+    // ── is_matching_audio_response ────────────────────────────────────
+
+    const BOT_ID: i64 = 555000111;
+    const SENT_ID: i32 = 42;
+
+    fn match_audio(
+        msg_out: bool,
+        msg_id: i32,
+        peer: Option<i64>,
+        reply_to: Option<i32>,
+        mime: &str,
+    ) -> bool {
+        is_matching_audio_response(msg_out, msg_id, peer, reply_to, mime, SENT_ID, BOT_ID)
+    }
+
+    #[test]
+    fn matching_rejects_outgoing() {
+        // outgoing even with valid peer/newer/matching reply
+        assert!(!match_audio(
+            true,
+            43,
+            Some(BOT_ID),
+            Some(SENT_ID),
+            "audio/ogg"
+        ));
+    }
+
+    #[test]
+    fn matching_rejects_wrong_peer() {
+        // incoming but wrong peer
+        assert!(!match_audio(
+            false,
+            43,
+            Some(999999),
+            Some(SENT_ID),
+            "audio/ogg"
+        ));
+        // no peer_user_id at all
+        assert!(!match_audio(false, 43, None, Some(SENT_ID), "audio/ogg"));
+    }
+
+    #[test]
+    fn matching_rejects_stale_msg_id() {
+        // same msg_id as sent
+        assert!(!match_audio(
+            false,
+            SENT_ID,
+            Some(BOT_ID),
+            Some(SENT_ID),
+            "audio/ogg"
+        ));
+        // older than sent
+        assert!(!match_audio(
+            false,
+            SENT_ID - 1,
+            Some(BOT_ID),
+            Some(SENT_ID),
+            "audio/ogg"
+        ));
+    }
+
+    #[test]
+    fn matching_rejects_explicit_reply_to_other_message() {
+        // reply_to exists but != sent_msg_id
+        assert!(!match_audio(false, 43, Some(BOT_ID), Some(99), "audio/ogg"));
+    }
+
+    #[test]
+    fn matching_rejects_non_audio_mime() {
+        assert!(!match_audio(
+            false,
+            43,
+            Some(BOT_ID),
+            Some(SENT_ID),
+            "audio/mp4"
+        ));
+        assert!(!match_audio(
+            false,
+            43,
+            Some(BOT_ID),
+            Some(SENT_ID),
+            "text/plain"
+        ));
+        assert!(!match_audio(false, 43, Some(BOT_ID), Some(SENT_ID), ""));
+    }
+
+    #[test]
+    fn matching_accepts_valid_reply() {
+        // incoming, correct peer, newer, matching reply, audio mime
+        assert!(match_audio(
+            false,
+            43,
+            Some(BOT_ID),
+            Some(SENT_ID),
+            "audio/ogg"
+        ));
+        assert!(match_audio(
+            false,
+            100,
+            Some(BOT_ID),
+            Some(SENT_ID),
+            "audio/mpeg"
+        ));
+    }
+
+    #[test]
+    fn matching_rejects_replyless_newer_audio() {
+        assert!(!match_audio(false, 43, Some(BOT_ID), None, "audio/ogg"));
+        assert!(!match_audio(false, 100, Some(BOT_ID), None, "audio/mpeg"));
+    }
+
+    // ── is_matching_text_reply ─────────────────────────────────────────
+
+    const ALT_BOT_ID: i64 = 666000777;
+
+    fn match_text(msg_out: bool, msg_id: i32, user_id: i64, reply_to: Option<i32>) -> bool {
+        is_matching_text_reply(msg_out, msg_id, user_id, reply_to, SENT_ID, BOT_ID)
+    }
+
+    #[test]
+    fn text_reply_rejects_outgoing() {
+        assert!(!match_text(true, 43, BOT_ID, Some(SENT_ID)));
+    }
+
+    #[test]
+    fn text_reply_rejects_wrong_peer() {
+        assert!(!match_text(false, 43, ALT_BOT_ID, Some(SENT_ID)));
+    }
+
+    #[test]
+    fn text_reply_rejects_stale_id() {
+        assert!(!match_text(false, SENT_ID, BOT_ID, Some(SENT_ID)));
+        assert!(!match_text(false, SENT_ID - 1, BOT_ID, Some(SENT_ID)));
+    }
+
+    #[test]
+    fn text_reply_rejects_wrong_reply_to() {
+        assert!(!match_text(false, 43, BOT_ID, Some(99)));
+    }
+
+    #[test]
+    fn text_reply_rejects_missing_reply_to() {
+        assert!(!match_text(false, 43, BOT_ID, None));
+    }
+
+    #[test]
+    fn text_reply_accepts_valid() {
+        assert!(match_text(false, 43, BOT_ID, Some(SENT_ID)));
+        assert!(match_text(false, 100, BOT_ID, Some(SENT_ID)));
+    }
+
+    // ── is_matching_limits_response ────────────────────────────────────
+
+    #[test]
+    fn limits_matching_correct_candidate() {
+        assert!(is_matching_limits_response(
+            false,
+            43,
+            Some(BOT_ID),
+            false,
+            false,
+            "Открытые голоса: 0 / 666 символов;\nКружки/гифки: 0 / 10 сообщений;",
+            SENT_ID,
+            BOT_ID
+        ));
+    }
+
+    #[test]
+    fn limits_matching_rejects_outgoing() {
+        assert!(!is_matching_limits_response(
+            true,
+            43,
+            Some(BOT_ID),
+            false,
+            false,
+            "Открытые голоса: 0 / 666 символов;\nКружки/гифки: 0 / 10 сообщений;",
+            SENT_ID,
+            BOT_ID
+        ));
+    }
+
+    #[test]
+    fn limits_matching_rejects_wrong_peer() {
+        assert!(!is_matching_limits_response(
+            false,
+            43,
+            Some(999999),
+            false,
+            false,
+            "Открытые голоса: 0 / 666 символов;\nКружки/гифки: 0 / 10 сообщений;",
+            SENT_ID,
+            BOT_ID
+        ));
+        assert!(!is_matching_limits_response(
+            false,
+            43,
+            None,
+            false,
+            false,
+            "Открытые голоса: 0 / 666 символов;\nКружки/гифки: 0 / 10 сообщений;",
+            SENT_ID,
+            BOT_ID
+        ));
+    }
+
+    #[test]
+    fn limits_matching_rejects_stale_msg_id() {
+        assert!(!is_matching_limits_response(
+            false,
+            SENT_ID,
+            Some(BOT_ID),
+            false,
+            false,
+            "Открытые голоса: 0 / 666 символов;\nКружки/гифки: 0 / 10 сообщений;",
+            SENT_ID,
+            BOT_ID
+        ));
+        assert!(!is_matching_limits_response(
+            false,
+            SENT_ID - 1,
+            Some(BOT_ID),
+            false,
+            false,
+            "Открытые голоса: 0 / 666 символов;\nКружки/гифки: 0 / 10 сообщений;",
+            SENT_ID,
+            BOT_ID
+        ));
+    }
+
+    #[test]
+    fn limits_matching_rejects_media() {
+        assert!(!is_matching_limits_response(
+            false,
+            43,
+            Some(BOT_ID),
+            true,
+            false,
+            "Открытые голоса: 0 / 666 символов;\nКружки/гифки: 0 / 10 сообщений;",
+            SENT_ID,
+            BOT_ID
+        ));
+    }
+
+    #[test]
+    fn limits_matching_rejects_reply_markup() {
+        assert!(!is_matching_limits_response(
+            false,
+            43,
+            Some(BOT_ID),
+            false,
+            true,
+            "Открытые голоса: 0 / 666 символов;\nКружки/гифки: 0 / 10 сообщений;",
+            SENT_ID,
+            BOT_ID
+        ));
+    }
+
+    #[test]
+    fn limits_matching_rejects_malformed_text() {
+        assert!(!is_matching_limits_response(
+            false,
+            43,
+            Some(BOT_ID),
+            false,
+            false,
+            "random text",
+            SENT_ID,
+            BOT_ID
+        ));
+        assert!(!is_matching_limits_response(
+            false,
+            43,
+            Some(BOT_ID),
+            false,
+            false,
+            "",
+            SENT_ID,
+            BOT_ID
+        ));
+        assert!(!is_matching_limits_response(
+            false,
+            43,
+            Some(BOT_ID),
+            false,
+            false,
+            "Открытые голоса: 666 символов;\nКружки/гифки: 0 / 10 сообщений;",
+            SENT_ID,
+            BOT_ID
+        ));
     }
 }
