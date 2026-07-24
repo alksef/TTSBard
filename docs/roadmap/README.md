@@ -56,6 +56,7 @@
 - [ROADMAP-030 — sample-rate invariant](./completed/030-deepfilternet-resampling-invariant.md)
 - [ROADMAP-032 — audio boundaries и presets](./completed/032-audio-boundaries-and-dsp-presets.md)
 - [ROADMAP-035 — AudioPanel decomposition](./completed/035-audio-panel-subpanels.md)
+- [ROADMAP-047 — очередь задач озвучивания](./completed/047-speech-job-queue.md)
 
 ### Архитектура, AI и документация
 
