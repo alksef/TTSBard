@@ -18,12 +18,14 @@ use tauri::{App, AppHandle, Emitter, Manager};
 use tracing::{error, info, warn};
 
 use crate::commands::playback::PlaybackState;
+use crate::commands::speech_queue::SpeechQueueState;
 use crate::commands::telegram::TelegramState;
 use crate::config::{AppSettings, SettingsManager, WindowsManager, WindowsSettings};
 use crate::event_loop::EventHandler;
 use crate::events::AppEvent;
 use crate::secret_log;
 use crate::soundpanel::SoundPanelState;
+use crate::speech_queue::JobStatus;
 use crate::state::AppState;
 use crate::tts::TtsProviderType;
 use std::sync::Arc;
@@ -107,6 +109,19 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
     *app_state.inner().playback_manager.lock() = Some(pb_manager.clone());
     app.manage(PlaybackState(pb_manager));
     info!("Event sender configured in AppState");
+
+    // Start speech queue worker after PlaybackManager is installed
+    {
+        let sq_state = app.state::<SpeechQueueState>();
+        let worker_queue = sq_state.queue_arc();
+        let worker_notify = sq_state.notifier();
+        let worker_state = app_state.inner().clone();
+        let worker_handle = app.handle().clone();
+        app_state.inner().runtime.spawn(async move {
+            speech_worker(worker_queue, worker_notify, worker_state, worker_handle).await;
+        });
+        info!("Speech queue worker started");
+    }
 
     thread::spawn(move || {
         info!("Event thread started, waiting for events...");
@@ -648,4 +663,167 @@ pub(crate) fn parse_webview_server_error(
         };
 
     (user_friendly_msg, log_context)
+}
+
+// ── Speech worker ──
+
+async fn speech_worker(
+    queue: Arc<parking_lot::Mutex<crate::speech_queue::SpeechQueue>>,
+    notify: Arc<tokio::sync::Notify>,
+    app_state: AppState,
+    app_handle: AppHandle,
+) {
+    use crate::commands::tts_pipeline;
+    use crate::event_loop::route_processed_text;
+
+    loop {
+        let work_item = {
+            let mut q = queue.lock();
+            match q.claim_next_generation() {
+                Ok(Some(item)) => Some(item),
+                Ok(None) => {
+                    drop(q);
+                    None
+                }
+                Err(e) => {
+                    warn!(error = %e, "claim_next_generation error, worker continuing");
+                    drop(q);
+                    None
+                }
+            }
+        };
+
+        let work_item = match work_item {
+            Some(item) => item,
+            None => {
+                notify.notified().await;
+                continue;
+            }
+        };
+
+        {
+            let q = queue.lock();
+            let dto = q.state();
+            drop(q);
+            let _ = app_handle.emit("speech-queue-changed", dto);
+        }
+
+        let job_id = work_item.job_id;
+        let snapshot = work_item.snapshot;
+        let original_text = work_item.original_text;
+
+        match tts_pipeline::prepare_speech(&snapshot, &original_text).await {
+            Ok(prepared) => {
+                let (speaker, mic) =
+                    tts_pipeline::compute_output_configs(&snapshot.audio, &snapshot.audio_effects);
+
+                if speaker.is_none() && mic.is_none() {
+                    let mut q = queue.lock();
+                    let _ = q.fail_generation(
+                        job_id,
+                        "All outputs disabled (speaker and mic both off)".to_string(),
+                    );
+                    let dto = q.state();
+                    drop(q);
+                    let _ = app_handle.emit("speech-queue-changed", dto);
+                    continue;
+                }
+
+                let processed_text = prepared.processed_text.clone();
+
+                {
+                    let mut q = queue.lock();
+                    let _ = q.mark_ready(job_id, processed_text.clone());
+                    let dto = q.state();
+                    drop(q);
+                    let _ = app_handle.emit("speech-queue-changed", dto);
+                }
+
+                let handoff_accepted = {
+                    let pb_guard = app_state.playback_manager.lock();
+                    if let Some(pb) = pb_guard.as_ref() {
+                        pb.enqueue_with_outputs(
+                            job_id.to_string(),
+                            processed_text.clone(),
+                            prepared.audio,
+                            speaker,
+                            mic,
+                        )
+                    } else {
+                        false
+                    }
+                };
+
+                if !handoff_accepted {
+                    let mut q = queue.lock();
+                    let _ = q.fail_playback(
+                        job_id,
+                        "Playback handoff rejected (queue full or no manager)".to_string(),
+                    );
+                    let dto = q.state();
+                    drop(q);
+                    let _ = app_handle.emit("speech-queue-changed", dto);
+                    continue;
+                }
+
+                // Route processed text AFTER successful handoff acceptance,
+                // via spawn_blocking to avoid blocking_read on async runtime.
+                {
+                    let text = processed_text.clone();
+                    let state = app_state.clone();
+                    let skip_twitch = snapshot.skip_twitch;
+                    let skip_webview = snapshot.skip_webview;
+                    let join_handle = tokio::task::spawn_blocking(move || {
+                        route_processed_text(&state, &text, skip_twitch, skip_webview);
+                    });
+                    if let Err(e) = join_handle.await {
+                        warn!(error = %e, "route_processed_text join failed");
+                    }
+                }
+
+                {
+                    if let Some(hm) = app_state.editor.history_manager.lock().as_ref() {
+                        if prepared.cache_saved || prepared.cache_hit {
+                            hm.record_phrase_with_meta(
+                                &processed_text,
+                                &prepared.provider_name,
+                                &prepared.voice_name,
+                                &prepared.cache_key,
+                            );
+                        } else {
+                            hm.record_phrase(&processed_text);
+                        }
+                    }
+                }
+
+                loop {
+                    let status = {
+                        let q = queue.lock();
+                        q.get_status(job_id)
+                    };
+
+                    match status {
+                        Some(JobStatus::Playing) => break,
+                        Some(JobStatus::Failed) => break,
+                        Some(JobStatus::Ready) => {
+                            notify.notified().await;
+                            continue;
+                        }
+                        _ => {
+                            warn!(?status, job_id = %job_id, "Unexpected status waiting for Playing");
+                            break;
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                let mut q = queue.lock();
+                let _ = q.fail_generation(job_id, e.clone());
+                let dto = q.state();
+                drop(q);
+                let _ = app_handle.emit("speech-queue-changed", dto);
+                warn!(error = %e, job_id = %job_id, "Speech preparation failed, worker waiting for retry/skip");
+            }
+        }
+    }
 }

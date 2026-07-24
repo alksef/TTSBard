@@ -18,6 +18,25 @@ pub struct AcceptedJob {
     pub job_id: Uuid,
 }
 
+// ── WorkItem: returned by claim_next_generation ──
+
+#[derive(Clone)]
+pub(crate) struct WorkItem {
+    pub job_id: Uuid,
+    pub original_text: String,
+    pub snapshot: Snapshot,
+}
+
+impl std::fmt::Debug for WorkItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WorkItem")
+            .field("job_id", &self.job_id)
+            .field("original_text", &self.original_text)
+            .field("snapshot", &"<opaque>")
+            .finish()
+    }
+}
+
 // ── Snapshot: settings frozen at submit time ──
 
 #[derive(Clone)]
@@ -235,6 +254,35 @@ impl SpeechQueue {
         Ok(())
     }
 
+    pub(crate) fn claim_next_generation(&mut self) -> Result<Option<WorkItem>, QueueError> {
+        let job_id = match self.next_actionable() {
+            Some(id) => id,
+            None => return Ok(None),
+        };
+        let job = self.get_mut(job_id)?;
+        job.status = JobStatus::Generating;
+        Ok(Some(WorkItem {
+            job_id: job.job_id,
+            original_text: job.original_text.clone(),
+            snapshot: job.snapshot.clone(),
+        }))
+    }
+
+    pub fn fail_playback(&mut self, job_id: Uuid, error_msg: String) -> Result<(), QueueError> {
+        let job = self.get_mut(job_id)?;
+        match job.status {
+            JobStatus::Ready | JobStatus::Playing => {
+                job.status = JobStatus::Failed;
+                job.error = Some(error_msg);
+                Ok(())
+            }
+            _ => Err(QueueError::InvalidTransition {
+                from: job.status,
+                to: "Failed",
+            }),
+        }
+    }
+
     pub fn mark_ready(&mut self, job_id: Uuid, spoken_text: String) -> Result<(), QueueError> {
         let job = self.get_mut(job_id)?;
         if job.status != JobStatus::Generating {
@@ -336,6 +384,17 @@ impl SpeechQueue {
         }
         job.status = JobStatus::Cancelled;
         Ok(())
+    }
+
+    pub fn has_job(&self, job_id: Uuid) -> bool {
+        self.jobs.iter().any(|j| j.job_id == job_id)
+    }
+
+    pub fn get_status(&self, job_id: Uuid) -> Option<JobStatus> {
+        self.jobs
+            .iter()
+            .find(|j| j.job_id == job_id)
+            .map(|j| j.status)
     }
 }
 
@@ -501,6 +560,189 @@ mod tests {
 
         let id3 = q.submit("job3", snap()).unwrap();
         assert_eq!(q.next_actionable(), Some(id3));
+    }
+
+    // ── claim_next_generation ──
+
+    #[test]
+    fn claim_returns_first_queued_with_snapshot() {
+        let mut q = SpeechQueue::new();
+        let s = snap();
+        q.submit("first", s.clone()).unwrap();
+        q.submit("second", snap()).unwrap();
+
+        let item = q.claim_next_generation().unwrap().expect("should claim");
+        assert_eq!(item.original_text, "first");
+        assert_eq!(item.job_id, q.state().jobs[0].job_id);
+        assert_eq!(item.snapshot.voice, "test-voice");
+    }
+
+    #[test]
+    fn claim_returns_none_when_idle() {
+        let mut q = SpeechQueue::new();
+        assert!(q.claim_next_generation().unwrap().is_none());
+    }
+
+    #[test]
+    fn claim_prevents_duplicate_in_flight() {
+        let mut q = SpeechQueue::new();
+        q.submit("first", snap()).unwrap();
+
+        q.claim_next_generation().unwrap().expect("first claim");
+        assert!(q.claim_next_generation().unwrap().is_none());
+    }
+
+    #[test]
+    fn claim_returns_none_when_blocked_by_failed_head() {
+        let mut q = SpeechQueue::new();
+        let id1 = q.submit("first", snap()).unwrap();
+        q.submit("second", snap()).unwrap();
+
+        q.start_generation(id1).unwrap();
+        q.fail_generation(id1, "err".into()).unwrap();
+
+        assert!(q.claim_next_generation().unwrap().is_none());
+    }
+
+    #[test]
+    fn claim_returns_none_when_blocked_by_generating() {
+        let mut q = SpeechQueue::new();
+        q.submit("first", snap()).unwrap();
+        q.submit("second", snap()).unwrap();
+
+        q.claim_next_generation().unwrap();
+        assert!(q.claim_next_generation().unwrap().is_none());
+    }
+
+    #[test]
+    fn claim_after_retry_of_failed_head() {
+        let mut q = SpeechQueue::new();
+        let id1 = q.submit("first", snap()).unwrap();
+        q.submit("second", snap()).unwrap();
+
+        q.start_generation(id1).unwrap();
+        q.fail_generation(id1, "err".into()).unwrap();
+        q.retry_job(id1).unwrap();
+
+        let item = q.claim_next_generation().unwrap().expect("should claim");
+        assert_eq!(item.original_text, "first");
+    }
+
+    #[test]
+    fn claim_after_skip_of_failed_head_advances() {
+        let mut q = SpeechQueue::new();
+        let id1 = q.submit("first", snap()).unwrap();
+        q.submit("second", snap()).unwrap();
+
+        q.start_generation(id1).unwrap();
+        q.fail_generation(id1, "err".into()).unwrap();
+        q.skip_job(id1).unwrap();
+
+        let item = q.claim_next_generation().unwrap().expect("should claim");
+        assert_eq!(item.original_text, "second");
+    }
+
+    // ── fail_playback ──
+
+    #[test]
+    fn fail_playback_from_ready() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.mark_ready(id, "spoken".into()).unwrap();
+
+        q.fail_playback(id, "playback error".into()).unwrap();
+        let job = &q.state().jobs[0];
+        assert_eq!(job.status, JobStatus::Failed);
+        assert_eq!(job.error.as_deref(), Some("playback error"));
+        assert_eq!(job.spoken_text.as_deref(), Some("spoken"));
+        assert_eq!(job.attempt, 1);
+    }
+
+    #[test]
+    fn fail_playback_from_playing() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.mark_ready(id, "spoken".into()).unwrap();
+        q.mark_playing(id).unwrap();
+
+        q.fail_playback(id, "device lost".into()).unwrap();
+        let job = &q.state().jobs[0];
+        assert_eq!(job.status, JobStatus::Failed);
+        assert_eq!(job.error.as_deref(), Some("device lost"));
+        assert_eq!(job.spoken_text.as_deref(), Some("spoken"));
+        assert_eq!(job.attempt, 1);
+    }
+
+    #[test]
+    fn fail_playback_rejects_queued() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        let err = q.fail_playback(id, "err".into()).unwrap_err();
+        assert!(text_err(&err).contains("invalid transition"));
+        assert_eq!(q.state().jobs[0].status, JobStatus::Queued);
+    }
+
+    #[test]
+    fn fail_playback_rejects_generating() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        let err = q.fail_playback(id, "err".into()).unwrap_err();
+        assert!(text_err(&err).contains("invalid transition"));
+        assert_eq!(q.state().jobs[0].status, JobStatus::Generating);
+    }
+
+    #[test]
+    fn fail_playback_rejects_completed() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.mark_ready(id, "text".into()).unwrap();
+        q.mark_playing(id).unwrap();
+        q.mark_completed(id).unwrap();
+        let err = q.fail_playback(id, "err".into()).unwrap_err();
+        assert!(text_err(&err).contains("invalid transition"));
+    }
+
+    #[test]
+    fn fail_playback_rejects_cancelled() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.cancel_job(id).unwrap();
+        let err = q.fail_playback(id, "err".into()).unwrap_err();
+        assert!(text_err(&err).contains("invalid transition"));
+    }
+
+    #[test]
+    fn fail_playback_rejects_failed() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.fail_generation(id, "prev".into()).unwrap();
+        let err = q.fail_playback(id, "err".into()).unwrap_err();
+        assert!(text_err(&err).contains("invalid transition"));
+    }
+
+    #[test]
+    fn fail_playback_unknown_id() {
+        let mut q = SpeechQueue::new();
+        let fake = Uuid::new_v4();
+        let err = q.fail_playback(fake, "err".into()).unwrap_err();
+        assert!(text_err(&err).contains("not found"));
+    }
+
+    #[test]
+    fn fail_playback_preserves_spoken_text_and_attempt() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.mark_ready(id, "preserve-me".into()).unwrap();
+        q.fail_playback(id, "oops".into()).unwrap();
+        let job = &q.state().jobs[0];
+        assert_eq!(job.spoken_text.as_deref(), Some("preserve-me"));
+        assert_eq!(job.attempt, 1);
     }
 
     // ── start_generation ──
@@ -1214,6 +1456,69 @@ mod tests {
     }
 
     // ── serialization regression ──
+
+    #[test]
+    fn serialization_regression() {
+        // WorkItem deliberately has no Serialize/Deserialize derive.
+        // Verify that state DTO JSON never contains snapshot or work_item.
+        let mut q = SpeechQueue::new();
+        q.submit("hello", snap()).unwrap();
+        let json = serde_json::to_string(&q.state()).unwrap();
+        assert!(
+            !json.contains("snapshot"),
+            "state JSON must not contain 'snapshot'"
+        );
+        assert!(
+            !json.contains("work_item"),
+            "state JSON must not contain 'work_item'"
+        );
+        assert!(
+            !json.contains("WorkItem"),
+            "state JSON must not contain 'WorkItem'"
+        );
+    }
+
+    // ── has_job / get_status ──
+
+    #[test]
+    fn has_job_returns_true_for_existing() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        assert!(q.has_job(id));
+    }
+
+    #[test]
+    fn has_job_returns_false_for_unknown() {
+        let q = SpeechQueue::new();
+        assert!(!q.has_job(Uuid::new_v4()));
+    }
+
+    #[test]
+    fn get_status_returns_correct_status() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        assert_eq!(q.get_status(id), Some(JobStatus::Queued));
+    }
+
+    #[test]
+    fn get_status_returns_none_for_unknown() {
+        let q = SpeechQueue::new();
+        assert_eq!(q.get_status(Uuid::new_v4()), None);
+    }
+
+    #[test]
+    fn get_status_tracks_transitions() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        assert_eq!(q.get_status(id), Some(JobStatus::Generating));
+        q.mark_ready(id, "text".into()).unwrap();
+        assert_eq!(q.get_status(id), Some(JobStatus::Ready));
+        q.mark_playing(id).unwrap();
+        assert_eq!(q.get_status(id), Some(JobStatus::Playing));
+        q.mark_completed(id).unwrap();
+        assert_eq!(q.get_status(id), Some(JobStatus::Completed));
+    }
 
     #[test]
     fn state_json_excludes_snapshot_and_api_key() {

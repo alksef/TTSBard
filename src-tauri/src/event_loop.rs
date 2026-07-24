@@ -3,11 +3,35 @@
 // This module handles application events and routes them to appropriate handlers.
 // Refactored from lib.rs handle_event() function (2026-03-11)
 
+use crate::commands::speech_queue::SpeechQueueState;
 use crate::events::{AppEvent, InputLayout, TwitchEvent};
 use crate::soundpanel_window::update_soundpanel_appearance;
 use crate::state::AppState;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tracing::{debug, error, info};
+use uuid::Uuid;
+
+/// Synchronous routing helper for processed TTS text.
+/// Uses the snapshot's captured skip flags, not the mutable global prefix flags.
+pub(crate) fn route_processed_text(
+    app_state: &AppState,
+    text: &str,
+    skip_twitch: bool,
+    skip_webview: bool,
+) {
+    if !skip_webview {
+        app_state
+            .webview
+            .send_event(AppEvent::TextSentToTts(text.to_string()));
+    }
+    if !skip_twitch {
+        let settings = app_state.twitch.settings.blocking_read();
+        if settings.enabled {
+            drop(settings);
+            app_state.send_twitch_event(TwitchEvent::SendMessage(text.to_string()));
+        }
+    }
+}
 
 /// Update tray icon based on interception state
 fn update_tray_icon(_app_handle: &AppHandle, is_intercepting: bool) {
@@ -101,20 +125,23 @@ impl EventHandler {
             AppEvent::TwitchStatusChanged(status) => {
                 debug!(?status, "[EVENT] Twitch status changed");
             }
-            AppEvent::PlaybackStarted { .. } => {
-                debug!("[EVENT] Playback started");
+            AppEvent::PlaybackStarted {
+                ref text_id,
+                ref text,
+            } => {
+                debug!(text_id = %text_id, "[EVENT] Playback started");
+                self.process_playback_started(text_id, text);
             }
             AppEvent::PlaybackFinished { ref text_id } => {
                 debug!(text_id = %text_id, "[EVENT] Playback finished");
-                if let Some(pb) = self.state.playback_manager.lock().as_ref() {
-                    pb.on_playback_finished();
-                }
+                self.process_playback_finished(text_id);
             }
             AppEvent::PlaybackFailed {
                 ref text_id,
                 ref error,
             } => {
                 debug!(text_id = %text_id, error = %error, "[EVENT] Playback failed");
+                self.process_playback_failed(text_id, error);
             }
             AppEvent::PlaybackPaused => {
                 debug!("[EVENT] Playback paused");
@@ -136,6 +163,75 @@ impl EventHandler {
             }
             AppEvent::Quit => {
                 info!("[EVENT] Quit event received - WebView server should handle cleanup");
+            }
+        }
+    }
+
+    /// Process PlaybackStarted — if text_id is a queue job, transition Ready→Playing.
+    fn process_playback_started(&self, text_id: &str, _text: &str) {
+        if let Ok(job_id) = Uuid::parse_str(text_id) {
+            if let Some(sq) = self.app_handle.try_state::<SpeechQueueState>() {
+                let mut q = sq.lock();
+                if q.has_job(job_id) {
+                    match q.mark_playing(job_id) {
+                        Ok(()) => {
+                            let dto = q.state();
+                            drop(q);
+                            let _ = self.app_handle.emit("speech-queue-changed", dto);
+                            sq.notify_one();
+                        }
+                        Err(e) => {
+                            debug!(error = %e, job_id = %job_id, "PlaybackStarted: invalid transition for queue job");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Process PlaybackFinished — if queue job, transition Playing→Completed, then always advance.
+    fn process_playback_finished(&self, text_id: &str) {
+        if let Ok(job_id) = Uuid::parse_str(text_id) {
+            if let Some(sq) = self.app_handle.try_state::<SpeechQueueState>() {
+                let mut q = sq.lock();
+                if q.has_job(job_id) {
+                    match q.mark_completed(job_id) {
+                        Ok(()) => {
+                            let dto = q.state();
+                            drop(q);
+                            let _ = self.app_handle.emit("speech-queue-changed", dto);
+                        }
+                        Err(e) => {
+                            debug!(error = %e, job_id = %job_id, "PlaybackFinished: invalid transition for queue job");
+                        }
+                    }
+                }
+            }
+        }
+        // Always advance playback (legacy behavior)
+        if let Some(pb) = self.state.playback_manager.lock().as_ref() {
+            pb.on_playback_finished();
+        }
+    }
+
+    /// Process PlaybackFailed — if queue job, transition Ready/Playing→Failed, fail-closed.
+    fn process_playback_failed(&self, text_id: &str, error_msg: &str) {
+        if let Ok(job_id) = Uuid::parse_str(text_id) {
+            if let Some(sq) = self.app_handle.try_state::<SpeechQueueState>() {
+                let mut q = sq.lock();
+                if q.has_job(job_id) {
+                    match q.fail_playback(job_id, error_msg.to_string()) {
+                        Ok(()) => {
+                            let dto = q.state();
+                            drop(q);
+                            let _ = self.app_handle.emit("speech-queue-changed", dto);
+                            sq.notify_one();
+                        }
+                        Err(e) => {
+                            debug!(error = %e, job_id = %job_id, "PlaybackFailed: invalid transition for queue job");
+                        }
+                    }
+                }
             }
         }
     }

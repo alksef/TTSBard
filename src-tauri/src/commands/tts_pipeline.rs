@@ -1,7 +1,9 @@
 use crate::audio::{
     apply_effects, decode_audio, process_boundaries, AudioEffects, AudioPcm, OutputConfig,
 };
-use crate::config::{AiSettings, AppSettings, AudioEffectsSettings, DspSettings, NetworkSettings};
+use crate::config::{
+    AiSettings, AppSettings, AudioEffectsSettings, AudioSettings, DspSettings, NetworkSettings,
+};
 use crate::speech_queue::Snapshot;
 use crate::state::AppState;
 use crate::tts::TtsProvider;
@@ -280,20 +282,18 @@ pub fn apply_audio_effects_pipeline(
     apply_audio_effects_pipeline_with_settings(audio_data, &settings.audio_effects, &settings.dsp)
 }
 
-/// 5. Отправка звука в плеер
-pub fn enqueue_and_record(
-    state: &AppState,
-    text: String,
-    audio: AudioPcm,
-    settings: &AppSettings,
-) -> Result<(), String> {
-    let audio_settings = &settings.audio;
-    let effects_volume = if settings.audio_effects.enabled {
+// ── OutputConfig helper (pure, reused by worker and legacy enqueue_and_record) ──
+
+pub(crate) fn compute_output_configs(
+    audio_settings: &AudioSettings,
+    effects_settings: &AudioEffectsSettings,
+) -> (Option<OutputConfig>, Option<OutputConfig>) {
+    let effects_volume = if effects_settings.enabled {
         Some(
             AudioEffects::new(
-                settings.audio_effects.pitch,
-                settings.audio_effects.speed,
-                settings.audio_effects.volume,
+                effects_settings.pitch,
+                effects_settings.speed,
+                effects_settings.volume,
             )
             .volume_factor(),
         )
@@ -324,6 +324,19 @@ pub fn enqueue_and_record(
             volume: final_volume,
         }
     });
+
+    (speaker_config, virtual_mic_config)
+}
+
+/// 5. Отправка звука в плеер (legacy path, uses global audio_config snapshots)
+pub fn enqueue_and_record(
+    state: &AppState,
+    text: String,
+    audio: AudioPcm,
+    settings: &AppSettings,
+) -> Result<(), String> {
+    let (speaker_config, virtual_mic_config) =
+        compute_output_configs(&settings.audio, &settings.audio_effects);
 
     if speaker_config.is_none() && virtual_mic_config.is_none() {
         return Err(
@@ -519,5 +532,87 @@ mod tests {
         .await
         .expect("AI-disabled helper should never fail");
         assert_eq!(result, "hello world");
+    }
+
+    // ── compute_output_configs tests ──
+
+    fn make_audio_settings(speaker_enabled: bool, mic_device: Option<&str>) -> AudioSettings {
+        use crate::config::AudioSettings;
+        AudioSettings {
+            speaker_enabled,
+            speaker_device: None,
+            speaker_volume: 80,
+            virtual_mic_device: mic_device.map(|s| s.to_string()),
+            virtual_mic_volume: 60,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn output_configs_both_enabled() {
+        let audio = make_audio_settings(true, Some("mic1"));
+        let effects = AudioEffectsSettings::default();
+        let (spk, mic) = compute_output_configs(&audio, &effects);
+        assert!(spk.is_some());
+        assert_eq!(spk.as_ref().unwrap().volume, 0.8);
+        assert!(mic.is_some());
+        assert_eq!(mic.as_ref().unwrap().device_id.as_deref(), Some("mic1"));
+        assert_eq!(mic.as_ref().unwrap().volume, 0.6);
+    }
+
+    #[test]
+    fn output_configs_speaker_only() {
+        let audio = make_audio_settings(true, None);
+        let effects = AudioEffectsSettings::default();
+        let (spk, mic) = compute_output_configs(&audio, &effects);
+        assert!(spk.is_some());
+        assert!(mic.is_none());
+    }
+
+    #[test]
+    fn output_configs_mic_only() {
+        let audio = make_audio_settings(false, Some("mic1"));
+        let effects = AudioEffectsSettings::default();
+        let (spk, mic) = compute_output_configs(&audio, &effects);
+        assert!(spk.is_none());
+        assert!(mic.is_some());
+    }
+
+    #[test]
+    fn output_configs_both_disabled() {
+        let audio = make_audio_settings(false, None);
+        let effects = AudioEffectsSettings::default();
+        let (spk, mic) = compute_output_configs(&audio, &effects);
+        assert!(spk.is_none());
+        assert!(mic.is_none());
+    }
+
+    #[test]
+    fn output_configs_effects_volume_factor_applied() {
+        let audio = make_audio_settings(true, Some("mic1"));
+        let mut effects = AudioEffectsSettings::default();
+        effects.enabled = true;
+        effects.volume = 50;
+        let (spk, _mic) = compute_output_configs(&audio, &effects);
+        let expected = 0.8 * (50.0f32 / 100.0);
+        assert!((spk.unwrap().volume - expected).abs() < 0.0001);
+    }
+
+    #[test]
+    fn output_configs_parity_with_legacy() {
+        let audio = make_audio_settings(true, Some("dev-test"));
+        let effects = AudioEffectsSettings::default();
+        let (spk, mic) = compute_output_configs(&audio, &effects);
+
+        let legacy_effects_volume: Option<f32> = if effects.enabled {
+            Some(AudioEffects::new(effects.pitch, effects.speed, effects.volume).volume_factor())
+        } else {
+            None
+        };
+        let legacy_spk_vol = 0.8 * legacy_effects_volume.unwrap_or(1.0);
+        assert_eq!(spk.unwrap().volume, legacy_spk_vol);
+
+        let legacy_mic_vol = 0.6 * legacy_effects_volume.unwrap_or(1.0);
+        assert_eq!(mic.unwrap().volume, legacy_mic_vol);
     }
 }

@@ -286,9 +286,8 @@ pub fn run() {
     let tab_manager = Arc::new(tabs::TabManager::new(tabs_path));
     let tabs_state = commands::tabs::TabsState(tab_manager);
 
-    let speech_queue = commands::speech_queue::SpeechQueueState(Arc::new(parking_lot::Mutex::new(
-        speech_queue::SpeechQueue::new(),
-    )));
+    let speech_queue =
+        commands::speech_queue::SpeechQueueState::new(speech_queue::SpeechQueue::new());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
