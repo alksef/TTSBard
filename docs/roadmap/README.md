@@ -45,7 +45,6 @@ related_tasks: []
 | [ROADMAP-038 — Dynamic Piper providers](./active/038-dynamic-piper-tts-providers.md) | `in_progress` | Ручная проверка на Windows |
 | [ROADMAP-040 — Test coverage gaps](./active/040-test-coverage-gaps.md) | `in_progress` | P1/P2: composables, playback seam, HTTP contracts |
 | [ROADMAP-041 — Review 021 remediation](./active/041-review-021-remediation.md) | `in_progress` | Сверить оставшийся scope и закрыть item |
-| [ROADMAP-049 — Надёжная корреляция ответов Silero](./active/049-silero-response-correlation.md) | `in_progress` | Проверить P1; затем вывести limits/reset time в UI |
 
 ## Завершённые направления
 
@@ -63,6 +62,7 @@ related_tasks: []
 - [ROADMAP-033 — phrase audio cache](./completed/033-phrase-history-audio-cache.md)
 - [ROADMAP-034 — Silero metadata и recent dedup](./completed/034-silero-voice-and-playback-recent-dedup.md)
 - [ROADMAP-048 — Enter/Escape и autocomplete](./completed/048-editor-autocomplete-enter-escape.md)
+- [ROADMAP-049 — Надёжная корреляция ответов Silero](./completed/049-silero-response-correlation.md)
 
 ### Окна, ввод и sound panel
 

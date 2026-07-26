@@ -2,7 +2,7 @@ use super::client::TelegramClient;
 use super::types::{CurrentVoice, Limits, TtsResult};
 use grammers_session::updates::UpdatesLike;
 use regex::Regex;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::{debug, error, info, trace, warn};
@@ -265,34 +265,50 @@ impl SileroTtsBot {
                         );
 
                         if let Some(media) = msg.media() {
-                            // Создаем временную папку
+                            let extension = voice_extension(&voice.mime_type);
                             let temp_dir = Self::get_temp_dir()?;
-                            std::fs::create_dir_all(&temp_dir)
-                                .map_err(|e| format!("Failed to create temp dir: {}", e))?;
+                            let final_path = voice_final_path(&temp_dir, voice.msg_id, extension);
+                            let part_path = voice_part_path(&temp_dir, voice.msg_id, extension);
 
-                            // Определяем расширение файла
-                            let extension = if voice.mime_type == "audio/mpeg" {
-                                "mp3"
-                            } else {
-                                "ogg"
-                            };
+                            match std::fs::remove_file(&part_path) {
+                                Ok(()) => {
+                                    debug!(
+                                        "Removed stale part file: {}",
+                                        crate::secret_log::safe_path_for_log(&part_path)
+                                    );
+                                }
+                                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                                Err(e) => {
+                                    return Err(format!(
+                                        "Failed to remove stale part file {}: {}",
+                                        crate::secret_log::safe_path_for_log(&part_path),
+                                        e
+                                    ));
+                                }
+                            }
 
-                            // Генерируем уникальное имя файла
-                            let timestamp = chrono::Utc::now().timestamp();
-                            let file_name = format!("silero_tts_{}.{}", timestamp, extension);
-                            let dest_path = temp_dir.join(&file_name);
+                            debug!(
+                                "Downloading voice file to {}",
+                                crate::secret_log::safe_path_for_log(&part_path)
+                            );
 
-                            info!(?dest_path, "Downloading voice file");
+                            if let Err(e) = client_inner.download_media(&media, &part_path).await {
+                                let _ = std::fs::remove_file(&part_path);
+                                return Err(format!("Download failed: {}", e));
+                            }
 
-                            // Скачиваем медиа
-                            client_inner
-                                .download_media(&media, &dest_path)
-                                .await
-                                .map_err(|e| format!("Download failed: {}", e))?;
+                            let (published_path, file_size) =
+                                publish_voice_file(&part_path, &final_path)?;
 
-                            info!(?dest_path, "Download completed");
+                            info!(
+                                msg_id = voice.msg_id,
+                                mime = %voice.mime_type,
+                                size = file_size,
+                                path = %crate::secret_log::safe_path_for_log(&published_path),
+                                "Voice file published"
+                            );
 
-                            return Ok(dest_path
+                            return Ok(published_path
                                 .to_str()
                                 .ok_or_else(|| "Invalid path".to_string())?
                                 .to_string());
@@ -347,6 +363,47 @@ impl SileroTtsBot {
 
         Ok(temp_dir)
     }
+}
+
+/// Determine file extension from the MIME type of a voice message.
+fn voice_extension(mime_type: &str) -> &str {
+    if mime_type == "audio/mpeg" {
+        "mp3"
+    } else {
+        "ogg"
+    }
+}
+
+/// Full path for the published voice file: `silero_tts_<msg_id>.<ext>`.
+fn voice_final_path(temp_dir: &Path, msg_id: i32, ext: &str) -> PathBuf {
+    temp_dir.join(format!("silero_tts_{}.{}", msg_id, ext))
+}
+
+/// Path for the in-progress `.part` download file.
+fn voice_part_path(temp_dir: &Path, msg_id: i32, ext: &str) -> PathBuf {
+    let final_name = format!("silero_tts_{}.{}", msg_id, ext);
+    temp_dir.join(format!("{}.part", final_name))
+}
+
+/// Atomically publish a downloaded `.part` file:
+///   1. Read metadata – reject zero-byte files and clean up on failure.
+///   2. Rename (atomic on the same filesystem) – clean up on failure.
+/// Returns the final path and file size on success.
+fn publish_voice_file(part_path: &Path, final_path: &Path) -> Result<(PathBuf, u64), String> {
+    let metadata = std::fs::metadata(part_path).map_err(|e| {
+        let _ = std::fs::remove_file(part_path);
+        format!("Failed to read metadata of downloaded file: {}", e)
+    })?;
+    let file_size = metadata.len();
+    if file_size == 0 {
+        let _ = std::fs::remove_file(part_path);
+        return Err("Downloaded file is empty".to_string());
+    }
+    std::fs::rename(part_path, final_path).map_err(|e| {
+        let _ = std::fs::remove_file(part_path);
+        format!("Failed to rename downloaded file: {}", e)
+    })?;
+    Ok((final_path.to_path_buf(), file_size))
 }
 
 /// Pure matching rules for Silero audio responses.
@@ -2573,5 +2630,158 @@ mod tests {
     fn limits_short_message_rejects_malformed_text() {
         let update = make_short_update(false, 43, BOT_ID, "random text");
         assert!(extract_limits_info_from_update(&update, SENT_ID, BOT_ID).is_none());
+    }
+
+    // ── voice_extension ────────────────────────────────────────────────
+
+    #[test]
+    fn voice_extension_mp3() {
+        assert_eq!(voice_extension("audio/mpeg"), "mp3");
+    }
+
+    #[test]
+    fn voice_extension_ogg_default() {
+        assert_eq!(voice_extension("audio/ogg"), "ogg");
+        assert_eq!(voice_extension("audio/opus"), "ogg");
+        assert_eq!(voice_extension(""), "ogg");
+    }
+
+    // ── voice_final_path / voice_part_path ─────────────────────────────
+
+    #[test]
+    fn voice_paths_mp3() {
+        let dir = PathBuf::from("/tmp/test_tts");
+        assert_eq!(
+            voice_final_path(&dir, 42, "mp3"),
+            PathBuf::from("/tmp/test_tts/silero_tts_42.mp3")
+        );
+        assert_eq!(
+            voice_part_path(&dir, 42, "mp3"),
+            PathBuf::from("/tmp/test_tts/silero_tts_42.mp3.part")
+        );
+    }
+
+    #[test]
+    fn voice_paths_ogg() {
+        let dir = PathBuf::from("/tmp/test_tts");
+        assert_eq!(
+            voice_final_path(&dir, 123, "ogg"),
+            PathBuf::from("/tmp/test_tts/silero_tts_123.ogg")
+        );
+        assert_eq!(
+            voice_part_path(&dir, 123, "ogg"),
+            PathBuf::from("/tmp/test_tts/silero_tts_123.ogg.part")
+        );
+    }
+
+    #[test]
+    fn voice_paths_different_msg_ids() {
+        let dir = PathBuf::from("/tmp/test_tts");
+        let f1 = voice_final_path(&dir, 1, "mp3");
+        let f2 = voice_final_path(&dir, 2, "mp3");
+        assert_ne!(f1, f2);
+        let p1 = voice_part_path(&dir, 1, "mp3");
+        let p2 = voice_part_path(&dir, 2, "mp3");
+        assert_ne!(p1, p2);
+    }
+
+    // ── publish_voice_file ─────────────────────────────────────────────
+
+    /// Helper: creates a per-test temp directory, returns it, and schedules
+    /// best-effort cleanup when the returned `DirGuard` is dropped.
+    struct DirGuard(PathBuf);
+
+    impl Drop for DirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn test_dir(label: &str) -> DirGuard {
+        let d =
+            std::env::temp_dir().join(format!("test_tts_publish_{}_{}", std::process::id(), label));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        DirGuard(d)
+    }
+
+    #[test]
+    fn publish_non_empty_success() {
+        let guard = test_dir("non_empty");
+        let part = voice_part_path(&guard.0, 10, "mp3");
+        let final_path = voice_final_path(&guard.0, 10, "mp3");
+
+        std::fs::write(&part, b"valid audio data").unwrap();
+
+        let (published, size) =
+            publish_voice_file(&part, &final_path).expect("publication must succeed");
+        assert!(!part.exists(), "part file must be removed after rename");
+        assert!(final_path.exists(), "final file must exist");
+        assert_eq!(published, final_path);
+        assert_eq!(size, 16);
+    }
+
+    #[test]
+    fn publish_zero_byte_rejected_and_cleaned() {
+        let guard = test_dir("zero_byte");
+        let part = voice_part_path(&guard.0, 20, "ogg");
+        let final_path = voice_final_path(&guard.0, 20, "ogg");
+
+        std::fs::write(&part, b"").unwrap();
+
+        let err =
+            publish_voice_file(&part, &final_path).expect_err("zero-byte file must be rejected");
+        assert!(err.contains("empty"), "error must mention empty: {}", err);
+        assert!(
+            !part.exists(),
+            "part file must be cleaned up after zero-byte rejection"
+        );
+        assert!(!final_path.exists(), "final file must not be created");
+    }
+
+    #[test]
+    fn publish_missing_part_returns_error() {
+        let guard = test_dir("missing_part");
+        let part = voice_part_path(&guard.0, 30, "mp3");
+        let final_path = voice_final_path(&guard.0, 30, "mp3");
+
+        let err = publish_voice_file(&part, &final_path)
+            .expect_err("missing part file must return error");
+        assert!(
+            err.contains("metadata"),
+            "error must mention metadata: {}",
+            err
+        );
+        assert!(
+            !part.exists(),
+            "no part file must remain after metadata failure"
+        );
+        assert!(!final_path.exists());
+    }
+
+    #[test]
+    fn publish_rename_to_existing_behaviour() {
+        let guard = test_dir("rename_existing");
+        let part = voice_part_path(&guard.0, 40, "mp3");
+        let final_path = voice_final_path(&guard.0, 40, "mp3");
+
+        std::fs::write(&part, b"new data").unwrap();
+        std::fs::write(&final_path, b"old data").unwrap();
+
+        let result = publish_voice_file(&part, &final_path);
+        match result {
+            Ok((_path, _size)) => {
+                // On Unix rename overwrites; verify the part is gone and
+                // final contains the new content.
+                assert!(!part.exists());
+                let content = std::fs::read_to_string(&final_path).unwrap();
+                assert_eq!(content, "new data");
+            }
+            Err(e) => {
+                // On Windows rename fails if destination exists.
+                assert!(e.contains("rename"), "error must mention rename: {}", e);
+                assert!(!part.exists(), "part must be cleaned up on failure");
+            }
+        }
     }
 }
