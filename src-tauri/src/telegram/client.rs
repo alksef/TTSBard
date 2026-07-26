@@ -152,6 +152,14 @@ pub struct TelegramClient {
     proxy_status: Arc<Mutex<ProxyStatus>>,
     /// Serializes /limits request-response pairs so only one active at a time
     pub(crate) limits_mutex: Arc<tokio::sync::Mutex<()>>,
+    /// Confirmed speaker voice id shared across clones.
+    /// When the requested speaker matches this cache the /speaker round
+    /// trip is skipped. Updated only after a positively parsed success
+    /// response or get_current_voice sync; invalidated on (re)connect.
+    pub(crate) confirmed_speaker: Arc<tokio::sync::Mutex<Option<String>>>,
+    /// Serializes check / possible /speaker request / cache-update so
+    /// concurrent set_speaker and get_current_voice calls are atomic.
+    pub(crate) speaker_serializer: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl fmt::Debug for TelegramClient {
@@ -184,6 +192,8 @@ impl TelegramClient {
             session_path: Arc::new(Mutex::new(None)),
             proxy_status: Arc::new(Mutex::new(ProxyStatus::default())),
             limits_mutex: Arc::new(tokio::sync::Mutex::new(())),
+            confirmed_speaker: Arc::new(tokio::sync::Mutex::new(None)),
+            speaker_serializer: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -364,7 +374,8 @@ impl TelegramClient {
             .map_err(|e| format!("Не удалось создать сессию: {}", e))?;
         let session = Arc::new(session);
 
-        // Abort old dispatcher and pool task on reinitialization
+        // Abort old dispatcher and pool task first so in-flight waiters on
+        // the old update source wake instead of blocking for the full timeout.
         {
             let mut old_disp = self.dispatcher_handle.lock().await;
             if let Some(handle) = old_disp.take() {
@@ -380,6 +391,15 @@ impl TelegramClient {
         // Drop old broadcast sender so pending subscribers get Closed
         {
             *self.broadcast_tx.lock().await = None;
+        }
+
+        // Acquire serializer and invalidate cache under it; hold the guard
+        // through transport replacement so no stale speaker write can
+        // repopulate the cache after invalidation.
+        let _serializer_guard = self.speaker_serializer.lock().await;
+        {
+            let mut cache = self.confirmed_speaker.lock().await;
+            *cache = None;
         }
 
         // Создаём SenderPool with appropriate configuration
@@ -796,7 +816,8 @@ impl TelegramClient {
 
     /// Отключение клиента
     pub async fn disconnect(&self) -> Result<OperationResult, String> {
-        // Abort dispatcher so it stops reading the raw receiver
+        // Abort dispatcher first so in-flight waiters on the old update
+        // source wake instead of blocking for the full timeout.
         {
             let mut old_disp = self.dispatcher_handle.lock().await;
             if let Some(handle) = old_disp.take() {
@@ -808,9 +829,20 @@ impl TelegramClient {
             *self.broadcast_tx.lock().await = None;
         }
         // Завершаем задачу пула
-        let mut pool_task = self.pool_task.lock().await;
-        if let Some(task) = pool_task.take() {
-            task.abort();
+        {
+            let mut pool_task = self.pool_task.lock().await;
+            if let Some(task) = pool_task.take() {
+                task.abort();
+            }
+        }
+
+        // Acquire serializer and invalidate cache under it; hold the guard
+        // through state clearing so no stale speaker write can repopulate
+        // the cache after invalidation.
+        let _serializer_guard = self.speaker_serializer.lock().await;
+        {
+            let mut cache = self.confirmed_speaker.lock().await;
+            *cache = None;
         }
 
         // Сбрасываем состояние
@@ -1079,5 +1111,118 @@ mod tests {
     fn auth_state_flow_mockability_limitation() {
         // This test exists to document the limitation explicitly.
         // No compile-pass stub — the limitation is architectural.
+    }
+
+    // ── confirmed_speaker cache ────────────────────────────────────────
+
+    #[test]
+    fn confirmed_speaker_defaults_to_none() {
+        let client = TelegramClient::new();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let cache = client.confirmed_speaker.lock().await;
+            assert!(cache.is_none());
+        });
+    }
+
+    #[test]
+    fn confirmed_speaker_shared_across_clones() {
+        let client = TelegramClient::new();
+        let clone = client.clone();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        rt.block_on(async {
+            let mut c = client.confirmed_speaker.lock().await;
+            *c = Some("baya".to_string());
+        });
+
+        rt.block_on(async {
+            let cached = clone.confirmed_speaker.lock().await;
+            assert_eq!(cached.as_deref(), Some("baya"));
+        });
+    }
+
+    #[test]
+    fn confirmed_speaker_updates_visible_across_clones() {
+        let client = TelegramClient::new();
+        let clone = client.clone();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        rt.block_on(async {
+            let mut c = client.confirmed_speaker.lock().await;
+            *c = Some("first".to_string());
+        });
+
+        rt.block_on(async {
+            let mut c = clone.confirmed_speaker.lock().await;
+            assert_eq!(c.as_deref(), Some("first"));
+            *c = Some("second".to_string());
+        });
+
+        rt.block_on(async {
+            let cached = client.confirmed_speaker.lock().await;
+            assert_eq!(cached.as_deref(), Some("second"));
+        });
+    }
+
+    #[test]
+    fn disconnect_invalidates_confirmed_speaker() {
+        let client = TelegramClient::new();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        rt.block_on(async {
+            {
+                let mut c = client.confirmed_speaker.lock().await;
+                *c = Some("stale-speaker".to_string());
+            }
+            let _ = client.disconnect().await;
+            let cache = client.confirmed_speaker.lock().await;
+            assert!(cache.is_none());
+        });
+    }
+
+    #[test]
+    fn disconnect_invalidation_visible_on_clone() {
+        let client = TelegramClient::new();
+        let clone = client.clone();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        rt.block_on(async {
+            {
+                let mut c = client.confirmed_speaker.lock().await;
+                *c = Some("stale".to_string());
+            }
+            let _ = client.disconnect().await;
+            let cache = clone.confirmed_speaker.lock().await;
+            assert!(cache.is_none());
+        });
+    }
+
+    // ── speaker_serializer ──────────────────────────────────────────────
+
+    #[test]
+    fn speaker_serializer_defaults_to_available() {
+        let client = TelegramClient::new();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let guard = client.speaker_serializer.try_lock();
+            assert!(guard.is_ok(), "serializer must be available by default");
+            drop(guard);
+        });
+    }
+
+    #[test]
+    fn speaker_serializer_shared_across_clones() {
+        let client = TelegramClient::new();
+        let clone = client.clone();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let _g1 = client.speaker_serializer.lock().await;
+            let try_g2 = clone.speaker_serializer.try_lock();
+            assert!(
+                try_g2.is_err(),
+                "clone serializer must be held when original is locked"
+            );
+        });
     }
 }

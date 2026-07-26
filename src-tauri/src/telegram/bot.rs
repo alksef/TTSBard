@@ -429,6 +429,9 @@ impl Default for SileroTtsBot {
 pub async fn get_current_voice(client: &TelegramClient) -> Result<Option<CurrentVoice>, String> {
     info!("Getting current voice from bot");
 
+    // Serialize with other speaker-mutating operations (set_speaker)
+    let _ser = client.speaker_serializer.lock().await;
+
     // 0. Subscribe BEFORE sending to avoid missing fast response
     let mut rx = client.subscribe_updates().await?;
 
@@ -457,6 +460,10 @@ pub async fn get_current_voice(client: &TelegramClient) -> Result<Option<Current
                     extract_voice_info_from_update(&update, sent_message_id, bot_user_id)
                 {
                     info!("Voice info found");
+                    if !voice_info.id.is_empty() {
+                        let mut cache = client.confirmed_speaker.lock().await;
+                        *cache = Some(voice_info.id.clone());
+                    }
                     return Ok(Some(voice_info));
                 }
             }
@@ -860,6 +867,19 @@ impl FindWhitespace for &str {
 /// Отправить "/speaker {code}" боту и дождаться текстового ответа
 /// Возвращает true если успешно, иначе ошибку
 pub async fn set_speaker(client: &TelegramClient, voice_code: &str) -> Result<bool, String> {
+    // Serialize the full check-request-update cycle; avoid holding the
+    // cache mutex across nested network helpers.
+    let _ser = client.speaker_serializer.lock().await;
+
+    // Check only while serialized so the cached state cannot change underneath us.
+    {
+        let cached = client.confirmed_speaker.lock().await;
+        if cached.as_deref() == Some(voice_code) {
+            debug!(voice_code, "Speaker already confirmed, skipping /speaker");
+            return Ok(true);
+        }
+    }
+
     info!("Setting speaker voice");
 
     // 0. Subscribe BEFORE sending
@@ -878,6 +898,7 @@ pub async fn set_speaker(client: &TelegramClient, voice_code: &str) -> Result<bo
         let elapsed = start_time.elapsed();
         if elapsed >= total_timeout {
             warn!("Timeout (30s) waiting for set_speaker response");
+            *client.confirmed_speaker.lock().await = None;
             return Err("Timeout waiting for speaker change response".to_string());
         }
 
@@ -890,18 +911,23 @@ pub async fn set_speaker(client: &TelegramClient, voice_code: &str) -> Result<bo
                 {
                     info!("Set speaker response: {}", result);
                     if result {
+                        let mut cache = client.confirmed_speaker.lock().await;
+                        *cache = Some(voice_code.to_string());
                         return Ok(true);
                     } else {
+                        *client.confirmed_speaker.lock().await = None;
                         return Err("Invalid voice code".to_string());
                     }
                 }
             }
             Ok(Err(broadcast::error::RecvError::Closed)) => {
                 warn!("Update stream closed");
+                *client.confirmed_speaker.lock().await = None;
                 return Err("Update stream closed".to_string());
             }
             Ok(Err(broadcast::error::RecvError::Lagged(n))) => {
                 warn!(skipped = n, "Broadcast receiver lagged");
+                *client.confirmed_speaker.lock().await = None;
                 return Err(format!("Update stream lagged (skipped {} messages)", n));
             }
             Err(_) => {
@@ -1645,5 +1671,118 @@ mod tests {
             SENT_ID,
             BOT_ID
         ));
+    }
+
+    // ── set_speaker cache / serialization tests ──────────────────────────
+
+    #[test]
+    fn set_speaker_short_circuits_when_cache_matches() {
+        let client = TelegramClient::new();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        rt.block_on(async {
+            let mut cache = client.confirmed_speaker.lock().await;
+            *cache = Some("baya_16".to_string());
+            drop(cache);
+
+            let result = set_speaker(&client, "baya_16").await;
+            assert!(result.is_ok(), "must skip /speaker when cache matches");
+            assert!(result.unwrap());
+        });
+    }
+
+    #[test]
+    fn set_speaker_proceeds_when_cache_differs() {
+        let client = TelegramClient::new();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        rt.block_on(async {
+            {
+                let mut cache = client.confirmed_speaker.lock().await;
+                *cache = Some("old-speaker".to_string());
+            }
+
+            let result = set_speaker(&client, "new-speaker").await;
+            assert!(
+                result.is_err(),
+                "must proceed to subscribe when cache differs"
+            );
+        });
+    }
+
+    #[test]
+    fn set_speaker_proceeds_when_cache_is_none() {
+        let client = TelegramClient::new();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        rt.block_on(async {
+            let result = set_speaker(&client, "any-speaker").await;
+            assert!(result.is_err(), "must proceed when cache is None");
+        });
+    }
+
+    #[test]
+    fn set_speaker_serializer_blocks_concurrent_calls() {
+        let client = TelegramClient::new();
+        let clone = client.clone();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        rt.block_on(async {
+            {
+                let mut cache = client.confirmed_speaker.lock().await;
+                *cache = Some("shared-cached".to_string());
+                drop(cache);
+            }
+
+            let _hold = client.speaker_serializer.lock().await;
+
+            let task_handle =
+                tokio::spawn(async move { set_speaker(&clone, "shared-cached").await });
+
+            tokio::task::yield_now().await;
+            tokio::task::yield_now().await;
+            assert!(
+                !task_handle.is_finished(),
+                "task must be blocked on serializer"
+            );
+
+            drop(_hold);
+
+            let result = task_handle.await.unwrap();
+            assert!(
+                result.is_ok(),
+                "cache hit succeeds after serializer released"
+            );
+        });
+    }
+
+    #[test]
+    fn set_speaker_double_check_sees_concurrent_update() {
+        let client = TelegramClient::new();
+        let clone = client.clone();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        rt.block_on(async {
+            let hold = client.speaker_serializer.lock().await;
+
+            let task_handle =
+                tokio::spawn(async move { set_speaker(&clone, "concurrent-speaker").await });
+
+            tokio::task::yield_now().await;
+            tokio::task::yield_now().await;
+
+            {
+                let mut cache = client.confirmed_speaker.lock().await;
+                *cache = Some("concurrent-speaker".to_string());
+            }
+
+            drop(hold);
+
+            let result = task_handle.await.unwrap();
+            assert!(
+                result.is_ok(),
+                "double-check after serializer must see the cache update"
+            );
+        });
     }
 }
