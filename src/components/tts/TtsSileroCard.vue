@@ -5,7 +5,8 @@ import { confirm } from '@tauri-apps/plugin-dialog';
 import ProviderCard from '../shared/ProviderCard.vue';
 import TelegramConnectionStatus from './TelegramConnectionStatus.vue';
 import type { VoiceCode } from '../../types/settings';
-import type { CurrentVoice } from '../../composables/useTelegramAuth';
+import type { CurrentVoice, Limits } from '../../composables/useTelegramAuth';
+import { parseLimitsResetTimestamp, formatLimitCounter } from '../../utils/sileroLimits';
 
 interface Props {
   active?: boolean;
@@ -28,6 +29,9 @@ interface Props {
   savedVoices?: VoiceCode[];
   voiceLoading?: boolean;
   voiceError?: string | null;
+  limits?: Limits | null;
+  limitsLoading?: boolean;
+  limitsError?: string | null;
 }
 
 interface Emits {
@@ -41,6 +45,7 @@ interface Emits {
   (e: 'add-voice', data: { code: string; description?: string }, callback: (success: boolean, error?: string) => void): void;
   (e: 'remove-voice', id: string): void;
   (e: 'select-voice', id: string): void;
+  (e: 'refresh-limits'): void;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -63,6 +68,22 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<Emits>();
 
 const hasError = computed(() => props.errorMessage !== null);
+
+const limitsVoicesFormatted = computed(() => {
+  if (!props.limits) return null
+  return formatLimitCounter(props.limits.voices)
+})
+
+const limitsResetFormatted = computed(() => {
+  if (!props.limits?.reset_timestamp) return null
+  const parsed = parseLimitsResetTimestamp(props.limits.reset_timestamp)
+  return parsed.formatted
+})
+
+const limitsTooltip = computed(() => {
+  if (!props.limits?.reset_timestamp) return ''
+  return `Сброс: ${props.limits.reset_timestamp}`
+})
 
 const showAddVoiceDialog = ref(false);
 const voiceCodeInput = ref('');
@@ -159,6 +180,46 @@ function handleSelectVoice(voiceId: string) {
       @reconnect="$emit('reconnect')"
       @proxy-mode-change="$emit('proxy-mode-change', $event)"
     />
+
+    <div v-if="connected && limits" class="limits-row">
+      <span class="limits-counters">
+        Символы: {{ limitsVoicesFormatted }}
+        <template v-if="limitsResetFormatted">
+          · <span :title="limitsTooltip">обновится {{ limitsResetFormatted }}</span>
+        </template>
+        <template v-else-if="limits.reset_timestamp">
+          · <span :title="limitsTooltip">обновится —</span>
+        </template>
+        <span v-if="limitsError" class="limits-stale-cue" title="Ошибка обновления">⚠</span>
+      </span>
+      <button
+        class="limits-refresh"
+        :disabled="limitsLoading"
+        :title="limitsError || 'Обновить лимиты'"
+        :aria-label="limitsError || 'Обновить лимиты'"
+        @click="$emit('refresh-limits')"
+      >
+        <Loader2 v-if="limitsLoading" :size="14" class="spinner" />
+        <RefreshCw v-else :size="14" />
+      </button>
+    </div>
+
+    <div v-else-if="connected && !limits && !limitsLoading" class="limits-row limits-row-unavailable">
+      <span class="limits-counters">Символы: —</span>
+      <button
+        class="limits-refresh"
+        :title="limitsError || 'Загрузить лимиты'"
+        :aria-label="limitsError || 'Загрузить лимиты'"
+        @click="$emit('refresh-limits')"
+      >
+        <RefreshCw :size="14" />
+      </button>
+    </div>
+
+    <div v-else-if="connected && limitsLoading && !limits" class="limits-row limits-row-loading">
+      <Loader2 :size="14" class="spinner" />
+      <span class="limits-counters">Загрузка лимитов...</span>
+    </div>
 
     <!-- Voice Management Section (shown when connected) -->
     <div v-if="connected" class="voice-management-section">
@@ -351,13 +412,6 @@ function handleSelectVoice(voiceId: string) {
   min-width: 0;
 }
 
-.voice-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  margin-bottom: 2px;
-}
-
 .voice-id {
   font-size: 12px;
   color: var(--color-text-secondary);
@@ -422,21 +476,6 @@ function handleSelectVoice(voiceId: string) {
   font-size: 18px;
   font-weight: 600;
   color: var(--color-text-primary);
-}
-
-.dialog-description {
-  margin: 0 0 16px;
-  font-size: 14px;
-  color: var(--color-text-secondary);
-  line-height: 1.5;
-}
-
-.dialog-description code {
-  background: var(--color-bg-secondary);
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-family: monospace;
-  font-size: 13px;
 }
 
 .voice-input {
@@ -541,4 +580,74 @@ function handleSelectVoice(voiceId: string) {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+.limits-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.limits-counters {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.limits-stale-cue {
+  color: var(--color-warning, #e67e22);
+  cursor: help;
+  margin-left: 4px;
+}
+
+.limits-refresh {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+}
+
+.limits-refresh:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
+}
+
+.limits-refresh:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.limits-row-unavailable,
+.limits-row-loading,
+.limits-row-stale {
+  padding: 6px 0;
+}
+
+.limits-row-unavailable .limits-counters {
+  color: var(--color-text-tertiary);
+}
+
+.limits-row-loading {
+  gap: 8px;
+}
+
+.limits-row-loading .limits-counters {
+  font-size: 13px;
+  color: var(--color-text-tertiary);
+}
+
 </style>

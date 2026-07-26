@@ -1,6 +1,7 @@
 use super::client::TelegramClient;
 use super::types::{CurrentVoice, Limits, TtsResult};
 use grammers_session::updates::UpdatesLike;
+use regex::Regex;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -156,6 +157,18 @@ impl SileroTtsBot {
                 for update in &u.updates {
                     if let grammers_tl_types::enums::Update::NewMessage(msg) = update {
                         if let grammers_tl_types::enums::Message::Message(m) = &msg.message {
+                            let peer_user_id = match &m.peer_id {
+                                grammers_tl_types::enums::Peer::User(u) => Some(u.user_id),
+                                _ => None,
+                            };
+                            log_bot_text(
+                                "voice",
+                                m.out,
+                                m.id,
+                                peer_user_id,
+                                bot_user_id,
+                                &m.message,
+                            );
                             if let Some(media) = &m.media {
                                 if let grammers_tl_types::enums::MessageMedia::Document(doc_media) =
                                     media
@@ -163,15 +176,11 @@ impl SileroTtsBot {
                                     if let Some(grammers_tl_types::enums::Document::Document(doc)) =
                                         &doc_media.document
                                     {
-                                        let peer_user_id = match &m.peer_id {
-                                            grammers_tl_types::enums::Peer::User(u) => {
-                                                Some(u.user_id)
-                                            }
-                                            _ => None,
-                                        };
                                         let reply_to_msg_id = match &m.reply_to {
                                             Some(
-                                                grammers_tl_types::enums::MessageReplyHeader::Header(h),
+                                                grammers_tl_types::enums::MessageReplyHeader::Header(
+                                                    h,
+                                                ),
                                             ) => h.reply_to_msg_id,
                                             _ => None,
                                         };
@@ -370,34 +379,60 @@ fn is_matching_audio_response(
 }
 
 /// Pure matching rules for reply-less /limits responses.
-/// Checks direction, peer, message ID ordering, absence of media and inline menu,
-/// and that text parses as limits.
+/// Checks direction, peer, message ID ordering, absence of media,
+/// and that text parses as limits.  `reply_markup` is allowed — the
+/// content discriminator is `parse_limits_info`.
 fn is_matching_limits_response(
     msg_out: bool,
     msg_id: i32,
     peer_user_id: Option<i64>,
     has_media: bool,
-    has_reply_markup: bool,
     text: &str,
     sent_msg_id: i32,
     bot_user_id: i64,
 ) -> bool {
+    let peer_matched = peer_user_id == Some(bot_user_id);
+    let text_len = text.len();
     if msg_out {
+        trace!(msg_id, sent_msg_id, "limits candidate rejected: outgoing");
         return false;
     }
-    if peer_user_id != Some(bot_user_id) {
+    if !peer_matched {
+        trace!(
+            msg_id,
+            peer_user_id,
+            bot_user_id,
+            "limits candidate rejected: peer mismatch"
+        );
         return false;
     }
     if msg_id <= sent_msg_id {
+        trace!(
+            msg_id,
+            sent_msg_id,
+            "limits candidate rejected: stale msg_id"
+        );
         return false;
     }
-    if has_media || has_reply_markup {
+    if has_media {
+        trace!(msg_id, sent_msg_id, "limits candidate rejected: has media");
         return false;
     }
     if text.is_empty() {
+        trace!(msg_id, text_len, "limits candidate rejected: empty text");
         return false;
     }
-    parse_limits_info(text).is_some()
+    let parsed = parse_limits_info(text).is_some();
+    trace!(
+        msg_id,
+        sent_msg_id,
+        peer_matched,
+        has_media,
+        text_len,
+        parsed,
+        "limits candidate evaluation complete"
+    );
+    parsed
 }
 
 /// Pure matching rules for text replies (used by set-speaker).
@@ -553,6 +588,15 @@ fn extract_voice_info_from_update(
                             );
                             continue;
                         }
+
+                        log_bot_text(
+                            "speaker",
+                            m.out,
+                            m.id,
+                            peer_user_id,
+                            bot_user_id,
+                            &m.message,
+                        );
 
                         // Проверяем что это ответ на наше сообщение
                         match &m.reply_to {
@@ -745,123 +789,402 @@ async fn send_limits_command(client: &TelegramClient) -> Result<(i32, i64), Stri
 }
 
 /// Извлечь информацию о лимитах из текстового сообщения.
-/// Delegates policy to `is_matching_limits_response` to avoid duplicating
-/// matching rules.
+/// Delegates to specialised helpers based on the `UpdatesLike` variant.
 fn extract_limits_info_from_update(
     update_like: &UpdatesLike,
     sent_msg_id: i32,
     bot_user_id: i64,
 ) -> Option<Limits> {
-    if let UpdatesLike::Updates(updates_enum) = update_like {
-        if let grammers_tl_types::enums::Updates::Updates(u) = updates_enum {
-            for update in &u.updates {
-                if let grammers_tl_types::enums::Update::NewMessage(msg) = update {
-                    if let grammers_tl_types::enums::Message::Message(m) = &msg.message {
-                        let peer_user_id = match &m.peer_id {
-                            grammers_tl_types::enums::Peer::User(u) => Some(u.user_id),
-                            _ => None,
-                        };
-                        if is_matching_limits_response(
-                            m.out,
-                            m.id,
-                            peer_user_id,
-                            m.media.is_some(),
-                            m.reply_markup.is_some(),
-                            &m.message,
-                            sent_msg_id,
-                            bot_user_id,
-                        ) {
-                            // parse_limits_info will succeed since is_matching_limits_response validated it
-                            return parse_limits_info(&m.message);
-                        }
-                    }
+    match update_like {
+        UpdatesLike::Updates(updates_enum) => match updates_enum {
+            grammers_tl_types::enums::Updates::Updates(u) => {
+                extract_limits_info_from_updates(&u.updates, sent_msg_id, bot_user_id)
+            }
+            grammers_tl_types::enums::Updates::Combined(u) => {
+                extract_limits_info_from_updates(&u.updates, sent_msg_id, bot_user_id)
+            }
+            grammers_tl_types::enums::Updates::UpdateShortMessage(m) => {
+                extract_limits_info_from_short_message(m, sent_msg_id, bot_user_id)
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn extract_limits_info_from_updates(
+    updates: &[grammers_tl_types::enums::Update],
+    sent_msg_id: i32,
+    bot_user_id: i64,
+) -> Option<Limits> {
+    for update in updates {
+        match update {
+            grammers_tl_types::enums::Update::NewMessage(msg) => {
+                if let Some(result) =
+                    extract_limits_info_from_message(&msg.message, sent_msg_id, bot_user_id)
+                {
+                    return Some(result);
                 }
             }
+            grammers_tl_types::enums::Update::EditMessage(msg) => {
+                if let Some(result) =
+                    extract_limits_info_from_message(&msg.message, sent_msg_id, bot_user_id)
+                {
+                    return Some(result);
+                }
+            }
+            _ => {}
         }
     }
     None
 }
 
-/// Парсит текст ответа бота для получения информации о лимитах
-/// Формат: "🔓 Открытые голоса: 0 / 666 символов;" и "🪩 Кружки/гифки: 0 / 10 сообщений;"
+fn extract_limits_info_from_message(
+    message: &grammers_tl_types::enums::Message,
+    sent_msg_id: i32,
+    bot_user_id: i64,
+) -> Option<Limits> {
+    match message {
+        grammers_tl_types::enums::Message::Message(m) => {
+            let peer_user_id = match &m.peer_id {
+                grammers_tl_types::enums::Peer::User(u) => Some(u.user_id),
+                _ => None,
+            };
+            log_bot_text("limits", m.out, m.id, peer_user_id, bot_user_id, &m.message);
+            trace!(
+                candidate_msg_id = m.id,
+                sent_msg_id,
+                peer = peer_user_id,
+                bot = bot_user_id,
+                has_media = m.media.is_some(),
+                has_reply_markup = m.reply_markup.is_some(),
+                text_len = m.message.len(),
+                "Evaluating limits candidate"
+            );
+            if is_matching_limits_response(
+                m.out,
+                m.id,
+                peer_user_id,
+                m.media.is_some(),
+                &m.message,
+                sent_msg_id,
+                bot_user_id,
+            ) {
+                trace!(msg_id = m.id, "Limits candidate accepted");
+                return parse_limits_info(&m.message);
+            }
+        }
+        _ => {}
+    }
+    None
+}
+
+fn extract_limits_info_from_short_message(
+    m: &grammers_tl_types::types::UpdateShortMessage,
+    sent_msg_id: i32,
+    bot_user_id: i64,
+) -> Option<Limits> {
+    log_bot_text(
+        "limits",
+        m.out,
+        m.id,
+        Some(m.user_id),
+        bot_user_id,
+        &m.message,
+    );
+    trace!(
+        candidate_msg_id = m.id,
+        sent_msg_id,
+        peer = m.user_id,
+        bot = bot_user_id,
+        has_media = false,
+        text_len = m.message.len(),
+        "Evaluating limits candidate (short message)"
+    );
+    if is_matching_limits_response(
+        m.out,
+        m.id,
+        Some(m.user_id),
+        false,
+        &m.message,
+        sent_msg_id,
+        bot_user_id,
+    ) {
+        trace!(msg_id = m.id, "Limits candidate accepted (short message)");
+        return parse_limits_info(&m.message);
+    }
+    None
+}
+
+/// Парсит текст ответа бота для получения информации о лимитах.
+/// Supports two layouts:
+/// 1. Legacy inline: header and counter on the same line
+///    "Открытые голоса: 0 / 666 символов;"
+/// 2. Multiline: header on one line, counter on the next non-empty line
+///    "🔓 Открытые голоса:\n       34 / 666 символов;"
+/// Markdown emphasis (`**label:**`) is stripped before matching section headers.
+/// Both open-voices and gifs counters are required; other sections are ignored.
 fn parse_limits_info(text: &str) -> Option<Limits> {
     trace!("Parsing limits info");
 
     let mut voices: Option<String> = None;
     let mut gifs: Option<String> = None;
 
-    for line in text.lines() {
-        let line = line.trim();
+    #[derive(PartialEq)]
+    enum Pending {
+        Voices,
+        Gifs,
+        Other,
+    }
 
-        // Парсим "🔓 Открытые голоса: 0 / 666 символов;"
-        if line.contains("Открытые голоса:") || line.contains("Відкриті голоси:")
-        {
-            // Извлекаем часть "0 / 666"
-            if let Some(colon_pos) = line.find(':') {
-                let after_colon = line[colon_pos + 1..].trim();
-                // Ищем шаблон "число / число"
-                if let Some(slash_pos) = after_colon.find('/') {
-                    let before_slash = after_colon[..slash_pos].trim();
-                    let after_slash = after_colon[slash_pos + 1..].trim();
-                    // Извлекаем числа
-                    if let Some(space_pos) = after_slash.find_whitespace() {
-                        let limit_num = after_slash[..space_pos].trim();
-                        voices = Some(format!("{} / {}", before_slash, limit_num));
-                    } else {
-                        // Если нет пробела, берем всё до конца
-                        voices = Some(format!("{} / {}", before_slash, after_slash.trim()));
-                    }
-                }
-            }
+    let mut pending: Option<Pending> = None;
+    let lines: Vec<&str> = text.lines().collect();
+
+    for i in 0..lines.len() {
+        let raw = lines[i];
+        let line = raw.trim();
+
+        if line.is_empty() {
+            continue;
         }
 
-        // Парсим "🪩 Кружки/гифки: 0 / 10 сообщений;"
-        if line.contains("Кружки/гифки:")
-            || line.contains("Кружки/гіфки:")
-            || line.contains("Гифки:")
-        {
-            // Извлекаем часть "0 / 10"
-            if let Some(colon_pos) = line.find(':') {
-                let after_colon = line[colon_pos + 1..].trim();
-                // Ищем шаблон "число / число"
-                if let Some(slash_pos) = after_colon.find('/') {
-                    let before_slash = after_colon[..slash_pos].trim();
-                    let after_slash = after_colon[slash_pos + 1..].trim();
-                    // Извлекаем числа
-                    if let Some(space_pos) = after_slash.find_whitespace() {
-                        let limit_num = after_slash[..space_pos].trim();
-                        gifs = Some(format!("{} / {}", before_slash, limit_num));
-                    } else {
-                        // Если нет пробела, берем всё до конца
-                        gifs = Some(format!("{} / {}", before_slash, after_slash.trim()));
-                    }
+        // If we have a pending section, try to match a counter on this line first.
+        if let Some(ref section) = pending {
+            if let Some(counter) = try_parse_slash_counter(line) {
+                match section {
+                    Pending::Voices => voices = Some(counter),
+                    Pending::Gifs => gifs = Some(counter),
+                    Pending::Other => { /* ignored */ }
                 }
+                pending = None;
+                continue;
             }
+            // No counter on this line, reset pending and re-evaluate as header.
+            pending = None;
+        }
+
+        // Strip Markdown bold/italic markers for header matching.
+        let cleaned = strip_markdown_emphasis(line);
+
+        if is_voices_header(cleaned) {
+            if let Some(counter) = try_parse_counter_after_colon(cleaned) {
+                voices = Some(counter);
+            } else {
+                pending = Some(Pending::Voices);
+            }
+        } else if is_gifs_header(cleaned) {
+            if let Some(counter) = try_parse_counter_after_colon(cleaned) {
+                gifs = Some(counter);
+            } else {
+                pending = Some(Pending::Gifs);
+            }
+        } else if is_other_section_header(cleaned) {
+            // Recognised section that we deliberately ignore — mark as Other
+            // so we skip the next line without binding it to voices/gifs.
+            pending = Some(Pending::Other);
+        } else {
+            // Unrecognised line — clear any stale pending.
+            pending = None;
         }
     }
 
-    // Возвращаем результат если нашли оба поля
     if let (Some(voices_val), Some(gifs_val)) = (voices, gifs) {
+        let reset_timestamp = parse_reset_timestamp(text);
         trace!(voices_val, gifs_val, "Parsed limits info");
         Some(Limits {
             voices: voices_val,
             gifs: gifs_val,
+            reset_timestamp,
         })
     } else {
-        warn!("Failed to parse limits info from text");
+        trace!("Failed to parse limits info from text");
         None
     }
 }
 
-/// Трейт для поиска первого пробела в строке
-trait FindWhitespace {
-    fn find_whitespace(&self) -> Option<usize>;
+/// Strip surrounding `**` or `*` Markdown emphasis markers from a trimmed line.
+fn strip_markdown_emphasis(s: &str) -> &str {
+    if s.starts_with("**") && s.ends_with("**") && s.len() >= 4 {
+        &s[2..s.len() - 2]
+    } else if s.starts_with('*') && s.ends_with('*') && s.len() >= 2 {
+        &s[1..s.len() - 1]
+    } else {
+        s
+    }
 }
 
-impl FindWhitespace for &str {
-    fn find_whitespace(&self) -> Option<usize> {
-        self.chars().position(|c| c.is_whitespace())
+/// Check if a trimmed, stripped line is a recognised voices section header.
+fn is_voices_header(line: &str) -> bool {
+    line.contains("Открытые голоса:") || line.contains("Відкриті голоси:")
+}
+
+/// Check if a trimmed, stripped line is a recognised gifs section header.
+fn is_gifs_header(line: &str) -> bool {
+    line.contains("Кружки/гифки:") || line.contains("Кружки/гіфки:") || line.contains("Гифки:")
+}
+
+/// Recognised section headers that we intentionally ignore.
+fn is_other_section_header(line: &str) -> bool {
+    line.starts_with("🎙")
+        && (line.contains("Переозвучка:")
+            || line.contains("Переозвучення:")
+            || line.contains("Только текст:")
+            || line.contains("Тільки текст:"))
+}
+
+/// Try to parse a `number / number` counter from a trimmed line.
+/// Both sides must consist purely of decimal digits.
+fn try_parse_slash_counter(line: &str) -> Option<String> {
+    let slash_pos = line.find('/')?;
+
+    let before = line[..slash_pos].trim();
+    let after = line[slash_pos + 1..].trim();
+
+    // The "total" side may be followed by text (e.g. " символов;"), so find the first whitespace.
+    let total_str = if let Some(ws) = after.find(|c: char| c.is_whitespace() || c == ';') {
+        &after[..ws]
+    } else {
+        after
+    };
+
+    if !before.chars().all(|c| c.is_ascii_digit()) {
+        return None;
     }
+    if !total_str.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    if before.is_empty() || total_str.is_empty() {
+        return None;
+    }
+
+    Some(format!("{} / {}", before, total_str))
+}
+
+/// Try to parse a counter from the part after the colon on a header line.
+fn try_parse_counter_after_colon(line: &str) -> Option<String> {
+    let colon_pos = line.find(':')?;
+    let after_colon = line[colon_pos + 1..].trim();
+    if after_colon.is_empty() {
+        return None;
+    }
+    try_parse_slash_counter(after_colon)
+}
+
+/// Извлекает опциональный timestamp сброса лимитов из текста.
+/// Поддерживает русский "обновится" и украинский "оновлюється".
+/// Formats:
+///   1. Full-year:  ключ YYYY-MM-DD HH:mm:ss UTC±N
+///   2. Legacy:     ключ MM-DD HH:mm:ss UTC±N
+/// Возвращает None если суффикс отсутствует или невалидный.
+fn parse_reset_timestamp(text: &str) -> Option<String> {
+    // Try full-year format first.
+    if let Some(result) = try_parse_reset_full_year(text) {
+        return Some(result);
+    }
+    // Fall back to legacy yearless format.
+    try_parse_reset_legacy(text)
+}
+
+const FULL_YEAR_TS_RE: &str = r"(?i)(?:обновится|оновлюється)\s+(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\s+UTC([+-])(\d{1,2})";
+
+const LEGACY_TS_RE: &str = r"(?i)(?:обновится|оновлюється)\s+(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\s+UTC([+-])(\d{1,2})";
+
+fn try_parse_reset_full_year(text: &str) -> Option<String> {
+    let re = Regex::new(FULL_YEAR_TS_RE).ok()?;
+    let caps = re.captures(text)?;
+    let full_match = caps.get(0)?;
+
+    let end = full_match.end();
+    if let Some(next) = text[end..].chars().next() {
+        if next.is_alphanumeric() || next == '-' {
+            return None;
+        }
+    }
+
+    let year: u32 = caps.get(1)?.as_str().parse().ok()?;
+    let month: u32 = caps.get(2)?.as_str().parse().ok()?;
+    let day: u32 = caps.get(3)?.as_str().parse().ok()?;
+    let hour: u32 = caps.get(4)?.as_str().parse().ok()?;
+    let minute: u32 = caps.get(5)?.as_str().parse().ok()?;
+    let second: u32 = caps.get(6)?.as_str().parse().ok()?;
+    let sign = caps.get(7)?.as_str();
+    let offset_val: i32 = caps.get(8)?.as_str().parse().ok()?;
+
+    if year < 2000 || year > 2099 {
+        return None;
+    }
+    if month < 1 || month > 12 {
+        return None;
+    }
+    if day < 1 || day > 31 {
+        return None;
+    }
+    if hour > 23 {
+        return None;
+    }
+    if minute > 59 {
+        return None;
+    }
+    if second > 59 {
+        return None;
+    }
+
+    let offset = if sign == "-" { -offset_val } else { offset_val };
+    if offset < -12 || offset > 14 {
+        return None;
+    }
+
+    Some(format!(
+        "{}-{:02}-{:02} {:02}:{:02}:{:02} UTC{}{}",
+        year, month, day, hour, minute, second, sign, offset_val,
+    ))
+}
+
+fn try_parse_reset_legacy(text: &str) -> Option<String> {
+    let re = Regex::new(LEGACY_TS_RE).ok()?;
+    let caps = re.captures(text)?;
+    let full_match = caps.get(0)?;
+
+    let end = full_match.end();
+    if let Some(next) = text[end..].chars().next() {
+        if next.is_alphanumeric() || next == '-' {
+            return None;
+        }
+    }
+
+    let month: u32 = caps.get(1)?.as_str().parse().ok()?;
+    let day: u32 = caps.get(2)?.as_str().parse().ok()?;
+    let hour: u32 = caps.get(3)?.as_str().parse().ok()?;
+    let minute: u32 = caps.get(4)?.as_str().parse().ok()?;
+    let second: u32 = caps.get(5)?.as_str().parse().ok()?;
+    let sign = caps.get(6)?.as_str();
+    let offset_val: i32 = caps.get(7)?.as_str().parse().ok()?;
+
+    if month < 1 || month > 12 {
+        return None;
+    }
+    if day < 1 || day > 31 {
+        return None;
+    }
+    if hour > 23 {
+        return None;
+    }
+    if minute > 59 {
+        return None;
+    }
+    if second > 59 {
+        return None;
+    }
+
+    let offset = if sign == "-" { -offset_val } else { offset_val };
+    if offset < -12 || offset > 14 {
+        return None;
+    }
+
+    Some(format!(
+        "{:02}-{:02} {:02}:{:02}:{:02} UTC{}{}",
+        month, day, hour, minute, second, sign, offset_val,
+    ))
 }
 
 /// Отправить "/speaker {code}" боту и дождаться текстового ответа
@@ -1036,6 +1359,14 @@ fn extract_set_speaker_response_from_update(
                     }
                     _ => None,
                 };
+                log_bot_text(
+                    "set_speaker",
+                    msg.out,
+                    msg.id,
+                    Some(msg.user_id),
+                    bot_user_id,
+                    &msg.message,
+                );
                 if is_matching_text_reply(
                     msg.out,
                     msg.id,
@@ -1077,6 +1408,14 @@ fn process_message(
                 Some(grammers_tl_types::enums::MessageReplyHeader::Header(h)) => h.reply_to_msg_id,
                 _ => None,
             };
+            log_bot_text(
+                "set_speaker",
+                m.out,
+                m.id,
+                Some(user_id),
+                bot_user_id,
+                &m.message,
+            );
             if !is_matching_text_reply(
                 m.out,
                 m.id,
@@ -1126,6 +1465,56 @@ fn parse_set_speaker_response(text: &str) -> Result<bool, String> {
     }
 
     Err("Unknown response format".to_string())
+}
+
+/// Pure predicate: should we log inbound Silero bot text?
+/// All four conditions must be met:
+///   - message is incoming (`out == false`)
+///   - peer is the resolved Silero bot (`peer_user_id == Some(bot_user_id)`)
+///   - environment variable `TTSBARD_LOG_TELEGRAM_TEXT` is exactly `"1"`
+#[cfg(any(debug_assertions, test))]
+fn should_log_bot_text(
+    out: bool,
+    peer_user_id: Option<i64>,
+    bot_user_id: i64,
+    env_val: Option<&str>,
+) -> bool {
+    !out && peer_user_id == Some(bot_user_id) && env_val == Some("1")
+}
+
+/// Log the full text of an inbound Silero bot message when all security
+/// conditions are satisfied.  Compile-time no-op in release builds.
+#[cfg(debug_assertions)]
+fn log_bot_text(
+    ctx: &str,
+    out: bool,
+    msg_id: i32,
+    peer_user_id: Option<i64>,
+    bot_user_id: i64,
+    text: &str,
+) {
+    let env_val = std::env::var("TTSBARD_LOG_TELEGRAM_TEXT").ok();
+    if should_log_bot_text(out, peer_user_id, bot_user_id, env_val.as_deref()) {
+        debug!(
+            target: "silero_inbound_text",
+            ctx,
+            msg_id,
+            bot_user_id,
+            text,
+            "Inbound Silero bot text",
+        );
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn log_bot_text(
+    _ctx: &str,
+    _out: bool,
+    _msg_id: i32,
+    _peer_user_id: Option<i64>,
+    _bot_user_id: i64,
+    _text: &str,
+) {
 }
 
 #[cfg(test)]
@@ -1265,6 +1654,320 @@ mod tests {
         assert!(parse_limits_info("Hello world").is_none());
         assert!(parse_limits_info("random text").is_none());
         assert!(parse_limits_info("").is_none());
+    }
+
+    #[test]
+    fn parse_limits_info_reset_ru_positive_offset() {
+        let text = "Открытые голоса: 0 / 666 символов; обновится 07-27 00:47:27 UTC+3\nКружки/гифки: 0 / 10 сообщений; обновится 07-27 00:47:27 UTC+3";
+        let l = parse_limits_info(text).expect("must parse");
+        assert_eq!(l.voices, "0 / 666");
+        assert_eq!(l.gifs, "0 / 10");
+        assert_eq!(l.reset_timestamp.as_deref(), Some("07-27 00:47:27 UTC+3"));
+    }
+
+    #[test]
+    fn parse_limits_info_reset_ua_negative_offset() {
+        let text = "Відкриті голоси: 5 / 333 символів;\nКружки/гіфки: 2 / 10 повідомлень; оновлюється 12-31 23:59:59 UTC-5";
+        let l = parse_limits_info(text).expect("must parse");
+        assert_eq!(l.voices, "5 / 333");
+        assert_eq!(l.gifs, "2 / 10");
+        assert_eq!(l.reset_timestamp.as_deref(), Some("12-31 23:59:59 UTC-5"));
+    }
+
+    #[test]
+    fn parse_limits_info_reset_absent() {
+        let text = "Открытые голоса: 0 / 666 символов;\nКружки/гифки: 0 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must parse");
+        assert_eq!(l.voices, "0 / 666");
+        assert_eq!(l.gifs, "0 / 10");
+        assert!(l.reset_timestamp.is_none());
+    }
+
+    #[test]
+    fn parse_limits_info_reset_malformed_missing_field() {
+        let text = "Открытые голоса: 1 / 500 символов; обновится 07-27 00:47 UTC+3\nКружки/гифки: 0 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must still parse counters");
+        assert_eq!(l.voices, "1 / 500");
+        assert_eq!(l.gifs, "0 / 10");
+        assert!(l.reset_timestamp.is_none());
+    }
+
+    #[test]
+    fn parse_limits_info_reset_malformed_garbage_after_keyword() {
+        let text =
+            "Открытые голоса: 0 / 666 символов; обновится garbage\nКружки/гифки: 0 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must still parse counters");
+        assert_eq!(l.voices, "0 / 666");
+        assert_eq!(l.gifs, "0 / 10");
+        assert!(l.reset_timestamp.is_none());
+    }
+
+    #[test]
+    fn parse_limits_info_reset_full_year_ru() {
+        let text = "Открытые голоса: 0 / 666 символов; обновится 2025-07-27 00:47:27 UTC+3\nКружки/гифки: 0 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must parse counters");
+        assert_eq!(l.voices, "0 / 666");
+        assert_eq!(l.gifs, "0 / 10");
+        assert_eq!(
+            l.reset_timestamp.as_deref(),
+            Some("2025-07-27 00:47:27 UTC+3")
+        );
+    }
+
+    #[test]
+    fn parse_limits_info_reset_malformed_no_utc_offset() {
+        let text = "Открытые голоса: 0 / 666 символов; обновится 07-27 00:47:27\nКружки/гифки: 0 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must still parse counters");
+        assert_eq!(l.voices, "0 / 666");
+        assert_eq!(l.gifs, "0 / 10");
+        assert!(l.reset_timestamp.is_none());
+    }
+
+    #[test]
+    fn parse_limits_info_reset_impossible_month() {
+        let text = "Открытые голоса: 0 / 666 символов; обновится 13-01 00:00:00 UTC+3\nКружки/гифки: 0 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must still parse counters");
+        assert_eq!(l.voices, "0 / 666");
+        assert_eq!(l.gifs, "0 / 10");
+        assert!(l.reset_timestamp.is_none());
+    }
+
+    #[test]
+    fn parse_limits_info_reset_impossible_day() {
+        let text = "Открытые голоса: 0 / 666 символов; обновится 07-32 00:00:00 UTC+3\nКружки/гифки: 0 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must still parse counters");
+        assert_eq!(l.voices, "0 / 666");
+        assert_eq!(l.gifs, "0 / 10");
+        assert!(l.reset_timestamp.is_none());
+    }
+
+    #[test]
+    fn parse_limits_info_reset_impossible_hour() {
+        let text = "Открытые голоса: 0 / 666 символов; обновится 07-27 24:00:00 UTC+3\nКружки/гифки: 0 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must still parse counters");
+        assert_eq!(l.voices, "0 / 666");
+        assert_eq!(l.gifs, "0 / 10");
+        assert!(l.reset_timestamp.is_none());
+    }
+
+    #[test]
+    fn parse_limits_info_reset_impossible_minute() {
+        let text = "Открытые голоса: 0 / 666 символов; обновится 07-27 00:60:00 UTC+3\nКружки/гифки: 0 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must still parse counters");
+        assert_eq!(l.voices, "0 / 666");
+        assert_eq!(l.gifs, "0 / 10");
+        assert!(l.reset_timestamp.is_none());
+    }
+
+    #[test]
+    fn parse_limits_info_reset_impossible_second() {
+        let text = "Открытые голоса: 0 / 666 символов; обновится 07-27 00:00:60 UTC+3\nКружки/гифки: 0 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must still parse counters");
+        assert_eq!(l.voices, "0 / 666");
+        assert_eq!(l.gifs, "0 / 10");
+        assert!(l.reset_timestamp.is_none());
+    }
+
+    #[test]
+    fn parse_limits_info_reset_impossible_utc_offset_too_large() {
+        let text = "Открытые голоса: 0 / 666 символов; обновится 07-27 00:00:00 UTC+15\nКружки/гифки: 0 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must still parse counters");
+        assert_eq!(l.voices, "0 / 666");
+        assert_eq!(l.gifs, "0 / 10");
+        assert!(l.reset_timestamp.is_none());
+    }
+
+    #[test]
+    fn parse_limits_info_reset_impossible_utc_offset_too_negative() {
+        let text = "Открытые голоса: 0 / 666 символов; обновится 07-27 00:00:00 UTC-13\nКружки/гифки: 0 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must still parse counters");
+        assert_eq!(l.voices, "0 / 666");
+        assert_eq!(l.gifs, "0 / 10");
+        assert!(l.reset_timestamp.is_none());
+    }
+
+    #[test]
+    fn parse_limits_info_reset_trailing_junk() {
+        let text = "Открытые голоса: 0 / 666 символов; обновится 07-27 00:47:27 UTC+3extra\nКружки/гифки: 0 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must still parse counters");
+        assert_eq!(l.voices, "0 / 666");
+        assert_eq!(l.gifs, "0 / 10");
+        assert!(l.reset_timestamp.is_none());
+    }
+
+    #[test]
+    fn parse_limits_info_reset_trailing_digits() {
+        let text = "Открытые голоса: 0 / 666 символов; обновится 07-27 00:47:27 UTC+312\nКружки/гифки: 0 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must still parse counters");
+        assert_eq!(l.voices, "0 / 666");
+        assert_eq!(l.gifs, "0 / 10");
+        assert!(l.reset_timestamp.is_none());
+    }
+
+    // ── Multiline payload tests ────────────────────────────────────────
+
+    #[test]
+    fn parse_limits_multiline_real_payload() {
+        let text = "🔓 Открытые голоса:\n       34 / 666 символов;\n       Обновится 2026-07-27 00:47:27 UTC+3.\n\n🪩 Кружки/гифки:\n       0 / 10 сообщений;\n\n🎙 Переозвучка:\n       0 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must parse multiline payload");
+        assert_eq!(l.voices, "34 / 666");
+        assert_eq!(l.gifs, "0 / 10");
+        assert_eq!(
+            l.reset_timestamp.as_deref(),
+            Some("2026-07-27 00:47:27 UTC+3")
+        );
+    }
+
+    #[test]
+    fn parse_limits_multiline_markdown_emphasis() {
+        let text = "**🔓 Открытые голоса:**\n       34 / 666 символов;\n\n**🪩 Кружки/гифки:**\n       0 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must parse Markdown-emphasized headers");
+        assert_eq!(l.voices, "34 / 666");
+        assert_eq!(l.gifs, "0 / 10");
+    }
+
+    #[test]
+    fn parse_limits_multiline_single_asterisk_emphasis() {
+        let text = "*🔓 Открытые голоса:*\n       34 / 666 символов;\n\n*🪩 Кружки/гифки:*\n       0 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must parse single-asterisk emphasized headers");
+        assert_eq!(l.voices, "34 / 666");
+        assert_eq!(l.gifs, "0 / 10");
+    }
+
+    #[test]
+    fn parse_limits_multiline_gifs_gifki_label() {
+        let text = "Открытые голоса:\n       5 / 333 символов;\n\nГифки:\n       2 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must parse gifs via Гифки label");
+        assert_eq!(l.voices, "5 / 333");
+        assert_eq!(l.gifs, "2 / 10");
+    }
+
+    #[test]
+    fn parse_limits_multiline_ua() {
+        let text = "Відкриті голоси:\n       10 / 500 символів;\n\nКружки/гіфки:\n       3 / 10 повідомлень;";
+        let l = parse_limits_info(text).expect("must parse UA multiline");
+        assert_eq!(l.voices, "10 / 500");
+        assert_eq!(l.gifs, "3 / 10");
+    }
+
+    #[test]
+    fn parse_limits_multiline_fails_missing_voices_counter() {
+        let text =
+            "🔓 Открытые голоса:\n       символов;\n🪩 Кружки/гифки:\n       0 / 10 сообщений;";
+        assert!(parse_limits_info(text).is_none());
+    }
+
+    #[test]
+    fn parse_limits_multiline_fails_missing_gifs_counter() {
+        let text = "🔓 Открытые голоса:\n       34 / 666 символов;\n\n🪩 Кружки/гифки:\n       повідомлень;";
+        assert!(parse_limits_info(text).is_none());
+    }
+
+    #[test]
+    fn parse_limits_multiline_fails_arbitrary_slash_text() {
+        let text = "some random / text\nand another line with / numbers";
+        assert!(parse_limits_info(text).is_none());
+    }
+
+    #[test]
+    fn parse_limits_multiline_ignores_perevozvuchka() {
+        let text = "Открытые голоса:\n       10 / 100 символов;\nКружки/гифки:\n       2 / 10 сообщений;\n🎙 Переозвучка:\n       5 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must parse only voices and gifs");
+        assert_eq!(l.voices, "10 / 100");
+        assert_eq!(l.gifs, "2 / 10");
+    }
+
+    #[test]
+    fn parse_limits_multiline_ignores_only_text_section() {
+        let text = "Открытые голоса:\n       10 / 100 символов;\nКружки/гифки:\n       2 / 10 сообщений;\n🎙 Только текст:\n       3 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must ignore only-text section");
+        assert_eq!(l.voices, "10 / 100");
+        assert_eq!(l.gifs, "2 / 10");
+    }
+
+    #[test]
+    fn parse_limits_multiline_counter_non_numeric_rejected() {
+        let text =
+            "Открытые голоса:\n       abc / 666 символов;\nКружки/гифки:\n       0 / 10 сообщений;";
+        assert!(parse_limits_info(text).is_none());
+    }
+
+    #[test]
+    fn parse_limits_multiline_total_non_numeric_rejected() {
+        let text =
+            "Открытые голоса:\n       34 / xyz символов;\nКружки/гифки:\n       0 / 10 сообщений;";
+        assert!(parse_limits_info(text).is_none());
+    }
+
+    #[test]
+    fn parse_limits_multiline_fails_interleaved_slash_without_header() {
+        let text = "🔓 Открытые голоса:\n\n       unrelated line\n\n       34 / 666 символов;\n\n🪩 Кружки/гифки:\n       0 / 10 сообщений;";
+        assert!(
+            parse_limits_info(text).is_none(),
+            "counter not on immediate next non-empty line after header must fail"
+        );
+    }
+
+    // ── Full-year reset timestamp validation ───────────────────────────
+
+    #[test]
+    fn parse_limits_reset_full_year_ua() {
+        let text = "Відкриті голоси: 5 / 333 символів; оновлюється 2026-12-31 23:59:59 UTC-5\nКружки/гіфки: 2 / 10 повідомлень;";
+        let l = parse_limits_info(text).expect("must parse full-year UA");
+        assert_eq!(l.voices, "5 / 333");
+        assert_eq!(l.gifs, "2 / 10");
+        assert_eq!(
+            l.reset_timestamp.as_deref(),
+            Some("2026-12-31 23:59:59 UTC-5")
+        );
+    }
+
+    #[test]
+    fn parse_limits_reset_full_year_invalid_year_before_2000() {
+        let text = "Открытые голоса: 0 / 666 символов; обновится 1999-07-27 00:47:27 UTC+3\nКружки/гифки: 0 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must still parse counters");
+        assert!(l.reset_timestamp.is_none());
+    }
+
+    #[test]
+    fn parse_limits_reset_full_year_invalid_year_after_2099() {
+        let text = "Открытые голоса: 0 / 666 символов; обновится 2100-07-27 00:47:27 UTC+3\nКружки/гифки: 0 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must still parse counters");
+        assert!(l.reset_timestamp.is_none());
+    }
+
+    #[test]
+    fn parse_limits_reset_full_year_impossible_month() {
+        let text = "Открытые голоса: 0 / 666 символов; обновится 2026-13-01 00:00:00 UTC+3\nКружки/гифки: 0 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must still parse counters");
+        assert!(l.reset_timestamp.is_none());
+    }
+
+    #[test]
+    fn parse_limits_reset_full_year_trailing_junk() {
+        let text = "Открытые голоса: 0 / 666 символов; обновится 2026-07-27 00:47:27 UTC+3extra\nКружки/гифки: 0 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must still parse counters");
+        assert!(l.reset_timestamp.is_none());
+    }
+
+    #[test]
+    fn parse_limits_reset_full_year_garbage_after_keyword() {
+        let text =
+            "Открытые голоса: 0 / 666 символов; обновится garbage2026\nКружки/гифки: 0 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("must still parse counters");
+        assert!(l.reset_timestamp.is_none());
+    }
+
+    #[test]
+    fn parse_limits_reset_legacy_still_works_alongside_full_year() {
+        let text = "Открытые голоса: 0 / 666 символов; обновится 2026-07-27 00:47:27 UTC+3\nКружки/гифки: 0 / 10 сообщений;";
+        let l = parse_limits_info(text).expect("legacy counter must still parse");
+        assert_eq!(l.voices, "0 / 666");
+        assert_eq!(l.gifs, "0 / 10");
+        assert_eq!(
+            l.reset_timestamp.as_deref(),
+            Some("2026-07-27 00:47:27 UTC+3")
+        );
     }
 
     // ── parse_set_speaker_response ────────────────────────────────────
@@ -1542,7 +2245,6 @@ mod tests {
             43,
             Some(BOT_ID),
             false,
-            false,
             "Открытые голоса: 0 / 666 символов;\nКружки/гифки: 0 / 10 сообщений;",
             SENT_ID,
             BOT_ID
@@ -1555,7 +2257,6 @@ mod tests {
             true,
             43,
             Some(BOT_ID),
-            false,
             false,
             "Открытые голоса: 0 / 666 символов;\nКружки/гифки: 0 / 10 сообщений;",
             SENT_ID,
@@ -1570,7 +2271,6 @@ mod tests {
             43,
             Some(999999),
             false,
-            false,
             "Открытые голоса: 0 / 666 символов;\nКружки/гифки: 0 / 10 сообщений;",
             SENT_ID,
             BOT_ID
@@ -1579,7 +2279,6 @@ mod tests {
             false,
             43,
             None,
-            false,
             false,
             "Открытые голоса: 0 / 666 символов;\nКружки/гифки: 0 / 10 сообщений;",
             SENT_ID,
@@ -1594,7 +2293,6 @@ mod tests {
             SENT_ID,
             Some(BOT_ID),
             false,
-            false,
             "Открытые голоса: 0 / 666 символов;\nКружки/гифки: 0 / 10 сообщений;",
             SENT_ID,
             BOT_ID
@@ -1603,7 +2301,6 @@ mod tests {
             false,
             SENT_ID - 1,
             Some(BOT_ID),
-            false,
             false,
             "Открытые голоса: 0 / 666 символов;\nКружки/гифки: 0 / 10 сообщений;",
             SENT_ID,
@@ -1618,7 +2315,6 @@ mod tests {
             43,
             Some(BOT_ID),
             true,
-            false,
             "Открытые голоса: 0 / 666 символов;\nКружки/гифки: 0 / 10 сообщений;",
             SENT_ID,
             BOT_ID
@@ -1626,13 +2322,12 @@ mod tests {
     }
 
     #[test]
-    fn limits_matching_rejects_reply_markup() {
-        assert!(!is_matching_limits_response(
+    fn limits_matching_accepts_with_reply_markup() {
+        assert!(is_matching_limits_response(
             false,
             43,
             Some(BOT_ID),
             false,
-            true,
             "Открытые голоса: 0 / 666 символов;\nКружки/гифки: 0 / 10 сообщений;",
             SENT_ID,
             BOT_ID
@@ -1646,7 +2341,6 @@ mod tests {
             43,
             Some(BOT_ID),
             false,
-            false,
             "random text",
             SENT_ID,
             BOT_ID
@@ -1656,7 +2350,6 @@ mod tests {
             43,
             Some(BOT_ID),
             false,
-            false,
             "",
             SENT_ID,
             BOT_ID
@@ -1665,7 +2358,6 @@ mod tests {
             false,
             43,
             Some(BOT_ID),
-            false,
             false,
             "Открытые голоса: 666 символов;\nКружки/гифки: 0 / 10 сообщений;",
             SENT_ID,
@@ -1784,5 +2476,102 @@ mod tests {
                 "double-check after serializer must see the cache update"
             );
         });
+    }
+
+    // ── should_log_bot_text ──────────────────────────────────────────
+
+    #[test]
+    fn should_log_bot_text_enables_debug_exact_1() {
+        assert!(should_log_bot_text(false, Some(42), 42, Some("1")));
+    }
+
+    #[test]
+    fn should_log_bot_text_disabled_unset() {
+        assert!(!should_log_bot_text(false, Some(42), 42, None));
+    }
+
+    #[test]
+    fn should_log_bot_text_disabled_empty_string() {
+        assert!(!should_log_bot_text(false, Some(42), 42, Some("")));
+    }
+
+    #[test]
+    fn should_log_bot_text_disabled_wrong_value() {
+        assert!(!should_log_bot_text(false, Some(42), 42, Some("0")));
+        assert!(!should_log_bot_text(false, Some(42), 42, Some("true")));
+    }
+
+    #[test]
+    fn should_log_bot_text_disabled_outgoing() {
+        assert!(!should_log_bot_text(true, Some(42), 42, Some("1")));
+    }
+
+    #[test]
+    fn should_log_bot_text_disabled_wrong_peer() {
+        assert!(!should_log_bot_text(false, Some(99), 42, Some("1")));
+    }
+
+    #[test]
+    fn should_log_bot_text_disabled_no_peer() {
+        assert!(!should_log_bot_text(false, None, 42, Some("1")));
+    }
+
+    // ── extract_limits_info_from_update (short message) ─────────────────
+
+    const MULTILINE_PAYLOAD: &str = "🔓 Открытые голоса:\n       34 / 666 символов;\n       Обновится 2026-07-27 00:47:27 UTC+3.\n\n🪩 Кружки/гифки:\n       0 / 10 сообщений;\n\n🎙 Переозвучка:\n       0 / 10 сообщений;";
+
+    fn make_short_update(out: bool, id: i32, user_id: i64, message: &str) -> UpdatesLike {
+        UpdatesLike::Updates(grammers_tl_types::enums::Updates::UpdateShortMessage(
+            grammers_tl_types::types::UpdateShortMessage {
+                out,
+                mentioned: false,
+                media_unread: false,
+                silent: false,
+                id,
+                user_id,
+                message: message.to_string(),
+                pts: 0,
+                pts_count: 0,
+                date: 0,
+                fwd_from: None,
+                via_bot_id: None,
+                reply_to: None,
+                entities: None,
+                ttl_period: None,
+            },
+        ))
+    }
+
+    #[test]
+    fn limits_short_message_accepted() {
+        let update = make_short_update(false, 43, BOT_ID, MULTILINE_PAYLOAD);
+        let result = extract_limits_info_from_update(&update, SENT_ID, BOT_ID);
+        let l = result.expect("must parse limits from short message");
+        assert_eq!(l.voices, "34 / 666");
+        assert_eq!(l.gifs, "0 / 10");
+    }
+
+    #[test]
+    fn limits_short_message_rejects_outgoing() {
+        let update = make_short_update(true, 43, BOT_ID, MULTILINE_PAYLOAD);
+        assert!(extract_limits_info_from_update(&update, SENT_ID, BOT_ID).is_none());
+    }
+
+    #[test]
+    fn limits_short_message_rejects_wrong_user() {
+        let update = make_short_update(false, 43, 999999, MULTILINE_PAYLOAD);
+        assert!(extract_limits_info_from_update(&update, SENT_ID, BOT_ID).is_none());
+    }
+
+    #[test]
+    fn limits_short_message_rejects_stale_id() {
+        let update = make_short_update(false, SENT_ID, BOT_ID, MULTILINE_PAYLOAD);
+        assert!(extract_limits_info_from_update(&update, SENT_ID, BOT_ID).is_none());
+    }
+
+    #[test]
+    fn limits_short_message_rejects_malformed_text() {
+        let update = make_short_update(false, 43, BOT_ID, "random text");
+        assert!(extract_limits_info_from_update(&update, SENT_ID, BOT_ID).is_none());
     }
 }

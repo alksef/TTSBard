@@ -87,6 +87,10 @@ const {
   selectVoice: selectTelegramVoice,
   loadSavedVoices: loadTelegramSavedVoices,
   autoRefreshVoice: autoRefreshTelegramVoice,
+  limits: telegramLimits,
+  limitsLoading: telegramLimitsLoading,
+  limitsError: telegramLimitsError,
+  refreshLimits: refreshTelegramLimits,
 } = telegramAuth;
 
 // silero error state
@@ -377,6 +381,7 @@ async function reconnectTelegram() {
     debugLog('[TTS] Telegram reconnected:', result);
 
     await loadTelegramProxyStatus();
+    void refreshTelegramLimits();
 
     showSuccess('Telegram переподключён');
   } catch (error) {
@@ -436,14 +441,14 @@ watch([telegramErrorMessage, telegramHasError], () => {
 watch(telegramConnected, async (newValue) => {
   if (newValue) {
     sileroError.value = null;
-    loadTelegramProxyStatus();
-    // Load saved voices and auto-refresh
+    void refreshTelegramLimits();
+    void loadTelegramProxyStatus();
     await loadTelegramSavedVoices();
     await autoRefreshTelegramVoice();
   } else {
     currentTelegramProxyStatus.value = null;
   }
-});
+}, { immediate: true });
 
 // Save proxy mode when user opens Telegram connection modal
 watch(showTelegramModal, async (isOpen) => {
@@ -578,6 +583,9 @@ function dismissStatus() {
         :saved-voices="telegramSavedVoices"
         :voice-loading="telegramVoiceLoading"
         :voice-error="telegramVoiceError"
+        :limits="telegramLimits"
+        :limits-loading="telegramLimitsLoading"
+        :limits-error="telegramLimitsError"
         @select="setActiveProvider('silero')"
         @toggle="toggleProvider('silero')"
         @connect="openTelegramModal"
@@ -588,6 +596,7 @@ function dismissStatus() {
         @add-voice="handleAddVoice"
         @remove-voice="handleRemoveVoice"
         @select-voice="handleSelectVoice"
+        @refresh-limits="refreshTelegramLimits"
       />
 
       <!-- OpenAI Provider -->

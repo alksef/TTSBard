@@ -78,6 +78,8 @@ pub struct CurrentVoice {
 pub struct Limits {
     pub voices: String,
     pub gifs: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reset_timestamp: Option<String>,
 }
 
 /// Сохраненный код голоса для Telegram TTS

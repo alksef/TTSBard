@@ -34,6 +34,7 @@ export interface CurrentVoice {
 export interface Limits {
   voices: string
   gifs: string
+  reset_timestamp?: string
 }
 
 export function useTelegramAuth() {
@@ -46,6 +47,9 @@ export function useTelegramAuth() {
   const savedVoices = ref<VoiceCode[]>([])
   const voiceLoading = ref(false)
   const voiceError = ref<string | null>(null)
+  const limitsLoading = ref(false)
+  const limitsError = ref<string | null>(null)
+  const limitsOpId = ref(0)
   const operationId = ref(0)
 
   // Computed properties
@@ -76,6 +80,7 @@ export function useTelegramAuth() {
       } else {
         status.value = null
         state.value = 'idle'
+        clearLimits()
       }
 
       return status.value
@@ -236,6 +241,7 @@ export function useTelegramAuth() {
 
       status.value = null
       state.value = 'idle'
+      clearLimits()
       return true
     } catch (error) {
       debugError('Failed to sign out:', error)
@@ -301,29 +307,42 @@ export function useTelegramAuth() {
 
   // Refresh limits information
   async function refreshLimits(): Promise<Limits | null> {
+    const opId = ++limitsOpId.value
+    limitsLoading.value = true
+    limitsError.value = null
     try {
       debugLog('[TELEGRAM LIMITS] Refreshing limits')
 
       const limitsData = await invoke<Limits | null>('telegram_get_limits')
 
+      if (opId !== limitsOpId.value) return null
+
       debugLog('[TELEGRAM LIMITS] Limits:', limitsData)
 
       if (limitsData) {
         limits.value = limitsData
-        errorMessage.value = null  // Очищаем ошибку при успехе
       } else {
-        // Таймаут или не удалось получить информацию
-        limits.value = null
-        errorMessage.value = 'Не удалось получить информацию о лимитах. Проверьте подключение к боту.'
+        limitsError.value = 'Не удалось получить информацию о лимитах'
       }
 
       return limitsData
     } catch (error) {
+      if (opId !== limitsOpId.value) return null
       debugError('[TELEGRAM LIMITS] Exception during refresh:', error)
-      errorMessage.value = error as string
-      limits.value = null
+      limitsError.value = error instanceof Error ? error.message : String(error)
       return null
+    } finally {
+      if (opId === limitsOpId.value) {
+        limitsLoading.value = false
+      }
     }
+  }
+
+  function clearLimits() {
+    limitsOpId.value++
+    limits.value = null
+    limitsLoading.value = false
+    limitsError.value = null
   }
 
   // Initialize - check status on mount
@@ -351,6 +370,7 @@ export function useTelegramAuth() {
     errorMessage.value = null
     status.value = null
     loading.value = false
+    clearLimits()
     try {
       await invoke('telegram_disconnect')
     } catch (error) {
@@ -364,6 +384,7 @@ export function useTelegramAuth() {
     state.value = 'idle'
     errorMessage.value = null
     loading.value = false
+    clearLimits()
   }
 
   // Load saved voices from settings
@@ -493,6 +514,8 @@ export function useTelegramAuth() {
     savedVoices,
     voiceLoading,
     voiceError,
+    limitsLoading,
+    limitsError,
 
     // Computed
     isConnected,
@@ -512,6 +535,7 @@ export function useTelegramAuth() {
     speak,
     refreshVoice,
     refreshLimits,
+    clearLimits,
     cancelConnection,
     reset,
     loadSavedVoices,

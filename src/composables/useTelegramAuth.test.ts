@@ -572,6 +572,216 @@ describe('useTelegramAuth', () => {
     })
   })
 
+  describe('refreshLimits', () => {
+    it('sets limits value on success', async () => {
+      mockInvoke.mockResolvedValueOnce({ voices: '17/666', gifs: '5/50' })
+
+      const { refreshLimits, limits, limitsLoading, limitsError } = useTelegramAuth()
+      const result = await refreshLimits()
+
+      expect(result).toEqual({ voices: '17/666', gifs: '5/50' })
+      expect(limits.value).toEqual({ voices: '17/666', gifs: '5/50' })
+      expect(limitsError.value).toBeNull()
+      expect(limitsLoading.value).toBe(false)
+    })
+
+    it('sets limits value including reset_timestamp', async () => {
+      mockInvoke.mockResolvedValueOnce({ voices: '17/666', gifs: '5/50', reset_timestamp: '07-26 14:30:00 UTC+3' })
+
+      const { refreshLimits, limits } = useTelegramAuth()
+      await refreshLimits()
+
+      expect(limits.value).toEqual({ voices: '17/666', gifs: '5/50', reset_timestamp: '07-26 14:30:00 UTC+3' })
+    })
+
+    it('does NOT touch global errorMessage on success or failure', async () => {
+      mockInvoke.mockResolvedValueOnce({ voices: '17/666', gifs: '5/50' })
+
+      const { refreshLimits, errorMessage } = useTelegramAuth()
+      await refreshLimits()
+
+      expect(errorMessage.value).toBeNull()
+
+      mockInvoke.mockRejectedValueOnce(new Error('limits error'))
+
+      await refreshLimits()
+
+      expect(errorMessage.value).toBeNull()
+    })
+
+    it('preserves previous limits value on error', async () => {
+      mockInvoke
+        .mockResolvedValueOnce({ voices: '17/666', gifs: '5/50' })
+        .mockRejectedValueOnce(new Error('limits fetch failed'))
+
+      const { refreshLimits, limits, limitsError } = useTelegramAuth()
+
+      await refreshLimits()
+      expect(limits.value).toEqual({ voices: '17/666', gifs: '5/50' })
+
+      await refreshLimits()
+      expect(limits.value).toEqual({ voices: '17/666', gifs: '5/50' })
+      expect(limitsError.value).toBe('limits fetch failed')
+    })
+
+    it('sets limitsError when backend returns null', async () => {
+      mockInvoke.mockResolvedValueOnce(null)
+
+      const { refreshLimits, limits, limitsError } = useTelegramAuth()
+      const result = await refreshLimits()
+
+      expect(result).toBeNull()
+      expect(limits.value).toBeNull()
+      expect(limitsError.value).toBe('Не удалось получить информацию о лимитах')
+    })
+
+    it('does not clear existing limits value when backend returns null', async () => {
+      mockInvoke
+        .mockResolvedValueOnce({ voices: '17/666', gifs: '5/50' })
+        .mockResolvedValueOnce(null)
+
+      const { refreshLimits, limits, limitsError } = useTelegramAuth()
+
+      await refreshLimits()
+      await refreshLimits()
+
+      expect(limits.value).toEqual({ voices: '17/666', gifs: '5/50' })
+      expect(limitsError.value).toBe('Не удалось получить информацию о лимитах')
+    })
+
+    it('preserves limits on rejection and preserves null if no prior value', async () => {
+      mockInvoke.mockRejectedValueOnce(new Error('network error'))
+
+      const { refreshLimits, limits, limitsError } = useTelegramAuth()
+      await refreshLimits()
+
+      expect(limits.value).toBeNull()
+      expect(limitsError.value).toBe('network error')
+    })
+  })
+
+  describe('limits stale async protection', () => {
+    it('clearLimits prevents stale async completion from overwriting', async () => {
+      let resolveFirst!: (value: unknown) => void
+      mockInvoke.mockImplementationOnce(() => new Promise(r => { resolveFirst = r }))
+
+      const { refreshLimits, clearLimits, limits, limitsLoading } = useTelegramAuth()
+      const promise = refreshLimits()
+
+      await new Promise(r => setTimeout(r, 10))
+      clearLimits()
+
+      expect(limits.value).toBeNull()
+      expect(limitsLoading.value).toBe(false)
+
+      resolveFirst({ voices: 'old/100', gifs: 'old/10' })
+      await promise
+
+      expect(limits.value).toBeNull()
+      expect(limitsLoading.value).toBe(false)
+    })
+
+    it('clearLimits prevents stale error from overwriting newer result', async () => {
+      let resolve!: (value: unknown) => void
+      mockInvoke
+        .mockImplementationOnce(() => new Promise(r => { resolve = r }))
+        .mockResolvedValueOnce({ voices: 'new/100', gifs: 'new/10' })
+
+      const { refreshLimits, clearLimits, limits } = useTelegramAuth()
+      const stalePromise = refreshLimits()
+
+      await new Promise(r => setTimeout(r, 10))
+      clearLimits()
+
+      resolve(Promise.reject(new Error('stale error')))
+      await stalePromise
+
+      await refreshLimits()
+
+      expect(limits.value).toEqual({ voices: 'new/100', gifs: 'new/10' })
+    })
+
+    it('sequential refreshLimits overwrites with latest result', async () => {
+      let resolveFirst!: (value: unknown) => void
+      mockInvoke
+        .mockImplementationOnce(() => new Promise(r => { resolveFirst = r }))
+        .mockResolvedValueOnce({ voices: 'latest/100', gifs: 'latest/10' })
+
+      const { refreshLimits, limits } = useTelegramAuth()
+      const firstPromise = refreshLimits()
+
+      await new Promise(r => setTimeout(r, 10))
+      const secondPromise = refreshLimits()
+      await secondPromise
+
+      expect(limits.value).toEqual({ voices: 'latest/100', gifs: 'latest/10' })
+
+      resolveFirst({ voices: 'old/100', gifs: 'old/10' })
+      await firstPromise
+
+      expect(limits.value).toEqual({ voices: 'latest/100', gifs: 'latest/10' })
+    })
+  })
+
+  describe('limits clearing on terminal disconnect/reset', () => {
+    it('signOut clears limits', async () => {
+      mockInvoke
+        .mockResolvedValueOnce({ voices: '17/666', gifs: '5/50' })
+        .mockResolvedValueOnce(undefined)
+
+      const { refreshLimits, signOut, limits, limitsLoading, limitsError } = useTelegramAuth()
+
+      await refreshLimits()
+      expect(limits.value).toBeTruthy()
+
+      await signOut()
+
+      expect(limits.value).toBeNull()
+      expect(limitsLoading.value).toBe(false)
+      expect(limitsError.value).toBeNull()
+    })
+
+    it('cancelConnection clears limits', async () => {
+      let resolveInit!: (value: unknown) => void
+      let resolveDisconnect!: (value: unknown) => void
+      mockInvoke
+        .mockImplementationOnce(() => new Promise(r => { resolveInit = r }))
+        .mockImplementationOnce(() => new Promise(r => { resolveDisconnect = r }))
+
+      const { requestCode, cancelConnection, limits, limitsLoading } = useTelegramAuth()
+      limits.value = { voices: '17/666', gifs: '5/50' }
+
+      requestCode(credentials)
+
+      await new Promise(r => setTimeout(r, 10))
+      const cancelPromise = cancelConnection()
+
+      expect(limits.value).toBeNull()
+      expect(limitsLoading.value).toBe(false)
+
+      resolveInit(undefined)
+      resolveDisconnect(undefined)
+      await cancelPromise
+
+      expect(limits.value).toBeNull()
+      expect(limitsLoading.value).toBe(false)
+    })
+
+    it('reset clears limits', async () => {
+      const { refreshLimits, reset, limits, limitsLoading, limitsError } = useTelegramAuth()
+      mockInvoke.mockResolvedValueOnce({ voices: '17/666', gifs: '5/50' })
+
+      await refreshLimits()
+      expect(limits.value).toBeTruthy()
+
+      reset()
+
+      expect(limits.value).toBeNull()
+      expect(limitsLoading.value).toBe(false)
+      expect(limitsError.value).toBeNull()
+    })
+  })
+
   describe('loadedSavedVoices', () => {
     it('loads voices from settings', async () => {
       const settings = mockSettings()
