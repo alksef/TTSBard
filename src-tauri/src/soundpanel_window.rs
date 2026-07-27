@@ -1,8 +1,51 @@
 use crate::config::WindowsManager;
 use crate::soundpanel::SoundPanelState;
-use crate::state::AppState;
+use crate::state::{ActiveWindow, AppState};
 use tauri::{AppHandle, Emitter, Manager};
-use tracing::{debug, info};
+use tracing::{debug, error, info};
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct WindowVisibility {
+    pub soundpanel_visible: bool,
+    pub playback_control_visible: bool,
+}
+
+pub fn get_visibility(app_handle: &AppHandle) -> Result<WindowVisibility, String> {
+    let sp_visible = app_handle
+        .get_webview_window("soundpanel")
+        .ok_or_else(|| "soundpanel window not found".to_string())?
+        .is_visible()
+        .map_err(|e| format!("Failed to check soundpanel visibility: {}", e))?;
+    let pc_visible = app_handle
+        .get_webview_window("playback-control")
+        .ok_or_else(|| "playback-control window not found".to_string())?
+        .is_visible()
+        .map_err(|e| format!("Failed to check playback visibility: {}", e))?;
+    Ok(WindowVisibility {
+        soundpanel_visible: sp_visible,
+        playback_control_visible: pc_visible,
+    })
+}
+
+pub fn emit_visibility_event(app_handle: &AppHandle) {
+    match get_visibility(app_handle) {
+        Ok(vis) => {
+            if let Some(main_window) = app_handle.get_webview_window("main") {
+                if let Err(e) = main_window.emit("window-visibility-changed", vis) {
+                    error!(
+                        error = %e,
+                        event = "window-visibility-changed",
+                        window = "main",
+                        "Failed to emit visibility event to main window"
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            error!(error = %e, "Failed to get visibility for event notification");
+        }
+    }
+}
 
 /// Show soundpanel floating window
 pub fn show_soundpanel_window(app_handle: &AppHandle) -> tauri::Result<()> {
@@ -55,6 +98,7 @@ pub fn show_soundpanel_window(app_handle: &AppHandle) -> tauri::Result<()> {
             }
         }
 
+        emit_visibility_event(app_handle);
         return Ok(());
     }
 
@@ -142,6 +186,8 @@ pub fn hide_soundpanel_window(app_handle: &AppHandle, app_state: &AppState) -> t
 
         window.hide()?;
 
+        emit_visibility_event(app_handle);
+
         if let Some(sp_state) = app_handle.try_state::<SoundPanelState>() {
             if sp_state.is_floating_clickthrough_enabled() {
                 debug!(
@@ -161,4 +207,34 @@ pub fn emit_soundpanel_no_binding(app_handle: &AppHandle, key: char) -> tauri::R
         window.emit("no-binding", key)?;
     }
     Ok(())
+}
+
+pub fn close_soundpanel_with_interception(app_handle: &AppHandle) -> Result<(), String> {
+    let app_state = app_handle.state::<AppState>();
+    let sp_state = app_handle.state::<SoundPanelState>();
+    sp_state.set_interception_enabled(false);
+    app_state.set_interception_enabled(false);
+    hide_soundpanel_window(app_handle, &app_state)
+        .map_err(|e| format!("Failed to hide window: {}", e))
+}
+
+pub fn toggle_soundpanel_window(app_handle: &AppHandle) -> Result<bool, String> {
+    let window = app_handle
+        .get_webview_window("soundpanel")
+        .ok_or_else(|| "soundpanel window not found".to_string())?;
+    let visible = window
+        .is_visible()
+        .map_err(|e| format!("Failed to check soundpanel visibility: {}", e))?;
+
+    if visible {
+        close_soundpanel_with_interception(app_handle)?;
+        Ok(false)
+    } else {
+        show_soundpanel_window(app_handle)
+            .map_err(|e| format!("Failed to show soundpanel: {}", e))?;
+        app_handle
+            .state::<AppState>()
+            .set_active_window(ActiveWindow::SoundPanel);
+        Ok(true)
+    }
 }

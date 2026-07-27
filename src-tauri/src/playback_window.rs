@@ -45,6 +45,8 @@ pub fn show_playback_window(app_handle: &AppHandle) -> tauri::Result<()> {
                 }
             }
         }
+
+        crate::soundpanel_window::emit_visibility_event(app_handle);
         return Ok(());
     }
     Err(tauri::Error::WindowNotFound)
@@ -70,6 +72,7 @@ pub fn hide_playback_window(app_handle: &AppHandle) -> tauri::Result<()> {
     if let Some(window) = app_handle.get_webview_window("playback-control") {
         window.hide()?;
     }
+    crate::soundpanel_window::emit_visibility_event(app_handle);
     Ok(())
 }
 
@@ -84,4 +87,23 @@ pub fn update_playback_appearance(app_handle: &AppHandle) -> tauri::Result<()> {
         window.emit("playback-appearance-update", ())?;
     }
     Ok(())
+}
+
+pub fn toggle_playback_window(app_handle: &AppHandle) -> Result<bool, String> {
+    let window = app_handle
+        .get_webview_window("playback-control")
+        .ok_or_else(|| "playback-control window not found".to_string())?;
+    let visible = window
+        .is_visible()
+        .map_err(|e| format!("Failed to check playback visibility: {}", e))?;
+
+    if visible {
+        hide_playback_window(app_handle)
+            .map_err(|e| format!("Failed to hide playback window: {}", e))?;
+        Ok(false)
+    } else {
+        show_playback_window(app_handle)
+            .map_err(|e| format!("Failed to show playback window: {}", e))?;
+        Ok(true)
+    }
 }

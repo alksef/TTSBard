@@ -12,7 +12,7 @@
 use std::sync::mpsc;
 use std::thread;
 use tauri::image::Image;
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::{App, AppHandle, Emitter, Manager};
 use tracing::{error, info, warn};
@@ -446,13 +446,36 @@ fn init_windows(
     Ok(())
 }
 
+/// Show (restore) the main webview window: show, unminimize, and focus.
+///
+/// Logs failures with `warn!` and the provided `action` context, without panicking.
+fn show_main_window(app_handle: &AppHandle, action: &str) {
+    let window = match app_handle.get_webview_window("main") {
+        Some(w) => w,
+        None => {
+            warn!(action, "show_main_window: main window not found");
+            return;
+        }
+    };
+    if let Err(e) = window.show() {
+        warn!(action, error = %e, "show_main_window: show failed");
+    }
+    if let Err(e) = window.unminimize() {
+        warn!(action, error = %e, "show_main_window: unminimize failed");
+    }
+    if let Err(e) = window.set_focus() {
+        warn!(action, error = %e, "show_main_window: set_focus failed");
+    }
+}
+
 /// Initialize system tray
 fn init_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     let app_handle = app.handle().clone();
 
     // Load icon.png (512x512) for tray
     let png_bytes = include_bytes!("../icons/icon.png");
-    let decoded_image = image::load_from_memory(png_bytes).expect("Failed to decode tray icon");
+    let decoded_image = image::load_from_memory(png_bytes)
+        .map_err(|e| format!("Failed to decode tray icon: {}", e))?;
     let rgba_image = decoded_image.to_rgba8();
     let (width, height) = (rgba_image.width(), rgba_image.height());
 
@@ -466,15 +489,45 @@ fn init_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         height, "Initializing system tray with icon (resized to 32x32 from original)"
     );
 
-    // Create context menu (only "Quit" item)
-    let quit_item =
-        MenuItem::with_id(&app_handle, "quit", "Выход", true, None as Option<&str>).unwrap();
+    // Create context menu
+    let show_main = MenuItem::with_id(
+        &app_handle,
+        "show_main",
+        "Показать главное окно",
+        true,
+        None as Option<&str>,
+    )
+    .map_err(|e| format!("Failed to create 'show_main' menu item: {}", e))?;
+    let sp_toggle = MenuItem::with_id(
+        &app_handle,
+        "toggle_soundpanel",
+        "Саундпад",
+        true,
+        None as Option<&str>,
+    )
+    .map_err(|e| format!("Failed to create 'toggle_soundpanel' menu item: {}", e))?;
+    let pc_toggle = MenuItem::with_id(
+        &app_handle,
+        "toggle_playback",
+        "Управление воспроизведением",
+        true,
+        None as Option<&str>,
+    )
+    .map_err(|e| format!("Failed to create 'toggle_playback' menu item: {}", e))?;
+    let separator = PredefinedMenuItem::separator(&app_handle)
+        .map_err(|e| format!("Failed to create separator: {}", e))?;
+    let quit_item = MenuItem::with_id(&app_handle, "quit", "Выход", true, None as Option<&str>)
+        .map_err(|e| format!("Failed to create 'quit' menu item: {}", e))?;
 
-    let menu = Menu::with_items(&app_handle, &[&quit_item]).unwrap();
+    let menu = Menu::with_items(
+        &app_handle,
+        &[&show_main, &sp_toggle, &pc_toggle, &separator, &quit_item],
+    )
+    .map_err(|e| format!("Failed to build menu: {}", e))?;
 
     // Create tray icon
     info!("[TRAY] Creating tray icon...");
-    let _ = TrayIconBuilder::with_id("main")
+    TrayIconBuilder::with_id("main")
         .icon(tray_icon)
         .tooltip("TTSBard")
         .show_menu_on_left_click(false)
@@ -488,21 +541,34 @@ fn init_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
                 if matches!(button, tauri::tray::MouseButton::Left)
                     && matches!(button_state, tauri::tray::MouseButtonState::Up)
                 {
-                    if let Some(window) = tray.app_handle().get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.unminimize();
-                        let _ = window.set_focus();
-                    }
+                    show_main_window(tray.app_handle(), "tray-left-click");
                 }
             }
         })
-        .on_menu_event(|tray, event| {
-            if event.id.as_ref() == "quit" {
+        .on_menu_event(|tray, event| match event.id.as_ref() {
+            "show_main" => {
+                show_main_window(tray.app_handle(), "tray-menu-show_main");
+            }
+            "toggle_soundpanel" => {
+                if let Err(e) =
+                    crate::soundpanel_window::toggle_soundpanel_window(tray.app_handle())
+                {
+                    warn!(error = %e, "Tray toggle_soundpanel failed");
+                }
+            }
+            "toggle_playback" => {
+                if let Err(e) = crate::playback_window::toggle_playback_window(tray.app_handle()) {
+                    warn!(error = %e, "Tray toggle_playback failed");
+                }
+            }
+            "quit" => {
                 tray.app_handle().exit(0);
             }
+            _ => {}
         })
         .menu(&menu)
-        .build(&app_handle);
+        .build(&app_handle)
+        .map_err(|e| format!("Failed to build tray icon: {}", e))?;
     info!("[TRAY] Tray icon created successfully");
 
     Ok(())

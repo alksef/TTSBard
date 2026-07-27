@@ -2,7 +2,8 @@
 import { ref, onMounted, onUnmounted, watch, provide, computed, nextTick } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { invoke } from '@tauri-apps/api/core'
-import type { UnlistenFn } from '@tauri-apps/api/event'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { Music, MonitorPlay } from 'lucide-vue-next'
 import Sidebar from './components/Sidebar.vue'
 import InputPanel from './components/InputPanel.vue'
 import TtsPanel from './components/TtsPanel.vue'
@@ -20,7 +21,7 @@ import ErrorToasts from './components/ErrorToasts.vue'
 import MinimalModeButton from './components/MinimalModeButton.vue'
 import { useTelegramAuth, TELEGRAM_AUTH_KEY } from './composables/useTelegramAuth'
 import { provideAppSettings } from './composables/useAppSettings'
-import { debugLog } from './utils/debug'
+import { debugLog, debugError } from './utils/debug'
 
 type Panel = 'input' | 'tts' | 'soundpanel' | 'playback' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'vtube-studio' | 'settings' | 'hotkeys' | 'intercept'
 
@@ -66,6 +67,70 @@ async function closeWindow() {
     await getCurrentWindow().close()
   } catch (e) {
     debugLog('[App] Failed to close window:', e)
+  }
+}
+
+// Floating window visibility state
+const soundpanelVisible = ref(false)
+const playbackVisible = ref(false)
+const soundpanelPending = ref(false)
+const playbackPending = ref(false)
+let unlistenVisibility: UnlistenFn | null = null
+let visibilityListenerSetup: Promise<void> | null = null
+let visibilityToken = 0
+
+function formatHotkeyDisplay(hotkey: { modifiers: string[]; key: string } | undefined): string {
+  if (!hotkey || !hotkey.key) return ''
+  const modMap: Record<string, string> = { ctrl: 'Ctrl', shift: 'Shift', alt: 'Alt', super: 'Win' }
+  const mods = hotkey.modifiers.map(m => modMap[m] ?? m)
+  return mods.length > 0 ? `${mods.join('+')}+${hotkey.key}` : hotkey.key
+}
+
+const soundPanelHotkey = computed(() => appSettings.settings.value?.hotkeys?.sound_panel)
+const playbackHotkey = computed(() => appSettings.settings.value?.hotkeys?.playback_control_window)
+
+const soundPanelAction = computed(() => soundpanelVisible.value ? 'Скрыть саундпад' : 'Показать саундпад')
+const playbackAction = computed(() => playbackVisible.value ? 'Скрыть управление воспроизведением' : 'Показать управление воспроизведением')
+
+const soundPanelTitle = computed(() => {
+  const hk = formatHotkeyDisplay(soundPanelHotkey.value)
+  return hk ? `${soundPanelAction.value} (${hk})` : soundPanelAction.value
+})
+
+const playbackTitle = computed(() => {
+  const hk = formatHotkeyDisplay(playbackHotkey.value)
+  return hk ? `${playbackAction.value} (${hk})` : playbackAction.value
+})
+
+async function toggleSoundPanel() {
+  if (soundpanelPending.value) return
+  soundpanelPending.value = true
+  const capturedToken = visibilityToken
+  try {
+    const visible = await invoke<boolean>('toggle_soundpanel_window')
+    if (capturedToken === visibilityToken) {
+      soundpanelVisible.value = visible
+    }
+  } catch (e) {
+    debugError('[App] Failed to toggle sound panel:', e)
+  } finally {
+    soundpanelPending.value = false
+  }
+}
+
+async function togglePlaybackControl() {
+  if (playbackPending.value) return
+  playbackPending.value = true
+  const capturedToken = visibilityToken
+  try {
+    const visible = await invoke<boolean>('toggle_playback_control_window')
+    if (capturedToken === visibilityToken) {
+      playbackVisible.value = visible
+    }
+  } catch (e) {
+    debugError('[App] Failed to toggle playback control:', e)
+  } finally {
+    playbackPending.value = false
   }
 }
 
@@ -212,11 +277,42 @@ onMounted(async () => {
   } catch (error) {
     debugLog('[APP] Telegram auto-init failed or no session:', error)
   }
+
+  // Listen for floating window visibility changes
+  visibilityListenerSetup = listen<{ soundpanel_visible: boolean; playback_control_visible: boolean }>('window-visibility-changed', (event) => {
+    visibilityToken++
+    soundpanelVisible.value = event.payload.soundpanel_visible
+    playbackVisible.value = event.payload.playback_control_visible
+  }).then(fn => {
+    unlistenVisibility = fn
+  }).catch(e => {
+    debugError('[App] Failed to listen for visibility events:', e)
+  })
+
+  // Wait for listener setup before reading snapshot to avoid the gap
+  await visibilityListenerSetup
+
+  // Load initial visibility snapshot (skip if a newer event already arrived)
+  try {
+    const snapshotToken = visibilityToken
+    const snapshot = await invoke<{ soundpanel_visible: boolean; playback_control_visible: boolean }>('get_visibility_snapshot')
+    if (snapshotToken === visibilityToken) {
+      soundpanelVisible.value = snapshot.soundpanel_visible
+      playbackVisible.value = snapshot.playback_control_visible
+    }
+  } catch (e) {
+    debugError('[App] Failed to get visibility snapshot:', e)
+  }
 })
 
 onUnmounted(() => {
   document.removeEventListener('keydown', handleReturnFocusKeydown)
-  if (unlistenFocus.current) unlistenFocus.current()
+  unlistenFocus.current?.()
+  if (unlistenVisibility) {
+    unlistenVisibility()
+  } else if (visibilityListenerSetup) {
+    visibilityListenerSetup.then(() => unlistenVisibility?.())
+  }
 })
 </script>
 
@@ -228,6 +324,26 @@ onUnmounted(() => {
         <span class="titlebar-text" data-tauri-drag-region>TTSBard</span>
       </div>
       <div class="titlebar-controls">
+        <button
+          class="titlebar-btn floating-window"
+          :class="{ active: soundpanelVisible }"
+          @click="toggleSoundPanel"
+          :title="soundPanelTitle"
+          :aria-label="soundPanelAction"
+          :disabled="soundpanelPending"
+        >
+          <Music :size="14" />
+        </button>
+        <button
+          class="titlebar-btn floating-window"
+          :class="{ active: playbackVisible }"
+          @click="togglePlaybackControl"
+          :title="playbackTitle"
+          :aria-label="playbackAction"
+          :disabled="playbackPending"
+        >
+          <MonitorPlay :size="14" />
+        </button>
         <button class="titlebar-btn minimize" @click="minimizeWindow" title="Свернуть" aria-label="Свернуть">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="5" y1="12" x2="19" y2="12" />
@@ -354,6 +470,15 @@ onUnmounted(() => {
 .titlebar-btn.close:hover {
   background: var(--status-disconnected, #e5484d);
   color: var(--color-text-white, #fff);
+}
+
+.titlebar-btn.floating-window.active {
+  color: var(--color-accent);
+}
+
+.titlebar-btn.floating-window:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Wrapper holding the sidebar and main content side-by-side */

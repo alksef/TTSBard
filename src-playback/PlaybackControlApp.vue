@@ -221,7 +221,11 @@ async function doReplay(id: string) {
 }
 
 async function closeWindow() {
-  await getCurrentWindow().hide()
+  try {
+    await invoke('close_playback_control_window')
+  } catch (e) {
+    console.warn('closeWindow failed', e)
+  }
 }
 
 async function doRetry(job_id: string) {

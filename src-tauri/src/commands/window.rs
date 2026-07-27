@@ -1,6 +1,6 @@
 use crate::config::{Hotkey, HotkeySettings, SettingsManager, Theme, WindowsManager};
 use crate::playback_window::update_playback_appearance;
-use crate::soundpanel_window::{hide_soundpanel_window, update_soundpanel_appearance};
+use crate::soundpanel_window::update_soundpanel_appearance;
 use crate::state::AppState;
 use tauri::{AppHandle, Manager, State};
 use tracing::{debug, info, warn};
@@ -223,32 +223,37 @@ pub fn hide_main_window(app_handle: AppHandle) -> Result<(), String> {
 
 /// Close soundpanel window and stop interception
 #[tauri::command]
-pub fn close_soundpanel_window(
-    app_handle: AppHandle,
-    app_state: State<'_, AppState>,
-    soundpanel_state: State<'_, crate::soundpanel::SoundPanelState>,
-) -> Result<(), String> {
-    soundpanel_state.set_interception_enabled(false);
-    app_state.set_interception_enabled(false);
-
-    hide_soundpanel_window(&app_handle, &app_state)
-        .map_err(|e| format!("Failed to hide window: {}", e))?;
-
-    Ok(())
+pub fn close_soundpanel_window(app_handle: AppHandle) -> Result<(), String> {
+    crate::soundpanel_window::close_soundpanel_with_interception(&app_handle)
 }
 
-/// Toggle playback control window visibility
+/// Toggle playback control window visibility.
+/// Returns `true` if the window is visible after the toggle.
 #[tauri::command]
-pub fn toggle_playback_control_window(app_handle: AppHandle) -> Result<(), String> {
-    if let Some(window) = app_handle.get_webview_window("playback-control") {
-        if window.is_visible().unwrap_or(false) {
-            crate::playback_window::hide_playback_window(&app_handle).map_err(|e| e.to_string())
-        } else {
-            crate::playback_window::show_playback_window(&app_handle).map_err(|e| e.to_string())
-        }
-    } else {
-        Err("playback-control window not found".to_string())
-    }
+pub fn toggle_playback_control_window(app_handle: AppHandle) -> Result<bool, String> {
+    crate::playback_window::toggle_playback_window(&app_handle)
+}
+
+/// Close playback control window (save position, emit visibility notification).
+#[tauri::command]
+pub fn close_playback_control_window(app_handle: AppHandle) -> Result<(), String> {
+    crate::playback_window::hide_playback_window(&app_handle)
+        .map_err(|e| format!("Failed to close playback control window: {}", e))
+}
+
+/// Toggle SoundPanel floating window visibility.
+/// Returns `true` if the window is visible after the toggle.
+#[tauri::command]
+pub fn toggle_soundpanel_window(app_handle: AppHandle) -> Result<bool, String> {
+    crate::soundpanel_window::toggle_soundpanel_window(&app_handle)
+}
+
+/// Get current visibility snapshot of both floating windows for initial UI sync.
+#[tauri::command]
+pub fn get_visibility_snapshot(
+    app_handle: AppHandle,
+) -> Result<crate::soundpanel_window::WindowVisibility, String> {
+    crate::soundpanel_window::get_visibility(&app_handle)
 }
 
 /// Set show playback control window on start

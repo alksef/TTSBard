@@ -49,17 +49,18 @@ use commands::telegram::{
     telegram_get_user, telegram_init, telegram_request_code, telegram_sign_in, telegram_sign_out,
 };
 use commands::{
-    apply_openai_proxy_settings, close_soundpanel_window, disable_virtual_mic, enable_virtual_mic,
-    get_audio_effects, get_audio_settings, get_dsp_settings, get_editor_height, get_editor_quick,
-    get_editor_spellcheck_enabled, get_editor_spellcheck_source, get_editor_typing_idle_timeout_ms,
+    apply_openai_proxy_settings, close_playback_control_window, close_soundpanel_window,
+    disable_virtual_mic, enable_virtual_mic, get_audio_effects, get_audio_settings,
+    get_dsp_settings, get_editor_height, get_editor_quick, get_editor_spellcheck_enabled,
+    get_editor_spellcheck_source, get_editor_typing_idle_timeout_ms,
     get_global_exclude_from_capture, get_hotkey_enabled, get_hotkey_settings, get_interception,
     get_local_tts_url, get_main_appearance, get_main_compact_dims, get_openai_api_key,
     get_openai_voice, get_output_devices, get_playback_appearance_source,
     get_show_playback_on_start, get_soundpanel_appearance_source, get_tts_provider,
-    get_virtual_mic_devices, has_api_key, hide_main_window, open_file_dialog,
-    prepare_tts_provider_by_id, preview_audio_file, quit_app, reregister_hotkeys_cmd,
-    reset_hotkey_to_default, save_audio_effects, save_dsp_settings, select_tts_provider_by_id,
-    set_audio_effects_enabled, set_audio_effects_enhance_atten_db,
+    get_virtual_mic_devices, get_visibility_snapshot, has_api_key, hide_main_window,
+    open_file_dialog, prepare_tts_provider_by_id, preview_audio_file, quit_app,
+    reregister_hotkeys_cmd, reset_hotkey_to_default, save_audio_effects, save_dsp_settings,
+    select_tts_provider_by_id, set_audio_effects_enabled, set_audio_effects_enhance_atten_db,
     set_audio_effects_enhance_enabled, set_audio_effects_formant_preserved,
     set_audio_effects_pitch, set_audio_effects_speed, set_audio_effects_volume, set_editor_height,
     set_editor_quick, set_editor_spellcheck_enabled, set_editor_spellcheck_source,
@@ -71,8 +72,8 @@ use commands::{
     set_speaker_device, set_speaker_enabled, set_speaker_volume, set_tts_provider,
     set_virtual_mic_device, set_virtual_mic_volume, speak_text, speak_text_raw_export,
     stop_preview, test_audio_device, toggle_interception, toggle_playback_control_window,
-    unregister_hotkeys, update_theme, window::remove_main_bounds, window::resize_main_window,
-    window::return_to_previous_window, window::set_main_bounds,
+    toggle_soundpanel_window, unregister_hotkeys, update_theme, window::remove_main_bounds,
+    window::resize_main_window, window::return_to_previous_window, window::set_main_bounds,
 };
 use config::{SettingsManager, WindowsManager};
 use soundpanel::{
@@ -542,6 +543,9 @@ pub fn run() {
             reregister_hotkeys_cmd,
             set_hotkey_recording,
             toggle_playback_control_window,
+            close_playback_control_window,
+            toggle_soundpanel_window,
+            get_visibility_snapshot,
             set_show_playback_on_start,
             get_show_playback_on_start,
             // Window appearance commands
