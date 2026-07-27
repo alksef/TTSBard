@@ -1,6 +1,6 @@
 [package]
 name = "ttsbard"
-version = "0.3.0-dev"
+version = "0.17.0"
 description = "Fast text-to-speech for communication and streaming — for people with speech limitations and streamers"
 authors = ["Aleksey Efimov"]
 license = "GPL-3.0-only"
