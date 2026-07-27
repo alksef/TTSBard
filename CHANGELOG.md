@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.1] - 2026-07-28
+
+### Исправлено
+
+- Повышена надёжность Silero TTS: если Telegram сообщает об успешном скачивании, но создаёт пустой временный аудиофайл, приложение выполняет до трёх попыток загрузки. Пустые `.part`-файлы удаляются между попытками и не блокируют последующие фразы в очереди.
+
+**[Full Changelog](https://github.com/alksef/TTSBard/compare/v0.17.0...v0.17.1)**
+
 ## [0.17.0] - 2026-07-27
 
 ### Добавлено
