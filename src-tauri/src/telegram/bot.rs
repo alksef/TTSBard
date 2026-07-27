@@ -10,6 +10,12 @@ use tracing::{debug, error, info, trace, warn};
 /// Имя бота Silero TTS в Telegram
 const BOT_USERNAME: &str = "silero_voice_bot";
 
+/// Максимальное количество попыток скачивания (включая первую)
+const MAX_DOWNLOAD_ATTEMPTS: u32 = 3;
+
+/// Задержка между попытками скачивания (в миллисекундах)
+const DOWNLOAD_RETRY_DELAY_MS: u64 = 1000;
+
 /// Структура для результата голосового сообщения
 #[derive(Debug, Clone)]
 struct VoiceMessageResult {
@@ -270,48 +276,68 @@ impl SileroTtsBot {
                             let final_path = voice_final_path(&temp_dir, voice.msg_id, extension);
                             let part_path = voice_part_path(&temp_dir, voice.msg_id, extension);
 
-                            match std::fs::remove_file(&part_path) {
-                                Ok(()) => {
-                                    debug!(
-                                        "Removed stale part file: {}",
-                                        crate::secret_log::safe_path_for_log(&part_path)
-                                    );
+                            for attempt in 1u32..=MAX_DOWNLOAD_ATTEMPTS {
+                                cleanup_part_file(&part_path)?;
+
+                                debug!(
+                                    attempt,
+                                    max_attempts = MAX_DOWNLOAD_ATTEMPTS,
+                                    msg_id = voice.msg_id,
+                                    "Download attempt",
+                                );
+
+                                if let Err(e) =
+                                    client_inner.download_media(&media, &part_path).await
+                                {
+                                    let _ = std::fs::remove_file(&part_path);
+                                    return Err(format!("Download failed: {}", e));
                                 }
-                                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                                Err(e) => {
-                                    return Err(format!(
-                                        "Failed to remove stale part file {}: {}",
-                                        crate::secret_log::safe_path_for_log(&part_path),
-                                        e
-                                    ));
+
+                                match classify_part_file(&part_path) {
+                                    Ok(PartFileStatus::EmptyRetryable) => {
+                                        warn!(
+                                            attempt,
+                                            max_attempts = MAX_DOWNLOAD_ATTEMPTS,
+                                            msg_id = voice.msg_id,
+                                            will_retry = attempt < MAX_DOWNLOAD_ATTEMPTS,
+                                            "Downloaded file is empty"
+                                        );
+                                        if attempt < MAX_DOWNLOAD_ATTEMPTS {
+                                            tokio::time::sleep(std::time::Duration::from_millis(
+                                                DOWNLOAD_RETRY_DELAY_MS,
+                                            ))
+                                            .await;
+                                        }
+                                        continue;
+                                    }
+                                    Ok(PartFileStatus::Ready { .. }) => {
+                                        let (published_path, file_size) =
+                                            publish_voice_file(&part_path, &final_path)?;
+
+                                        info!(
+                                            msg_id = voice.msg_id,
+                                            mime = %voice.mime_type,
+                                            size = file_size,
+                                            path = %crate::secret_log::safe_path_for_log(&published_path),
+                                            "Voice file published"
+                                        );
+
+                                        return Ok(published_path
+                                            .to_str()
+                                            .ok_or_else(|| "Invalid path".to_string())?
+                                            .to_string());
+                                    }
+                                    Err(e) => {
+                                        let _ = std::fs::remove_file(&part_path);
+                                        return Err(e);
+                                    }
                                 }
                             }
 
-                            debug!(
-                                "Downloading voice file to {}",
-                                crate::secret_log::safe_path_for_log(&part_path)
-                            );
-
-                            if let Err(e) = client_inner.download_media(&media, &part_path).await {
-                                let _ = std::fs::remove_file(&part_path);
-                                return Err(format!("Download failed: {}", e));
-                            }
-
-                            let (published_path, file_size) =
-                                publish_voice_file(&part_path, &final_path)?;
-
-                            info!(
-                                msg_id = voice.msg_id,
-                                mime = %voice.mime_type,
-                                size = file_size,
-                                path = %crate::secret_log::safe_path_for_log(&published_path),
-                                "Voice file published"
-                            );
-
-                            return Ok(published_path
-                                .to_str()
-                                .ok_or_else(|| "Invalid path".to_string())?
-                                .to_string());
+                            return Err(format!(
+                                "Downloaded file is empty after {} attempts",
+                                MAX_DOWNLOAD_ATTEMPTS
+                            ));
                         }
                     }
                 }
@@ -383,6 +409,50 @@ fn voice_final_path(temp_dir: &Path, msg_id: i32, ext: &str) -> PathBuf {
 fn voice_part_path(temp_dir: &Path, msg_id: i32, ext: &str) -> PathBuf {
     let final_name = format!("silero_tts_{}.{}", msg_id, ext);
     temp_dir.join(format!("{}.part", final_name))
+}
+
+/// Clean up a `.part` file, logging success and ignoring "not found" errors.
+fn cleanup_part_file(path: &Path) -> Result<(), String> {
+    match std::fs::remove_file(path) {
+        Ok(()) => {
+            debug!(
+                "Removed file: {}",
+                crate::secret_log::safe_path_for_log(path)
+            );
+            Ok(())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!(
+            "Failed to remove stale part file {}: {}",
+            crate::secret_log::safe_path_for_log(path),
+            e
+        )),
+    }
+}
+
+/// Result of classifying a downloaded `.part` file for the retry loop.
+#[derive(Debug, PartialEq)]
+enum PartFileStatus {
+    /// File has content and is ready for publication.
+    Ready { size: u64 },
+    /// File is exactly zero bytes; caller should retry.
+    EmptyRetryable,
+}
+
+/// Classify a downloaded `.part` file:
+/// - Returns `Ready` with size for non-empty files (preserved for atomic rename).
+/// - Returns `EmptyRetryable` for exactly zero-byte files (`.part` is removed).
+/// - Returns `Err` for missing or unreadable metadata.
+fn classify_part_file(path: &Path) -> Result<PartFileStatus, String> {
+    let metadata = std::fs::metadata(path)
+        .map_err(|e| format!("Failed to read metadata of downloaded file: {}", e))?;
+    let size = metadata.len();
+    if size == 0 {
+        cleanup_part_file(path)?;
+        Ok(PartFileStatus::EmptyRetryable)
+    } else {
+        Ok(PartFileStatus::Ready { size })
+    }
 }
 
 /// Atomically publish a downloaded `.part` file:
@@ -2783,5 +2853,62 @@ mod tests {
                 assert!(!part.exists(), "part must be cleaned up on failure");
             }
         }
+    }
+
+    // ── cleanup_part_file ──────────────────────────────────────────────
+
+    #[test]
+    fn cleanup_part_file_existing() {
+        let guard = test_dir("cleanup_existing");
+        let path = guard.0.join("existing.part");
+        std::fs::write(&path, b"data").unwrap();
+        assert!(path.exists());
+        cleanup_part_file(&path).unwrap();
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn cleanup_part_file_missing() {
+        let guard = test_dir("cleanup_missing");
+        let path = guard.0.join("missing.part");
+        assert!(!path.exists());
+        cleanup_part_file(&path).unwrap();
+    }
+
+    // ── classify_part_file ─────────────────────────────────────────────
+
+    #[test]
+    fn classify_non_empty_is_ready() {
+        let guard = test_dir("classify_ready");
+        let path = guard.0.join("ready.part");
+        std::fs::write(&path, b"valid audio data").unwrap();
+
+        let status = classify_part_file(&path).expect("must classify");
+        assert_eq!(status, PartFileStatus::Ready { size: 16 });
+        assert!(path.exists(), "non-empty part must be preserved");
+    }
+
+    #[test]
+    fn classify_zero_byte_is_retryable_and_cleaned() {
+        let guard = test_dir("classify_empty");
+        let path = guard.0.join("empty.part");
+        std::fs::write(&path, b"").unwrap();
+
+        let status = classify_part_file(&path).expect("must classify");
+        assert_eq!(status, PartFileStatus::EmptyRetryable);
+        assert!(!path.exists(), "empty part must be removed");
+    }
+
+    #[test]
+    fn classify_missing_metadata_returns_error() {
+        let guard = test_dir("classify_missing");
+        let path = guard.0.join("nonexistent.part");
+
+        let err = classify_part_file(&path).expect_err("must error on missing file");
+        assert!(
+            err.contains("metadata"),
+            "error must mention metadata: {}",
+            err
+        );
     }
 }
