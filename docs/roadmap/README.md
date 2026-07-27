@@ -86,6 +86,7 @@ related_tasks: []
 - [ROADMAP-032 — audio boundaries и presets](./completed/032-audio-boundaries-and-dsp-presets.md)
 - [ROADMAP-035 — AudioPanel decomposition](./completed/035-audio-panel-subpanels.md)
 - [ROADMAP-047 — очередь задач озвучивания](./completed/047-speech-job-queue.md)
+- [ROADMAP-050 — Единый список управления воспроизведением](./completed/050-unified-playback-activity-list.md)
 
 ### Архитектура, AI и документация
 

@@ -1,9 +1,11 @@
-use crate::speech_queue::{AcceptedJob, Snapshot, SpeechQueue, SpeechQueueStateDto};
+use crate::commands::playback::PlaybackState;
+use crate::speech_queue::{AcceptedJob, JobStatus, Snapshot, SpeechQueue, SpeechQueueStateDto};
 use crate::state::AppState;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Notify;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 pub struct SpeechQueueState {
@@ -138,15 +140,106 @@ pub fn retry_speech_job(
 pub fn cancel_speech_job(
     app_handle: AppHandle,
     queue: State<'_, SpeechQueueState>,
+    playback: State<'_, PlaybackState>,
     job_id: Uuid,
 ) -> Result<(), String> {
-    let mut q = queue.lock();
-    q.cancel_job(job_id).map_err(|e| e.to_string())?;
-    let dto = q.state();
-    drop(q);
-    emit_queue_changed(&app_handle, dto);
-    queue.notify_one();
-    Ok(())
+    let handoff_guard = {
+        let mut q = queue.lock();
+        let status = q
+            .get_status(job_id)
+            .ok_or_else(|| "Job not found".to_string())?;
+
+        match status {
+            JobStatus::Queued | JobStatus::Failed => {
+                q.cancel_job(job_id).map_err(|e| e.to_string())?;
+                let dto = q.state();
+                drop(q);
+                info!(job_id = %job_id, observed_status = ?status, "cancel accepted");
+                emit_queue_changed(&app_handle, dto);
+                queue.notify_one();
+                return Ok(());
+            }
+            JobStatus::Generating => {
+                q.cancel_generating_job(job_id).map_err(|e| e.to_string())?;
+                let dto = q.state();
+                drop(q);
+                info!(job_id = %job_id, observed_status = ?status, "cancel accepted");
+                emit_queue_changed(&app_handle, dto);
+                queue.notify_one();
+                return Ok(());
+            }
+            JobStatus::Ready => {
+                let guard = q
+                    .get_handoff_guard(job_id)
+                    .ok_or_else(|| "Job not found".to_string())?;
+                drop(q);
+                Some(guard)
+            }
+            _ => {
+                info!(job_id = %job_id, observed_status = ?status, "cancel rejected");
+                return Err("Cannot cancel: job is in a non-cancellable state".to_string());
+            }
+        }
+    };
+
+    if let Some(guard) = handoff_guard {
+        let _g = guard.lock();
+
+        let pb = &playback.inner().0;
+        let id_str = job_id.to_string();
+
+        let is_current = pb.current_id().map(|c| c == id_str).unwrap_or(false);
+        if is_current {
+            info!(job_id = %job_id, reason = "current_protected", "cancel rejected");
+            return Err("Cannot cancel: audio is currently playing".to_string());
+        }
+
+        let mut removed_from_tail = false;
+        if pb.queued_ids().iter().any(|q| q == &id_str) {
+            match pb.remove_queued_item(&id_str) {
+                Ok(()) => {
+                    removed_from_tail = true;
+                }
+                Err(ref e) if e.starts_with("NotQueued") => {
+                    info!(job_id = %job_id, reason = "became_current_during_removal", "cancel rejected");
+                    return Err("Cannot cancel: audio is currently playing".to_string());
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        let mut q = queue.lock();
+        let current_status = q.get_status(job_id);
+        match current_status {
+            Some(JobStatus::Ready) => {
+                q.cancel_ready_job(job_id).map_err(|e| e.to_string())?;
+                let dto = q.state();
+                drop(q);
+                let location = if removed_from_tail { "tail" } else { "absent" };
+                info!(job_id = %job_id, location, "cancel accepted");
+                emit_queue_changed(&app_handle, dto);
+                queue.notify_one();
+                Ok(())
+            }
+            Some(JobStatus::Cancelled) => {
+                drop(q);
+                info!(job_id = %job_id, "cancel already committed");
+                Ok(())
+            }
+            Some(JobStatus::Playing) => {
+                drop(q);
+                info!(job_id = %job_id, reason = "became_current", "cancel rejected");
+                Err("Cannot cancel: audio is currently playing".to_string())
+            }
+            other => {
+                let msg = format!("Cannot cancel: unexpected status {:?}", other);
+                warn!(job_id = %job_id, status = ?other, "unexpected ready-cancel status");
+                Err(msg)
+            }
+        }
+    } else {
+        unreachable!()
+    }
 }
 
 #[tauri::command]
@@ -162,6 +255,54 @@ pub fn skip_speech_job(
     emit_queue_changed(&app_handle, dto);
     queue.notify_one();
     Ok(())
+}
+
+#[tauri::command]
+pub fn restore_cancelled_speech_job(
+    app_handle: AppHandle,
+    queue: State<'_, SpeechQueueState>,
+    playback: State<'_, PlaybackState>,
+    job_id: Uuid,
+) -> Result<(), String> {
+    let spoken_text_is_set = {
+        let q = queue.lock();
+        let status = q
+            .get_status(job_id)
+            .ok_or_else(|| "Job not found".to_string())?;
+        let error = q.get_error(job_id);
+        if status != JobStatus::Cancelled || error.is_some() {
+            return Err("Cannot restore: job is not user-cancelled".to_string());
+        }
+        q.get_spoken_text(job_id).is_some()
+    };
+
+    if spoken_text_is_set {
+        let pb = &playback.inner().0;
+        match pb.replay_from_cache(&job_id.to_string()) {
+            Ok(()) => {
+                let mut q = queue.lock();
+                q.touch_activity(job_id);
+                let dto = q.state();
+                drop(q);
+                emit_queue_changed(&app_handle, dto);
+                return Ok(());
+            }
+            Err(ref e) if is_cache_miss_error(e) => {}
+            Err(e) => return Err(e),
+        }
+    }
+
+    let mut q = queue.lock();
+    q.restore_cancelled_job(job_id).map_err(|e| e.to_string())?;
+    let dto = q.state();
+    drop(q);
+    emit_queue_changed(&app_handle, dto);
+    queue.notify_one();
+    Ok(())
+}
+
+pub(crate) fn is_cache_miss_error(err: &str) -> bool {
+    err.starts_with("CacheMiss")
 }
 
 #[cfg(test)]
@@ -202,5 +343,21 @@ mod tests {
     fn resolve_silero_speaker_whitespace_only_settings_and_no_captured_returns_error() {
         let result = resolve_silero_speaker("   ", None);
         assert_eq!(result, Err("No active Silero speaker selected".to_string()));
+    }
+
+    #[test]
+    fn is_cache_miss_true_for_cache_miss_prefix() {
+        assert!(is_cache_miss_error("CacheMiss: no cached audio for id 'x'"));
+        assert!(is_cache_miss_error("CacheMiss"));
+    }
+
+    #[test]
+    fn is_cache_miss_false_for_other_errors() {
+        assert!(!is_cache_miss_error("QueueFull: playback queue is full"));
+        assert!(!is_cache_miss_error(
+            "AlreadyPending: id 'x' is already queued"
+        ));
+        assert!(!is_cache_miss_error(""));
+        assert!(!is_cache_miss_error("Some other error"));
     }
 }

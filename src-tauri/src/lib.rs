@@ -568,7 +568,9 @@ pub fn run() {
             commands::playback::playback_stop,
             commands::playback::playback_repeat,
             commands::playback::replay_phrase,
+            commands::playback::cancel_queued_replay,
             commands::playback::get_playback_state,
+            commands::playback::get_playback_activity,
             // Spellcheck command
             commands::spellcheck::spellcheck,
             // Speech queue commands
@@ -577,6 +579,7 @@ pub fn run() {
             commands::speech_queue::retry_speech_job,
             commands::speech_queue::cancel_speech_job,
             commands::speech_queue::skip_speech_job,
+            commands::speech_queue::restore_cancelled_speech_job,
         ])
         .setup({
             let settings_clone = settings.clone();

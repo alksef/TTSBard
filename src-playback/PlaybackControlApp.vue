@@ -5,12 +5,15 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { LogicalSize } from '@tauri-apps/api/dpi'
 import {
-  type JobDto,
-  type SpeechQueueStateDto,
+  type ActivityRow,
+  type PlaybackActivityDto,
   type PlaybackStatus,
+  type SpeechQueueStateDto,
+  isPlaybackActivityDto,
   isSpeechQueueStateDto,
-  effectiveStatus,
-  jobActions,
+  activityActions,
+  activityStatusLabel,
+  mergeWithStaleProtection,
 } from './speechQueue'
 
 const opacity = ref(94)
@@ -45,7 +48,7 @@ const playbackCard = ref<HTMLDivElement | null>(null)
 async function resizeToFit() {
   try {
     await nextTick()
-    await new Promise<number>(resolve => requestAnimationFrame(resolve))
+    await new Promise<number>((resolve) => requestAnimationFrame(resolve))
     const card = playbackCard.value
     if (!card) return
     const contentHeight = card.offsetHeight
@@ -63,16 +66,25 @@ async function resizeToFit() {
 interface PlaybackStateDto {
   status: 'Idle' | 'Playing' | 'Paused' | 'Stopped'
   current: string | null
+  current_id: string | null
   queue: string[]
   recent: { id: string; text: string; timestamp: number }[]
 }
 
-const state = ref<PlaybackStateDto>({
-  status: 'Idle',
-  current: null,
-  queue: [],
-  recent: [],
-})
+const playbackStatus = ref<PlaybackStatus>('Idle')
+const currentText = ref<string | null>(null)
+
+async function fetchPlaybackStatus() {
+  try {
+    const ps = await invoke<PlaybackStateDto>('get_playback_state')
+    playbackStatus.value = ps.status
+    currentText.value = ps.current
+  } catch {
+    // silent
+  }
+}
+
+const activityRows = ref<ActivityRow[]>([])
 
 const speechQueue = ref<SpeechQueueStateDto>({
   jobs: [],
@@ -82,6 +94,8 @@ const speechQueue = ref<SpeechQueueStateDto>({
 
 const pendingActions = ref<Set<string>>(new Set())
 const actionError = ref('')
+const rowErrors = ref<Record<string, string>>({})
+let fetchGeneration = 0
 
 function formatError(e: unknown): string {
   if (e instanceof Error) return e.message
@@ -91,9 +105,14 @@ function formatError(e: unknown): string {
 
 let unlisteners: UnlistenFn[] = []
 
-async function fetchState() {
+async function fetchActivity() {
+  fetchGeneration += 1
+  const gen = fetchGeneration
   try {
-    state.value = await invoke<PlaybackStateDto>('get_playback_state')
+    const dto = await invoke<PlaybackActivityDto>('get_playback_activity')
+    if (isPlaybackActivityDto(dto) && gen === fetchGeneration) {
+      activityRows.value = mergeWithStaleProtection([], dto.rows)
+    }
   } catch {
     // silent
   }
@@ -110,29 +129,95 @@ async function fetchSpeechQueue() {
 function applySpeechQueuePayload(payload: unknown) {
   if (isSpeechQueueStateDto(payload)) {
     speechQueue.value = payload
+    fetchActivity()
   } else {
     fetchSpeechQueue()
   }
 }
 
 function doPause() {
-  invoke('playback_pause')
+  const currentRow = activityRows.value.find(r => r.is_current)
+  const rowId = currentRow?.id ?? ''
+  if (pendingActions.value.has('pause:' + rowId)) return
+  if (rowId) {
+    rowErrors.value = { ...rowErrors.value, [rowId]: '' }
+  }
+  pendingActions.value = new Set([...pendingActions.value, 'pause:' + rowId])
+  invoke('playback_pause').catch((e) => {
+    if (rowId) {
+      rowErrors.value = { ...rowErrors.value, [rowId]: 'Ошибка паузы: ' + formatError(e) }
+    }
+  }).finally(() => {
+    pendingActions.value = new Set([...pendingActions.value].filter((a) => a !== 'pause:' + rowId))
+  })
 }
 
 function doResume() {
-  invoke('playback_resume')
+  const currentRow = activityRows.value.find(r => r.is_current)
+  const rowId = currentRow?.id ?? ''
+  if (pendingActions.value.has('resume:' + rowId)) return
+  if (rowId) {
+    rowErrors.value = { ...rowErrors.value, [rowId]: '' }
+  }
+  pendingActions.value = new Set([...pendingActions.value, 'resume:' + rowId])
+  invoke('playback_resume').catch((e) => {
+    if (rowId) {
+      rowErrors.value = { ...rowErrors.value, [rowId]: 'Ошибка возобновления: ' + formatError(e) }
+    }
+  }).finally(() => {
+    pendingActions.value = new Set([...pendingActions.value].filter((a) => a !== 'resume:' + rowId))
+  })
 }
 
 function doStop() {
-  invoke('playback_stop')
+  const currentRow = activityRows.value.find(r => r.is_current)
+  const rowId = currentRow?.id ?? ''
+  if (pendingActions.value.has('stop:' + rowId)) return
+  if (rowId) {
+    rowErrors.value = { ...rowErrors.value, [rowId]: '' }
+  }
+  pendingActions.value = new Set([...pendingActions.value, 'stop:' + rowId])
+  invoke('playback_stop').catch((e) => {
+    if (rowId) {
+      rowErrors.value = { ...rowErrors.value, [rowId]: 'Ошибка остановки: ' + formatError(e) }
+    }
+  }).finally(() => {
+    pendingActions.value = new Set([...pendingActions.value].filter((a) => a !== 'stop:' + rowId))
+  })
 }
 
-function doRepeat() {
-  invoke('playback_repeat')
+function doRestart() {
+  const currentRow = activityRows.value.find(r => r.is_current)
+  const rowId = currentRow?.id ?? ''
+  if (pendingActions.value.has('restart:' + rowId)) return
+  if (rowId) {
+    rowErrors.value = { ...rowErrors.value, [rowId]: '' }
+  }
+  pendingActions.value = new Set([...pendingActions.value, 'restart:' + rowId])
+  invoke('playback_repeat').catch((e) => {
+    if (rowId) {
+      rowErrors.value = { ...rowErrors.value, [rowId]: 'Ошибка повтора: ' + formatError(e) }
+    }
+  }).finally(() => {
+    pendingActions.value = new Set([...pendingActions.value].filter((a) => a !== 'restart:' + rowId))
+  })
 }
 
-function doReplay(id: string) {
-  invoke('replay_phrase', { id })
+async function doReplay(id: string) {
+  if (pendingActions.value.has('replay:' + id)) return
+  actionError.value = ''
+  rowErrors.value = { ...rowErrors.value, [id]: '' }
+  pendingActions.value = new Set([...pendingActions.value, 'replay:' + id])
+  try {
+    await invoke('replay_phrase', { id })
+  } catch (e) {
+    const msg = 'Ошибка повтора: ' + formatError(e)
+    rowErrors.value = { ...rowErrors.value, [id]: msg }
+  } finally {
+    pendingActions.value = new Set([...pendingActions.value].filter((a) => a !== 'replay:' + id))
+    await fetchActivity()
+    await fetchSpeechQueue()
+  }
 }
 
 async function closeWindow() {
@@ -142,42 +227,120 @@ async function closeWindow() {
 async function doRetry(job_id: string) {
   if (pendingActions.value.has(job_id)) return
   actionError.value = ''
+  rowErrors.value = { ...rowErrors.value, [job_id]: '' }
   pendingActions.value = new Set([...pendingActions.value, job_id])
   try {
-    await invoke('retry_speech_job', { job_id })
+    await invoke('retry_speech_job', { jobId: job_id })
   } catch (e) {
-    actionError.value = 'Ошибка повтора: ' + formatError(e)
+    const msg = 'Ошибка повтора: ' + formatError(e)
+    rowErrors.value = { ...rowErrors.value, [job_id]: msg }
   } finally {
-    pendingActions.value = new Set([...pendingActions.value].filter(id => id !== job_id))
+    pendingActions.value = new Set([...pendingActions.value].filter((id) => id !== job_id))
     await fetchSpeechQueue()
+    await fetchActivity()
   }
 }
 
 async function doSkip(job_id: string) {
   if (pendingActions.value.has(job_id)) return
   actionError.value = ''
+  rowErrors.value = { ...rowErrors.value, [job_id]: '' }
   pendingActions.value = new Set([...pendingActions.value, job_id])
   try {
-    await invoke('skip_speech_job', { job_id })
+    await invoke('skip_speech_job', { jobId: job_id })
   } catch (e) {
-    actionError.value = 'Ошибка пропуска: ' + formatError(e)
+    const msg = 'Ошибка пропуска: ' + formatError(e)
+    rowErrors.value = { ...rowErrors.value, [job_id]: msg }
   } finally {
-    pendingActions.value = new Set([...pendingActions.value].filter(id => id !== job_id))
+    pendingActions.value = new Set([...pendingActions.value].filter((id) => id !== job_id))
     await fetchSpeechQueue()
+    await fetchActivity()
   }
 }
 
 async function doCancelJob(job_id: string) {
   if (pendingActions.value.has(job_id)) return
   actionError.value = ''
+  rowErrors.value = { ...rowErrors.value, [job_id]: '' }
   pendingActions.value = new Set([...pendingActions.value, job_id])
   try {
-    await invoke('cancel_speech_job', { job_id })
+    await invoke('cancel_speech_job', { jobId: job_id })
   } catch (e) {
-    actionError.value = 'Ошибка отмены: ' + formatError(e)
+    const msg = 'Ошибка отмены: ' + formatError(e)
+    rowErrors.value = { ...rowErrors.value, [job_id]: msg }
   } finally {
-    pendingActions.value = new Set([...pendingActions.value].filter(id => id !== job_id))
     await fetchSpeechQueue()
+    await fetchActivity()
+    pendingActions.value = new Set([...pendingActions.value].filter((id) => id !== job_id))
+  }
+}
+
+async function doRestore(job_id: string) {
+  if (pendingActions.value.has(job_id)) return
+  actionError.value = ''
+  rowErrors.value = { ...rowErrors.value, [job_id]: '' }
+  pendingActions.value = new Set([...pendingActions.value, job_id])
+  try {
+    await invoke('restore_cancelled_speech_job', { jobId: job_id })
+  } catch (e) {
+    const msg = 'Ошибка возврата в очередь: ' + formatError(e)
+    rowErrors.value = { ...rowErrors.value, [job_id]: msg }
+  } finally {
+    await fetchSpeechQueue()
+    await fetchActivity()
+    pendingActions.value = new Set([...pendingActions.value].filter((id) => id !== job_id))
+  }
+}
+
+async function doCancelReplay(id: string) {
+  if (pendingActions.value.has(id)) return
+  actionError.value = ''
+  rowErrors.value = { ...rowErrors.value, [id]: '' }
+  pendingActions.value = new Set([...pendingActions.value, id])
+  try {
+    await invoke('cancel_queued_replay', { id })
+  } catch (e) {
+    const msg = 'Ошибка отмены: ' + formatError(e)
+    rowErrors.value = { ...rowErrors.value, [id]: msg }
+  } finally {
+    pendingActions.value = new Set([...pendingActions.value].filter((a) => a !== id))
+    await fetchActivity()
+    await fetchSpeechQueue()
+  }
+}
+
+function isPending(id: string): boolean {
+  return (
+    pendingActions.value.has(id) ||
+    pendingActions.value.has('replay:' + id) ||
+    pendingActions.value.has('pause:' + id) ||
+    pendingActions.value.has('resume:' + id) ||
+    pendingActions.value.has('stop:' + id) ||
+    pendingActions.value.has('restart:' + id)
+  )
+}
+
+function showSpokenText(row: ActivityRow): boolean {
+  return (
+    row.spoken_text != null &&
+    row.spoken_text !== '' &&
+    row.spoken_text !== row.original_text
+  )
+}
+
+function findFailedJobId(): string | null {
+  const failedJob = speechQueue.value.jobs.find(j => j.status === 'failed')
+  return failedJob?.job_id ?? null
+}
+
+async function scrollToFailed() {
+  const failedId = findFailedJobId()
+  if (!failedId) return
+  await nextTick()
+  const el = document.querySelector(`[data-row-id="${CSS.escape(failedId)}"]`)
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    ;(el as HTMLElement).focus()
   }
 }
 
@@ -190,16 +353,37 @@ onMounted(async () => {
     // silent
   }
 
-  await Promise.all([fetchState(), fetchSpeechQueue()])
+  await Promise.all([fetchActivity(), fetchSpeechQueue(), fetchPlaybackStatus()])
 
   unlisteners = [
-    await listen('playback-started', () => fetchState()),
-    await listen('playback-finished', () => fetchState()),
-    await listen('playback-paused', () => fetchState()),
-    await listen('playback-resumed', () => fetchState()),
-    await listen('playback-stopped', () => fetchState()),
-    await listen('queue-changed', () => fetchState()),
-    await listen('refresh-state', () => fetchState()),
+    await listen('playback-started', () => {
+      fetchPlaybackStatus()
+      fetchActivity()
+    }),
+    await listen('playback-finished', () => {
+      fetchPlaybackStatus()
+      fetchActivity()
+    }),
+    await listen('playback-paused', () => {
+      fetchPlaybackStatus()
+      fetchActivity()
+    }),
+    await listen('playback-resumed', () => {
+      fetchPlaybackStatus()
+      fetchActivity()
+    }),
+    await listen('playback-stopped', () => {
+      fetchPlaybackStatus()
+      fetchActivity()
+    }),
+    await listen('queue-changed', () => {
+      fetchPlaybackStatus()
+      fetchActivity()
+    }),
+    await listen('refresh-state', () => {
+      fetchPlaybackStatus()
+      fetchActivity()
+    }),
     await listen('speech-queue-changed', (event) => {
       applySpeechQueuePayload(event.payload)
     }),
@@ -218,57 +402,44 @@ onMounted(async () => {
   await resizeToFit()
 })
 
-watch(() => state.value, () => { resizeToFit() }, { deep: true })
-watch(() => speechQueue.value, () => { resizeToFit() }, { deep: true })
+watch(() => activityRows.value, () => { resizeToFit() }, { deep: true })
 
 onUnmounted(() => {
   unlisteners.forEach((u) => u())
 })
 
 const pauseIcon = () =>
-  state.value.status === 'Paused' ? '▶' : '⏸'
-
-const playbackStatus = computed<PlaybackStatus>(() => state.value.status)
-
-function jobDisplayStatus(job: JobDto): string {
-  return effectiveStatus(job.status, playbackStatus.value)
-}
-
-function showSpokenText(job: JobDto): boolean {
-  return job.spoken_text != null && job.spoken_text !== '' && job.spoken_text !== job.original_text
-}
+  playbackStatus.value === 'Paused' ? '▶' : '⏸'
 </script>
 
 <template>
   <div ref="playbackCard" class="playback-window" :class="{ 'light-background': isLightBackground }" :style="overlayStyle">
     <div class="window-header" data-tauri-drag-region>
       <span class="title">Управление</span>
-      <span class="status-badge" :class="state.status.toLowerCase()">
-        {{ state.status }}
+      <span class="status-badge" :class="playbackStatus.toLowerCase()">
+        {{ playbackStatus }}
       </span>
       <button class="close-btn" @click="closeWindow" title="Закрыть" aria-label="Закрыть">✕</button>
     </div>
 
-    <!-- Current Phrase -->
     <div class="current-section">
-      <div v-if="state.current" class="current-text">{{ state.current }}</div>
+      <div v-if="currentText" class="current-text">{{ currentText }}</div>
       <div v-else class="current-text empty">Нет активной фразы</div>
     </div>
 
-    <!-- Controls -->
     <div class="controls">
       <button
         class="ctrl-btn"
-        :disabled="state.status === 'Idle' || state.status === 'Stopped'"
-        @click="state.status === 'Paused' ? doResume() : doPause()"
-        :title="state.status === 'Paused' ? 'Возобновить' : 'Пауза'"
-        :aria-label="state.status === 'Paused' ? 'Возобновить' : 'Пауза'"
+        :disabled="playbackStatus === 'Idle' || playbackStatus === 'Stopped'"
+        @click="playbackStatus === 'Paused' ? doResume() : doPause()"
+        :title="playbackStatus === 'Paused' ? 'Возобновить' : 'Пауза'"
+        :aria-label="playbackStatus === 'Paused' ? 'Возобновить' : 'Пауза'"
       >
         {{ pauseIcon() }}
       </button>
       <button
         class="ctrl-btn"
-        :disabled="state.status === 'Idle' || state.status === 'Stopped'"
+        :disabled="playbackStatus === 'Idle' || playbackStatus === 'Stopped'"
         @click="doStop"
         title="Стоп"
         aria-label="Стоп"
@@ -277,10 +448,10 @@ function showSpokenText(job: JobDto): boolean {
       </button>
       <button
         class="ctrl-btn"
-        :disabled="state.status === 'Idle' || state.status === 'Stopped'"
-        @click="doRepeat"
-        title="Повторить"
-        aria-label="Повторить"
+        :disabled="playbackStatus === 'Idle' || playbackStatus === 'Stopped'"
+        @click="doRestart"
+        title="Начать сначала"
+        aria-label="Начать сначала"
       >
         🔁
       </button>
@@ -288,81 +459,130 @@ function showSpokenText(job: JobDto): boolean {
 
     <div v-if="actionError" class="action-error">{{ actionError }}</div>
 
-    <!-- Speech Queue -->
-    <div v-if="speechQueue.jobs.length > 0" class="section">
-      <div class="section-title">Очередь генерации ({{ speechQueue.jobs.length }})</div>
+    <div v-if="speechQueue.blocked" class="blocked-warning">
+      ⚠ Очередь заблокирована — последующие фразы не будут обработаны, пока ошибочная задача не будет повторена или пропущена.
+      <span v-if="speechQueue.blocked_reason" class="blocked-reason-detail">{{ speechQueue.blocked_reason }}</span>
+      <button
+        v-if="findFailedJobId()"
+        class="blocked-focus-btn"
+        @click="scrollToFailed"
+        title="Прокрутить к ошибочной задаче"
+        aria-label="Прокрутить к ошибочной задаче"
+      >Показать ошибочную задачу</button>
+    </div>
 
-      <div v-if="speechQueue.blocked" class="blocked-warning">
-        ⚠ Очередь заблокирована — последующие фразы не будут обработаны, пока ошибочная задача не будет повторена или пропущена.
-        <span v-if="speechQueue.blocked_reason" class="blocked-reason-detail">{{ speechQueue.blocked_reason }}</span>
-      </div>
+    <div v-if="activityRows.length > 0" class="activity-list">
+      <div
+        v-for="row in activityRows"
+        :key="row.id"
+        class="activity-row"
+        :class="'row-status-' + row.status"
+        :data-row-id="row.id"
+      >
+        <div class="row-text-row">
+          <span class="row-original">{{ row.original_text }}</span>
+        </div>
+        <div v-if="showSpokenText(row)" class="row-spoken">{{ row.spoken_text }}</div>
+        <div class="row-meta-row">
+          <span class="row-status-tag" :class="row.status">{{ activityStatusLabel(row.status) }}</span>
+          <span v-if="row.attempt > 1" class="row-attempt">#{{ row.attempt }}</span>
+        </div>
+        <div v-if="row.status === 'failed' && row.error" class="row-error">{{ row.error }}</div>
+        <div v-if="rowErrors[row.id]" class="row-action-error">{{ rowErrors[row.id] }}</div>
 
-      <div class="speech-queue-list">
-        <div
-          v-for="job in speechQueue.jobs"
-          :key="job.job_id"
-          class="speech-job"
-          :class="'job-status-' + job.status"
-        >
-          <div class="job-text-row">
-            <span class="job-original">{{ job.original_text }}</span>
-          </div>
-          <div v-if="showSpokenText(job)" class="job-spoken">{{ job.spoken_text }}</div>
-          <div class="job-meta-row">
-            <span class="job-status-tag" :class="job.status">{{ jobDisplayStatus(job) }}</span>
-            <span v-if="job.attempt > 1" class="job-attempt">#{{ job.attempt }}</span>
-          </div>
-          <div v-if="job.status === 'failed' && job.error" class="job-error">{{ job.error }}</div>
-          <div class="job-actions-row" v-if="jobActions(job).canRetry || jobActions(job).canSkip || jobActions(job).canCancel">
+        <div class="row-actions-row">
+          <template v-if="activityActions(row).canPause">
             <button
-              v-if="jobActions(job).canRetry"
-              class="job-action-btn retry"
-              :disabled="pendingActions.has(job.job_id)"
-              @click="doRetry(job.job_id)"
-              title="Повторить"
+              class="row-action-btn pause"
+              @click="doPause()"
+              title="Пауза"
+              aria-label="Пауза"
+            >⏸</button>
+          </template>
+          <template v-if="activityActions(row).canResume">
+            <button
+              class="row-action-btn resume"
+              @click="doResume()"
+              title="Возобновить"
+              aria-label="Возобновить"
+            >▶</button>
+          </template>
+          <template v-if="activityActions(row).canStop">
+            <button
+              class="row-action-btn stop"
+              @click="doStop()"
+              title="Стоп"
+              aria-label="Стоп"
+            >⏹</button>
+          </template>
+          <template v-if="activityActions(row).canRestart">
+            <button
+              class="row-action-btn restart"
+              @click="doRestart()"
+              title="Начать сначала"
+              aria-label="Начать сначала"
+            >🔁</button>
+          </template>
+          <template v-if="activityActions(row).canReplay">
+            <button
+              class="row-action-btn replay"
+              :disabled="isPending(row.id)"
+              @click="doReplay(row.id)"
+              title="Воспроизвести снова"
+              aria-label="Воспроизвести снова"
+            >🔄</button>
+          </template>
+          <template v-if="activityActions(row).canRetry">
+            <button
+              class="row-action-btn retry"
+              :disabled="isPending(row.id)"
+              @click="doRetry(row.job_id!)"
+              title="Повторить генерацию"
               aria-label="Повторить генерацию"
-            >
-              ↻
-            </button>
+            >↻</button>
+          </template>
+          <template v-if="activityActions(row).canSkip">
             <button
-              v-if="jobActions(job).canSkip"
-              class="job-action-btn skip"
-              :disabled="pendingActions.has(job.job_id)"
-              @click="doSkip(job.job_id)"
+              class="row-action-btn skip"
+              :disabled="isPending(row.id)"
+              @click="doSkip(row.job_id!)"
               title="Пропустить"
               aria-label="Пропустить задачу"
-            >
-              ⏭
-            </button>
+            >⏭</button>
+          </template>
+          <template v-if="activityActions(row).canCancel">
             <button
-              v-if="jobActions(job).canCancel"
-              class="job-action-btn cancel"
-              :disabled="pendingActions.has(job.job_id)"
-              @click="doCancelJob(job.job_id)"
+              v-if="row.status === 'replay_queued'"
+              class="row-action-btn cancel"
+              :disabled="isPending(row.id)"
+              @click="doCancelReplay(row.id)"
               title="Отменить"
               aria-label="Отменить задачу"
-            >
-              ✕
-            </button>
-          </div>
+            >✕</button>
+            <button
+              v-else
+              class="row-action-btn cancel"
+              :disabled="isPending(row.id)"
+              @click="doCancelJob(row.job_id!)"
+              title="Отменить"
+              aria-label="Отменить задачу"
+            >✕</button>
+          </template>
+          <template v-if="activityActions(row).canRestore">
+            <button
+              class="row-action-btn restore"
+              :disabled="isPending(row.id)"
+              @click="doRestore(row.job_id!)"
+              title="Вернуть в очередь"
+              aria-label="Вернуть в очередь"
+            >↻</button>
+          </template>
         </div>
       </div>
     </div>
 
-    <!-- Recent -->
-    <div v-if="state.recent.length > 0" class="section">
-      <div class="section-title">Недавние</div>
-      <div class="recent-list">
-        <div
-          v-for="entry in state.recent"
-          :key="entry.id"
-          class="recent-item"
-          @click="doReplay(entry.id)"
-          :title="'Повторить: ' + entry.text"
-        >
-          {{ entry.text }}
-        </div>
-      </div>
+    <div v-else-if="speechQueue.jobs.length === 0" class="empty-list-hint">
+      Нет активных задач
     </div>
   </div>
 </template>
@@ -420,7 +640,7 @@ body {
   padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   min-height: 150px;
   width: 100%;
   height: 100%;
@@ -438,6 +658,7 @@ body {
   justify-content: space-between;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .title {
@@ -494,7 +715,8 @@ body {
 }
 
 .current-section {
-  padding: 8px 4px;
+  padding: 4px 4px;
+  flex-shrink: 0;
 }
 
 .current-text {
@@ -514,6 +736,7 @@ body {
   display: flex;
   gap: 8px;
   justify-content: center;
+  flex-shrink: 0;
 }
 
 .ctrl-btn {
@@ -541,45 +764,15 @@ body {
   cursor: not-allowed;
 }
 
-.section-title {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--text-muted);
-  margin-bottom: 4px;
-}
-
-.recent-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 120px;
-  overflow-y: auto;
-}
-
-.recent-item {
-  padding: 4px 8px;
-  font-size: 0.8rem;
-  border-radius: 6px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.recent-item:hover {
-  background: rgba(255, 255, 255, 0.06);
-}
-
 .blocked-warning {
   padding: 6px 10px;
-  margin-bottom: 6px;
   border-radius: 8px;
   background: rgba(255, 183, 77, 0.12);
   color: #ffb74d;
   font-size: 0.75rem;
   line-height: 1.4;
   border: 1px solid rgba(255, 183, 77, 0.2);
+  flex-shrink: 0;
 }
 
 .blocked-reason-detail {
@@ -588,46 +781,78 @@ body {
   opacity: 0.7;
 }
 
-.speech-queue-list {
+.blocked-focus-btn {
+  display: block;
+  margin-top: 6px;
+  padding: 3px 10px;
+  border: 1px solid rgba(255, 183, 77, 0.35);
+  border-radius: 6px;
+  background: rgba(255, 183, 77, 0.1);
+  color: #ffb74d;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+}
+
+.blocked-focus-btn:hover {
+  background: rgba(255, 183, 77, 0.2);
+  border-color: #ffb74d;
+}
+
+.activity-list {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-height: 300px;
   overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
-.speech-job {
+.activity-row {
   padding: 6px 8px;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid transparent;
 }
 
-.job-status-failed {
+.row-status-failed {
   border-color: rgba(255, 111, 105, 0.25);
 }
 
-.job-status-playing {
+.row-status-playing {
   border-color: rgba(74, 222, 128, 0.2);
 }
 
-.job-status-generating {
+.row-status-paused {
+  border-color: rgba(255, 183, 77, 0.25);
+}
+
+.row-status-stopped {
+  border-color: rgba(255, 111, 105, 0.25);
+}
+
+.row-status-generating {
   border-color: rgba(255, 183, 77, 0.2);
 }
 
-.job-text-row {
-  display: flex;
-  align-items: baseline;
-  gap: 0;
+.row-status-replay_queued {
+  border-color: rgba(200, 162, 255, 0.2);
 }
 
-.job-original {
+.row-text-row {
+  display: flex;
+  align-items: baseline;
+}
+
+.row-original {
   font-size: 0.82rem;
   word-break: break-word;
   line-height: 1.3;
 }
 
-.job-spoken {
+.row-spoken {
   font-size: 0.7rem;
   color: var(--text-muted);
   margin-top: 2px;
@@ -635,14 +860,14 @@ body {
   line-height: 1.3;
 }
 
-.job-meta-row {
+.row-meta-row {
   display: flex;
   align-items: center;
   gap: 6px;
   margin-top: 4px;
 }
 
-.job-status-tag {
+.row-status-tag {
   font-size: 0.65rem;
   padding: 1px 6px;
   border-radius: 6px;
@@ -651,43 +876,63 @@ body {
   letter-spacing: 0.03em;
 }
 
-.job-status-tag.queued {
+.row-status-tag.queued {
   background: rgba(100, 100, 100, 0.2);
   color: var(--text-muted);
 }
 
-.job-status-tag.generating {
+.row-status-tag.generating {
   background: rgba(255, 183, 77, 0.15);
   color: #ffb74d;
 }
 
-.job-status-tag.ready {
+.row-status-tag.ready {
   background: rgba(135, 206, 250, 0.15);
   color: #87cefa;
 }
 
-.job-status-tag.playing {
+.row-status-tag.playing {
   background: rgba(74, 222, 128, 0.15);
   color: #4ade80;
 }
 
-.job-status-tag.completed {
+.row-status-tag.paused {
+  background: rgba(255, 183, 77, 0.15);
+  color: #ffb74d;
+}
+
+.row-status-tag.stopped {
+  background: rgba(255, 111, 105, 0.15);
+  color: #ff6f69;
+}
+
+.row-status-tag.completed {
   background: rgba(74, 222, 128, 0.08);
   color: rgba(74, 222, 128, 0.7);
 }
 
-.job-status-tag.cancelled {
+.row-status-tag.replay_queued {
+  background: rgba(200, 162, 255, 0.15);
+  color: #c8a2ff;
+}
+
+.row-status-tag.cancelled {
   background: rgba(100, 100, 100, 0.1);
   color: var(--text-muted);
 }
 
-.job-attempt {
+.row-status-tag.idle {
+  background: rgba(100, 100, 100, 0.15);
+  color: var(--text-muted);
+}
+
+.row-attempt {
   font-size: 0.6rem;
   color: var(--text-muted);
   font-weight: 500;
 }
 
-.job-error {
+.row-error {
   font-size: 0.68rem;
   color: #ff6f69;
   margin-top: 3px;
@@ -695,13 +940,21 @@ body {
   word-break: break-word;
 }
 
-.job-actions-row {
+.row-action-error {
+  font-size: 0.68rem;
+  color: #ff6f69;
+  margin-top: 2px;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+.row-actions-row {
   display: flex;
   gap: 4px;
   margin-top: 4px;
 }
 
-.job-action-btn {
+.row-action-btn {
   width: 26px;
   height: 26px;
   border: 1px solid var(--border);
@@ -718,26 +971,56 @@ body {
   padding: 0;
 }
 
-.job-action-btn:hover:not(:disabled) {
+.row-action-btn:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.08);
 }
 
-.job-action-btn.retry:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.job-action-btn.skip:hover:not(:disabled) {
+.row-action-btn.pause:hover:not(:disabled) {
   border-color: #ffb74d;
   color: #ffb74d;
 }
 
-.job-action-btn.cancel:hover:not(:disabled) {
+.row-action-btn.resume:hover:not(:disabled) {
+  border-color: #4ade80;
+  color: #4ade80;
+}
+
+.row-action-btn.stop:hover:not(:disabled) {
   border-color: #ff6f69;
   color: #ff6f69;
 }
 
-.job-action-btn:disabled {
+.row-action-btn.restart:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.row-action-btn.replay:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.row-action-btn.retry:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.row-action-btn.skip:hover:not(:disabled) {
+  border-color: #ffb74d;
+  color: #ffb74d;
+}
+
+.row-action-btn.cancel:hover:not(:disabled) {
+  border-color: #ff6f69;
+  color: #ff6f69;
+}
+
+.row-action-btn.restore:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.row-action-btn:disabled {
   opacity: 0.3;
   cursor: not-allowed;
 }
@@ -751,5 +1034,13 @@ body {
   line-height: 1.3;
   word-break: break-word;
   border: 1px solid rgba(255, 111, 105, 0.2);
+  flex-shrink: 0;
+}
+
+.empty-list-hint {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  text-align: center;
+  padding: 8px 0;
 }
 </style>

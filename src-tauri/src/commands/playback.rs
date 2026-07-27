@@ -2,8 +2,11 @@ use crate::audio::effects;
 use crate::audio::{
     decode_audio, AudioEffects, AudioPcm, AudioPlayer, OutputConfig, OutputDeviceInfo,
 };
+use crate::commands::speech_queue::SpeechQueueState;
 use crate::config::SettingsManager;
-use crate::playback::{PlaybackManager, PlaybackStateDto};
+use crate::playback::{
+    project_playback_activity, PlaybackActivityDto, PlaybackManager, PlaybackStateDto,
+};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::{Mutex as StdMutex, OnceLock};
@@ -53,10 +56,27 @@ pub fn playback_repeat(playback: State<'_, PlaybackState>) -> Result<(), String>
 }
 
 #[tauri::command]
-pub fn replay_phrase(id: String, playback: State<'_, PlaybackState>) -> Result<(), String> {
+pub fn replay_phrase(
+    id: String,
+    playback: State<'_, PlaybackState>,
+    queue: State<'_, SpeechQueueState>,
+) -> Result<(), String> {
     let pb = &playback.inner().0;
-    pb.replay_from_cache(&id);
+    pb.replay_from_cache(&id).map_err(|e| {
+        debug!(target: "playback", error = %e, "replay_phrase cache miss");
+        e
+    })?;
+    if let Ok(job_id) = uuid::Uuid::parse_str(&id) {
+        let mut q = queue.lock();
+        q.touch_activity(job_id);
+    }
     Ok(())
+}
+
+#[tauri::command]
+pub fn cancel_queued_replay(id: String, playback: State<'_, PlaybackState>) -> Result<(), String> {
+    let pb = &playback.inner().0;
+    pb.cancel_queued_replay(&id)
 }
 
 #[tauri::command]
@@ -65,6 +85,29 @@ pub fn get_playback_state(playback: State<'_, PlaybackState>) -> PlaybackStateDt
     let dto = pb.get_state();
     debug!(target: "playback", status=?dto.status, current=dto.current.is_some(), recent=dto.recent.len(), "get_playback_state");
     dto
+}
+
+#[tauri::command]
+pub fn get_playback_activity(
+    playback: State<'_, PlaybackState>,
+    queue: State<'_, SpeechQueueState>,
+) -> PlaybackActivityDto {
+    let pb = &playback.inner().0;
+    let q = queue.lock();
+    let jobs = q.state().jobs;
+    drop(q);
+
+    let snap = pb.snapshot();
+
+    let rows = project_playback_activity(
+        &jobs,
+        &snap.cache_entries,
+        &snap.current_id,
+        &snap.queue_ids,
+        &snap.pb_status,
+    );
+
+    PlaybackActivityDto { rows }
 }
 
 /// Get all output devices

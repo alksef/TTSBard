@@ -50,8 +50,202 @@ pub struct RecentPhrase {
 pub struct PlaybackStateDto {
     pub status: PlaybackStatus,
     pub current: Option<String>,
+    pub current_id: Option<String>,
     pub queue: Vec<String>,
     pub recent: Vec<RecentPhrase>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlaybackActivityDto {
+    pub rows: Vec<ActivityRow>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActivityRow {
+    pub id: String,
+    pub job_id: Option<String>,
+    pub original_text: String,
+    pub spoken_text: Option<String>,
+    pub status: String,
+    pub error: Option<String>,
+    pub attempt: u32,
+    pub created_at_ms: i64,
+    pub last_activity_at_ms: i64,
+    pub is_current: bool,
+    pub can_replay: bool,
+}
+
+fn job_status_activity_str(
+    status: &crate::speech_queue::JobStatus,
+    is_paused: bool,
+) -> &'static str {
+    use crate::speech_queue::JobStatus;
+    match status {
+        JobStatus::Queued => "queued",
+        JobStatus::Generating => "generating",
+        JobStatus::Ready => "ready",
+        JobStatus::Playing => {
+            if is_paused {
+                "paused"
+            } else {
+                "playing"
+            }
+        }
+        JobStatus::Completed => "completed",
+        JobStatus::Failed => "failed",
+        JobStatus::Cancelled => "cancelled",
+    }
+}
+
+fn playback_status_str(pb_status: &PlaybackStatus) -> &'static str {
+    match pb_status {
+        PlaybackStatus::Idle => "idle",
+        PlaybackStatus::Playing => "playing",
+        PlaybackStatus::Paused => "paused",
+        PlaybackStatus::Stopped => "stopped",
+    }
+}
+
+pub fn project_playback_activity(
+    jobs: &[crate::speech_queue::JobDto],
+    cache_entries: &[(String, String, i64)],
+    current_id: &Option<String>,
+    queue_ids: &[String],
+    pb_status: &PlaybackStatus,
+) -> Vec<ActivityRow> {
+    use crate::speech_queue::JobStatus;
+    use std::collections::HashSet;
+
+    let is_paused = *pb_status == PlaybackStatus::Paused;
+
+    let replay_current_or_queued: HashSet<&String> = {
+        let mut s = HashSet::new();
+        if let Some(cid) = current_id {
+            s.insert(cid);
+        }
+        for qid in queue_ids {
+            s.insert(qid);
+        }
+        s
+    };
+
+    let mut rows: Vec<ActivityRow> = Vec::new();
+    let mut matched_cache: HashSet<String> = HashSet::new();
+
+    for job in jobs {
+        let job_id_str = job.job_id.to_string();
+        let in_cache = cache_entries.iter().any(|(id, _, _)| id == &job_id_str);
+        matched_cache.insert(job_id_str.clone());
+
+        let is_current = current_id.as_deref() == Some(&job_id_str);
+        let is_current_or_queued = replay_current_or_queued.contains(&job_id_str);
+
+        let status = if is_current && *pb_status == PlaybackStatus::Stopped {
+            "stopped"
+        } else if job.status == JobStatus::Ready {
+            if is_current {
+                if is_paused {
+                    "paused"
+                } else {
+                    "playing"
+                }
+            } else if is_current_or_queued {
+                "replay_queued"
+            } else {
+                "ready"
+            }
+        } else if job.status == JobStatus::Completed {
+            if is_current {
+                if is_paused {
+                    "paused"
+                } else {
+                    "playing"
+                }
+            } else if is_current_or_queued {
+                "replay_queued"
+            } else {
+                "completed"
+            }
+        } else if job.status == JobStatus::Cancelled
+            && job.error.is_none()
+            && job.spoken_text.is_some()
+        {
+            if is_current {
+                if is_paused {
+                    "paused"
+                } else {
+                    "playing"
+                }
+            } else if is_current_or_queued {
+                "replay_queued"
+            } else {
+                "cancelled"
+            }
+        } else {
+            job_status_activity_str(&job.status, is_paused && is_current)
+        };
+
+        let is_in_queue = queue_ids.iter().any(|q| q == &job_id_str);
+        let can_replay = in_cache
+            && !is_in_queue
+            && (job.status == JobStatus::Completed || *pb_status == PlaybackStatus::Stopped)
+            && !(is_current && *pb_status != PlaybackStatus::Stopped);
+
+        rows.push(ActivityRow {
+            id: job_id_str.clone(),
+            job_id: Some(job_id_str.clone()),
+            original_text: job.original_text.clone(),
+            spoken_text: job.spoken_text.clone(),
+            status: status.to_string(),
+            error: job.error.clone(),
+            attempt: job.attempt,
+            created_at_ms: job.created_at_ms,
+            last_activity_at_ms: job.last_activity_at_ms,
+            is_current,
+            can_replay,
+        });
+    }
+
+    for (cache_id, cache_text, cache_ts) in cache_entries {
+        if matched_cache.contains(cache_id) {
+            continue;
+        }
+        let is_current = current_id.as_deref() == Some(cache_id.as_str());
+        let is_in_queue = queue_ids.iter().any(|q| q == cache_id);
+
+        let status = if is_current {
+            playback_status_str(pb_status).to_string()
+        } else if is_in_queue {
+            "replay_queued".to_string()
+        } else {
+            "completed".to_string()
+        };
+
+        let can_replay =
+            (!is_current && !is_in_queue) || (is_current && *pb_status == PlaybackStatus::Stopped);
+
+        rows.push(ActivityRow {
+            id: cache_id.clone(),
+            job_id: None,
+            original_text: cache_text.clone(),
+            spoken_text: None,
+            status,
+            error: None,
+            attempt: 1,
+            created_at_ms: *cache_ts,
+            last_activity_at_ms: *cache_ts,
+            is_current,
+            can_replay,
+        });
+    }
+
+    rows.sort_by(|a, b| {
+        b.last_activity_at_ms
+            .cmp(&a.last_activity_at_ms)
+            .then_with(|| a.id.cmp(&b.id))
+    });
+
+    rows
 }
 
 /// Динамическая конфигурация аудиовыходов — обновляется в runtime.
@@ -77,6 +271,7 @@ struct Shared {
     audio_cache: VecDeque<CachedPhrase>,
 }
 
+#[derive(Debug)]
 enum EnqueueState {
     SendToThread(QueuedPhrase),
     Queued,
@@ -92,7 +287,7 @@ impl Shared {
         speaker: Option<OutputConfig>,
         mic: Option<OutputConfig>,
     ) -> EnqueueState {
-        let ts = Utc::now().timestamp();
+        let ts = Utc::now().timestamp_millis();
         self.audio_cache.retain(|c| c.id != id);
         self.audio_cache.push_back(CachedPhrase {
             id: id.clone(),
@@ -170,6 +365,7 @@ impl Shared {
         PlaybackStateDto {
             status: self.status.clone(),
             current: self.current.as_ref().map(|p| p.text.clone()),
+            current_id: self.current.as_ref().map(|p| p.id.clone()),
             queue: self.queue.iter().map(|p| p.text.clone()).collect(),
             recent: self
                 .audio_cache
@@ -191,6 +387,123 @@ impl Shared {
             .find(|c| c.id == id)
             .map(|c| (c.id.clone(), c.text.clone(), Arc::clone(&c.audio)))
     }
+
+    fn all_cache_entries(&self) -> Vec<(String, String, i64)> {
+        self.audio_cache
+            .iter()
+            .map(|c| (c.id.clone(), c.text.clone(), c.timestamp))
+            .collect()
+    }
+
+    fn has_cached_audio(&self, id: &str) -> bool {
+        self.audio_cache.iter().any(|c| c.id == id)
+    }
+
+    fn current_identity(&self) -> Option<(String, String)> {
+        self.current
+            .as_ref()
+            .map(|p| (p.id.clone(), p.text.clone()))
+    }
+
+    fn queued_ids(&self) -> Vec<String> {
+        self.queue.iter().map(|q| q.id.clone()).collect()
+    }
+
+    fn remove_queued_item(&mut self, id: &str) -> Result<(), String> {
+        let pos = self.queue.iter().position(|q| q.id == id);
+        match pos {
+            Some(idx) => {
+                self.queue.remove(idx);
+                Ok(())
+            }
+            None => {
+                if self.current.as_ref().map(|c| c.id == id).unwrap_or(false) {
+                    Err(format!(
+                        "NotQueued: id '{}' is already current, not in queue",
+                        id
+                    ))
+                } else {
+                    Err(format!(
+                        "NotFound: id '{}' is not in the playback queue",
+                        id
+                    ))
+                }
+            }
+        }
+    }
+
+    fn accept_replay(
+        &mut self,
+        id: &str,
+        text: String,
+        audio: Arc<AudioPcm>,
+        speaker: Option<OutputConfig>,
+        mic: Option<OutputConfig>,
+    ) -> Result<EnqueueState, String> {
+        let is_queued = self.queue.iter().any(|q| q.id == id);
+        if is_queued {
+            return Err(format!(
+                "AlreadyPending: id '{}' is already queued for playback",
+                id
+            ));
+        }
+
+        let is_active = self.current.is_some()
+            && (self.status == PlaybackStatus::Playing || self.status == PlaybackStatus::Paused);
+
+        if is_active {
+            let is_current = self.current.as_ref().map(|c| c.id == id).unwrap_or(false);
+            if is_current {
+                return Err(format!(
+                    "AlreadyPending: id '{}' is already current for playback",
+                    id
+                ));
+            }
+            if self.queue.len() >= MAX_QUEUE {
+                return Err(format!(
+                    "QueueFull: playback queue is full (max {})",
+                    MAX_QUEUE
+                ));
+            }
+        }
+
+        let now = Utc::now().timestamp_millis();
+        if let Some(entry) = self.audio_cache.iter_mut().find(|c| c.id == id) {
+            if now > entry.timestamp {
+                entry.timestamp = now;
+            } else {
+                entry.timestamp = entry.timestamp.saturating_add(1);
+            }
+        }
+
+        if is_active {
+            self.queue.push_back(QueuedPhrase {
+                id: id.to_string(),
+                text,
+                audio,
+                speaker,
+                mic,
+            });
+            Ok(EnqueueState::Queued)
+        } else {
+            let phrase = QueuedPhrase {
+                id: id.to_string(),
+                text,
+                audio,
+                speaker,
+                mic,
+            };
+            self.current = Some(phrase.clone());
+            Ok(EnqueueState::SendToThread(phrase))
+        }
+    }
+}
+
+pub struct PlaybackSnapshot {
+    pub cache_entries: Vec<(String, String, i64)>,
+    pub current_id: Option<String>,
+    pub queue_ids: Vec<String>,
+    pub pb_status: PlaybackStatus,
 }
 
 pub struct PlaybackManager {
@@ -549,12 +862,79 @@ impl PlaybackManager {
         true
     }
 
-    pub fn replay_from_cache(&self, id: &str) {
-        let replay = self.state.read().find_in_cache(id);
-        if let Some((id, text, audio)) = replay {
-            // Cached replay uses current global config — existing contract.
-            self.enqueue(id, text, (*audio).clone());
+    pub fn replay_from_cache(&self, id: &str) -> Result<(), String> {
+        let audio_cfg = self.audio_config.read().clone();
+        let mut s = self.state.write();
+
+        let cached = s
+            .find_in_cache(id)
+            .ok_or_else(|| format!("CacheMiss: no cached audio for id '{}'", id))?;
+        let (_, cached_text, cached_audio) = cached;
+
+        match s.accept_replay(
+            id,
+            cached_text,
+            cached_audio,
+            audio_cfg.speaker,
+            audio_cfg.mic,
+        ) {
+            Ok(EnqueueState::SendToThread(phrase)) => {
+                drop(s);
+                let _ = self.cmd_tx.send(Cmd::Enqueue(phrase));
+                let _ = self.app_handle.emit("queue-changed", ());
+                Ok(())
+            }
+            Ok(EnqueueState::Queued) => {
+                drop(s);
+                let _ = self.app_handle.emit("queue-changed", ());
+                Ok(())
+            }
+            Ok(EnqueueState::Rejected) => {
+                drop(s);
+                Err(format!(
+                    "QueueFull: playback queue is full (max {MAX_QUEUE})"
+                ))
+            }
+            Err(e) => Err(e),
         }
+    }
+
+    pub fn snapshot(&self) -> PlaybackSnapshot {
+        let s = self.state.read();
+        PlaybackSnapshot {
+            cache_entries: s.all_cache_entries(),
+            current_id: s.current_identity().map(|(id, _)| id),
+            queue_ids: s.queued_ids(),
+            pb_status: s.status.clone(),
+        }
+    }
+
+    pub fn cancel_queued_replay(&self, id: &str) -> Result<(), String> {
+        let result = self.state.write().remove_queued_item(id);
+        if result.is_ok() {
+            let _ = self.app_handle.emit("queue-changed", ());
+        }
+        result
+    }
+
+    pub fn remove_queued_item(&self, id: &str) -> Result<(), String> {
+        self.state.write().remove_queued_item(id)
+    }
+
+    pub fn has_cache_for(&self, id: &str) -> bool {
+        self.state.read().has_cached_audio(id)
+    }
+
+    pub fn cache_entries_all(&self) -> Vec<(String, String, i64)> {
+        self.state.read().all_cache_entries()
+    }
+
+    pub fn current_id(&self) -> Option<String> {
+        self.state.read().current_identity().map(|(id, _)| id)
+    }
+
+    pub fn queued_ids(&self) -> Vec<String> {
+        self.state.read().queued_ids()
     }
 
     pub fn on_playback_finished(&self) {
@@ -1117,5 +1497,943 @@ mod tests {
             }
             _ => panic!("expected SendToThread"),
         }
+    }
+
+    // ── cache inspection ──
+
+    #[test]
+    fn has_cached_audio_returns_true_for_item_in_cache() {
+        let mut s = make_shared();
+        s.audio_cache.push_back(CachedPhrase {
+            id: "cached".into(),
+            text: "cached text".into(),
+            audio: Arc::new(dummy_audio()),
+            timestamp: 42,
+        });
+        assert!(s.has_cached_audio("cached"));
+    }
+
+    #[test]
+    fn has_cached_audio_returns_false_for_missing_item() {
+        let s = make_shared();
+        assert!(!s.has_cached_audio("nonexistent"));
+    }
+
+    #[test]
+    fn has_cached_audio_returns_false_after_eviction() {
+        let mut s = make_shared();
+        for i in 0..(AUDIO_CACHE_SIZE + 5) {
+            let audio = Arc::new(dummy_audio());
+            s.enqueue_state(format!("id{i}"), format!("text{i}"), audio, None, None);
+        }
+        assert!(!s.has_cached_audio("id0"));
+        assert!(s.has_cached_audio(format!("id{}", AUDIO_CACHE_SIZE + 4).as_str()));
+    }
+
+    #[test]
+    fn all_cache_entries_returns_all_items() {
+        let mut s = make_shared();
+        s.audio_cache.push_back(CachedPhrase {
+            id: "a".into(),
+            text: "text a".into(),
+            audio: Arc::new(dummy_audio()),
+            timestamp: 1,
+        });
+        s.audio_cache.push_back(CachedPhrase {
+            id: "b".into(),
+            text: "text b".into(),
+            audio: Arc::new(dummy_audio()),
+            timestamp: 2,
+        });
+        let entries = s.all_cache_entries();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].0, "a");
+        assert_eq!(entries[1].0, "b");
+    }
+
+    #[test]
+    fn current_identity_returns_none_when_idle() {
+        let s = make_shared();
+        assert!(s.current_identity().is_none());
+    }
+
+    #[test]
+    fn current_identity_returns_id_and_text_when_playing() {
+        let s = make_shared_playing();
+        let (id, text) = s.current_identity().unwrap();
+        assert_eq!(id, "current");
+        assert_eq!(text, "current text");
+    }
+
+    #[test]
+    fn get_state_dto_includes_current_id() {
+        let s = make_shared_playing();
+        let dto = s.get_state_dto();
+        assert_eq!(dto.current_id.as_deref(), Some("current"));
+    }
+
+    #[test]
+    fn get_state_dto_current_id_none_when_idle() {
+        let s = make_shared();
+        let dto = s.get_state_dto();
+        assert!(dto.current_id.is_none());
+    }
+
+    // ── find_in_cache returns audio for replay ──
+
+    #[test]
+    fn find_in_cache_returns_replayable_audio() {
+        let mut s = make_shared();
+        let audio = Arc::new(dummy_audio());
+        s.audio_cache.push_back(CachedPhrase {
+            id: "playable".into(),
+            text: "playable text".into(),
+            audio: Arc::clone(&audio),
+            timestamp: 100,
+        });
+        let result = s.find_in_cache("playable");
+        assert!(result.is_some());
+        let (id, text, _) = result.unwrap();
+        assert_eq!(id, "playable");
+        assert_eq!(text, "playable text");
+    }
+
+    #[test]
+    fn find_in_cache_missing_for_replay_returns_none() {
+        let s = make_shared();
+        assert!(s.find_in_cache("missing").is_none());
+    }
+
+    // ── queued_ids ──
+
+    #[test]
+    fn queued_ids_returns_all_queue_ids() {
+        let mut s = make_shared_playing();
+        s.queue.push_back(QueuedPhrase {
+            id: "q1".into(),
+            text: "first".into(),
+            audio: Arc::new(dummy_audio()),
+            speaker: None,
+            mic: None,
+        });
+        s.queue.push_back(QueuedPhrase {
+            id: "q2".into(),
+            text: "second".into(),
+            audio: Arc::new(dummy_audio()),
+            speaker: None,
+            mic: None,
+        });
+        let ids = s.queued_ids();
+        assert_eq!(ids, vec!["q1", "q2"]);
+    }
+
+    #[test]
+    fn queued_ids_empty_when_nothing_queued() {
+        let s = make_shared();
+        assert!(s.queued_ids().is_empty());
+    }
+
+    // ── project_playback_activity ──
+
+    use crate::speech_queue::{JobDto, JobStatus};
+
+    fn job_dto(job_id: &str, status: JobStatus, text: &str, last_activity_at_ms: i64) -> JobDto {
+        JobDto {
+            job_id: uuid::Uuid::parse_str(job_id).unwrap(),
+            original_text: text.to_string(),
+            spoken_text: None,
+            status,
+            error: None,
+            attempt: 1,
+            created_at_ms: last_activity_at_ms,
+            last_activity_at_ms,
+        }
+    }
+
+    #[test]
+    fn project_job_cache_dedup() {
+        let jobs = vec![job_dto(
+            "11111111-1111-1111-1111-111111111111",
+            JobStatus::Completed,
+            "hello",
+            1000,
+        )];
+        let cache: Vec<(String, String, i64)> = vec![(
+            "11111111-1111-1111-1111-111111111111".into(),
+            "hello".into(),
+            1000,
+        )];
+        let rows = project_playback_activity(&jobs, &cache, &None, &[], &PlaybackStatus::Idle);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "11111111-1111-1111-1111-111111111111");
+        assert!(rows[0].job_id.is_some());
+    }
+
+    #[test]
+    fn project_completed_replay_current_playing() {
+        let id = "11111111-1111-1111-1111-111111111111";
+        let jobs = vec![job_dto(id, JobStatus::Completed, "hello", 1000)];
+        let cache: Vec<(String, String, i64)> = vec![(id.into(), "hello".into(), 1000)];
+        let rows = project_playback_activity(
+            &jobs,
+            &cache,
+            &Some(id.to_string()),
+            &[],
+            &PlaybackStatus::Playing,
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "playing");
+        assert!(!rows[0].can_replay);
+    }
+
+    #[test]
+    fn project_completed_replay_current_paused() {
+        let id = "11111111-1111-1111-1111-111111111111";
+        let jobs = vec![job_dto(id, JobStatus::Completed, "hello", 1000)];
+        let cache: Vec<(String, String, i64)> = vec![(id.into(), "hello".into(), 1000)];
+        let rows = project_playback_activity(
+            &jobs,
+            &cache,
+            &Some(id.to_string()),
+            &[],
+            &PlaybackStatus::Paused,
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "paused");
+        assert!(!rows[0].can_replay);
+    }
+
+    #[test]
+    fn project_completed_replay_in_tail_queued() {
+        let id = "11111111-1111-1111-1111-111111111111";
+        let jobs = vec![job_dto(id, JobStatus::Completed, "hello", 1000)];
+        let cache: Vec<(String, String, i64)> = vec![(id.into(), "hello".into(), 1000)];
+        let rows = project_playback_activity(
+            &jobs,
+            &cache,
+            &None,
+            &[id.to_string()],
+            &PlaybackStatus::Playing,
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "replay_queued");
+        assert!(!rows[0].can_replay);
+    }
+
+    #[test]
+    fn project_playback_only_current_row() {
+        let cache_id = "cache-only-1";
+        let cache: Vec<(String, String, i64)> = vec![(cache_id.into(), "cached".into(), 2000)];
+        let rows = project_playback_activity(
+            &[],
+            &cache,
+            &Some(cache_id.to_string()),
+            &[],
+            &PlaybackStatus::Playing,
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "playing");
+        assert!(rows[0].job_id.is_none());
+    }
+
+    #[test]
+    fn project_playback_only_pending_row() {
+        let cache_id = "cache-only-q";
+        let cache: Vec<(String, String, i64)> = vec![(cache_id.into(), "cached".into(), 2000)];
+        let rows = project_playback_activity(
+            &[],
+            &cache,
+            &None,
+            &[cache_id.to_string()],
+            &PlaybackStatus::Playing,
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "replay_queued");
+        assert!(rows[0].job_id.is_none());
+        assert!(!rows[0].can_replay);
+    }
+
+    #[test]
+    fn project_replay_unavailable_current() {
+        let id = "11111111-1111-1111-1111-111111111111";
+        let jobs = vec![job_dto(id, JobStatus::Completed, "hello", 1000)];
+        let cache: Vec<(String, String, i64)> = vec![(id.into(), "hello".into(), 1000)];
+        let rows = project_playback_activity(
+            &jobs,
+            &cache,
+            &Some(id.to_string()),
+            &[],
+            &PlaybackStatus::Playing,
+        );
+        assert!(!rows[0].can_replay);
+    }
+
+    #[test]
+    fn project_replay_unavailable_queued() {
+        let id = "11111111-1111-1111-1111-111111111111";
+        let jobs = vec![job_dto(id, JobStatus::Completed, "hello", 1000)];
+        let cache: Vec<(String, String, i64)> = vec![(id.into(), "hello".into(), 1000)];
+        let rows = project_playback_activity(
+            &jobs,
+            &cache,
+            &None,
+            &[id.to_string()],
+            &PlaybackStatus::Idle,
+        );
+        assert!(!rows[0].can_replay);
+    }
+
+    #[test]
+    fn project_replay_available_not_in_cache() {
+        let id = "11111111-1111-1111-1111-111111111111";
+        let jobs = vec![job_dto(id, JobStatus::Completed, "hello", 1000)];
+        let rows = project_playback_activity(&jobs, &[], &None, &[], &PlaybackStatus::Idle);
+        assert_eq!(rows.len(), 1);
+        assert!(!rows[0].can_replay, "no cache means no replay");
+    }
+
+    #[test]
+    fn project_replay_available_cached_completed() {
+        let id = "11111111-1111-1111-1111-111111111111";
+        let jobs = vec![job_dto(id, JobStatus::Completed, "hello", 1000)];
+        let cache: Vec<(String, String, i64)> = vec![(id.into(), "hello".into(), 1000)];
+        let rows = project_playback_activity(&jobs, &cache, &None, &[], &PlaybackStatus::Idle);
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].can_replay);
+        assert_eq!(rows[0].status, "completed");
+    }
+
+    #[test]
+    fn project_replay_tail_order_independent_of_blocked_queue() {
+        let completed_id = "11111111-1111-1111-1111-111111111111";
+        let failed_id = "22222222-2222-2222-2222-222222222222";
+        let queued_id = "33333333-3333-3333-3333-333333333333";
+        let replay_id = "44444444-4444-4444-4444-444444444444";
+
+        let jobs = vec![
+            job_dto(failed_id, JobStatus::Failed, "failed job", 500),
+            job_dto(queued_id, JobStatus::Queued, "queued job", 1000),
+            job_dto(completed_id, JobStatus::Completed, "completed job", 1500),
+        ];
+        let cache: Vec<(String, String, i64)> = vec![
+            (replay_id.into(), "replay text".into(), 2000),
+            (completed_id.into(), "completed job".into(), 1500),
+        ];
+
+        let rows = project_playback_activity(
+            &jobs,
+            &cache,
+            &None,
+            &[replay_id.to_string()],
+            &PlaybackStatus::Playing,
+        );
+
+        // replay should be in result as replay_queued
+        let replay_row = rows.iter().find(|r| r.id == replay_id).unwrap();
+        assert_eq!(replay_row.status, "replay_queued");
+        assert!(!replay_row.can_replay);
+
+        // blocked job (failed) still present with its status
+        let failed_row = rows.iter().find(|r| r.id == failed_id).unwrap();
+        assert_eq!(failed_row.status, "failed");
+    }
+
+    #[test]
+    fn project_millisecond_ordering_sorts_desc() {
+        let id_a = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+        let id_b = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+        let jobs = vec![
+            job_dto(id_a, JobStatus::Completed, "older", 1000),
+            job_dto(id_b, JobStatus::Completed, "newer", 2000),
+        ];
+        let cache: Vec<(String, String, i64)> = vec![
+            (id_a.into(), "older".into(), 1000),
+            (id_b.into(), "newer".into(), 2000),
+        ];
+        let rows = project_playback_activity(&jobs, &cache, &None, &[], &PlaybackStatus::Idle);
+        assert_eq!(rows[0].id, id_b);
+        assert_eq!(rows[1].id, id_a);
+    }
+
+    #[test]
+    fn project_cache_only_evicted_row_disappears() {
+        let id = "11111111-1111-1111-1111-111111111111";
+        let jobs = vec![job_dto(id, JobStatus::Completed, "hello", 1000)];
+        let rows = project_playback_activity(
+            &jobs,
+            &[], // no cache entries
+            &None,
+            &[],
+            &PlaybackStatus::Idle,
+        );
+        // job still present, can_replay is false because not in cache
+        assert_eq!(rows.len(), 1);
+        assert!(!rows[0].can_replay);
+    }
+
+    // ── accept_replay (atomic replay core) ──
+
+    fn phrase_for_replay(id: &str) -> (String, Arc<AudioPcm>) {
+        (id.to_string(), Arc::new(dummy_audio()))
+    }
+
+    fn shared_with_cache(id: &str, ts: i64) -> Shared {
+        let mut s = make_shared();
+        s.audio_cache.push_back(CachedPhrase {
+            id: id.to_string(),
+            text: id.to_string(),
+            audio: Arc::new(dummy_audio()),
+            timestamp: ts,
+        });
+        s
+    }
+
+    #[test]
+    fn accept_replay_cache_miss() {
+        let mut s = make_shared();
+        let (text, audio) = phrase_for_replay("no_cache");
+        let result = s.accept_replay("no_cache", text, audio, None, None);
+        match result {
+            Err(msg) => assert!(msg.contains("CacheMiss"), "expected CacheMiss, got: {msg}"),
+            _ => panic!("expected Err"),
+        }
+    }
+
+    #[test]
+    fn accept_replay_already_pending_when_playing_current() {
+        let mut s = make_shared_playing();
+        let (text, audio) = phrase_for_replay("current");
+        let result = s.accept_replay("current", text, audio, None, None);
+        match result {
+            Err(msg) => assert!(
+                msg.contains("AlreadyPending"),
+                "expected AlreadyPending, got: {msg}"
+            ),
+            _ => panic!("expected Err"),
+        }
+    }
+
+    #[test]
+    fn accept_replay_already_pending_when_paused_current() {
+        let mut s = make_shared_paused();
+        let (text, audio) = phrase_for_replay("paused_id");
+        let result = s.accept_replay("paused_id", text, audio, None, None);
+        match result {
+            Err(msg) => assert!(
+                msg.contains("AlreadyPending"),
+                "expected AlreadyPending, got: {msg}"
+            ),
+            _ => panic!("expected Err"),
+        }
+    }
+
+    #[test]
+    fn accept_replay_already_pending_when_queued() {
+        let mut s = make_shared_playing();
+        s.queue.push_back(QueuedPhrase {
+            id: "queued".into(),
+            text: "queued".into(),
+            audio: Arc::new(dummy_audio()),
+            speaker: None,
+            mic: None,
+        });
+        let (text, audio) = phrase_for_replay("queued");
+        let result = s.accept_replay("queued", text, audio, None, None);
+        match result {
+            Err(msg) => assert!(
+                msg.contains("AlreadyPending"),
+                "expected AlreadyPending, got: {msg}"
+            ),
+            _ => panic!("expected Err"),
+        }
+    }
+
+    #[test]
+    fn accept_replay_queue_full_when_playing() {
+        let mut s = make_shared_playing();
+        // populate cache for both current and new ids
+        let cache_id = "new_replay";
+        s.audio_cache.push_back(CachedPhrase {
+            id: cache_id.into(),
+            text: cache_id.into(),
+            audio: Arc::new(dummy_audio()),
+            timestamp: 0,
+        });
+        // fill queue to max
+        for i in 0..MAX_QUEUE {
+            let qid = format!("q{i}");
+            s.audio_cache.push_back(CachedPhrase {
+                id: qid.clone(),
+                text: qid.clone(),
+                audio: Arc::new(dummy_audio()),
+                timestamp: 0,
+            });
+            s.queue.push_back(QueuedPhrase {
+                id: qid,
+                text: format!("text{i}"),
+                audio: Arc::new(dummy_audio()),
+                speaker: None,
+                mic: None,
+            });
+        }
+        let (text, audio) = phrase_for_replay(cache_id);
+        let result = s.accept_replay(cache_id, text, audio, None, None);
+        match result {
+            Err(msg) => assert!(msg.contains("QueueFull"), "expected QueueFull, got: {msg}"),
+            _ => panic!("expected Err"),
+        }
+    }
+
+    #[test]
+    fn accept_replay_appends_to_tail_when_playing() {
+        let mut s = make_shared_playing();
+        // fill some queue entries
+        for i in 0..3 {
+            let qid = format!("existing{i}");
+            s.audio_cache.push_back(CachedPhrase {
+                id: qid.clone(),
+                text: qid.clone(),
+                audio: Arc::new(dummy_audio()),
+                timestamp: 0,
+            });
+            s.queue.push_back(QueuedPhrase {
+                id: qid,
+                text: format!("text{i}"),
+                audio: Arc::new(dummy_audio()),
+                speaker: None,
+                mic: None,
+            });
+        }
+        let replay_id = "replay_tail";
+        s.audio_cache.push_back(CachedPhrase {
+            id: replay_id.into(),
+            text: replay_id.into(),
+            audio: Arc::new(dummy_audio()),
+            timestamp: 0,
+        });
+        let (text, audio) = phrase_for_replay(replay_id);
+        let result = s.accept_replay(replay_id, text, audio, None, None);
+        assert!(
+            matches!(result, Ok(EnqueueState::Queued)),
+            "expected Queued"
+        );
+        assert_eq!(s.queue.len(), 4);
+        assert_eq!(s.queue[3].id, replay_id);
+    }
+
+    #[test]
+    fn accept_replay_becomes_current_when_idle() {
+        let mut s = shared_with_cache("idle_replay", 100);
+        let (text, audio) = phrase_for_replay("idle_replay");
+        let result = s.accept_replay("idle_replay", text, audio, None, None);
+        assert!(
+            matches!(result, Ok(EnqueueState::SendToThread(_))),
+            "expected SendToThread"
+        );
+        assert_eq!(s.current.as_ref().unwrap().id, "idle_replay");
+    }
+
+    #[test]
+    fn accept_replay_becomes_current_when_stopped() {
+        let mut s = make_shared_playing();
+        s.status = PlaybackStatus::Stopped;
+        // Stopped with current — should still be replayable
+        let new_id = "stopped_replay";
+        s.audio_cache.push_back(CachedPhrase {
+            id: new_id.into(),
+            text: new_id.into(),
+            audio: Arc::new(dummy_audio()),
+            timestamp: 100,
+        });
+        let (text, audio) = phrase_for_replay(new_id);
+        let result = s.accept_replay(new_id, text, audio, None, None);
+        assert!(
+            matches!(result, Ok(EnqueueState::SendToThread(_))),
+            "expected SendToThread (Stopped is not pending), got: {:?}",
+            result
+        );
+        assert_eq!(s.current.as_ref().unwrap().id, new_id);
+    }
+
+    #[test]
+    fn accept_replay_updates_timestamp_monotonically() {
+        let mut s = shared_with_cache("ts_replay", 5000);
+        s.accept_replay(
+            "ts_replay",
+            "ts_replay".into(),
+            Arc::new(dummy_audio()),
+            None,
+            None,
+        )
+        .unwrap();
+        let entry = s.audio_cache.iter().find(|c| c.id == "ts_replay").unwrap();
+        assert!(entry.timestamp >= 5000, "timestamp should not decrease");
+    }
+
+    #[test]
+    fn accept_replay_does_not_decrease_timestamp() {
+        let mut s = shared_with_cache("future_replay", 9999999999999_i64);
+        s.accept_replay(
+            "future_replay",
+            "future_replay".into(),
+            Arc::new(dummy_audio()),
+            None,
+            None,
+        )
+        .unwrap();
+        let entry = s
+            .audio_cache
+            .iter()
+            .find(|c| c.id == "future_replay")
+            .unwrap();
+        assert_eq!(
+            entry.timestamp, 10000000000000_i64,
+            "timestamp must be strictly greater than previous"
+        );
+    }
+
+    #[test]
+    fn accept_replay_tail_already_pending_when_stopped() {
+        let mut s = make_shared_playing();
+        s.status = PlaybackStatus::Stopped;
+        s.queue.push_back(QueuedPhrase {
+            id: "queued".into(),
+            text: "queued".into(),
+            audio: Arc::new(dummy_audio()),
+            speaker: None,
+            mic: None,
+        });
+        let (text, audio) = phrase_for_replay("queued");
+        let result = s.accept_replay("queued", text, audio, None, None);
+        match result {
+            Err(msg) => assert!(
+                msg.contains("AlreadyPending"),
+                "expected AlreadyPending while Stopped, got: {msg}"
+            ),
+            _ => panic!("expected Err"),
+        }
+    }
+
+    #[test]
+    fn accept_replay_strict_timestamp_bump_when_clock_not_ahead() {
+        let previous = Utc::now().timestamp_millis() + 60_000;
+        let mut s = shared_with_cache("same_ms", previous);
+        s.accept_replay(
+            "same_ms",
+            "same_ms".into(),
+            Arc::new(dummy_audio()),
+            None,
+            None,
+        )
+        .unwrap();
+        let entry = s.audio_cache.iter().find(|c| c.id == "same_ms").unwrap();
+        assert_eq!(
+            entry.timestamp,
+            previous + 1,
+            "replay must advance activity when wall clock is not ahead"
+        );
+    }
+
+    // ── remove_queued_item ──
+
+    #[test]
+    fn cancel_queued_replay_removes_requested_id() {
+        let mut s = make_shared_playing();
+        s.queue.push_back(QueuedPhrase {
+            id: "to_cancel".into(),
+            text: "to_cancel".into(),
+            audio: Arc::new(dummy_audio()),
+            speaker: None,
+            mic: None,
+        });
+        s.queue.push_back(QueuedPhrase {
+            id: "keep_me".into(),
+            text: "keep_me".into(),
+            audio: Arc::new(dummy_audio()),
+            speaker: None,
+            mic: None,
+        });
+        assert_eq!(s.queue.len(), 2);
+        assert!(s.remove_queued_item("to_cancel").is_ok());
+        assert_eq!(s.queue.len(), 1);
+        assert_eq!(s.queue[0].id, "keep_me");
+    }
+
+    #[test]
+    fn cancel_queued_replay_preserves_remaining_order() {
+        let mut s = make_shared_playing();
+        for i in 0..4 {
+            s.queue.push_back(QueuedPhrase {
+                id: format!("q{i}"),
+                text: format!("q{i}"),
+                audio: Arc::new(dummy_audio()),
+                speaker: None,
+                mic: None,
+            });
+        }
+        assert!(s.remove_queued_item("q1").is_ok());
+        assert_eq!(s.queue.len(), 3);
+        assert_eq!(s.queue[0].id, "q0");
+        assert_eq!(s.queue[1].id, "q2");
+        assert_eq!(s.queue[2].id, "q3");
+    }
+
+    #[test]
+    fn cancel_queued_replay_first_entry_preserves_order() {
+        let mut s = make_shared_playing();
+        s.queue.push_back(QueuedPhrase {
+            id: "q0".into(),
+            text: "q0".into(),
+            audio: Arc::new(dummy_audio()),
+            speaker: None,
+            mic: None,
+        });
+        s.queue.push_back(QueuedPhrase {
+            id: "q1".into(),
+            text: "q1".into(),
+            audio: Arc::new(dummy_audio()),
+            speaker: None,
+            mic: None,
+        });
+        assert!(s.remove_queued_item("q0").is_ok());
+        assert_eq!(s.queue.len(), 1);
+        assert_eq!(s.queue[0].id, "q1");
+    }
+
+    #[test]
+    fn cancel_queued_replay_last_entry_preserves_order() {
+        let mut s = make_shared_playing();
+        s.queue.push_back(QueuedPhrase {
+            id: "q0".into(),
+            text: "q0".into(),
+            audio: Arc::new(dummy_audio()),
+            speaker: None,
+            mic: None,
+        });
+        s.queue.push_back(QueuedPhrase {
+            id: "q1".into(),
+            text: "q1".into(),
+            audio: Arc::new(dummy_audio()),
+            speaker: None,
+            mic: None,
+        });
+        assert!(s.remove_queued_item("q1").is_ok());
+        assert_eq!(s.queue.len(), 1);
+        assert_eq!(s.queue[0].id, "q0");
+    }
+
+    #[test]
+    fn cancel_queued_replay_rejects_unknown_id() {
+        let mut s = make_shared_playing();
+        match s.remove_queued_item("nonexistent") {
+            Err(msg) => assert!(msg.contains("NotFound"), "expected NotFound, got: {msg}"),
+            _ => panic!("expected Err"),
+        }
+    }
+
+    #[test]
+    fn cancel_queued_replay_rejects_current_id() {
+        let mut s = make_shared_playing();
+        match s.remove_queued_item("current") {
+            Err(msg) => assert!(msg.contains("NotQueued"), "expected NotQueued, got: {msg}"),
+            _ => panic!("expected Err"),
+        }
+    }
+
+    #[test]
+    fn cancel_queued_replay_does_not_alter_current() {
+        let mut s = make_shared_playing();
+        s.queue.push_back(QueuedPhrase {
+            id: "to_cancel".into(),
+            text: "to_cancel".into(),
+            audio: Arc::new(dummy_audio()),
+            speaker: None,
+            mic: None,
+        });
+        let current_before = s.current.as_ref().unwrap().id.clone();
+        assert!(s.remove_queued_item("to_cancel").is_ok());
+        assert_eq!(s.current.as_ref().unwrap().id, current_before);
+        assert!(s.current.is_some());
+    }
+
+    #[test]
+    fn cancel_queued_replay_from_empty_queue_rejects() {
+        let mut s = make_shared_playing();
+        assert!(s.queue.is_empty());
+        match s.remove_queued_item("anything") {
+            Err(msg) => assert!(
+                msg.contains("NotFound"),
+                "expected NotFound from empty queue, got: {msg}"
+            ),
+            _ => panic!("expected Err"),
+        }
+    }
+
+    // ── Stopped projection ──
+
+    #[test]
+    fn project_stopped_job_row_shows_stopped() {
+        let id = "11111111-1111-1111-1111-111111111111";
+        let jobs = vec![job_dto(id, JobStatus::Completed, "hello", 1000)];
+        let cache: Vec<(String, String, i64)> = vec![(id.into(), "hello".into(), 1000)];
+        let rows = project_playback_activity(
+            &jobs,
+            &cache,
+            &Some(id.to_string()),
+            &[],
+            &PlaybackStatus::Stopped,
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "stopped");
+        assert!(
+            rows[0].can_replay,
+            "stopped current with cache should allow replay"
+        );
+        assert!(rows[0].is_current);
+    }
+
+    #[test]
+    fn project_stopped_job_playing_status_shows_stopped() {
+        let id = "11111111-1111-1111-1111-111111111111";
+        let jobs = vec![job_dto(id, JobStatus::Playing, "hello", 1000)];
+        let cache: Vec<(String, String, i64)> = vec![(id.into(), "hello".into(), 1000)];
+        let rows = project_playback_activity(
+            &jobs,
+            &cache,
+            &Some(id.to_string()),
+            &[],
+            &PlaybackStatus::Stopped,
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "stopped");
+        assert!(rows[0].can_replay, "stopped with cache should allow replay");
+    }
+
+    #[test]
+    fn project_stopped_playback_only_row_shows_stopped() {
+        let cache_id = "cache-only-stopped";
+        let cache: Vec<(String, String, i64)> = vec![(cache_id.into(), "cached".into(), 2000)];
+        let rows = project_playback_activity(
+            &[],
+            &cache,
+            &Some(cache_id.to_string()),
+            &[],
+            &PlaybackStatus::Stopped,
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "stopped");
+        assert!(
+            rows[0].can_replay,
+            "stopped current playback-only row with cache should allow replay"
+        );
+        assert!(rows[0].job_id.is_none());
+    }
+
+    #[test]
+    fn project_stopped_completed_not_current_shows_completed() {
+        let id = "11111111-1111-1111-1111-111111111111";
+        let jobs = vec![job_dto(id, JobStatus::Completed, "hello", 1000)];
+        let cache: Vec<(String, String, i64)> = vec![(id.into(), "hello".into(), 1000)];
+        let rows = project_playback_activity(&jobs, &cache, &None, &[], &PlaybackStatus::Stopped);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "completed");
+        assert!(rows[0].can_replay);
+    }
+
+    #[test]
+    fn project_stopped_replay_unavailable_in_tail() {
+        let id = "11111111-1111-1111-1111-111111111111";
+        let jobs = vec![job_dto(id, JobStatus::Completed, "hello", 1000)];
+        let cache: Vec<(String, String, i64)> = vec![(id.into(), "hello".into(), 1000)];
+        let rows = project_playback_activity(
+            &jobs,
+            &cache,
+            &None,
+            &[id.to_string()],
+            &PlaybackStatus::Stopped,
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "replay_queued");
+        assert!(
+            !rows[0].can_replay,
+            "ID in queue_ids must have can_replay=false even when Stopped"
+        );
+    }
+
+    // ── Ready projection (restored ready-cancelled items) ──
+
+    #[test]
+    fn project_ready_current_playing_shows_playing() {
+        let id = "11111111-1111-1111-1111-111111111111";
+        let jobs = vec![job_dto(id, JobStatus::Ready, "hello", 1000)];
+        let cache: Vec<(String, String, i64)> = vec![(id.into(), "hello".into(), 1000)];
+        let rows = project_playback_activity(
+            &jobs,
+            &cache,
+            &Some(id.to_string()),
+            &[],
+            &PlaybackStatus::Playing,
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "playing");
+        assert!(rows[0].is_current);
+    }
+
+    #[test]
+    fn project_ready_current_paused_shows_paused() {
+        let id = "11111111-1111-1111-1111-111111111111";
+        let jobs = vec![job_dto(id, JobStatus::Ready, "hello", 1000)];
+        let cache: Vec<(String, String, i64)> = vec![(id.into(), "hello".into(), 1000)];
+        let rows = project_playback_activity(
+            &jobs,
+            &cache,
+            &Some(id.to_string()),
+            &[],
+            &PlaybackStatus::Paused,
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "paused");
+    }
+
+    #[test]
+    fn project_ready_in_tail_shows_replay_queued() {
+        let id = "11111111-1111-1111-1111-111111111111";
+        let jobs = vec![job_dto(id, JobStatus::Ready, "hello", 1000)];
+        let cache: Vec<(String, String, i64)> = vec![(id.into(), "hello".into(), 1000)];
+        let rows = project_playback_activity(
+            &jobs,
+            &cache,
+            &None,
+            &[id.to_string()],
+            &PlaybackStatus::Playing,
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "replay_queued");
+        assert!(!rows[0].can_replay);
+    }
+
+    #[test]
+    fn project_ready_not_current_not_queued_shows_ready() {
+        let id = "11111111-1111-1111-1111-111111111111";
+        let jobs = vec![job_dto(id, JobStatus::Ready, "hello", 1000)];
+        let rows = project_playback_activity(&jobs, &[], &None, &[], &PlaybackStatus::Idle);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "ready");
+    }
+
+    #[test]
+    fn project_ready_current_stopped_shows_stopped() {
+        let id = "11111111-1111-1111-1111-111111111111";
+        let jobs = vec![job_dto(id, JobStatus::Ready, "hello", 1000)];
+        let cache: Vec<(String, String, i64)> = vec![(id.into(), "hello".into(), 1000)];
+        let rows = project_playback_activity(
+            &jobs,
+            &cache,
+            &Some(id.to_string()),
+            &[],
+            &PlaybackStatus::Stopped,
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "stopped");
     }
 }

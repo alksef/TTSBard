@@ -6,6 +6,7 @@ use crate::tts::TtsProvider;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
+use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -80,11 +81,14 @@ pub struct SpeechJob {
     pub error: Option<String>,
     pub attempt: u32,
     pub created_at_ms: i64,
+    pub last_activity_at_ms: i64,
     pub snapshot: Snapshot,
+    pub handoff_guard: Arc<parking_lot::Mutex<()>>,
 }
 
 impl SpeechJob {
     fn new(original_text: String, snapshot: Snapshot) -> Self {
+        let now_ms = Utc::now().timestamp_millis();
         Self {
             job_id: Uuid::new_v4(),
             original_text,
@@ -92,8 +96,10 @@ impl SpeechJob {
             status: JobStatus::Queued,
             error: None,
             attempt: 1,
-            created_at_ms: Utc::now().timestamp_millis(),
+            created_at_ms: now_ms,
+            last_activity_at_ms: now_ms,
             snapshot,
+            handoff_guard: Arc::new(parking_lot::Mutex::new(())),
         }
     }
 }
@@ -125,6 +131,7 @@ pub struct JobDto {
     pub error: Option<String>,
     pub attempt: u32,
     pub created_at_ms: i64,
+    pub last_activity_at_ms: i64,
 }
 
 impl From<&SpeechJob> for JobDto {
@@ -137,6 +144,7 @@ impl From<&SpeechJob> for JobDto {
             error: job.error.clone(),
             attempt: job.attempt,
             created_at_ms: job.created_at_ms,
+            last_activity_at_ms: job.last_activity_at_ms,
         }
     }
 }
@@ -276,6 +284,11 @@ impl SpeechQueue {
                 job.error = Some(error_msg);
                 Ok(())
             }
+            JobStatus::Cancelled if job.error.is_none() && job.spoken_text.is_some() => {
+                job.status = JobStatus::Failed;
+                job.error = Some(error_msg);
+                Ok(())
+            }
             _ => Err(QueueError::InvalidTransition {
                 from: job.status,
                 to: "Failed",
@@ -323,14 +336,20 @@ impl SpeechQueue {
 
     pub fn mark_playing(&mut self, job_id: Uuid) -> Result<(), QueueError> {
         let job = self.get_mut(job_id)?;
-        if job.status != JobStatus::Ready {
-            return Err(QueueError::InvalidTransition {
+        match job.status {
+            JobStatus::Ready => {
+                job.status = JobStatus::Playing;
+                Ok(())
+            }
+            JobStatus::Cancelled if job.error.is_none() && job.spoken_text.is_some() => {
+                job.status = JobStatus::Playing;
+                Ok(())
+            }
+            _ => Err(QueueError::InvalidTransition {
                 from: job.status,
                 to: "Playing",
-            });
+            }),
         }
-        job.status = JobStatus::Playing;
-        Ok(())
     }
 
     pub fn mark_completed(&mut self, job_id: Uuid) -> Result<(), QueueError> {
@@ -357,6 +376,7 @@ impl SpeechQueue {
         job.error = None;
         job.spoken_text = None;
         job.attempt += 1;
+        bump_activity(job);
         Ok(())
     }
 
@@ -374,6 +394,38 @@ impl SpeechQueue {
         }
     }
 
+    pub fn cancel_ready_job(&mut self, job_id: Uuid) -> Result<(), QueueError> {
+        let job = self.get_mut(job_id)?;
+        if job.status != JobStatus::Ready {
+            return Err(QueueError::InvalidTransition {
+                from: job.status,
+                to: "Cancelled",
+            });
+        }
+        job.status = JobStatus::Cancelled;
+        Ok(())
+    }
+
+    pub fn cancel_generating_job(&mut self, job_id: Uuid) -> Result<(), QueueError> {
+        let job = self.get_mut(job_id)?;
+        if job.status != JobStatus::Generating {
+            return Err(QueueError::InvalidTransition {
+                from: job.status,
+                to: "Cancelled",
+            });
+        }
+        job.status = JobStatus::Cancelled;
+        job.error = None;
+        Ok(())
+    }
+
+    pub fn get_handoff_guard(&self, job_id: Uuid) -> Option<Arc<parking_lot::Mutex<()>>> {
+        self.jobs
+            .iter()
+            .find(|j| j.job_id == job_id)
+            .map(|j| j.handoff_guard.clone())
+    }
+
     pub fn skip_job(&mut self, job_id: Uuid) -> Result<(), QueueError> {
         let job = self.get_mut(job_id)?;
         if job.status != JobStatus::Failed {
@@ -383,6 +435,35 @@ impl SpeechQueue {
             });
         }
         job.status = JobStatus::Cancelled;
+        bump_activity(job);
+        Ok(())
+    }
+
+    pub fn restore_cancelled_job(&mut self, job_id: Uuid) -> Result<(), QueueError> {
+        let (status, error_is_some) = match self.jobs.iter().find(|j| j.job_id == job_id) {
+            Some(job) => (job.status, job.error.is_some()),
+            None => return Err(QueueError::JobNotFound(job_id)),
+        };
+        if status != JobStatus::Cancelled {
+            return Err(QueueError::InvalidTransition {
+                from: status,
+                to: "Queued (restore)",
+            });
+        }
+        if error_is_some {
+            return Err(QueueError::InvalidTransition {
+                from: status,
+                to: "Queued (restore)",
+            });
+        }
+        if self.active_count() >= MAX_ACTIVE_CAPACITY {
+            return Err(QueueError::QueueFull(MAX_ACTIVE_CAPACITY));
+        }
+        let job = self.get_mut(job_id)?;
+        job.status = JobStatus::Queued;
+        job.spoken_text = None;
+        job.handoff_guard = Arc::new(parking_lot::Mutex::new(()));
+        bump_activity(job);
         Ok(())
     }
 
@@ -395,6 +476,43 @@ impl SpeechQueue {
             .iter()
             .find(|j| j.job_id == job_id)
             .map(|j| j.status)
+    }
+
+    pub fn get_spoken_text(&self, job_id: Uuid) -> Option<String> {
+        self.jobs
+            .iter()
+            .find(|j| j.job_id == job_id)
+            .and_then(|j| j.spoken_text.clone())
+    }
+
+    pub fn get_error(&self, job_id: Uuid) -> Option<String> {
+        self.jobs
+            .iter()
+            .find(|j| j.job_id == job_id)
+            .and_then(|j| j.error.clone())
+    }
+
+    pub fn touch_activity(&mut self, job_id: Uuid) -> bool {
+        if let Some(job) = self.jobs.iter_mut().find(|j| j.job_id == job_id) {
+            let now = Utc::now().timestamp_millis();
+            if now > job.last_activity_at_ms {
+                job.last_activity_at_ms = now;
+            } else {
+                job.last_activity_at_ms += 1;
+            }
+            true
+        } else {
+            false
+        }
+    }
+}
+
+fn bump_activity(job: &mut SpeechJob) {
+    let now = Utc::now().timestamp_millis();
+    if now > job.last_activity_at_ms {
+        job.last_activity_at_ms = now;
+    } else {
+        job.last_activity_at_ms += 1;
     }
 }
 
@@ -945,6 +1063,78 @@ mod tests {
         assert!(text_err(&err).contains("invalid transition"));
     }
 
+    #[test]
+    fn mark_playing_accepts_cancelled_ready_origin() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.mark_ready(id, "spoken form".into()).unwrap();
+        q.cancel_ready_job(id).unwrap();
+        assert_eq!(q.state().jobs[0].status, JobStatus::Cancelled);
+        assert!(q.state().jobs[0].spoken_text.is_some());
+        assert!(q.state().jobs[0].error.is_none());
+
+        q.mark_playing(id).unwrap();
+        assert_eq!(q.state().jobs[0].status, JobStatus::Playing);
+    }
+
+    #[test]
+    fn mark_playing_rejects_cancelled_queued_origin() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.cancel_job(id).unwrap();
+        assert_eq!(q.state().jobs[0].status, JobStatus::Cancelled);
+        assert!(q.state().jobs[0].spoken_text.is_none());
+
+        let err = q.mark_playing(id).unwrap_err();
+        assert!(text_err(&err).contains("invalid transition"));
+        assert_eq!(q.state().jobs[0].status, JobStatus::Cancelled);
+    }
+
+    #[test]
+    fn mark_playing_rejects_cancelled_failed_origin() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.fail_generation(id, "err".into()).unwrap();
+        q.cancel_job(id).unwrap();
+        assert_eq!(q.state().jobs[0].status, JobStatus::Cancelled);
+        assert!(q.state().jobs[0].error.is_some());
+
+        let err = q.mark_playing(id).unwrap_err();
+        assert!(text_err(&err).contains("invalid transition"));
+        assert_eq!(q.state().jobs[0].status, JobStatus::Cancelled);
+    }
+
+    #[test]
+    fn fail_playback_accepts_cancelled_ready_origin() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.mark_ready(id, "spoken form".into()).unwrap();
+        q.cancel_ready_job(id).unwrap();
+        assert_eq!(q.state().jobs[0].status, JobStatus::Cancelled);
+        assert!(q.state().jobs[0].spoken_text.is_some());
+        assert!(q.state().jobs[0].error.is_none());
+
+        q.fail_playback(id, "sink error".into()).unwrap();
+        assert_eq!(q.state().jobs[0].status, JobStatus::Failed);
+        assert_eq!(q.state().jobs[0].error.as_deref(), Some("sink error"));
+    }
+
+    #[test]
+    fn fail_playback_rejects_cancelled_queued_origin() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.cancel_job(id).unwrap();
+        assert_eq!(q.state().jobs[0].status, JobStatus::Cancelled);
+        assert!(q.state().jobs[0].spoken_text.is_none());
+
+        let err = q.fail_playback(id, "err".into()).unwrap_err();
+        assert!(text_err(&err).contains("invalid transition"));
+        assert_eq!(q.state().jobs[0].status, JobStatus::Cancelled);
+    }
+
     // ── retry ──
 
     #[test]
@@ -1095,6 +1285,140 @@ mod tests {
         assert!(text_err(&err).contains("invalid transition"));
     }
 
+    #[test]
+    fn cancel_ready_job_preserves_spoken_text() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.mark_ready(id, "spoken form".into()).unwrap();
+        assert_eq!(q.state().jobs[0].status, JobStatus::Ready);
+        assert_eq!(q.state().jobs[0].spoken_text, Some("spoken form".into()));
+
+        q.cancel_ready_job(id).unwrap();
+        assert_eq!(q.state().jobs[0].status, JobStatus::Cancelled);
+        assert_eq!(q.state().jobs[0].spoken_text, Some("spoken form".into()));
+    }
+
+    #[test]
+    fn cancel_ready_job_does_not_update_activity() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.mark_ready(id, "text".into()).unwrap();
+        let before = q.state().jobs[0].last_activity_at_ms;
+
+        q.cancel_ready_job(id).unwrap();
+        let after = q.state().jobs[0].last_activity_at_ms;
+        assert_eq!(after, before);
+    }
+
+    #[test]
+    fn cancel_queued_job_does_not_update_activity() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        let before = q.state().jobs[0].last_activity_at_ms;
+
+        q.cancel_job(id).unwrap();
+        let after = q.state().jobs[0].last_activity_at_ms;
+        assert_eq!(after, before);
+    }
+
+    #[test]
+    fn cancel_ready_job_removes_from_active_count() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.mark_ready(id, "text".into()).unwrap();
+        assert_eq!(q.active_count(), 1);
+
+        q.cancel_ready_job(id).unwrap();
+        assert_eq!(q.active_count(), 0);
+    }
+
+    #[test]
+    fn cancel_rejects_playing() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.mark_ready(id, "text".into()).unwrap();
+        q.mark_playing(id).unwrap();
+        let err = q.cancel_job(id).unwrap_err();
+        assert!(text_err(&err).contains("invalid transition"));
+        assert_eq!(q.state().jobs[0].status, JobStatus::Playing);
+    }
+
+    #[test]
+    fn cancel_ready_job_rejects_queued() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        let err = q.cancel_ready_job(id).unwrap_err();
+        assert!(text_err(&err).contains("invalid transition"));
+        assert_eq!(q.state().jobs[0].status, JobStatus::Queued);
+    }
+
+    #[test]
+    fn cancel_ready_job_rejects_generating() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        let err = q.cancel_ready_job(id).unwrap_err();
+        assert!(text_err(&err).contains("invalid transition"));
+        assert_eq!(q.state().jobs[0].status, JobStatus::Generating);
+    }
+
+    #[test]
+    fn cancel_ready_job_rejects_completed() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.mark_ready(id, "text".into()).unwrap();
+        q.mark_playing(id).unwrap();
+        q.mark_completed(id).unwrap();
+        let err = q.cancel_ready_job(id).unwrap_err();
+        assert!(text_err(&err).contains("invalid transition"));
+    }
+
+    #[test]
+    fn cancel_ready_job_rejects_cancelled() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.cancel_job(id).unwrap();
+        let err = q.cancel_ready_job(id).unwrap_err();
+        assert!(text_err(&err).contains("invalid transition"));
+        assert_eq!(q.state().jobs[0].status, JobStatus::Cancelled);
+    }
+
+    #[test]
+    fn cancel_ready_job_rejects_failed() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.fail_generation(id, "prev".into()).unwrap();
+        let err = q.cancel_ready_job(id).unwrap_err();
+        assert!(text_err(&err).contains("invalid transition"));
+        assert_eq!(q.state().jobs[0].status, JobStatus::Failed);
+    }
+
+    #[test]
+    fn cancel_ready_job_rejects_playing() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.mark_ready(id, "text".into()).unwrap();
+        q.mark_playing(id).unwrap();
+        let err = q.cancel_ready_job(id).unwrap_err();
+        assert!(text_err(&err).contains("invalid transition"));
+        assert_eq!(q.state().jobs[0].status, JobStatus::Playing);
+    }
+
+    #[test]
+    fn cancel_ready_job_unknown_id() {
+        let mut q = SpeechQueue::new();
+        let fake = Uuid::new_v4();
+        let err = q.cancel_ready_job(fake).unwrap_err();
+        assert!(text_err(&err).contains("not found"));
+    }
+
     // ── skip ──
 
     #[test]
@@ -1184,6 +1508,147 @@ mod tests {
         let fake = Uuid::new_v4();
         let err = q.skip_job(fake).unwrap_err();
         assert!(text_err(&err).contains("not found"));
+    }
+
+    // ── restore_cancelled_job ──
+
+    #[test]
+    fn restore_cancelled_queued_job_back_to_queued() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.cancel_job(id).unwrap();
+        assert_eq!(q.state().jobs[0].status, JobStatus::Cancelled);
+
+        q.restore_cancelled_job(id).unwrap();
+        assert_eq!(q.state().jobs[0].status, JobStatus::Queued);
+    }
+
+    #[test]
+    fn restore_preserves_job_id_text_snapshot_fifo_and_attempt() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("restore-me", snap()).unwrap();
+        let _id2 = q.submit("second", snap()).unwrap();
+
+        let snapshot_before = q.jobs[0].snapshot.provider.clone();
+        let voice_before = q.jobs[0].snapshot.voice.clone();
+        q.cancel_job(id).unwrap();
+
+        q.restore_cancelled_job(id).unwrap();
+
+        let state = q.state();
+        assert_eq!(state.jobs[0].job_id, id);
+        assert_eq!(state.jobs[0].original_text, "restore-me");
+        assert_eq!(state.jobs[0].status, JobStatus::Queued);
+        assert_eq!(state.jobs[0].attempt, 1);
+        assert_eq!(state.jobs[0].spoken_text, None);
+        assert_eq!(state.jobs[0].error, None);
+        // Snapshot fields preserved
+        assert_eq!(q.jobs[0].snapshot.provider, snapshot_before);
+        assert_eq!(q.jobs[0].snapshot.voice, voice_before);
+        // FIFO position preserved
+        assert_eq!(state.jobs[1].job_id, _id2);
+    }
+
+    #[test]
+    fn restore_updates_last_activity() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.cancel_job(id).unwrap();
+        let before_ms = q.state().jobs[0].last_activity_at_ms;
+
+        q.restore_cancelled_job(id).unwrap();
+
+        let after_ms = q.state().jobs[0].last_activity_at_ms;
+        assert!(after_ms > before_ms);
+    }
+
+    #[test]
+    fn restore_rejects_non_cancelled_job() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        let err = q.restore_cancelled_job(id).unwrap_err();
+        assert!(text_err(&err).contains("invalid transition"));
+        assert_eq!(q.state().jobs[0].status, JobStatus::Queued);
+    }
+
+    #[test]
+    fn restore_rejects_failed_origin_cancelled_with_error() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.fail_generation(id, "err".into()).unwrap();
+        q.cancel_job(id).unwrap();
+        // job is Cancelled with Some(error)
+        assert_eq!(q.state().jobs[0].status, JobStatus::Cancelled);
+        assert!(q.state().jobs[0].error.is_some());
+
+        let err = q.restore_cancelled_job(id).unwrap_err();
+        assert!(text_err(&err).contains("invalid transition"));
+        assert_eq!(q.state().jobs[0].status, JobStatus::Cancelled);
+    }
+
+    #[test]
+    fn restore_rejects_skipped_origin_cancelled_with_error() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.fail_generation(id, "err".into()).unwrap();
+        q.skip_job(id).unwrap();
+        // job is Cancelled with Some(error)
+        assert_eq!(q.state().jobs[0].status, JobStatus::Cancelled);
+        assert!(q.state().jobs[0].error.is_some());
+
+        let err = q.restore_cancelled_job(id).unwrap_err();
+        assert!(text_err(&err).contains("invalid transition"));
+        assert_eq!(q.state().jobs[0].status, JobStatus::Cancelled);
+    }
+
+    #[test]
+    fn restore_rejects_unknown_id() {
+        let mut q = SpeechQueue::new();
+        let fake = Uuid::new_v4();
+        let err = q.restore_cancelled_job(fake).unwrap_err();
+        assert!(text_err(&err).contains("not found"));
+    }
+
+    #[test]
+    fn restore_capacity_full_rejection_is_atomic() {
+        let mut q = SpeechQueue::new();
+        for i in 0..MAX_ACTIVE_CAPACITY {
+            let id = q.submit(&format!("job {}", i), snap()).unwrap();
+            q.cancel_job(id).unwrap();
+        }
+        for i in 0..MAX_ACTIVE_CAPACITY {
+            q.submit(&format!("active {}", i), snap()).unwrap();
+        }
+        // Now active_count == MAX_ACTIVE_CAPACITY
+        assert_eq!(q.active_count(), MAX_ACTIVE_CAPACITY);
+
+        let target_id = q.state().jobs[0].job_id;
+        let state_before = serde_json::to_value(q.state()).unwrap();
+
+        let err = q.restore_cancelled_job(target_id).unwrap_err();
+        assert!(text_err(&err).contains("queue full"));
+
+        let state_after = serde_json::to_value(q.state()).unwrap();
+        assert_eq!(state_before, state_after);
+    }
+
+    #[test]
+    fn restore_ready_cancelled_back_to_queued_clears_spoken_text() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.mark_ready(id, "spoken form".into()).unwrap();
+        q.cancel_ready_job(id).unwrap();
+        assert_eq!(q.state().jobs[0].status, JobStatus::Cancelled);
+        assert!(q.state().jobs[0].spoken_text.is_some());
+
+        q.restore_cancelled_job(id).unwrap();
+        let job = &q.state().jobs[0];
+        assert_eq!(job.status, JobStatus::Queued);
+        assert_eq!(job.spoken_text, None);
+        assert_eq!(job.error, None);
     }
 
     // ── capacity ──
@@ -1287,6 +1752,7 @@ mod tests {
             "mark_completed",
             "retry_job",
             "cancel_job",
+            "cancel_ready_job",
             "skip_job",
         ] {
             let err = match *op_name {
@@ -1298,6 +1764,7 @@ mod tests {
                 "mark_completed" => q.mark_completed(fake).unwrap_err(),
                 "retry_job" => q.retry_job(fake).unwrap_err(),
                 "cancel_job" => q.cancel_job(fake).unwrap_err(),
+                "cancel_ready_job" => q.cancel_ready_job(fake).unwrap_err(),
                 "skip_job" => q.skip_job(fake).unwrap_err(),
                 _ => unreachable!(),
             };
@@ -1555,5 +2022,411 @@ mod tests {
             !json.contains("sk-test-sentinel-dont-expose"),
             "state JSON must not contain AI API key"
         );
+    }
+
+    // ── last_activity_at_ms ──
+
+    #[test]
+    fn submit_sets_last_activity_to_created_at() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        let state = q.state();
+        assert_eq!(
+            state.jobs[0].last_activity_at_ms,
+            state.jobs[0].created_at_ms
+        );
+        assert!(q.has_job(id));
+    }
+
+    #[test]
+    fn retry_updates_last_activity() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        let before_ms = q.state().jobs[0].last_activity_at_ms;
+
+        q.start_generation(id).unwrap();
+        q.fail_generation(id, "err".into()).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        q.retry_job(id).unwrap();
+
+        let after_ms = q.state().jobs[0].last_activity_at_ms;
+        assert!(after_ms > before_ms);
+    }
+
+    #[test]
+    fn cancel_does_not_update_last_activity() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        let before_ms = q.state().jobs[0].last_activity_at_ms;
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        q.cancel_job(id).unwrap();
+
+        let after_ms = q.state().jobs[0].last_activity_at_ms;
+        assert_eq!(after_ms, before_ms);
+    }
+
+    #[test]
+    fn skip_updates_last_activity() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.fail_generation(id, "err".into()).unwrap();
+        let before_ms = q.state().jobs[0].last_activity_at_ms;
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        q.skip_job(id).unwrap();
+
+        let after_ms = q.state().jobs[0].last_activity_at_ms;
+        assert!(after_ms > before_ms);
+    }
+
+    #[test]
+    fn pipeline_transitions_do_not_update_last_activity() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        let initial = q.state().jobs[0].last_activity_at_ms;
+
+        q.start_generation(id).unwrap();
+        assert_eq!(q.state().jobs[0].last_activity_at_ms, initial);
+
+        q.mark_ready(id, "text".into()).unwrap();
+        assert_eq!(q.state().jobs[0].last_activity_at_ms, initial);
+
+        q.mark_playing(id).unwrap();
+        assert_eq!(q.state().jobs[0].last_activity_at_ms, initial);
+
+        q.mark_completed(id).unwrap();
+        assert_eq!(q.state().jobs[0].last_activity_at_ms, initial);
+    }
+
+    #[test]
+    fn fail_generation_does_not_update_last_activity() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        let initial = q.state().jobs[0].last_activity_at_ms;
+
+        q.fail_generation(id, "err".into()).unwrap();
+        assert_eq!(q.state().jobs[0].last_activity_at_ms, initial);
+    }
+
+    #[test]
+    fn touch_activity_updates_timestamp() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        let before_ms = q.state().jobs[0].last_activity_at_ms;
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let touched = q.touch_activity(id);
+        assert!(touched);
+
+        let after_ms = q.state().jobs[0].last_activity_at_ms;
+        assert!(after_ms > before_ms);
+    }
+
+    #[test]
+    fn touch_activity_unknown_id_returns_false() {
+        let mut q = SpeechQueue::new();
+        let fake = Uuid::new_v4();
+        assert!(!q.touch_activity(fake));
+        assert!(q.is_empty());
+    }
+
+    #[test]
+    fn last_activity_preserves_fifo_order() {
+        let mut q = SpeechQueue::new();
+        let id1 = q.submit("first", snap()).unwrap();
+        let id2 = q.submit("second", snap()).unwrap();
+        let id3 = q.submit("third", snap()).unwrap();
+
+        q.touch_activity(id3);
+
+        let state = q.state();
+        // FIFO order in jobs vector is unchanged
+        assert_eq!(state.jobs[0].job_id, id1);
+        assert_eq!(state.jobs[1].job_id, id2);
+        assert_eq!(state.jobs[2].job_id, id3);
+        // But last_activity of id3 is newer
+        assert!(state.jobs[2].last_activity_at_ms > state.jobs[0].last_activity_at_ms);
+    }
+
+    #[test]
+    fn touch_activity_is_strictly_monotonic() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+
+        let first = q.state().jobs[0].last_activity_at_ms;
+
+        q.touch_activity(id);
+        let second = q.state().jobs[0].last_activity_at_ms;
+
+        q.touch_activity(id);
+        let third = q.state().jobs[0].last_activity_at_ms;
+
+        assert!(second > first, "second bump must be > first");
+        assert!(third > second, "third bump must be > second");
+    }
+
+    #[test]
+    fn touch_activity_on_cancelled_with_spoken_text_preserves_status() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.mark_ready(id, "cached audio".into()).unwrap();
+        q.cancel_ready_job(id).unwrap();
+        assert_eq!(q.state().jobs[0].status, JobStatus::Cancelled);
+        assert_eq!(
+            q.state().jobs[0].spoken_text.as_deref(),
+            Some("cached audio")
+        );
+
+        let before_ms = q.state().jobs[0].last_activity_at_ms;
+        std::thread::sleep(std::time::Duration::from_millis(5));
+
+        q.touch_activity(id);
+
+        let after_ms = q.state().jobs[0].last_activity_at_ms;
+        assert!(
+            after_ms > before_ms,
+            "touch_activity must bump timestamp on cancelled job"
+        );
+        assert_eq!(
+            q.state().jobs[0].status,
+            JobStatus::Cancelled,
+            "touch_activity must not change status"
+        );
+        assert_eq!(
+            q.state().jobs[0].spoken_text.as_deref(),
+            Some("cached audio")
+        );
+    }
+
+    #[test]
+    fn touch_activity_on_cancelled_queued_origin_preserves_status() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.cancel_job(id).unwrap();
+        assert_eq!(q.state().jobs[0].status, JobStatus::Cancelled);
+        assert!(q.state().jobs[0].spoken_text.is_none());
+
+        let before_ms = q.state().jobs[0].last_activity_at_ms;
+        std::thread::sleep(std::time::Duration::from_millis(5));
+
+        q.touch_activity(id);
+
+        let after_ms = q.state().jobs[0].last_activity_at_ms;
+        assert!(after_ms > before_ms);
+        assert_eq!(q.state().jobs[0].status, JobStatus::Cancelled);
+    }
+
+    // ── cancel_generating_job ──
+
+    #[test]
+    fn cancel_generating_job_transitions_to_cancelled() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        assert_eq!(q.state().jobs[0].status, JobStatus::Generating);
+
+        q.cancel_generating_job(id).unwrap();
+        assert_eq!(q.state().jobs[0].status, JobStatus::Cancelled);
+        assert_eq!(q.state().jobs[0].error, None);
+    }
+
+    #[test]
+    fn cancel_generating_job_preserves_no_error_for_restore() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.cancel_generating_job(id).unwrap();
+        assert!(q.state().jobs[0].error.is_none());
+        q.restore_cancelled_job(id).unwrap();
+        assert_eq!(q.state().jobs[0].status, JobStatus::Queued);
+        assert_eq!(q.state().jobs[0].attempt, 1);
+        assert_eq!(q.state().jobs[0].original_text, "hello");
+    }
+
+    #[test]
+    fn cancel_generating_job_rejects_queued() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        let err = q.cancel_generating_job(id).unwrap_err();
+        assert!(text_err(&err).contains("invalid transition"));
+        assert_eq!(q.state().jobs[0].status, JobStatus::Queued);
+    }
+
+    #[test]
+    fn cancel_generating_job_rejects_ready() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.mark_ready(id, "spoken".into()).unwrap();
+        let err = q.cancel_generating_job(id).unwrap_err();
+        assert!(text_err(&err).contains("invalid transition"));
+        assert_eq!(q.state().jobs[0].status, JobStatus::Ready);
+    }
+
+    #[test]
+    fn cancel_generating_job_rejects_playing() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.mark_ready(id, "spoken".into()).unwrap();
+        q.mark_playing(id).unwrap();
+        let err = q.cancel_generating_job(id).unwrap_err();
+        assert!(text_err(&err).contains("invalid transition"));
+        assert_eq!(q.state().jobs[0].status, JobStatus::Playing);
+    }
+
+    #[test]
+    fn cancel_generating_job_rejects_completed() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.mark_ready(id, "text".into()).unwrap();
+        q.mark_playing(id).unwrap();
+        q.mark_completed(id).unwrap();
+        let err = q.cancel_generating_job(id).unwrap_err();
+        assert!(text_err(&err).contains("invalid transition"));
+    }
+
+    #[test]
+    fn cancel_generating_job_does_not_update_activity() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        let before = q.state().jobs[0].last_activity_at_ms;
+
+        q.cancel_generating_job(id).unwrap();
+        let after = q.state().jobs[0].last_activity_at_ms;
+        assert_eq!(after, before);
+    }
+
+    #[test]
+    fn cancel_generating_job_unknown_id_errors() {
+        let mut q = SpeechQueue::new();
+        let fake = Uuid::new_v4();
+        let err = q.cancel_generating_job(fake).unwrap_err();
+        assert!(text_err(&err).contains("not found"));
+    }
+
+    #[test]
+    fn restore_generating_cancelled_preserves_snapshot_and_fifo() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("restore-me", snap()).unwrap();
+        let _id2 = q.submit("second", snap()).unwrap();
+
+        q.start_generation(id).unwrap();
+        q.cancel_generating_job(id).unwrap();
+        assert_eq!(q.state().jobs[0].status, JobStatus::Cancelled);
+
+        q.restore_cancelled_job(id).unwrap();
+        let state = q.state();
+        assert_eq!(state.jobs[0].job_id, id);
+        assert_eq!(state.jobs[0].original_text, "restore-me");
+        assert_eq!(state.jobs[0].status, JobStatus::Queued);
+        assert_eq!(state.jobs[0].attempt, 1);
+        assert_eq!(state.jobs[0].spoken_text, None);
+        assert_eq!(state.jobs[0].error, None);
+        assert_eq!(state.jobs[1].job_id, _id2);
+    }
+
+    #[test]
+    fn restore_generating_cancelled_updates_activity() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.cancel_generating_job(id).unwrap();
+        let before = q.state().jobs[0].last_activity_at_ms;
+
+        q.restore_cancelled_job(id).unwrap();
+        let after = q.state().jobs[0].last_activity_at_ms;
+        assert!(after > before);
+    }
+
+    // ── handoff guard for ready cancellation ──
+
+    #[test]
+    fn handoff_guard_absent_before_install_cancel_accepted() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.mark_ready(id, "spoken".into()).unwrap();
+
+        let guard = {
+            let idx = q.jobs.iter().position(|j| j.job_id == id).unwrap();
+            q.jobs[idx].handoff_guard.clone()
+        };
+
+        let g = guard.lock();
+        assert_eq!(q.get_status(id), Some(JobStatus::Ready));
+        q.cancel_ready_job(id).unwrap();
+        assert_eq!(q.get_status(id), Some(JobStatus::Cancelled));
+        drop(g);
+    }
+
+    #[test]
+    fn handoff_guard_worker_rechecks_status_and_discards_when_cancelled() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.mark_ready(id, "spoken".into()).unwrap();
+
+        let guard = {
+            let idx = q.jobs.iter().position(|j| j.job_id == id).unwrap();
+            q.jobs[idx].handoff_guard.clone()
+        };
+
+        let g = guard.lock();
+        q.cancel_ready_job(id).unwrap();
+        assert_eq!(q.get_status(id), Some(JobStatus::Cancelled));
+        drop(g);
+
+        let g = guard.lock();
+        let status = q.get_status(id);
+        assert_eq!(status, Some(JobStatus::Cancelled));
+        drop(g);
+    }
+
+    #[test]
+    fn handoff_guard_cancel_sees_cancelled_no_double_mutation() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+        q.mark_ready(id, "spoken".into()).unwrap();
+
+        let guard = {
+            let idx = q.jobs.iter().position(|j| j.job_id == id).unwrap();
+            q.jobs[idx].handoff_guard.clone()
+        };
+
+        let g = guard.lock();
+        q.cancel_ready_job(id).unwrap();
+        assert_eq!(q.get_status(id), Some(JobStatus::Cancelled));
+        assert!(q.cancel_ready_job(id).is_err());
+        drop(g);
+    }
+
+    #[test]
+    fn handoff_guard_reset_on_restore() {
+        let mut q = SpeechQueue::new();
+        let id = q.submit("hello", snap()).unwrap();
+        q.start_generation(id).unwrap();
+
+        let guard1 = {
+            let idx = q.jobs.iter().position(|j| j.job_id == id).unwrap();
+            q.jobs[idx].handoff_guard.clone()
+        };
+
+        q.cancel_generating_job(id).unwrap();
+
+        q.restore_cancelled_job(id).unwrap();
+        let guard2 = {
+            let idx = q.jobs.iter().position(|j| j.job_id == id).unwrap();
+            q.jobs[idx].handoff_guard.clone()
+        };
+
+        assert!(!Arc::ptr_eq(&guard1, &guard2));
     }
 }

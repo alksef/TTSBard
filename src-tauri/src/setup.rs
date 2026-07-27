@@ -679,6 +679,12 @@ pub(crate) fn parse_webview_server_error(
     (user_friendly_msg, log_context)
 }
 
+fn q_state_dto(
+    q: &Arc<parking_lot::Mutex<crate::speech_queue::SpeechQueue>>,
+) -> crate::speech_queue::SpeechQueueStateDto {
+    q.lock().state()
+}
+
 // ── Speech worker ──
 
 async fn speech_worker(
@@ -772,38 +778,64 @@ async fn speech_worker(
 
                 let processed_text = prepared.processed_text.clone();
 
-                {
+                let handoff_guard = {
                     let mut q = queue.lock();
+                    let status = q.get_status(job_id);
+                    if status != Some(JobStatus::Generating) {
+                        drop(q);
+                        info!(job_id = %job_id, observed_status = ?status, "worker discard: not Generating after preparation");
+                        let _ = app_handle.emit("speech-queue-changed", q_state_dto(&queue));
+                        continue;
+                    }
                     let _ = q.mark_ready(job_id, processed_text.clone());
+                    let guard = q
+                        .get_handoff_guard(job_id)
+                        .expect("handoff_guard missing after mark_ready");
                     let dto = q.state();
                     drop(q);
                     let _ = app_handle.emit("speech-queue-changed", dto);
-                }
+                    guard
+                };
 
                 let handoff_accepted = {
-                    let pb_guard = playback_manager.lock();
-                    if let Some(pb) = pb_guard.as_ref() {
-                        pb.enqueue_with_outputs(
-                            job_id.to_string(),
-                            processed_text.clone(),
-                            prepared.audio,
-                            speaker,
-                            mic,
-                        )
-                    } else {
-                        false
+                    let _g = handoff_guard.lock();
+
+                    {
+                        let q = queue.lock();
+                        let status = q.get_status(job_id);
+                        if status != Some(JobStatus::Ready) {
+                            drop(q);
+                            info!(job_id = %job_id, observed_status = ?status, "worker discard: cancelled after mark_ready");
+                            false
+                        } else {
+                            drop(q);
+                            let pb_guard = playback_manager.lock();
+                            if let Some(pb) = pb_guard.as_ref() {
+                                pb.enqueue_with_outputs(
+                                    job_id.to_string(),
+                                    processed_text.clone(),
+                                    prepared.audio,
+                                    speaker,
+                                    mic,
+                                )
+                            } else {
+                                false
+                            }
+                        }
                     }
                 };
 
                 if !handoff_accepted {
                     let mut q = queue.lock();
-                    let _ = q.fail_playback(
-                        job_id,
-                        "Playback handoff rejected (queue full or no manager)".to_string(),
-                    );
-                    let dto = q.state();
-                    drop(q);
-                    let _ = app_handle.emit("speech-queue-changed", dto);
+                    if q.get_status(job_id) == Some(JobStatus::Ready) {
+                        let _ = q.fail_playback(
+                            job_id,
+                            "Playback handoff rejected (queue full or no manager)".to_string(),
+                        );
+                        let dto = q.state();
+                        drop(q);
+                        let _ = app_handle.emit("speech-queue-changed", dto);
+                    }
                     continue;
                 }
 
