@@ -539,6 +539,7 @@ h2 {
 
 .save-button-inline.secondary {
   background: var(--btn-accent-bg);
+  color: var(--color-text-primary);
   font-weight: 500;
 }
 
