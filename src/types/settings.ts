@@ -378,7 +378,7 @@ export interface AiSettingsDto {
 // VTube Studio Settings Types
 // ============================================================================
 
-export type VTubeStudioTypingMode = 'Event' | 'Hotkeys'
+export type VTubeStudioTypingMode = 'Event' | 'Hotkeys' | 'Item'
 
 export interface VTubeStudioTypingActionDto {
   outputMode: VTubeStudioTypingMode
@@ -387,6 +387,8 @@ export interface VTubeStudioTypingActionDto {
   stopHotkeyId: string
   startHotkeyName: string
   stopHotkeyName: string
+  itemFileName: string
+  itemType: string
 }
 
 export interface VtsHotkeyInfoDto {
@@ -404,6 +406,35 @@ export interface VTubeStudioSettingsDto {
   port: number
   start_on_boot: boolean
   typingAction: VTubeStudioTypingActionDto
+}
+
+/**
+ * VTube Studio item status (discriminated union).
+ *
+ * Mirrors the tagged Rust enum `VTubeStudioItemStatus`:
+ *   - status: "Inactive" — no active item action.
+ *   - status: "Ready" — item is resolved, animated to ready state.
+ *   - status: "Missing" — configured filename not found in scene.
+ *   - status: "Ambiguous" — multiple instances share the filename.
+ *   - status: "Unsupported" — item type is not usable for typing action.
+ *   - status: "Error" — an unexpected error occurred during resolution.
+ */
+export type VTubeStudioItemStatus =
+  | { status: 'Inactive' }
+  | { status: 'Ready'; fileName: string; vtsType: string }
+  | { status: 'Missing'; fileName: string }
+  | { status: 'Ambiguous'; fileName: string; matchCount: number }
+  | { status: 'Unsupported'; fileName: string; vtsType: string }
+  | { status: 'Error'; fileName: string; message: string }
+
+/**
+ * Aggregate scene item record (no instanceID).
+ */
+export interface SceneItemRecord {
+  fileName: string
+  itemType: string
+  supported: boolean
+  duplicateCount: number
 }
 
 // ============================================================================

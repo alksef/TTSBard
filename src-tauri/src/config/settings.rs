@@ -677,6 +677,7 @@ fn default_vtube_port() -> u16 {
 pub enum VTubeStudioTypingMode {
     Event,
     Hotkeys,
+    Item,
 }
 
 /// VTube Studio typing action configuration
@@ -690,6 +691,10 @@ pub struct VTubeStudioTypingAction {
     pub start_hotkey_name: String,
     #[serde(default)]
     pub stop_hotkey_name: String,
+    #[serde(default)]
+    pub item_file_name: String,
+    #[serde(default)]
+    pub item_type: String,
 }
 
 impl Default for VTubeStudioTypingAction {
@@ -701,6 +706,8 @@ impl Default for VTubeStudioTypingAction {
             stop_hotkey_id: String::new(),
             start_hotkey_name: String::new(),
             stop_hotkey_name: String::new(),
+            item_file_name: String::new(),
+            item_type: String::new(),
         }
     }
 }
@@ -2574,7 +2581,7 @@ mod tests {
     }
 
     /// VTubeStudioSettings defaults: disabled, port 8001, no token, start_on_boot false,
-    /// typing mode Event, param name TTSBardTyping, empty hotkey IDs.
+    /// typing mode Event, param name TTSBardTyping, empty hotkey IDs, empty item metadata.
     #[test]
     fn vtube_studio_settings_defaults() {
         let s = VTubeStudioSettings::default();
@@ -2586,6 +2593,8 @@ mod tests {
         assert_eq!(s.typing_action.parameter_name, "TTSBardTyping");
         assert!(s.typing_action.start_hotkey_id.is_empty());
         assert!(s.typing_action.stop_hotkey_id.is_empty());
+        assert!(s.typing_action.item_file_name.is_empty());
+        assert!(s.typing_action.item_type.is_empty());
     }
 
     /// VTubeStudioSettings round-trip: all fields including typing_action are persisted.
@@ -2603,6 +2612,8 @@ mod tests {
                 stop_hotkey_id: "hotkey-stop-1".to_string(),
                 start_hotkey_name: "Start".to_string(),
                 stop_hotkey_name: "Stop".to_string(),
+                item_file_name: String::new(),
+                item_type: String::new(),
             },
         };
         let json = serde_json::to_string(&original).unwrap();
@@ -2624,18 +2635,28 @@ mod tests {
         assert_eq!(back.typing_action.stop_hotkey_name, "Stop");
     }
 
-    /// VTubeStudioTypingMode is serialized as camelCase Event/Hotkeys.
+    /// VTubeStudioTypingMode is serialized as Event/Hotkeys/Item.
     #[test]
     fn vtube_studio_typing_mode_serde() {
         assert_eq!(
             serde_json::to_string(&VTubeStudioTypingMode::Event).unwrap(),
             "\"Event\""
         );
+        assert_eq!(
+            serde_json::to_string(&VTubeStudioTypingMode::Hotkeys).unwrap(),
+            "\"Hotkeys\""
+        );
+        assert_eq!(
+            serde_json::to_string(&VTubeStudioTypingMode::Item).unwrap(),
+            "\"Item\""
+        );
         let m: VTubeStudioTypingMode = serde_json::from_str("\"Hotkeys\"").unwrap();
         assert_eq!(m, VTubeStudioTypingMode::Hotkeys);
+        let m: VTubeStudioTypingMode = serde_json::from_str("\"Item\"").unwrap();
+        assert_eq!(m, VTubeStudioTypingMode::Item);
     }
 
-    /// VTubeStudioTypingAction fresh defaults.
+    /// VTubeStudioTypingAction fresh defaults include empty item metadata.
     #[test]
     fn vtube_studio_typing_action_defaults() {
         let a = VTubeStudioTypingAction::default();
@@ -2643,6 +2664,8 @@ mod tests {
         assert_eq!(a.parameter_name, "TTSBardTyping");
         assert!(a.start_hotkey_id.is_empty());
         assert!(a.stop_hotkey_id.is_empty());
+        assert!(a.item_file_name.is_empty());
+        assert!(a.item_type.is_empty());
     }
 
     /// Existing settings without the later typing action use the safe Event default.
@@ -2715,6 +2738,107 @@ mod tests {
         assert!(json.contains("parameter_name"), "json: {}", json);
         assert!(json.contains("start_hotkey_id"), "json: {}", json);
         assert!(json.contains("stop_hotkey_id"), "json: {}", json);
+        assert!(json.contains("item_file_name"), "json: {}", json);
+        assert!(json.contains("item_type"), "json: {}", json);
+    }
+
+    /// Old persisted typing action with no item fields deserializes to empty item metadata.
+    #[test]
+    fn vtube_studio_typing_action_deserializes_without_item_fields() {
+        let old_json = r#"{
+            "output_mode": "Event",
+            "parameter_name": "TTSBardTyping",
+            "start_hotkey_id": "",
+            "stop_hotkey_id": ""
+        }"#;
+        let a: VTubeStudioTypingAction = serde_json::from_str(old_json)
+            .expect("old typing action (without item fields) must deserialize");
+        assert_eq!(a.output_mode, VTubeStudioTypingMode::Event);
+        assert_eq!(a.parameter_name, "TTSBardTyping");
+        assert!(a.item_file_name.is_empty());
+        assert!(a.item_type.is_empty());
+    }
+
+    /// Old persisted typing action with hotkey names but no item fields deserializes to empty item metadata.
+    #[test]
+    fn vtube_studio_typing_action_hotkeys_deserializes_without_item_fields() {
+        let old_json = r#"{
+            "output_mode": "Hotkeys",
+            "parameter_name": "Custom",
+            "start_hotkey_id": "s1",
+            "stop_hotkey_id": "s2",
+            "start_hotkey_name": "Start",
+            "stop_hotkey_name": "Stop"
+        }"#;
+        let a: VTubeStudioTypingAction = serde_json::from_str(old_json)
+            .expect("old typing action (Hotkeys, without item fields) must deserialize");
+        assert_eq!(a.output_mode, VTubeStudioTypingMode::Hotkeys);
+        assert_eq!(a.start_hotkey_id, "s1");
+        assert_eq!(a.stop_hotkey_id, "s2");
+        assert!(a.item_file_name.is_empty());
+        assert!(a.item_type.is_empty());
+    }
+
+    /// Item action round-trips exact mixed-case/non-ASCII filename and item type
+    /// without an instanceID field appearing in persisted JSON.
+    #[test]
+    fn vtube_studio_typing_action_item_round_trip() {
+        let original = VTubeStudioTypingAction {
+            output_mode: VTubeStudioTypingMode::Item,
+            parameter_name: String::new(),
+            start_hotkey_id: String::new(),
+            stop_hotkey_id: String::new(),
+            start_hotkey_name: String::new(),
+            stop_hotkey_name: String::new(),
+            item_file_name: "Über_Cat_GIF_123.gif".to_string(),
+            item_type: "GIF".to_string(),
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        assert!(
+            !json.contains("instanceID"),
+            "json must not contain instanceID: {}",
+            json
+        );
+        assert!(
+            !json.contains("instance_id"),
+            "json must not contain instance_id: {}",
+            json
+        );
+        assert!(json.contains("Über_Cat_GIF_123.gif"), "json: {}", json);
+        assert!(json.contains("GIF"), "json: {}", json);
+        assert!(json.contains("\"Item\""), "json: {}", json);
+
+        let back: VTubeStudioTypingAction = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.output_mode, VTubeStudioTypingMode::Item);
+        assert_eq!(back.item_file_name, "Über_Cat_GIF_123.gif");
+        assert_eq!(back.item_type, "GIF");
+    }
+
+    /// Safe DTO JSON uses outputMode, itemFileName, itemType, preserves exact metadata,
+    /// and contains no token or instanceID.
+    #[test]
+    fn vtube_studio_typing_action_dto_camelcase_no_secrets() {
+        use crate::config::dto::VTubeStudioTypingActionDto;
+        let action = VTubeStudioTypingAction {
+            output_mode: VTubeStudioTypingMode::Item,
+            parameter_name: String::new(),
+            start_hotkey_id: String::new(),
+            stop_hotkey_id: String::new(),
+            start_hotkey_name: String::new(),
+            stop_hotkey_name: String::new(),
+            item_file_name: "My Item.PNG".to_string(),
+            item_type: "PNG".to_string(),
+        };
+        let dto: VTubeStudioTypingActionDto = (&action).into();
+        let json = serde_json::to_string(&dto).unwrap();
+        assert!(json.contains("outputMode"), "json: {}", json);
+        assert!(json.contains("itemFileName"), "json: {}", json);
+        assert!(json.contains("itemType"), "json: {}", json);
+        assert!(json.contains("My Item.PNG"), "json: {}", json);
+        assert!(json.contains("PNG"), "json: {}", json);
+        assert!(!json.contains("token"), "json: {}", json);
+        assert!(!json.contains("instanceID"), "json: {}", json);
+        assert!(!json.contains("instance_id"), "json: {}", json);
     }
 
     // ==================== Silero timing settings tests ====================

@@ -1194,6 +1194,8 @@ pub struct VTubeStudioTypingActionDto {
     pub stop_hotkey_id: String,
     pub start_hotkey_name: String,
     pub stop_hotkey_name: String,
+    pub item_file_name: String,
+    pub item_type: String,
 }
 
 impl From<&crate::config::VTubeStudioTypingAction> for VTubeStudioTypingActionDto {
@@ -1205,6 +1207,8 @@ impl From<&crate::config::VTubeStudioTypingAction> for VTubeStudioTypingActionDt
             stop_hotkey_id: a.stop_hotkey_id.clone(),
             start_hotkey_name: a.start_hotkey_name.clone(),
             stop_hotkey_name: a.stop_hotkey_name.clone(),
+            item_file_name: a.item_file_name.clone(),
+            item_type: a.item_type.clone(),
         }
     }
 }

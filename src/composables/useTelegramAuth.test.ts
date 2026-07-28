@@ -81,7 +81,7 @@ function mockSettings(): AppSettingsDto {
       enabled: false,
       port: 8001,
       start_on_boot: false,
-      typingAction: { outputMode: 'Event', parameterName: 'TTSBardTyping', startHotkeyId: '', stopHotkeyId: '', startHotkeyName: '', stopHotkeyName: '' },
+      typingAction: { outputMode: 'Event', parameterName: 'TTSBardTyping', startHotkeyId: '', stopHotkeyId: '', startHotkeyName: '', stopHotkeyName: '', itemFileName: '', itemType: '' },
     },
   }
 }

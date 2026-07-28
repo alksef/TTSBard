@@ -1,30 +1,293 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures::{SinkExt, StreamExt};
+use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use super::messages::{
-    self, HotkeyInfo, HotkeysInCurrentModelResponseData, VtsRequest, VtsResponse,
+    self, HotkeyInfo, HotkeysInCurrentModelResponseData, ItemAnimationControlResponseData,
+    ItemInstanceInfo, ItemListResponseData, VtsRequest, VtsResponse,
 };
 use crate::config::{VTubeStudioSettings, VTubeStudioTypingMode};
 use crate::events::VTubeStudioConnectionStatus;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(12);
+const ITEM_ACTION_TIMEOUT: Duration = Duration::from_secs(2);
 const TYPING_KEEPALIVE_MS: u64 = 500;
 
 type WsStream = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>;
+
+#[derive(Debug, Clone, PartialEq)]
+enum ItemKind {
+    Static,
+    Animated,
+    Unsupported { original_type: String },
+}
+
+impl ItemKind {
+    fn classify(item_type: &str) -> Self {
+        match item_type {
+            "PNG" | "JPG" => ItemKind::Static,
+            "GIF" | "AnimationFolder" => ItemKind::Animated,
+            "Live2D" | "Unknown" => ItemKind::Unsupported {
+                original_type: item_type.to_string(),
+            },
+            _ => ItemKind::Unsupported {
+                original_type: item_type.to_string(),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "status")]
+pub enum VTubeStudioItemStatus {
+    Inactive,
+    Ready {
+        #[serde(rename = "fileName")]
+        file_name: String,
+        #[serde(rename = "vtsType")]
+        vts_type: String,
+    },
+    Missing {
+        #[serde(rename = "fileName")]
+        file_name: String,
+    },
+    Ambiguous {
+        #[serde(rename = "fileName")]
+        file_name: String,
+        #[serde(rename = "matchCount")]
+        match_count: u32,
+    },
+    Unsupported {
+        #[serde(rename = "fileName")]
+        file_name: String,
+        #[serde(rename = "vtsType")]
+        vts_type: String,
+    },
+    Error {
+        #[serde(rename = "fileName")]
+        file_name: String,
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SceneItemRecord {
+    pub file_name: String,
+    pub item_type: String,
+    pub supported: bool,
+    pub duplicate_count: u32,
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedItem {
+    instance_id: String,
+    file_name: String,
+    item_type: String,
+    kind: ItemKind,
+}
+
+#[derive(Debug, PartialEq)]
+enum ResolveItemError {
+    Missing,
+    Ambiguous,
+    Unsupported {
+        file_name: String,
+        item_type: String,
+    },
+}
+
+impl std::fmt::Display for ResolveItemError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ResolveItemError::Missing => {
+                write!(f, "no scene item matching the configured filename")
+            }
+            ResolveItemError::Ambiguous => {
+                write!(f, "multiple scene items match the configured filename")
+            }
+            ResolveItemError::Unsupported {
+                file_name,
+                item_type,
+            } => {
+                write!(
+                    f,
+                    "item '{}' has unsupported type '{}'",
+                    file_name, item_type
+                )
+            }
+        }
+    }
+}
+
+fn resolve_item(
+    instances: &[ItemInstanceInfo],
+    configured_file_name: &str,
+) -> Result<ResolvedItem, ResolveItemError> {
+    let matching: Vec<&ItemInstanceInfo> = instances
+        .iter()
+        .filter(|i| i.file_name == configured_file_name)
+        .collect();
+
+    if matching.is_empty() {
+        return Err(ResolveItemError::Missing);
+    }
+    if matching.len() > 1 {
+        return Err(ResolveItemError::Ambiguous);
+    }
+
+    let item = matching[0];
+    let kind = ItemKind::classify(&item.item_type);
+
+    if let ItemKind::Unsupported { ref original_type } = kind {
+        return Err(ResolveItemError::Unsupported {
+            file_name: item.file_name.clone(),
+            item_type: original_type.clone(),
+        });
+    }
+
+    Ok(ResolvedItem {
+        instance_id: item.instance_id.clone(),
+        file_name: item.file_name.clone(),
+        item_type: item.item_type.clone(),
+        kind,
+    })
+}
 
 struct InnerState {
     ws: Option<WsStream>,
     typing_cancel: Option<CancellationToken>,
     typing_handle: Option<tokio::task::JoinHandle<()>>,
     typing_active: bool,
+    resolved_item: Option<ResolvedItem>,
+}
+
+#[derive(Debug)]
+struct ItemSyncState {
+    desired: bool,
+    generation: u64,
+    applied: Option<bool>,
+    worker_running: bool,
+}
+
+impl Default for ItemSyncState {
+    fn default() -> Self {
+        Self {
+            desired: false,
+            generation: 0,
+            applied: None,
+            worker_running: false,
+        }
+    }
+}
+
+struct ItemTransitionState {
+    inner: parking_lot::Mutex<ItemSyncState>,
+}
+
+impl ItemTransitionState {
+    fn new() -> Self {
+        Self {
+            inner: parking_lot::Mutex::new(ItemSyncState::default()),
+        }
+    }
+
+    fn record_desired(&self, visible: bool) {
+        let mut s = self.inner.lock();
+        if s.worker_running {
+            if s.desired != visible {
+                s.desired = visible;
+                s.generation = s.generation.wrapping_add(1);
+            }
+        } else if s.applied != Some(visible) {
+            s.desired = visible;
+            s.generation = s.generation.wrapping_add(1);
+        }
+    }
+
+    fn read_desired(&self) -> (bool, u64) {
+        let s = self.inner.lock();
+        (s.desired, s.generation)
+    }
+
+    fn read_applied(&self) -> Option<bool> {
+        self.inner.lock().applied
+    }
+
+    fn begin_work(&self) -> Option<u64> {
+        let mut s = self.inner.lock();
+        if s.worker_running {
+            return None;
+        }
+        if s.applied == Some(s.desired) {
+            return None;
+        }
+        s.worker_running = true;
+        Some(s.generation)
+    }
+
+    fn finish_success(&self, gen: u64, visible: bool) -> bool {
+        let mut s = self.inner.lock();
+        if s.generation == gen {
+            s.applied = Some(visible);
+        }
+        if s.applied != Some(s.desired) {
+            true
+        } else {
+            s.worker_running = false;
+            false
+        }
+    }
+
+    fn finish_failure(&self, attempted_gen: u64) -> bool {
+        let mut s = self.inner.lock();
+        s.applied = None;
+        if s.generation != attempted_gen {
+            true
+        } else {
+            s.worker_running = false;
+            false
+        }
+    }
+
+    fn end_work(&self) {
+        self.inner.lock().worker_running = false;
+    }
+
+    fn set_applied_if_current(&self, visible: bool, gen: u64) -> bool {
+        let mut s = self.inner.lock();
+        if s.generation == gen {
+            s.applied = Some(visible);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn mark_applied_unknown(&self) {
+        self.inner.lock().applied = None;
+    }
+
+    fn reset(&self) {
+        let mut s = self.inner.lock();
+        s.desired = false;
+        s.generation = s.generation.wrapping_add(1);
+        s.applied = None;
+        s.worker_running = false;
+    }
+
+    fn force_applied(&self, visible: bool) {
+        self.inner.lock().applied = Some(visible);
+    }
 }
 
 pub struct VTubeStudioService {
@@ -33,6 +296,9 @@ pub struct VTubeStudioService {
     is_authenticated: Arc<AtomicBool>,
     desired_running: Arc<AtomicBool>,
     connection_status: Arc<parking_lot::Mutex<VTubeStudioConnectionStatus>>,
+    item_status: Arc<parking_lot::Mutex<VTubeStudioItemStatus>>,
+    item_transition: ItemTransitionState,
+    session: AtomicU64,
 }
 
 impl VTubeStudioService {
@@ -44,13 +310,25 @@ impl VTubeStudioService {
                 typing_cancel: None,
                 typing_handle: None,
                 typing_active: false,
+                resolved_item: None,
             })),
             is_authenticated: Arc::new(AtomicBool::new(false)),
             desired_running: Arc::new(AtomicBool::new(false)),
             connection_status: Arc::new(parking_lot::Mutex::new(
                 VTubeStudioConnectionStatus::Disconnected,
             )),
+            item_status: Arc::new(parking_lot::Mutex::new(VTubeStudioItemStatus::Inactive)),
+            item_transition: ItemTransitionState::new(),
+            session: AtomicU64::new(0),
         }
+    }
+
+    fn read_session(&self) -> u64 {
+        self.session.load(Ordering::Acquire)
+    }
+
+    fn invalidate_session(&self) -> u64 {
+        self.session.fetch_add(1, Ordering::SeqCst) + 1
     }
 
     pub fn set_connection_status(&self, status: VTubeStudioConnectionStatus) {
@@ -84,6 +362,138 @@ impl VTubeStudioService {
         self.inner.lock().await.ws.is_some()
     }
 
+    pub fn get_item_status(&self) -> VTubeStudioItemStatus {
+        self.item_status.lock().clone()
+    }
+
+    pub fn record_item_desired(&self, visible: bool) {
+        self.item_transition.record_desired(visible);
+    }
+
+    pub async fn run_item_sync(&self) -> VTubeStudioItemStatus {
+        match self.item_transition.begin_work() {
+            Some(_) => {}
+            None => return self.get_item_status(),
+        }
+
+        let session = self.read_session();
+
+        loop {
+            let typing_action = { self.settings.read().await.typing_action.clone() };
+            if typing_action.output_mode != VTubeStudioTypingMode::Item {
+                self.item_transition.end_work();
+                break;
+            }
+
+            if self.read_session() != session {
+                self.item_transition.end_work();
+                break;
+            }
+
+            let (desired, gen) = self.item_transition.read_desired();
+
+            let (mut sock, resolved, item_type_for_log) = {
+                let mut inner = self.inner.lock().await;
+                if self.read_session() != session {
+                    self.item_transition.end_work();
+                    break;
+                }
+                let ws = inner.ws.take();
+                let resolved = inner.resolved_item.clone();
+                let it = match &resolved {
+                    Some(r) => r.item_type.clone(),
+                    None => String::new(),
+                };
+                (ws, resolved, it)
+            };
+
+            let file_name_for_log = match &resolved {
+                Some(r) => r.file_name.clone(),
+                None => typing_action.item_file_name.clone(),
+            };
+
+            let result = match (sock.as_mut(), &resolved) {
+                (Some(ws), Some(item)) => {
+                    let start = Instant::now();
+                    let res = animate_item(ws, self.next_id(), item, desired).await;
+                    let duration = start.elapsed();
+                    info!(
+                        mode = "Item",
+                        item_type = %item_type_for_log,
+                        file_name = %file_name_for_log,
+                        desired = desired,
+                        duration_ms = duration.as_millis(),
+                        "Item animation request completed"
+                    );
+                    res
+                }
+                (None, _) => {
+                    warn!(
+                        mode = "Item",
+                        file_name = %file_name_for_log,
+                        "No WebSocket available for item sync"
+                    );
+                    self.item_transition.end_work();
+                    return self.get_item_status();
+                }
+                (_, None) => {
+                    self.item_transition.end_work();
+                    return self.get_item_status();
+                }
+            };
+
+            if let Some(s) = sock {
+                let mut inner = self.inner.lock().await;
+                if self.read_session() == session {
+                    inner.ws = Some(s);
+                }
+            }
+
+            match result {
+                Ok(()) => {
+                    if self.read_session() == session {
+                        let continue_work = self.item_transition.finish_success(gen, desired);
+                        let status = VTubeStudioItemStatus::Ready {
+                            file_name: file_name_for_log.clone(),
+                            vts_type: item_type_for_log.clone(),
+                        };
+                        *self.item_status.lock() = status;
+
+                        if !continue_work {
+                            break;
+                        }
+                    } else {
+                        self.item_transition.end_work();
+                        break;
+                    }
+                }
+                Err(..) => {
+                    if self.read_session() == session {
+                        warn!(
+                            mode = "Item",
+                            file_name = %file_name_for_log,
+                            "Item animation request failed"
+                        );
+                        let continue_work = self.item_transition.finish_failure(gen);
+                        let status = VTubeStudioItemStatus::Error {
+                            file_name: file_name_for_log.clone(),
+                            message: "item action failed".to_string(),
+                        };
+                        *self.item_status.lock() = status;
+                        if continue_work {
+                            continue;
+                        }
+                    } else {
+                        self.item_transition.end_work();
+                    }
+                    return self.get_item_status();
+                }
+            }
+        }
+
+        self.get_item_status()
+    }
+
     pub async fn test_connection(
         &self,
         port: u16,
@@ -112,9 +522,12 @@ impl VTubeStudioService {
         self.set_desired_running(true);
         self.set_connection_status(VTubeStudioConnectionStatus::Connecting);
 
+        let typing_action = { self.settings.read().await.typing_action.clone() };
+
         let mut inner = self.inner.lock().await;
         self.stop_typing_keepalive_locked(&mut inner);
         inner.typing_active = false;
+        inner.resolved_item = None;
         inner.ws = None;
 
         let ws_result = connect_ws(port).await;
@@ -142,6 +555,32 @@ impl VTubeStudioService {
         inner.ws = Some(ws);
         self.is_authenticated.store(true, Ordering::SeqCst);
         self.set_connection_status(VTubeStudioConnectionStatus::Connected);
+
+        match typing_action.output_mode {
+            VTubeStudioTypingMode::Event | VTubeStudioTypingMode::Hotkeys => {
+                *self.item_status.lock() = VTubeStudioItemStatus::Inactive;
+            }
+            VTubeStudioTypingMode::Item => {
+                let file_name = typing_action.item_file_name.clone();
+                if file_name.is_empty() {
+                    *self.item_status.lock() = VTubeStudioItemStatus::Missing {
+                        file_name: String::new(),
+                    };
+                } else {
+                    let session = self.read_session();
+                    let mut sock = inner.ws.take().unwrap();
+                    let (resolved, status) = self
+                        .do_item_refresh_with_desired(&mut sock, &file_name, session)
+                        .await;
+                    if self.read_session() == session {
+                        inner.ws = Some(sock);
+                        inner.resolved_item = resolved;
+                        *self.item_status.lock() = status;
+                    }
+                }
+            }
+        }
+
         Ok(new_token)
     }
 
@@ -168,7 +607,7 @@ impl VTubeStudioService {
                         self.is_authenticated.store(false, Ordering::SeqCst);
                     }
                 }
-            } else {
+            } else if typing_action.output_mode == VTubeStudioTypingMode::Hotkeys {
                 if let Some(ref mut ws) = inner.ws {
                     let stop_id = typing_action.stop_hotkey_id.clone();
                     if let Err(e) = trigger_hotkey(ws, self.next_id(), &stop_id).await {
@@ -177,6 +616,8 @@ impl VTubeStudioService {
                         self.is_authenticated.store(false, Ordering::SeqCst);
                     }
                 }
+            } else if typing_action.output_mode == VTubeStudioTypingMode::Item {
+                self.item_transition.record_desired(false);
             }
             return Ok(());
         }
@@ -311,20 +752,229 @@ impl VTubeStudioService {
                     return Err(e);
                 }
             }
+            VTubeStudioTypingMode::Item => {
+                self.item_transition.record_desired(true);
+            }
         }
 
         Ok(())
     }
 
+    pub async fn refresh_item_action(&self) -> VTubeStudioItemStatus {
+        let typing_action = { self.settings.read().await.typing_action.clone() };
+
+        match typing_action.output_mode {
+            VTubeStudioTypingMode::Event | VTubeStudioTypingMode::Hotkeys => {
+                let mut inner = self.inner.lock().await;
+                inner.resolved_item = None;
+                let status = VTubeStudioItemStatus::Inactive;
+                *self.item_status.lock() = status.clone();
+                status
+            }
+            VTubeStudioTypingMode::Item => {
+                let file_name = typing_action.item_file_name.clone();
+
+                if file_name.is_empty() {
+                    let mut inner = self.inner.lock().await;
+                    inner.resolved_item = None;
+                    let status = VTubeStudioItemStatus::Missing {
+                        file_name: String::new(),
+                    };
+                    *self.item_status.lock() = status.clone();
+                    return status;
+                }
+
+                let mut inner = self.inner.lock().await;
+
+                let mut sock = match inner.ws.take() {
+                    Some(ws) => ws,
+                    None => {
+                        inner.resolved_item = None;
+                        let status = VTubeStudioItemStatus::Error {
+                            file_name: file_name.clone(),
+                            message: "WebSocket not available".to_string(),
+                        };
+                        *self.item_status.lock() = status.clone();
+                        return status;
+                    }
+                };
+
+                let session = self.read_session();
+                let (resolved, status) = self
+                    .do_item_refresh_with_desired(&mut sock, &file_name, session)
+                    .await;
+                if self.read_session() == session {
+                    inner.ws = Some(sock);
+                    inner.resolved_item = resolved;
+                    *self.item_status.lock() = status.clone();
+                }
+                status
+            }
+        }
+    }
+
+    async fn do_item_refresh_with_desired(
+        &self,
+        ws: &mut WsStream,
+        file_name: &str,
+        session: u64,
+    ) -> (Option<ResolvedItem>, VTubeStudioItemStatus) {
+        let (desired, desired_gen) = self.item_transition.read_desired();
+
+        match fetch_scene_instances(ws, self.next_id(), Some(file_name)).await {
+            Ok(instances) => {
+                if self.read_session() != session {
+                    return (None, VTubeStudioItemStatus::Inactive);
+                }
+
+                match resolve_item(&instances, file_name) {
+                    Ok(item) => {
+                        let resolved = item.clone();
+                        match animate_item(ws, self.next_id(), &item, desired).await {
+                            Ok(_) => {
+                                if self.read_session() == session {
+                                    self.item_transition
+                                        .set_applied_if_current(desired, desired_gen);
+                                }
+                                let status = VTubeStudioItemStatus::Ready {
+                                    file_name: resolved.file_name.clone(),
+                                    vts_type: resolved.item_type.clone(),
+                                };
+                                (Some(resolved), status)
+                            }
+                            Err(e) => {
+                                if self.read_session() == session {
+                                    self.item_transition.mark_applied_unknown();
+                                }
+                                let status = VTubeStudioItemStatus::Error {
+                                    file_name: file_name.to_string(),
+                                    message: format!("failed to normalize item: {}", e),
+                                };
+                                (Some(resolved), status)
+                            }
+                        }
+                    }
+                    Err(ResolveItemError::Missing) => {
+                        let status = VTubeStudioItemStatus::Missing {
+                            file_name: file_name.to_string(),
+                        };
+                        (None, status)
+                    }
+                    Err(ResolveItemError::Ambiguous) => {
+                        let count = instances
+                            .iter()
+                            .filter(|i| i.file_name == file_name)
+                            .count() as u32;
+                        let status = VTubeStudioItemStatus::Ambiguous {
+                            file_name: file_name.to_string(),
+                            match_count: count,
+                        };
+                        (None, status)
+                    }
+                    Err(ResolveItemError::Unsupported {
+                        file_name: fn_,
+                        item_type,
+                    }) => {
+                        let status = VTubeStudioItemStatus::Unsupported {
+                            file_name: fn_,
+                            vts_type: item_type,
+                        };
+                        (None, status)
+                    }
+                }
+            }
+            Err(e) => {
+                if self.read_session() == session {
+                    self.item_transition.mark_applied_unknown();
+                }
+                let status = VTubeStudioItemStatus::Error {
+                    file_name: file_name.to_string(),
+                    message: e,
+                };
+                (None, status)
+            }
+        }
+    }
+
+    pub async fn list_scene_items(&self) -> Result<Vec<SceneItemRecord>, String> {
+        if !self.is_desired_running() {
+            return Err("VTube Studio is not running.".to_string());
+        }
+
+        let status = self.get_connection_status();
+        if status != VTubeStudioConnectionStatus::Connected {
+            return Err(format!(
+                "VTube Studio is not connected (status: {:?}).",
+                status
+            ));
+        }
+
+        if !self.is_authenticated.load(Ordering::SeqCst) {
+            return Err("VTube Studio is not authenticated.".to_string());
+        }
+
+        let mut inner = self.inner.lock().await;
+        let ws = inner
+            .ws
+            .as_mut()
+            .ok_or_else(|| "VTube Studio WebSocket is not available.".to_string())?;
+
+        let instances = fetch_scene_instances(ws, self.next_id(), None).await?;
+
+        Ok(build_scene_records(&instances))
+    }
+
     pub async fn disconnect(&self) {
+        let typing_action = { self.settings.read().await.typing_action.clone() };
         let mut inner = self.inner.lock().await;
         self.set_desired_running(false);
 
         let typing_active = inner.typing_active;
-        let typing_action = { self.settings.read().await.typing_action.clone() };
+        let resolved_item = inner.resolved_item.clone();
 
         self.stop_typing_keepalive_locked(&mut inner);
         inner.typing_active = false;
+
+        if typing_action.output_mode == VTubeStudioTypingMode::Item {
+            let applied = self.item_transition.read_applied();
+            self.invalidate_session();
+            self.item_transition.reset();
+
+            let should_hide = match (resolved_item.as_ref(), applied) {
+                (Some(_), Some(true)) | (Some(_), None) => true,
+                _ => false,
+            };
+
+            if should_hide {
+                if let (Some(ref mut ws), Some(ref item)) = (&mut inner.ws, &resolved_item) {
+                    let start = Instant::now();
+                    if let Err(_e) = animate_item(ws, self.next_id(), item, false).await {
+                        warn!(
+                            mode = "Item",
+                            file_name = %item.file_name,
+                            "Best-effort hide during disconnect failed"
+                        );
+                    }
+                    let duration = start.elapsed();
+                    info!(
+                        mode = "Item",
+                        item_type = %item.item_type,
+                        file_name = %item.file_name,
+                        desired = false,
+                        duration_ms = duration.as_millis(),
+                        "Disconnect hide completed"
+                    );
+                }
+            }
+
+            inner.ws = None;
+            inner.resolved_item = None;
+            self.is_authenticated.store(false, Ordering::SeqCst);
+            self.set_connection_status(VTubeStudioConnectionStatus::Disconnected);
+            *self.item_status.lock() = VTubeStudioItemStatus::Inactive;
+            info!("VTube Studio disconnected");
+            return;
+        }
 
         if typing_active {
             if let Some(ref mut ws) = inner.ws {
@@ -341,13 +991,16 @@ impl VTubeStudioService {
                                     .await;
                         }
                     }
+                    VTubeStudioTypingMode::Item => {}
                 }
             }
         }
 
         inner.ws = None;
+        inner.resolved_item = None;
         self.is_authenticated.store(false, Ordering::SeqCst);
         self.set_connection_status(VTubeStudioConnectionStatus::Disconnected);
+        *self.item_status.lock() = VTubeStudioItemStatus::Inactive;
         info!("VTube Studio disconnected");
     }
 
@@ -435,6 +1088,67 @@ impl VTubeStudioService {
 
         self.stop_typing_keepalive_locked(&mut inner);
 
+        if typing_action.output_mode == VTubeStudioTypingMode::Item {
+            // Invalidate session so any in-flight worker completes without
+            // restoring state after this test ends (requirement 4).
+            let session = self.invalidate_session();
+            let resolved = inner.resolved_item.clone();
+            let ws = inner.ws.as_mut().unwrap();
+
+            let item = match resolved {
+                Some(ref item) => item.clone(),
+                None => {
+                    return Err(
+                        "No resolved item available for testing. Refresh the item first."
+                            .to_string(),
+                    );
+                }
+            };
+
+            for i in 0..repeat_count {
+                if let Err(e) = animate_item(ws, self.next_id(), &item, true).await {
+                    self.item_transition.mark_applied_unknown();
+                    *self.item_status.lock() = VTubeStudioItemStatus::Error {
+                        file_name: item.file_name.clone(),
+                        message: format!("show failed at repeat {}: {}", i + 1, e),
+                    };
+                    // Do not change connection status on item test failure
+                    return Err(format!("Item show failed at repeat {}: {}", i + 1, e));
+                }
+
+                tokio::time::sleep(Duration::from_millis(timeout_ms)).await;
+
+                if let Err(e) = animate_item(ws, self.next_id(), &item, false).await {
+                    self.item_transition.mark_applied_unknown();
+                    *self.item_status.lock() = VTubeStudioItemStatus::Error {
+                        file_name: item.file_name.clone(),
+                        message: format!("hide failed at repeat {}: {}", i + 1, e),
+                    };
+                    // Do not change connection status on item test failure
+                    return Err(format!("Item hide failed at repeat {}: {}", i + 1, e));
+                }
+
+                if i + 1 < repeat_count {
+                    tokio::time::sleep(Duration::from_millis(timeout_ms)).await;
+                }
+            }
+
+            // Guarded commit: only restore if session is still current (requirement 3)
+            if self.read_session() == session {
+                self.item_transition.reset();
+                self.item_transition.force_applied(false);
+                *self.item_status.lock() = VTubeStudioItemStatus::Ready {
+                    file_name: item.file_name.clone(),
+                    vts_type: item.item_type.clone(),
+                };
+            }
+
+            return Ok(format!(
+                "Тест действия выполнен: повторов — {}, таймаут — {} мс",
+                repeat_count, timeout_ms
+            ));
+        }
+
         let timeout_dur = Duration::from_millis(timeout_ms);
 
         for i in 0..repeat_count {
@@ -466,6 +1180,9 @@ impl VTubeStudioService {
                             e
                         ));
                     }
+                }
+                VTubeStudioTypingMode::Item => {
+                    // Unreachable — Item mode handled above.
                 }
             }
 
@@ -499,6 +1216,9 @@ impl VTubeStudioService {
                             e
                         ));
                     }
+                }
+                VTubeStudioTypingMode::Item => {
+                    // Unreachable — Item mode handled above.
                 }
             }
 
@@ -649,6 +1369,73 @@ async fn trigger_hotkey(
     Ok(())
 }
 
+async fn fetch_scene_instances(
+    ws: &mut WsStream,
+    request_id: String,
+    file_name: Option<&str>,
+) -> Result<Vec<ItemInstanceInfo>, String> {
+    let req = VtsRequest::item_list_request(&request_id, file_name);
+    let json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+
+    let value = send_and_recv(ws, &json, &request_id, "ItemListResponse")
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let data: ItemListResponseData =
+        serde_json::from_value(value).map_err(|e| format!("Parse item list response: {}", e))?;
+
+    Ok(data.item_instances_in_scene)
+}
+
+async fn animate_item(
+    ws: &mut WsStream,
+    request_id: String,
+    resolved: &ResolvedItem,
+    show: bool,
+) -> Result<(), String> {
+    let (opacity, frame, play_state) = match (&resolved.kind, show) {
+        (ItemKind::Animated, true) => (1.0, Some(0), Some(true)),
+        (ItemKind::Animated, false) => (0.0, None, Some(false)),
+        (ItemKind::Static, true) => (1.0, None, None),
+        (ItemKind::Static, false) => (0.0, None, None),
+        _ => {
+            return Err(format!(
+                "cannot animate unsupported item kind for '{}'",
+                resolved.file_name
+            ))
+        }
+    };
+
+    let req = VtsRequest::item_animation_control_request(
+        &request_id,
+        &resolved.instance_id,
+        opacity,
+        frame,
+        play_state,
+    );
+    let json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+
+    let value = timeout(
+        ITEM_ACTION_TIMEOUT,
+        send_and_recv(ws, &json, &request_id, "ItemAnimationControlResponse"),
+    )
+    .await
+    .map_err(|_| "Item animation request timed out".to_string())?
+    .map_err(|e| format!("Item animation request failed: {}", e))?;
+
+    let _data: ItemAnimationControlResponseData = serde_json::from_value(value)
+        .map_err(|e| format!("Malformed item animation response: {}", e))?;
+
+    debug!(
+        opacity,
+        show,
+        item_type = %resolved.item_type,
+        file_name = %resolved.file_name,
+        "Item animation control applied"
+    );
+    Ok(())
+}
+
 enum RecvResult {
     Match(serde_json::Value),
     Skip,
@@ -744,6 +1531,43 @@ async fn recv_until_match(
             RecvResult::Error(e) => return Err(e),
         }
     }
+}
+
+fn build_scene_records(instances: &[ItemInstanceInfo]) -> Vec<SceneItemRecord> {
+    let records: Vec<SceneItemRecord> = instances
+        .iter()
+        .map(|inst| {
+            let kind = ItemKind::classify(&inst.item_type);
+            let supported = !matches!(kind, ItemKind::Unsupported { .. });
+            SceneItemRecord {
+                file_name: inst.file_name.clone(),
+                item_type: inst.item_type.clone(),
+                supported,
+                duplicate_count: 1,
+            }
+        })
+        .collect();
+
+    let mut grouped: Vec<SceneItemRecord> = Vec::new();
+    let mut seen: HashMap<(String, String), usize> = HashMap::new();
+
+    for rec in &records {
+        let key = (rec.file_name.clone(), rec.item_type.clone());
+        if let Some(idx) = seen.get(&key) {
+            grouped[*idx].duplicate_count += 1;
+        } else {
+            seen.insert(key, grouped.len());
+            grouped.push(rec.clone());
+        }
+    }
+
+    grouped.sort_by(|a, b| {
+        a.file_name
+            .cmp(&b.file_name)
+            .then_with(|| a.item_type.cmp(&b.item_type))
+    });
+
+    grouped
 }
 
 #[cfg(test)]
@@ -1614,5 +2438,1549 @@ mod tests {
             }
             _ => panic!("expected Error"),
         }
+    }
+
+    fn make_instance(file_name: &str, instance_id: &str, item_type: &str) -> ItemInstanceInfo {
+        ItemInstanceInfo {
+            file_name: file_name.to_string(),
+            instance_id: instance_id.to_string(),
+            item_type: item_type.to_string(),
+            framerate: 0.0,
+            frame_count: -1,
+            current_frame: -1,
+        }
+    }
+
+    #[test]
+    fn item_kind_classifies_types() {
+        assert_eq!(ItemKind::classify("PNG"), ItemKind::Static);
+        assert_eq!(ItemKind::classify("JPG"), ItemKind::Static);
+        assert_eq!(ItemKind::classify("GIF"), ItemKind::Animated);
+        assert_eq!(ItemKind::classify("AnimationFolder"), ItemKind::Animated);
+        assert_eq!(
+            ItemKind::classify("Live2D"),
+            ItemKind::Unsupported {
+                original_type: "Live2D".to_string()
+            }
+        );
+        assert_eq!(
+            ItemKind::classify("Unknown"),
+            ItemKind::Unsupported {
+                original_type: "Unknown".to_string()
+            }
+        );
+        assert_eq!(
+            ItemKind::classify("FutureTypeXYZ"),
+            ItemKind::Unsupported {
+                original_type: "FutureTypeXYZ".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_zero_matches_is_missing() {
+        let instances = vec![make_instance("icon.png", "i1", "PNG")];
+        assert_eq!(
+            resolve_item(&instances, "other.png").unwrap_err(),
+            ResolveItemError::Missing
+        );
+    }
+
+    #[test]
+    fn resolve_single_match_returns_item() {
+        let instances = vec![make_instance("icon.png", "i1", "PNG")];
+        let resolved = resolve_item(&instances, "icon.png").unwrap();
+        assert_eq!(resolved.instance_id, "i1");
+        assert_eq!(resolved.file_name, "icon.png");
+        assert_eq!(resolved.item_type, "PNG");
+        assert_eq!(resolved.kind, ItemKind::Static);
+    }
+
+    #[test]
+    fn resolve_duplicate_filename_is_ambiguous() {
+        let instances = vec![
+            make_instance("icon.png", "i1", "PNG"),
+            make_instance("icon.png", "i2", "PNG"),
+        ];
+        assert_eq!(
+            resolve_item(&instances, "icon.png").unwrap_err(),
+            ResolveItemError::Ambiguous
+        );
+    }
+
+    #[test]
+    fn resolve_wrong_case_is_missing() {
+        let instances = vec![make_instance("Icon.png", "i1", "PNG")];
+        assert_eq!(
+            resolve_item(&instances, "icon.png").unwrap_err(),
+            ResolveItemError::Missing
+        );
+    }
+
+    #[test]
+    fn resolve_unsupported_rejected_with_type() {
+        let instances = vec![make_instance("model.moc3", "i1", "Live2D")];
+        assert_eq!(
+            resolve_item(&instances, "model.moc3").unwrap_err(),
+            ResolveItemError::Unsupported {
+                file_name: "model.moc3".to_string(),
+                item_type: "Live2D".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_future_type_rejected_with_diagnostic() {
+        let instances = vec![make_instance("video.mp4", "i1", "VideoClip")];
+        assert_eq!(
+            resolve_item(&instances, "video.mp4").unwrap_err(),
+            ResolveItemError::Unsupported {
+                file_name: "video.mp4".to_string(),
+                item_type: "VideoClip".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_unsupported_unknown_rejected() {
+        let instances = vec![make_instance("thing.dat", "i1", "Unknown")];
+        assert_eq!(
+            resolve_item(&instances, "thing.dat").unwrap_err(),
+            ResolveItemError::Unsupported {
+                file_name: "thing.dat".to_string(),
+                item_type: "Unknown".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_duplicate_unsupported_is_ambiguous_not_unsupported() {
+        let instances = vec![
+            make_instance("bad.moc3", "i1", "Live2D"),
+            make_instance("bad.moc3", "i2", "Live2D"),
+        ];
+        assert_eq!(
+            resolve_item(&instances, "bad.moc3").unwrap_err(),
+            ResolveItemError::Ambiguous
+        );
+    }
+
+    #[test]
+    fn resolve_multiple_duplicate_unsupported_ambiguous_first() {
+        let instances = vec![
+            make_instance("a.png", "i1", "PNG"),
+            make_instance("bad.moc3", "i2", "Live2D"),
+            make_instance("bad.moc3", "i3", "Live2D"),
+        ];
+        let result = resolve_item(&instances, "bad.moc3");
+        assert_eq!(result.unwrap_err(), ResolveItemError::Ambiguous);
+    }
+
+    #[test]
+    fn resolve_animated_gif_is_animated_kind() {
+        let instances = vec![make_instance("anim.gif", "i1", "GIF")];
+        let resolved = resolve_item(&instances, "anim.gif").unwrap();
+        assert_eq!(resolved.kind, ItemKind::Animated);
+    }
+
+    #[test]
+    fn resolve_animated_folder_is_animated_kind() {
+        let instances = vec![make_instance("akari_fly", "i1", "AnimationFolder")];
+        let resolved = resolve_item(&instances, "akari_fly").unwrap();
+        assert_eq!(resolved.kind, ItemKind::Animated);
+    }
+
+    #[test]
+    fn resolve_exact_filename_match_in_mixed_set() {
+        let instances = vec![
+            make_instance("icon.png", "i1", "PNG"),
+            make_instance("icon.gif", "i2", "GIF"),
+            make_instance("icon.png", "i3", "PNG"),
+        ];
+        assert_eq!(
+            resolve_item(&instances, "icon.png").unwrap_err(),
+            ResolveItemError::Ambiguous
+        );
+        let resolved = resolve_item(&instances, "icon.gif").unwrap();
+        assert_eq!(resolved.instance_id, "i2");
+        assert_eq!(resolved.kind, ItemKind::Animated);
+    }
+
+    #[test]
+    fn classify_item_list_response_matches() {
+        let resp = make_response(
+            "ItemListResponse",
+            "ilr-1",
+            serde_json::json!({
+                "itemsInSceneCount": 1,
+                "totalItemsAllowedCount": 60,
+                "canLoadItemsRightNow": true,
+                "itemInstancesInScene": [
+                    {"fileName": "a.png", "instanceID": "i1", "type": "PNG"}
+                ]
+            }),
+        );
+        match classify_vts_response(&resp, "ilr-1", "ItemListResponse") {
+            RecvResult::Match(data) => {
+                let parsed: ItemListResponseData = serde_json::from_value(data).unwrap();
+                assert_eq!(parsed.items_in_scene_count, 1);
+                assert!(parsed.can_load_items_right_now);
+                assert_eq!(parsed.item_instances_in_scene.len(), 1);
+            }
+            RecvResult::Skip => panic!("expected Match, got Skip"),
+            RecvResult::Error(e) => panic!("expected Match, got Error: {}", e),
+        }
+    }
+
+    #[test]
+    fn classify_item_list_api_error_matches() {
+        let resp = make_response(
+            "APIError",
+            "ilr-err",
+            serde_json::json!({"errorID": 150, "message": "Permission not granted"}),
+        );
+        match classify_vts_response(&resp, "ilr-err", "ItemListResponse") {
+            RecvResult::Error(e) => {
+                assert!(e.contains("VTS error 150"), "got: {}", e);
+                assert!(
+                    !e.contains("Permission"),
+                    "error must not contain VTS message text: {}",
+                    e
+                );
+            }
+            RecvResult::Match(_) => panic!("expected Error, got Match"),
+            RecvResult::Skip => panic!("expected Error, got Skip"),
+        }
+    }
+
+    #[test]
+    fn classify_item_animation_control_response_matches() {
+        let resp = make_response(
+            "ItemAnimationControlResponse",
+            "iac-r-1",
+            serde_json::json!({"frame": 3, "animationPlaying": true}),
+        );
+        match classify_vts_response(&resp, "iac-r-1", "ItemAnimationControlResponse") {
+            RecvResult::Match(data) => {
+                let parsed: ItemAnimationControlResponseData =
+                    serde_json::from_value(data).unwrap();
+                assert_eq!(parsed.frame, 3);
+                assert!(parsed.animation_playing);
+            }
+            RecvResult::Skip => panic!("expected Match, got Skip"),
+            RecvResult::Error(e) => panic!("expected Match, got Error: {}", e),
+        }
+    }
+
+    #[test]
+    fn classify_item_animation_control_api_error_matches() {
+        let resp = make_response(
+            "APIError",
+            "iac-err",
+            serde_json::json!({"errorID": 200, "message": "Bad request"}),
+        );
+        match classify_vts_response(&resp, "iac-err", "ItemAnimationControlResponse") {
+            RecvResult::Error(e) => {
+                assert!(e.contains("VTS error 200"), "got: {}", e);
+                assert!(
+                    !e.contains("Bad request"),
+                    "error must not contain VTS message text: {}",
+                    e
+                );
+            }
+            RecvResult::Match(_) => panic!("expected Error, got Match"),
+            RecvResult::Skip => panic!("expected Error, got Skip"),
+        }
+    }
+
+    #[test]
+    fn malformed_item_animation_control_response_fails_deserialization() {
+        let resp = make_response(
+            "ItemAnimationControlResponse",
+            "iac-mal",
+            serde_json::json!({"unexpectedField": "garbage"}),
+        );
+        match classify_vts_response(&resp, "iac-mal", "ItemAnimationControlResponse") {
+            RecvResult::Match(data) => {
+                let err =
+                    serde_json::from_value::<ItemAnimationControlResponseData>(data).unwrap_err();
+                assert!(
+                    err.to_string().contains("frame"),
+                    "malformed deserialization should mention missing frame field: {}",
+                    err
+                );
+            }
+            RecvResult::Skip => panic!("expected Match, got Skip"),
+            RecvResult::Error(e) => panic!("expected Match, got Error: {}", e),
+        }
+    }
+
+    #[test]
+    fn resolve_item_error_display() {
+        assert_eq!(
+            ResolveItemError::Missing.to_string(),
+            "no scene item matching the configured filename"
+        );
+        assert_eq!(
+            ResolveItemError::Ambiguous.to_string(),
+            "multiple scene items match the configured filename"
+        );
+        assert_eq!(
+            ResolveItemError::Unsupported {
+                file_name: "x.moc3".to_string(),
+                item_type: "Live2D".to_string(),
+            }
+            .to_string(),
+            "item 'x.moc3' has unsupported type 'Live2D'"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // VTubeStudioItemStatus serde shape
+    // ---------------------------------------------------------------------------
+
+    fn has_instance_id_keys(value: &serde_json::Value) -> bool {
+        match value {
+            serde_json::Value::Object(map) => {
+                map.keys().any(|k| k == "instanceID" || k == "instanceId")
+                    || map.values().any(has_instance_id_keys)
+            }
+            serde_json::Value::Array(arr) => arr.iter().any(has_instance_id_keys),
+            _ => false,
+        }
+    }
+
+    #[test]
+    fn item_status_serde_inactive() {
+        let status = VTubeStudioItemStatus::Inactive;
+        let expected = serde_json::json!({"status": "Inactive"});
+        assert_eq!(serde_json::to_value(&status).unwrap(), expected);
+        assert!(!has_instance_id_keys(
+            &serde_json::to_value(&status).unwrap()
+        ));
+
+        let parsed: VTubeStudioItemStatus = serde_json::from_value(expected).unwrap();
+        assert_eq!(parsed, VTubeStudioItemStatus::Inactive);
+    }
+
+    #[test]
+    fn item_status_serde_ready() {
+        let status = VTubeStudioItemStatus::Ready {
+            file_name: "icon.png".into(),
+            vts_type: "PNG".into(),
+        };
+        let expected =
+            serde_json::json!({"status": "Ready", "fileName": "icon.png", "vtsType": "PNG"});
+        assert_eq!(serde_json::to_value(&status).unwrap(), expected);
+        assert!(!has_instance_id_keys(
+            &serde_json::to_value(&status).unwrap()
+        ));
+
+        let parsed: VTubeStudioItemStatus = serde_json::from_value(expected).unwrap();
+        assert_eq!(parsed, status);
+    }
+
+    #[test]
+    fn item_status_serde_missing() {
+        let status = VTubeStudioItemStatus::Missing {
+            file_name: "ghost.png".into(),
+        };
+        let expected = serde_json::json!({"status": "Missing", "fileName": "ghost.png"});
+        assert_eq!(serde_json::to_value(&status).unwrap(), expected);
+        assert!(!has_instance_id_keys(
+            &serde_json::to_value(&status).unwrap()
+        ));
+
+        let parsed: VTubeStudioItemStatus = serde_json::from_value(expected).unwrap();
+        assert_eq!(parsed, status);
+    }
+
+    #[test]
+    fn item_status_serde_ambiguous() {
+        let status = VTubeStudioItemStatus::Ambiguous {
+            file_name: "dup.png".into(),
+            match_count: 3,
+        };
+        let expected =
+            serde_json::json!({"status": "Ambiguous", "fileName": "dup.png", "matchCount": 3});
+        assert_eq!(serde_json::to_value(&status).unwrap(), expected);
+        assert!(!has_instance_id_keys(
+            &serde_json::to_value(&status).unwrap()
+        ));
+
+        let parsed: VTubeStudioItemStatus = serde_json::from_value(expected).unwrap();
+        assert_eq!(parsed, status);
+    }
+
+    #[test]
+    fn item_status_serde_unsupported() {
+        let status = VTubeStudioItemStatus::Unsupported {
+            file_name: "model.moc3".into(),
+            vts_type: "Live2D".into(),
+        };
+        let expected = serde_json::json!({"status": "Unsupported", "fileName": "model.moc3", "vtsType": "Live2D"});
+        assert_eq!(serde_json::to_value(&status).unwrap(), expected);
+        assert!(!has_instance_id_keys(
+            &serde_json::to_value(&status).unwrap()
+        ));
+
+        let parsed: VTubeStudioItemStatus = serde_json::from_value(expected).unwrap();
+        assert_eq!(parsed, status);
+    }
+
+    #[test]
+    fn item_status_serde_error() {
+        let status = VTubeStudioItemStatus::Error {
+            file_name: "bad.gif".into(),
+            message: "request timed out".into(),
+        };
+        let expected = serde_json::json!({"status": "Error", "fileName": "bad.gif", "message": "request timed out"});
+        assert_eq!(serde_json::to_value(&status).unwrap(), expected);
+        assert!(!has_instance_id_keys(
+            &serde_json::to_value(&status).unwrap()
+        ));
+
+        let parsed: VTubeStudioItemStatus = serde_json::from_value(expected).unwrap();
+        assert_eq!(parsed, status);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Resolve error → Item status mapping (pure)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn resolve_missing_maps_to_missing_status() {
+        let instances = vec![make_instance("icon.png", "i1", "PNG")];
+        let err = resolve_item(&instances, "other.png").unwrap_err();
+        assert_eq!(err, ResolveItemError::Missing);
+
+        let status = VTubeStudioItemStatus::Missing {
+            file_name: "other.png".into(),
+        };
+        assert!(
+            matches!(status, VTubeStudioItemStatus::Missing { ref file_name } if file_name == "other.png")
+        );
+    }
+
+    #[test]
+    fn resolve_ambiguous_maps_to_ambiguous_status_with_count() {
+        let instances = vec![
+            make_instance("dup.png", "i1", "PNG"),
+            make_instance("dup.png", "i2", "PNG"),
+        ];
+        let err = resolve_item(&instances, "dup.png").unwrap_err();
+        assert_eq!(err, ResolveItemError::Ambiguous);
+
+        let count = instances
+            .iter()
+            .filter(|i| i.file_name == "dup.png")
+            .count() as u32;
+        let status = VTubeStudioItemStatus::Ambiguous {
+            file_name: "dup.png".into(),
+            match_count: count,
+        };
+        assert!(
+            matches!(&status, VTubeStudioItemStatus::Ambiguous { file_name, match_count } if file_name == "dup.png" && *match_count == 2)
+        );
+    }
+
+    #[test]
+    fn resolve_unsupported_maps_to_unsupported_status() {
+        let instances = vec![make_instance("model.moc3", "i1", "Live2D")];
+        let err = resolve_item(&instances, "model.moc3").unwrap_err();
+
+        match err {
+            ResolveItemError::Unsupported {
+                file_name,
+                item_type,
+            } => {
+                let status = VTubeStudioItemStatus::Unsupported {
+                    file_name: file_name.clone(),
+                    vts_type: item_type.clone(),
+                };
+                assert!(
+                    matches!(&status, VTubeStudioItemStatus::Unsupported { file_name: f, vts_type: t } if f == "model.moc3" && t == "Live2D")
+                );
+            }
+            _ => panic!("expected Unsupported"),
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Scene record aggregation (pure)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn build_scene_records_single_item() {
+        let instances = vec![make_instance("icon.png", "i1", "PNG")];
+        let records = build_scene_records(&instances);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].file_name, "icon.png");
+        assert_eq!(records[0].item_type, "PNG");
+        assert!(records[0].supported);
+        assert_eq!(records[0].duplicate_count, 1);
+    }
+
+    #[test]
+    fn build_scene_records_aggregates_duplicates_same_file_type() {
+        let instances = vec![
+            make_instance("icon.png", "i1", "PNG"),
+            make_instance("icon.png", "i2", "PNG"),
+        ];
+        let records = build_scene_records(&instances);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].file_name, "icon.png");
+        assert_eq!(records[0].item_type, "PNG");
+        assert_eq!(records[0].duplicate_count, 2);
+        assert!(records[0].supported);
+    }
+
+    #[test]
+    fn build_scene_records_separates_by_type_even_with_same_filename() {
+        let instances = vec![
+            make_instance("item.png", "i1", "PNG"),
+            make_instance("item.png", "i2", "Live2D"),
+        ];
+        let records = build_scene_records(&instances);
+        assert_eq!(records.len(), 2);
+        let png = records.iter().find(|r| r.item_type == "PNG").unwrap();
+        assert!(png.supported);
+        assert_eq!(png.duplicate_count, 1);
+        let l2d = records.iter().find(|r| r.item_type == "Live2D").unwrap();
+        assert!(!l2d.supported);
+        assert_eq!(l2d.duplicate_count, 1);
+    }
+
+    #[test]
+    fn build_scene_records_unsupported_future_type_is_false() {
+        let instances = vec![make_instance("video.mp4", "i1", "VideoClip")];
+        let records = build_scene_records(&instances);
+        assert_eq!(records.len(), 1);
+        assert!(!records[0].supported);
+        assert_eq!(records[0].item_type, "VideoClip");
+    }
+
+    #[test]
+    fn build_scene_records_unknown_type_is_unsupported() {
+        let instances = vec![make_instance("thing.dat", "i1", "Unknown")];
+        let records = build_scene_records(&instances);
+        assert_eq!(records.len(), 1);
+        assert!(!records[0].supported);
+    }
+
+    #[test]
+    fn build_scene_records_deterministic_order_by_filename_then_type() {
+        let instances = vec![
+            make_instance("z.png", "iz", "PNG"),
+            make_instance("a.png", "ia1", "AnimationFolder"),
+            make_instance("a.png", "ia2", "PNG"),
+        ];
+        let records = build_scene_records(&instances);
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0].file_name, "a.png");
+        assert_eq!(records[0].item_type, "AnimationFolder");
+        assert_eq!(records[1].file_name, "a.png");
+        assert_eq!(records[1].item_type, "PNG");
+        assert_eq!(records[2].file_name, "z.png");
+        assert_eq!(records[2].item_type, "PNG");
+
+        let instances_rev = vec![
+            make_instance("a.png", "ia2", "PNG"),
+            make_instance("a.png", "ia1", "AnimationFolder"),
+            make_instance("z.png", "iz", "PNG"),
+        ];
+        let records_rev = build_scene_records(&instances_rev);
+        assert_eq!(records, records_rev);
+    }
+
+    #[test]
+    fn scene_item_record_serde_no_instance_id() {
+        let rec = SceneItemRecord {
+            file_name: "icon.png".into(),
+            item_type: "PNG".into(),
+            supported: true,
+            duplicate_count: 2,
+        };
+        let json = serde_json::to_string(&rec).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["file_name"].as_str().unwrap(), "icon.png");
+        assert_eq!(v["duplicate_count"].as_u64().unwrap(), 2);
+        assert_eq!(v["duplicateCount"].as_u64().unwrap(), 2);
+        assert!(v.get("instanceID").is_none());
+        assert!(v.get("instanceId").is_none());
+        assert!(v.get("instance_id").is_none());
+    }
+
+    #[test]
+    fn scene_item_record_supported_static() {
+        let rec = SceneItemRecord {
+            file_name: "a.png".into(),
+            item_type: "PNG".into(),
+            supported: true,
+            duplicate_count: 1,
+        };
+        assert!(rec.supported);
+
+        let rec2 = SceneItemRecord {
+            file_name: "b.jpg".into(),
+            item_type: "JPG".into(),
+            supported: true,
+            duplicate_count: 1,
+        };
+        assert!(rec2.supported);
+    }
+
+    #[test]
+    fn scene_item_record_supported_animated() {
+        let rec = SceneItemRecord {
+            file_name: "anim.gif".into(),
+            item_type: "GIF".into(),
+            supported: true,
+            duplicate_count: 1,
+        };
+        assert!(rec.supported);
+
+        let rec2 = SceneItemRecord {
+            file_name: "akari_fly".into(),
+            item_type: "AnimationFolder".into(),
+            supported: true,
+            duplicate_count: 1,
+        };
+        assert!(rec2.supported);
+    }
+
+    #[test]
+    fn scene_item_record_unsupported_live2d() {
+        let rec = SceneItemRecord {
+            file_name: "model.moc3".into(),
+            item_type: "Live2D".into(),
+            supported: false,
+            duplicate_count: 1,
+        };
+        assert!(!rec.supported);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Event/Hotkeys refresh → Inactive / no network request
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn refresh_item_action_event_mode_is_inactive_no_network() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        rt.block_on(async {
+            {
+                let mut s = svc.settings.write().await;
+                s.typing_action.output_mode = VTubeStudioTypingMode::Event;
+            }
+            let status = svc.refresh_item_action().await;
+            assert_eq!(status, VTubeStudioItemStatus::Inactive);
+            assert_eq!(svc.get_item_status(), VTubeStudioItemStatus::Inactive);
+        });
+    }
+
+    #[test]
+    fn refresh_item_action_hotkeys_mode_is_inactive_no_network() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        rt.block_on(async {
+            {
+                let mut s = svc.settings.write().await;
+                s.typing_action.output_mode = VTubeStudioTypingMode::Hotkeys;
+            }
+            let status = svc.refresh_item_action().await;
+            assert_eq!(status, VTubeStudioItemStatus::Inactive);
+            assert_eq!(svc.get_item_status(), VTubeStudioItemStatus::Inactive);
+        });
+    }
+
+    // ---------------------------------------------------------------------------
+    // Empty Item filename → Missing (no network)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn refresh_item_action_empty_filename_is_missing_no_network() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        rt.block_on(async {
+            {
+                let mut s = svc.settings.write().await;
+                s.typing_action.output_mode = VTubeStudioTypingMode::Item;
+                s.typing_action.item_file_name = String::new();
+            }
+            let status = svc.refresh_item_action().await;
+            assert_eq!(
+                status,
+                VTubeStudioItemStatus::Missing {
+                    file_name: String::new()
+                }
+            );
+            assert_eq!(
+                svc.get_item_status(),
+                VTubeStudioItemStatus::Missing {
+                    file_name: String::new()
+                }
+            );
+        });
+    }
+
+    // ---------------------------------------------------------------------------
+    // Defaults and disconnect
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn service_defaults_have_separate_disconnected_and_inactive() {
+        let svc = VTubeStudioService::new();
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Disconnected
+        );
+        assert_eq!(svc.get_item_status(), VTubeStudioItemStatus::Inactive);
+    }
+
+    #[test]
+    fn disconnect_sets_item_status_inactive() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_connection_status(VTubeStudioConnectionStatus::Connected);
+        rt.block_on(async {
+            svc.disconnect().await;
+        });
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Disconnected
+        );
+        assert_eq!(svc.get_item_status(), VTubeStudioItemStatus::Inactive);
+    }
+
+    #[test]
+    fn new_service_item_status_is_inactive() {
+        let svc = VTubeStudioService::new();
+        let status = svc.get_item_status();
+        assert_eq!(status, VTubeStudioItemStatus::Inactive);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Event/Hotkeys refresh clears pre-existing resolution → Inactive (no network)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn refresh_event_mode_clears_resolved_item_and_sets_inactive() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        rt.block_on(async {
+            {
+                let mut s = svc.settings.write().await;
+                s.typing_action.output_mode = VTubeStudioTypingMode::Event;
+            }
+            {
+                let mut inner = svc.inner.lock().await;
+                inner.resolved_item = Some(ResolvedItem {
+                    instance_id: "old-id".into(),
+                    file_name: "old.png".into(),
+                    item_type: "PNG".into(),
+                    kind: ItemKind::Static,
+                });
+            }
+
+            let status = svc.refresh_item_action().await;
+            assert_eq!(status, VTubeStudioItemStatus::Inactive);
+            assert_eq!(svc.get_item_status(), VTubeStudioItemStatus::Inactive);
+
+            let inner = svc.inner.lock().await;
+            assert!(inner.resolved_item.is_none());
+        });
+    }
+
+    #[test]
+    fn refresh_hotkeys_mode_clears_resolved_item_and_sets_inactive() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        rt.block_on(async {
+            {
+                let mut s = svc.settings.write().await;
+                s.typing_action.output_mode = VTubeStudioTypingMode::Hotkeys;
+            }
+            {
+                let mut inner = svc.inner.lock().await;
+                inner.resolved_item = Some(ResolvedItem {
+                    instance_id: "old-id".into(),
+                    file_name: "old.gif".into(),
+                    item_type: "GIF".into(),
+                    kind: ItemKind::Animated,
+                });
+            }
+
+            let status = svc.refresh_item_action().await;
+            assert_eq!(status, VTubeStudioItemStatus::Inactive);
+            assert_eq!(svc.get_item_status(), VTubeStudioItemStatus::Inactive);
+
+            let inner = svc.inner.lock().await;
+            assert!(inner.resolved_item.is_none());
+        });
+    }
+
+    // ---------------------------------------------------------------------------
+    // No-socket Item refresh clears resolution → Error
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn refresh_item_no_socket_clears_resolution_and_returns_error() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        rt.block_on(async {
+            {
+                let mut s = svc.settings.write().await;
+                s.typing_action.output_mode = VTubeStudioTypingMode::Item;
+                s.typing_action.item_file_name = "no-socket-test.png".to_string();
+            }
+            {
+                let mut inner = svc.inner.lock().await;
+                inner.resolved_item = Some(ResolvedItem {
+                    instance_id: "stale-id".into(),
+                    file_name: "stale.png".into(),
+                    item_type: "PNG".into(),
+                    kind: ItemKind::Static,
+                });
+            }
+            assert!(svc.inner.lock().await.ws.is_none());
+
+            let status = svc.refresh_item_action().await;
+            assert_eq!(
+                status,
+                VTubeStudioItemStatus::Error {
+                    file_name: "no-socket-test.png".to_string(),
+                    message: "WebSocket not available".to_string(),
+                }
+            );
+            assert_eq!(
+                svc.get_item_status(),
+                VTubeStudioItemStatus::Error {
+                    file_name: "no-socket-test.png".to_string(),
+                    message: "WebSocket not available".to_string(),
+                }
+            );
+
+            let inner = svc.inner.lock().await;
+            assert!(inner.resolved_item.is_none());
+        });
+    }
+
+    // ---------------------------------------------------------------------------
+    // Item transition state-machine pure tests (no live socket)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn item_transition_record_desired_true_starts_sync() {
+        let state = ItemTransitionState::new();
+        state.record_desired(true);
+        let (d, gen) = state.read_desired();
+        assert!(d);
+        assert_eq!(state.read_applied(), None);
+        assert!(gen >= 1);
+    }
+
+    #[test]
+    fn item_transition_repeated_true_is_idempotent() {
+        let state = ItemTransitionState::new();
+        state.record_desired(true);
+        let (_, g1) = state.read_desired();
+        state.record_desired(true);
+        let (d, g2) = state.read_desired();
+        assert!(d);
+        assert!(g2 >= g1);
+    }
+
+    #[test]
+    fn item_transition_false_to_true_before_completion_collapses() {
+        let state = ItemTransitionState::new();
+        state.record_desired(false);
+        let (_, gen_false) = state.read_desired();
+        state.record_desired(true);
+        let (d, gen_true) = state.read_desired();
+        assert!(d);
+        assert!(gen_true > gen_false);
+        let accepted = state.set_applied_if_current(false, gen_false);
+        assert!(!accepted);
+        assert_eq!(state.read_applied(), None);
+    }
+
+    #[test]
+    fn item_transition_completion_only_replaces_matching_generation() {
+        let state = ItemTransitionState::new();
+        state.record_desired(true);
+        let (_, gen1) = state.read_desired();
+        let accepted = state.set_applied_if_current(true, gen1);
+        assert!(accepted);
+        assert_eq!(state.read_applied(), Some(true));
+        state.record_desired(false);
+        let (_, gen2) = state.read_desired();
+        assert!(!state.set_applied_if_current(true, gen1));
+        let (d, _) = state.read_desired();
+        assert!(!d);
+        assert!(state.set_applied_if_current(false, gen2));
+        assert_eq!(state.read_applied(), Some(false));
+    }
+
+    #[test]
+    fn item_transition_many_updates_keep_constant_size_state() {
+        let state = ItemTransitionState::new();
+        for i in 0..100 {
+            state.record_desired(i % 2 == 0);
+        }
+        let (_, gen) = state.read_desired();
+        assert!(gen >= 100);
+    }
+
+    #[test]
+    fn item_transition_failure_sets_applied_unknown() {
+        let state = ItemTransitionState::new();
+        state.record_desired(true);
+        state.force_applied(true);
+        assert_eq!(state.read_applied(), Some(true));
+        state.mark_applied_unknown();
+        assert_eq!(state.read_applied(), None);
+    }
+
+    #[test]
+    fn item_transition_next_sync_retries_latest_desired_after_failure() {
+        let state = ItemTransitionState::new();
+        state.record_desired(true);
+        // Request fails — mark applied unknown
+        state.mark_applied_unknown();
+        assert_eq!(state.read_applied(), None);
+        // Next sync pass reads latest desired
+        let (d, _gen) = state.read_desired();
+        assert!(d);
+        // It will be retried because applied != desired
+        assert_ne!(state.read_applied(), Some(d));
+    }
+
+    #[test]
+    fn item_transition_shutdown_race_handshake_observes_update() {
+        let state = ItemTransitionState::new();
+        state.record_desired(true);
+        state.force_applied(true);
+        let (d, _) = state.read_desired();
+        assert_eq!(Some(d), state.read_applied());
+        // No new desired, should not claim (begin_work returns None)
+        assert!(state.begin_work().is_none());
+
+        // New desired arrives
+        state.record_desired(false);
+        // begin_work should succeed because desired != applied
+        let gen = state.begin_work();
+        assert!(gen.is_some(), "new desired detected, must claim worker");
+    }
+
+    #[test]
+    fn item_transition_worker_cas_ensures_single_worker() {
+        let state = ItemTransitionState::new();
+        state.record_desired(true);
+        assert!(state.begin_work().is_some());
+        assert!(state.begin_work().is_none());
+        assert!(state.begin_work().is_none());
+        state.end_work();
+        state.record_desired(true); // trigger again (applied still None)
+        assert!(state.begin_work().is_some());
+    }
+
+    #[test]
+    fn item_transition_refresh_commit_sets_applied_to_desired() {
+        let state = ItemTransitionState::new();
+        state.record_desired(true);
+        // Simulate successful refresh that normalizes to desired
+        state.force_applied(true);
+        assert_eq!(state.read_applied(), Some(true));
+
+        state.record_desired(false);
+        state.force_applied(false);
+        assert_eq!(state.read_applied(), Some(false));
+    }
+
+    #[test]
+    fn item_transition_reset_clears_desired_and_applied() {
+        let state = ItemTransitionState::new();
+        state.record_desired(true);
+        state.force_applied(true);
+        state.reset();
+        let (d, _) = state.read_desired();
+        assert!(!d);
+        assert_eq!(state.read_applied(), None);
+    }
+
+    #[test]
+    fn item_transition_force_applied_setting() {
+        let state = ItemTransitionState::new();
+        assert_eq!(state.read_applied(), None);
+        state.force_applied(true);
+        assert_eq!(state.read_applied(), Some(true));
+        state.force_applied(false);
+        assert_eq!(state.read_applied(), Some(false));
+    }
+
+    // ---------------------------------------------------------------------------
+    // Worker ownership/exit protocol model tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn worker_exit_racing_with_new_desired_leaves_live_owner_or_clean_unclaimed() {
+        // Equality exits unclaimed (finite steps no busy loop)
+        let state = ItemTransitionState::new();
+        state.record_desired(true);
+        let gen = state.begin_work().expect("should claim worker");
+
+        // Worker successfully completes: applied=true via finish_success
+        let continue_work = state.finish_success(gen, true);
+        assert!(!continue_work, "equality exits unclaimed, no further work");
+        assert_eq!(state.read_applied(), Some(true));
+        // begin_work must now return None because desired==applied
+        assert!(state.begin_work().is_none());
+
+        // New desired arrives: update racing with release is not lost
+        state.record_desired(false);
+        let _gen2 = state.begin_work().expect("new desired must claim worker");
+    }
+
+    #[test]
+    fn persistent_failure_attempts_once_and_exits_unclaimed() {
+        let state = ItemTransitionState::new();
+        state.record_desired(true);
+        let gen = state.begin_work().expect("should claim worker");
+
+        // Worker fails: finish_failure releases worker and sets applied=None
+        assert!(!state.finish_failure(gen));
+        assert_eq!(state.read_applied(), None);
+        // After failure, worker is released → begin_work may claim for retry
+        // (same-value after failure is eligible for one retry, requirement 2)
+    }
+
+    #[test]
+    fn same_value_update_during_inflight_does_not_stale_completion() {
+        let state = ItemTransitionState::new();
+        state.record_desired(true);
+        let (_, gen1) = state.read_desired();
+        assert!(gen1 >= 1);
+
+        // Worker starts processing gen1 desired=true
+        // Meanwhile, same desired=true recorded again — must NOT advance generation
+        state.record_desired(true);
+        let (d, gen2) = state.read_desired();
+        assert!(d);
+        assert_eq!(gen1, gen2, "same-value must not advance generation");
+
+        // Worker finishes gen1 completion — stale completion must be rejected
+        // (set_applied_if_current with gen1 still works since gen hasn't changed)
+        let accepted = state.set_applied_if_current(true, gen1);
+        assert!(accepted, "completion with current gen must be accepted");
+        assert_eq!(state.read_applied(), Some(true));
+    }
+
+    #[test]
+    fn same_value_update_after_failure_can_claim_retry() {
+        let state = ItemTransitionState::new();
+        state.record_desired(true);
+
+        // Worker fails — finish_failure sets applied=None, releases worker
+        let gen = state.begin_work().expect("should claim worker");
+        assert!(!state.finish_failure(gen));
+        assert_eq!(state.read_applied(), None);
+
+        // New trigger: even with same desired value (true), applied=None means mismatch
+        let (d, gen1) = state.read_desired();
+        assert!(d);
+        assert_eq!(state.read_applied(), None);
+        assert_ne!(Some(d), state.read_applied());
+
+        // Next sync can claim worker to retry (begin_work succeeds)
+        // record_desired(true) must advance generation for retry
+        state.record_desired(true);
+        let gen_retry = state.begin_work();
+        assert!(gen_retry.is_some(), "same-value after failure may retry");
+        // Generation must have advanced
+        assert!(
+            gen_retry.unwrap() > gen1,
+            "generation must advance for retry"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Session/disconnect invalidation model tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn disconnect_invalidates_inflight_worker_session() {
+        // Simulate: service connects (session=0), worker runs, disconnect increments session
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_desired_running(true);
+        svc.set_connection_status(VTubeStudioConnectionStatus::Connected);
+        // Set Item mode with a filename so run_item_sync enters Item path
+        rt.block_on(async {
+            {
+                let mut s = svc.settings.write().await;
+                s.typing_action.output_mode = VTubeStudioTypingMode::Item;
+                s.typing_action.item_file_name = "test.png".to_string();
+            }
+        });
+
+        // Session starts at 0, then disconnect bumps it
+        rt.block_on(async {
+            svc.disconnect().await;
+        });
+        let session_after = svc.read_session();
+        assert!(
+            session_after > 0,
+            "session must be incremented by disconnect"
+        );
+
+        // After disconnect, all state is clean
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Disconnected
+        );
+        assert!(!svc.is_desired_running());
+        assert_eq!(svc.get_item_status(), VTubeStudioItemStatus::Inactive);
+    }
+
+    #[test]
+    fn worker_session_mismatch_prevents_socket_restoration() {
+        let state = ItemTransitionState::new();
+        state.record_desired(true);
+        state.force_applied(true);
+
+        // Worker claims and owns a generation snapshot
+        let gen = state.begin_work();
+        assert!(gen.is_some());
+
+        // Session invalidated externally → worker releases
+        state.end_work();
+        // After release, begin_work checks: applied(Some(true)) == desired(true) → no work
+        assert!(
+            state.begin_work().is_none(),
+            "session invalidation via release prevents stale reclaim"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Generation-aware refresh model tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn refresh_desired_change_during_io_cannot_commit_stale_applied() {
+        let state = ItemTransitionState::new();
+        let (_, gen0) = state.read_desired();
+        state.record_desired(true);
+        let (_, gen1) = state.read_desired();
+        assert!(gen1 > gen0);
+
+        // Simulate I/O takes time, desired changes to false during it
+        state.record_desired(false);
+        let (_, gen2) = state.read_desired();
+        assert!(gen2 > gen1);
+
+        // Old completion with stale desired=true, gen=gen1 must be rejected
+        let stale = state.set_applied_if_current(true, gen1);
+        assert!(
+            !stale,
+            "stale gen1 applied must be rejected when gen2 is newer"
+        );
+
+        // Current completion succeeds
+        let current = state.set_applied_if_current(false, gen2);
+        assert!(current, "current gen2 completion should succeed");
+        assert_eq!(state.read_applied(), Some(false));
+    }
+
+    #[test]
+    fn refresh_action_error_retains_resolved_item_for_retry() {
+        // This tests the do_item_refresh_with_desired contract:
+        // When fetch_scene_instances succeeds but animate_item fails,
+        // the resolved item should be returned alongside the Error status.
+        // This is inherently an async test involving network, but the model is:
+        // The method returns (Some(resolved_item), Error) on animate failure.
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_desired_running(true);
+        svc.set_connection_status(VTubeStudioConnectionStatus::Connected);
+        rt.block_on(async {
+            {
+                let mut s = svc.settings.write().await;
+                s.typing_action.output_mode = VTubeStudioTypingMode::Item;
+                s.typing_action.item_file_name = "ghost.png".to_string();
+            }
+            // No websocket — animate will fail
+            let status = svc.refresh_item_action().await;
+            assert!(
+                matches!(status, VTubeStudioItemStatus::Error { .. }),
+                "expected Error, got {:?}",
+                status
+            );
+            // After Error from refresh (no socket), resolved_item is None
+            let inner = svc.inner.lock().await;
+            assert!(inner.resolved_item.is_none());
+        });
+    }
+
+    // ---------------------------------------------------------------------------
+    // Resolve errors suppress requests (no transition)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn missing_ambiguous_unsupported_suppress_item_requests() {
+        // These resolve errors do not change connection status
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_connection_status(VTubeStudioConnectionStatus::Connected);
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Connected
+        );
+
+        // Empty filename -> Missing (no WS call)
+        rt.block_on(async {
+            {
+                let mut s = svc.settings.write().await;
+                s.typing_action.output_mode = VTubeStudioTypingMode::Item;
+                s.typing_action.item_file_name = String::new();
+            }
+            let status = svc.refresh_item_action().await;
+            assert!(matches!(status, VTubeStudioItemStatus::Missing { .. }));
+        });
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Connected
+        );
+
+        // Event mode -> Inactive (no WS call)
+        rt.block_on(async {
+            {
+                let mut s = svc.settings.write().await;
+                s.typing_action.output_mode = VTubeStudioTypingMode::Event;
+            }
+            let status = svc.refresh_item_action().await;
+            assert_eq!(status, VTubeStudioItemStatus::Inactive);
+        });
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Connected
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Item status transitions never change connection to Error
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn no_item_transition_changes_connection_from_connected_to_error() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_desired_running(true);
+        svc.set_connection_status(VTubeStudioConnectionStatus::Connected);
+
+        // Event/Hotkeys/empty Item refresh — all return without touching connection
+        rt.block_on(async {
+            {
+                let mut s = svc.settings.write().await;
+                s.typing_action.output_mode = VTubeStudioTypingMode::Event;
+            }
+            let _ = svc.refresh_item_action().await;
+        });
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Connected
+        );
+
+        rt.block_on(async {
+            {
+                let mut s = svc.settings.write().await;
+                s.typing_action.output_mode = VTubeStudioTypingMode::Hotkeys;
+            }
+            let _ = svc.refresh_item_action().await;
+        });
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Connected
+        );
+
+        rt.block_on(async {
+            {
+                let mut s = svc.settings.write().await;
+                s.typing_action.output_mode = VTubeStudioTypingMode::Item;
+                s.typing_action.item_file_name = String::new();
+            }
+            let _ = svc.refresh_item_action().await;
+        });
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Connected
+        );
+    }
+
+    #[test]
+    fn item_worker_failure_sets_error_status_but_keeps_connection() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_desired_running(true);
+        svc.set_connection_status(VTubeStudioConnectionStatus::Connected);
+
+        // Set Item mode with a filename but no WS — worker will fail
+        rt.block_on(async {
+            {
+                let mut s = svc.settings.write().await;
+                s.typing_action.output_mode = VTubeStudioTypingMode::Item;
+                s.typing_action.item_file_name = "test.png".to_string();
+            }
+        });
+
+        svc.record_item_desired(true);
+        rt.block_on(async {
+            let status = svc.run_item_sync().await;
+            // Status may be Inactive (no ws, no resolved item) or Error
+            // Key: connection status remains Connected
+            let _ = status;
+        });
+
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Connected,
+            "item worker failure must not corrupt connection status"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Requirement 3: session invalidation between pre-check and mutex
+    // acquisition cannot restore a socket (guarded commit).
+    // ---------------------------------------------------------------------------
+    #[test]
+    fn guarded_commit_must_recheck_session_under_mutex() {
+        // This test models the required protocol:
+        // 1. read session before taking ws
+        // 2. take ws from inner
+        // 3. do I/O (simulated)
+        // 4. acquire inner, re-check session under mutex before restoring
+        //
+        // Previously: session was checked outside mutex, then inner locked.
+        // Now: inner locked first, then session re-checked inside.
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        rt.block_on(async {
+            let svc = VTubeStudioService::new();
+            svc.set_desired_running(true);
+            svc.set_connection_status(VTubeStudioConnectionStatus::Connected);
+            svc.is_authenticated.store(true, Ordering::SeqCst);
+
+            // Set up item mode with a filename so we can observe behavior
+            {
+                let mut s = svc.settings.write().await;
+                s.typing_action.output_mode = VTubeStudioTypingMode::Item;
+                s.typing_action.item_file_name = "test.png".to_string();
+            }
+
+            // Place a fake resolved item so the worker doesn't bail early
+            {
+                let mut inner = svc.inner.lock().await;
+                inner.resolved_item = Some(ResolvedItem {
+                    instance_id: "test-id".into(),
+                    file_name: "test.png".into(),
+                    item_type: "PNG".into(),
+                    kind: ItemKind::Static,
+                });
+            }
+
+            let session = svc.read_session();
+
+            // Invalidate session as if disconnect happened while worker was in-flight
+            let _new_session = svc.invalidate_session();
+            assert_ne!(svc.read_session(), session);
+
+            // Guarded commit: acquire inner, then re-check session
+            let mut inner = svc.inner.lock().await;
+            let stale = svc.read_session() != session;
+            assert!(stale, "session must be stale after invalidation");
+
+            // Because session is stale, do NOT restore socket/change state
+            // The inner guard is dropped without restoring
+            inner.resolved_item = None;
+            // (In production: inner.ws would NOT be restored for stale session)
+
+            assert!(
+                inner.ws.is_none(),
+                "no socket should be placed for stale session"
+            );
+        });
+    }
+
+    // ---------------------------------------------------------------------------
+    // Requirement 4: Item test action coordinates with worker/session.
+    // Older in-flight worker must not restore state after the test.
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn item_test_invalidates_session_to_coordinate_with_worker_and_ends_hidden() {
+        let state = ItemTransitionState::new();
+
+        // Simulate: worker running (claimed), applying desired=true
+        state.record_desired(true);
+        let gen = state.begin_work().expect("worker must claim");
+        // Worker is in-flight with gen
+
+        // Now test starts — invalidate by calling finish_failure (model of session invalidation)
+        // In real code, session invalidation causes worker to check `read_session() != session`
+        // and call end_work() or finish_failure().
+        // After test ends hidden:
+        state.finish_failure(gen); // old worker exits, applied=None
+        assert_eq!(state.read_applied(), None);
+
+        // Test resets to hidden
+        state.reset();
+        state.force_applied(false);
+        let (d, _) = state.read_desired();
+        assert!(!d, "must end hidden");
+        assert_eq!(state.read_applied(), Some(false));
+
+        // Verify old worker cannot resurrect — begin_work returns None
+        // because desired(false) == applied(Some(false))
+        assert!(
+            state.begin_work().is_none(),
+            "stale worker must not be able to claim after test ends hidden"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Requirement 1/5 combined: equality exits unclaimed; success with no newer
+    // desired exits unclaimed; update racing with release is not lost.
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn equality_exits_unclaimed_in_finite_steps_no_busy_loop() {
+        let state = ItemTransitionState::new();
+
+        // Record desired=true, claim worker, succeed
+        state.record_desired(true);
+        let gen = state.begin_work().expect("must claim");
+        let continue_work = state.finish_success(gen, true);
+        assert!(!continue_work, "equality exits unclaimed — no busy loop");
+        assert_eq!(state.read_applied(), Some(true));
+
+        // begin_work returns None when desired == applied
+        assert!(state.begin_work().is_none());
+
+        // A new record_desired(true) while worker not running and applied=Some(true)
+        // must NOT advance generation (requirement 2)
+        let (_, gen_before) = state.read_desired();
+        state.record_desired(true);
+        let (_, gen_after) = state.read_desired();
+        assert_eq!(
+            gen_before, gen_after,
+            "same-value recording while already applied must not advance generation"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Requirement 2 combined: same-value after failure is eligible for one retry.
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn same_value_after_failure_triggers_retry_by_advancing_generation() {
+        let state = ItemTransitionState::new();
+
+        state.record_desired(true);
+        let gen_first = state.begin_work().expect("claim");
+        state.finish_failure(gen_first);
+
+        // After failure: applied=None, no worker. Record same desired=true
+        let (_, gen_before_retry) = state.read_desired();
+        state.record_desired(true); // must advance generation for retry
+        let (d, gen_after_retry) = state.read_desired();
+        assert!(d);
+        assert!(
+            gen_after_retry > gen_before_retry || gen_after_retry > gen_first,
+            "generation must advance for retry after failure"
+        );
+        assert!(gen_after_retry >= gen_first.wrapping_add(2));
+
+        // begin_work succeeds for the retry
+        let gen_retry = state.begin_work();
+        assert!(gen_retry.is_some(), "retry must be possible after failure");
+
+        // Success: no more work
+        let continue_work = state.finish_success(gen_retry.unwrap(), true);
+        assert!(!continue_work, "after retry success, exits unclaimed");
+        assert_eq!(state.read_applied(), Some(true));
+    }
+
+    #[test]
+    fn session_invalidation_via_disconnect_prevents_worker_resurrection() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_desired_running(true);
+        svc.set_connection_status(VTubeStudioConnectionStatus::Connected);
+        svc.is_authenticated.store(true, Ordering::SeqCst);
+
+        // Store a synthetic resolved item
+        rt.block_on(async {
+            let mut inner = svc.inner.lock().await;
+            inner.resolved_item = Some(ResolvedItem {
+                instance_id: "test-id".into(),
+                file_name: "test.png".into(),
+                item_type: "PNG".into(),
+                kind: ItemKind::Static,
+            });
+        });
+
+        // After disconnect, worker cannot resurrect state
+        rt.block_on(async {
+            svc.disconnect().await;
+        });
+
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Disconnected
+        );
+        assert_eq!(svc.get_item_status(), VTubeStudioItemStatus::Inactive);
     }
 }

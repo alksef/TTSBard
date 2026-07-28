@@ -129,6 +129,80 @@ pub(crate) struct HotkeyTriggerRequestData {
     pub hotkey_id: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct ItemListRequestData {
+    #[serde(rename = "includeAvailableSpots")]
+    pub include_available_spots: bool,
+    #[serde(rename = "includeItemInstancesInScene")]
+    pub include_item_instances_in_scene: bool,
+    #[serde(rename = "includeAvailableItemFiles")]
+    pub include_available_item_files: bool,
+    #[serde(
+        rename = "onlyItemsWithFileName",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub only_items_with_file_name: Option<String>,
+    #[serde(rename = "onlyItemsWithInstanceID")]
+    pub only_items_with_instance_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct ItemInstanceInfo {
+    #[serde(rename = "fileName")]
+    pub file_name: String,
+    #[serde(rename = "instanceID")]
+    pub instance_id: String,
+    #[serde(rename = "type")]
+    pub item_type: String,
+    #[serde(default)]
+    pub framerate: f64,
+    #[serde(default)]
+    #[serde(rename = "frameCount")]
+    pub frame_count: i32,
+    #[serde(default)]
+    #[serde(rename = "currentFrame")]
+    pub current_frame: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct ItemListResponseData {
+    #[serde(rename = "itemsInSceneCount")]
+    pub items_in_scene_count: i32,
+    #[serde(rename = "totalItemsAllowedCount")]
+    pub total_items_allowed_count: i32,
+    #[serde(rename = "canLoadItemsRightNow")]
+    pub can_load_items_right_now: bool,
+    #[serde(default)]
+    #[serde(rename = "availableSpots")]
+    pub available_spots: Vec<i32>,
+    #[serde(default)]
+    #[serde(rename = "itemInstancesInScene")]
+    pub item_instances_in_scene: Vec<ItemInstanceInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct ItemAnimationControlRequestData {
+    #[serde(rename = "itemInstanceID")]
+    pub item_instance_id: String,
+    pub opacity: f64,
+    #[serde(rename = "frame", skip_serializing_if = "Option::is_none")]
+    pub frame: Option<i32>,
+    #[serde(
+        rename = "setAnimationPlayState",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub set_animation_play_state: Option<bool>,
+    #[serde(rename = "animationPlayState", skip_serializing_if = "Option::is_none")]
+    pub animation_play_state: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct ItemAnimationControlResponseData {
+    pub frame: i32,
+    #[serde(rename = "animationPlaying")]
+    pub animation_playing: bool,
+}
+
 impl VtsRequest {
     pub(crate) fn new(message_type: &str, request_id: &str, data: serde_json::Value) -> Self {
         Self {
@@ -204,6 +278,43 @@ impl VtsRequest {
         })
         .unwrap();
         Self::new("HotkeyTriggerRequest", request_id, data)
+    }
+
+    pub(crate) fn item_list_request(
+        request_id: &str,
+        only_items_with_file_name: Option<&str>,
+    ) -> Self {
+        let data = serde_json::to_value(ItemListRequestData {
+            include_available_spots: false,
+            include_item_instances_in_scene: true,
+            include_available_item_files: false,
+            only_items_with_file_name: only_items_with_file_name.map(|s| s.to_string()),
+            only_items_with_instance_id: String::new(),
+        })
+        .unwrap();
+        Self::new("ItemListRequest", request_id, data)
+    }
+
+    pub(crate) fn item_animation_control_request(
+        request_id: &str,
+        item_instance_id: &str,
+        opacity: f64,
+        frame: Option<i32>,
+        animation_play_state: Option<bool>,
+    ) -> Self {
+        let data = serde_json::to_value(ItemAnimationControlRequestData {
+            item_instance_id: item_instance_id.to_string(),
+            opacity,
+            frame,
+            set_animation_play_state: if animation_play_state.is_some() {
+                Some(true)
+            } else {
+                None
+            },
+            animation_play_state,
+        })
+        .unwrap();
+        Self::new("ItemAnimationControlRequest", request_id, data)
     }
 }
 
@@ -617,5 +728,322 @@ mod tests {
             v["data"]["parameterValues"][0]["value"].as_f64().unwrap(),
             0.75
         );
+    }
+
+    #[test]
+    fn item_list_request_unfiltered_payload() {
+        let req = VtsRequest::item_list_request("item-list-1", None);
+        let json = serde_json::to_string(&req).unwrap();
+        let expected = serde_json::json!({
+            "apiName": "VTubeStudioPublicAPI",
+            "apiVersion": "1.0",
+            "requestID": "item-list-1",
+            "messageType": "ItemListRequest",
+            "data": {
+                "includeAvailableSpots": false,
+                "includeItemInstancesInScene": true,
+                "includeAvailableItemFiles": false,
+                "onlyItemsWithInstanceID": ""
+            }
+        });
+        let actual: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn item_list_request_filename_filter_payload() {
+        let req = VtsRequest::item_list_request("item-list-2", Some("Ribbon (@denchisoft)"));
+        let json = serde_json::to_string(&req).unwrap();
+        let expected = serde_json::json!({
+            "apiName": "VTubeStudioPublicAPI",
+            "apiVersion": "1.0",
+            "requestID": "item-list-2",
+            "messageType": "ItemListRequest",
+            "data": {
+                "includeAvailableSpots": false,
+                "includeItemInstancesInScene": true,
+                "includeAvailableItemFiles": false,
+                "onlyItemsWithFileName": "Ribbon (@denchisoft)",
+                "onlyItemsWithInstanceID": ""
+            }
+        });
+        let actual: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn item_list_response_deserializes() {
+        let json = r#"{
+            "apiName": "VTubeStudioPublicAPI",
+            "apiVersion": "1.0",
+            "timestamp": 1625405710728,
+            "requestID": "item-list-3",
+            "messageType": "ItemListResponse",
+            "data": {
+                "itemsInSceneCount": 4,
+                "totalItemsAllowedCount": 60,
+                "canLoadItemsRightNow": true,
+                "availableSpots": [],
+                "itemInstancesInScene": [
+                    {
+                        "fileName": "b_woozy (@denchisoft).png",
+                        "instanceID": "png-instance-1",
+                        "order": 1,
+                        "type": "PNG",
+                        "censored": false,
+                        "flipped": false,
+                        "locked": false,
+                        "smoothing": 0.0,
+                        "framerate": 0.0,
+                        "frameCount": -1,
+                        "currentFrame": -1,
+                        "pinnedToModel": false,
+                        "pinnedModelID": "",
+                        "pinnedArtMeshID": "",
+                        "groupName": "",
+                        "sceneName": "",
+                        "fromWorkshop": false
+                    },
+                    {
+                        "fileName": "akari_fly (@walfieee)",
+                        "instanceID": "anim-instance-1",
+                        "order": 2,
+                        "type": "AnimationFolder",
+                        "censored": false,
+                        "flipped": false,
+                        "locked": false,
+                        "smoothing": 0.0,
+                        "framerate": 15.0,
+                        "frameCount": 7,
+                        "currentFrame": 3,
+                        "pinnedToModel": false,
+                        "pinnedModelID": "",
+                        "pinnedArtMeshID": "",
+                        "groupName": "",
+                        "sceneName": "",
+                        "fromWorkshop": false
+                    },
+                    {
+                        "fileName": "b_woozy (@denchisoft).png",
+                        "instanceID": "png-instance-2",
+                        "order": 3,
+                        "type": "PNG",
+                        "censored": false,
+                        "flipped": true,
+                        "locked": false,
+                        "smoothing": 0.0,
+                        "framerate": 0.0,
+                        "frameCount": -1,
+                        "currentFrame": -1,
+                        "pinnedToModel": false,
+                        "pinnedModelID": "",
+                        "pinnedArtMeshID": "",
+                        "groupName": "",
+                        "sceneName": "",
+                        "fromWorkshop": false,
+                        "futureExtraField": "should-be-ignored"
+                    },
+                    {
+                        "fileName": "loading_gif.gif",
+                        "instanceID": "gif-instance-1",
+                        "order": 4,
+                        "type": "GIF",
+                        "censored": false,
+                        "flipped": false,
+                        "locked": false,
+                        "smoothing": 0.0,
+                        "framerate": 24.0,
+                        "frameCount": 30,
+                        "currentFrame": 10,
+                        "pinnedToModel": false,
+                        "pinnedModelID": "",
+                        "pinnedArtMeshID": "",
+                        "groupName": "",
+                        "sceneName": "",
+                        "fromWorkshop": false
+                    }
+                ]
+            }
+        }"#;
+        let resp: VtsResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.message_type, "ItemListResponse");
+        assert_eq!(resp.request_id, "item-list-3");
+        let data: ItemListResponseData = serde_json::from_value(resp.data).unwrap();
+        assert_eq!(data.items_in_scene_count, 4);
+        assert_eq!(data.total_items_allowed_count, 60);
+        assert!(data.can_load_items_right_now);
+        assert_eq!(data.item_instances_in_scene.len(), 4);
+
+        let png1 = &data.item_instances_in_scene[0];
+        assert_eq!(png1.file_name, "b_woozy (@denchisoft).png");
+        assert_eq!(png1.instance_id, "png-instance-1");
+        assert_eq!(png1.item_type, "PNG");
+
+        let anim = &data.item_instances_in_scene[1];
+        assert_eq!(anim.file_name, "akari_fly (@walfieee)");
+        assert_eq!(anim.instance_id, "anim-instance-1");
+        assert_eq!(anim.item_type, "AnimationFolder");
+        assert_eq!(anim.framerate, 15.0);
+        assert_eq!(anim.frame_count, 7);
+        assert_eq!(anim.current_frame, 3);
+
+        let png2 = &data.item_instances_in_scene[2];
+        assert_eq!(png2.file_name, "b_woozy (@denchisoft).png");
+        assert_eq!(png2.instance_id, "png-instance-2");
+        assert_eq!(png2.item_type, "PNG");
+
+        let gif = &data.item_instances_in_scene[3];
+        assert_eq!(gif.file_name, "loading_gif.gif");
+        assert_eq!(gif.instance_id, "gif-instance-1");
+        assert_eq!(gif.item_type, "GIF");
+        assert_eq!(gif.framerate, 24.0);
+        assert_eq!(gif.frame_count, 30);
+        assert_eq!(gif.current_frame, 10);
+    }
+
+    #[test]
+    fn item_animation_control_animated_show_payload() {
+        let req = VtsRequest::item_animation_control_request(
+            "anim-show-1",
+            "anim-instance-1",
+            1.0,
+            Some(0),
+            Some(true),
+        );
+        let json = serde_json::to_string(&req).unwrap();
+        let expected = serde_json::json!({
+            "apiName": "VTubeStudioPublicAPI",
+            "apiVersion": "1.0",
+            "requestID": "anim-show-1",
+            "messageType": "ItemAnimationControlRequest",
+            "data": {
+                "itemInstanceID": "anim-instance-1",
+                "opacity": 1.0,
+                "frame": 0,
+                "setAnimationPlayState": true,
+                "animationPlayState": true
+            }
+        });
+        let actual: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn item_animation_control_animated_hide_payload() {
+        let req = VtsRequest::item_animation_control_request(
+            "anim-hide-1",
+            "anim-instance-1",
+            0.0,
+            None,
+            Some(false),
+        );
+        let json = serde_json::to_string(&req).unwrap();
+        let expected = serde_json::json!({
+            "apiName": "VTubeStudioPublicAPI",
+            "apiVersion": "1.0",
+            "requestID": "anim-hide-1",
+            "messageType": "ItemAnimationControlRequest",
+            "data": {
+                "itemInstanceID": "anim-instance-1",
+                "opacity": 0.0,
+                "setAnimationPlayState": true,
+                "animationPlayState": false
+            }
+        });
+        let actual: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(actual, expected);
+        assert!(actual["data"]["frame"].is_null());
+    }
+
+    #[test]
+    fn item_animation_control_static_show_payload() {
+        let req = VtsRequest::item_animation_control_request(
+            "static-show-1",
+            "png-instance-1",
+            1.0,
+            None,
+            None,
+        );
+        let json = serde_json::to_string(&req).unwrap();
+        let expected = serde_json::json!({
+            "apiName": "VTubeStudioPublicAPI",
+            "apiVersion": "1.0",
+            "requestID": "static-show-1",
+            "messageType": "ItemAnimationControlRequest",
+            "data": {
+                "itemInstanceID": "png-instance-1",
+                "opacity": 1.0
+            }
+        });
+        let actual: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(actual, expected);
+        assert!(actual["data"]["frame"].is_null());
+        assert!(actual["data"]["setAnimationPlayState"].is_null());
+        assert!(actual["data"]["animationPlayState"].is_null());
+    }
+
+    #[test]
+    fn item_animation_control_static_hide_payload() {
+        let req = VtsRequest::item_animation_control_request(
+            "static-hide-1",
+            "png-instance-1",
+            0.0,
+            None,
+            None,
+        );
+        let json = serde_json::to_string(&req).unwrap();
+        let expected = serde_json::json!({
+            "apiName": "VTubeStudioPublicAPI",
+            "apiVersion": "1.0",
+            "requestID": "static-hide-1",
+            "messageType": "ItemAnimationControlRequest",
+            "data": {
+                "itemInstanceID": "png-instance-1",
+                "opacity": 0.0
+            }
+        });
+        let actual: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(actual, expected);
+        assert!(actual["data"]["frame"].is_null());
+        assert!(actual["data"]["setAnimationPlayState"].is_null());
+        assert!(actual["data"]["animationPlayState"].is_null());
+    }
+
+    #[test]
+    fn item_animation_control_response_deserializes() {
+        let json = r#"{
+            "apiName": "VTubeStudioPublicAPI",
+            "apiVersion": "1.0",
+            "timestamp": 1625405710728,
+            "requestID": "anim-ctrl-resp-1",
+            "messageType": "ItemAnimationControlResponse",
+            "data": {
+                "frame": 3,
+                "animationPlaying": true
+            }
+        }"#;
+        let resp: VtsResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.message_type, "ItemAnimationControlResponse");
+        assert_eq!(resp.request_id, "anim-ctrl-resp-1");
+        let data: ItemAnimationControlResponseData = serde_json::from_value(resp.data).unwrap();
+        assert_eq!(data.frame, 3);
+        assert!(data.animation_playing);
+    }
+
+    #[test]
+    fn item_list_api_error_deserializes() {
+        let json = r#"{
+            "apiName": "VTubeStudioPublicAPI",
+            "apiVersion": "1.0",
+            "requestID": "item-list-err",
+            "messageType": "APIError",
+            "data": { "errorID": 150, "message": "Permission not granted" }
+        }"#;
+        let resp: VtsResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.message_type, "APIError");
+        assert_eq!(resp.request_id, "item-list-err");
+        let err: VtsErrorData = serde_json::from_value(resp.data).unwrap();
+        assert_eq!(err.error_id, 150);
+        assert_eq!(err.message, "Permission not granted");
     }
 }

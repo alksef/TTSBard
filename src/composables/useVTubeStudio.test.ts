@@ -9,17 +9,19 @@ const {
   setCapturedListenCallback,
   getCapturedListenCallback,
 } = vi.hoisted(() => {
-  let capturedListenCallback: ((event: unknown) => void) | null = null
+  const capturedListenCallbacks = new Map<string, (event: unknown) => void>()
   const listenMock = vi.fn()
   const mockUnlistenFn = vi.fn()
   return {
     mockInvoke: vi.fn(),
     listenMock,
     mockUnlistenFn,
-    setCapturedListenCallback: (cb: ((event: unknown) => void) | null) => {
-      capturedListenCallback = cb
+    setCapturedListenCallback: (event: string, cb: ((event: unknown) => void) | null) => {
+      if (cb) capturedListenCallbacks.set(event, cb)
+      else if (event) capturedListenCallbacks.delete(event)
+      else capturedListenCallbacks.clear()
     },
-    getCapturedListenCallback: () => capturedListenCallback,
+    getCapturedListenCallback: (event = 'vtube-studio-status-changed') => capturedListenCallbacks.get(event) ?? null,
   }
 })
 
@@ -73,6 +75,9 @@ function setupBaseMock(settings?: Partial<VTubeStudioSettings>, status?: string)
     if (cmd === 'get_vtube_studio_status') {
       return status ?? 'Disconnected'
     }
+    if (cmd === 'get_vtube_studio_item_status') {
+      return { status: 'Inactive' }
+    }
     return undefined
   })
 }
@@ -92,9 +97,9 @@ describe('useVTubeStudio', () => {
     mockVtubeSettingsRef.value = { enabled: false, port: 8001, start_on_boot: false }
     capturedOnMountedCb = null
     capturedOnUnmountedCb = null
-    setCapturedListenCallback(null)
-    listenMock.mockImplementation(async (_event: string, cb: (event: unknown) => void) => {
-      setCapturedListenCallback(cb)
+    setCapturedListenCallback('', null)
+    listenMock.mockImplementation(async (event: string, cb: (event: unknown) => void) => {
+      setCapturedListenCallback(event, cb)
       return mockUnlistenFn
     })
   })
@@ -777,12 +782,58 @@ describe('useVTubeStudio', () => {
       expect(composable.savedTypingAction.value.outputMode).toBe('Hotkeys')
     })
 
-    it('defaults drafts to Event / TTSBardTyping when no typingAction in response', async () => {
-      const { typingMode, eventName, startHotkeyId, stopHotkeyId } = await setupAndMount()
+    it('normalizes legacy typingAction that lacks itemFileName and itemType', async () => {
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'get_vtube_studio_settings') {
+          return {
+            enabled: false,
+            port: 8001,
+            start_on_boot: false,
+            typingAction: {
+              outputMode: 'Event',
+              parameterName: 'MyEvent',
+              startHotkeyId: '',
+              stopHotkeyId: '',
+              startHotkeyName: '',
+              stopHotkeyName: '',
+            },
+          }
+        }
+        if (cmd === 'get_vtube_studio_status') {
+          return 'Disconnected'
+        }
+        return undefined
+      })
+
+      const composable = useVTubeStudio()
+      if (capturedOnMountedCb) {
+        await capturedOnMountedCb()
+      }
+
+      expect(composable.typingMode.value).toBe('Event')
+      expect(composable.eventName.value).toBe('MyEvent')
+      expect(composable.savedTypingAction.value.itemFileName).toBe('')
+      expect(composable.savedTypingAction.value.itemType).toBe('')
+      expect(composable.savedTypingAction.value.outputMode).toBe('Event')
+      expect(composable.savedTypingAction.value.parameterName).toBe('MyEvent')
+    })
+
+    it('defaults drafts and saved action to Event / TTSBardTyping / empty fields when no typingAction in response', async () => {
+      const { typingMode, eventName, startHotkeyId, stopHotkeyId, savedTypingAction } = await setupAndMount()
       expect(typingMode.value).toBe('Event')
       expect(eventName.value).toBe('TTSBardTyping')
       expect(startHotkeyId.value).toBe('')
       expect(stopHotkeyId.value).toBe('')
+      expect(savedTypingAction.value).toEqual({
+        outputMode: 'Event',
+        parameterName: 'TTSBardTyping',
+        startHotkeyId: '',
+        stopHotkeyId: '',
+        startHotkeyName: '',
+        stopHotkeyName: '',
+        itemFileName: '',
+        itemType: '',
+      })
     })
   })
 
@@ -1164,6 +1215,90 @@ describe('useVTubeStudio', () => {
     it('hotkeysError starts as null', async () => {
       const { hotkeysError } = await setupAndMount()
       expect(hotkeysError.value).toBeNull()
+    })
+  })
+
+  describe('Item mode', () => {
+    it('tracks the independent item-status event and exposes a persistent recovery warning', async () => {
+      const { itemStatus, itemStatusWarning } = await setupAndMount()
+      const cb = getCapturedListenCallback('vtube-studio-item-status-changed')
+      expect(cb).not.toBeNull()
+
+      cb!({ payload: { status: 'Missing', fileName: 'typing.gif' } })
+      await flushMicrotasks()
+
+      expect(itemStatus.value).toEqual({ status: 'Missing', fileName: 'typing.gif' })
+      expect(itemStatusWarning.value).toContain('typing.gif')
+      expect(itemStatusWarning.value).toContain('Обновить')
+    })
+
+    it('loads only supported scene items and derives the selected item type', async () => {
+      const composable = await setupAndMount(undefined, 'Connected')
+      composable.currentStatus.value = 'Connected'
+      composable.itemFileName.value = 'typing.gif'
+      mockInvoke.mockImplementation(async (cmd: string) => cmd === 'get_vtube_studio_scene_items'
+        ? [
+            { fileName: 'typing.gif', itemType: 'Animation', supported: true, duplicateCount: 1 },
+            { fileName: 'model.vtube.json', itemType: 'Live2D', supported: false, duplicateCount: 1 },
+          ]
+        : undefined)
+
+      await composable.loadSceneItems()
+
+      expect(composable.sceneItems.value).toHaveLength(1)
+      expect(composable.sceneItems.value[0].fileName).toBe('typing.gif')
+      expect(composable.itemType.value).toBe('Animation')
+    })
+
+    it('allows saving only one supported current-scene instance', async () => {
+      const composable = await setupAndMount(undefined, 'Connected')
+      composable.typingMode.value = 'Item'
+      composable.itemFileName.value = 'typing.gif'
+      composable.sceneItems.value = [
+        { fileName: 'typing.gif', itemType: 'Animation', supported: true, duplicateCount: 2 },
+      ]
+      expect(composable.canSaveTypingAction.value).toBe(false)
+
+      composable.sceneItems.value = [
+        { fileName: 'typing.gif', itemType: 'Animation', supported: true, duplicateCount: 1 },
+      ]
+      expect(composable.canSaveTypingAction.value).toBe(true)
+    })
+
+    it('saves exact Item filename and display type', async () => {
+      const composable = await setupAndMount(undefined, 'Connected')
+      composable.typingMode.value = 'Item'
+      composable.itemFileName.value = 'Typing.GIF'
+      composable.itemType.value = 'Animation'
+      composable.sceneItems.value = [
+        { fileName: 'Typing.GIF', itemType: 'Animation', supported: true, duplicateCount: 1 },
+      ]
+      mockInvoke.mockResolvedValue('Сохранено')
+
+      await composable.saveTypingAction()
+
+      expect(mockInvoke).toHaveBeenCalledWith('save_vtube_studio_typing_action', expect.objectContaining({
+        outputMode: 'Item',
+        itemFileName: 'Typing.GIF',
+        itemType: 'Animation',
+      }))
+      expect(composable.savedTypingAction.value.itemFileName).toBe('Typing.GIF')
+    })
+
+    it('refreshes both the scene list and the saved item status', async () => {
+      const composable = await setupAndMount(undefined, 'Connected')
+      composable.currentStatus.value = 'Connected'
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'get_vtube_studio_scene_items') return []
+        if (cmd === 'refresh_vtube_studio_item') return { status: 'Ready', fileName: 'typing.png', vtsType: 'PNG' }
+        return undefined
+      })
+
+      await composable.refreshItemAction()
+
+      expect(mockInvoke).toHaveBeenCalledWith('get_vtube_studio_scene_items')
+      expect(mockInvoke).toHaveBeenCalledWith('refresh_vtube_studio_item')
+      expect(composable.itemStatus.value.status).toBe('Ready')
     })
   })
 })

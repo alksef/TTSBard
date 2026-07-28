@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { Play, Square, RotateCw } from 'lucide-vue-next'
+import { Download, Play, RefreshCw, RotateCw, Square } from 'lucide-vue-next'
 import { useVTubeStudio } from '../composables/useVTubeStudio'
 
 const {
@@ -19,13 +19,23 @@ const {
   eventName,
   startHotkeyId,
   stopHotkeyId,
+  itemFileName,
+  itemType,
   savedTypingAction,
   hotkeys,
   hotkeysLoading,
   hotkeysError,
+  sceneItems,
+  sceneItemsLoading,
+  sceneItemsError,
+  itemStatus,
+  itemStatusWarning,
+  selectedSceneItem,
+  canLoadSceneItems,
   save,
   saveTypingAction,
   loadHotkeys,
+  refreshItemAction,
   testAction,
   startVTubeStudio,
   stopVTubeStudio,
@@ -114,6 +124,7 @@ const {
         <select v-model="typingMode" class="text-input typing-mode-select" :disabled="busy">
           <option value="Event">Событие</option>
           <option value="Hotkeys">Горячие клавиши</option>
+          <option value="Item">Предмет сцены</option>
         </select>
       </div>
 
@@ -130,7 +141,7 @@ const {
         </div>
       </template>
 
-      <template v-else>
+      <template v-else-if="typingMode === 'Hotkeys'">
         <div class="setting-row">
           <button
             @click="loadHotkeys()"
@@ -168,6 +179,49 @@ const {
           </select>
         </div>
       </template>
+
+      <template v-else>
+        <div class="setting-row item-toolbar">
+          <button
+            @click="refreshItemAction()"
+            class="save-button-inline secondary"
+            :disabled="!canLoadSceneItems"
+            :class="{ disabled: !canLoadSceneItems }"
+            :title="currentStatus !== 'Connected' ? 'Подключитесь к VTube Studio для загрузки предметов сцены' : 'Обновить предметы текущей сцены и проверить сохранённый предмет'"
+            aria-label="Обновить предметы сцены"
+          >
+            <RefreshCw :size="14" class="icon-left" />
+            Обновить предметы
+          </button>
+        </div>
+
+        <div v-if="sceneItemsLoading" class="hotkey-status loading">Загрузка предметов текущей сцены...</div>
+        <div v-if="sceneItemsError" class="hotkey-status error">{{ sceneItemsError }}</div>
+
+        <div class="setting-row typing-action-row item-selection-row">
+          <label>Предмет:</label>
+          <select v-model="itemFileName" class="text-input item-select" :disabled="busy">
+            <option value="" disabled>— выберите —</option>
+            <option v-if="itemFileName && !selectedSceneItem" :value="itemFileName">
+              {{ itemFileName }} — нет в текущей сцене
+            </option>
+            <option v-for="item in sceneItems" :key="`${item.fileName}:${item.itemType}`" :value="item.fileName">
+              {{ item.fileName }} · {{ item.itemType }}<template v-if="item.duplicateCount > 1"> · {{ item.duplicateCount }} экз.</template>
+            </option>
+          </select>
+        </div>
+        <div v-if="itemFileName" class="item-metadata">
+          <span>Файл: <code>{{ itemFileName }}</code></span>
+          <span>Тип: <code>{{ itemType || 'неизвестен' }}</code></span>
+          <span v-if="selectedSceneItem && selectedSceneItem.duplicateCount > 1" class="duplicate-warning">
+            Оставьте в сцене один экземпляр.
+          </span>
+        </div>
+      </template>
+
+      <div v-if="itemStatusWarning" class="item-warning" role="status">
+        {{ itemStatusWarning }}
+      </div>
 
       <div class="setting-row button-row">
         <button
@@ -233,13 +287,13 @@ const {
       <div class="info-card">
         <div class="info-row">
           <span class="info-label">Способ</span>
-          <code class="info-code">{{ savedTypingAction.outputMode === 'Event' ? 'Событие' : 'Горячие клавиши' }}</code>
+          <code class="info-code">{{ savedTypingAction.outputMode === 'Event' ? 'Событие' : savedTypingAction.outputMode === 'Hotkeys' ? 'Горячие клавиши' : 'Предмет сцены' }}</code>
         </div>
         <div v-if="savedTypingAction.outputMode === 'Event'" class="info-row">
           <span class="info-label">Событие</span>
           <code class="info-code">{{ savedTypingAction.parameterName || '(не задано)' }}</code>
         </div>
-        <template v-else>
+        <template v-else-if="savedTypingAction.outputMode === 'Hotkeys'">
           <div class="info-row">
             <span class="info-label">Начало набора</span>
             <code class="info-code">{{ savedTypingAction.startHotkeyName || savedTypingAction.startHotkeyId || '(не задан)' }}</code>
@@ -247,6 +301,20 @@ const {
           <div class="info-row">
             <span class="info-label">Окончание набора</span>
             <code class="info-code">{{ savedTypingAction.stopHotkeyName || savedTypingAction.stopHotkeyId || '(не задан)' }}</code>
+          </div>
+        </template>
+        <template v-else>
+          <div class="info-row">
+            <span class="info-label">Предмет</span>
+            <code class="info-code">{{ savedTypingAction.itemFileName || '(не задан)' }}</code>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Тип</span>
+            <code class="info-code">{{ savedTypingAction.itemType || '(неизвестен)' }}</code>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Состояние</span>
+            <code class="info-code">{{ itemStatus.status }}</code>
           </div>
         </template>
         <template v-if="savedTypingAction.outputMode === 'Event'">
@@ -274,6 +342,7 @@ const {
       <p class="help-text">
         Для режима <strong>Событие</strong> привяжите указанное имя параметра к нужному выражению модели.
         Для режима <strong>Горячие клавиши</strong> выберите стартовый и стоповый Hotkey текущей модели после подключения.
+        Для режима <strong>Предмет сцены</strong> заранее загрузите один PNG, JPG, GIF или animation-folder и выберите его после обновления списка.
       </p>
       <p class="help-text">
         <strong>Тест действия</strong> запускает сохранённое действие в активной сессии для проверки.
@@ -635,6 +704,45 @@ select.text-input {
   color: var(--danger-text-weak);
   background: var(--danger-bg-weak);
   border: 1px solid var(--danger-border);
+}
+
+.item-toolbar {
+  margin-bottom: 0.75rem;
+}
+
+.item-selection-row .item-select {
+  max-width: 100%;
+}
+
+.item-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  margin: -0.35rem 0 1rem;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.item-metadata code {
+  color: var(--color-info);
+}
+
+.duplicate-warning {
+  color: var(--danger-text-weak);
+  font-weight: 600;
+}
+
+.item-warning {
+  margin: 0 0 1rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--danger-border);
+  border-radius: 8px;
+  background: var(--danger-bg-weak);
+  color: var(--danger-text-weak);
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .info-card {

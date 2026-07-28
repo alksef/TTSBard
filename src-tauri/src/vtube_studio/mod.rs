@@ -1,4 +1,4 @@
 mod messages;
 mod service;
 
-pub use service::VTubeStudioService;
+pub use service::{SceneItemRecord, VTubeStudioItemStatus, VTubeStudioService};

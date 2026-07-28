@@ -3,7 +3,13 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useVTubeStudioSettings } from './useAppSettings'
 import { debugLog, debugError } from '../utils/debug'
-import type { VtsHotkeyInfoDto, VTubeStudioTypingActionDto, VTubeStudioTypingMode } from '../types/settings'
+import type {
+  SceneItemRecord,
+  VtsHotkeyInfoDto,
+  VTubeStudioItemStatus,
+  VTubeStudioTypingActionDto,
+  VTubeStudioTypingMode,
+} from '../types/settings'
 
 export type VTubeStatus = 'Disconnected' | 'Connecting' | 'Connected' | 'Error'
 
@@ -32,6 +38,19 @@ export interface VTubeStudioSettings {
 }
 
 interface TypingActionDraft extends VTubeStudioTypingActionDto {}
+
+function normalizeTypingAction(action: Partial<TypingActionDraft> | undefined): TypingActionDraft {
+  return {
+    outputMode: action?.outputMode ?? 'Event',
+    parameterName: action?.parameterName ?? 'TTSBardTyping',
+    startHotkeyId: action?.startHotkeyId ?? '',
+    stopHotkeyId: action?.stopHotkeyId ?? '',
+    startHotkeyName: action?.startHotkeyName ?? '',
+    stopHotkeyName: action?.stopHotkeyName ?? '',
+    itemFileName: action?.itemFileName ?? '',
+    itemType: action?.itemType ?? '',
+  }
+}
 
 function isRustEnumDisconnected(obj: unknown): obj is RustEnumDisconnected {
   return typeof obj === 'object' && obj !== null && 'Disconnected' in obj
@@ -79,7 +98,8 @@ export function useVTubeStudio() {
   const portError = ref<string | null>(null)
   let errorTimeout: number | null = null
   const currentStatus = ref<VTubeStatus>('Disconnected')
-  let unlisten: (() => void) | null = null
+  let unlistenStatus: (() => void) | null = null
+  let unlistenItemStatus: (() => void) | null = null
 
   const busy = ref(false)
   let opGeneration = 0
@@ -90,14 +110,22 @@ export function useVTubeStudio() {
   const eventName = ref('TTSBardTyping')
   const startHotkeyId = ref('')
   const stopHotkeyId = ref('')
+  const itemFileName = ref('')
+  const itemType = ref('')
   const savedTypingAction = ref<TypingActionDraft>({
     outputMode: 'Event', parameterName: 'TTSBardTyping',
     startHotkeyId: '', stopHotkeyId: '', startHotkeyName: '', stopHotkeyName: '',
+    itemFileName: '', itemType: '',
   })
   const hotkeys = ref<VtsHotkeyInfoDto[]>([])
   const hotkeysLoading = ref(false)
   const hotkeysError = ref<string | null>(null)
   let hotkeyLoadGeneration = 0
+  const sceneItems = ref<SceneItemRecord[]>([])
+  const sceneItemsLoading = ref(false)
+  const sceneItemsError = ref<string | null>(null)
+  const itemStatus = ref<VTubeStudioItemStatus>({ status: 'Inactive' })
+  let sceneItemLoadGeneration = 0
 
   const typingTimeoutError = computed(() => {
     const v = typingTimeout.value
@@ -120,10 +148,33 @@ export function useVTubeStudio() {
       && !busy.value
       && typingTimeoutError.value === null
       && typingRepeatsError.value === null
+      && (savedTypingAction.value.outputMode !== 'Item' || itemStatus.value.status === 'Ready')
   })
   const canTestAction = canTestTyping
   const canLoadHotkeys = computed(() => currentStatus.value === 'Connected' && !busy.value)
-  const canSaveTypingAction = computed(() => typingMode.value === 'Event' ? eventName.value.trim().length > 0 : startHotkeyId.value.trim().length > 0 && stopHotkeyId.value.trim().length > 0)
+  const selectedSceneItem = computed(() => sceneItems.value.find(item => item.fileName === itemFileName.value) ?? null)
+  const canLoadSceneItems = computed(() => currentStatus.value === 'Connected' && !busy.value && !sceneItemsLoading.value)
+  const canSaveTypingAction = computed(() => {
+    if (typingMode.value === 'Event') return eventName.value.trim().length > 0
+    if (typingMode.value === 'Hotkeys') return startHotkeyId.value.trim().length > 0 && stopHotkeyId.value.trim().length > 0
+    const selected = selectedSceneItem.value
+    return itemFileName.value.length > 0 && selected?.supported === true && selected.duplicateCount === 1
+  })
+  const itemStatusWarning = computed(() => {
+    const status = itemStatus.value
+    switch (status.status) {
+      case 'Missing':
+        return `Предмет ${status.fileName || '(не задан)'} не найден. Загрузите его в сцену VTube Studio и нажмите «Обновить».`
+      case 'Ambiguous':
+        return `Найдено экземпляров ${status.fileName}: ${status.matchCount}. Оставьте один экземпляр и нажмите «Обновить».`
+      case 'Unsupported':
+        return `Предмет ${status.fileName} имеет неподдерживаемый тип ${status.vtsType}. Выберите PNG, JPG, GIF или animation-folder.`
+      case 'Error':
+        return `Не удалось проверить предмет ${status.fileName || '(не задан)'}. Проверьте VTube Studio и нажмите «Обновить». ${status.message}`
+      default:
+        return null
+    }
+  })
   const typingActionValid = canSaveTypingAction
   const draftOutputMode = typingMode
   const draftParameterName = eventName
@@ -167,20 +218,23 @@ export function useVTubeStudio() {
 
   async function loadSettings() {
     try {
-      const data = await invoke<VTubeStudioSettings & { typingAction: TypingActionDraft }>('get_vtube_studio_settings')
+      const data = await invoke<VTubeStudioSettings & { typingAction?: TypingActionDraft }>('get_vtube_studio_settings')
       settings.value = { enabled: data.enabled, port: data.port, start_on_boot: data.start_on_boot }
-      savedTypingAction.value = data.typingAction
-      typingMode.value = data.typingAction.outputMode
-      eventName.value = data.typingAction.parameterName
-      startHotkeyId.value = data.typingAction.startHotkeyId
-      stopHotkeyId.value = data.typingAction.stopHotkeyId
-      if (data.typingAction.outputMode === 'Hotkeys') {
+      const normalized = normalizeTypingAction(data.typingAction)
+      savedTypingAction.value = normalized
+      typingMode.value = normalized.outputMode
+      eventName.value = normalized.parameterName
+      startHotkeyId.value = normalized.startHotkeyId
+      stopHotkeyId.value = normalized.stopHotkeyId
+      itemFileName.value = normalized.itemFileName
+      itemType.value = normalized.itemType
+      if (normalized.outputMode === 'Hotkeys') {
         const savedHotkeys: VtsHotkeyInfoDto[] = []
-        if (data.typingAction.startHotkeyId && data.typingAction.startHotkeyName) {
-          savedHotkeys.push({ hotkeyID: data.typingAction.startHotkeyId, name: data.typingAction.startHotkeyName, type: 'Сохранённая', description: '' })
+        if (normalized.startHotkeyId && normalized.startHotkeyName) {
+          savedHotkeys.push({ hotkeyID: normalized.startHotkeyId, name: normalized.startHotkeyName, type: 'Сохранённая', description: '' })
         }
-        if (data.typingAction.stopHotkeyId && data.typingAction.stopHotkeyName && data.typingAction.stopHotkeyId !== data.typingAction.startHotkeyId) {
-          savedHotkeys.push({ hotkeyID: data.typingAction.stopHotkeyId, name: data.typingAction.stopHotkeyName, type: 'Сохранённая', description: '' })
+        if (normalized.stopHotkeyId && normalized.stopHotkeyName && normalized.stopHotkeyId !== normalized.startHotkeyId) {
+          savedHotkeys.push({ hotkeyID: normalized.stopHotkeyId, name: normalized.stopHotkeyName, type: 'Сохранённая', description: '' })
         }
         hotkeys.value = savedHotkeys
       }
@@ -196,6 +250,14 @@ export function useVTubeStudio() {
       handleStatusChange(convertStatusFromRust(status))
     } catch (e) {
       debugError('[VTubeStudio] Failed to load status:', e)
+    }
+  }
+
+  async function loadItemStatus() {
+    try {
+      itemStatus.value = await invoke<VTubeStudioItemStatus>('get_vtube_studio_item_status')
+    } catch (e) {
+      debugError('[VTubeStudio] Failed to load item status:', e)
     }
   }
 
@@ -363,12 +425,45 @@ export function useVTubeStudio() {
     }
   }
 
+  async function loadSceneItems() {
+    if (!canLoadSceneItems.value) return
+    const generation = ++sceneItemLoadGeneration
+    sceneItemsLoading.value = true
+    sceneItemsError.value = null
+    try {
+      const result = await invoke<SceneItemRecord[]>('get_vtube_studio_scene_items')
+      if (generation === sceneItemLoadGeneration) {
+        sceneItems.value = result.filter(item => item.supported)
+        const selected = sceneItems.value.find(item => item.fileName === itemFileName.value)
+        if (selected) itemType.value = selected.itemType
+      }
+    } catch (e) {
+      if (generation === sceneItemLoadGeneration) {
+        sceneItemsError.value = e instanceof Error ? e.message : String(e)
+      }
+    } finally {
+      if (generation === sceneItemLoadGeneration) sceneItemsLoading.value = false
+    }
+  }
+
+  async function refreshItemAction() {
+    if (currentStatus.value !== 'Connected' || busy.value) return
+    await loadSceneItems()
+    try {
+      itemStatus.value = await invoke<VTubeStudioItemStatus>('refresh_vtube_studio_item')
+    } catch (e) {
+      sceneItemsError.value = e instanceof Error ? e.message : String(e)
+    }
+  }
+
   async function saveTypingAction() {
     if (busy.value) return
     if (!canSaveTypingAction.value) {
       showError(typingMode.value === 'Event'
         ? 'Имя параметра не может быть пустым'
-        : 'ID горячих клавиш не могут быть пустыми')
+        : typingMode.value === 'Hotkeys'
+          ? 'ID горячих клавиш не могут быть пустыми'
+          : 'Выберите один поддерживаемый экземпляр предмета')
       return
     }
     const gen = startOperation()
@@ -384,6 +479,8 @@ export function useVTubeStudio() {
         stopHotkeyId: typingMode.value === 'Hotkeys' ? stopId : '',
         startHotkeyName: typingMode.value === 'Hotkeys' ? startHotkeyName : '',
         stopHotkeyName: typingMode.value === 'Hotkeys' ? stopHotkeyName : '',
+        itemFileName: typingMode.value === 'Item' ? itemFileName.value : undefined,
+        itemType: typingMode.value === 'Item' ? itemType.value : undefined,
       })
       if (!isStaleOp(gen)) {
         // The backend persists trimmed values. Reflect those exact values in the
@@ -394,6 +491,8 @@ export function useVTubeStudio() {
         savedTypingAction.value = {
           outputMode: typingMode.value, parameterName, startHotkeyId: startId, stopHotkeyId: stopId,
           startHotkeyName, stopHotkeyName,
+          itemFileName: typingMode.value === 'Item' ? itemFileName.value : savedTypingAction.value.itemFileName,
+          itemType: typingMode.value === 'Item' ? itemType.value : savedTypingAction.value.itemType,
         }
         showError(result)
       }
@@ -419,9 +518,18 @@ export function useVTubeStudio() {
   onMounted(async () => {
     await loadSettings()
     await loadStatus()
-    unlisten = await listen<unknown>('vtube-studio-status-changed', (event) => {
+    await loadItemStatus()
+    unlistenStatus = await listen<unknown>('vtube-studio-status-changed', (event) => {
       handleStatusChange(convertStatusFromRust(event.payload as RustVTubeStatus))
     })
+    unlistenItemStatus = await listen<VTubeStudioItemStatus>('vtube-studio-item-status-changed', (event) => {
+      itemStatus.value = event.payload
+    })
+  })
+
+  watch(itemFileName, (fileName) => {
+    const selected = sceneItems.value.find(item => item.fileName === fileName)
+    if (selected) itemType.value = selected.itemType
   })
 
   watch(vtubeSettingsFromComposable, (newSettings) => {
@@ -435,9 +543,8 @@ export function useVTubeStudio() {
   }, { immediate: true })
 
   onUnmounted(() => {
-    if (unlisten !== null) {
-      unlisten()
-    }
+    unlistenStatus?.()
+    unlistenItemStatus?.()
     if (errorTimeout !== null) {
       clearTimeout(errorTimeout)
     }
@@ -462,10 +569,19 @@ export function useVTubeStudio() {
     eventName,
     startHotkeyId,
     stopHotkeyId,
+    itemFileName,
+    itemType,
     savedTypingAction,
     hotkeys,
     hotkeysLoading,
     hotkeysError,
+    sceneItems,
+    sceneItemsLoading,
+    sceneItemsError,
+    itemStatus,
+    itemStatusWarning,
+    selectedSceneItem,
+    canLoadSceneItems,
     draftOutputMode,
     draftParameterName,
     draftStartHotkeyId,
@@ -476,6 +592,8 @@ export function useVTubeStudio() {
     save,
     saveTypingAction,
     loadHotkeys,
+    loadSceneItems,
+    refreshItemAction,
     loadCurrentModelHotkeys,
     testAction,
     testTypingParameter,
@@ -487,5 +605,6 @@ export function useVTubeStudio() {
     showError,
     loadSettings,
     loadStatus,
+    loadItemStatus,
   }
 }
