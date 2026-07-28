@@ -24,6 +24,69 @@ struct VoiceMessageResult {
     mime_type: String,
 }
 
+/// Response from waiting for Silero synthesis: either an audio voice
+/// message or a correlated text rejection from the bot.
+#[derive(Debug)]
+enum SynthesisResponse {
+    Voice(VoiceMessageResult),
+    TextRejection(RejectionKind),
+}
+
+/// Timeout for synthesis voice/text response from Silero bot (seconds).
+const SYNTHESIS_TIMEOUT_SECS: u64 = 10;
+
+/// User-facing error when Silero bot signals the text exceeds the voice-over limit.
+const LIMIT_REJECTION_TEXT: &str = "Превышен лимит озвучки Silero.";
+
+/// User-facing error for any other strictly-correlated Silero bot text rejection.
+const GENERIC_REJECTION_TEXT: &str = "Silero отклонил запрос.";
+
+/// Classified kind of a correlated text rejection from the Silero synthesis bot.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum RejectionKind {
+    /// Bot replied with the known "превысит … лимит … озвучки" limit message.
+    LimitExceeded,
+    /// Any other non-empty correlated text reply from the bot.
+    Generic,
+}
+
+/// Pure classifier: determine the `RejectionKind` of a correlated text reply
+/// from the Silero bot by checking for known Russian markers in the
+/// Unicode-lowercased text.  Recognises two ordered layouts:
+///
+/// 1. New: `лимит` → `озвучк` → `исчерпан`
+/// 2. Old: `превысит` → `лимит` → `озвучк`
+///
+/// Uses the stem `озвучк` to cover `озвучки` and `озвучку`.
+/// Text/link material may appear between markers.
+fn classify_rejection(text: &str) -> RejectionKind {
+    let lower = text.to_lowercase();
+
+    // New pattern: лимит → озвучк → исчерпан
+    let after_лимит = lower.find("лимит").map(|p| &lower[p + "лимит".len()..]);
+    if let Some(rest) = after_лимит {
+        if let Some(rest) = rest.find("озвучк").map(|p| &rest[p + "озвучк".len()..]) {
+            if rest.find("исчерпан").is_some() {
+                return RejectionKind::LimitExceeded;
+            }
+        }
+    }
+
+    // Old pattern: превысит → лимит → озвучк
+    let after_превысит = lower
+        .find("превысит")
+        .map(|p| &lower[p + "превысит".len()..]);
+    if let Some(rest) = after_превысит {
+        if let Some(rest) = rest.find("лимит").map(|p| &rest[p + "лимит".len()..]) {
+            if rest.find("озвучк").is_some() {
+                return RejectionKind::LimitExceeded;
+            }
+        }
+    }
+
+    RejectionKind::Generic
+}
+
 /// Структура для работы с ботом Silero TTS
 pub struct SileroTtsBot {
     _client: Option<TelegramClient>,
@@ -54,15 +117,32 @@ impl SileroTtsBot {
 
         let (sent_msg_id, bot_user_id) = Self::send_text_to_bot(client, text).await?;
 
-        let voice_result =
-            Self::wait_for_voice_message(&mut rx, 30, sent_msg_id, bot_user_id).await?;
+        let response = Self::wait_for_synthesis_response(
+            &mut rx,
+            SYNTHESIS_TIMEOUT_SECS,
+            sent_msg_id,
+            bot_user_id,
+        )
+        .await?;
 
-        // 3. Скачиваем аудиофайл во временную папку
-        let audio_path = Self::download_voice_to_temp(client, &voice_result).await?;
+        match response {
+            SynthesisResponse::Voice(voice_result) => {
+                // 3. Скачиваем аудиофайл во временную папку
+                let audio_path = Self::download_voice_to_temp(client, &voice_result).await?;
 
-        info!(?audio_path, "TTS synthesis completed");
+                info!(?audio_path, "TTS synthesis completed");
 
-        Ok(TtsResult::success(audio_path))
+                Ok(TtsResult::success(audio_path))
+            }
+            SynthesisResponse::TextRejection(kind) => {
+                warn!("Silero bot rejected the request");
+                let msg = match kind {
+                    RejectionKind::LimitExceeded => LIMIT_REJECTION_TEXT,
+                    RejectionKind::Generic => GENERIC_REJECTION_TEXT,
+                };
+                Err(msg.to_string())
+            }
+        }
     }
 
     /// Отправить текст боту
@@ -102,14 +182,14 @@ impl SileroTtsBot {
         Ok((msg_id, bot_user_id))
     }
 
-    /// Ожидать голосовое сообщение от бота с таймаутом
-    async fn wait_for_voice_message(
+    /// Ожидать голосовое сообщение или текстовую ошибку от бота с таймаутом
+    async fn wait_for_synthesis_response(
         rx: &mut broadcast::Receiver<Arc<UpdatesLike>>,
         timeout_secs: u64,
         sent_msg_id: i32,
         bot_user_id: i64,
-    ) -> Result<VoiceMessageResult, String> {
-        info!(timeout_secs, sent_msg_id, "Waiting for voice message");
+    ) -> Result<SynthesisResponse, String> {
+        info!(timeout_secs, sent_msg_id, "Waiting for synthesis response");
 
         let start_time = std::time::Instant::now();
         let total_timeout = std::time::Duration::from_secs(timeout_secs);
@@ -117,7 +197,7 @@ impl SileroTtsBot {
         loop {
             let elapsed = start_time.elapsed();
             if elapsed >= total_timeout {
-                warn!("Timeout waiting for voice message");
+                warn!("Timeout waiting for synthesis response");
                 return Err("Timeout waiting for voice message".to_string());
             }
 
@@ -125,14 +205,27 @@ impl SileroTtsBot {
 
             match tokio::time::timeout(remaining, rx.recv()).await {
                 Ok(Ok(update)) => {
-                    if let Some(result) =
-                        Self::extract_voice_from_update(&update, sent_msg_id, bot_user_id)
-                    {
-                        debug!(
-                            "[SILORO] Voice message found: file_id={}, msg_id={}, mime={}",
-                            result.file_id, result.msg_id, result.mime_type
-                        );
-                        return Ok(result);
+                    if let Some(response) = Self::extract_synthesis_response_from_update(
+                        &update,
+                        sent_msg_id,
+                        bot_user_id,
+                    ) {
+                        match &response {
+                            SynthesisResponse::Voice(v) => {
+                                debug!(
+                                    "[SILORO] Voice message found: file_id={}, msg_id={}, mime={}",
+                                    v.file_id, v.msg_id, v.mime_type
+                                );
+                            }
+                            SynthesisResponse::TextRejection(kind) => {
+                                warn!(
+                                    rejection_kind = ?kind,
+                                    msg_id = sent_msg_id,
+                                    "[SILORO] Bot text rejection"
+                                );
+                            }
+                        }
+                        return Ok(response);
                     }
                 }
                 Ok(Err(broadcast::error::RecvError::Closed)) => {
@@ -151,81 +244,177 @@ impl SileroTtsBot {
         }
     }
 
-    /// Извлечь информацию о голосовом сообщении из обновления
-    #[allow(clippy::collapsible_match)]
-    fn extract_voice_from_update(
+    /// Извлечь голосовое сообщение или текст ошибки из обновления
+    fn extract_synthesis_response_from_update(
         update_like: &UpdatesLike,
         sent_msg_id: i32,
         bot_user_id: i64,
-    ) -> Option<VoiceMessageResult> {
+    ) -> Option<SynthesisResponse> {
         if let UpdatesLike::Updates(updates_enum) = update_like {
-            if let grammers_tl_types::enums::Updates::Updates(u) = updates_enum {
-                for update in &u.updates {
-                    if let grammers_tl_types::enums::Update::NewMessage(msg) = update {
-                        if let grammers_tl_types::enums::Message::Message(m) = &msg.message {
-                            let peer_user_id = match &m.peer_id {
-                                grammers_tl_types::enums::Peer::User(u) => Some(u.user_id),
-                                _ => None,
-                            };
-                            log_bot_text(
-                                "voice",
-                                m.out,
-                                m.id,
-                                peer_user_id,
-                                bot_user_id,
-                                &m.message,
-                            );
-                            if let Some(media) = &m.media {
-                                if let grammers_tl_types::enums::MessageMedia::Document(doc_media) =
-                                    media
-                                {
-                                    if let Some(grammers_tl_types::enums::Document::Document(doc)) =
-                                        &doc_media.document
-                                    {
-                                        let reply_to_msg_id = match &m.reply_to {
-                                            Some(
-                                                grammers_tl_types::enums::MessageReplyHeader::Header(
-                                                    h,
-                                                ),
-                                            ) => h.reply_to_msg_id,
-                                            _ => None,
-                                        };
-                                        let matches_request = is_matching_audio_response(
-                                            m.out,
-                                            m.id,
-                                            peer_user_id,
-                                            reply_to_msg_id,
-                                            &doc.mime_type,
-                                            sent_msg_id,
-                                            bot_user_id,
-                                        );
-                                        trace!(
-                                            target: "silero_correlation",
-                                            candidate_msg_id = m.id,
-                                            sent_msg_id,
-                                            peer_user_id,
-                                            bot_user_id,
-                                            reply_to_msg_id,
-                                            outgoing = m.out,
-                                            mime = %doc.mime_type,
-                                            matches_request,
-                                            "Evaluated Silero audio response candidate"
-                                        );
-                                        if matches_request {
-                                            return Some(VoiceMessageResult {
-                                                file_id: doc.id.to_string(),
-                                                msg_id: m.id,
-                                                mime_type: doc.mime_type.clone(),
-                                            });
-                                        }
-                                    }
-                                }
-                            }
+            match updates_enum {
+                grammers_tl_types::enums::Updates::Updates(u) => {
+                    Self::extract_synthesis_from_updates_slice(&u.updates, sent_msg_id, bot_user_id)
+                }
+                grammers_tl_types::enums::Updates::Combined(u) => {
+                    Self::extract_synthesis_from_updates_slice(&u.updates, sent_msg_id, bot_user_id)
+                }
+                grammers_tl_types::enums::Updates::UpdateShortMessage(m) => {
+                    Self::extract_synthesis_from_short_message_inner(m, sent_msg_id, bot_user_id)
+                }
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Process a slice of `Update` items (from `Updates` or `Combined` envelope)
+    /// looking for `NewMessage` with a valid synthesis response.
+    fn extract_synthesis_from_updates_slice(
+        updates: &[grammers_tl_types::enums::Update],
+        sent_msg_id: i32,
+        bot_user_id: i64,
+    ) -> Option<SynthesisResponse> {
+        for update in updates {
+            if let grammers_tl_types::enums::Update::NewMessage(msg) = update {
+                if let Some(response) =
+                    Self::extract_synthesis_from_message(&msg.message, sent_msg_id, bot_user_id)
+                {
+                    return Some(response);
+                }
+            }
+        }
+        None
+    }
+
+    /// Process a full `Message` struct: check for audio voice or text rejection.
+    fn extract_synthesis_from_message(
+        message: &grammers_tl_types::enums::Message,
+        sent_msg_id: i32,
+        bot_user_id: i64,
+    ) -> Option<SynthesisResponse> {
+        if let grammers_tl_types::enums::Message::Message(m) = message {
+            let peer_user_id = match &m.peer_id {
+                grammers_tl_types::enums::Peer::User(u) => Some(u.user_id),
+                _ => None,
+            };
+            log_bot_text("voice", m.out, m.id, peer_user_id, bot_user_id, &m.message);
+
+            let reply_to_msg_id = match &m.reply_to {
+                Some(grammers_tl_types::enums::MessageReplyHeader::Header(h)) => h.reply_to_msg_id,
+                _ => None,
+            };
+
+            // Check for audio voice response first
+            if let Some(media) = &m.media {
+                if let grammers_tl_types::enums::MessageMedia::Document(doc_media) = media {
+                    if let Some(grammers_tl_types::enums::Document::Document(doc)) =
+                        &doc_media.document
+                    {
+                        let matches_request = is_matching_audio_response(
+                            m.out,
+                            m.id,
+                            peer_user_id,
+                            reply_to_msg_id,
+                            &doc.mime_type,
+                            sent_msg_id,
+                            bot_user_id,
+                        );
+                        trace!(
+                            target: "silero_correlation",
+                            candidate_msg_id = m.id,
+                            sent_msg_id,
+                            peer_user_id,
+                            bot_user_id,
+                            reply_to_msg_id,
+                            outgoing = m.out,
+                            mime = %doc.mime_type,
+                            matches_request,
+                            "Evaluated Silero audio response candidate"
+                        );
+                        if matches_request {
+                            return Some(SynthesisResponse::Voice(VoiceMessageResult {
+                                file_id: doc.id.to_string(),
+                                msg_id: m.id,
+                                mime_type: doc.mime_type.clone(),
+                            }));
                         }
                     }
                 }
             }
+
+            // Check for text rejection
+            if is_synthesis_text_rejection(
+                m.out,
+                m.id,
+                peer_user_id,
+                reply_to_msg_id,
+                &m.message,
+                sent_msg_id,
+                bot_user_id,
+            ) {
+                let kind = classify_rejection(&m.message);
+                trace!(
+                    target: "silero_correlation",
+                    candidate_msg_id = m.id,
+                    sent_msg_id,
+                    peer_user_id,
+                    bot_user_id,
+                    reply_to_msg_id,
+                    rejection_kind = ?kind,
+                    "Evaluated Silero text rejection candidate"
+                );
+                return Some(SynthesisResponse::TextRejection(kind));
+            }
         }
+        None
+    }
+
+    /// Extract a synthesis response from a private `UpdateShortMessage`.
+    fn extract_synthesis_from_short_message_inner(
+        m: &grammers_tl_types::types::UpdateShortMessage,
+        sent_msg_id: i32,
+        bot_user_id: i64,
+    ) -> Option<SynthesisResponse> {
+        log_bot_text(
+            "voice",
+            m.out,
+            m.id,
+            Some(m.user_id),
+            bot_user_id,
+            &m.message,
+        );
+
+        let reply_to_msg_id = match &m.reply_to {
+            Some(grammers_tl_types::enums::MessageReplyHeader::Header(h)) => h.reply_to_msg_id,
+            _ => None,
+        };
+
+        trace!(
+            target: "silero_correlation",
+            candidate_msg_id = m.id,
+            sent_msg_id,
+            user_id = m.user_id,
+            bot_user_id,
+            reply_to_msg_id,
+            outgoing = m.out,
+            text_len = m.message.len(),
+            "Evaluated Silero short message candidate"
+        );
+
+        if is_synthesis_text_rejection(
+            m.out,
+            m.id,
+            Some(m.user_id),
+            reply_to_msg_id,
+            &m.message,
+            sent_msg_id,
+            bot_user_id,
+        ) {
+            let kind = classify_rejection(&m.message);
+            return Some(SynthesisResponse::TextRejection(kind));
+        }
+
         None
     }
 
@@ -577,6 +766,57 @@ fn is_matching_text_reply(
         && user_id == bot_user_id
         && msg_id > expected_msg_id
         && reply_to_msg_id == Some(expected_msg_id)
+}
+
+/// Pure predicate: should a message be treated as a text rejection from
+/// the Silero synthesis bot?
+///
+/// Acceptance rules, in order checked:
+///   - Incoming, exact bot peer, newer msg_id, non-empty text →
+///     accepted as either limit or generic **iff** `reply_to`
+///     exactly matches `sent_msg_id`.
+///   - Incoming, exact bot peer, newer msg_id, non-empty **known limit**
+///     text with `reply_to == None` → accepted as `LimitExceeded`.
+///   - Reply-less generic text → rejected.
+///   - Explicit wrong `reply_to` even for known limit text → rejected.
+///   - Outgoing, wrong peer, stale msg_id, empty text → rejected.
+///
+/// Media (including Telegram web-page previews) is allowed — the only
+/// relevant discriminators are correlation and text content.
+fn is_synthesis_text_rejection(
+    msg_out: bool,
+    msg_id: i32,
+    peer_user_id: Option<i64>,
+    reply_to_msg_id: Option<i32>,
+    text: &str,
+    sent_msg_id: i32,
+    bot_user_id: i64,
+) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let Some(uid) = peer_user_id else {
+        return false;
+    };
+
+    // Basic correlation: incoming, correct peer, newer id
+    if msg_out || uid != bot_user_id || msg_id <= sent_msg_id {
+        return false;
+    }
+
+    // With exact reply_to match — accept any non-empty text
+    if reply_to_msg_id == Some(sent_msg_id) {
+        return true;
+    }
+
+    // Without reply_to — only accept known limit text
+    if reply_to_msg_id.is_none() && classify_rejection(text) == RejectionKind::LimitExceeded {
+        return true;
+    }
+
+    // Wrong explicit reply_to or unrecognised reply-less text — reject
+    false
 }
 
 impl Default for SileroTtsBot {
@@ -2363,6 +2603,239 @@ mod tests {
         assert!(match_text(false, 100, BOT_ID, Some(SENT_ID)));
     }
 
+    // ── is_synthesis_text_rejection ─────────────────────────────────
+
+    fn rej(
+        msg_out: bool,
+        msg_id: i32,
+        peer: Option<i64>,
+        reply_to: Option<i32>,
+        text: &str,
+    ) -> bool {
+        is_synthesis_text_rejection(msg_out, msg_id, peer, reply_to, text, SENT_ID, BOT_ID)
+    }
+
+    #[test]
+    fn text_rejection_accepts_valid() {
+        assert!(rej(
+            false,
+            43,
+            Some(BOT_ID),
+            Some(SENT_ID),
+            "some error text"
+        ));
+        assert!(rej(false, 100, Some(BOT_ID), Some(SENT_ID), "error"));
+    }
+
+    #[test]
+    fn text_rejection_rejects_outgoing() {
+        assert!(!rej(true, 43, Some(BOT_ID), Some(SENT_ID), "some error"));
+    }
+
+    #[test]
+    fn text_rejection_rejects_wrong_peer() {
+        assert!(!rej(false, 43, Some(999999), Some(SENT_ID), "some error"));
+    }
+
+    #[test]
+    fn text_rejection_rejects_missing_peer() {
+        assert!(!rej(false, 43, None, Some(SENT_ID), "some error"));
+    }
+
+    #[test]
+    fn text_rejection_rejects_stale_id() {
+        assert!(!rej(
+            false,
+            SENT_ID,
+            Some(BOT_ID),
+            Some(SENT_ID),
+            "some error"
+        ));
+        assert!(!rej(
+            false,
+            SENT_ID - 1,
+            Some(BOT_ID),
+            Some(SENT_ID),
+            "some error"
+        ));
+    }
+
+    #[test]
+    fn text_rejection_rejects_wrong_reply_to() {
+        assert!(!rej(false, 43, Some(BOT_ID), Some(99), "some error"));
+    }
+
+    #[test]
+    fn text_rejection_rejects_missing_reply_to() {
+        assert!(!rej(false, 43, Some(BOT_ID), None, "some error"));
+    }
+
+    #[test]
+    fn text_rejection_accepts_with_media() {
+        // Media (e.g. Telegram web-page preview) must not prevent text
+        // rejection — the predicate depends on strict correlation and
+        // non-empty text, not on the absence of media.
+        assert!(rej(
+            false,
+            43,
+            Some(BOT_ID),
+            Some(SENT_ID),
+            "some error text"
+        ));
+    }
+
+    #[test]
+    fn text_rejection_accepts_russian_link_text() {
+        // Exact Silero bot response containing a link and Markdown-like
+        // text.  The predicate must detect it as a text rejection.
+        assert!(rej(
+            false,
+            43,
+            Some(BOT_ID),
+            Some(SENT_ID),
+            "Вы ввели текст, содержащий ссылку на https://t.me/something. Бот не может синтезировать такой текст."
+        ));
+    }
+
+    #[test]
+    fn text_rejection_rejects_empty_text() {
+        assert!(!rej(false, 43, Some(BOT_ID), Some(SENT_ID), ""));
+    }
+
+    #[test]
+    fn text_rejection_rejects_whitespace_text() {
+        assert!(!rej(false, 43, Some(BOT_ID), Some(SENT_ID), "   "));
+        assert!(!rej(false, 43, Some(BOT_ID), Some(SENT_ID), "\t\n  "));
+    }
+
+    // ── classify_rejection ────────────────────────────────────────────
+
+    #[test]
+    fn classify_limit_exceeded_exact_phrase() {
+        assert_eq!(
+            classify_rejection("Отправленный текст превысит лимит озвучки."),
+            RejectionKind::LimitExceeded
+        );
+    }
+
+    #[test]
+    fn classify_limit_exceeded_with_link_between_markers() {
+        assert_eq!(
+            classify_rejection("Отправленный текст превысит лимит https://t.me/something озвучки."),
+            RejectionKind::LimitExceeded
+        );
+    }
+
+    #[test]
+    fn classify_limit_exceeded_case_insensitive() {
+        assert_eq!(
+            classify_rejection("ОТПРАВЛЕННЫЙ ТЕКСТ ПРЕВЫСИТ ЛИМИТ ОЗВУЧКИ."),
+            RejectionKind::LimitExceeded
+        );
+    }
+
+    #[test]
+    fn classify_limit_exceeded_mixed_case() {
+        assert_eq!(
+            classify_rejection("Текст Превысит лимит Озвучки"),
+            RejectionKind::LimitExceeded
+        );
+    }
+
+    #[test]
+    fn classify_generic_wrong_marker_order() {
+        assert_eq!(
+            // "лимит" before "превысит" — wrong order
+            classify_rejection("лимит превысит озвучки"),
+            RejectionKind::Generic
+        );
+    }
+
+    #[test]
+    fn classify_generic_missing_first_marker() {
+        assert_eq!(
+            classify_rejection("какой-то лимит озвучки"),
+            RejectionKind::Generic
+        );
+    }
+
+    #[test]
+    fn classify_generic_missing_last_marker() {
+        assert_eq!(classify_rejection("превысит лимит"), RejectionKind::Generic);
+    }
+
+    #[test]
+    fn classify_generic_unrelated_text() {
+        assert_eq!(
+            classify_rejection("Вы ввели текст, содержащий ссылку на https://t.me/something."),
+            RejectionKind::Generic
+        );
+    }
+
+    #[test]
+    fn classify_generic_empty_text() {
+        assert_eq!(classify_rejection(""), RejectionKind::Generic);
+    }
+
+    // ── classify_rejection: new pattern (лимит → озвучк → исчерпан) ───
+
+    #[test]
+    fn classify_new_limit_exact_phrase() {
+        assert_eq!(
+            classify_rejection("Лимит на озвучку исчерпан. Через сутки можно попробовать снова."),
+            RejectionKind::LimitExceeded
+        );
+    }
+
+    #[test]
+    fn classify_new_limit_with_link_between_markers() {
+        assert_eq!(
+            classify_rejection("Лимит на озвучку https://t.me/test исчерпан."),
+            RejectionKind::LimitExceeded
+        );
+    }
+
+    #[test]
+    fn classify_new_limit_case_insensitive() {
+        assert_eq!(
+            classify_rejection("ЛИМИТ НА ОЗВУЧКУ ИСЧЕРПАН."),
+            RejectionKind::LimitExceeded
+        );
+    }
+
+    #[test]
+    fn classify_old_limit_with_ozvuchku_stem() {
+        // The stem `озвучк` must match `озвучку` in the old pattern too.
+        assert_eq!(
+            classify_rejection("текст превысит лимит озвучку"),
+            RejectionKind::LimitExceeded
+        );
+    }
+
+    #[test]
+    fn synthesis_timeout_constant_is_10_seconds() {
+        assert_eq!(SYNTHESIS_TIMEOUT_SECS, 10);
+    }
+
+    // ── is_synthesis_text_rejection: reply-less and wrong-reply rules ──
+
+    const NEW_LIMIT: &str = "Лимит на озвучку исчерпан. Через сутки можно попробовать снова.";
+
+    #[test]
+    fn text_rejection_accepts_replyless_known_limit() {
+        assert!(rej(false, 43, Some(BOT_ID), None, NEW_LIMIT));
+    }
+
+    #[test]
+    fn text_rejection_rejects_replyless_generic() {
+        assert!(!rej(false, 43, Some(BOT_ID), None, "some generic error"));
+    }
+
+    #[test]
+    fn text_rejection_rejects_wrong_reply_even_for_known_limit() {
+        assert!(!rej(false, 43, Some(BOT_ID), Some(99), NEW_LIMIT));
+    }
+
     // ── is_matching_limits_response ────────────────────────────────────
 
     #[test]
@@ -2700,6 +3173,47 @@ mod tests {
     fn limits_short_message_rejects_malformed_text() {
         let update = make_short_update(false, 43, BOT_ID, "random text");
         assert!(extract_limits_info_from_update(&update, SENT_ID, BOT_ID).is_none());
+    }
+
+    // ── extract_synthesis_response_from_update (short message) ─────────
+
+    #[test]
+    fn synthesis_short_message_accepts_replyless_new_limit() {
+        let update = make_short_update(false, 43, BOT_ID, NEW_LIMIT);
+        let result = SileroTtsBot::extract_synthesis_response_from_update(&update, SENT_ID, BOT_ID);
+        match result {
+            Some(SynthesisResponse::TextRejection(kind)) => {
+                assert_eq!(kind, RejectionKind::LimitExceeded);
+            }
+            other => panic!("expected TextRejection(LimitExceeded), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn synthesis_short_message_rejects_outgoing() {
+        let update = make_short_update(true, 43, BOT_ID, NEW_LIMIT);
+        assert!(
+            SileroTtsBot::extract_synthesis_response_from_update(&update, SENT_ID, BOT_ID)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn synthesis_short_message_rejects_wrong_user() {
+        let update = make_short_update(false, 43, 999999, NEW_LIMIT);
+        assert!(
+            SileroTtsBot::extract_synthesis_response_from_update(&update, SENT_ID, BOT_ID)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn synthesis_short_message_rejects_stale_id() {
+        let update = make_short_update(false, SENT_ID, BOT_ID, NEW_LIMIT);
+        assert!(
+            SileroTtsBot::extract_synthesis_response_from_update(&update, SENT_ID, BOT_ID)
+                .is_none()
+        );
     }
 
     // ── voice_extension ────────────────────────────────────────────────
