@@ -401,7 +401,7 @@ impl Default for LocalTtsSettings {
 }
 
 /// Telegram TTS settings (for Silero)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TelegramTtsSettings {
     pub api_id: Option<i64>,
     #[serde(default)]
@@ -412,6 +412,37 @@ pub struct TelegramTtsSettings {
     /// Текущий выбранный ID голоса
     #[serde(default)]
     pub current_voice_id: String,
+    /// Ожидание связанного audio/text reply после отправки текста (ms)
+    #[serde(default = "default_synthesis_response_timeout_ms")]
+    pub synthesis_response_timeout_ms: u32,
+    /// Пауза после пустого скачанного файла перед следующей попыткой (ms)
+    #[serde(default = "default_download_retry_delay_ms")]
+    pub download_retry_delay_ms: u32,
+}
+
+fn default_synthesis_response_timeout_ms() -> u32 {
+    10000
+}
+fn default_download_retry_delay_ms() -> u32 {
+    1000
+}
+
+pub const SYNTHESIS_RESPONSE_TIMEOUT_MIN_MS: u32 = 1000;
+pub const SYNTHESIS_RESPONSE_TIMEOUT_MAX_MS: u32 = 120_000;
+pub const DOWNLOAD_RETRY_DELAY_MIN_MS: u32 = 100;
+pub const DOWNLOAD_RETRY_DELAY_MAX_MS: u32 = 10_000;
+
+impl Default for TelegramTtsSettings {
+    fn default() -> Self {
+        Self {
+            api_id: None,
+            proxy_mode: ProxyMode::None,
+            voices: Vec::new(),
+            current_voice_id: String::new(),
+            synthesis_response_timeout_ms: default_synthesis_response_timeout_ms(),
+            download_retry_delay_ms: default_download_retry_delay_ms(),
+        }
+    }
 }
 
 /// Proxy mode for Telegram connection
@@ -1086,6 +1117,38 @@ impl AppSettings {
         if let Err(e) = validate_port(self.webview.port) {
             warn!(error = %e, "Invalid webview port, using default");
             self.webview.port = 10100;
+        }
+
+        // Validate and clamp Silero timing settings
+        {
+            let old = self.tts.telegram.synthesis_response_timeout_ms;
+            self.tts.telegram.synthesis_response_timeout_ms = old.clamp(
+                SYNTHESIS_RESPONSE_TIMEOUT_MIN_MS,
+                SYNTHESIS_RESPONSE_TIMEOUT_MAX_MS,
+            );
+            if self.tts.telegram.synthesis_response_timeout_ms != old {
+                warn!(
+                    synthesis_response_timeout_ms = old,
+                    clamped = self.tts.telegram.synthesis_response_timeout_ms,
+                    min = SYNTHESIS_RESPONSE_TIMEOUT_MIN_MS,
+                    max = SYNTHESIS_RESPONSE_TIMEOUT_MAX_MS,
+                    "clamped synthesis_response_timeout_ms"
+                );
+            }
+        }
+        {
+            let old = self.tts.telegram.download_retry_delay_ms;
+            self.tts.telegram.download_retry_delay_ms =
+                old.clamp(DOWNLOAD_RETRY_DELAY_MIN_MS, DOWNLOAD_RETRY_DELAY_MAX_MS);
+            if self.tts.telegram.download_retry_delay_ms != old {
+                warn!(
+                    download_retry_delay_ms = old,
+                    clamped = self.tts.telegram.download_retry_delay_ms,
+                    min = DOWNLOAD_RETRY_DELAY_MIN_MS,
+                    max = DOWNLOAD_RETRY_DELAY_MAX_MS,
+                    "clamped download_retry_delay_ms"
+                );
+            }
         }
     }
 }
@@ -2652,5 +2715,173 @@ mod tests {
         assert!(json.contains("parameter_name"), "json: {}", json);
         assert!(json.contains("start_hotkey_id"), "json: {}", json);
         assert!(json.contains("stop_hotkey_id"), "json: {}", json);
+    }
+
+    // ==================== Silero timing settings tests ====================
+
+    /// TelegramTtsSettings::default() must have correct default timing values.
+    #[test]
+    fn telegram_tts_settings_default_timing() {
+        let s = TelegramTtsSettings::default();
+        assert_eq!(s.synthesis_response_timeout_ms, 10000);
+        assert_eq!(s.download_retry_delay_ms, 1000);
+    }
+
+    /// Old JSON without synthesis_response_timeout_ms or download_retry_delay_ms
+    /// must deserialize to defaults.
+    #[test]
+    fn telegram_tts_settings_deserializes_without_timing_fields() {
+        let old_json = r#"{
+            "api_id": null,
+            "proxy_mode": "none",
+            "voices": [],
+            "current_voice_id": ""
+        }"#;
+        let settings: TelegramTtsSettings = serde_json::from_str(old_json)
+            .expect("old TelegramTtsSettings (without timing fields) must deserialize");
+        assert_eq!(settings.synthesis_response_timeout_ms, 10000);
+        assert_eq!(settings.download_retry_delay_ms, 1000);
+    }
+
+    /// Clamping: synthesis_response_timeout_ms at exact min boundary passes through.
+    #[test]
+    fn validate_silero_timeout_exact_min() {
+        let mut app = AppSettings::default();
+        app.tts.telegram.synthesis_response_timeout_ms = SYNTHESIS_RESPONSE_TIMEOUT_MIN_MS;
+        app.validate();
+        assert_eq!(
+            app.tts.telegram.synthesis_response_timeout_ms,
+            SYNTHESIS_RESPONSE_TIMEOUT_MIN_MS
+        );
+    }
+
+    /// Clamping: synthesis_response_timeout_ms at exact max boundary passes through.
+    #[test]
+    fn validate_silero_timeout_exact_max() {
+        let mut app = AppSettings::default();
+        app.tts.telegram.synthesis_response_timeout_ms = SYNTHESIS_RESPONSE_TIMEOUT_MAX_MS;
+        app.validate();
+        assert_eq!(
+            app.tts.telegram.synthesis_response_timeout_ms,
+            SYNTHESIS_RESPONSE_TIMEOUT_MAX_MS
+        );
+    }
+
+    /// Clamping: synthesis_response_timeout_ms below min is clamped up.
+    #[test]
+    fn validate_silero_timeout_below_min() {
+        let mut app = AppSettings::default();
+        app.tts.telegram.synthesis_response_timeout_ms = 500;
+        app.validate();
+        assert_eq!(
+            app.tts.telegram.synthesis_response_timeout_ms,
+            SYNTHESIS_RESPONSE_TIMEOUT_MIN_MS
+        );
+        // zero also clamped
+        let mut app2 = AppSettings::default();
+        app2.tts.telegram.synthesis_response_timeout_ms = 0;
+        app2.validate();
+        assert_eq!(
+            app2.tts.telegram.synthesis_response_timeout_ms,
+            SYNTHESIS_RESPONSE_TIMEOUT_MIN_MS
+        );
+    }
+
+    /// Clamping: synthesis_response_timeout_ms above max is clamped down.
+    #[test]
+    fn validate_silero_timeout_above_max() {
+        let mut app = AppSettings::default();
+        app.tts.telegram.synthesis_response_timeout_ms = 999_999;
+        app.validate();
+        assert_eq!(
+            app.tts.telegram.synthesis_response_timeout_ms,
+            SYNTHESIS_RESPONSE_TIMEOUT_MAX_MS
+        );
+    }
+
+    /// Clamping: download_retry_delay_ms at exact min boundary passes through.
+    #[test]
+    fn validate_silero_delay_exact_min() {
+        let mut app = AppSettings::default();
+        app.tts.telegram.download_retry_delay_ms = DOWNLOAD_RETRY_DELAY_MIN_MS;
+        app.validate();
+        assert_eq!(
+            app.tts.telegram.download_retry_delay_ms,
+            DOWNLOAD_RETRY_DELAY_MIN_MS
+        );
+    }
+
+    /// Clamping: download_retry_delay_ms at exact max boundary passes through.
+    #[test]
+    fn validate_silero_delay_exact_max() {
+        let mut app = AppSettings::default();
+        app.tts.telegram.download_retry_delay_ms = DOWNLOAD_RETRY_DELAY_MAX_MS;
+        app.validate();
+        assert_eq!(
+            app.tts.telegram.download_retry_delay_ms,
+            DOWNLOAD_RETRY_DELAY_MAX_MS
+        );
+    }
+
+    /// Clamping: download_retry_delay_ms below min is clamped up.
+    #[test]
+    fn validate_silero_delay_below_min() {
+        let mut app = AppSettings::default();
+        app.tts.telegram.download_retry_delay_ms = 50;
+        app.validate();
+        assert_eq!(
+            app.tts.telegram.download_retry_delay_ms,
+            DOWNLOAD_RETRY_DELAY_MIN_MS
+        );
+        // zero also clamped
+        let mut app2 = AppSettings::default();
+        app2.tts.telegram.download_retry_delay_ms = 0;
+        app2.validate();
+        assert_eq!(
+            app2.tts.telegram.download_retry_delay_ms,
+            DOWNLOAD_RETRY_DELAY_MIN_MS
+        );
+    }
+
+    /// Clamping: download_retry_delay_ms above max is clamped down.
+    #[test]
+    fn validate_silero_delay_above_max() {
+        let mut app = AppSettings::default();
+        app.tts.telegram.download_retry_delay_ms = 99_999;
+        app.validate();
+        assert_eq!(
+            app.tts.telegram.download_retry_delay_ms,
+            DOWNLOAD_RETRY_DELAY_MAX_MS
+        );
+    }
+
+    /// Settings -> DTO -> settings round-trip preserves both hidden timing values.
+    #[test]
+    fn telegram_tts_timing_dto_round_trip() {
+        use crate::config::dto::TtsSettingsDto;
+        let mut settings = AppSettings::default();
+        settings.tts.telegram.synthesis_response_timeout_ms = 25000;
+        settings.tts.telegram.download_retry_delay_ms = 3000;
+        let dto: TtsSettingsDto = settings.tts.clone().into();
+        assert_eq!(dto.telegram.synthesis_response_timeout_ms, 25000);
+        assert_eq!(dto.telegram.download_retry_delay_ms, 3000);
+        let back: TtsSettings = dto.into();
+        assert_eq!(back.telegram.synthesis_response_timeout_ms, 25000);
+        assert_eq!(back.telegram.download_retry_delay_ms, 3000);
+    }
+
+    /// DTO from old frontend (missing timing fields) deserializes to defaults.
+    #[test]
+    fn telegram_tts_dto_deserializes_without_timing_fields() {
+        let old_json = r#"{
+            "api_id": null,
+            "proxy_mode": "none",
+            "voices": [],
+            "current_voice_id": ""
+        }"#;
+        let dto: crate::config::dto::TelegramTtsSettingsDto = serde_json::from_str(old_json)
+            .expect("old DTO (without timing fields) must deserialize");
+        assert_eq!(dto.synthesis_response_timeout_ms, 10000);
+        assert_eq!(dto.download_retry_delay_ms, 1000);
     }
 }

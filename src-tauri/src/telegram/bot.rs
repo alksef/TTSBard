@@ -13,8 +13,44 @@ const BOT_USERNAME: &str = "silero_voice_bot";
 /// Максимальное количество попыток скачивания (включая первую)
 const MAX_DOWNLOAD_ATTEMPTS: u32 = 3;
 
-/// Задержка между попытками скачивания (в миллисекундах)
-const DOWNLOAD_RETRY_DELAY_MS: u64 = 1000;
+/// Returns `Some(delay)` when another attempt remains according to
+/// `MAX_DOWNLOAD_ATTEMPTS`, otherwise `None`.
+fn retry_delay_for_attempt(
+    attempt: u32,
+    delay: std::time::Duration,
+) -> Option<std::time::Duration> {
+    if attempt < MAX_DOWNLOAD_ATTEMPTS {
+        Some(delay)
+    } else {
+        None
+    }
+}
+
+/// Runtime timing settings for Silero synthesis.
+/// Immutable snapshot of the two configurable durations; stored as
+/// `Duration` to prevent unit confusion through the call chain.
+#[derive(Debug, Clone)]
+pub struct SileroRuntimeSettings {
+    pub synthesis_response_timeout: std::time::Duration,
+    pub download_retry_delay: std::time::Duration,
+}
+
+impl SileroRuntimeSettings {
+    pub fn new(synthesis_response_timeout_ms: u32, download_retry_delay_ms: u32) -> Self {
+        Self {
+            synthesis_response_timeout: std::time::Duration::from_millis(
+                synthesis_response_timeout_ms as u64,
+            ),
+            download_retry_delay: std::time::Duration::from_millis(download_retry_delay_ms as u64),
+        }
+    }
+}
+
+impl Default for SileroRuntimeSettings {
+    fn default() -> Self {
+        Self::new(10000, 1000)
+    }
+}
 
 /// Структура для результата голосового сообщения
 #[derive(Debug, Clone)]
@@ -31,9 +67,6 @@ enum SynthesisResponse {
     Voice(VoiceMessageResult),
     TextRejection(RejectionKind),
 }
-
-/// Timeout for synthesis voice/text response from Silero bot (seconds).
-const SYNTHESIS_TIMEOUT_SECS: u64 = 10;
 
 /// User-facing error when Silero bot signals the text exceeds the voice-over limit.
 const LIMIT_REJECTION_TEXT: &str = "Превышен лимит озвучки Silero.";
@@ -99,7 +132,11 @@ impl SileroTtsBot {
 
     /// Синтез речи через Telegram бота
     /// Возвращает путь к скачанному аудиофайлу
-    pub async fn synthesize(client: &TelegramClient, text: &str) -> Result<TtsResult, String> {
+    pub async fn synthesize(
+        client: &TelegramClient,
+        text: &str,
+        rt: &SileroRuntimeSettings,
+    ) -> Result<TtsResult, String> {
         info!("Starting TTS synthesis");
 
         let text = text.trim();
@@ -119,7 +156,7 @@ impl SileroTtsBot {
 
         let response = Self::wait_for_synthesis_response(
             &mut rx,
-            SYNTHESIS_TIMEOUT_SECS,
+            rt.synthesis_response_timeout,
             sent_msg_id,
             bot_user_id,
         )
@@ -127,10 +164,11 @@ impl SileroTtsBot {
 
         match response {
             SynthesisResponse::Voice(voice_result) => {
-                // 3. Скачиваем аудиофайл во временную папку
-                let audio_path = Self::download_voice_to_temp(client, &voice_result).await?;
+                let audio_path =
+                    Self::download_voice_to_temp(client, &voice_result, rt.download_retry_delay)
+                        .await?;
 
-                info!(?audio_path, "TTS synthesis completed");
+                info!(msg_id = voice_result.msg_id, "TTS synthesis completed");
 
                 Ok(TtsResult::success(audio_path))
             }
@@ -185,23 +223,25 @@ impl SileroTtsBot {
     /// Ожидать голосовое сообщение или текстовую ошибку от бота с таймаутом
     async fn wait_for_synthesis_response(
         rx: &mut broadcast::Receiver<Arc<UpdatesLike>>,
-        timeout_secs: u64,
+        timeout: std::time::Duration,
         sent_msg_id: i32,
         bot_user_id: i64,
     ) -> Result<SynthesisResponse, String> {
-        info!(timeout_secs, sent_msg_id, "Waiting for synthesis response");
+        info!(
+            timeout_ms = timeout.as_millis(),
+            sent_msg_id, "Waiting for synthesis response"
+        );
 
         let start_time = std::time::Instant::now();
-        let total_timeout = std::time::Duration::from_secs(timeout_secs);
 
         loop {
             let elapsed = start_time.elapsed();
-            if elapsed >= total_timeout {
+            if elapsed >= timeout {
                 warn!("Timeout waiting for synthesis response");
                 return Err("Timeout waiting for voice message".to_string());
             }
 
-            let remaining = total_timeout.saturating_sub(elapsed);
+            let remaining = timeout.saturating_sub(elapsed);
 
             match tokio::time::timeout(remaining, rx.recv()).await {
                 Ok(Ok(update)) => {
@@ -422,6 +462,7 @@ impl SileroTtsBot {
     async fn download_voice_to_temp(
         client: &TelegramClient,
         voice: &VoiceMessageResult,
+        retry_delay: std::time::Duration,
     ) -> Result<String, String> {
         debug!(
             "[SILORO] Downloading voice file_id={}, msg_id={}, mime={}",
@@ -484,18 +525,17 @@ impl SileroTtsBot {
 
                                 match classify_part_file(&part_path) {
                                     Ok(PartFileStatus::EmptyRetryable) => {
+                                        let retry = retry_delay_for_attempt(attempt, retry_delay);
                                         warn!(
                                             attempt,
                                             max_attempts = MAX_DOWNLOAD_ATTEMPTS,
                                             msg_id = voice.msg_id,
-                                            will_retry = attempt < MAX_DOWNLOAD_ATTEMPTS,
+                                            retry_delay_ms = retry_delay.as_millis(),
+                                            will_retry = retry.is_some(),
                                             "Downloaded file is empty"
                                         );
-                                        if attempt < MAX_DOWNLOAD_ATTEMPTS {
-                                            tokio::time::sleep(std::time::Duration::from_millis(
-                                                DOWNLOAD_RETRY_DELAY_MS,
-                                            ))
-                                            .await;
+                                        if let Some(delay) = retry {
+                                            tokio::time::sleep(delay).await;
                                         }
                                         continue;
                                     }
@@ -2812,11 +2852,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn synthesis_timeout_constant_is_10_seconds() {
-        assert_eq!(SYNTHESIS_TIMEOUT_SECS, 10);
-    }
-
     // ── is_synthesis_text_rejection: reply-less and wrong-reply rules ──
 
     const NEW_LIMIT: &str = "Лимит на озвучку исчерпан. Через сутки можно попробовать снова.";
@@ -3424,5 +3459,95 @@ mod tests {
             "error must mention metadata: {}",
             err
         );
+    }
+
+    // ── SileroRuntimeSettings ────────────────────────────────────────
+
+    #[test]
+    fn runtime_settings_default_values() {
+        let rt = SileroRuntimeSettings::default();
+        assert_eq!(rt.synthesis_response_timeout.as_millis(), 10000);
+        assert_eq!(rt.download_retry_delay.as_millis(), 1000);
+    }
+
+    #[test]
+    fn runtime_settings_non_default_milliseconds() {
+        let rt = SileroRuntimeSettings::new(5000, 200);
+        assert_eq!(rt.synthesis_response_timeout.as_millis(), 5000);
+        assert_eq!(rt.download_retry_delay.as_millis(), 200);
+    }
+
+    #[test]
+    fn runtime_settings_clone_preserves_values() {
+        let rt = SileroRuntimeSettings::new(7000, 300);
+        let cloned = rt.clone();
+        assert_eq!(
+            cloned.synthesis_response_timeout.as_millis(),
+            rt.synthesis_response_timeout.as_millis()
+        );
+        assert_eq!(
+            cloned.download_retry_delay.as_millis(),
+            rt.download_retry_delay.as_millis()
+        );
+    }
+
+    // ── retry_delay_for_attempt ────────────────────────────────────
+
+    #[test]
+    fn retry_delay_first_attempt_returns_delay() {
+        let delay = std::time::Duration::from_millis(500);
+        assert_eq!(retry_delay_for_attempt(1, delay), Some(delay));
+    }
+
+    #[test]
+    fn retry_delay_second_attempt_returns_delay() {
+        let delay = std::time::Duration::from_millis(500);
+        assert_eq!(retry_delay_for_attempt(2, delay), Some(delay));
+    }
+
+    #[test]
+    fn retry_delay_final_attempt_returns_none() {
+        let delay = std::time::Duration::from_millis(500);
+        assert_eq!(retry_delay_for_attempt(3, delay), None);
+    }
+
+    #[test]
+    fn retry_delay_out_of_range_returns_none() {
+        let delay = std::time::Duration::from_millis(500);
+        assert_eq!(retry_delay_for_attempt(4, delay), None);
+        assert_eq!(retry_delay_for_attempt(10, delay), None);
+    }
+
+    // ── wait_for_synthesis_response timeout test ────────────────────
+
+    #[tokio::test]
+    async fn wait_for_synthesis_response_observes_short_duration() {
+        // Live sender that never sends a matching update — timeout triggers.
+        let (tx, mut rx) = tokio::sync::broadcast::channel::<Arc<UpdatesLike>>(16);
+        let short_timeout = std::time::Duration::from_millis(50);
+        let start = std::time::Instant::now();
+
+        let handle = tokio::spawn(async move {
+            SileroTtsBot::wait_for_synthesis_response(&mut rx, short_timeout, 42, 555000).await
+        });
+
+        // Keep the sender alive (never send a matching msg).
+        let _tx = tx;
+
+        let result = tokio::time::timeout(std::time::Duration::from_secs(2), handle)
+            .await
+            .expect("test helper timeout");
+
+        let duration = start.elapsed();
+        assert!(
+            duration.as_millis() < 1000,
+            "short timeout must fire in under 1s, got {}ms",
+            duration.as_millis()
+        );
+
+        match result {
+            Ok(Err(e)) if e.contains("Timeout") => {}
+            other => panic!("expected Timeout error, got {:?}", other),
+        }
     }
 }

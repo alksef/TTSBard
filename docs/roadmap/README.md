@@ -64,6 +64,7 @@ related_tasks: []
 - [ROADMAP-048 — Enter/Escape и autocomplete](./completed/048-editor-autocomplete-enter-escape.md)
 - [ROADMAP-049 — Надёжная корреляция ответов Silero](./completed/049-silero-response-correlation.md)
 - [ROADMAP-052 — Перехват ошибки лимита Silero](./completed/052-silero-limit-error-handling.md)
+- [ROADMAP-053 — Настройка ожидания и повторов Silero](./completed/053-silero-runtime-tuning.md)
 
 ### Окна, ввод и sound panel
 

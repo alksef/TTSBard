@@ -79,6 +79,8 @@ export interface TelegramTtsSettingsDto {
   proxy_mode?: string
   voices?: VoiceCode[]
   current_voice_id?: string
+  synthesis_response_timeout_ms?: number
+  download_retry_delay_ms?: number
 }
 
 export interface VoiceCode {

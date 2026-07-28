@@ -2,7 +2,7 @@ use crate::config::{ProxyMode, SettingsManager};
 use crate::telegram::types::AuthState;
 use crate::telegram::{
     bot::set_speaker, get_current_voice, get_limits, types::VoiceCode, CurrentVoice, Limits,
-    ProxyStatus, SileroTtsBot, TelegramClient, TtsResult, UserInfo,
+    ProxyStatus, SileroRuntimeSettings, SileroTtsBot, TelegramClient, TtsResult, UserInfo,
 };
 use std::sync::Arc;
 use tauri::{AppHandle, State};
@@ -319,9 +319,10 @@ pub async fn telegram_get_user(
 #[tauri::command]
 pub async fn speak_text_silero(
     state: State<'_, TelegramState>,
+    settings_manager: State<'_, SettingsManager>,
     text: String,
 ) -> Result<TtsResult, String> {
-    tracing::debug!(text, "Starting TTS");
+    tracing::debug!(text_len = text.len(), "Starting TTS via Silero");
 
     // Валидация
     let text = text.trim();
@@ -346,8 +347,19 @@ pub async fn speak_text_silero(
         ));
     }
 
+    // Load settings, construct runtime snapshot, release lock before synthesis
+    let runtime_settings = {
+        let settings = settings_manager
+            .load()
+            .map_err(|e| format!("Failed to load settings: {}", e))?;
+        SileroRuntimeSettings::new(
+            settings.tts.telegram.synthesis_response_timeout_ms,
+            settings.tts.telegram.download_retry_delay_ms,
+        )
+    };
+
     // Выполняем синтез
-    let result = SileroTtsBot::synthesize(&client, text).await?;
+    let result = SileroTtsBot::synthesize(&client, text, &runtime_settings).await?;
 
     Ok(result)
 }

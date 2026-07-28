@@ -1,5 +1,5 @@
 use crate::events::EventSender;
-use crate::telegram::TelegramClient;
+use crate::telegram::{SileroRuntimeSettings, TelegramClient};
 use crate::tts::engine::TtsEngine;
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -14,6 +14,7 @@ pub struct SileroTts {
     configured: bool,
     event_tx: Option<EventSender>,
     captured_speaker: Option<String>,
+    runtime_settings: SileroRuntimeSettings,
 }
 
 impl SileroTts {
@@ -23,6 +24,7 @@ impl SileroTts {
             configured: false,
             event_tx: None,
             captured_speaker: None,
+            runtime_settings: SileroRuntimeSettings::default(),
         }
     }
 
@@ -39,6 +41,7 @@ impl SileroTts {
             configured: true,
             event_tx: None,
             captured_speaker: None,
+            runtime_settings: SileroRuntimeSettings::default(),
         }
     }
 
@@ -52,8 +55,17 @@ impl SileroTts {
         self
     }
 
+    pub fn with_runtime_settings(mut self, settings: SileroRuntimeSettings) -> Self {
+        self.runtime_settings = settings;
+        self
+    }
+
     pub fn captured_speaker(&self) -> Option<&str> {
         self.captured_speaker.as_deref()
+    }
+
+    pub fn runtime_settings(&self) -> &SileroRuntimeSettings {
+        &self.runtime_settings
     }
 }
 
@@ -66,10 +78,7 @@ impl Default for SileroTts {
 #[async_trait]
 impl TtsEngine for SileroTts {
     async fn synthesize(&self, text: &str) -> Result<Vec<u8>, String> {
-        debug!(
-            text_preview = %text.chars().take(30).collect::<String>(),
-            "Silero TTS synthesize requested"
-        );
+        debug!(text_len = text.len(), "Silero TTS synthesize requested");
 
         if !self.configured {
             return Err(
@@ -100,7 +109,8 @@ impl TtsEngine for SileroTts {
             }
         }
 
-        let result = crate::telegram::SileroTtsBot::synthesize(client, text).await?;
+        let result =
+            crate::telegram::SileroTtsBot::synthesize(client, text, &self.runtime_settings).await?;
 
         if !result.success {
             let err = result.error.unwrap_or_else(|| "Unknown error".to_string());
@@ -147,5 +157,89 @@ mod tests {
     fn captured_speaker_whitespace_is_trimmed() {
         let tts = SileroTts::new().with_captured_speaker("  baya_16  ".to_string());
         assert_eq!(tts.captured_speaker(), Some("baya_16"));
+    }
+
+    #[test]
+    fn runtime_settings_default_values() {
+        let tts = SileroTts::new();
+        let rt = tts.runtime_settings();
+        assert_eq!(rt.synthesis_response_timeout.as_millis(), 10000);
+        assert_eq!(rt.download_retry_delay.as_millis(), 1000);
+    }
+
+    #[test]
+    fn runtime_settings_non_default_values() {
+        let rt = SileroRuntimeSettings::new(5000, 2000);
+        assert_eq!(rt.synthesis_response_timeout.as_millis(), 5000);
+        assert_eq!(rt.download_retry_delay.as_millis(), 2000);
+    }
+
+    #[test]
+    fn clone_preserves_runtime_settings() {
+        let rt = SileroRuntimeSettings::new(7000, 300);
+        let original = SileroTts::new()
+            .with_captured_speaker("baya_16".to_string())
+            .with_runtime_settings(rt.clone());
+        let cloned = original.clone();
+        assert_eq!(cloned.captured_speaker(), Some("baya_16"));
+        assert_eq!(
+            cloned
+                .runtime_settings()
+                .synthesis_response_timeout
+                .as_millis(),
+            7000
+        );
+        assert_eq!(
+            cloned.runtime_settings().download_retry_delay.as_millis(),
+            300
+        );
+    }
+
+    #[test]
+    fn with_captured_speaker_preserves_runtime_settings() {
+        let rt = SileroRuntimeSettings::new(8000, 500);
+        let original = SileroTts::new()
+            .with_runtime_settings(rt)
+            .with_captured_speaker("baya_16".to_string());
+        assert_eq!(original.captured_speaker(), Some("baya_16"));
+        assert_eq!(
+            original
+                .runtime_settings()
+                .synthesis_response_timeout
+                .as_millis(),
+            8000
+        );
+        assert_eq!(
+            original.runtime_settings().download_retry_delay.as_millis(),
+            500
+        );
+
+        let updated = original.with_captured_speaker("new_speaker".to_string());
+        assert_eq!(updated.captured_speaker(), Some("new_speaker"));
+        assert_eq!(
+            updated
+                .runtime_settings()
+                .synthesis_response_timeout
+                .as_millis(),
+            8000
+        );
+        assert_eq!(
+            updated.runtime_settings().download_retry_delay.as_millis(),
+            500
+        );
+    }
+
+    #[test]
+    fn default_constructor_uses_default_runtime_settings() {
+        let tts1 = SileroTts::new();
+        let tts2 = SileroTts::with_telegram_client(Arc::new(Mutex::new(None)));
+        assert_eq!(
+            tts1.runtime_settings()
+                .synthesis_response_timeout
+                .as_millis(),
+            tts2.runtime_settings()
+                .synthesis_response_timeout
+                .as_millis()
+        );
     }
 }

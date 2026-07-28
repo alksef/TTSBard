@@ -1,6 +1,7 @@
 use crate::commands::playback::PlaybackState;
 use crate::speech_queue::{AcceptedJob, JobStatus, Snapshot, SpeechQueue, SpeechQueueStateDto};
 use crate::state::AppState;
+use crate::telegram::SileroRuntimeSettings;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
@@ -69,7 +70,14 @@ pub(crate) fn build_snapshot(state: &AppState, text: &str) -> Result<Snapshot, S
                 &settings.tts.telegram.current_voice_id,
                 silero.captured_speaker(),
             )?;
-            let captured = silero.clone().with_captured_speaker(speaker);
+            let runtime = SileroRuntimeSettings::new(
+                settings.tts.telegram.synthesis_response_timeout_ms,
+                settings.tts.telegram.download_retry_delay_ms,
+            );
+            let captured = silero
+                .clone()
+                .with_captured_speaker(speaker)
+                .with_runtime_settings(runtime);
             crate::tts::TtsProvider::Silero(captured)
         }
         other => other.clone(),
@@ -359,5 +367,43 @@ mod tests {
         ));
         assert!(!is_cache_miss_error(""));
         assert!(!is_cache_miss_error("Some other error"));
+    }
+
+    #[test]
+    fn build_snapshot_captures_timing_values_from_settings() {
+        use crate::config::AppSettings;
+        use crate::state::AppState;
+        use crate::tts::registry::TtsProviderEntry;
+        use crate::tts::TtsProvider;
+
+        let state = AppState::new();
+
+        let mut settings = AppSettings::default();
+        settings.tts.telegram.synthesis_response_timeout_ms = 7777;
+        settings.tts.telegram.download_retry_delay_ms = 888;
+        settings.tts.telegram.current_voice_id = "test_vc".to_string();
+        *state.settings_cache.write() = settings;
+
+        {
+            let mut registry = state.tts_registry.lock();
+            let entry = TtsProviderEntry {
+                id: "silero".to_string(),
+                display_name: "Silero".to_string(),
+                provider: TtsProvider::Silero(crate::tts::silero::SileroTts::new()),
+            };
+            registry.add_or_replace(entry);
+            registry.select("silero").unwrap();
+        }
+
+        let snapshot = build_snapshot(&state, "test text").expect("build_snapshot must succeed");
+
+        if let TtsProvider::Silero(silero) = &snapshot.tts_provider {
+            let rt = silero.runtime_settings();
+            assert_eq!(rt.synthesis_response_timeout.as_millis(), 7777);
+            assert_eq!(rt.download_retry_delay.as_millis(), 888);
+            assert_eq!(silero.captured_speaker(), Some("test_vc"));
+        } else {
+            panic!("expected Silero provider");
+        }
     }
 }

@@ -340,6 +340,17 @@ pub struct TelegramTtsSettingsDto {
     pub voices: Vec<crate::telegram::types::VoiceCode>,
     #[serde(default)]
     pub current_voice_id: String,
+    #[serde(default = "default_synthesis_response_timeout_ms_dto")]
+    pub synthesis_response_timeout_ms: u32,
+    #[serde(default = "default_download_retry_delay_ms_dto")]
+    pub download_retry_delay_ms: u32,
+}
+
+fn default_synthesis_response_timeout_ms_dto() -> u32 {
+    10000
+}
+fn default_download_retry_delay_ms_dto() -> u32 {
+    1000
 }
 
 impl From<TelegramTtsSettings> for TelegramTtsSettingsDto {
@@ -351,6 +362,8 @@ impl From<TelegramTtsSettings> for TelegramTtsSettingsDto {
                 .unwrap_or_else(|_| "none".to_string()),
             voices: s.voices,
             current_voice_id: s.current_voice_id,
+            synthesis_response_timeout_ms: s.synthesis_response_timeout_ms,
+            download_retry_delay_ms: s.download_retry_delay_ms,
         }
     }
 }
@@ -366,6 +379,8 @@ impl From<TelegramTtsSettingsDto> for TelegramTtsSettings {
             },
             voices: dto.voices,
             current_voice_id: dto.current_voice_id,
+            synthesis_response_timeout_ms: dto.synthesis_response_timeout_ms,
+            download_retry_delay_ms: dto.download_retry_delay_ms,
         }
     }
 }
