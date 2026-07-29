@@ -1,8 +1,8 @@
 ---
 id: ROADMAP-031
-status: deferred
+status: completed
 created: 2026-07-13
-updated: 2026-07-25
+updated: 2026-07-30
 related_tasks: []
 ---
 
@@ -11,6 +11,14 @@ related_tasks: []
 Исследование завершено, реализация отложена до отдельного proof-of-concept.
 
 **Источник:** [официальный репозиторий Resemble Enhance](https://github.com/resemble-ai/resemble-enhance)
+
+## Outcome
+
+Resemble Enhance не внедряется в текущий realtime PCM pipeline: для чистого TTS
+польза не подтверждена, а полный enhancer добавляет существенные риски задержки,
+поставки и изменения тембра. Исследовательский вопрос закрыт. Если появится
+практическая потребность в offline restoration, сравнение на целевых образцах и
+proof-of-concept оформляются как отдельный roadmap item.
 
 ## 1. Вывод для обсуждения
 

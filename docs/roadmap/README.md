@@ -40,7 +40,6 @@ related_tasks: []
 
 | Item | Статус | Следующий шаг |
 |---|---|---|
-| [ROADMAP-031 — Resemble Enhance](./active/031-resemble-enhance-research.md) | `deferred` | Вернуться после DSP A/B и отдельного proof-of-concept |
 | [ROADMAP-037 — Hotkeys и возврат фокуса](./active/037-application-hotkeys-and-previous-window-focus.md) | `in_progress` | Ручная проверка runtime-сценариев |
 | [ROADMAP-038 — Dynamic Piper providers](./active/038-dynamic-piper-tts-providers.md) | `in_progress` | Ручная проверка на Windows |
 ## Завершённые направления
@@ -83,6 +82,7 @@ related_tasks: []
 - [ROADMAP-025 — PCM playback pipeline](./completed/025-playback-pcm-pipeline.md)
 - [ROADMAP-029 — DSP postprocessing](./completed/029-dsp-audio-postprocessing.md)
 - [ROADMAP-030 — sample-rate invariant](./completed/030-deepfilternet-resampling-invariant.md)
+- [ROADMAP-031 — Resemble Enhance research](./completed/031-resemble-enhance-research.md)
 - [ROADMAP-032 — audio boundaries и presets](./completed/032-audio-boundaries-and-dsp-presets.md)
 - [ROADMAP-035 — AudioPanel decomposition](./completed/035-audio-panel-subpanels.md)
 - [ROADMAP-047 — очередь задач озвучивания](./completed/047-speech-job-queue.md)

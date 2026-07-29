@@ -12,7 +12,7 @@ related_tasks: []
 
 Вариант A реализован и проверен.
 
-**Связано:** `src-tauri/src/audio/effects.rs`, [ROADMAP-025](./025-playback-pcm-pipeline.md), [ROADMAP-029](./029-dsp-audio-postprocessing.md), [ROADMAP-031](../active/031-resemble-enhance-research.md)
+**Связано:** `src-tauri/src/audio/effects.rs`, [ROADMAP-025](./025-playback-pcm-pipeline.md), [ROADMAP-029](./029-dsp-audio-postprocessing.md), [ROADMAP-031](./031-resemble-enhance-research.md)
 
 ## 1. Проблема
 
