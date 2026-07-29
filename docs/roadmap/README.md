@@ -40,7 +40,6 @@ related_tasks: []
 
 | Item | Статус | Следующий шаг |
 |---|---|---|
-| [ROADMAP-037 — Hotkeys и возврат фокуса](./active/037-application-hotkeys-and-previous-window-focus.md) | `in_progress` | Ручная проверка runtime-сценариев |
 | [ROADMAP-038 — Dynamic Piper providers](./active/038-dynamic-piper-tts-providers.md) | `in_progress` | Ручная проверка на Windows |
 ## Завершённые направления
 
@@ -71,6 +70,7 @@ related_tasks: []
 - [ROADMAP-014 — soundpanel sets](./completed/014-soundpanel-sets-and-inline-editing.md)
 - [ROADMAP-023 — transparency и appearance](./completed/023-window-transparency-and-unified-appearance.md)
 - [ROADMAP-026 — compact appearance](./completed/026-main-window-compact-appearance.md)
+- [ROADMAP-037 — Hotkeys и возврат фокуса](./completed/037-application-hotkeys-and-previous-window-focus.md)
 - [ROADMAP-051 — вызов плавающих окон мышью](./completed/051-mouse-access-to-floating-windows.md)
 
 ### Audio и playback pipeline
