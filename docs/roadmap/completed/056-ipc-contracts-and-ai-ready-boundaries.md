@@ -1,8 +1,8 @@
 ---
 id: ROADMAP-056
-status: in_progress
+status: completed
 created: 2026-07-29
-updated: 2026-07-29
+updated: 2026-07-30
 related_tasks: [TASK-117]
 ---
 
@@ -175,7 +175,11 @@ cargo check --locked --manifest-path src-tauri/Cargo.toml
 tests и сохранение существующего wire shape, если его изменение не заявлено как
 отдельная migration.
 
-## Критерии завершения
+## Изначальные критерии завершения
+
+Ниже сохранены критерии исходного полного плана. Пользовательское решение о
+закрытии принято после ограниченного Outcome, описанного в конце документа;
+невыполненные пункты не считаются реализованными.
 
 - command/event parity автоматически проверяется в локальной и CI-матрице;
 - frontend использует contract names и структурированные ошибки на
@@ -196,3 +200,33 @@ tests и сохранение существующего wire shape, если е
 - генерация всех Rust/TypeScript DTO одним big-bang этапом;
 - одновременная декомпозиция Telegram, VTube Studio, settings и commands;
 - UI redesign и новые TTS/AI providers.
+
+## Outcome
+
+Фактически в рамках ROADMAP-056 выполнены P0 и первый vertical slice P1:
+
+- Source-derived IPC command/event inventory, включая parity gate в CI и
+  локальную команду `npm run check:ipc` для трёх frontend entrypoints (main,
+  Playback Control, SoundPanel). Отсутствующий command или event ломает проверку;
+  динамические имена оформлены явным allowlist с причиной.
+- Удалены legacy `AppEvent::TextReady`, `speak_text`/`speak_text_internal` Tauri
+  commands и дублирующий text-interception state (`interception_enabled`).
+  Действующий key-action intercept и request-local routing flags сохранены.
+- `submit_speech` error slice: backend возвращает структурированный
+  `CommandError { code, message, retryable }` вместо голой строки; frontend
+  вызывает команду через typed wrapper и преобразует rejection в
+  `IpcCommandError` на стороне TypeScript. Внутренний diagnostic context
+  остаётся в tracing.
+- `docs/development/architecture.md` обновлён: отражён фактический flow
+  `submit_speech → SpeechSnapshot → SpeechQueue → speech worker`, per-phrase
+  output config и удаление legacy text-interception path.
+- SoundPanel/Intercept settings: все три mutation-команды возвращают ошибку
+  записи, runtime обновляется только после успешного `persist`, событие
+  `InterceptionChanged` не публикуется при failure (failure-safe persist).
+
+Оставшиеся P1 (миграция остальных domains на typed wrapper и CommandError),
+P2 (разделение internal/frontend events), P3-WebView (атомарный section-level
+persist) и P4 (декомпозиция Telegram, VTube Studio, settings, commands) **не
+были выполнены** и не требуются для закрытия этого roadmap item. Если эти
+направления будут возобновлены, они должны быть предложены как новый roadmap
+item с уточнённым scope и приоритетом.
