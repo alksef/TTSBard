@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, watch, inject } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { createAsyncCleanupScope } from '../utils/asyncCleanup';
 import { useTtsSettings, useAppSettings } from '../composables/useAppSettings';
 import type { TtsProviderType, TtsProviderInfoDto, VoiceModel } from '../types/settings';
 import { debugLog, debugError } from '../utils/debug';
@@ -118,7 +119,7 @@ const statusMessage = ref('');
 const statusType = ref<'success' | 'error'>('error');
 let statusTimeout: ReturnType<typeof setTimeout> | null = null;
 let errorTimeout: ReturnType<typeof setTimeout> | null = null;
-let unlistenTtsError: (() => void) | null = null;
+const listenerScope = createAsyncCleanupScope();
 
 // Methods
 function showStatus(message: string, type: 'success' | 'error' = 'error') {
@@ -539,17 +540,14 @@ watch(ttsSettings, (newSettings) => {
 
 // Load on mount
 onMounted(async () => {
-  unlistenTtsError = await listen('tts-error', (event) => {
+  await listenerScope.track(listen('tts-error', (event) => {
     showError(event.payload as string);
-  });
+  }));
 });
 
 onUnmounted(() => {
   if (errorTimeout) clearTimeout(errorTimeout);
-  if (unlistenTtsError) {
-    unlistenTtsError();
-    unlistenTtsError = null;
-  }
+  listenerScope.dispose();
 });
 
 function dismissStatus() {

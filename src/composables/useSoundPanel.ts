@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event'
 import { open, confirm } from '@tauri-apps/plugin-dialog'
 import type { SoundBinding, SoundSets, SoundSet } from '../types'
 import { debugLog, debugError } from '../utils/debug'
+import { createAsyncCleanupScope } from '../utils/asyncCleanup'
 
 export function useSoundPanel() {
   const bindings = ref<SoundBinding[]>([])
@@ -20,10 +21,9 @@ export function useSoundPanel() {
   const isTesting = ref(false)
   const isSaving = ref(false)
 
-  const _cleanups: Array<() => void> = []
+  const listenerScope = createAsyncCleanupScope()
   onUnmounted(() => {
-    _cleanups.forEach(fn => fn())
-    _cleanups.length = 0
+    listenerScope.dispose()
   })
 
   const availableKeys = Array.from({ length: 26 }, (_, i) =>
@@ -240,19 +240,21 @@ export function useSoundPanel() {
     await loadSets()
     await loadBindings()
 
-    const unlistenBindings = await listen('soundpanel-bindings-changed', async () => {
-      debugLog('[SoundPanelTab] Bindings changed event, reloading')
-      await loadSets()
-      await loadBindings()
-    })
-    _cleanups.push(() => unlistenBindings())
+    await listenerScope.track(
+      listen('soundpanel-bindings-changed', async () => {
+        debugLog('[SoundPanelTab] Bindings changed event, reloading')
+        await loadSets()
+        await loadBindings()
+      }),
+    )
 
-    const unlistenActiveSet = await listen('soundpanel-active-set-changed', async () => {
-      debugLog('[SoundPanelTab] Active set changed event, reloading')
-      await loadSets()
-      await loadBindings()
-    })
-    _cleanups.push(() => unlistenActiveSet())
+    await listenerScope.track(
+      listen('soundpanel-active-set-changed', async () => {
+        debugLog('[SoundPanelTab] Active set changed event, reloading')
+        await loadSets()
+        await loadBindings()
+      }),
+    )
   })
 
   return {

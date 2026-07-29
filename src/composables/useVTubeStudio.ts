@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useVTubeStudioSettings } from './useAppSettings'
 import { debugLog, debugError } from '../utils/debug'
+import { createAsyncCleanupScope } from '../utils/asyncCleanup'
 import type {
   SceneItemRecord,
   VtsHotkeyInfoDto,
@@ -98,8 +99,7 @@ export function useVTubeStudio() {
   const portError = ref<string | null>(null)
   let errorTimeout: number | null = null
   const currentStatus = ref<VTubeStatus>('Disconnected')
-  let unlistenStatus: (() => void) | null = null
-  let unlistenItemStatus: (() => void) | null = null
+  const listenerScope = createAsyncCleanupScope()
 
   const busy = ref(false)
   let opGeneration = 0
@@ -519,12 +519,16 @@ export function useVTubeStudio() {
     await loadSettings()
     await loadStatus()
     await loadItemStatus()
-    unlistenStatus = await listen<unknown>('vtube-studio-status-changed', (event) => {
-      handleStatusChange(convertStatusFromRust(event.payload as RustVTubeStatus))
-    })
-    unlistenItemStatus = await listen<VTubeStudioItemStatus>('vtube-studio-item-status-changed', (event) => {
-      itemStatus.value = event.payload
-    })
+    await listenerScope.track(
+      listen<unknown>('vtube-studio-status-changed', (event) => {
+        handleStatusChange(convertStatusFromRust(event.payload as RustVTubeStatus))
+      }),
+    )
+    await listenerScope.track(
+      listen<VTubeStudioItemStatus>('vtube-studio-item-status-changed', (event) => {
+        itemStatus.value = event.payload
+      }),
+    )
   })
 
   watch(itemFileName, (fileName) => {
@@ -543,8 +547,7 @@ export function useVTubeStudio() {
   }, { immediate: true })
 
   onUnmounted(() => {
-    unlistenStatus?.()
-    unlistenItemStatus?.()
+    listenerScope.dispose()
     if (errorTimeout !== null) {
       clearTimeout(errorTimeout)
     }

@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { createAsyncCleanupScope } from '../utils/asyncCleanup'
 import { Crosshair, Trash2, Keyboard } from 'lucide-vue-next'
 
 interface InterceptBindingDto {
@@ -22,7 +23,7 @@ const newBindingAction = ref<string>('show_main_window')
 const errorMessage = ref<string | null>(null)
 const messageState = ref<'error' | 'success' | 'warning' | null>(null)
 let messageTimeoutId: ReturnType<typeof setTimeout> | null = null
-let unlisten: (() => void) | null = null
+const listenerScope = createAsyncCleanupScope()
 
 const ACTIONS: { value: string; label: string }[] = [
   { value: 'show_main_window', label: 'Главное окно' },
@@ -157,21 +158,23 @@ onMounted(async () => {
   // Payload приходит как весь AppEvent enum ({"InterceptionChanged": <bool>}),
   // а НЕ как чистый bool. Извлекаем реальное значение, иначе toggle «залипает»
   // во включённом виде (объект всегда truthy).
-  unlisten = await listen<unknown>('interception-changed', (event) => {
-    if (!settings.value) return
-    const payload = event.payload as { InterceptionChanged?: boolean } | boolean | null
-    if (typeof payload === 'boolean') {
-      settings.value.enabled = payload
-    } else if (payload && typeof payload.InterceptionChanged === 'boolean') {
-      settings.value.enabled = payload.InterceptionChanged
-    }
-  })
+  await listenerScope.track(
+    listen<unknown>('interception-changed', (event) => {
+      if (!settings.value) return
+      const payload = event.payload as { InterceptionChanged?: boolean } | boolean | null
+      if (typeof payload === 'boolean') {
+        settings.value.enabled = payload
+      } else if (payload && typeof payload.InterceptionChanged === 'boolean') {
+        settings.value.enabled = payload.InterceptionChanged
+      }
+    }),
+  )
 })
 
 onUnmounted(() => {
   if (messageTimeoutId !== null) clearTimeout(messageTimeoutId)
   document.removeEventListener('keydown', handleKeyDown)
-  if (unlisten) unlisten()
+  listenerScope.dispose()
 })
 </script>
 

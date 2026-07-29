@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event'
 import { confirm } from '@tauri-apps/plugin-dialog'
 import { useWebViewSettings } from './useAppSettings'
 import { debugLog, debugError } from '../utils/debug'
+import { createAsyncCleanupScope } from '../utils/asyncCleanup'
 
 
 export interface WebViewSettings {
@@ -35,7 +36,7 @@ export function useWebView() {
   const displayUrl = ref('')
 
   let errorTimeout: number | null = null
-  let unlisten: (() => void) | null = null
+  const listenerScope = createAsyncCleanupScope()
 
   function updateDisplayUrl() {
     const host = settings.value.bind_address === '127.0.0.1' ? '127.0.0.1' : localIp.value
@@ -242,9 +243,11 @@ export function useWebView() {
     await refreshIp()
     await loadToken()
     updateDisplayUrl()
-    unlisten = await listen<string>('webview-server-error', (event) => {
-      showError(event.payload)
-    })
+    await listenerScope.track(
+      listen<string>('webview-server-error', (event) => {
+        showError(event.payload)
+      }),
+    )
   })
 
   watch(webviewSettingsFromComposable, (newSettings) => {
@@ -264,9 +267,7 @@ export function useWebView() {
     if (errorTimeout !== null) {
       clearTimeout(errorTimeout)
     }
-    if (unlisten !== null) {
-      unlisten()
-    }
+    listenerScope.dispose()
   })
 
   return {

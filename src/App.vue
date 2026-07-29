@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, watch, provide, computed, nextTick } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { invoke } from '@tauri-apps/api/core'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { listen } from '@tauri-apps/api/event'
 import { Music, MonitorPlay } from 'lucide-vue-next'
 import Sidebar from './components/Sidebar.vue'
 import InputPanel from './components/InputPanel.vue'
@@ -22,6 +22,7 @@ import MinimalModeButton from './components/MinimalModeButton.vue'
 import { useTelegramAuth, TELEGRAM_AUTH_KEY } from './composables/useTelegramAuth'
 import { provideAppSettings } from './composables/useAppSettings'
 import { debugLog, debugError } from './utils/debug'
+import { createAsyncCleanupScope } from './utils/asyncCleanup'
 
 type Panel = 'input' | 'tts' | 'soundpanel' | 'playback' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'vtube-studio' | 'settings' | 'hotkeys' | 'intercept'
 
@@ -75,7 +76,7 @@ const soundpanelVisible = ref(false)
 const playbackVisible = ref(false)
 const soundpanelPending = ref(false)
 const playbackPending = ref(false)
-let unlistenVisibility: UnlistenFn | null = null
+const listenerScope = createAsyncCleanupScope()
 let visibilityListenerSetup: Promise<void> | null = null
 let visibilityToken = 0
 
@@ -250,8 +251,6 @@ function handleReturnFocusKeydown(event: KeyboardEvent) {
 }
 
 // Initialize Telegram session on app start
-const unlistenFocus: { current: UnlistenFn | null } = { current: null }
-
 onMounted(async () => {
   debugLog('[App] 🚀 App mounted')
   debugLog('[App] Initial state:', {
@@ -265,12 +264,16 @@ onMounted(async () => {
 
   document.addEventListener('keydown', handleReturnFocusKeydown)
 
-  getCurrentWindow().onFocusChanged(async ({ payload: focused }) => {
-    if (focused && currentPanel.value === 'input') {
-      await nextTick()
-      inputPanelRef.value?.focusEditor()
-    }
-  }).then(fn => { unlistenFocus.current = fn })
+  void listenerScope.track(
+    getCurrentWindow().onFocusChanged(async ({ payload: focused }) => {
+      if (focused && currentPanel.value === 'input') {
+        await nextTick()
+        inputPanelRef.value?.focusEditor()
+      }
+    }),
+  ).catch((e) => {
+    debugError('[App] Failed to listen for focus events:', e)
+  })
 
   try {
     await telegramAuth.init()
@@ -279,13 +282,13 @@ onMounted(async () => {
   }
 
   // Listen for floating window visibility changes
-  visibilityListenerSetup = listen<{ soundpanel_visible: boolean; playback_control_visible: boolean }>('window-visibility-changed', (event) => {
-    visibilityToken++
-    soundpanelVisible.value = event.payload.soundpanel_visible
-    playbackVisible.value = event.payload.playback_control_visible
-  }).then(fn => {
-    unlistenVisibility = fn
-  }).catch(e => {
+  visibilityListenerSetup = listenerScope.track(
+    listen<{ soundpanel_visible: boolean; playback_control_visible: boolean }>('window-visibility-changed', (event) => {
+      visibilityToken++
+      soundpanelVisible.value = event.payload.soundpanel_visible
+      playbackVisible.value = event.payload.playback_control_visible
+    }),
+  ).then(() => undefined).catch(e => {
     debugError('[App] Failed to listen for visibility events:', e)
   })
 
@@ -307,12 +310,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   document.removeEventListener('keydown', handleReturnFocusKeydown)
-  unlistenFocus.current?.()
-  if (unlistenVisibility) {
-    unlistenVisibility()
-  } else if (visibilityListenerSetup) {
-    visibilityListenerSetup.then(() => unlistenVisibility?.())
-  }
+  listenerScope.dispose()
 })
 </script>
 

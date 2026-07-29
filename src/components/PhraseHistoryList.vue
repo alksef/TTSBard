@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { Search, X, Trash2, ChevronDown, ChevronRight, Play } from 'lucide-vue-next'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { listen } from '@tauri-apps/api/event'
+import { createAsyncCleanupScope } from '../utils/asyncCleanup'
 import { usePhraseHistory, type PhraseEntry } from '../composables/usePhraseHistory'
 import { relativeTime } from '../utils/time'
 import { debugError } from '../utils/debug'
@@ -37,7 +38,7 @@ const replayingId = ref<string | null>(null)
 const cacheErrors = ref<Record<string, boolean>>({})
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
-let unlistenTextSent: UnlistenFn | null = null
+const listenerScope = createAsyncCleanupScope()
 let reloadDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
 watch(filter, (val) => {
@@ -131,16 +132,18 @@ async function replayPhrase(phrase: PhraseEntry) {
 }
 
 onMounted(async () => {
-  unlistenTextSent = await listen('text-sent-to-tts', () => {
-    if (!isExpanded.value) return
-    if (reloadDebounceTimer) {
-      clearTimeout(reloadDebounceTimer)
-    }
-    reloadDebounceTimer = setTimeout(() => {
-      loadPhrases()
-      reloadDebounceTimer = null
-    }, 300)
-  })
+  await listenerScope.track(
+    listen('text-sent-to-tts', () => {
+      if (!isExpanded.value) return
+      if (reloadDebounceTimer) {
+        clearTimeout(reloadDebounceTimer)
+      }
+      reloadDebounceTimer = setTimeout(() => {
+        loadPhrases()
+        reloadDebounceTimer = null
+      }, 300)
+    }),
+  )
 })
 
 onUnmounted(() => {
@@ -152,10 +155,7 @@ onUnmounted(() => {
     clearTimeout(reloadDebounceTimer)
     reloadDebounceTimer = null
   }
-  if (unlistenTextSent) {
-    unlistenTextSent()
-    unlistenTextSent = null
-  }
+  listenerScope.dispose()
 })
 </script>
 

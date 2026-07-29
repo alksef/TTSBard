@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted as vueOnUnmounted, inject, nextTick, type Ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { listen, UnlistenFn } from '@tauri-apps/api/event'
+import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { save } from '@tauri-apps/plugin-dialog'
 import { useEditorSettings, useAppSettings, useTtsSettings, useAiSettings } from '../composables/useAppSettings'
 import { SETTINGS_CHANGED_EVENT, type QuickEditorMode } from '../types/settings'
 import { useErrorHandler } from '../composables/useErrorHandler'
 import { debugLog, debugError } from '../utils/debug'
+import { createAsyncCleanupScope } from '../utils/asyncCleanup'
 import { compactModeState, initCompactDims } from '../composables/compactModeState'
 import TtsEditor from './editor/TtsEditor.vue'
 import PhraseHistoryList from './PhraseHistoryList.vue'
@@ -92,7 +93,7 @@ const isAiButtonEnabled = computed(() => {
   return isProviderConfigured.value
 })
 
-let unlistenSettings: UnlistenFn | null = null
+const listenerScope = createAsyncCleanupScope()
 let previousCompactHeight = 0
 let compactSaveTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -146,25 +147,22 @@ onMounted(async () => {
     appSettingsContext.settings.value?.windows?.main?.compact_height ?? 400,
   )
 
-  unlistenSettings = await listen(SETTINGS_CHANGED_EVENT, async () => {
-    debugLog('[InputPanel] Settings changed event received')
-  })
+  await listenerScope.track(
+    listen(SETTINGS_CHANGED_EVENT, async () => {
+      debugLog('[InputPanel] Settings changed event received')
+    }),
+  )
 
   window.addEventListener('preprocessor-data-changed', onPreprocessorChanged)
 
   await reloadPreprocessorData()
 
-  let unlistenClose: (() => void) | undefined
   const currentWindow = getCurrentWindow()
   const closeHandler = async () => {
     await flushTabsSave()
   }
-  const unlistenResult = await currentWindow.onCloseRequested(closeHandler)
-  if (typeof unlistenResult === 'function') {
-    unlistenClose = unlistenResult
-  }
+  await listenerScope.track(currentWindow.onCloseRequested(closeHandler))
 
-  let unlistenResize: (() => void) | undefined
   const resizeHandler = currentWindow.onResized(async () => {
     if (!isMinimalMode.value) return
     if (compactModeState.appDrivenResize > 0) return
@@ -186,10 +184,7 @@ onMounted(async () => {
       }
     }, 1000)
   })
-  const unlistenResizeResult = await resizeHandler
-  if (typeof unlistenResizeResult === 'function') {
-    unlistenResize = unlistenResizeResult
-  }
+  await listenerScope.track(resizeHandler)
 
   compactModeState.flushPendingCompactSave = async () => {
     if (!isMinimalMode.value) return
@@ -210,20 +205,13 @@ onMounted(async () => {
       // silently fail
     }
   }
-
-  vueOnUnmounted(() => {
-    if (unlistenClose) unlistenClose()
-    if (unlistenResize) unlistenResize()
-    if (compactSaveTimer) clearTimeout(compactSaveTimer)
-    compactModeState.flushPendingCompactSave = null
-  })
 })
 
 vueOnUnmounted(async () => {
   await flushTabsSave()
-  if (unlistenSettings) {
-    unlistenSettings()
-  }
+  listenerScope.dispose()
+  if (compactSaveTimer) clearTimeout(compactSaveTimer)
+  compactModeState.flushPendingCompactSave = null
   window.removeEventListener('preprocessor-data-changed', onPreprocessorChanged)
   typingBurst.dispose()
 })

@@ -17,8 +17,7 @@ export function useSpellcheck() {
 
   async function checkWords(words: string[]): Promise<SpellResult[]> {
     if (source.value === 'off' || words.length === 0) return []
-    const cmd = source.value === 'online' ? 'check_spelling_online' : 'spellcheck'
-    return invoke<SpellResult[]>(cmd, { words })
+    return invoke<SpellResult[]>('spellcheck', { words })
   }
 
   return { source, enabled, checkWords }

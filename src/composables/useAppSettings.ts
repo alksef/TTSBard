@@ -5,12 +5,13 @@
  * loaded via the get_all_app_settings command.
  */
 
-import { ref, computed, provide, inject, onScopeDispose, type ComputedRef, type Ref } from 'vue'
+import { ref, computed, provide, inject, getCurrentScope, onScopeDispose, type ComputedRef, type Ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type { AppSettingsDto, AppSettingsContext } from '../types/settings'
 import { APP_SETTINGS_KEY, SETTINGS_CHANGED_EVENT } from '../types/settings'
 import { debugLog, debugError, debugWarn } from '../utils/debug'
+import { createAsyncCleanupScope } from '../utils/asyncCleanup'
 
 // Maximum number of retries for backend ready
 const MAX_RETRIES = 50
@@ -24,8 +25,8 @@ export function createAppSettings(): AppSettingsContext {
   const isLoading: Ref<boolean> = ref(false)
   const error: Ref<string | null> = ref<string | null>(null)
 
-  // Store cleanup function for event listeners
-  let cleanupListeners: (() => void) | null = null
+  const listenerScope = createAsyncCleanupScope()
+  let cleanupListeners: (() => void) | null = () => listenerScope.dispose()
 
   // Coalescing flag: if an event arrives during load, schedule exactly one follow-up reload
   let pendingReload = false
@@ -113,41 +114,44 @@ export function createAppSettings(): AppSettingsContext {
   // Set up event listeners for settings updates
   async function setupEventListeners() {
     // Listen for backend-ready event
-    const unlistenReady = await listen('backend-ready', () => {
-      debugLog('[useAppSettings] Received backend-ready event')
-      if (!settings.value) {
-        load()
-      }
-    })
+    await listenerScope.track(
+      listen('backend-ready', () => {
+        debugLog('[useAppSettings] Received backend-ready event')
+        if (!settings.value) {
+          load()
+        }
+      }),
+    )
 
     // Listen for general settings changes
-    const unlistenSettingsChanged = await listen(SETTINGS_CHANGED_EVENT, () => {
-      debugLog('[useAppSettings] Settings changed, reloading')
-      reload()
-    })
+    await listenerScope.track(
+      listen(SETTINGS_CHANGED_EVENT, () => {
+        debugLog('[useAppSettings] Settings changed, reloading')
+        reload()
+      }),
+    )
 
     // Listen for settings changes that require reload
-    const unlistenTtsProvider = await listen('tts-provider-changed', () => {
-      debugLog('[useAppSettings] TTS provider changed, reloading settings')
-      reload()
-    })
+    await listenerScope.track(
+      listen('tts-provider-changed', () => {
+        debugLog('[useAppSettings] TTS provider changed, reloading settings')
+        reload()
+      }),
+    )
 
     // Listen for soundpanel bindings changes
-    const unlistenSoundpanelBindings = await listen('soundpanel-bindings-changed', () => {
-      debugLog('[useAppSettings] SoundPanel bindings changed, reloading settings')
-      reload()
-    })
+    await listenerScope.track(
+      listen('soundpanel-bindings-changed', () => {
+        debugLog('[useAppSettings] SoundPanel bindings changed, reloading settings')
+        reload()
+      }),
+    )
 
     // Note: twitch-status-changed is NOT handled here because it's a runtime state,
     // not a settings change. TwitchPanel handles this event separately.
 
     // Return cleanup function
-    return () => {
-      unlistenReady()
-      unlistenSettingsChanged()
-      unlistenTtsProvider()
-      unlistenSoundpanelBindings()
-    }
+    return () => listenerScope.dispose()
   }
 
   // Start loading and setup listeners
@@ -155,27 +159,23 @@ export function createAppSettings(): AppSettingsContext {
 
   // Setup event listeners with automatic cleanup on scope disposal
   setupEventListeners()
-    .then((cleanup) => {
-      cleanupListeners = cleanup
-
-      // Auto-cleanup when component scope is destroyed (HMR, unmount, etc.)
-      onScopeDispose(() => {
-        debugLog('[useAppSettings] Disposing event listeners')
-        cleanup()
-        cleanupListeners = null
-      })
-
-      // Dev-mode HMR cleanup (additional safety for hot module replacement)
-      if (import.meta.env.DEV && import.meta.hot) {
-        import.meta.hot.dispose(() => {
-          cleanupListeners?.()
-          cleanupListeners = null
-        })
-      }
-    })
+    .then(() => undefined)
     .catch((e) => {
+      listenerScope.dispose()
+      cleanupListeners = null
       debugError('[useAppSettings] Failed to setup event listeners:', e)
     })
+
+  if (getCurrentScope()) {
+    onScopeDispose(() => {
+      debugLog('[useAppSettings] Disposing event listeners')
+      cleanup()
+    })
+  }
+
+  if (import.meta.env.DEV && import.meta.hot) {
+    import.meta.hot.dispose(() => cleanup())
+  }
 
   // Manual cleanup function for explicit cleanup if needed
   const cleanup = () => {

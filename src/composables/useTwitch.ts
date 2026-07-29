@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useTwitchSettings } from './useAppSettings'
 import { debugLog, debugError } from '../utils/debug'
+import { createAsyncCleanupScope } from '../utils/asyncCleanup'
 
 export type TwitchStatus = 'Disconnected' | 'Connecting' | 'Connected' | 'Error'
 
@@ -79,7 +80,7 @@ export function useTwitch() {
   const errorMessage = ref<string | null>(null)
   let errorTimeout: number | null = null
   const currentStatus = ref<TwitchStatus>('Disconnected')
-  let unlisten: (() => void) | null = null
+  const listenerScope = createAsyncCleanupScope()
   const showToken = ref(false)
 
   const isConnected = ref(false)
@@ -172,9 +173,11 @@ export function useTwitch() {
 
   onMounted(async () => {
     await loadSettings()
-    unlisten = await listen<unknown>('twitch-status-changed', (event) => {
-      handleStatusChange(convertStatusFromRust(event.payload as RustTwitchStatus))
-    })
+    await listenerScope.track(
+      listen<unknown>('twitch-status-changed', (event) => {
+        handleStatusChange(convertStatusFromRust(event.payload as RustTwitchStatus))
+      }),
+    )
   })
 
   watch(twitchSettingsFromComposable, (newSettings) => {
@@ -190,9 +193,7 @@ export function useTwitch() {
   }, { immediate: true })
 
   onUnmounted(() => {
-    if (unlisten !== null) {
-      unlisten()
-    }
+    listenerScope.dispose()
     if (errorTimeout !== null) {
       clearTimeout(errorTimeout)
     }
