@@ -22,6 +22,12 @@ Workflow запускается для push тега `v*`, pull request в `mast
 вручную через `workflow_dispatch`. Только запуск по тегу создаёт GitHub Release;
 PR и ручной запуск собирают dev-артефакты.
 
+Перед сборкой приложения workflow запускает `npm test` и полный набор
+Rust-тестов на Windows через
+`cargo test --manifest-path src-tauri/Cargo.toml --locked`. Rust-тесты идут
+после обнаружения `libclang.dll`, поэтому используют тот же `LIBCLANG_PATH`,
+что и релизная сборка. Падение любого теста останавливает создание артефакта.
+
 Перед тегом синхронизируйте версию штатным скриптом, проверьте diff и сборку:
 
 ```powershell

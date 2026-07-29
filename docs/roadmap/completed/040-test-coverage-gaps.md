@@ -46,12 +46,13 @@ related_tasks: []
 8. Playback state machine: queue limit/order, pause/resume/stop/repeat,
    cache eviction/replay и переход к следующей фразе. Нужен mockable audio seam.
 
-### P2 — интеграционные контракты (отложено)
+### P2 — интеграционные контракты и CI
 
-9. Локальный mock HTTP server для Fish/OpenAI/DeepSeek/custom providers:
+9. Отложено: локальный mock HTTP server для Fish/OpenAI/DeepSeek/custom providers:
    URL, headers/body, non-2xx, timeout и malformed response.
-10. Windows test job для Rust с настройкой `LIBCLANG_PATH`, frontend test job и
-    отчёт покрытия без немедленного жёсткого percentage gate.
+10. GitHub build workflow запускает frontend-тесты и Rust-тесты на Windows с
+    настройкой `LIBCLANG_PATH`. Публикация отчёта покрытия отложена; жёсткий
+    percentage gate не вводится.
 
 ## Порядок реализации
 
@@ -84,8 +85,9 @@ P1 завершён последующими изменениями:
 
 ## Outcome
 
-Unit-test foundation и приоритетное P0/P1 покрытие реализованы. Локальные HTTP
-mock-серверы для Fish/OpenAI/DeepSeek/custom providers, Windows Rust test job,
-отдельный frontend test job и публикация coverage report отложены до появления
-практической необходимости; жёсткий percentage gate не вводится. Roadmap
-закрыт без этих пунктов по принятому решению о сокращении scope.
+Unit-test foundation и приоритетное P0/P1 покрытие реализованы. GitHub build
+workflow запускает frontend-тесты и Rust-тесты на Windows до сборки приложения.
+Локальные HTTP mock-серверы для Fish/OpenAI/DeepSeek/custom providers и
+публикация coverage report отложены до появления практической необходимости;
+жёсткий percentage gate не вводится. Roadmap закрыт без этих пунктов по
+принятому решению о сокращении scope.

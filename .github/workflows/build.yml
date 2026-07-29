@@ -76,6 +76,12 @@ jobs:
           "LIBCLANG_PATH=$($libclang.DirectoryName)" >> $env:GITHUB_ENV
           Write-Host "Using $($libclang.FullName)"
 
+      - name: Run frontend tests
+        run: npm test
+
+      - name: Run Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
       - name: Build application
         run: .\scripts\build.ps1 -Mode release
         shell: pwsh
