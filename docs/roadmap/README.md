@@ -46,6 +46,7 @@ related_tasks: []
 | [ROADMAP-040 — Test coverage gaps](./active/040-test-coverage-gaps.md) | `in_progress` | P1/P2: composables, playback seam, HTTP contracts |
 | [ROADMAP-041 — Review 021 remediation](./active/041-review-021-remediation.md) | `in_progress` | Сверить оставшийся scope и закрыть item |
 | [ROADMAP-054 — Детерминированная видимость предмета VTube Studio](./active/054-vtube-studio-item-visibility.md) | `in_progress` | P4: ручная приёмка с реальным VTube Studio item |
+| [ROADMAP-055 — Качество и AI-ready архитектура](./active/055-quality-and-ai-ready-architecture.md) | `in_progress` | Утвердить A1–A5; затем закрыть IPC parity и settings contracts |
 
 ## Завершённые направления
 
