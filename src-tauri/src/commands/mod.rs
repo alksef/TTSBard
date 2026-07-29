@@ -2,7 +2,6 @@ use crate::config::{
     normalize_typing_idle_timeout_ms, AppSettingsDto, QuickEditorMode, SettingsManager,
     SpellSource, TtsProviderInfoDto, WindowsManager,
 };
-use crate::events::{AppEvent, RoutedText};
 use crate::state::AppState;
 use crate::tts::TtsProvider;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -91,96 +90,6 @@ pub async fn quit_app(app_handle: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Internal function for TTS synthesis (shared between command and event handler)
-pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), String> {
-    info!(text_len = text.chars().count(), "Starting TTS Pipeline");
-
-    if text.trim().is_empty() {
-        return Err("Текст не может быть пустым".to_string());
-    }
-
-    let settings = state.settings_cache.read().clone();
-
-    let prefix_result = crate::preprocessor::parse_prefix(&text);
-    let text = prefix_result.text;
-    let skip_twitch = prefix_result.skip_twitch;
-    let skip_webview = prefix_result.skip_webview;
-
-    let text = tts_pipeline::preprocess_text(state, &text);
-
-    let text = tts_pipeline::ai_correct_text(state, &text, &settings).await;
-
-    let audio_data = tts_pipeline::synthesize_audio(state, &text).await?;
-
-    let audio_pcm = tts_pipeline::apply_audio_effects_pipeline(audio_data, &settings)?;
-
-    let (provider_name, voice_name) = get_provider_voice_names(state, &settings);
-    let effects_fp =
-        crate::history::compute_effects_fingerprint(&settings.audio_effects, &settings.dsp);
-    let cache_key = crate::history::build_cache_key(&text, &provider_name, &voice_name, effects_fp);
-
-    let cache_saved = crate::history::save_audio_cache(&cache_key, &audio_pcm).is_ok();
-
-    state.emit_event(AppEvent::TextSentToTts(RoutedText::new(
-        text.clone(),
-        skip_twitch,
-        skip_webview,
-    )));
-
-    tts_pipeline::enqueue_and_record(state, text.clone(), audio_pcm, &settings)?;
-
-    if let Some(hm) = state.editor.history_manager.lock().as_ref() {
-        if cache_saved {
-            hm.record_phrase_with_meta(&text, &provider_name, &voice_name, &cache_key);
-        } else {
-            hm.record_phrase(&text);
-        }
-    }
-
-    Ok(())
-}
-
-pub(crate) fn provider_kind(provider: &TtsProvider) -> &'static str {
-    match provider {
-        TtsProvider::OpenAi(_) => "openai",
-        TtsProvider::Silero(_) => "silero",
-        TtsProvider::Local(_) => "local",
-        TtsProvider::Fish(_) => "fish",
-        TtsProvider::Piper(_) => "piper",
-    }
-}
-
-pub(crate) fn get_provider_voice_names(
-    state: &AppState,
-    settings: &crate::config::AppSettings,
-) -> (String, String) {
-    if let Some(entry) = state.tts_registry.lock().active() {
-        let provider_name = provider_kind(&entry.provider).to_string();
-        return (provider_name, entry.id.clone());
-    }
-
-    use crate::tts::TtsProviderType;
-    let provider_name = match settings.tts.provider {
-        TtsProviderType::OpenAi => "openai",
-        TtsProviderType::Silero => "silero",
-        TtsProviderType::Local => "local",
-        TtsProviderType::Fish => "fish",
-    };
-    let voice_name = match settings.tts.provider {
-        TtsProviderType::OpenAi => settings.tts.openai.voice.clone(),
-        TtsProviderType::Fish => settings.tts.fish.reference_id.clone(),
-        TtsProviderType::Silero => settings.tts.telegram.current_voice_id.clone(),
-        TtsProviderType::Local => String::new(),
-    };
-    (provider_name.to_string(), voice_name)
-}
-
-/// Manually trigger TTS for given text
-#[tauri::command]
-pub async fn speak_text(state: State<'_, AppState>, text: String) -> Result<(), String> {
-    speak_text_internal(&state, text).await
-}
-
 /// Synthesize text and export raw audio bytes to a file (no effects, no playback)
 #[tauri::command]
 pub async fn speak_text_raw_export(
@@ -219,7 +128,6 @@ pub async fn get_all_app_settings(
         .load()
         .map_err(|e| format!("Failed to load windows settings: {}", e))?;
 
-    let interception_enabled = app_state.is_interception_enabled();
     let preprocessor = app_state.editor.get_preprocessor();
 
     let soundpanel_bindings = soundpanel_state.get_all_bindings();
@@ -233,7 +141,6 @@ pub async fn get_all_app_settings(
         webview_settings: &webview_settings,
         twitch_settings: &twitch_settings,
         windows_settings: &windows_settings,
-        interception_enabled,
         preprocessor: preprocessor.as_ref(),
         soundpanel_bindings,
     });

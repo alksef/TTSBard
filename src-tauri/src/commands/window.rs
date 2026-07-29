@@ -98,28 +98,6 @@ pub async fn resize_main_window(
     }
 }
 
-/// Get interception state (enabled/disabled)
-#[tauri::command]
-pub fn get_interception(state: State<'_, AppState>) -> bool {
-    state.is_interception_enabled()
-}
-
-/// Toggle interception mode
-#[tauri::command]
-pub fn set_interception(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
-    state.set_interception_enabled(enabled);
-    Ok(())
-}
-
-/// Toggle interception mode (returns new state)
-#[tauri::command]
-pub fn toggle_interception(state: State<'_, AppState>) -> Result<bool, String> {
-    let current = state.is_interception_enabled();
-    let new_value = !current;
-    state.set_interception_enabled(new_value);
-    Ok(new_value)
-}
-
 /// Get hotkey enabled setting
 #[tauri::command]
 pub fn get_hotkey_enabled(settings_manager: State<'_, SettingsManager>) -> bool {
@@ -221,10 +199,10 @@ pub fn hide_main_window(app_handle: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Close soundpanel window and stop interception
+/// Close the SoundPanel window.
 #[tauri::command]
 pub fn close_soundpanel_window(app_handle: AppHandle) -> Result<(), String> {
-    crate::soundpanel_window::close_soundpanel_with_interception(&app_handle)
+    crate::soundpanel_window::close_soundpanel_window(&app_handle)
 }
 
 /// Toggle playback control window visibility.

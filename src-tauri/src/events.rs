@@ -15,8 +15,6 @@ pub enum AppEvent {
     InterceptionChanged(bool),
     /// Изменение раскладки (EN/RU)
     LayoutChanged(InputLayout),
-    /// Текст готов для отправки в TTS
-    TextReady(String),
     /// Текст отправлен в TTS (для WebView Source)
     TextSentToTts(RoutedText),
     /// Изменение статуса TTS
@@ -171,7 +169,6 @@ impl AppEvent {
         match self {
             AppEvent::InterceptionChanged(_) => "interception-changed",
             AppEvent::LayoutChanged(_) => "layout-changed",
-            AppEvent::TextReady(_) => "text-ready",
             AppEvent::TextSentToTts(_) => "text-sent-to-tts",
             AppEvent::TtsStatusChanged(_) => "tts-status-changed",
             AppEvent::TtsError(_) => "tts-error",

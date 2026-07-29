@@ -18,10 +18,7 @@ import EditorTabs from './editor/EditorTabs.vue'
 import StatusMessage from './shared/StatusMessage.vue'
 import { useTypingBurst, type TypingConsumer } from '../composables/useTypingBurst'
 import { acceptClear } from './inputAcceptance'
-
-interface AcceptedJob {
-  job_id: string
-}
+import { submitSpeech } from '../ipc/speech'
 
 const { showError } = useErrorHandler()
 const { tabs, activeId, active, create: createTab, close: closeTab, select: selectTab, rename: renameTab, init: initTabs, flushSave: flushTabsSave } = useEditorTabs()
@@ -357,7 +354,7 @@ async function handleEnter() {
   isSpeakingInFlight.value = true
 
   try {
-    await invoke<AcceptedJob>('submit_speech', { text: currentText })
+    await submitSpeech(currentText)
     recordHistory(currentText)
     tabs.value = acceptClear(tabs.value, senderTabId, currentText)
 
@@ -372,7 +369,7 @@ async function handleEnter() {
     }
   } catch (e) {
     debugError('[InputPanel] Failed to speak:', e)
-    showError(e as string)
+    showError(e instanceof Error ? e.message : String(e))
   } finally {
     isSpeakingInFlight.value = false
   }

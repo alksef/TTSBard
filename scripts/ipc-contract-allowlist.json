@@ -1,0 +1,10 @@
+{
+  "dynamicExpressions": [
+    {
+      "kind": "backend_emit",
+      "file": "src-tauri/src/setup.rs",
+      "expression": "event_name",
+      "reason": "The value is produced by AppEvent::to_tauri_event(); those event names are extracted into the inventory."
+    }
+  ]
+}

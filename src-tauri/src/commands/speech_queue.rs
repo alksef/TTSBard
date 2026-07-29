@@ -1,5 +1,8 @@
 use crate::commands::playback::PlaybackState;
-use crate::speech_queue::{AcceptedJob, JobStatus, Snapshot, SpeechQueue, SpeechQueueStateDto};
+use crate::ipc::{speech as speech_contract, CommandError};
+use crate::speech_queue::{
+    AcceptedJob, JobStatus, QueueError, Snapshot, SpeechQueue, SpeechQueueStateDto,
+};
 use crate::state::AppState;
 use crate::telegram::SileroRuntimeSettings;
 use parking_lot::Mutex;
@@ -39,10 +42,17 @@ impl SpeechQueueState {
     }
 }
 
-const SPEECH_QUEUE_CHANGED: &str = "speech-queue-changed";
-
 fn emit_queue_changed(app_handle: &AppHandle, dto: SpeechQueueStateDto) {
-    let _ = app_handle.emit(SPEECH_QUEUE_CHANGED, dto);
+    let _ = app_handle.emit(speech_contract::QUEUE_CHANGED_EVENT, dto);
+}
+
+fn map_submit_queue_error(error: QueueError) -> CommandError {
+    let (code, retryable) = match error {
+        QueueError::EmptyText => (speech_contract::error_code::EMPTY_TEXT, false),
+        QueueError::QueueFull(_) => (speech_contract::error_code::QUEUE_FULL, true),
+        _ => (speech_contract::error_code::QUEUE_REJECTED, false),
+    };
+    CommandError::new(code, error.to_string(), retryable)
 }
 
 fn resolve_silero_speaker(settings_voice: &str, captured: Option<&str>) -> Result<String, String> {
@@ -113,10 +123,16 @@ pub fn submit_speech(
     state: State<'_, AppState>,
     queue: State<'_, SpeechQueueState>,
     text: String,
-) -> Result<AcceptedJob, String> {
-    let snapshot = build_snapshot(&state, &text).map_err(|e| format!("Snapshot error: {}", e))?;
+) -> Result<AcceptedJob, CommandError> {
+    let snapshot = build_snapshot(&state, &text).map_err(|error| {
+        CommandError::new(
+            speech_contract::error_code::SNAPSHOT_UNAVAILABLE,
+            format!("Snapshot error: {error}"),
+            false,
+        )
+    })?;
     let mut q = queue.lock();
-    let job_id = q.submit(&text, snapshot).map_err(|e| e.to_string())?;
+    let job_id = q.submit(&text, snapshot).map_err(map_submit_queue_error)?;
     let dto = q.state();
     drop(q);
     emit_queue_changed(&app_handle, dto);
@@ -316,6 +332,29 @@ pub(crate) fn is_cache_miss_error(err: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn submit_command_name_matches_registered_function() {
+        assert_eq!(speech_contract::SUBMIT_COMMAND, stringify!(submit_speech));
+    }
+
+    #[test]
+    fn submit_queue_full_error_is_structured_and_retryable() {
+        let error = map_submit_queue_error(QueueError::QueueFull(10));
+
+        assert_eq!(error.code, speech_contract::error_code::QUEUE_FULL);
+        assert!(error.retryable);
+        assert!(error.message.contains("queue full"));
+    }
+
+    #[test]
+    fn submit_empty_text_error_is_structured_and_not_retryable() {
+        let error = map_submit_queue_error(QueueError::EmptyText);
+
+        assert_eq!(error.code, speech_contract::error_code::EMPTY_TEXT);
+        assert!(!error.retryable);
+        assert!(error.message.contains("empty"));
+    }
 
     #[test]
     fn resolve_silero_speaker_settings_takes_precedence_over_captured() {

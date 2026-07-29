@@ -293,7 +293,6 @@ export type Theme = 'dark' | 'light'
 
 export interface GeneralSettingsDto {
   hotkey_enabled: boolean
-  interception_enabled: boolean
   enter_closes_disabled: boolean
   theme?: Theme
   show_playback_on_start: boolean

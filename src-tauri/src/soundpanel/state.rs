@@ -70,9 +70,6 @@ impl SoundSets {
 /// Состояние звуковой панели
 #[derive(Clone)]
 pub struct SoundPanelState {
-    /// Включен ли режим перехвата для звуковой панели
-    pub interception_enabled: Arc<Mutex<bool>>,
-
     /// Наборы звуков (Set), каждый со своими привязками
     pub sets: Arc<Mutex<SoundSets>>,
 
@@ -110,7 +107,6 @@ impl SoundPanelState {
     pub fn new(appdata_path: String) -> Self {
         let intercept = crate::soundpanel::intercept::load(&appdata_path);
         Self {
-            interception_enabled: Arc::new(Mutex::new(false)),
             sets: Arc::new(Mutex::new(SoundSets::default())),
             event_sender: Arc::new(Mutex::new(None)),
             appdata_path: Arc::new(Mutex::new(appdata_path)),
@@ -120,27 +116,6 @@ impl SoundPanelState {
             intercept: Arc::new(Mutex::new(intercept)),
             stay_visible: Arc::new(Mutex::new(false)),
             active_playbacks: Arc::new(Mutex::new(Vec::new())),
-        }
-    }
-
-    /// Проверить, включен ли режим перехвата
-    #[allow(dead_code)]
-    pub fn is_interception_enabled(&self) -> bool {
-        self.interception_enabled
-            .lock()
-            .map(|v| *v)
-            .unwrap_or(false)
-    }
-
-    /// Установить режим перехвата
-    pub fn set_interception_enabled(&self, enabled: bool) {
-        if let Ok(mut val) = self.interception_enabled.lock() {
-            *val = enabled;
-        } else {
-            error!(
-                target = "soundpanel::state",
-                "Failed to lock interception_enabled"
-            );
         }
     }
 
@@ -436,56 +411,89 @@ impl SoundPanelState {
     }
 
     /// Включить/выключить перехват (persist + emit)
-    pub fn set_intercept_enabled(&self, enabled: bool) {
-        let appdata_path = self.appdata_path.lock().unwrap().clone();
-        if let Ok(mut val) = self.intercept.lock() {
-            val.enabled = enabled;
-            let settings = val.clone();
-            drop(val);
-            let _ = crate::soundpanel::intercept::save(&appdata_path, &settings);
-            self.emit_event(AppEvent::InterceptionChanged(enabled));
-        } else {
-            error!(target = "soundpanel::state", "Failed to lock intercept");
-        }
+    pub fn set_intercept_enabled(&self, enabled: bool) -> Result<(), String> {
+        let appdata_path = self
+            .appdata_path
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?
+            .clone();
+        let mut val = self
+            .intercept
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        let mut new_settings = val.clone();
+        new_settings.enabled = enabled;
+        crate::soundpanel::intercept::save(&appdata_path, &new_settings)?;
+        *val = new_settings;
+        let changed = val.enabled;
+        drop(val);
+        self.emit_event(AppEvent::InterceptionChanged(changed));
+        Ok(())
     }
 
     /// Установить биндинг перехвата (persist)
-    pub fn set_intercept_binding(&self, key: String, action: String) {
-        let appdata_path = self.appdata_path.lock().unwrap().clone();
-        if let Ok(mut val) = self.intercept.lock() {
-            val.bindings.retain(|b| b.key != key);
-            val.bindings
-                .push(crate::soundpanel::intercept::InterceptBinding {
-                    key: key.clone(),
-                    action: action.clone(),
-                });
-            let settings = val.clone();
-            drop(val);
-            let _ = crate::soundpanel::intercept::save(&appdata_path, &settings);
-            info!(key = key, action = action, "Intercept binding set");
-        } else {
-            error!(target = "soundpanel::state", "Failed to lock intercept");
-        }
+    pub fn set_intercept_binding(&self, key: String, action: String) -> Result<(), String> {
+        let appdata_path = self
+            .appdata_path
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?
+            .clone();
+        let mut val = self
+            .intercept
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        let mut new_settings = val.clone();
+        new_settings.bindings.retain(|b| b.key != key);
+        new_settings
+            .bindings
+            .push(crate::soundpanel::intercept::InterceptBinding {
+                key: key.clone(),
+                action: action.clone(),
+            });
+        crate::soundpanel::intercept::save(&appdata_path, &new_settings)?;
+        *val = new_settings;
+        drop(val);
+        info!(key = key, action = action, "Intercept binding set");
+        Ok(())
     }
 
     /// Очистить биндинг перехвата (persist)
-    pub fn clear_intercept_binding(&self, key: String) {
-        let appdata_path = self.appdata_path.lock().unwrap().clone();
-        if let Ok(mut val) = self.intercept.lock() {
-            val.bindings.retain(|b| b.key != key);
-            let settings = val.clone();
-            drop(val);
-            let _ = crate::soundpanel::intercept::save(&appdata_path, &settings);
-            info!(key = key, "Intercept binding cleared");
-        } else {
-            error!(target = "soundpanel::state", "Failed to lock intercept");
-        }
+    pub fn clear_intercept_binding(&self, key: String) -> Result<(), String> {
+        let appdata_path = self
+            .appdata_path
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?
+            .clone();
+        let mut val = self
+            .intercept
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        let mut new_settings = val.clone();
+        new_settings.bindings.retain(|b| b.key != key);
+        crate::soundpanel::intercept::save(&appdata_path, &new_settings)?;
+        *val = new_settings;
+        drop(val);
+        info!(key = key, "Intercept binding cleared");
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc;
+
+    fn bad_path(label: &str) -> String {
+        std::env::temp_dir()
+            .join(format!(
+                "ttsbard_state_test_{}_{}",
+                std::process::id(),
+                label,
+            ))
+            .join("nonexistent")
+            .to_string_lossy()
+            .to_string()
+    }
 
     #[test]
     fn test_find_active_fallback() {
@@ -585,5 +593,61 @@ mod tests {
         assert_eq!(active.name, "Основной");
         assert_eq!(active.bindings.len(), 2);
         assert_eq!(active.bindings[0].key, 'A');
+    }
+
+    // ── Intercept persistence failure safety ────────────────────────────
+
+    #[test]
+    fn set_intercept_enabled_persist_failure_leaves_state_unchanged() {
+        let path = bad_path("enabled_fail");
+        let state = SoundPanelState::new(path);
+        assert!(!state.get_intercept().enabled);
+
+        let result = state.set_intercept_enabled(true);
+        assert!(result.is_err());
+        assert!(!state.get_intercept().enabled);
+    }
+
+    #[test]
+    fn set_intercept_enabled_persist_failure_does_not_emit_event() {
+        let path = bad_path("enabled_noevent");
+        let state = SoundPanelState::new(path);
+        let (tx, rx) = mpsc::channel();
+        state.set_event_sender(tx);
+
+        let result = state.set_intercept_enabled(true);
+        assert!(result.is_err());
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn set_intercept_binding_persist_failure_leaves_state_unchanged() {
+        let path = bad_path("binding_fail");
+        let state = SoundPanelState::new(path);
+        assert!(state.get_intercept().bindings.is_empty());
+
+        let result = state.set_intercept_binding("NUMPAD1".into(), "play_sound".into());
+        assert!(result.is_err());
+        assert!(state.get_intercept().bindings.is_empty());
+    }
+
+    #[test]
+    fn clear_intercept_binding_persist_failure_leaves_state_unchanged() {
+        let path = bad_path("clear_fail");
+        let state = SoundPanelState::new(path);
+        // Pre-populate runtime (without persist) so we can test rollback
+        {
+            let mut val = state.intercept.lock().unwrap();
+            val.bindings
+                .push(crate::soundpanel::intercept::InterceptBinding {
+                    key: "NUMPAD1".into(),
+                    action: "play_sound".into(),
+                });
+        }
+        assert_eq!(state.get_intercept().bindings.len(), 1);
+
+        let result = state.clear_intercept_binding("NUMPAD1".into());
+        assert!(result.is_err());
+        assert_eq!(state.get_intercept().bindings.len(), 1);
     }
 }

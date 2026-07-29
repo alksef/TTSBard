@@ -46,7 +46,7 @@ related_tasks: []
 | [ROADMAP-040 — Test coverage gaps](./active/040-test-coverage-gaps.md) | `in_progress` | P1/P2: composables, playback seam, HTTP contracts |
 | [ROADMAP-041 — Review 021 remediation](./active/041-review-021-remediation.md) | `in_progress` | Сверить оставшийся scope и закрыть item |
 | [ROADMAP-054 — Детерминированная видимость предмета VTube Studio](./active/054-vtube-studio-item-visibility.md) | `in_progress` | P4: ручная приёмка с реальным VTube Studio item |
-| [ROADMAP-056 — IPC-контракты и AI-ready границы](./active/056-ipc-contracts-and-ai-ready-boundaries.md) | `in_progress` | P0: inventory/parity gate и удаление legacy TextReady path |
+| [ROADMAP-056 — IPC-контракты и AI-ready границы](./active/056-ipc-contracts-and-ai-ready-boundaries.md) | `in_progress` | P1: перенести следующий domain на typed wrapper и CommandError |
 
 ## Завершённые направления
 

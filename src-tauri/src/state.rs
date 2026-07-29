@@ -77,9 +77,6 @@ pub struct AppState {
     /// WebView service (settings + event sender)
     pub webview: Arc<crate::webview::service::WebViewService>,
 
-    /// Включен ли режим перехвата
-    pub interception_enabled: Arc<Mutex<bool>>,
-
     /// Включены ли хоткеи (runtime only, synced with settings.json)
     pub hotkey_enabled: Arc<Mutex<bool>>,
 
@@ -161,7 +158,6 @@ impl AppState {
         Self {
             event_sender: Arc::new(Mutex::new(None)),
             webview,
-            interception_enabled: Arc::new(Mutex::new(false)),
             hotkey_enabled: Arc::new(Mutex::new(true)), // default true
             tts_config: Arc::new(RwLock::new(TtsConfig::default())),
             tts_registry: Arc::new(Mutex::new(TtsProviderRegistry::new())),
@@ -200,15 +196,6 @@ impl AppState {
 
     pub fn get_event_sender(&self) -> Option<Sender<AppEvent>> {
         self.event_sender.lock().clone()
-    }
-
-    pub fn is_interception_enabled(&self) -> bool {
-        *self.interception_enabled.lock()
-    }
-
-    pub fn set_interception_enabled(&self, enabled: bool) {
-        *self.interception_enabled.lock() = enabled;
-        self.emit_event(AppEvent::InterceptionChanged(enabled));
     }
 
     pub fn is_hotkey_enabled(&self) -> bool {

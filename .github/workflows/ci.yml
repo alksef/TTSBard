@@ -60,6 +60,10 @@ jobs:
           cache: 'npm'
       - name: Install dependencies
         run: npm ci
+      - name: Check IPC contracts
+        run: |
+          npm run check:ipc
+          npm run test:ipc
       - name: Type check
         run: npm run build
 

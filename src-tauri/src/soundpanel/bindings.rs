@@ -256,8 +256,7 @@ pub fn set_intercept_enabled(
     enabled: bool,
     state: State<'_, SoundPanelState>,
 ) -> Result<(), String> {
-    state.set_intercept_enabled(enabled);
-    Ok(())
+    state.set_intercept_enabled(enabled)
 }
 
 /// Установить биндинг перехвата
@@ -267,8 +266,7 @@ pub fn set_intercept_binding(
     action: String,
     state: State<'_, SoundPanelState>,
 ) -> Result<(), String> {
-    state.set_intercept_binding(key, action);
-    Ok(())
+    state.set_intercept_binding(key, action)
 }
 
 /// Очистить биндинг перехвата
@@ -277,8 +275,7 @@ pub fn clear_intercept_binding(
     key: String,
     state: State<'_, SoundPanelState>,
 ) -> Result<(), String> {
-    state.clear_intercept_binding(key);
-    Ok(())
+    state.clear_intercept_binding(key)
 }
 
 // ---- Set management commands ----

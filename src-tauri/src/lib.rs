@@ -9,6 +9,7 @@ mod event_loop;
 mod events;
 mod history;
 mod hotkeys;
+pub mod ipc;
 pub mod playback;
 mod playback_window;
 mod preprocessor;
@@ -53,27 +54,27 @@ use commands::{
     disable_virtual_mic, enable_virtual_mic, get_audio_effects, get_audio_settings,
     get_dsp_settings, get_editor_height, get_editor_quick, get_editor_spellcheck_enabled,
     get_editor_spellcheck_source, get_editor_typing_idle_timeout_ms,
-    get_global_exclude_from_capture, get_hotkey_enabled, get_hotkey_settings, get_interception,
-    get_local_tts_url, get_main_appearance, get_main_compact_dims, get_openai_api_key,
-    get_openai_voice, get_output_devices, get_playback_appearance_source,
-    get_show_playback_on_start, get_soundpanel_appearance_source, get_tts_provider,
-    get_virtual_mic_devices, get_visibility_snapshot, has_api_key, hide_main_window,
-    open_file_dialog, prepare_tts_provider_by_id, preview_audio_file, quit_app,
-    reregister_hotkeys_cmd, reset_hotkey_to_default, save_audio_effects, save_dsp_settings,
-    select_tts_provider_by_id, set_audio_effects_enabled, set_audio_effects_enhance_atten_db,
+    get_global_exclude_from_capture, get_hotkey_enabled, get_hotkey_settings, get_local_tts_url,
+    get_main_appearance, get_main_compact_dims, get_openai_api_key, get_openai_voice,
+    get_output_devices, get_playback_appearance_source, get_show_playback_on_start,
+    get_soundpanel_appearance_source, get_tts_provider, get_virtual_mic_devices,
+    get_visibility_snapshot, has_api_key, hide_main_window, open_file_dialog,
+    prepare_tts_provider_by_id, preview_audio_file, quit_app, reregister_hotkeys_cmd,
+    reset_hotkey_to_default, save_audio_effects, save_dsp_settings, select_tts_provider_by_id,
+    set_audio_effects_enabled, set_audio_effects_enhance_atten_db,
     set_audio_effects_enhance_enabled, set_audio_effects_formant_preserved,
     set_audio_effects_pitch, set_audio_effects_speed, set_audio_effects_volume, set_editor_height,
     set_editor_quick, set_editor_spellcheck_enabled, set_editor_spellcheck_source,
     set_editor_typing_idle_timeout_ms, set_global_exclude_from_capture, set_hotkey,
-    set_hotkey_enabled, set_hotkey_recording, set_interception, set_local_tts_url,
-    set_main_bg_color, set_main_compact_dims, set_main_custom_background, set_main_custom_opacity,
-    set_main_opacity, set_main_opacity_compact_only, set_openai_api_key, set_openai_voice,
+    set_hotkey_enabled, set_hotkey_recording, set_local_tts_url, set_main_bg_color,
+    set_main_compact_dims, set_main_custom_background, set_main_custom_opacity, set_main_opacity,
+    set_main_opacity_compact_only, set_openai_api_key, set_openai_voice,
     set_playback_appearance_source, set_show_playback_on_start, set_soundpanel_appearance_source,
     set_speaker_device, set_speaker_enabled, set_speaker_volume, set_tts_provider,
-    set_virtual_mic_device, set_virtual_mic_volume, speak_text, speak_text_raw_export,
-    stop_preview, test_audio_device, toggle_interception, toggle_playback_control_window,
-    toggle_soundpanel_window, unregister_hotkeys, update_theme, window::remove_main_bounds,
-    window::resize_main_window, window::return_to_previous_window, window::set_main_bounds,
+    set_virtual_mic_device, set_virtual_mic_volume, speak_text_raw_export, stop_preview,
+    test_audio_device, toggle_playback_control_window, toggle_soundpanel_window,
+    unregister_hotkeys, update_theme, window::remove_main_bounds, window::resize_main_window,
+    window::return_to_previous_window, window::set_main_bounds,
 };
 use config::{SettingsManager, WindowsManager};
 use soundpanel::{
@@ -304,7 +305,6 @@ pub fn run() {
         .manage(speech_queue)
         .invoke_handler(tauri::generate_handler![
             greet,
-            speak_text,
             speak_text_raw_export,
             get_tts_provider,
             set_tts_provider,
@@ -317,9 +317,6 @@ pub fn run() {
             get_openai_voice,
             set_openai_voice,
             apply_openai_proxy_settings,
-            get_interception,
-            set_interception,
-            toggle_interception,
             has_api_key,
             quit_app,
             get_hotkey_enabled,

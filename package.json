@@ -9,6 +9,8 @@
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:ipc": "node --test scripts/check-ipc-contracts.test.mjs",
+    "check:ipc": "node scripts/check-ipc-contracts.mjs",
     "test:watch": "vitest",
     "tauri": "tauri"
   },

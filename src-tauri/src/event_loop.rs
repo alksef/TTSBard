@@ -42,9 +42,6 @@ impl EventHandler {
             AppEvent::LayoutChanged(layout) => {
                 self.process_layout_changed(layout);
             }
-            AppEvent::TextReady(text) => {
-                self.process_text_ready(text);
-            }
             AppEvent::TextSentToTts(text) => {
                 self.process_text_sent_to_tts(text);
             }
@@ -233,28 +230,6 @@ impl EventHandler {
             InputLayout::English => debug!("Current layout: English (EN)"),
             InputLayout::Russian => debug!("Current layout: Russian (RU)"),
         }
-    }
-
-    /// Process text ready for TTS event
-    fn process_text_ready(&self, text: String) {
-        debug!(
-            text_len = text.chars().count(),
-            "[EVENT] Text ready for TTS"
-        );
-
-        // Используем общий runtime вместо создания нового
-        let state = self.state.clone();
-        self.state.runtime.spawn(async move {
-            match crate::commands::speak_text_internal(&state, text).await {
-                Ok(_) => {
-                    debug!("[EVENT] TTS started successfully in interception mode");
-                }
-                Err(e) => {
-                    error!(error = %e, "[EVENT] TTS failed in interception mode");
-                    state.emit_event(AppEvent::TtsError(e));
-                }
-            }
-        });
     }
 
     /// Process text sent to TTS event

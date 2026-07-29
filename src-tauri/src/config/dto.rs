@@ -785,17 +785,15 @@ impl From<WindowsSettingsDto> for WindowsSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeneralSettingsDto {
     pub hotkey_enabled: bool,
-    pub interception_enabled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
     pub show_playback_on_start: bool,
 }
 
 impl GeneralSettingsDto {
-    pub fn from_config_and_state(config: &ConfigAppSettings, interception_enabled: bool) -> Self {
+    pub fn from_config(config: &ConfigAppSettings) -> Self {
         Self {
             hotkey_enabled: config.hotkey_enabled,
-            interception_enabled,
             theme: Some(match config.theme {
                 crate::config::settings::Theme::Dark => "dark".to_string(),
                 crate::config::settings::Theme::Light => "light".to_string(),
@@ -1254,7 +1252,6 @@ pub struct AllSourcesParams<'a> {
     pub webview_settings: &'a WebViewSettings,
     pub twitch_settings: &'a TwitchSettings,
     pub windows_settings: &'a WindowsSettings,
-    pub interception_enabled: bool,
     pub preprocessor: Option<&'a crate::preprocessor::TextPreprocessor>,
     pub soundpanel_bindings: Vec<SoundBinding>,
 }
@@ -1305,10 +1302,7 @@ impl AppSettingsDto {
             audio: params.config.audio.clone(),
             audio_effects: params.config.audio_effects.clone().into(),
             dsp: params.config.dsp.clone().into(),
-            general: GeneralSettingsDto::from_config_and_state(
-                params.config,
-                params.interception_enabled,
-            ),
+            general: GeneralSettingsDto::from_config(params.config),
             editor: EditorSettingsDto {
                 quick: params.config.editor.quick.as_str().to_string(),
                 ai: params.config.editor.ai,

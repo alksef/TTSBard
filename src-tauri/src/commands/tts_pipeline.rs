@@ -267,26 +267,7 @@ pub async fn synthesize_audio(state: &AppState, text: &str) -> Result<Vec<u8>, S
     synthesize_with_provider(&provider, text).await
 }
 
-/// 4. Этап применения аудио-эффектов (pitch, speed, volume,
-///    DeepFilterNet, DSP), boundary cleanup (DC offset + fade-in/out).
-///
-/// Pipeline order:
-///   1. Decode audio to PCM
-///   2. DeepFilterNet noise suppression (if enabled)
-///   3. Signalsmith Stretch (tempo + pitch + formant correction)
-///   4. DSP (EQ + compressor + limiter)
-///   5. Per-phrase boundary cleanup (DC offset removal + start/end fade)
-///
-/// Returns `AudioPcm` ready for playback.
-pub fn apply_audio_effects_pipeline(
-    audio_data: Vec<u8>,
-    settings: &AppSettings,
-) -> Result<AudioPcm, String> {
-    apply_audio_effects_pipeline_with_settings(audio_data, &settings.audio_effects, &settings.dsp)
-}
-
-// ── OutputConfig helper (pure, reused by worker and legacy enqueue_and_record) ──
-
+/// Build the per-phrase output configuration captured by the speech worker.
 pub(crate) fn compute_output_configs(
     audio_settings: &AudioSettings,
     effects_settings: &AudioEffectsSettings,
@@ -331,40 +312,6 @@ pub(crate) fn compute_output_configs(
     (speaker_config, virtual_mic_config)
 }
 
-/// 5. Отправка звука в плеер (legacy path, uses global audio_config snapshots)
-pub fn enqueue_and_record(
-    state: &AppState,
-    text: String,
-    audio: AudioPcm,
-    settings: &AppSettings,
-) -> Result<(), String> {
-    let (speaker_config, virtual_mic_config) =
-        compute_output_configs(&settings.audio, &settings.audio_effects);
-
-    if speaker_config.is_none() && virtual_mic_config.is_none() {
-        return Err(
-            "Аудиовывод и виртуальный микрофон выключены. Включите хотя бы один вывод.".to_string(),
-        );
-    }
-
-    if let Some(pb) = state.playback_manager.lock().as_ref() {
-        pb.update_audio_config(speaker_config, virtual_mic_config);
-        let phrase_id = uuid::Uuid::new_v4().to_string();
-        info!(target: "playback", "Enqueueing phrase to PlaybackManager");
-        let enqueued = pb.enqueue(phrase_id, text.clone(), audio);
-        if !enqueued {
-            warn!(
-                text_len = text.chars().count(),
-                "Playback queue full, phrase dropped"
-            );
-            return Err("Очередь воспроизведения переполнена. Попробуйте позже.".to_string());
-        }
-        Ok(())
-    } else {
-        Err("Плеер не инициализирован".to_string())
-    }
-}
-
 /// Export raw TTS audio bytes to a file — synthesis only, no effects, no playback.
 pub async fn synthesize_and_export(state: &AppState, text: &str, path: &str) -> Result<(), String> {
     let settings = state.settings_cache.read().clone();
@@ -397,6 +344,14 @@ mod tests {
         s
     }
 
+    fn apply_pipeline(audio_data: Vec<u8>, settings: &AppSettings) -> Result<AudioPcm, String> {
+        apply_audio_effects_pipeline_with_settings(
+            audio_data,
+            &settings.audio_effects,
+            &settings.dsp,
+        )
+    }
+
     fn generate_silent_wav() -> Vec<u8> {
         let sample_rate = 48000u32;
         let channels = 1usize;
@@ -410,8 +365,8 @@ mod tests {
     fn pipeline_with_boundary_cleanup_enabled() {
         let wav = generate_silent_wav();
         let settings = make_settings(true);
-        let result = apply_audio_effects_pipeline(wav, &settings)
-            .expect("pipeline with boundary cleanup enabled");
+        let result =
+            apply_pipeline(wav, &settings).expect("pipeline with boundary cleanup enabled");
         assert!(result.samples.iter().all(|s| s.is_finite()));
         assert_eq!(result.sample_rate, 48000);
         assert_eq!(result.channels, 1);
@@ -422,8 +377,8 @@ mod tests {
     fn pipeline_with_boundary_cleanup_disabled() {
         let wav = generate_silent_wav();
         let settings = make_settings(false);
-        let result = apply_audio_effects_pipeline(wav, &settings)
-            .expect("pipeline with boundary cleanup disabled");
+        let result =
+            apply_pipeline(wav, &settings).expect("pipeline with boundary cleanup disabled");
         assert!(result.samples.iter().all(|s| s.is_finite()));
         assert_eq!(result.sample_rate, 48000);
         assert_eq!(result.channels, 1);
@@ -444,8 +399,7 @@ mod tests {
             .expect("encode test WAV");
 
         let settings = make_settings(false);
-        let result =
-            apply_audio_effects_pipeline(wav, &settings).expect("pipeline with boundary disabled");
+        let result = apply_pipeline(wav, &settings).expect("pipeline with boundary disabled");
         for (a, b) in samples.iter().zip(result.samples.iter()) {
             assert!(
                 (a - b).abs() < 0.01,
@@ -466,7 +420,7 @@ mod tests {
         settings.dsp.compressor.enabled = false;
         settings.dsp.limiter.enabled = false;
 
-        let result = apply_audio_effects_pipeline(wav, &settings)
+        let result = apply_pipeline(wav, &settings)
             .expect("pipeline with boundary enabled, effects disabled");
         // Sample rate preserved (no DeepFilterNet resampling).
         assert_eq!(result.sample_rate, 48000);
@@ -486,7 +440,7 @@ mod tests {
             .expect("encode stereo WAV");
 
         let settings = make_settings(true);
-        let result = apply_audio_effects_pipeline(wav, &settings).expect("pipeline with boundary");
+        let result = apply_pipeline(wav, &settings).expect("pipeline with boundary");
         assert_eq!(result.sample_rate, sample_rate);
         assert_eq!(result.channels, channels);
         assert_eq!(result.frame_count(), frames);
@@ -541,15 +495,12 @@ mod tests {
         assert_eq!(result, "hello world");
     }
 
-    // ── compute_output_configs tests ──
-
     fn make_audio_settings(speaker_enabled: bool, mic_device: Option<&str>) -> AudioSettings {
-        use crate::config::AudioSettings;
         AudioSettings {
             speaker_enabled,
             speaker_device: None,
             speaker_volume: 80,
-            virtual_mic_device: mic_device.map(|s| s.to_string()),
+            virtual_mic_device: mic_device.map(str::to_string),
             virtual_mic_volume: 60,
         }
     }
@@ -558,70 +509,55 @@ mod tests {
     fn output_configs_both_enabled() {
         let audio = make_audio_settings(true, Some("mic1"));
         let effects = AudioEffectsSettings::default();
-        let (spk, mic) = compute_output_configs(&audio, &effects);
-        assert!(spk.is_some());
-        assert_eq!(spk.as_ref().unwrap().volume, 0.8);
-        assert!(mic.is_some());
-        assert_eq!(mic.as_ref().unwrap().device_id.as_deref(), Some("mic1"));
-        assert_eq!(mic.as_ref().unwrap().volume, 0.6);
+        let (speaker, mic) = compute_output_configs(&audio, &effects);
+
+        assert_eq!(speaker.as_ref().map(|config| config.volume), Some(0.8));
+        assert_eq!(
+            mic.as_ref().and_then(|config| config.device_id.as_deref()),
+            Some("mic1")
+        );
+        assert_eq!(mic.as_ref().map(|config| config.volume), Some(0.6));
     }
 
     #[test]
     fn output_configs_speaker_only() {
         let audio = make_audio_settings(true, None);
-        let effects = AudioEffectsSettings::default();
-        let (spk, mic) = compute_output_configs(&audio, &effects);
-        assert!(spk.is_some());
+        let (speaker, mic) = compute_output_configs(&audio, &AudioEffectsSettings::default());
+
+        assert!(speaker.is_some());
         assert!(mic.is_none());
     }
 
     #[test]
     fn output_configs_mic_only() {
         let audio = make_audio_settings(false, Some("mic1"));
-        let effects = AudioEffectsSettings::default();
-        let (spk, mic) = compute_output_configs(&audio, &effects);
-        assert!(spk.is_none());
+        let (speaker, mic) = compute_output_configs(&audio, &AudioEffectsSettings::default());
+
+        assert!(speaker.is_none());
         assert!(mic.is_some());
     }
 
     #[test]
     fn output_configs_both_disabled() {
         let audio = make_audio_settings(false, None);
-        let effects = AudioEffectsSettings::default();
-        let (spk, mic) = compute_output_configs(&audio, &effects);
-        assert!(spk.is_none());
+        let (speaker, mic) = compute_output_configs(&audio, &AudioEffectsSettings::default());
+
+        assert!(speaker.is_none());
         assert!(mic.is_none());
     }
 
     #[test]
-    fn output_configs_effects_volume_factor_applied() {
+    fn output_configs_apply_effects_volume_factor() {
         let audio = make_audio_settings(true, Some("mic1"));
         let effects = AudioEffectsSettings {
             enabled: true,
             volume: 50,
             ..Default::default()
         };
-        let (spk, _mic) = compute_output_configs(&audio, &effects);
+        let (speaker, _) = compute_output_configs(&audio, &effects);
         let expected = 0.8 * (50.0f32 / 100.0);
-        assert!((spk.unwrap().volume - expected).abs() < 0.0001);
-    }
 
-    #[test]
-    fn output_configs_parity_with_legacy() {
-        let audio = make_audio_settings(true, Some("dev-test"));
-        let effects = AudioEffectsSettings::default();
-        let (spk, mic) = compute_output_configs(&audio, &effects);
-
-        let legacy_effects_volume: Option<f32> = if effects.enabled {
-            Some(AudioEffects::new(effects.pitch, effects.speed, effects.volume).volume_factor())
-        } else {
-            None
-        };
-        let legacy_spk_vol = 0.8 * legacy_effects_volume.unwrap_or(1.0);
-        assert_eq!(spk.unwrap().volume, legacy_spk_vol);
-
-        let legacy_mic_vol = 0.6 * legacy_effects_volume.unwrap_or(1.0);
-        assert_eq!(mic.unwrap().volume, legacy_mic_vol);
+        assert!((speaker.unwrap().volume - expected).abs() < 0.0001);
     }
 
     // ── Snapshot identity / cache key separation tests ──

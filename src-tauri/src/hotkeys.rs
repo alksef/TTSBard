@@ -312,7 +312,6 @@ pub fn unregister_all_hotkeys(app_handle: &AppHandle) -> Result<(), Box<dyn std:
 /// Initialize hotkeys from settings
 ///
 /// This function reads hotkey settings from the config and registers them.
-/// F1 (text interception) remains hardcoded and is always registered.
 pub fn initialize_hotkeys(
     _hwnd: isize,
     app_state: AppState,

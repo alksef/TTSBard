@@ -77,7 +77,7 @@ prepare/synthesize helpers, но не должен искусственно пр
 
 ## Этапы реализации
 
-### P0 — Инвентаризация контрактов и legacy cleanup
+### P0 — Инвентаризация контрактов и legacy cleanup — завершён 2026-07-29
 
 1. Собрать machine-readable inventory зарегистрированных Tauri commands,
    frontend `invoke`, backend/frontend event names и literal `listen`.
@@ -89,6 +89,11 @@ prepare/synthesize helpers, но не должен искусственно пр
 4. До удаления каждого public name проверить tests, frontend и возможные
    вспомогательные окна; не смешивать cleanup с изменением speech pipeline.
 
+Результат: source-derived inventory и parity gate добавлены в локальные проверки
+и CI; динамический event adapter оформлен allowlist с причиной. Legacy
+`TextReady`/`speak_text`, дублирующие interception flags и старые команды удалены,
+а действующий key-action intercept сохранён.
+
 ### P1 — IPC contract layer
 
 1. Ввести backend/frontend contract modules для command и event names. Начать с
@@ -99,6 +104,11 @@ prepare/synthesize helpers, но не должен искусственно пр
    миграция callers, затем удаление прежних string literals.
 4. Code generation вводить только если ручные shared constants и parity tests
    перестанут обеспечивать достаточную проверяемость.
+
+Первый vertical slice реализован для `submit_speech`: backend возвращает
+`CommandError { code, message, retryable }`, frontend вызывает команду через
+typed wrapper и преобразует rejection в `IpcCommandError`. Следующие slices
+должны переиспользовать этот envelope и мигрироваться по одному domain.
 
 ### P2 — Internal и frontend events
 
@@ -120,6 +130,11 @@ prepare/synthesize helpers, но не должен искусственно пр
    Уже корректный порядок `persist → runtime → emit` не переписывать.
 4. Добавить failure-injection tests для write error и проверку отсутствия emit и
    runtime mutation после неуспешного persist.
+
+SoundPanel/Intercept часть завершена 2026-07-29: все три mutation-команды
+возвращают ошибку записи, runtime обновляется только после успешного persist,
+а `InterceptionChanged` не публикуется при failure. Атомарный WebView section
+persist остаётся следующим отдельным P3 slice.
 
 ### P4 — Module boundaries
 

@@ -85,12 +85,15 @@ Telegram.
 ### Синтез и воспроизведение
 
 ```text
-UI / keyboard interception
-  → Tauri command или AppEvent::TextReady
+InputPanel
+  → Tauri command submit_speech
+  → immutable SpeechSnapshot
+  → SpeechQueue
+  → speech worker
   → text preprocessing и prefix flags
   → выбранный provider из TtsProviderRegistry
   → audio decode / resample / DSP
-  → PlaybackManager queue
+  → PlaybackManager с per-phrase output config
   → выбранные audio devices
   → playback events в UI
 ```
@@ -98,6 +101,9 @@ UI / keyboard interception
 Провайдер возвращает аудиоданные через общий TTS-контракт. Провайдер не должен
 самостоятельно управлять окнами или очередью воспроизведения. Правила эффектов
 и частоты дискретизации описаны в [аудиодокументации](../user/audio-effects.md).
+Старый путь глобального перехвата текста и `AppEvent::TextReady` удалён; low-level
+keyboard hook используется только экспериментальным Numpad/F-key control для
+дискретных действий приложения.
 
 ### Рассылка текста и typing state
 

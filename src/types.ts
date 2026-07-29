@@ -4,7 +4,6 @@
 export type AppEvent =
   | { InterceptionChanged: boolean }
   | { LayoutChanged: InputLayout }
-  | { TextReady: string }
   | { TtsStatusChanged: TtsStatus }
   | { TtsError: string }
   | { ShowFloatingWindow: null }

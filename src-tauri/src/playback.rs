@@ -778,14 +778,8 @@ impl PlaybackManager {
         info!("Playback thread ended");
     }
 
-    /// Обновить динамическую конфигурацию аудиовыходов (C1-дыра).
-    /// Вызывается из `speak_text_internal` перед/после `enqueue`.
-    pub fn update_audio_config(&self, speaker: Option<OutputConfig>, mic: Option<OutputConfig>) {
-        *self.audio_config.write() = AudioOutputsConfig { speaker, mic };
-    }
-
-    /// Добавить фразу в очередь. Snapshots текущий глобальный `audio_config` —
-    /// compatibility wrapper для legacy вызовов без явного per-phrase output config.
+    /// Добавить фразу в очередь, используя fallback-конфигурацию manager.
+    /// Этот путь применяется при повторе ранее синтезированной фразы.
     /// Возвращает `true` если фраза принята, `false` если очередь полна.
     pub fn enqueue(&self, id: String, text: String, audio: AudioPcm) -> bool {
         let cfg = self.audio_config.read().clone();

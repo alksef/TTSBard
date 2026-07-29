@@ -209,11 +209,8 @@ pub fn emit_soundpanel_no_binding(app_handle: &AppHandle, key: char) -> tauri::R
     Ok(())
 }
 
-pub fn close_soundpanel_with_interception(app_handle: &AppHandle) -> Result<(), String> {
+pub fn close_soundpanel_window(app_handle: &AppHandle) -> Result<(), String> {
     let app_state = app_handle.state::<AppState>();
-    let sp_state = app_handle.state::<SoundPanelState>();
-    sp_state.set_interception_enabled(false);
-    app_state.set_interception_enabled(false);
     hide_soundpanel_window(app_handle, &app_state)
         .map_err(|e| format!("Failed to hide window: {}", e))
 }
@@ -227,7 +224,7 @@ pub fn toggle_soundpanel_window(app_handle: &AppHandle) -> Result<bool, String> 
         .map_err(|e| format!("Failed to check soundpanel visibility: {}", e))?;
 
     if visible {
-        close_soundpanel_with_interception(app_handle)?;
+        close_soundpanel_window(app_handle)?;
         Ok(false)
     } else {
         show_soundpanel_window(app_handle)
