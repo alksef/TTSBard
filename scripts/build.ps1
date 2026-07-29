@@ -59,10 +59,9 @@ Write-Ok $rustcVer
 Write-Ok $cmakeVer
 
 # espeak-rs-sys v0.2.0 hardcodes Release library paths. Keep its C library on the
-# default dynamic CRT (Release profile). A local espeak-rs-sys patch (prepared
-# per docs/development/windows-debug-crt.md) removes the erroneous debug-only `msvcrtd`
-# link directive, so native components use compatible release-CRT allocator
-# bookkeeping. The patch is developer-local and not committed.
+# default dynamic CRT (Release profile). Cargo.toml disables debug assertions only
+# for that upstream package, preventing its build script from linking `msvcrtd`.
+# See docs/development/windows-debug-crt.md.
 if ($Mode -eq 'debug') {
     $env:ESPEAK_LIB_PROFILE = 'Release'
     Remove-Item Env:ESPEAK_STATIC_CRT -ErrorAction SilentlyContinue

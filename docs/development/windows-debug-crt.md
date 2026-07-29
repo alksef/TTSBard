@@ -46,99 +46,46 @@ Redistributable не устраняет несовместимость release/d
 Корректное решение — использовать согласованный вариант CRT для всех
 компонентов.
 
-## Локальный патч `espeak-rs-sys` (developer-local, не коммитить)
+## Постоянное исправление через Cargo profile
 
-Каждый Windows-разработчик, выполняющий debug-сборку, должен самостоятельно
-подготовить локальный патч. Директория `src-tauri/patches/espeak-rs-sys/`
-и конфигурация `[patch.crates-io]` являются **developer-local** и **не должны
-коммититься** в репозиторий. Релизная сборка и committed `Cargo.lock`
-в чистом checkout продолжают использовать `espeak-rs-sys` с crates.io.
+В `src-tauri/Cargo.toml` задан узкий profile override:
 
-### Пошаговая подготовка (PowerShell)
+```toml
+[profile.dev.package.espeak-rs-sys]
+debug-assertions = false
+```
 
-Все команды ниже выполняются из корня репозитория.
+Он отключает `cfg(debug_assertions)` только при компиляции upstream package
+`espeak-rs-sys`, включая его build script. Поэтому ошибочная ветка не печатает
+`cargo:rustc-link-lib=dylib=msvcrtd`, а assertions приложения, тестов и остальных
+dependencies остаются включёнными. Профиль `test` наследует настройки `dev`,
+поэтому одинаковое правило действует для `cargo build`, `cargo test` и debug
+Tauri build.
 
-1. **Загрузить и найти исходный код `espeak-rs-sys 0.2.0` в Cargo registry:**
+Это решение воспроизводится в чистом checkout, не изменяет Cargo registry, не
+требует vendored копии eSpeak и сохраняет registry `source`/`checksum` в
+`Cargo.lock`.
 
-   ```powershell
-   cargo fetch --manifest-path .\src-tauri\Cargo.toml
-   $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE '.cargo' }
-   $srcDir = Get-ChildItem -Path "$cargoHome\registry\src\*\espeak-rs-sys-0.2.0" -Directory |
-       Select-Object -First 1
-   if (-not $srcDir) { throw 'espeak-rs-sys-0.2.0 not found in Cargo registry' }
-   Write-Host "Source: $($srcDir.FullName)"
-   ```
+### Почему глобальный `build-override` не используется
 
-2. **Скопировать исходный код в `src-tauri/patches/espeak-rs-sys`:**
+`[profile.dev.build-override] debug-assertions = false` затрагивает все build
+scripts и proc macros. Для текущего dependency graph это меняет конфигурацию
+Tauri codegen и приводит к несовместимому generated code. Package-scoped
+override ограничивает workaround ровно дефектным upstream crate.
 
-   ```powershell
-   $patchDir = Join-Path (Get-Location) 'src-tauri\patches\espeak-rs-sys'
-   if (Test-Path $patchDir) {
-       throw "Patch directory already exists: $patchDir. Inspect it before replacing."
-   }
-   Copy-Item -Recurse -Force $srcDir.FullName $patchDir
-   ```
+### Почему `/NODEFAULTLIB:msvcrtd.lib` неэффективен
 
-3. **Открыть скопированный `build.rs` и удалить ровно пять строк
-   msVCRT debug-блока:**
-
-   ```rust
-   // Windows debug
-   if cfg!(all(debug_assertions, windows)) {
-       println!("cargo:rustc-link-lib=dylib=msvcrtd");
-   }
-   ```
-
-4. **Добавить в локальный `src-tauri/.cargo/config.toml`, сохранив уже
-   существующие секции вроде `[env]`:**
-
-   ```toml
-   [patch.crates-io]
-   espeak-rs-sys = { path = "patches/espeak-rs-sys" }
-   ```
-
-   Cargo разрешает этот путь относительно корня `src-tauri`, поэтому здесь
-   намеренно нет `../`.
-
-5. **Чтобы локальные файлы нельзя было случайно добавить через `git add .`,
-   добавить их в `.git/info/exclude`:**
-
-   ```gitignore
-   /src-tauri/.cargo/
-   /src-tauri/patches/espeak-rs-sys/
-   ```
-
-   `.git/info/exclude` действует только в текущем clone и не коммитится.
-
-6. **Запустить debug-сборку:**
-
-   ```powershell
-   .\scripts\build.ps1 -Mode debug
-   ```
-
-   Cargo локально уберёт registry `source`/`checksum` у `espeak-rs-sys` в
-   `Cargo.lock`. **Не коммитьте** это изменение — committed lockfile должен
-   оставаться привязанным к crates.io. Не запускайте ради этого
-   `cargo generate-lockfile`: он может без необходимости перерезолвить другие
-   зависимости.
-
-### Почему `/NODEFAULTLIB:msvcrtd.lib` был неэффективен
-
-Предыдущий подход в `src-tauri/build.rs` пытался подавить `msvcrtd.lib`
-через `/NODEFAULTLIB`. Однако директива `cargo:rustc-link-lib=dylib=msvcrtd`
+Подавление `msvcrtd.lib` через `/NODEFAULTLIB` не решает проблему. Директива
+`cargo:rustc-link-lib=dylib=msvcrtd`
 в `espeak-rs-sys/build.rs` добавляет DLL-ссылку как *явную зависимость*
 (не default library), поэтому `/NODEFAULTLIB` на неё не действует.
-Правильное решение — удалить саму директиву в источнике.
+Нужно не допустить генерацию самой директивы.
 
 ### Release-сборка
 
-Release-сборка (`--release`) не затрагивается локальным патчем и никогда не
-имела этой проблемы: условный блок `debug_assertions` не активируется в
-release, и eSpeak всегда собирается с профилем Release + динамическая CRT.
-Committed `Cargo.toml` и `Cargo.lock` не содержат патча, поэтому CI и чистые
-checkout используют crates.io-версию. На машине разработчика локальная
-конфигурация Cargo применяется к обоим профилям, но единственное отличие
-`build.rs` находится под `debug_assertions` и в release не выполняется.
+Release-сборка (`--release`) не затрагивается override для `profile.dev` и
+никогда не имела этой проблемы: `debug_assertions` в release выключены, а
+eSpeak собирается с профилем Release + динамическая CRT.
 
 ## Сборка debug
 
@@ -200,16 +147,14 @@ if (-not $proc.HasExited) {
 Тест не оставляет фонового процесса: через 4 секунды процесс принудительно
 завершается.
 
-## Обслуживание патча при обновлении `espeak-rs`/`espeak-rs-sys`
+## Обслуживание при обновлении `espeak-rs`/`espeak-rs-sys`
 
-1. При изменении версии `espeak-rs-sys` в `Cargo.toml` проверить upstream
-   крейт на наличие блока `msvcrtd`. Если в новой версии блок удалён
-   разработчиками — локальный патч можно убрать.
-2. Если блок всё ещё присутствует — обновить vendored копию в
-   `src-tauri/patches/espeak-rs-sys` из нового источника Cargo registry и
-   повторно применить удаление блока.
-3. После любого изменения выполнить полную debug-сборку и проверить
-   зависимости через `dumpbin /dependents`.
+1. При изменении версии проверить upstream `build.rs` на блок `msvcrtd`.
+2. Если блок удалён разработчиками, удалить package override из `Cargo.toml`.
+3. Если условие или package name изменились, не расширять workaround глобально:
+   сначала повторно определить минимальный package-scoped profile.
+4. После изменения выполнить полную debug-сборку и проверить зависимости через
+   `dumpbin /dependents`.
 
 ## См. также
 

@@ -990,7 +990,7 @@ impl Default for AiDeepSeekSettings {
 }
 
 /// Custom OpenAI-compatible settings for AI text correction
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct AiCustomSettings {
     pub url: Option<String>,
     pub api_key: Option<String>,
@@ -998,17 +998,6 @@ pub struct AiCustomSettings {
     pub use_proxy: bool,
     #[serde(default)]
     pub model: String,
-}
-
-impl Default for AiCustomSettings {
-    fn default() -> Self {
-        Self {
-            url: None,
-            api_key: None,
-            use_proxy: false,
-            model: String::new(),
-        }
-    }
 }
 
 /// AI settings for text correction
@@ -1299,10 +1288,8 @@ impl SettingsManager {
     /// * `value` - New value to set (must be serializable to JSON)
     ///
     /// # Example
-    /// ```no_run
-    /// # use ttsbard_lib::config::settings::SettingsManager;
-    /// # let manager = SettingsManager::new().unwrap();
-    /// manager.update_field("/audio/speaker_volume", &80).unwrap();
+    /// ```text
+    /// settings_manager.update_field("/audio/speaker_volume", &80)?;
     /// ```
     fn update_field<T>(&self, json_pointer: &str, value: &T) -> Result<()>
     where

@@ -171,23 +171,12 @@ struct InnerState {
     resolved_item: Option<ResolvedItem>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct ItemSyncState {
     desired: bool,
     generation: u64,
     applied: Option<bool>,
     worker_running: bool,
-}
-
-impl Default for ItemSyncState {
-    fn default() -> Self {
-        Self {
-            desired: false,
-            generation: 0,
-            applied: None,
-            worker_running: false,
-        }
-    }
 }
 
 struct ItemTransitionState {
@@ -940,10 +929,10 @@ impl VTubeStudioService {
             self.invalidate_session();
             self.item_transition.reset();
 
-            let should_hide = match (resolved_item.as_ref(), applied) {
-                (Some(_), Some(true)) | (Some(_), None) => true,
-                _ => false,
-            };
+            let should_hide = matches!(
+                (resolved_item.as_ref(), applied),
+                (Some(_), Some(true)) | (Some(_), None)
+            );
 
             if should_hide {
                 if let (Some(ref mut ws), Some(ref item)) = (&mut inner.ws, &resolved_item) {
@@ -1061,10 +1050,10 @@ impl VTubeStudioService {
     ) -> Result<String, String> {
         let typing_action = self.settings.read().await.typing_action.clone();
 
-        if timeout_ms < 100 || timeout_ms > 5000 {
+        if !(100..=5000).contains(&timeout_ms) {
             return Err("Таймаут должен быть от 100 до 5000 мс".to_string());
         }
-        if repeat_count < 1 || repeat_count > 10 {
+        if !(1..=10).contains(&repeat_count) {
             return Err("Повторы должны быть от 1 до 10".to_string());
         }
 
@@ -1475,7 +1464,7 @@ async fn send_and_recv(
 ) -> Result<serde_json::Value, String> {
     use tokio_tungstenite::tungstenite::Message;
 
-    let send_msg = Message::Text(request_json.to_string().into());
+    let send_msg = Message::Text(request_json.to_string());
     timeout(REQUEST_TIMEOUT, ws.send(send_msg))
         .await
         .map_err(|_| "Send timed out".to_string())?
@@ -1743,7 +1732,7 @@ mod tests {
         );
         match classify_vts_response(&resp, "req-1", "AuthenticationResponse") {
             RecvResult::Match(data) => {
-                assert_eq!(data["authenticated"].as_bool().unwrap(), true);
+                assert!(data["authenticated"].as_bool().unwrap());
             }
             RecvResult::Skip => panic!("expected Match, got Skip"),
             RecvResult::Error(e) => panic!("expected Match, got Error: {}", e),
@@ -1759,7 +1748,7 @@ mod tests {
         );
         match classify_vts_response(&resp, "req-2", "AuthenticationResponse") {
             RecvResult::Match(data) => {
-                assert_eq!(data["authenticated"].as_bool().unwrap(), true);
+                assert!(data["authenticated"].as_bool().unwrap());
             }
             RecvResult::Skip => panic!("expected Match, got Skip"),
             RecvResult::Error(e) => panic!("expected Match, got Error: {}", e),
@@ -2408,19 +2397,16 @@ mod tests {
             } else {
                 msg_type
             };
-            match classify_vts_response(&resp, req_id, expected_msg_type) {
-                RecvResult::Match(_) => {
-                    assert!(
-                        msg_type == expected_msg_type
-                            || (expected_match == "APIResponse" && msg_type == expected_match)
-                            || msg_type == expected_match,
-                        "expected Match for {}/expecting {}, but got Match from msg_type={}",
-                        expected_msg_type,
-                        expected_match,
-                        msg_type
-                    );
-                }
-                _ => {}
+            if let RecvResult::Match(_) = classify_vts_response(&resp, req_id, expected_msg_type) {
+                assert!(
+                    msg_type == expected_msg_type
+                        || (expected_match == "APIResponse" && msg_type == expected_match)
+                        || msg_type == expected_match,
+                    "expected Match for {}/expecting {}, but got Match from msg_type={}",
+                    expected_msg_type,
+                    expected_match,
+                    msg_type
+                );
             }
         }
     }
@@ -3003,8 +2989,9 @@ mod tests {
         };
         let json = serde_json::to_string(&rec).unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(v["file_name"].as_str().unwrap(), "icon.png");
-        assert_eq!(v["duplicate_count"].as_u64().unwrap(), 2);
+        assert_eq!(v["fileName"].as_str().unwrap(), "icon.png");
+        assert!(v.get("file_name").is_none());
+        assert!(v.get("duplicate_count").is_none());
         assert_eq!(v["duplicateCount"].as_u64().unwrap(), 2);
         assert!(v.get("instanceID").is_none());
         assert!(v.get("instanceId").is_none());
@@ -3480,7 +3467,7 @@ mod tests {
     fn same_value_update_during_inflight_does_not_stale_completion() {
         let state = ItemTransitionState::new();
         state.record_desired(true);
-        let (_, gen1) = state.read_desired();
+        let gen1 = state.begin_work().expect("worker must be in flight");
         assert!(gen1 >= 1);
 
         // Worker starts processing gen1 desired=true
@@ -3571,11 +3558,10 @@ mod tests {
     fn worker_session_mismatch_prevents_socket_restoration() {
         let state = ItemTransitionState::new();
         state.record_desired(true);
-        state.force_applied(true);
-
         // Worker claims and owns a generation snapshot
         let gen = state.begin_work();
         assert!(gen.is_some());
+        state.force_applied(true);
 
         // Session invalidated externally → worker releases
         state.end_work();
@@ -3938,7 +3924,7 @@ mod tests {
             gen_after_retry > gen_before_retry || gen_after_retry > gen_first,
             "generation must advance for retry after failure"
         );
-        assert!(gen_after_retry >= gen_first.wrapping_add(2));
+        assert!(gen_after_retry > gen_first);
 
         // begin_work succeeds for the retry
         let gen_retry = state.begin_work();

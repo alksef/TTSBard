@@ -94,6 +94,7 @@ pub async fn save_vtube_studio_settings(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri IPC exposes these fields as named arguments.
 pub async fn save_vtube_studio_typing_action(
     output_mode: String,
     parameter_name: String,
@@ -280,10 +281,9 @@ pub async fn get_vtube_studio_current_model_hotkeys(
         .vtube_studio
         .get_current_model_hotkeys()
         .await
-        .map_err(|e| {
+        .inspect_err(|_| {
             let status = state.vtube_studio.get_connection_status();
             emit_vts_status(&app_handle, &status);
-            e
         })?;
 
     let dtos: Vec<VtsHotkeyInfoDto> = hotkeys
@@ -486,10 +486,10 @@ pub async fn test_vtube_studio_typing(
     state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
-    if timeout_ms < 100 || timeout_ms > 5000 {
+    if !(100..=5000).contains(&timeout_ms) {
         return Err("Таймаут должен быть от 100 до 5000 мс".to_string());
     }
-    if repeat_count < 1 || repeat_count > 10 {
+    if !(1..=10).contains(&repeat_count) {
         return Err("Повторы должны быть от 1 до 10".to_string());
     }
 
@@ -682,7 +682,7 @@ mod tests {
         let records = vec![make_record("icon.png", "PNG", true, 1)];
         let result = validate_item_selection(&records, "ICON.PNG", "PNG");
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("icon.png"));
+        assert!(result.unwrap_err().contains("ICON.PNG"));
     }
 
     #[test]

@@ -134,3 +134,9 @@ tower = { version = "0.5", features = ["util"] }
 # codegen/compaction for the DFN3 graph. Our local copy auto-deduplicates names.
 [patch.crates-io]
 tract-core = { path = "patches/tract-core" }
+
+# espeak-rs-sys 0.2.0 conditionally links the incompatible Debug CRT from its
+# build script when cfg(debug_assertions) is enabled. Disable that cfg only for
+# this upstream package; application and test assertions remain enabled.
+[profile.dev.package.espeak-rs-sys]
+debug-assertions = false

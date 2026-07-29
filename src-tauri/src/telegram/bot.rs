@@ -346,39 +346,36 @@ impl SileroTtsBot {
             };
 
             // Check for audio voice response first
-            if let Some(media) = &m.media {
-                if let grammers_tl_types::enums::MessageMedia::Document(doc_media) = media {
-                    if let Some(grammers_tl_types::enums::Document::Document(doc)) =
-                        &doc_media.document
-                    {
-                        let matches_request = is_matching_audio_response(
-                            m.out,
-                            m.id,
-                            peer_user_id,
-                            reply_to_msg_id,
-                            &doc.mime_type,
-                            sent_msg_id,
-                            bot_user_id,
-                        );
-                        trace!(
-                            target: "silero_correlation",
-                            candidate_msg_id = m.id,
-                            sent_msg_id,
-                            peer_user_id,
-                            bot_user_id,
-                            reply_to_msg_id,
-                            outgoing = m.out,
-                            mime = %doc.mime_type,
-                            matches_request,
-                            "Evaluated Silero audio response candidate"
-                        );
-                        if matches_request {
-                            return Some(SynthesisResponse::Voice(VoiceMessageResult {
-                                file_id: doc.id.to_string(),
-                                msg_id: m.id,
-                                mime_type: doc.mime_type.clone(),
-                            }));
-                        }
+            if let Some(grammers_tl_types::enums::MessageMedia::Document(doc_media)) = &m.media {
+                if let Some(grammers_tl_types::enums::Document::Document(doc)) = &doc_media.document
+                {
+                    let matches_request = is_matching_audio_response(
+                        m.out,
+                        m.id,
+                        peer_user_id,
+                        reply_to_msg_id,
+                        &doc.mime_type,
+                        sent_msg_id,
+                        bot_user_id,
+                    );
+                    trace!(
+                        target: "silero_correlation",
+                        candidate_msg_id = m.id,
+                        sent_msg_id,
+                        peer_user_id,
+                        bot_user_id,
+                        reply_to_msg_id,
+                        outgoing = m.out,
+                        mime = %doc.mime_type,
+                        matches_request,
+                        "Evaluated Silero audio response candidate"
+                    );
+                    if matches_request {
+                        return Some(SynthesisResponse::Voice(VoiceMessageResult {
+                            file_id: doc.id.to_string(),
+                            msg_id: m.id,
+                            mime_type: doc.mime_type.clone(),
+                        }));
                     }
                 }
             }
@@ -687,6 +684,7 @@ fn classify_part_file(path: &Path) -> Result<PartFileStatus, String> {
 /// Atomically publish a downloaded `.part` file:
 ///   1. Read metadata – reject zero-byte files and clean up on failure.
 ///   2. Rename (atomic on the same filesystem) – clean up on failure.
+///
 /// Returns the final path and file size on success.
 fn publish_voice_file(part_path: &Path, final_path: &Path) -> Result<(PathBuf, u64), String> {
     let metadata = std::fs::metadata(part_path).map_err(|e| {
@@ -1251,37 +1249,34 @@ fn extract_limits_info_from_message(
     sent_msg_id: i32,
     bot_user_id: i64,
 ) -> Option<Limits> {
-    match message {
-        grammers_tl_types::enums::Message::Message(m) => {
-            let peer_user_id = match &m.peer_id {
-                grammers_tl_types::enums::Peer::User(u) => Some(u.user_id),
-                _ => None,
-            };
-            log_bot_text("limits", m.out, m.id, peer_user_id, bot_user_id, &m.message);
-            trace!(
-                candidate_msg_id = m.id,
-                sent_msg_id,
-                peer = peer_user_id,
-                bot = bot_user_id,
-                has_media = m.media.is_some(),
-                has_reply_markup = m.reply_markup.is_some(),
-                text_len = m.message.len(),
-                "Evaluating limits candidate"
-            );
-            if is_matching_limits_response(
-                m.out,
-                m.id,
-                peer_user_id,
-                m.media.is_some(),
-                &m.message,
-                sent_msg_id,
-                bot_user_id,
-            ) {
-                trace!(msg_id = m.id, "Limits candidate accepted");
-                return parse_limits_info(&m.message);
-            }
+    if let grammers_tl_types::enums::Message::Message(m) = message {
+        let peer_user_id = match &m.peer_id {
+            grammers_tl_types::enums::Peer::User(u) => Some(u.user_id),
+            _ => None,
+        };
+        log_bot_text("limits", m.out, m.id, peer_user_id, bot_user_id, &m.message);
+        trace!(
+            candidate_msg_id = m.id,
+            sent_msg_id,
+            peer = peer_user_id,
+            bot = bot_user_id,
+            has_media = m.media.is_some(),
+            has_reply_markup = m.reply_markup.is_some(),
+            text_len = m.message.len(),
+            "Evaluating limits candidate"
+        );
+        if is_matching_limits_response(
+            m.out,
+            m.id,
+            peer_user_id,
+            m.media.is_some(),
+            &m.message,
+            sent_msg_id,
+            bot_user_id,
+        ) {
+            trace!(msg_id = m.id, "Limits candidate accepted");
+            return parse_limits_info(&m.message);
         }
-        _ => {}
     }
     None
 }
@@ -1329,6 +1324,7 @@ fn extract_limits_info_from_short_message(
 ///    "Открытые голоса: 0 / 666 символов;"
 /// 2. Multiline: header on one line, counter on the next non-empty line
 ///    "🔓 Открытые голоса:\n       34 / 666 символов;"
+///
 /// Markdown emphasis (`**label:**`) is stripped before matching section headers.
 /// Both open-voices and gifs counters are required; other sections are ignored.
 fn parse_limits_info(text: &str) -> Option<Limits> {
@@ -1347,8 +1343,7 @@ fn parse_limits_info(text: &str) -> Option<Limits> {
     let mut pending: Option<Pending> = None;
     let lines: Vec<&str> = text.lines().collect();
 
-    for i in 0..lines.len() {
-        let raw = lines[i];
+    for raw in &lines {
         let line = raw.trim();
 
         if line.is_empty() {
@@ -1482,6 +1477,7 @@ fn try_parse_counter_after_colon(line: &str) -> Option<String> {
 /// Formats:
 ///   1. Full-year:  ключ YYYY-MM-DD HH:mm:ss UTC±N
 ///   2. Legacy:     ключ MM-DD HH:mm:ss UTC±N
+///
 /// Возвращает None если суффикс отсутствует или невалидный.
 fn parse_reset_timestamp(text: &str) -> Option<String> {
     // Try full-year format first.
@@ -1517,13 +1513,13 @@ fn try_parse_reset_full_year(text: &str) -> Option<String> {
     let sign = caps.get(7)?.as_str();
     let offset_val: i32 = caps.get(8)?.as_str().parse().ok()?;
 
-    if year < 2000 || year > 2099 {
+    if !(2000..=2099).contains(&year) {
         return None;
     }
-    if month < 1 || month > 12 {
+    if !(1..=12).contains(&month) {
         return None;
     }
-    if day < 1 || day > 31 {
+    if !(1..=31).contains(&day) {
         return None;
     }
     if hour > 23 {
@@ -1537,7 +1533,7 @@ fn try_parse_reset_full_year(text: &str) -> Option<String> {
     }
 
     let offset = if sign == "-" { -offset_val } else { offset_val };
-    if offset < -12 || offset > 14 {
+    if !(-12..=14).contains(&offset) {
         return None;
     }
 
@@ -1567,10 +1563,10 @@ fn try_parse_reset_legacy(text: &str) -> Option<String> {
     let sign = caps.get(6)?.as_str();
     let offset_val: i32 = caps.get(7)?.as_str().parse().ok()?;
 
-    if month < 1 || month > 12 {
+    if !(1..=12).contains(&month) {
         return None;
     }
-    if day < 1 || day > 31 {
+    if !(1..=31).contains(&day) {
         return None;
     }
     if hour > 23 {
@@ -1584,7 +1580,7 @@ fn try_parse_reset_legacy(text: &str) -> Option<String> {
     }
 
     let offset = if sign == "-" { -offset_val } else { offset_val };
-    if offset < -12 || offset > 14 {
+    if !(-12..=14).contains(&offset) {
         return None;
     }
 
@@ -1722,8 +1718,8 @@ fn extract_set_speaker_response_from_update(
     expected_msg_id: i32,
     bot_user_id: i64,
 ) -> Option<bool> {
-    match update_like {
-        UpdatesLike::Updates(updates_enum) => match updates_enum {
+    if let UpdatesLike::Updates(updates_enum) = update_like {
+        match updates_enum {
             grammers_tl_types::enums::Updates::Updates(u) => {
                 for update in &u.updates {
                     match update {
@@ -1790,8 +1786,7 @@ fn extract_set_speaker_response_from_update(
                 // Chat update: not the private Silero user peer, reject.
             }
             _ => {}
-        },
-        _ => {}
+        }
     }
     None
 }
@@ -1804,50 +1799,44 @@ fn process_message(
     expected_msg_id: i32,
     bot_user_id: i64,
 ) -> Option<bool> {
-    match message {
-        grammers_tl_types::enums::Message::Message(m) => {
-            // Extract user_id from peer
-            let user_id = match &m.peer_id {
-                grammers_tl_types::enums::Peer::User(u) => u.user_id,
-                _ => return None,
-            };
-            let reply_to_msg_id = match &m.reply_to {
-                Some(grammers_tl_types::enums::MessageReplyHeader::Header(h)) => h.reply_to_msg_id,
-                _ => None,
-            };
-            log_bot_text(
-                "set_speaker",
-                m.out,
-                m.id,
-                Some(user_id),
-                bot_user_id,
-                &m.message,
-            );
-            if !is_matching_text_reply(
-                m.out,
-                m.id,
-                user_id,
-                reply_to_msg_id,
-                expected_msg_id,
-                bot_user_id,
-            ) {
-                return None;
-            }
-            if m.media.is_none() && !m.message.is_empty() {
-                return Some(parse_message_text_with_validation(&m.message));
-            }
+    if let grammers_tl_types::enums::Message::Message(m) = message {
+        // Extract user_id from peer
+        let user_id = match &m.peer_id {
+            grammers_tl_types::enums::Peer::User(u) => u.user_id,
+            _ => return None,
+        };
+        let reply_to_msg_id = match &m.reply_to {
+            Some(grammers_tl_types::enums::MessageReplyHeader::Header(h)) => h.reply_to_msg_id,
+            _ => None,
+        };
+        log_bot_text(
+            "set_speaker",
+            m.out,
+            m.id,
+            Some(user_id),
+            bot_user_id,
+            &m.message,
+        );
+        if !is_matching_text_reply(
+            m.out,
+            m.id,
+            user_id,
+            reply_to_msg_id,
+            expected_msg_id,
+            bot_user_id,
+        ) {
+            return None;
         }
-        _ => {}
+        if m.media.is_none() && !m.message.is_empty() {
+            return Some(parse_message_text_with_validation(&m.message));
+        }
     }
     None
 }
 
 /// Спарсить текст сообщения с валидацией
 fn parse_message_text_with_validation(text: &str) -> bool {
-    match parse_set_speaker_response(text) {
-        Ok(result) => result,
-        Err(_) => false,
-    }
+    parse_set_speaker_response(text).unwrap_or_default()
 }
 
 /// Парсит текст ответа бота для set_speaker
