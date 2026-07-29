@@ -88,4 +88,22 @@ mod tests {
             "voices/ has no voice variant files"
         );
     }
+
+    #[test]
+    #[ignore = "set TTSBARD_STAGING_DIR to an installer staging directory"]
+    fn packaged_staging_contains_espeak_data() {
+        let staging = std::env::var("TTSBARD_STAGING_DIR")
+            .expect("TTSBARD_STAGING_DIR is required for the packaging smoke test");
+        let data_dir = PathBuf::from(staging).join("espeak-ng-data");
+
+        assert!(
+            data_dir.join("voices").is_dir(),
+            "staged voices/ is missing"
+        );
+        assert!(data_dir.join("lang").is_dir(), "staged lang/ is missing");
+        assert!(
+            data_dir.join("en_dict").is_file(),
+            "staged en_dict is missing"
+        );
+    }
 }

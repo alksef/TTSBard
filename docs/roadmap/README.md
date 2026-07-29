@@ -44,7 +44,6 @@ related_tasks: []
 | [ROADMAP-037 — Hotkeys и возврат фокуса](./active/037-application-hotkeys-and-previous-window-focus.md) | `in_progress` | Ручная проверка runtime-сценариев |
 | [ROADMAP-038 — Dynamic Piper providers](./active/038-dynamic-piper-tts-providers.md) | `in_progress` | Ручная проверка на Windows |
 | [ROADMAP-040 — Test coverage gaps](./active/040-test-coverage-gaps.md) | `in_progress` | P1/P2: composables, playback seam, HTTP contracts |
-| [ROADMAP-041 — Review 021 remediation](./active/041-review-021-remediation.md) | `in_progress` | Сверить оставшийся scope и закрыть item |
 | [ROADMAP-054 — Детерминированная видимость предмета VTube Studio](./active/054-vtube-studio-item-visibility.md) | `in_progress` | P4: ручная приёмка с реальным VTube Studio item |
 ## Завершённые направления
 
@@ -101,6 +100,7 @@ related_tasks: []
 - [ROADMAP-028 — secret-safe logging](./completed/028-secret-safe-logging.md)
 - [ROADMAP-036 — Telegram auth polish](./completed/036-telegram-auth-flow-polish.md)
 - [ROADMAP-039 — Embedded Piper runtime и лицензирование](./completed/039-piper-runtime-feasibility.md)
+- [ROADMAP-041 — Review 021 remediation](./completed/041-review-021-remediation.md)
 - [ROADMAP-046 — Documentation migration](./completed/046-documentation-structure-migration.md)
 - [ROADMAP-055 — Качество и AI-ready foundation](./completed/055-quality-and-ai-ready-architecture.md)
 - [ROADMAP-056 — IPC-контракты и AI-ready границы](./completed/056-ipc-contracts-and-ai-ready-boundaries.md)

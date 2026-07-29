@@ -540,14 +540,8 @@ pub async fn set_tts_provider(
 ) -> Result<(), String> {
     info!(?provider, "Switching to provider");
 
-    super::persist_blocking(settings_manager.inner(), move |mgr| {
-        mgr.set_tts_provider(provider)
-    })
-    .await?;
-
-    match provider {
+    let concrete_id = match provider {
         TtsProviderType::OpenAi => {
-            info!("Initializing OpenAI TTS");
             let api_key = settings_manager.get_openai_api_key();
             if let Some(key) = api_key {
                 state.init_openai_tts(key);
@@ -555,12 +549,11 @@ pub async fn set_tts_provider(
             } else {
                 warn!("No API key found, OpenAI TTS not initialized");
             }
+            "openai"
         }
         TtsProviderType::Silero => {
             info!("Initializing Silero TTS");
-
             let client_arc = Arc::clone(&telegram_state.client);
-
             debug!("Checking Telegram session");
             let _connected = match super::telegram::telegram_auto_restore(
                 telegram_state,
@@ -581,15 +574,16 @@ pub async fn set_tts_provider(
                     false
                 }
             };
-
             state.init_silero_tts(client_arc);
             info!("Silero TTS initialized");
+            "silero"
         }
         TtsProviderType::Local => {
             info!("Initializing Local TTS");
             let url = settings_manager.get_local_tts_url();
             state.init_local_tts(url);
             debug!("Local TTS initialized");
+            "local-http"
         }
         TtsProviderType::Fish => {
             info!("Initializing Fish Audio TTS");
@@ -600,15 +594,12 @@ pub async fn set_tts_provider(
             } else {
                 warn!("No API key found, Fish Audio TTS not initialized");
             }
+            "fish"
         }
-    }
+    };
 
-    state.set_tts_provider_type(provider);
-
-    super::emit_settings_changed(&app_handle);
-
-    info!(?provider, "Provider set successfully");
-    Ok(())
+    super::select_tts_provider_by_id(concrete_id.to_string(), app_handle, state, settings_manager)
+        .await
 }
 
 /// Get Local TTS URL

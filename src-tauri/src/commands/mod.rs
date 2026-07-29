@@ -347,7 +347,9 @@ pub async fn prepare_tts_provider_by_id(
         .map_err(|e| format!("Provider preparation task failed: {}", e))?
 }
 
-/// Select an already registered TTS provider by its stable concrete ID
+/// Select an already registered TTS provider by its stable concrete ID.
+/// This is the single owner path for provider selection — prepare is executed
+/// before persistence, so partial states are never observed.
 #[tauri::command]
 pub async fn select_tts_provider_by_id(
     id: String,
@@ -356,21 +358,17 @@ pub async fn select_tts_provider_by_id(
     settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
     info!(id, "Selecting TTS provider by ID");
-
-    // Validate and select in the registry (returns Err for unknown IDs)
-    {
-        let mut registry = state.tts_registry.lock();
-        registry.select(&id)?;
-    }
-
-    // Persist the selection to survive restarts
-    let persist_id = id;
-    persist_blocking(settings_manager.inner(), move |mgr| {
-        mgr.set_tts_provider_id(Some(persist_id))
-    })
-    .await?;
-
+    let manager = settings_manager.inner().clone();
+    state
+        .select_tts_provider(id, move |provider_id, legacy_type| {
+            let mut settings = manager.load().map_err(|e| e.to_string())?;
+            settings.tts.provider_id = Some(provider_id);
+            if let Some(provider_type) = legacy_type {
+                settings.tts.provider = provider_type;
+            }
+            manager.save(&settings).map_err(|e| e.to_string())
+        })
+        .await?;
     emit_settings_changed(&app_handle);
-
     Ok(())
 }

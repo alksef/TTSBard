@@ -406,4 +406,49 @@ mod tests {
         reg.restore_saved_or_first(None);
         assert!(reg.active_id().is_none());
     }
+
+    // --- transactional selection contract tests ---
+
+    #[test]
+    fn reconfigure_non_active_preserves_active_id() {
+        let mut reg = TtsProviderRegistry::new();
+        reg.add_or_replace(entry("openai", "OpenAI"));
+        reg.add_or_replace(entry("silero", "Silero"));
+        reg.select("openai").unwrap();
+        // re-register silero (simulating key save) must not change active
+        reg.add_or_replace(entry("silero", "Silero updated"));
+        assert_eq!(reg.active_id(), Some("openai"));
+    }
+
+    #[test]
+    fn reconfigure_active_entry_preserves_selection() {
+        let mut reg = TtsProviderRegistry::new();
+        reg.add_or_replace(entry("openai", "OpenAI"));
+        reg.select("openai").unwrap();
+        reg.add_or_replace(entry("openai", "OpenAI v2"));
+        assert_eq!(reg.active_id(), Some("openai"));
+        assert_eq!(reg.active().unwrap().display_name, "OpenAI v2");
+    }
+
+    #[test]
+    fn select_failure_preserves_previous_active_id() {
+        let mut reg = TtsProviderRegistry::new();
+        reg.add_or_replace(entry("a", "Alpha"));
+        reg.select("a").unwrap();
+        assert_eq!(reg.active_id(), Some("a"));
+        let err = reg.select("nonexistent").unwrap_err();
+        assert!(err.contains("nonexistent"));
+        assert_eq!(reg.active_id(), Some("a"));
+    }
+
+    #[test]
+    fn select_builtin_then_piper_preserves_correct_ids() {
+        let mut reg = TtsProviderRegistry::new();
+        reg.add_or_replace(entry("openai", "OpenAI TTS"));
+        reg.add_or_replace(entry("local-piper:en-us", "English Piper"));
+        reg.select("openai").unwrap();
+        assert_eq!(reg.active_id(), Some("openai"));
+        reg.select("local-piper:en-us").unwrap();
+        assert_eq!(reg.active_id(), Some("local-piper:en-us"));
+    }
 }

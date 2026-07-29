@@ -3,7 +3,7 @@ use std::env;
 #[cfg(test)]
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use async_trait::async_trait;
 use ort::session::Session;
@@ -64,10 +64,11 @@ struct ModelState {
     config: ModelConfig,
 }
 
+#[derive(Clone)]
 pub struct LocalModelTts {
     model_path: std::path::PathBuf,
     config_path: std::path::PathBuf,
-    model: Mutex<Option<ModelState>>,
+    model: Arc<Mutex<Option<ModelState>>>,
     provider_id: String,
     display_name: String,
 }
@@ -144,7 +145,7 @@ impl LocalModelTts {
         Self {
             model_path: model_path.as_ref().to_path_buf(),
             config_path: config_path.as_ref().to_path_buf(),
-            model: Mutex::new(None),
+            model: Arc::new(Mutex::new(None)),
             provider_id: String::new(),
             display_name: String::new(),
         }
@@ -154,7 +155,7 @@ impl LocalModelTts {
         Self {
             model_path: descriptor.onnx_path.clone(),
             config_path: descriptor.json_path.clone(),
-            model: Mutex::new(None),
+            model: Arc::new(Mutex::new(None)),
             provider_id: descriptor.id.clone(),
             display_name: descriptor.display_name.clone(),
         }
@@ -301,11 +302,8 @@ impl LocalModelTts {
 
         Ok(audio.to_vec())
     }
-}
 
-#[async_trait]
-impl TtsEngine for LocalModelTts {
-    async fn synthesize(&self, text: &str) -> Result<Vec<u8>, String> {
+    fn synthesize_blocking(&self, text: &str) -> Result<Vec<u8>, String> {
         self.ensure_loaded().map_err(|e| e.to_string())?;
 
         let (voice, noise_scale, length_scale, noise_w, sample_rate) = {
@@ -342,6 +340,7 @@ impl TtsEngine for LocalModelTts {
             )
             .map_err(|e| e.to_string())?
         };
+
         const POST_ROLL_MS: u32 = 250;
         let post_roll_frames = (sample_rate as usize * POST_ROLL_MS as usize) / 1000;
         samples.extend(std::iter::repeat_n(0.0f32, post_roll_frames));
@@ -350,27 +349,45 @@ impl TtsEngine for LocalModelTts {
     }
 }
 
+async fn run_on_blocking_pool<F>(job: F) -> Result<Vec<u8>, String>
+where
+    F: FnOnce() -> Result<Vec<u8>, String> + Send + 'static,
+{
+    tokio::task::spawn_blocking(job)
+        .await
+        .map_err(|e| format!("Piper worker failed: {}", e))?
+}
+
+#[async_trait]
+impl TtsEngine for LocalModelTts {
+    async fn synthesize(&self, text: &str) -> Result<Vec<u8>, String> {
+        let worker = self.clone();
+        let text = text.to_string();
+        run_on_blocking_pool(move || worker.synthesize_blocking(&text)).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const TEST_MODEL_PATH: &str =
-        "/home/aefimov/ProjectsMy/loca_tts/ru_RU-irina-medium-cloned.onnx";
-    const TEST_CONFIG_PATH: &str =
-        "/home/aefimov/ProjectsMy/loca_tts/ru_RU-irina-medium-cloned.onnx.json";
-
-    fn model_exists() -> bool {
-        Path::new(TEST_MODEL_PATH).exists() && Path::new(TEST_CONFIG_PATH).exists()
-    }
-
     #[tokio::test]
-    async fn test_local_model_tts_synthesize() {
-        if !model_exists() {
-            eprintln!("Skipping test: model not found at {TEST_MODEL_PATH}");
-            return;
-        }
+    #[ignore = "set TTSBARD_PIPER_TEST_MODEL and TTSBARD_PIPER_TEST_CONFIG to run real inference"]
+    async fn test_local_model_tts_synthesize_with_fixture() {
+        let model_path = env::var("TTSBARD_PIPER_TEST_MODEL")
+            .expect("TTSBARD_PIPER_TEST_MODEL must point to a Piper ONNX fixture");
+        let config_path = env::var("TTSBARD_PIPER_TEST_CONFIG")
+            .expect("TTSBARD_PIPER_TEST_CONFIG must point to its JSON config");
+        assert!(
+            PathBuf::from(&model_path).is_file(),
+            "model fixture is missing"
+        );
+        assert!(
+            PathBuf::from(&config_path).is_file(),
+            "config fixture is missing"
+        );
 
-        let tts = LocalModelTts::new(TEST_MODEL_PATH, TEST_CONFIG_PATH);
+        let tts = LocalModelTts::new(model_path, config_path);
 
         let audio = tts
             .synthesize("Привет мир")
@@ -391,6 +408,23 @@ mod tests {
             pcm.sample_rate,
             pcm.duration_secs()
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn blocking_worker_keeps_async_executor_responsive() {
+        let mut worker = tokio::spawn(run_on_blocking_pool(|| {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            Ok(vec![1])
+        }));
+        let timer = tokio::time::sleep(std::time::Duration::from_millis(10));
+        tokio::pin!(timer);
+
+        tokio::select! {
+            _ = &mut timer => assert!(!worker.is_finished()),
+            result = &mut worker => panic!("blocking job completed before timer: {result:?}"),
+        }
+
+        assert_eq!(worker.await.unwrap().unwrap(), vec![1]);
     }
 
     #[test]

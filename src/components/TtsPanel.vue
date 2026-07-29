@@ -15,6 +15,10 @@ import TtsSileroCard from './tts/TtsSileroCard.vue';
 import TtsLocalCard from './tts/TtsLocalCard.vue';
 import TtsOpenAICard from './tts/TtsOpenAICard.vue';
 import TtsFishAudioCard from './tts/TtsFishAudioCard.vue';
+import {
+  selectBuiltinTtsProvider,
+  selectConcreteTtsProvider,
+} from './ttsProviderSelection';
 
 interface TtsProviderState {
   type: TtsProviderType;
@@ -279,11 +283,11 @@ async function toggleFishAudioUseProxy(enabled: boolean) {
 
 async function setActiveProvider(provider: TtsProviderType) {
   try {
-    await invoke('set_tts_provider', { provider });
+    await selectBuiltinTtsProvider(provider);
     activeProvider.value = provider;
     activePiperId.value = null;
-    const builtinId = getBuiltinProviderId(provider);
-    await invoke('select_tts_provider_by_id', { id: builtinId }).catch(() => {});
+    activeProviderId.value = getBuiltinProviderId(provider);
+    await reloadSettings();
   } catch (error) {
     showError(error as string);
   }
@@ -295,30 +299,14 @@ async function selectPiperProvider(id: string) {
   piperLoading.value[id] = true;
   piperError.value[id] = null;
 
-  const prevBuiltinType = activeProvider.value;
-  const prevPiperId = activePiperId.value;
-
   try {
-    await invoke('select_tts_provider_by_id', { id });
-    await invoke('prepare_tts_provider_by_id', { id });
-    activePiperId.value = id;
+    await selectConcreteTtsProvider(id);
     activeProvider.value = null;
+    activePiperId.value = id;
+    activeProviderId.value = id;
     showSuccess('Модель загружена');
   } catch (error) {
     piperError.value[id] = error as string;
-    if (prevPiperId && prevPiperId !== id) {
-      try {
-        await invoke('select_tts_provider_by_id', { id: prevPiperId });
-        activePiperId.value = prevPiperId;
-        activeProvider.value = null;
-      } catch { /* best-effort */ }
-    } else if (prevBuiltinType) {
-      try {
-        await invoke('set_tts_provider', { provider: prevBuiltinType });
-        activeProvider.value = prevBuiltinType;
-        activePiperId.value = null;
-      } catch { /* best-effort */ }
-    }
     showError(error as string);
   } finally {
     piperLoading.value[id] = false;

@@ -132,6 +132,10 @@ pub struct AppState {
 
     /// Сохранённый HWND внешнего окна, бывшего на переднем плане перед активацией TTSBard
     pub previous_foreground_hwnd: Arc<Mutex<Option<isize>>>,
+
+    /// Async mutex serialising concurrent provider selection operations.
+    /// Selected by concrete provider ID.
+    pub selection_mutex: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl AppState {
@@ -176,6 +180,7 @@ impl AppState {
             soundpanel_hook: Arc::new(Mutex::new(None)),
             shutdown: CancellationToken::new(),
             previous_foreground_hwnd: Arc::new(Mutex::new(None)),
+            selection_mutex: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -263,8 +268,7 @@ impl AppState {
             display_name: "OpenAI TTS".to_string(),
             provider: TtsProvider::OpenAi(tts),
         });
-        registry.select("openai").ok();
-        info!("TTS provider set to OpenAi");
+        info!("OpenAI TTS provider registered");
     }
 
     pub fn init_local_tts(&self, url: String) {
@@ -286,8 +290,7 @@ impl AppState {
             display_name: "Local HTTP TTS".to_string(),
             provider: TtsProvider::Local(tts),
         });
-        registry.select("local-http").ok();
-        info!("TTS provider set to Local");
+        info!("Local TTS provider registered");
     }
 
     pub fn init_silero_tts(
@@ -315,8 +318,7 @@ impl AppState {
             display_name: "Silero TTS".to_string(),
             provider: TtsProvider::Silero(tts),
         });
-        registry.select("silero").ok();
-        info!("TTS provider set to Silero");
+        info!("Silero TTS provider registered");
     }
 
     pub fn init_fish_audio_tts(&self, api_key: String) {
@@ -341,7 +343,7 @@ impl AppState {
             display_name: "Fish Audio TTS".to_string(),
             provider: TtsProvider::Fish(tts),
         });
-        registry.select("fish").ok();
+        info!("Fish Audio TTS provider registered");
     }
 
     #[allow(dead_code)]
@@ -530,10 +532,391 @@ impl AppState {
 
         info!(count = count, "Piper provider registration complete");
     }
+
+    /// Prepare, persist and publish one concrete provider selection.
+    /// Runtime state changes only after preparation and persistence succeed.
+    pub(crate) async fn select_tts_provider<F>(&self, id: String, persist: F) -> Result<(), String>
+    where
+        F: FnOnce(String, Option<TtsProviderType>) -> Result<(), String> + Send + 'static,
+    {
+        let _guard = self.selection_mutex.lock().await;
+
+        let provider = {
+            let registry = self.tts_registry.lock();
+            registry
+                .get(&id)
+                .map(|e| e.provider.clone())
+                .ok_or_else(|| format!("Unknown provider ID: {}", id))?
+        };
+
+        tokio::task::spawn_blocking(move || provider.prepare())
+            .await
+            .map_err(|e| format!("Selection task panicked: {}", e))?
+            .map_err(|e| format!("Provider preparation failed: {}", e))?;
+
+        let legacy_type = builtin_type_for_id(&id);
+        let persist_id = id.clone();
+        tokio::task::spawn_blocking(move || persist(persist_id, legacy_type))
+            .await
+            .map_err(|e| format!("Persist task panicked: {}", e))?
+            .map_err(|e| format!("Failed to persist selection: {}", e))?;
+
+        {
+            let mut registry = self.tts_registry.lock();
+            registry
+                .select(&id)
+                .expect("provider remains registered during selection transaction");
+        }
+
+        if let Some(tp) = legacy_type {
+            self.tts_config.write().provider_type = tp;
+        }
+
+        info!(id, legacy = ?legacy_type, "TTS provider selected");
+        Ok(())
+    }
+}
+
+/// Map a concrete provider ID to its built-in TtsProviderType, if any.
+pub(crate) fn builtin_type_for_id(id: &str) -> Option<TtsProviderType> {
+    match id {
+        "openai" => Some(TtsProviderType::OpenAi),
+        "silero" => Some(TtsProviderType::Silero),
+        "local-http" => Some(TtsProviderType::Local),
+        "fish" => Some(TtsProviderType::Fish),
+        _ => None,
+    }
 }
 
 impl Default for AppState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tts::piper::runtime::LocalModelTts;
+
+    fn dummy_local() -> TtsProvider {
+        TtsProvider::Local(LocalHttpServerTts::new())
+    }
+
+    fn failing_piper() -> TtsProvider {
+        TtsProvider::Piper(Arc::new(LocalModelTts::new(
+            "/nonexistent/model.onnx",
+            "/nonexistent/model.onnx.json",
+        )))
+    }
+
+    fn entry(id: &str, name: &str, provider: TtsProvider) -> TtsProviderEntry {
+        TtsProviderEntry {
+            id: id.to_string(),
+            display_name: name.to_string(),
+            provider,
+        }
+    }
+
+    #[test]
+    fn builtin_type_for_id_openai() {
+        assert_eq!(builtin_type_for_id("openai"), Some(TtsProviderType::OpenAi));
+    }
+
+    #[test]
+    fn builtin_type_for_id_silero() {
+        assert_eq!(builtin_type_for_id("silero"), Some(TtsProviderType::Silero));
+    }
+
+    #[test]
+    fn builtin_type_for_id_local_http() {
+        assert_eq!(
+            builtin_type_for_id("local-http"),
+            Some(TtsProviderType::Local)
+        );
+    }
+
+    #[test]
+    fn builtin_type_for_id_fish() {
+        assert_eq!(builtin_type_for_id("fish"), Some(TtsProviderType::Fish));
+    }
+
+    #[test]
+    fn builtin_type_for_id_piper_is_none() {
+        assert_eq!(builtin_type_for_id("local-piper:en_US-lessac-medium"), None);
+    }
+
+    #[test]
+    fn builtin_type_for_id_unknown_is_none() {
+        assert_eq!(builtin_type_for_id("nonexistent"), None);
+    }
+
+    // ── reconfigure inactive provider tests ──
+
+    #[test]
+    fn init_local_tts_registers_but_does_not_activate_when_another_is_active() {
+        let state = AppState::new();
+        {
+            let mut reg = state.tts_registry.lock();
+            reg.add_or_replace(entry("openai", "OpenAI", dummy_local()));
+            reg.select("openai").unwrap();
+        }
+
+        state.init_local_tts("http://127.0.0.1:9999".to_string());
+
+        let reg = state.tts_registry.lock();
+        assert_eq!(reg.active_id(), Some("openai"));
+        assert!(reg.get("local-http").is_some());
+    }
+
+    #[test]
+    fn init_openai_tts_registers_but_does_not_activate_when_another_is_active() {
+        let state = AppState::new();
+        {
+            let mut reg = state.tts_registry.lock();
+            reg.add_or_replace(entry("local-http", "Local", dummy_local()));
+            reg.select("local-http").unwrap();
+        }
+
+        state.init_openai_tts("sk-test12345678901234567890".to_string());
+
+        let reg = state.tts_registry.lock();
+        assert_eq!(reg.active_id(), Some("local-http"));
+        assert!(reg.get("openai").is_some());
+    }
+
+    #[test]
+    fn add_or_replace_preserves_existing_active_id() {
+        let state = AppState::new();
+        {
+            let mut reg = state.tts_registry.lock();
+            reg.add_or_replace(entry("openai", "OpenAI v1", dummy_local()));
+            reg.select("openai").unwrap();
+        }
+
+        {
+            let mut reg = state.tts_registry.lock();
+            reg.add_or_replace(entry("openai", "OpenAI v2", dummy_local()));
+        }
+
+        let reg = state.tts_registry.lock();
+        assert_eq!(reg.active_id(), Some("openai"));
+        assert_eq!(reg.get("openai").unwrap().display_name, "OpenAI v2");
+    }
+
+    // ── owner flow transactional tests (core logic without persist/emit) ──
+
+    /// Exercise the production transaction with an in-memory successful persist.
+    async fn selection_core(state: &AppState, id: &str) -> Result<Option<TtsProviderType>, String> {
+        let legacy = builtin_type_for_id(id);
+        state
+            .select_tts_provider(id.to_string(), |_, _| Ok(()))
+            .await?;
+        Ok(legacy)
+    }
+
+    #[test]
+    fn selection_unknown_id_preserves_active() {
+        let state = AppState::new();
+        {
+            let mut reg = state.tts_registry.lock();
+            reg.add_or_replace(entry("openai", "OpenAI", dummy_local()));
+            reg.select("openai").unwrap();
+        }
+
+        let result = state.runtime.block_on(selection_core(&state, "unknown-id"));
+        assert!(result.is_err());
+
+        let reg = state.tts_registry.lock();
+        assert_eq!(reg.active_id(), Some("openai"));
+    }
+
+    #[test]
+    fn prepare_failure_preserves_active_and_does_not_emit_success() {
+        let state = AppState::new();
+        {
+            let mut reg = state.tts_registry.lock();
+            reg.add_or_replace(entry("openai", "OpenAI", dummy_local()));
+            reg.add_or_replace(entry("bad-piper", "Bad Piper", failing_piper()));
+            reg.select("openai").unwrap();
+        }
+
+        let result = state.runtime.block_on(selection_core(&state, "bad-piper"));
+
+        assert!(result.is_err());
+        // registry must be unchanged
+        let reg = state.tts_registry.lock();
+        assert_eq!(reg.active_id(), Some("openai"));
+    }
+
+    #[test]
+    fn persistence_failure_preserves_runtime_selection_and_legacy_type() {
+        let state = AppState::new();
+        {
+            let mut reg = state.tts_registry.lock();
+            reg.add_or_replace(entry("openai", "OpenAI", dummy_local()));
+            reg.add_or_replace(entry("fish", "Fish", dummy_local()));
+            reg.select("openai").unwrap();
+        }
+        let old_type = state.tts_config.read().provider_type;
+
+        let result = state
+            .runtime
+            .block_on(state.select_tts_provider("fish".into(), |_, _| Err("disk full".into())));
+
+        assert!(result.unwrap_err().contains("disk full"));
+        assert_eq!(state.tts_registry.lock().active_id(), Some("openai"));
+        assert_eq!(state.tts_config.read().provider_type, old_type);
+    }
+
+    #[test]
+    fn successful_builtin_selection_agrees_concrete_id_and_legacy_type() {
+        let state = AppState::new();
+        {
+            let mut reg = state.tts_registry.lock();
+            reg.add_or_replace(entry("openai", "OpenAI", dummy_local()));
+            reg.add_or_replace(entry("fish", "Fish", dummy_local()));
+            reg.select("openai").unwrap();
+        }
+
+        let registry = Arc::clone(&state.tts_registry);
+        let result =
+            state
+                .runtime
+                .block_on(state.select_tts_provider("fish".into(), move |id, legacy| {
+                    assert_eq!(id, "fish");
+                    assert_eq!(legacy, Some(TtsProviderType::Fish));
+                    assert_eq!(registry.lock().active_id(), Some("openai"));
+                    Ok(())
+                }));
+        assert!(result.is_ok());
+
+        let reg = state.tts_registry.lock();
+        assert_eq!(reg.active_id(), Some("fish"));
+        assert_eq!(state.tts_config.read().provider_type, TtsProviderType::Fish);
+    }
+
+    #[test]
+    fn successful_piper_selection_has_none_legacy_type() {
+        let state = AppState::new();
+        {
+            let mut reg = state.tts_registry.lock();
+            reg.add_or_replace(entry("openai", "OpenAI", dummy_local()));
+            reg.add_or_replace(entry("piper-en-us-amy", "Amy", dummy_local()));
+            reg.select("openai").unwrap();
+        }
+
+        let result = state
+            .runtime
+            .block_on(selection_core(&state, "piper-en-us-amy"));
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), None);
+
+        let reg = state.tts_registry.lock();
+        assert_eq!(reg.active_id(), Some("piper-en-us-amy"));
+    }
+
+    #[test]
+    fn builtin_selection_updates_config_provider_type() {
+        let state = AppState::new();
+        {
+            let mut reg = state.tts_registry.lock();
+            reg.add_or_replace(entry("openai", "OpenAI", dummy_local()));
+            reg.add_or_replace(entry("silero", "Silero", dummy_local()));
+        }
+
+        state
+            .runtime
+            .block_on(selection_core(&state, "silero"))
+            .unwrap();
+
+        assert_eq!(
+            state.tts_config.read().provider_type,
+            TtsProviderType::Silero
+        );
+    }
+
+    #[test]
+    fn piper_selection_does_not_overwrite_legacy_provider_type() {
+        let state = AppState::new();
+        {
+            let mut reg = state.tts_registry.lock();
+            reg.add_or_replace(entry("openai", "OpenAI", dummy_local()));
+            reg.add_or_replace(entry("piper-en-us-amy", "Amy", dummy_local()));
+            reg.select("openai").unwrap();
+        }
+        // legacy config is implicitly whatever was set — for Piper selection, provider_type stays unchanged
+        let prev_type = state.tts_config.read().provider_type;
+
+        state
+            .runtime
+            .block_on(selection_core(&state, "piper-en-us-amy"))
+            .unwrap();
+
+        assert_eq!(state.tts_config.read().provider_type, prev_type);
+    }
+
+    #[test]
+    fn concurrent_selections_are_serialized() {
+        let state = AppState::new();
+        {
+            let mut reg = state.tts_registry.lock();
+            reg.add_or_replace(entry("openai", "OpenAI", dummy_local()));
+            reg.add_or_replace(entry("fish", "Fish", dummy_local()));
+        }
+
+        let (ra, rb) = state.runtime.block_on(async {
+            tokio::join!(
+                selection_core(&state, "openai"),
+                selection_core(&state, "fish")
+            )
+        });
+
+        assert!(ra.is_ok());
+        assert!(rb.is_ok());
+
+        let reg = state.tts_registry.lock();
+        let active = reg.active_id();
+        assert!(
+            active == Some("openai") || active == Some("fish"),
+            "Final active must be one of the two selected IDs, got {:?}",
+            active
+        );
+    }
+
+    #[test]
+    fn selection_mutex_serialises_concurrent_calls() {
+        let state = AppState::new();
+
+        {
+            let mut registry = state.tts_registry.lock();
+            registry.add_or_replace(TtsProviderEntry {
+                id: "a".to_string(),
+                display_name: "A".to_string(),
+                provider: TtsProvider::OpenAi(crate::tts::openai::OpenAiTts::new("sk-test".into())),
+            });
+            registry.add_or_replace(TtsProviderEntry {
+                id: "b".to_string(),
+                display_name: "B".to_string(),
+                provider: TtsProvider::OpenAi(crate::tts::openai::OpenAiTts::new("sk-test".into())),
+            });
+            registry.select("a").unwrap();
+        }
+        assert_eq!(state.tts_registry.lock().active_id(), Some("a"));
+
+        let result = state.runtime.block_on(async {
+            let mutex_for_task = Arc::clone(&state.selection_mutex);
+            let locked = state.selection_mutex.lock().await;
+            let task = tokio::spawn(async move {
+                let _guard = mutex_for_task.lock().await;
+                "b-done"
+            });
+
+            tokio::task::yield_now().await;
+            assert!(!task.is_finished());
+            drop(locked);
+            task.await.unwrap()
+        });
+        assert_eq!(result, "b-done");
     }
 }

@@ -1399,19 +1399,9 @@ impl SettingsManager {
 
     // ========== TTS Settings ==========
 
-    /// Set TTS provider
-    pub fn set_tts_provider(&self, provider: TtsProviderType) -> Result<()> {
-        self.update_field("/tts/provider", &provider)
-    }
-
     /// Get TTS provider
     pub fn get_tts_provider(&self) -> TtsProviderType {
         self.cache.read().tts.provider
-    }
-
-    /// Set TTS provider ID
-    pub fn set_tts_provider_id(&self, provider_id: Option<String>) -> Result<()> {
-        self.update_field("/tts/provider_id", &provider_id)
     }
 
     /// Get TTS provider ID
