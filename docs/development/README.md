@@ -58,6 +58,11 @@ Debug-режим создаёт runnable `src-tauri/target/debug/ttsbard.exe` б
 
 - [AI-assisted development workflow](./ai-workflow.md) — постановка локальных
   задач DeepSeek, запуск OpenCode и независимая проверка результата.
+- [AI-ready: принципы](./ai-ready-principles.md) — норматив наблюдаемой стоимости
+  безопасного малого изменения для агента без памяти о прошлых сессиях.
+- [Шаблон code review](./templates/code-review.md) и
+  [шаблон AI-ready review](./templates/ai-ready-review.md) — проверка конкретной
+  реализации и ручная оценка удобства следующего безопасного изменения.
 - [Архитектура](./architecture.md) — устройство приложения и основные
   инженерные паттерны.
 - [Сборка и релиз Windows в GitHub Actions](./github-actions-build.md) —
