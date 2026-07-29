@@ -46,7 +46,7 @@ related_tasks: []
 | [ROADMAP-040 — Test coverage gaps](./active/040-test-coverage-gaps.md) | `in_progress` | P1/P2: composables, playback seam, HTTP contracts |
 | [ROADMAP-041 — Review 021 remediation](./active/041-review-021-remediation.md) | `in_progress` | Сверить оставшийся scope и закрыть item |
 | [ROADMAP-054 — Детерминированная видимость предмета VTube Studio](./active/054-vtube-studio-item-visibility.md) | `in_progress` | P4: ручная приёмка с реальным VTube Studio item |
-| [ROADMAP-055 — Качество и AI-ready архитектура](./active/055-quality-and-ai-ready-architecture.md) | `in_progress` | Утвердить A1–A5; затем закрыть IPC parity и settings contracts |
+| [ROADMAP-056 — IPC-контракты и AI-ready границы](./active/056-ipc-contracts-and-ai-ready-boundaries.md) | `in_progress` | P0: inventory/parity gate и удаление legacy TextReady path |
 
 ## Завершённые направления
 
@@ -104,6 +104,7 @@ related_tasks: []
 - [ROADMAP-036 — Telegram auth polish](./completed/036-telegram-auth-flow-polish.md)
 - [ROADMAP-039 — Embedded Piper runtime и лицензирование](./completed/039-piper-runtime-feasibility.md)
 - [ROADMAP-046 — Documentation migration](./completed/046-documentation-structure-migration.md)
+- [ROADMAP-055 — Качество и AI-ready foundation](./completed/055-quality-and-ai-ready-architecture.md)
 
 ### VTube Studio и WebView
 

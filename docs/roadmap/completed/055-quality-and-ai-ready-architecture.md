@@ -1,22 +1,22 @@
 ---
 id: ROADMAP-055
-status: in_progress
+status: completed
 created: 2026-07-29
 updated: 2026-07-29
 related_tasks: [TASK-117, TASK-118]
 ---
 
-# ROADMAP-055 — Качество и AI-ready архитектура
+# ROADMAP-055 — Качество и AI-ready foundation
 
 ## Контекст
 
 Кодовая база быстро расширилась вокруг нескольких независимых runtime-контуров:
-редактора, очереди озвучивания, глобального перехвата, playback, настроек и
-сетевых интеграций. Основной UI уже создаёт immutable snapshot задачи через
-`submit_speech`, но глобальный перехват и export используют отдельный legacy
-pipeline. Настройки проходят через общий persisted cache, service-local state и
-frontend reload events. IPC-команды, события и DTO при этом описываются вручную
-по обе стороны границы Rust/TypeScript.
+редактора, очереди озвучивания, playback, настроек и сетевых интеграций. Основной
+UI уже создаёт immutable snapshot задачи через `submit_speech`, а рядом оставались
+legacy `TextReady`/`speak_text` declarations и отдельный export pipeline.
+Настройки проходят через общий persisted cache, service-local state и frontend
+reload events. IPC-команды, события и DTO при этом описываются вручную по обе
+стороны границы Rust/TypeScript.
 
 Такая структура работоспособна, но усложняет локальное доказательство
 инвариантов. Изменение одного пользовательского сценария может потребовать
@@ -55,10 +55,10 @@ Snapshot уже фиксирует provider, voice, routing flags, AI и audio s
 момент приёма задачи. Это предпочтительный source of truth для конкретной
 операции.
 
-### Глобальный перехват и export
+### Legacy TextReady и export
 
 ```text
-keyboard hook → AppEvent::TextReady
+legacy AppEvent::TextReady (активный producer отсутствует)
   → отдельная async-задача speak_text_internal
   → RoutedText(text, request-local routing flags)
   → synthesis / playback
@@ -71,9 +71,10 @@ save dialog → speak_text_raw_export
 ```
 
 Глобальные временные routing flags устранены, а export больше не блокирует async
-executor синхронной записью. Путь всё ещё не наследует queue invariants и общую
-cancellation model; его объединение с основным ingestion flow относится к A1 и
-возможно только после отдельного утверждения архитектуры.
+executor синхронной записью. При последующей инвентаризации выяснилось, что у
+`TextReady` нет producer, а IPC-команда `speak_text` не вызывается frontend.
+Удаление этого legacy path вынесено в ROADMAP-056; объединять его с рабочей
+очередью через новый application service не требуется.
 
 ### Настройки и frontend state
 
@@ -148,18 +149,13 @@ commit/rollback.
    `cargo test` должен запускать binary, а не только собирать его без ошибок.
 3. Сохранить `cargo fmt --check`, `cargo check`, frontend tests/build и docs check
    как обязательную матрицу.
-4. Добавить автоматическую проверку literal frontend invokes/listens против
-   зарегистрированных backend commands/events.
-5. Добавить contract tests для security, routing, settings transaction и
-   cancellation; runtime-only сценарии описать короткими воспроизводимыми
-   runbooks.
 
-## Состояние на 2026-07-29
+## Outcome
 
 Завершён обязательный defect-fix срез:
 
 - WebView authentication и UPnP переведены в fail-closed режим;
-- routing flags глобального перехвата стали request-local с сохранением wire
+- routing flags legacy speech path стали request-local с сохранением wire
   shape frontend event;
 - устранены выявленные lock-across-await, blocking sleep/sync I/O и утечки
   асинхронно регистрируемых frontend listeners;
@@ -170,91 +166,10 @@ commit/rollback.
   а существующие недетерминированные тестовые ожидания приведены к фактическим
   контрактам.
 
-Следующий неархитектурный срез: автоматическая literal IPC/event parity check и
-расширение contract tests для settings transaction и cancellation. Пункты
-A1–A5 ниже не начаты и ожидают отдельного решения.
-
-## Архитектурные proposals — требуют отдельного утверждения
-
-Следующие пункты не реализуются автоматически в рамках defect-fix этапов.
-
-### A1 — Единый SpeechApplicationService
-
-Свести UI submit, global interception, replay/export preparation к одному
-application-level входу с типом `SpeechRequest`:
-
-```text
-SpeechRequest {
-  source,
-  original_text,
-  routing_policy,
-  output_policy,
-  correlation_id
-}
-```
-
-Service создаёт immutable `SpeechSnapshot`, после чего queue worker остаётся
-единственным владельцем state transitions. Export может использовать тот же
-prepare/synthesize слой, но отдельную output policy без playback и routing.
-
-Ожидаемый эффект: один preprocessing/provider/routing contract, отсутствие
-legacy divergence и локальные тесты на все источники текста.
-
-### A2 — Явный IPC contract layer
-
-Ввести один contract module/manifest для command names, event names, DTO и error
-codes. Минимальный вариант — Rust constants + TypeScript generated constants и
-parity test; расширенный — schema/code generation для сериализуемых DTO.
-
-Command boundary возвращает структурированную ошибку:
-
-```text
-CommandError { code, message, retryable }
-```
-
-Внутренний diagnostic context остаётся только в tracing. Frontend перестаёт
-зависеть от текста Rust error и получает предсказуемые ветки retry/cancel.
-
-### A3 — Settings transaction и ownership
-
-Определить для каждого settings domain одного владельца и единый порядок:
-
-```text
-validate → persist shared cache → apply service runtime → emit revision
-```
-
-Setter возвращает обновлённый section DTO/revision. Frontend применяет ответ
-либо откатывает draft, а общий reload остаётся recovery path, не единственным
-способом синхронизации. Этот proposal согласуется с постепенной декомпозицией
-`AppState` из TASK-117 и не требует big-bang rewrite.
-
-### A4 — Разделение internal events и frontend events
-
-Разнести `AppEvent` на внутренние domain/application events и явные
-serializable frontend notifications. Routing выполняет один adapter, а payload
-содержит correlation id и необходимые request-local данные. Строковые emit в
-произвольных командах постепенно заменяются contract adapter-ом.
-
-### A5 — Module boundaries для AI-ready изменений
-
-Разделить особенно крупные файлы по причинам изменения, не по произвольному
-размеру:
-
-- Telegram: transport/auth, bot request correlation, parsers, download policy;
-- VTube Studio: connection/auth, request correlation, typing action, item sync;
-- settings: schema/defaults, validation, persistence, DTO mapping;
-- commands: только parse/validate/dispatch, без domain workflow.
-
-Для каждого выделенного модуля обязательны owner API, invariants в module docs,
-focused tests и отсутствие публичного доступа к внутренним locks. Это уменьшает
-контекст одной задачи и делает task-scoped diff проверяемым для AI-агента.
-
-## Порядок согласования архитектуры
-
-1. Сначала завершить P0 и локальные P1 fixes без изменения публичных контрактов.
-2. Отдельно утвердить или отклонить A1–A5; спорные пункты вынести в decisions.
-3. Реализовывать по одному seam: contract/helper → callers → закрытие legacy API.
-4. Не совмещать service extraction, DTO migration и UI redesign в одном diff.
+Незавершённые направления не удерживают этот item открытым. Автоматическая
+проверка IPC/event parity, удаление legacy `TextReady`, разделение internal и
+frontend events, локальная консистентность settings и декомпозиция крупных
+модулей получили уточнённый scope в ROADMAP-056.
 
 ## Проверки этапа
 
@@ -271,10 +186,8 @@ cargo check --manifest-path src-tauri/Cargo.toml
 Дополнительно:
 
 - security tests для WebView auth/UPnP;
-- concurrency tests для request-local routing и cancellation;
-- IPC/event parity check;
-- ручной Windows smoke: interception, `!`/`!!`, export, disconnect Silero,
-  preview cancel, WebView local/public access;
+- request-local routing и cancellation tests;
+- проверка Windows PE imports для eSpeak CRT;
 - task-scoped diff против baseline после каждой итерации.
 
 ## Критерии завершения
@@ -283,11 +196,9 @@ cargo check --manifest-path src-tauri/Cargo.toml
 - CI и локальная матрица зелёные, либо platform-specific blocker оформлен как
   отдельная воспроизводимая задача с рабочим CI gate;
 - пользовательский text отсутствует в штатных logs;
-- literal IPC mismatch не проходит автоматическую проверку;
-- architecture proposals A1–A5 получили явный статус: approved, rejected или
-  deferred; утверждённые пункты реализованы отдельными этапами;
-- `docs/development/architecture.md` отражает только фактически принятую и
-  реализованную модель, а не предварительные proposals.
+- Windows test harness запускается без Debug CRT mismatch;
+- оставшиеся архитектурные и contract improvements перенесены в ROADMAP-056 с
+  утверждённым scope.
 
 ## Не входит
 
