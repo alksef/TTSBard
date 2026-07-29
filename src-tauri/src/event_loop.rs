@@ -4,7 +4,7 @@
 // Refactored from lib.rs handle_event() function (2026-03-11)
 
 use crate::commands::speech_queue::SpeechQueueState;
-use crate::events::{AppEvent, InputLayout, TwitchEvent};
+use crate::events::{AppEvent, InputLayout, RoutedText, TwitchEvent};
 use crate::soundpanel_window::update_soundpanel_appearance;
 use crate::state::AppState;
 use tauri::{AppHandle, Emitter, Manager};
@@ -237,7 +237,10 @@ impl EventHandler {
 
     /// Process text ready for TTS event
     fn process_text_ready(&self, text: String) {
-        debug!(text = %text, "[EVENT] Text ready for TTS");
+        debug!(
+            text_len = text.chars().count(),
+            "[EVENT] Text ready for TTS"
+        );
 
         // Используем общий runtime вместо создания нового
         let state = self.state.clone();
@@ -255,33 +258,32 @@ impl EventHandler {
     }
 
     /// Process text sent to TTS event
-    fn process_text_sent_to_tts(&self, text: String) {
-        debug!(text = %text, "[EVENT] Text sent to TTS");
-
-        let (skip_twitch, skip_webview) = self.state.get_prefix_flags();
+    fn process_text_sent_to_tts(&self, routed: RoutedText) {
+        debug!(
+            text_len = routed.text.chars().count(),
+            "[EVENT] Text sent to TTS"
+        );
 
         // === WebView broadcast (check flag) ===
-        if !skip_webview {
+        if !routed.skip_webview {
             self.state
                 .webview
-                .send_event(AppEvent::TextSentToTts(text.clone()));
+                .send_event(AppEvent::TextSentToTts(routed.clone()));
         } else {
             debug!("[EVENT] WebView skipped (prefix)");
         }
 
         // === Twitch send (check flag) ===
-        if !skip_twitch {
+        if !routed.skip_twitch {
             let settings = self.state.twitch.settings.blocking_read();
             if settings.enabled {
                 drop(settings);
-                self.state.send_twitch_event(TwitchEvent::SendMessage(text));
+                self.state
+                    .send_twitch_event(TwitchEvent::SendMessage(routed.text));
             }
         } else {
             debug!("[EVENT] Twitch skipped (prefix)");
         }
-
-        // Clear flags after use
-        self.state.clear_prefix_flags();
     }
 
     /// Process show main window event

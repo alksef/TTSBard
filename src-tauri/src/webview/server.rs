@@ -159,7 +159,10 @@ impl WebViewServer {
         };
 
         let access_token = settings.access_token.clone();
-        let upnp_enabled = settings.upnp_enabled;
+        let upnp_enabled = settings.upnp_enabled && access_token.is_some();
+        if settings.upnp_enabled && access_token.is_none() {
+            tracing::warn!("UPnP disabled because WebView access token is not configured");
+        }
         drop(settings);
 
         // Forward UPnP port if enabled
@@ -521,6 +524,45 @@ mod tests {
             .extension(ConnectInfo(client_addr))
             .body(Body::empty())
             .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_access_from_public_network_denied_when_server_token_is_missing() {
+        let app = build_test_app(None);
+
+        let client_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 12345);
+        let req = Request::builder()
+            .uri("/")
+            .extension(ConnectInfo(client_addr))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_sse_from_public_network_denied_when_server_token_is_missing() {
+        let app = build_test_app(None);
+
+        let client_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 12345);
+        let req = Request::builder()
+            .uri("/sse")
+            .extension(ConnectInfo(client_addr))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_auth_denied_when_server_token_is_missing() {
+        let app = build_test_app(None);
+        let req = Request::builder().uri("/auth").body(Body::empty()).unwrap();
 
         let response = app.oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);

@@ -28,16 +28,14 @@ pub fn is_local_network(ip: IpAddr) -> bool {
 /// Validate a token using constant-time comparison
 ///
 /// This prevents timing attacks by using the subtle crate's ConstantTimeEq trait.
-/// Returns true if:
-/// - Both provided and stored tokens are None (no token configured)
-/// - Both tokens match exactly
+/// Returns true only when both tokens are present and match exactly.
+/// A missing stored token must fail closed for callers that require authentication.
 pub fn validate_token(provided: Option<&str>, stored: Option<&str>) -> bool {
     match (provided, stored) {
         (Some(p), Some(s)) => {
             // Constant-time comparison handles different lengths correctly
             bool::from(p.as_bytes().ct_eq(s.as_bytes()))
         }
-        (None, None) => true,
         _ => false,
     }
 }
@@ -77,7 +75,7 @@ mod tests {
 
     #[test]
     fn test_validate_token_none() {
-        assert!(validate_token(None, None));
+        assert!(!validate_token(None, None));
     }
 
     #[test]

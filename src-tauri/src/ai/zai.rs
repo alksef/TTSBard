@@ -174,7 +174,7 @@ impl ZAiClient {
         );
 
         let content = ai_common::extract_response_content(&response, "Z.ai")?;
-        ai_common::log_response_preview(&content, "Z.ai");
+        ai_common::log_response_metadata(&content, "Z.ai");
 
         Ok(content)
     }

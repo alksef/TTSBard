@@ -467,6 +467,10 @@ impl Shared {
             }
         }
 
+        if !self.audio_cache.iter().any(|entry| entry.id == id) {
+            return Err(format!("CacheMiss: no cached audio for id '{}'", id));
+        }
+
         let now = Utc::now().timestamp_millis();
         if let Some(entry) = self.audio_cache.iter_mut().find(|c| c.id == id) {
             if now > entry.timestamp {
@@ -583,7 +587,7 @@ impl PlaybackManager {
 
             match cmd {
                 Ok(Cmd::Enqueue(phrase)) => {
-                    info!(target: "playback", text=%phrase.text, "Enqueue received");
+                    info!(target: "playback", text_len=phrase.text.chars().count(), "Enqueue received");
                     if playing {
                         continue;
                     }

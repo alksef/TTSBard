@@ -178,7 +178,7 @@ impl OpenAiClient {
         );
 
         let content = ai_common::extract_response_content(&response, "OpenAI")?;
-        ai_common::log_response_preview(&content, "OpenAI");
+        ai_common::log_response_metadata(&content, "OpenAI");
 
         Ok(content)
     }

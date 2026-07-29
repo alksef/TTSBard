@@ -207,14 +207,14 @@ impl TwitchClient {
         // Sanitize text for IRC to prevent injection
         let clean_text = sanitize_irc_text(text);
 
-        debug!(%clean_text, "Sanitized message");
+        debug!(text_len = clean_text.chars().count(), "Sanitized message");
 
         let message = format!("PRIVMSG #{} :{}\r\n", self.settings.channel, clean_text);
 
         let mut writer_guard = self.writer.lock().await;
         if let Some(writer) = writer_guard.as_mut() {
             writer.write_all(message.as_bytes()).await?;
-            info!(channel = %self.settings.channel, %clean_text, "Sent to channel");
+            info!(channel = %self.settings.channel, text_len = clean_text.chars().count(), "Sent to channel");
         } else {
             error!("Cannot send message - writer not available");
             return Err("Writer not available".into());

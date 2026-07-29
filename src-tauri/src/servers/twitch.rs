@@ -128,7 +128,7 @@ pub async fn run_twitch_client(
                                 update_status(last_status.clone());
                             }
                             TwitchEvent::SendMessage(text) => {
-                                debug!(message = %text, "SendMessage event received");
+                                debug!(text_len = text.chars().count(), "SendMessage event received");
                                 if let Some(client) = &twitch_client {
                                     match client.send_message(&text).await {
                                         Ok(_) => debug!("Message sent successfully"),

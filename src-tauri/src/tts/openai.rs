@@ -74,7 +74,6 @@ impl TtsEngine for OpenAiTts {
             model = "tts-1",
             voice = &self.voice,
             text_length = text.len(),
-            text_preview = &text.chars().take(50).collect::<String>(),
             has_api_key = true,
             timeout_secs = self.timeout_secs,
             "TTS request started"
@@ -168,7 +167,7 @@ impl TtsEngine for OpenAiTts {
             let error_text = response.text().await.unwrap_or_default();
             error!(
                 status_code = status.as_u16(),
-                error_text = &error_text,
+                error_text_length = error_text.len(),
                 "TTS request failed"
             );
             return Err(format!(

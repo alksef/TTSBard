@@ -91,15 +91,17 @@ impl TtsEngine for SileroTts {
             .as_ref()
             .ok_or_else(|| "Telegram client not set".to_string())?;
 
-        let client_guard = client_arc.lock().await;
-        let client = client_guard.as_ref().ok_or_else(|| {
-            "Telegram client not initialized. Please connect to Telegram first.".to_string()
-        })?;
+        let client = {
+            let client_guard = client_arc.lock().await;
+            client_guard.as_ref().cloned().ok_or_else(|| {
+                "Telegram client not initialized. Please connect to Telegram first.".to_string()
+            })?
+        };
 
         if let Some(ref speaker_code) = self.captured_speaker {
             if !speaker_code.is_empty() {
                 debug!(speaker = %speaker_code, "Restoring captured Silero speaker before synthesis");
-                let set_result = crate::telegram::bot::set_speaker(client, speaker_code).await?;
+                let set_result = crate::telegram::bot::set_speaker(&client, speaker_code).await?;
                 if !set_result {
                     return Err(format!(
                         "Failed to restore captured speaker '{}': invalid voice code",
@@ -110,11 +112,11 @@ impl TtsEngine for SileroTts {
         }
 
         let result =
-            crate::telegram::SileroTtsBot::synthesize(client, text, &self.runtime_settings).await?;
+            crate::telegram::SileroTtsBot::synthesize(&client, text, &self.runtime_settings)
+                .await?;
 
         if !result.success {
             let err = result.error.unwrap_or_else(|| "Unknown error".to_string());
-            drop(client_guard);
             return Err(err);
         }
 
@@ -123,9 +125,9 @@ impl TtsEngine for SileroTts {
             .as_ref()
             .ok_or_else(|| "No audio path returned".to_string())?;
 
-        let audio_data =
-            std::fs::read(audio_path).map_err(|e| format!("Failed to read audio file: {}", e))?;
-        drop(client_guard);
+        let audio_data = tokio::fs::read(audio_path)
+            .await
+            .map_err(|e| format!("Failed to read audio file: {}", e))?;
 
         Ok(audio_data)
     }

@@ -4,6 +4,13 @@ use crate::webview::WebViewSettings;
 use std::fs;
 use tauri::{Manager, State};
 
+fn validate_upnp_token(enabled: bool, access_token: Option<&str>) -> Result<(), String> {
+    if enabled && access_token.is_none_or(str::is_empty) {
+        return Err("Сначала сгенерируйте токен доступа для внешнего WebView".to_string());
+    }
+    Ok(())
+}
+
 /// Get current webview settings from AppState
 #[tauri::command]
 pub async fn get_webview_settings(state: State<'_, AppState>) -> Result<WebViewSettings, String> {
@@ -64,6 +71,8 @@ pub async fn save_webview_settings(
     } else {
         settings
     };
+
+    validate_upnp_token(settings.upnp_enabled, settings.access_token.as_deref())?;
 
     // Check if enabled status or port changed (start_on_boot doesn't require restart)
     let old_settings = state.webview.settings.read().await;
@@ -189,7 +198,9 @@ pub async fn send_test_message(text: String, state: State<'_, AppState>) -> Resu
     // This allows testing WebView display without triggering voice synthesis
     state
         .webview
-        .send_event(crate::events::AppEvent::TextSentToTts(text));
+        .send_event(crate::events::AppEvent::TextSentToTts(
+            crate::events::RoutedText::broadcast(text),
+        ));
     Ok(())
 }
 
@@ -297,6 +308,9 @@ pub async fn set_webview_upnp_enabled(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
+    let access_token = state.webview.settings.read().await.access_token.clone();
+    validate_upnp_token(enabled, access_token.as_deref())?;
+
     // Update runtime state
     let mut settings = state.webview.settings.write().await;
     settings.upnp_enabled = enabled;
@@ -328,6 +342,23 @@ pub async fn set_webview_upnp_enabled(
 #[tauri::command]
 pub async fn get_webview_upnp_enabled(state: State<'_, AppState>) -> Result<bool, String> {
     Ok(state.webview.settings.read().await.upnp_enabled)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_upnp_token;
+
+    #[test]
+    fn upnp_requires_configured_token() {
+        assert!(validate_upnp_token(true, None).is_err());
+        assert!(validate_upnp_token(true, Some("")).is_err());
+        assert!(validate_upnp_token(true, Some("token")).is_ok());
+    }
+
+    #[test]
+    fn disabling_upnp_never_requires_token() {
+        assert!(validate_upnp_token(false, None).is_ok());
+    }
 }
 
 /// Forward typing state to WebView SSE (consumer adapter for the editor typing burst)

@@ -1,5 +1,5 @@
 use crate::tts::TtsProviderType;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::sync::mpsc::Sender;
 use tokio::sync::broadcast;
 
@@ -18,7 +18,7 @@ pub enum AppEvent {
     /// Текст готов для отправки в TTS
     TextReady(String),
     /// Текст отправлен в TTS (для WebView Source)
-    TextSentToTts(String),
+    TextSentToTts(RoutedText),
     /// Изменение статуса TTS
     TtsStatusChanged(TtsStatus),
     /// Ошибка TTS
@@ -71,6 +71,50 @@ pub enum AppEvent {
     WebViewTypingChanged(bool),
     /// Завершение работы приложения
     Quit,
+}
+
+/// Text routed after synthesis together with request-local delivery policy.
+///
+/// The routing fields are deliberately not serialized: the frontend keeps the
+/// existing `{"TextSentToTts":"..."}` contract while backend consumers avoid
+/// sharing mutable prefix flags between concurrent requests.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoutedText {
+    pub text: String,
+    pub skip_twitch: bool,
+    pub skip_webview: bool,
+}
+
+impl RoutedText {
+    pub fn new(text: String, skip_twitch: bool, skip_webview: bool) -> Self {
+        Self {
+            text,
+            skip_twitch,
+            skip_webview,
+        }
+    }
+
+    pub fn broadcast(text: String) -> Self {
+        Self::new(text, false, false)
+    }
+}
+
+impl Serialize for RoutedText {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.text)
+    }
+}
+
+impl<'de> Deserialize<'de> for RoutedText {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        String::deserialize(deserializer).map(Self::broadcast)
+    }
 }
 
 /// Typed WebView SSE broadcast payload
@@ -155,6 +199,35 @@ impl AppEvent {
             AppEvent::PlaybackStopped => "playback-stopped",
             AppEvent::QueueChanged => "queue-changed",
             AppEvent::Quit => "app-quit",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AppEvent, RoutedText};
+
+    #[test]
+    fn routed_text_preserves_frontend_wire_format() {
+        let event = AppEvent::TextSentToTts(RoutedText::new("hello".to_string(), true, true));
+
+        assert_eq!(
+            serde_json::to_string(&event).unwrap(),
+            r#"{"TextSentToTts":"hello"}"#
+        );
+    }
+
+    #[test]
+    fn routed_text_deserializes_legacy_wire_format_with_broadcast_policy() {
+        let event: AppEvent = serde_json::from_str(r#"{"TextSentToTts":"hello"}"#).unwrap();
+
+        match event {
+            AppEvent::TextSentToTts(routed) => {
+                assert_eq!(routed.text, "hello");
+                assert!(!routed.skip_twitch);
+                assert!(!routed.skip_webview);
+            }
+            _ => panic!("unexpected event"),
         }
     }
 }

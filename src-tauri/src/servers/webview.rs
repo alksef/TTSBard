@@ -137,10 +137,9 @@ pub async fn run_webview_server(
                                             info!("[WEBVIEW] Server shut down for quit");
                                             return;
                                         }
-                                        AppEvent::TextSentToTts(text) => {
-                                            let preview = text.chars().take(50).collect::<String>();
-                                            info!("[WEBVIEW] 📤 Broadcasting to SSE clients: '{}'...", preview);
-                                            server.broadcast_text(&text).await;
+                                        AppEvent::TextSentToTts(routed) => {
+                                            info!(text_len = routed.text.chars().count(), "[WEBVIEW] Broadcasting to SSE clients");
+                                            server.broadcast_text(&routed.text).await;
                                         }
                                         AppEvent::RestartWebViewServer => {
                                             info!("[WEBVIEW] ⚠ Restart event received, stopping server...");
@@ -215,10 +214,9 @@ pub async fn run_webview_server(
                                 info!("[WEBVIEW] ⚠ Restart event received, exiting disabled state");
                                 break;
                             }
-                            Ok(Some(AppEvent::TextSentToTts(text))) => {
+                            Ok(Some(AppEvent::TextSentToTts(routed))) => {
                                 // Ignore TTS events while disabled but log them
-                                let preview = text.chars().take(30).collect::<String>();
-                                info!("[WEBVIEW] Ignoring TTS text (server disabled): '{}'...", preview);
+                                info!(text_len = routed.text.chars().count(), "[WEBVIEW] Ignoring TTS text (server disabled)");
                             }
                             Ok(Some(AppEvent::WebViewTypingChanged(typing))) => {
                                 debug!("[WEBVIEW] Ignoring typing change (server disabled): {}", typing);

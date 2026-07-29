@@ -7,7 +7,6 @@ use crate::config::{
 use crate::speech_queue::Snapshot;
 use crate::state::AppState;
 use crate::tts::TtsProvider;
-use std::fs;
 use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Clone)]
@@ -30,7 +29,11 @@ pub(crate) fn preprocess_text_with_preprocessor(
     let text = if let Some(p) = preprocessor {
         let processed = p.process(text);
         if processed != text {
-            debug!(text, processed, "Replacements applied");
+            debug!(
+                original_len = text.chars().count(),
+                processed_len = processed.chars().count(),
+                "Replacements applied"
+            );
         }
         processed
     } else {
@@ -350,7 +353,10 @@ pub fn enqueue_and_record(
         info!(target: "playback", "Enqueueing phrase to PlaybackManager");
         let enqueued = pb.enqueue(phrase_id, text.clone(), audio);
         if !enqueued {
-            warn!("Playback queue full, phrase dropped: {}", text);
+            warn!(
+                text_len = text.chars().count(),
+                "Playback queue full, phrase dropped"
+            );
             return Err("Очередь воспроизведения переполнена. Попробуйте позже.".to_string());
         }
         Ok(())
@@ -365,13 +371,14 @@ pub async fn synthesize_and_export(state: &AppState, text: &str, path: &str) -> 
 
     let prefix_result = crate::preprocessor::parse_prefix(text);
     let text = prefix_result.text;
-    state.set_prefix_flags(prefix_result.skip_twitch, prefix_result.skip_webview);
 
     let text = preprocess_text(state, &text);
     let text = ai_correct_text(state, &text, &settings).await;
     let audio_data = synthesize_audio(state, &text).await?;
 
-    fs::write(path, &audio_data).map_err(|e| format!("Failed to write audio file: {}", e))?;
+    tokio::fs::write(path, &audio_data)
+        .await
+        .map_err(|e| format!("Failed to write audio file: {}", e))?;
 
     if let Some(hm) = state.editor.history_manager.lock().as_ref() {
         hm.record_phrase(&text);
@@ -544,7 +551,6 @@ mod tests {
             speaker_volume: 80,
             virtual_mic_device: mic_device.map(|s| s.to_string()),
             virtual_mic_volume: 60,
-            ..Default::default()
         }
     }
 
@@ -590,9 +596,11 @@ mod tests {
     #[test]
     fn output_configs_effects_volume_factor_applied() {
         let audio = make_audio_settings(true, Some("mic1"));
-        let mut effects = AudioEffectsSettings::default();
-        effects.enabled = true;
-        effects.volume = 50;
+        let effects = AudioEffectsSettings {
+            enabled: true,
+            volume: 50,
+            ..Default::default()
+        };
         let (spk, _mic) = compute_output_configs(&audio, &effects);
         let expected = 0.8 * (50.0f32 / 100.0);
         assert!((spk.unwrap().volume - expected).abs() < 0.0001);

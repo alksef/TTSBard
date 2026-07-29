@@ -2,7 +2,7 @@ use crate::config::{
     normalize_typing_idle_timeout_ms, AppSettingsDto, QuickEditorMode, SettingsManager,
     SpellSource, TtsProviderInfoDto, WindowsManager,
 };
-use crate::events::AppEvent;
+use crate::events::{AppEvent, RoutedText};
 use crate::state::AppState;
 use crate::tts::TtsProvider;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -71,16 +71,17 @@ pub async fn quit_app(app_handle: AppHandle) -> Result<(), String> {
     }
 
     if let Some(state) = app_handle.try_state::<AppState>() {
-        let mut hook_guard = state.soundpanel_hook.lock();
-        if let Some(ref mut hook_manager) = *hook_guard {
-            hook_manager.stop();
+        {
+            let mut hook_guard = state.soundpanel_hook.lock();
+            if let Some(ref mut hook_manager) = *hook_guard {
+                hook_manager.stop();
+            }
+            *hook_guard = None;
         }
-        *hook_guard = None;
-        drop(hook_guard);
 
         state.shutdown.cancel();
         info!("Shutdown token cancelled — all servers notified");
-        std::thread::sleep(std::time::Duration::from_millis(600));
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
 
         state.webview.send_event(crate::events::AppEvent::Quit);
     }
@@ -92,7 +93,7 @@ pub async fn quit_app(app_handle: AppHandle) -> Result<(), String> {
 
 /// Internal function for TTS synthesis (shared between command and event handler)
 pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), String> {
-    info!(text, "Starting TTS Pipeline");
+    info!(text_len = text.chars().count(), "Starting TTS Pipeline");
 
     if text.trim().is_empty() {
         return Err("Текст не может быть пустым".to_string());
@@ -102,7 +103,8 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
 
     let prefix_result = crate::preprocessor::parse_prefix(&text);
     let text = prefix_result.text;
-    state.set_prefix_flags(prefix_result.skip_twitch, prefix_result.skip_webview);
+    let skip_twitch = prefix_result.skip_twitch;
+    let skip_webview = prefix_result.skip_webview;
 
     let text = tts_pipeline::preprocess_text(state, &text);
 
@@ -119,7 +121,11 @@ pub async fn speak_text_internal(state: &AppState, text: String) -> Result<(), S
 
     let cache_saved = crate::history::save_audio_cache(&cache_key, &audio_pcm).is_ok();
 
-    state.emit_event(AppEvent::TextSentToTts(text.clone()));
+    state.emit_event(AppEvent::TextSentToTts(RoutedText::new(
+        text.clone(),
+        skip_twitch,
+        skip_webview,
+    )));
 
     tts_pipeline::enqueue_and_record(state, text.clone(), audio_pcm, &settings)?;
 

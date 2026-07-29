@@ -115,10 +115,6 @@ pub struct AppState {
     /// Кэшированные аудио устройства (device_id -> Device)
     pub cached_devices: Arc<RwLock<HashMap<String, cpal::Device>>>,
 
-    /// Флаги префиксов из текущего TTS запроса
-    prefix_skip_twitch: Arc<Mutex<bool>>,
-    prefix_skip_webview: Arc<Mutex<bool>>,
-
     /// Cached AI client for text correction
     pub ai_client: Arc<Mutex<Option<Arc<AiProvider>>>>,
 
@@ -178,8 +174,6 @@ impl AppState {
             hotkey_recording_in_progress: Arc::new(AtomicBool::new(false)),
             runtime,
             cached_devices: Arc::new(RwLock::new(HashMap::new())),
-            prefix_skip_twitch: Arc::new(Mutex::new(false)),
-            prefix_skip_webview: Arc::new(Mutex::new(false)),
             ai_client: Arc::new(Mutex::new(None)),
             ai_settings_hash: Arc::new(AtomicU64::new(0)),
             settings_cache: Arc::new(RwLock::new(Default::default())),
@@ -456,27 +450,6 @@ impl AppState {
     /// Отправить событие Twitch
     pub fn send_twitch_event(&self, event: TwitchEvent) {
         self.twitch.send_event(event);
-    }
-
-    // ========== Prefix Flags Management ==========
-
-    /// Set prefix flags for current TTS request
-    pub fn set_prefix_flags(&self, skip_twitch: bool, skip_webview: bool) {
-        *self.prefix_skip_twitch.lock() = skip_twitch;
-        *self.prefix_skip_webview.lock() = skip_webview;
-    }
-
-    /// Get current prefix flags
-    pub fn get_prefix_flags(&self) -> (bool, bool) {
-        let skip_twitch = *self.prefix_skip_twitch.lock();
-        let skip_webview = *self.prefix_skip_webview.lock();
-        (skip_twitch, skip_webview)
-    }
-
-    /// Clear prefix flags (reset to defaults)
-    pub fn clear_prefix_flags(&self) {
-        *self.prefix_skip_twitch.lock() = false;
-        *self.prefix_skip_webview.lock() = false;
     }
 
     // ========== AI Client Caching ==========

@@ -197,7 +197,7 @@ impl DeepSeekClient {
         );
 
         let content = ai_common::extract_response_content(&response, "DeepSeek")?;
-        ai_common::log_response_preview(&content, "DeepSeek");
+        ai_common::log_response_metadata(&content, "DeepSeek");
 
         Ok(content)
     }

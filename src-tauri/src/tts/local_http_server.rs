@@ -66,7 +66,6 @@ impl TtsEngine for LocalHttpServerTts {
         info!(
             server_url = %self.server_url,
             text_length = text.len(),
-            text_preview = %text.chars().take(50).collect::<String>(),
             timeout_secs = self.timeout_secs,
             "LocalHttpServerTTS request started"
         );
@@ -123,7 +122,7 @@ impl TtsEngine for LocalHttpServerTts {
             let error_text = response.text().await.unwrap_or_default();
             error!(
                 status_code = status.as_u16(),
-                error_text = %error_text,
+                error_text_length = error_text.len(),
                 "LocalHttpServerTTS request failed"
             );
             return Err(format!(

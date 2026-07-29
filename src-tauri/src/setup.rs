@@ -753,6 +753,7 @@ fn q_state_dto(
 
 // ── Speech worker ──
 
+#[allow(clippy::too_many_arguments)] // Worker dependencies are explicit ownership boundaries.
 async fn speech_worker(
     queue: Arc<parking_lot::Mutex<crate::speech_queue::SpeechQueue>>,
     notify: Arc<tokio::sync::Notify>,
@@ -940,7 +941,9 @@ async fn speech_worker(
                     }
                 }
 
-                let history_event = crate::events::AppEvent::TextSentToTts(processed_text.clone());
+                let history_event = crate::events::AppEvent::TextSentToTts(
+                    crate::events::RoutedText::broadcast(processed_text.clone()),
+                );
                 let event_name = history_event.to_tauri_event();
                 let _ = app_handle.emit(event_name, &history_event);
 
@@ -991,7 +994,9 @@ fn route_processed_text_from_handles(
     skip_webview: bool,
 ) {
     if !skip_webview {
-        webview.send_event(crate::events::AppEvent::TextSentToTts(text.to_string()));
+        webview.send_event(crate::events::AppEvent::TextSentToTts(
+            crate::events::RoutedText::broadcast(text.to_string()),
+        ));
     }
     if !skip_twitch {
         let settings = twitch.settings.blocking_read();

@@ -426,16 +426,20 @@ pub async fn preview_audio_file(
 
     let stop_flag = {
         let state = preview_state();
-        let guard = state
+        let mut guard = state
             .lock()
             .map_err(|e| format!("Ошибка блокировки плеера: {}", e))?;
 
         guard.stop_flag.store(true, Ordering::SeqCst);
-        std::thread::sleep(std::time::Duration::from_millis(150));
-        guard.stop_flag.store(false, Ordering::SeqCst);
-
-        guard.stop_flag.clone()
+        let next_stop_flag = Arc::new(AtomicBool::new(false));
+        guard.stop_flag = next_stop_flag.clone();
+        next_stop_flag
     };
+
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    if stop_flag.load(Ordering::SeqCst) {
+        return Ok(());
+    }
 
     tauri::async_runtime::spawn_blocking(move || {
         let file_data =

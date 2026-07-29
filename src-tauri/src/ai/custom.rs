@@ -194,7 +194,7 @@ impl CustomClient {
         );
 
         let content = ai_common::extract_response_content(&response, "Custom")?;
-        ai_common::log_response_preview(&content, "Custom");
+        ai_common::log_response_metadata(&content, "Custom");
 
         Ok(content)
     }

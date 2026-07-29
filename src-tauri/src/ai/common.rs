@@ -76,11 +76,10 @@ pub fn extract_response_content(
 // Logging
 // ============================================================================
 
-/// Log response preview
-pub fn log_response_preview(content: &str, provider_name: &str) {
+/// Log response metadata without persisting user content.
+pub fn log_response_metadata(content: &str, provider_name: &str) {
     tracing::info!(
         content_length = content.len(),
-        content_preview = &content[..content.len().min(200)],
         "{} correction completed",
         provider_name
     );
