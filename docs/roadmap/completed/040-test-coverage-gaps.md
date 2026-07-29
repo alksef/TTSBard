@@ -1,14 +1,16 @@
 ---
 id: ROADMAP-040
-status: in_progress
+status: completed
 created: 2026-07-18
-updated: 2026-07-25
+updated: 2026-07-30
 related_tasks: []
 ---
 
 # ROADMAP-040 — Пробелы тестового покрытия
 
-Round 1 завершён, P1/P2 остаются в roadmap.
+Основные пробелы unit-покрытия закрыты. Интеграционные HTTP mock-тесты и
+связанные улучшения CI осознанно отложены и не являются условием завершения
+этого roadmap item.
 
 ## Текущее состояние
 
@@ -44,7 +46,7 @@ Round 1 завершён, P1/P2 остаются в roadmap.
 8. Playback state machine: queue limit/order, pause/resume/stop/repeat,
    cache eviction/replay и переход к следующей фразе. Нужен mockable audio seam.
 
-### P2 — интеграционные контракты
+### P2 — интеграционные контракты (отложено)
 
 9. Локальный mock HTTP server для Fish/OpenAI/DeepSeek/custom providers:
    URL, headers/body, non-2xx, timeout и malformed response.
@@ -70,3 +72,20 @@ Round 1 завершён 2026-07-18:
   `debounceAsync`; production-дефект исправлен минимально;
 - независимо подтверждены `npm test` (10/10), `npm run build`,
   `cargo test --lib` (359/359) и `cargo check --locked`.
+
+P1 завершён последующими изменениями:
+
+- добавлены тесты `spellLinter`, `useAppSettings`, `useEditorTabs` и
+  `useTelegramAuth` с mock Tauri API, включая ошибки и cleanup listeners;
+- playback state machine покрыта тестами очереди, pause/resume/stop, replay,
+  cache eviction и перехода к следующей фразе;
+- по итоговой проверке 2026-07-30 проходят 17 frontend test-файлов с 424
+  тестами и 1037 Rust-тестов.
+
+## Outcome
+
+Unit-test foundation и приоритетное P0/P1 покрытие реализованы. Локальные HTTP
+mock-серверы для Fish/OpenAI/DeepSeek/custom providers, Windows Rust test job,
+отдельный frontend test job и публикация coverage report отложены до появления
+практической необходимости; жёсткий percentage gate не вводится. Roadmap
+закрыт без этих пунктов по принятому решению о сокращении scope.
