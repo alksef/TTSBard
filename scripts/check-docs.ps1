@@ -1,5 +1,7 @@
-[CmdletBinding()]
-param()
+﻿[CmdletBinding()]
+param(
+    [string]$TaskLifecycleFixtureRoot
+)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -182,6 +184,100 @@ function Test-RoadmapFiles(
     }
 }
 
+function Test-TaskLifecycle([string]$TasksDirectory) {
+    $tasksDir = [IO.Path]::GetFullPath($TasksDirectory)
+    $readmePath = Join-Path $tasksDir 'README.md'
+    if (-not (Test-Path -LiteralPath $readmePath)) {
+        Add-Error "Missing docs/tasks/README.md"
+        return
+    }
+
+    $readmeContent = Get-Content -LiteralPath $readmePath -Raw -Encoding UTF8
+    $sectionMatch = [regex]::Match(
+        $readmeContent,
+        '## Текущие задачи\s*\r?\n(?<body>.*?)(?=\r?\n## |\z)',
+        [Text.RegularExpressions.RegexOptions]::Singleline
+    )
+    if (-not $sectionMatch.Success) {
+        Add-Error "docs/tasks/README.md: missing '## Текущие задачи' section"
+        return
+    }
+
+    $sectionBody = $sectionMatch.Groups['body'].Value
+
+    # Parse indexed entries: link target + backtick-quoted status
+    $indexedFiles = @{}
+    $indexedStatuses = @{}
+    $entryPattern = '(?ms)^\s*-\s+\[[^\]\r\n]+\]\((?<link>[^)\r\n]+)\)(?<tail>.*?)(?=^\s*-\s+\[|\z)'
+    foreach ($match in [regex]::Matches($sectionBody, $entryPattern)) {
+        $linkTarget = $match.Groups['link'].Value.Trim()
+        $statusMatch = [regex]::Match($match.Groups['tail'].Value, '`(?<status>[^`]+)`')
+        if (-not $statusMatch.Success) {
+            Add-Error "docs/tasks/README.md: index entry '$linkTarget' has no status"
+            continue
+        }
+        $status = $statusMatch.Groups['status'].Value.Trim()
+
+        try {
+            $resolved = [IO.Path]::GetFullPath((Join-Path $tasksDir $linkTarget))
+        }
+        catch {
+            Add-Error "docs/tasks/README.md: invalid index link: $linkTarget"
+            continue
+        }
+        if ([IO.Path]::GetDirectoryName($resolved) -ne $tasksDir) {
+            Add-Error "docs/tasks/README.md: index link resolves outside docs/tasks: $linkTarget"
+            continue
+        }
+        $filename = [IO.Path]::GetFileName($resolved)
+        if ([string]::IsNullOrEmpty($filename) -or $filename -eq 'README.md') {
+            Add-Error "docs/tasks/README.md: invalid task link: $linkTarget"
+            continue
+        }
+
+        if ($indexedFiles.ContainsKey($filename)) {
+            Add-Error "docs/tasks/README.md: duplicate index entry for $filename"
+            continue
+        }
+
+        $indexedFiles[$filename] = $true
+        $indexedStatuses[$filename] = $status
+    }
+
+    $taskFiles = @{}
+    foreach ($file in Get-ChildItem -LiteralPath $tasksDir -Filter '*.md' -File) {
+        if ($file.Name -eq 'README.md') { continue }
+        $taskFiles[$file.Name] = $file.FullName
+    }
+
+    foreach ($file in $taskFiles.Keys) {
+        if (-not $indexedFiles.ContainsKey($file)) {
+            Add-Error "docs/tasks/$($file): unindexed task file; add to README current-task list"
+        }
+    }
+
+    foreach ($filename in $indexedFiles.Keys) {
+        if (-not $taskFiles.ContainsKey($filename)) {
+            Add-Error "docs/tasks/README.md: indexed file not found: $filename"
+        }
+    }
+
+    $canonicalPattern = [regex]::new("(?m)^\*\*[^*\r\n]+:\*\*\s+\x60(?<status>[^\x60]+)\x60")
+    foreach ($filename in $taskFiles.Keys) {
+        if (-not $indexedFiles.ContainsKey($filename)) { continue }
+
+        $content = Get-Content -LiteralPath $taskFiles[$filename] -Raw -Encoding UTF8
+        $canonMatch = $canonicalPattern.Match($content)
+        if (-not $canonMatch.Success) { continue }
+
+        $fileStatus = $canonMatch.Groups['status'].Value
+        $indexedStatus = $indexedStatuses[$filename]
+        if ($fileStatus -ne $indexedStatus) {
+            Add-Error "docs/tasks/$($filename): status mismatch — file has '$fileStatus', README index has '$indexedStatus'"
+        }
+    }
+}
+
 function Test-DocsStructure {
     $allowedEntries = @(
         'README.md',
@@ -230,6 +326,18 @@ function Test-TrackedArtifacts {
     }
 }
 
+if (-not [string]::IsNullOrWhiteSpace($TaskLifecycleFixtureRoot)) {
+    Test-TaskLifecycle $TaskLifecycleFixtureRoot
+    if ($errors.Count -gt 0) {
+        foreach ($failure in $errors) {
+            Write-Output "ERROR: $failure"
+        }
+        exit 1
+    }
+    Write-Output 'Task lifecycle validation passed.'
+    exit 0
+}
+
 $markdownFiles = @(Get-RepoMarkdownFiles)
 Test-MarkdownLinks $markdownFiles
 Test-RoadmapFiles 'docs/roadmap/active' @('exploring', 'planned', 'in_progress', 'deferred')
@@ -237,6 +345,7 @@ Test-RoadmapFiles 'docs/roadmap/completed' @('completed', 'superseded')
 Test-RoadmapFiles 'docs/roadmap/rejected' @('rejected', 'superseded')
 Test-StatusFiles 'docs/tasks' @('planned', 'in_progress', 'deferred', 'blocked')
 Test-StatusFiles 'docs/decisions' @('accepted', 'superseded', 'deprecated')
+Test-TaskLifecycle (Join-Path $repoRoot 'docs/tasks')
 Test-DocsStructure
 Test-TrackedArtifacts
 

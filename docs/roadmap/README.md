@@ -103,6 +103,7 @@ related_tasks: []
 - [ROADMAP-046 — Documentation migration](./completed/046-documentation-structure-migration.md)
 - [ROADMAP-055 — Качество и AI-ready foundation](./completed/055-quality-and-ai-ready-architecture.md)
 - [ROADMAP-056 — IPC-контракты и AI-ready границы](./completed/056-ipc-contracts-and-ai-ready-boundaries.md)
+- [ROADMAP-057 — Достоверный handoff и продуктовые источники](./completed/057-truthful-handoff-and-product-sources.md)
 
 ### VTube Studio и WebView
 

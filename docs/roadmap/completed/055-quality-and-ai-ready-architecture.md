@@ -2,8 +2,8 @@
 id: ROADMAP-055
 status: completed
 created: 2026-07-29
-updated: 2026-07-29
-related_tasks: [TASK-117, TASK-118]
+updated: 2026-07-30
+related_tasks: [TASK-117]
 ---
 
 # ROADMAP-055 — Качество и AI-ready foundation
@@ -132,8 +132,10 @@ commit/rollback.
    filesystem read выполнять вне async executor или через async API.
 2. Убрать blocking sleep из preview/shutdown commands и sync write из export;
    заменить фиксированные ожидания на async signal/join с bounded timeout.
-3. Исправить online spellcheck compatibility path по TASK-118 и добавить тесты
-   для `online`, `offline`, `off` и пустого input.
+3. Исправить online spellcheck compatibility path: оба включённых режима (`online`,
+   `offline`) используют зарегистрированную команду `spellcheck`; устранён вызов
+   несуществующей `check_spelling_online`. Добавить тесты для `online`, `offline`,
+   `off` и пустого input.
 4. Ввести общий frontend helper для async listener lifecycle с rollback частично
    зарегистрированного набора; мигрировать settings, Twitch, WebView, TTS,
    phrase history и playback window.

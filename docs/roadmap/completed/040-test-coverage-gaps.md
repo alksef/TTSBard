@@ -12,7 +12,9 @@ related_tasks: []
 связанные улучшения CI осознанно отложены и не являются условием завершения
 этого roadmap item.
 
-## Текущее состояние
+## Исходный baseline
+
+На момент создания roadmap (2026-07-18) состояние было следующим:
 
 - В `src-tauri/src` около 287 unit-тестов; тесты есть в 31 из 95 Rust-модулей.
 - Лучше всего покрыты audio DSP/effects/boundary, settings/migrations, history,
