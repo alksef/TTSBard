@@ -34,7 +34,7 @@ use std::sync::Arc;
 ///
 /// Settings are passed from lib.rs to avoid race condition from double loading.
 /// Logger is initialized before this function with the same settings.
-pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::error::Error>> {
+pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std::error::Error>> {
     info!("=== Application setup started ===");
 
     // Get state managers
@@ -239,14 +239,52 @@ pub fn init_app(app: &App, settings: AppSettings) -> Result<(), Box<dyn std::err
         crate::tts::piper::runtime::LocalModelTts::init_espeak_data(resource_dir);
     }
 
-    // Restore saved concrete provider ID with safe fallback.
-    // If the saved ID exists in the registry it is selected; if it was a
-    // deleted Piper model the current (built-in) provider is preserved.
-    // If nothing is active after fallback the first registered provider wins.
+    // Restore saved concrete provider ID. A deleted Piper model falls back to
+    // Silero, persists that choice and queues a one-shot frontend notification.
+    // Other missing IDs keep the registry's generic safe fallback behavior.
     let saved_id = settings_manager.get_tts_provider_id();
-    {
-        let mut registry = app_state.tts_registry.lock();
-        registry.restore_saved_or_first(saved_id.as_deref());
+    let missing_piper = {
+        let registry = app_state.tts_registry.lock();
+        missing_piper_model_name(saved_id.as_deref(), |id| registry.get(id).is_some())
+    };
+
+    if let Some(model_name) = missing_piper {
+        app_state.init_silero_tts(Arc::clone(&telegram_state.client));
+        app_state
+            .tts_registry
+            .lock()
+            .select("silero")
+            .expect("Silero is registered before Piper fallback selection");
+        app_state.set_tts_provider_type(TtsProviderType::Silero);
+
+        settings.tts.provider = TtsProviderType::Silero;
+        settings.tts.provider_id = Some("silero".to_string());
+        if let Err(error) = settings_manager.save(&settings) {
+            warn!(error = %error, "Failed to persist Silero fallback for missing Piper model");
+        }
+
+        app_state.push_notification(missing_piper_notification(&model_name));
+    } else {
+        let restored_piper = {
+            let mut registry = app_state.tts_registry.lock();
+            registry.restore_saved_or_first(saved_id.as_deref());
+            registry.active().and_then(|entry| match &entry.provider {
+                crate::tts::TtsProvider::Piper(provider) => {
+                    Some((entry.id.clone(), provider.clone()))
+                }
+                _ => None,
+            })
+        };
+
+        // A persisted Piper choice is already selected from the user's point
+        // of view. Prepare it before backend-ready so the first UI snapshot
+        // reports Ready. Unselected discovered models remain lazy.
+        if let Some((provider_id, provider)) = restored_piper {
+            info!(provider_id, "Preparing restored Piper provider");
+            if let Err(error) = provider.prepare() {
+                warn!(provider_id, error = %error, "Failed to prepare restored Piper provider");
+            }
+        }
     }
 
     // Initialize offline spellcheck
@@ -1004,5 +1042,55 @@ fn route_processed_text_from_handles(
             drop(settings);
             twitch.send_event(crate::events::TwitchEvent::SendMessage(text.to_string()));
         }
+    }
+}
+
+fn missing_piper_model_name<F>(saved_id: Option<&str>, is_registered: F) -> Option<String>
+where
+    F: FnOnce(&str) -> bool,
+{
+    let id = saved_id?;
+    let model_name = id.strip_prefix("local-piper:")?;
+    if model_name.is_empty() || is_registered(id) {
+        return None;
+    }
+    Some(model_name.to_string())
+}
+
+fn missing_piper_notification(model_name: &str) -> String {
+    format!(
+        "Piper-модель «{}» не найдена. Выбран провайдер Silero",
+        model_name
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{missing_piper_model_name, missing_piper_notification};
+
+    #[test]
+    fn missing_saved_piper_returns_safe_model_name() {
+        assert_eq!(
+            missing_piper_model_name(Some("local-piper:irina"), |_| false),
+            Some("irina".to_string())
+        );
+    }
+
+    #[test]
+    fn registered_piper_and_builtin_ids_do_not_trigger_fallback() {
+        assert_eq!(
+            missing_piper_model_name(Some("local-piper:irina"), |_| true),
+            None
+        );
+        assert_eq!(missing_piper_model_name(Some("silero"), |_| false), None);
+        assert_eq!(missing_piper_model_name(None, |_| false), None);
+    }
+
+    #[test]
+    fn missing_piper_notification_matches_user_facing_contract() {
+        assert_eq!(
+            missing_piper_notification("irina"),
+            "Piper-модель «irina» не найдена. Выбран провайдер Silero"
+        );
     }
 }

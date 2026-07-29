@@ -140,6 +140,10 @@ impl LocalModelTts {
         self.ensure_loaded().map_err(|e| e.to_string())
     }
 
+    pub fn is_loaded(&self) -> bool {
+        self.model.lock().unwrap().is_some()
+    }
+
     #[cfg(test)]
     pub fn new(model_path: impl AsRef<Path>, config_path: impl AsRef<Path>) -> Self {
         Self {
@@ -388,12 +392,14 @@ mod tests {
         );
 
         let tts = LocalModelTts::new(model_path, config_path);
+        assert!(!tts.is_loaded());
 
         let audio = tts
             .synthesize("Привет мир")
             .await
             .expect("synthesize should succeed");
 
+        assert!(tts.is_loaded());
         assert!(!audio.is_empty(), "synthesized audio should not be empty");
 
         let pcm = crate::audio::effects::decode_audio(&audio).expect("output should be valid WAV");
@@ -425,6 +431,12 @@ mod tests {
         }
 
         assert_eq!(worker.await.unwrap().unwrap(), vec![1]);
+    }
+
+    #[test]
+    fn new_model_is_discovered_but_not_loaded() {
+        let tts = LocalModelTts::new("/dummy/model.onnx", "/dummy/model.onnx.json");
+        assert!(!tts.is_loaded());
     }
 
     #[test]

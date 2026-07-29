@@ -437,6 +437,8 @@ pub struct TtsProviderInfoDto {
     pub display_name: String,
     pub kind: String,
     pub active: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_status: Option<String>,
 }
 
 // ============================================================================
@@ -1259,6 +1261,9 @@ pub struct AllSourcesParams<'a> {
 /// All application settings in a single DTO
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettingsDto {
+    /// One-shot startup notifications; consumed by the first settings request.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notifications: Vec<String>,
     /// TTS settings
     pub tts: TtsSettingsDto,
     /// WebView settings
@@ -1295,6 +1300,7 @@ impl AppSettingsDto {
     /// Create AppSettingsDto from all sources
     pub fn from_all_sources(params: AllSourcesParams<'_>) -> Self {
         Self {
+            notifications: Vec::new(),
             tts: params.config.tts.clone().into(),
             webview: params.webview_settings.clone().into(),
             twitch: params.twitch_settings.clone(),

@@ -25,7 +25,12 @@
 
 ## Проверки
 
+На Windows перед прямыми Cargo-командами установить `LIBCLANG_PATH` по логике
+`scripts/build.ps1`; локально `libclang.dll` находится в `D:\LLVM\bin`.
+Полную сборку приложения выполнять самим build-скриптом.
+
 ```powershell
+$env:LIBCLANG_PATH = 'D:\LLVM\bin'
 cargo test --manifest-path src-tauri/Cargo.toml
 cargo check --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml

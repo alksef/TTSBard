@@ -136,6 +136,9 @@ pub struct AppState {
     /// Async mutex serialising concurrent provider selection operations.
     /// Selected by concrete provider ID.
     pub selection_mutex: Arc<tokio::sync::Mutex<()>>,
+
+    /// One-shot messages produced during backend startup before the WebView is ready.
+    pub pending_notifications: Arc<Mutex<Vec<String>>>,
 }
 
 impl AppState {
@@ -181,7 +184,16 @@ impl AppState {
             shutdown: CancellationToken::new(),
             previous_foreground_hwnd: Arc::new(Mutex::new(None)),
             selection_mutex: Arc::new(tokio::sync::Mutex::new(())),
+            pending_notifications: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    pub fn push_notification(&self, message: String) {
+        self.pending_notifications.lock().push(message);
+    }
+
+    pub fn take_notifications(&self) -> Vec<String> {
+        std::mem::take(&mut *self.pending_notifications.lock())
     }
 
     pub fn set_event_sender(&self, sender: Sender<AppEvent>) {
@@ -918,5 +930,14 @@ mod tests {
             task.await.unwrap()
         });
         assert_eq!(result, "b-done");
+    }
+
+    #[test]
+    fn startup_notifications_are_delivered_once() {
+        let state = AppState::new();
+        state.push_notification("message".to_string());
+
+        assert_eq!(state.take_notifications(), vec!["message"]);
+        assert!(state.take_notifications().is_empty());
     }
 }

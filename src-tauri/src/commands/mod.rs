@@ -144,6 +144,7 @@ pub async fn get_all_app_settings(
         preprocessor: preprocessor.as_ref(),
         soundpanel_bindings,
     });
+    settings.notifications = app_state.take_notifications();
 
     // Populate runtime TTS provider info from the registry
     {
@@ -152,18 +153,26 @@ pub async fn get_all_app_settings(
         settings.tts.providers = registry
             .iter()
             .map(|entry| {
-                let kind = match &entry.provider {
-                    TtsProvider::OpenAi(_) => "openai",
-                    TtsProvider::Silero(_) => "silero",
-                    TtsProvider::Local(_) => "local-http",
-                    TtsProvider::Fish(_) => "fish",
-                    TtsProvider::Piper(_) => "piper",
+                let (kind, runtime_status) = match &entry.provider {
+                    TtsProvider::OpenAi(_) => ("openai", None),
+                    TtsProvider::Silero(_) => ("silero", None),
+                    TtsProvider::Local(_) => ("local-http", None),
+                    TtsProvider::Fish(_) => ("fish", None),
+                    TtsProvider::Piper(tts) => (
+                        "piper",
+                        Some(if tts.is_loaded() {
+                            "ready"
+                        } else {
+                            "discovered"
+                        }),
+                    ),
                 };
                 TtsProviderInfoDto {
                     id: entry.id.clone(),
                     display_name: entry.display_name.clone(),
                     kind: kind.to_string(),
                     active: Some(&entry.id) == active_id.as_ref(),
+                    runtime_status: runtime_status.map(str::to_string),
                 }
             })
             .collect();

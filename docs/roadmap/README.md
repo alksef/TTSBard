@@ -40,7 +40,6 @@ related_tasks: []
 
 | Item | Статус | Следующий шаг |
 |---|---|---|
-| [ROADMAP-038 — Dynamic Piper providers](./active/038-dynamic-piper-tts-providers.md) | `in_progress` | Ручная проверка на Windows |
 ## Завершённые направления
 
 ### Редактор и история
@@ -97,6 +96,7 @@ related_tasks: []
 - [ROADMAP-019 — custom AI provider](./completed/019-custom-ai-provider.md)
 - [ROADMAP-028 — secret-safe logging](./completed/028-secret-safe-logging.md)
 - [ROADMAP-036 — Telegram auth polish](./completed/036-telegram-auth-flow-polish.md)
+- [ROADMAP-038 — Dynamic Piper providers](./completed/038-dynamic-piper-tts-providers.md)
 - [ROADMAP-039 — Embedded Piper runtime и лицензирование](./completed/039-piper-runtime-feasibility.md)
 - [ROADMAP-040 — Test coverage gaps](./completed/040-test-coverage-gaps.md)
 - [ROADMAP-041 — Review 021 remediation](./completed/041-review-021-remediation.md)

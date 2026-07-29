@@ -23,6 +23,7 @@ import { useTelegramAuth, TELEGRAM_AUTH_KEY } from './composables/useTelegramAut
 import { provideAppSettings } from './composables/useAppSettings'
 import { debugLog, debugError } from './utils/debug'
 import { createAsyncCleanupScope } from './utils/asyncCleanup'
+import { useErrorHandler } from './composables/useErrorHandler'
 
 type Panel = 'input' | 'tts' | 'soundpanel' | 'playback' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'vtube-studio' | 'settings' | 'hotkeys' | 'intercept'
 
@@ -43,6 +44,13 @@ provide('isMinimalMode', isMinimalMode)
 
 // Create and provide app settings context
 const appSettings = provideAppSettings()
+const { showWarning } = useErrorHandler()
+
+watch(
+  () => appSettings.settings.value?.notifications,
+  notifications => notifications?.forEach(message => showWarning(message, 8000)),
+  { immediate: true },
+)
 
 // Create single shared instance of Telegram auth
 const telegramAuth = useTelegramAuth()

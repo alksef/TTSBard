@@ -109,6 +109,7 @@ export interface TtsProviderInfoDto {
   display_name: string
   kind: string
   active: boolean
+  runtime_status?: 'discovered' | 'ready'
 }
 
 export interface TtsSettingsDto {
@@ -445,6 +446,7 @@ export interface SceneItemRecord {
  * This is the response from get_all_app_settings command
  */
 export interface AppSettingsDto {
+  notifications?: string[]
   tts: TtsSettingsDto
   webview: WebViewSettingsDto
   twitch: TwitchSettingsDto

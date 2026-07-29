@@ -16,6 +16,7 @@ import TtsLocalCard from './tts/TtsLocalCard.vue';
 import TtsOpenAICard from './tts/TtsOpenAICard.vue';
 import TtsFishAudioCard from './tts/TtsFishAudioCard.vue';
 import {
+  getPiperProviderUiStatus,
   selectBuiltinTtsProvider,
   selectConcreteTtsProvider,
 } from './ttsProviderSelection';
@@ -312,6 +313,14 @@ async function selectPiperProvider(id: string) {
     piperLoading.value[id] = false;
     await reloadSettings();
   }
+}
+
+function piperUiStatus(provider: TtsProviderInfoDto) {
+  return getPiperProviderUiStatus(
+    provider,
+    !!piperLoading.value[provider.id],
+    piperError.value[provider.id],
+  );
 }
 
 function openTelegramModal() {
@@ -642,9 +651,9 @@ function dismissStatus() {
         @select="selectPiperProvider(p.id)"
       >
         <div class="piper-card-status">
-          <div v-if="piperLoading[p.id]" class="piper-status-loading">Загрузка...</div>
-          <div v-else-if="piperError[p.id]" class="piper-status-error">{{ piperError[p.id] }}</div>
-          <div v-else class="piper-status-ready">● Модель готова к работе</div>
+          <div :class="`piper-status-${piperUiStatus(p).kind}`">
+            {{ piperUiStatus(p).label }}
+          </div>
         </div>
       </ProviderCard>
     </div>
@@ -672,6 +681,10 @@ function dismissStatus() {
 }
 
 .piper-status-loading {
+  color: var(--color-text-secondary);
+}
+
+.piper-status-discovered {
   color: var(--color-text-secondary);
 }
 
