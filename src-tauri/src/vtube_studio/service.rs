@@ -590,19 +590,27 @@ impl VTubeStudioService {
             if typing_action.output_mode == VTubeStudioTypingMode::Event {
                 if let Some(ref mut ws) = inner.ws {
                     let param_name = typing_action.parameter_name.clone();
-                    if let Err(e) = inject_typing(ws, self.next_id(), &param_name, 0.0).await {
-                        debug!(error = %e, "VTS inject typing=false failed, discarding broken socket");
-                        inner.ws = None;
-                        self.is_authenticated.store(false, Ordering::SeqCst);
+                    if let Err(ref e) = inject_typing(ws, self.next_id(), &param_name, 0.0).await {
+                        if is_semantic_vts_error(e) {
+                            debug!(error = %e, "VTS inject typing=false got semantic error, socket stays alive");
+                        } else {
+                            debug!(error = %e, "VTS inject typing=false failed, discarding broken socket");
+                            inner.ws = None;
+                            self.is_authenticated.store(false, Ordering::SeqCst);
+                        }
                     }
                 }
             } else if typing_action.output_mode == VTubeStudioTypingMode::Hotkeys {
                 if let Some(ref mut ws) = inner.ws {
                     let stop_id = typing_action.stop_hotkey_id.clone();
-                    if let Err(e) = trigger_hotkey(ws, self.next_id(), &stop_id).await {
-                        debug!(error = %e, "VTS hotkey stop trigger failed, discarding broken socket");
-                        inner.ws = None;
-                        self.is_authenticated.store(false, Ordering::SeqCst);
+                    if let Err(ref e) = trigger_hotkey(ws, self.next_id(), &stop_id).await {
+                        if is_semantic_vts_error(e) {
+                            debug!(error = %e, "VTS hotkey stop trigger got semantic error, socket stays alive");
+                        } else {
+                            debug!(error = %e, "VTS hotkey stop trigger failed, discarding broken socket");
+                            inner.ws = None;
+                            self.is_authenticated.store(false, Ordering::SeqCst);
+                        }
                     }
                 }
             } else if typing_action.output_mode == VTubeStudioTypingMode::Item {
@@ -661,6 +669,11 @@ impl VTubeStudioService {
                 };
 
                 if let Err(e) = ensure_event_parameter(ws, self.next_id(), &param_name).await {
+                    if is_semantic_vts_error(&e) {
+                        debug!(error = %e, "VTS ensure event parameter got semantic error, socket stays alive");
+                        inner.typing_active = false;
+                        return Err(explain_event_error(&e, &param_name));
+                    }
                     debug!(error = %e, "VTS ensure event parameter failed, discarding broken socket");
                     inner.ws = None;
                     inner.typing_active = false;
@@ -670,6 +683,11 @@ impl VTubeStudioService {
                 }
 
                 if let Err(e) = inject_typing(ws, self.next_id(), &param_name, 1.0).await {
+                    if is_semantic_vts_error(&e) {
+                        debug!(error = %e, "VTS inject typing=true got semantic error, socket stays alive");
+                        inner.typing_active = false;
+                        return Err(explain_event_error(&e, &param_name));
+                    }
                     debug!(error = %e, "VTS inject typing=true failed, discarding broken socket");
                     inner.ws = None;
                     inner.typing_active = false;
@@ -702,12 +720,17 @@ impl VTubeStudioService {
                         let id = uuid::Uuid::new_v4().to_string();
                         if let Some(ref mut ws) = inner_guard.ws {
                             if let Err(e) = inject_typing(ws, id, &param_name, 1.0).await {
-                                debug!(error = %e, "VTS typing keep-alive inject failed, discarding broken socket");
-                                inner_guard.ws = None;
-                                inner_guard.typing_active = false;
-                                auth_flag.store(false, Ordering::SeqCst);
-                                *status_arc.lock() = VTubeStudioConnectionStatus::Error;
-                                break;
+                                if is_semantic_vts_error(&e) {
+                                    debug!(error = %e, "VTS typing keep-alive inject got semantic error, socket stays alive");
+                                    // continue loop without destroying state
+                                } else {
+                                    debug!(error = %e, "VTS typing keep-alive inject failed, discarding broken socket");
+                                    inner_guard.ws = None;
+                                    inner_guard.typing_active = false;
+                                    auth_flag.store(false, Ordering::SeqCst);
+                                    *status_arc.lock() = VTubeStudioConnectionStatus::Error;
+                                    break;
+                                }
                             }
                         } else {
                             break;
@@ -732,6 +755,10 @@ impl VTubeStudioService {
                 };
 
                 if let Err(e) = trigger_hotkey(ws, self.next_id(), &start_id).await {
+                    if is_semantic_vts_error(&e) {
+                        debug!(error = %e, "VTS hotkey start trigger got semantic error, socket stays alive");
+                        return Err(e);
+                    }
                     debug!(error = %e, "VTS hotkey start trigger failed, discarding broken socket");
                     inner.ws = None;
                     inner.typing_active = false;
@@ -1146,6 +1173,13 @@ impl VTubeStudioService {
                 VTubeStudioTypingMode::Event => {
                     let param_name = typing_action.parameter_name.clone();
                     if let Err(e) = ensure_event_parameter(ws, self.next_id(), &param_name).await {
+                        if is_semantic_vts_error(&e) {
+                            return Err(format!(
+                                "VTube Studio action test failed at repeat {} (ensure): {}",
+                                i + 1,
+                                explain_event_error(&e, &param_name)
+                            ));
+                        }
                         inner.ws = None;
                         self.is_authenticated.store(false, Ordering::SeqCst);
                         self.set_connection_status(VTubeStudioConnectionStatus::Error);
@@ -1156,6 +1190,13 @@ impl VTubeStudioService {
                         ));
                     }
                     if let Err(e) = inject_typing(ws, self.next_id(), &param_name, 1.0).await {
+                        if is_semantic_vts_error(&e) {
+                            return Err(format!(
+                                "VTube Studio action test failed at repeat {} (start): {}",
+                                i + 1,
+                                explain_event_error(&e, &param_name)
+                            ));
+                        }
                         inner.ws = None;
                         self.is_authenticated.store(false, Ordering::SeqCst);
                         self.set_connection_status(VTubeStudioConnectionStatus::Error);
@@ -1169,6 +1210,13 @@ impl VTubeStudioService {
                 VTubeStudioTypingMode::Hotkeys => {
                     let start_id = typing_action.start_hotkey_id.clone();
                     if let Err(e) = trigger_hotkey(ws, self.next_id(), &start_id).await {
+                        if is_semantic_vts_error(&e) {
+                            return Err(format!(
+                                "VTube Studio action test failed at repeat {} (start): {}",
+                                i + 1,
+                                e
+                            ));
+                        }
                         inner.ws = None;
                         self.is_authenticated.store(false, Ordering::SeqCst);
                         self.set_connection_status(VTubeStudioConnectionStatus::Error);
@@ -1192,6 +1240,13 @@ impl VTubeStudioService {
                 VTubeStudioTypingMode::Event => {
                     let param_name = typing_action.parameter_name.clone();
                     if let Err(e) = inject_typing(ws, self.next_id(), &param_name, 0.0).await {
+                        if is_semantic_vts_error(&e) {
+                            return Err(format!(
+                                "VTube Studio action test failed at repeat {} (stop): {}",
+                                i + 1,
+                                explain_event_error(&e, &param_name)
+                            ));
+                        }
                         inner.ws = None;
                         self.is_authenticated.store(false, Ordering::SeqCst);
                         self.set_connection_status(VTubeStudioConnectionStatus::Error);
@@ -1205,6 +1260,13 @@ impl VTubeStudioService {
                 VTubeStudioTypingMode::Hotkeys => {
                     let stop_id = typing_action.stop_hotkey_id.clone();
                     if let Err(e) = trigger_hotkey(ws, self.next_id(), &stop_id).await {
+                        if is_semantic_vts_error(&e) {
+                            return Err(format!(
+                                "VTube Studio action test failed at repeat {} (stop): {}",
+                                i + 1,
+                                e
+                            ));
+                        }
                         inner.ws = None;
                         self.is_authenticated.store(false, Ordering::SeqCst);
                         self.set_connection_status(VTubeStudioConnectionStatus::Error);
@@ -1568,6 +1630,37 @@ fn build_scene_records(instances: &[ItemInstanceInfo]) -> Vec<SceneItemRecord> {
     });
 
     grouped
+}
+
+/// true, если ошибка — валидный ответ VTS (APIError / парсинг), а не потеря транспорта.
+/// На такой ошибке сокет жив и НЕ должен отбрасываться.
+fn is_semantic_vts_error(err: &str) -> bool {
+    err.starts_with("VTS error ")
+        || err.starts_with("Parse error data")
+        || err.starts_with("Parse response JSON")
+}
+
+fn explain_event_error(err: &str, param_name: &str) -> String {
+    if err.starts_with("VTS error 453") {
+        format!(
+            "VTS error 453: input parameter '{}' not found. Map INPUT '{}' to the model's OUTPUT (e.g. ParamTyping) in VTS Parameter Setup; do not send a Live2D OUTPUT id directly.",
+            param_name, param_name
+        )
+    } else if err.starts_with("VTS error 352") {
+        format!(
+            "VTS error 352: custom parameter '{}' already created by another plugin. Free or rename the conflicting custom parameter.",
+            param_name
+        )
+    } else if err.starts_with("VTS error 356") {
+        format!(
+            "VTS error 356: invalid parameter name '{}'. Fix the parameter name (invalid characters or length).",
+            param_name
+        )
+    } else if err.starts_with("VTS error 355") {
+        "VTS error 355: too many custom parameters. Free a custom parameter slot in VTS.".to_string()
+    } else {
+        err.to_string()
+    }
 }
 
 #[cfg(test)]
@@ -4058,5 +4151,113 @@ mod tests {
             }
             _ => panic!("expected Error for VTS error 356 on ParameterCreationResponse"),
         }
+    }
+
+    // ---------------------------------------------------------------------------
+    // is_semantic_vts_error classification
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn semantic_error_classification_vts_error() {
+        assert!(is_semantic_vts_error("VTS error 453"));
+        assert!(is_semantic_vts_error("VTS error 352"));
+        assert!(is_semantic_vts_error("VTS error 356"));
+        assert!(is_semantic_vts_error("VTS error 355"));
+        assert!(is_semantic_vts_error("VTS error 42"));
+    }
+
+    #[test]
+    fn semantic_error_classification_parse_errors() {
+        assert!(is_semantic_vts_error(
+            "Parse error data: some detail"
+        ));
+        assert!(is_semantic_vts_error(
+            "Parse response JSON: malformed"
+        ));
+    }
+
+    #[test]
+    fn semantic_error_classification_transport_false() {
+        assert!(!is_semantic_vts_error("Send timed out"));
+        assert!(!is_semantic_vts_error("Response timed out"));
+        assert!(!is_semantic_vts_error("VTS connection closed"));
+        assert!(!is_semantic_vts_error("VTS closed the connection"));
+        assert!(!is_semantic_vts_error("WebSocket connect failed: ..."));
+        assert!(!is_semantic_vts_error("Read error: something"));
+        assert!(!is_semantic_vts_error("Send failed: ..."));
+    }
+
+    #[test]
+    fn semantic_error_classification_other_strings_false() {
+        assert!(!is_semantic_vts_error(""));
+        assert!(!is_semantic_vts_error("VTS error")); // no space before numeric id
+        assert!(!is_semantic_vts_error("Some random error"));
+    }
+
+    // ---------------------------------------------------------------------------
+    // explain_event_error helper
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn explain_event_error_453_includes_param_name_and_mapping_hint() {
+        let msg = explain_event_error("VTS error 453: input parameter 'MyParam' not found.", "MyParam");
+        assert!(msg.contains("VTS error 453"));
+        assert!(msg.contains("MyParam"));
+        assert!(msg.contains("INPUT"));
+        assert!(msg.contains("OUTPUT"));
+        assert!(msg.contains("ParamTyping"));
+        assert!(
+            msg.contains("do not send a Live2D OUTPUT id directly"),
+            "must explicitly warn against sending Live2D OUTPUT id: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn explain_event_error_352_suggests_free_or_rename() {
+        let msg = explain_event_error("VTS error 352: CustomParamAlreadyCreatedByOtherPlugin", "TTSParam");
+        assert!(msg.contains("VTS error 352"));
+        assert!(msg.contains("TTSParam"));
+        assert!(
+            msg.contains("Free") || msg.contains("Rename") || msg.contains("free") || msg.contains("rename"),
+            "should advise freeing or renaming the parameter: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn explain_event_error_356_suggests_fix_name() {
+        let msg = explain_event_error("VTS error 356: InvalidParameterName", "bad name!");
+        assert!(msg.contains("VTS error 356"));
+        assert!(msg.contains("bad name!"));
+        assert!(
+            msg.to_lowercase().contains("invalid") || msg.to_lowercase().contains("fix"),
+            "should mention invalid parameter name: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn explain_event_error_355_suggests_free_slot() {
+        let msg = explain_event_error("VTS error 355: TooManyCustomParams", "ignored");
+        assert!(msg.contains("VTS error 355"));
+        assert!(
+            msg.contains("too many") || msg.contains("Free") || msg.contains("slot"),
+            "should advise freeing a custom parameter slot: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn explain_event_error_unknown_returns_original() {
+        let msg = explain_event_error("VTS error 999: something else", "xyz");
+        assert_eq!(msg, "VTS error 999: something else");
+    }
+
+    #[test]
+    fn explain_event_error_transport_passthrough() {
+        // Should return the original string for non-semantic errors
+        let msg = explain_event_error("Send timed out", "ignored");
+        assert_eq!(msg, "Send timed out");
     }
 }
