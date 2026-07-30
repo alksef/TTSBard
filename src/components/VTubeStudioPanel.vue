@@ -122,7 +122,7 @@ const {
       <div class="setting-row typing-action-row">
         <label>Способ:</label>
         <select v-model="typingMode" class="text-input typing-mode-select" :disabled="busy">
-          <option value="Event">Событие</option>
+          <option value="Event">Параметр VTS</option>
           <option value="Hotkeys">Горячие клавиши</option>
           <option value="Item">Предмет сцены</option>
         </select>
@@ -130,7 +130,7 @@ const {
 
       <template v-if="typingMode === 'Event'">
         <div class="setting-row typing-action-row">
-          <label>Имя события:</label>
+          <label>Имя входного параметра VTS:</label>
           <input
             type="text"
             v-model="eventName"
@@ -139,6 +139,11 @@ const {
             placeholder="TTSBardTyping"
           />
         </div>
+        <p class="info-hint">
+          Входной параметр <code>INPUT TTSBardTyping</code> сопоставьте с <code>OUTPUT</code>
+          модели (напр. <code>ParamTyping</code>) в VTS Parameter Setup.
+          Диапазон <code>0..1</code>, smoothing <code>0</code> для дискретного индикатора.
+        </p>
       </template>
 
       <template v-else-if="typingMode === 'Hotkeys'">
@@ -287,10 +292,10 @@ const {
       <div class="info-card">
         <div class="info-row">
           <span class="info-label">Способ</span>
-          <code class="info-code">{{ savedTypingAction.outputMode === 'Event' ? 'Событие' : savedTypingAction.outputMode === 'Hotkeys' ? 'Горячие клавиши' : 'Предмет сцены' }}</code>
+          <code class="info-code">{{ savedTypingAction.outputMode === 'Event' ? 'Параметр VTS' : savedTypingAction.outputMode === 'Hotkeys' ? 'Горячие клавиши' : 'Предмет сцены' }}</code>
         </div>
         <div v-if="savedTypingAction.outputMode === 'Event'" class="info-row">
-          <span class="info-label">Событие</span>
+          <span class="info-label">Входной параметр</span>
           <code class="info-code">{{ savedTypingAction.parameterName || '(не задано)' }}</code>
         </div>
         <template v-else-if="savedTypingAction.outputMode === 'Hotkeys'">
@@ -340,7 +345,7 @@ const {
         Включите <strong>Plugin API</strong> в VTube Studio. При первом подключении откроется окно подтверждения разрешений.
       </p>
       <p class="help-text">
-        Для режима <strong>Событие</strong> привяжите указанное имя параметра к нужному выражению модели.
+        Для режима <strong>Параметр VTS</strong> привяжите указанное имя входного параметра к нужному выражению модели. После сохранения настройте <code>INPUT → OUTPUT</code> mapping в VTS Parameter Setup.
         Для режима <strong>Горячие клавиши</strong> выберите стартовый и стоповый Hotkey текущей модели после подключения.
         Для режима <strong>Предмет сцены</strong> заранее загрузите один PNG, JPG, GIF или animation-folder и выберите его после обновления списка.
       </p>
@@ -799,6 +804,14 @@ select.text-input {
   font-style: normal;
   font-weight: 500;
   color: var(--color-text-secondary);
+}
+
+.info-hint code {
+  font-family: var(--font-mono);
+  background: var(--info-bg-weak);
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.8rem;
 }
 
 .help-text {
