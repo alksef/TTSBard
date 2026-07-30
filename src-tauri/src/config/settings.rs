@@ -1288,6 +1288,29 @@ impl SettingsManager {
         Ok(())
     }
 
+    /// Read, mutate, persist, and refresh the cache while holding the shared
+    /// config writer lock for the complete read-modify-write transaction.
+    fn update_settings_atomically(&self, update: impl FnOnce(&mut AppSettings)) -> Result<()> {
+        let path = self.settings_path();
+        let _guard = persistence::config_write_lock().lock();
+
+        let mut settings = if path.exists() {
+            let content = fs::read_to_string(&path).context("Failed to read settings file")?;
+            serde_json::from_str(&content).context("Failed to parse settings JSON")?
+        } else {
+            AppSettings::default()
+        };
+        update(&mut settings);
+
+        let content =
+            serde_json::to_string_pretty(&settings).context("Failed to serialize settings")?;
+        persistence::write_json_atomically(&path, &content)
+            .context("Failed to write settings file")?;
+        *self.cache.write() = settings;
+
+        Ok(())
+    }
+
     /// Atomically update a single field in the settings JSON file
     ///
     /// This method reads the JSON file, updates a specific field using JSON pointer,
@@ -1536,9 +1559,10 @@ impl SettingsManager {
 
     /// Set Twitch settings
     pub fn set_twitch_settings(&self, settings: &TwitchSettings) -> Result<()> {
-        let mut app_settings = self.load()?;
-        app_settings.twitch = settings.clone();
-        self.save(&app_settings)
+        let settings = settings.clone();
+        self.update_settings_atomically(move |app_settings| {
+            app_settings.twitch = settings;
+        })
     }
 
     // ========== WebView Settings ==========
@@ -1564,12 +1588,12 @@ impl SettingsManager {
         bind_address: String,
         upnp_enabled: bool,
     ) -> Result<()> {
-        let mut app_settings = self.load()?;
-        app_settings.webview.start_on_boot = start_on_boot;
-        app_settings.webview.port = port;
-        app_settings.webview.bind_address = bind_address;
-        app_settings.webview.upnp_enabled = upnp_enabled;
-        self.save(&app_settings)
+        self.update_settings_atomically(move |app_settings| {
+            app_settings.webview.start_on_boot = start_on_boot;
+            app_settings.webview.port = port;
+            app_settings.webview.bind_address = bind_address;
+            app_settings.webview.upnp_enabled = upnp_enabled;
+        })
     }
 
     // ========== Logging Settings ==========
@@ -1986,9 +2010,14 @@ impl SettingsManager {
     }
 
     pub fn set_vtube_studio_settings(&self, settings: &VTubeStudioSettings) -> Result<()> {
-        let mut app_settings = self.load()?;
-        app_settings.vtube_studio = settings.clone();
-        self.save(&app_settings)
+        let settings = settings.clone();
+        self.update_settings_atomically(move |app_settings| {
+            app_settings.vtube_studio = settings;
+        })
+    }
+
+    pub fn set_vtube_studio_token(&self, token: Option<String>) -> Result<()> {
+        self.update_field("/vtube_studio/token", &token)
     }
 }
 
@@ -2373,9 +2402,12 @@ mod tests {
     fn set_webview_section_saves_four_fields_and_keeps_cache_in_sync() {
         let (manager, dir) = webview_section_tmp_manager("save-four");
 
-        let result =
-            manager.set_webview_section(false, 9090, "127.0.0.1".to_string(), false);
-        assert!(result.is_ok(), "set_webview_section failed: {:?}", result.err());
+        let result = manager.set_webview_section(false, 9090, "127.0.0.1".to_string(), false);
+        assert!(
+            result.is_ok(),
+            "set_webview_section failed: {:?}",
+            result.err()
+        );
 
         let disk = read_disk_settings(&dir);
         assert!(!disk.webview.start_on_boot);
@@ -2394,12 +2426,19 @@ mod tests {
         let (manager, dir) = webview_section_tmp_manager("preserve");
 
         // Seed unrelated fields via the still-public point setters.
-        manager.set_webview_access_token(Some("secret-token-123".to_string())).unwrap();
+        manager
+            .set_webview_access_token(Some("secret-token-123".to_string()))
+            .unwrap();
         let before = manager.load().unwrap();
         assert!(!before.webview.enabled, "default enabled must be false");
-        assert_eq!(before.webview.access_token, Some("secret-token-123".to_string()));
+        assert_eq!(
+            before.webview.access_token,
+            Some("secret-token-123".to_string())
+        );
 
-        manager.set_webview_section(false, 9090, "0.0.0.0".to_string(), true).unwrap();
+        manager
+            .set_webview_section(false, 9090, "0.0.0.0".to_string(), true)
+            .unwrap();
 
         let after = manager.load().unwrap();
         assert_eq!(
@@ -2417,23 +2456,60 @@ mod tests {
     }
 
     #[test]
+    fn set_webview_section_reads_snapshot_after_writer_lock() {
+        let (manager, dir) = webview_section_tmp_manager("fresh-snapshot");
+        manager
+            .set_webview_access_token(Some("cached-token".to_string()))
+            .unwrap();
+
+        // Model a writer that has committed its disk value while its cache
+        // publication is still pending under config_write_lock. A following
+        // section transaction must use the serialized disk snapshot, not the
+        // stale cache clone it had before acquiring the writer lock.
+        let mut disk = read_disk_settings(&dir);
+        disk.webview.access_token = Some("newer-disk-token".to_string());
+        std::fs::write(
+            dir.join("settings.json"),
+            serde_json::to_string_pretty(&disk).unwrap(),
+        )
+        .unwrap();
+
+        manager
+            .set_webview_section(false, 9090, "127.0.0.1".to_string(), false)
+            .unwrap();
+
+        let after = read_disk_settings(&dir);
+        assert_eq!(
+            after.webview.access_token,
+            Some("newer-disk-token".to_string())
+        );
+        assert_eq!(manager.load().unwrap(), after);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn set_webview_section_leaves_no_residual_temp_file() {
         let (manager, dir) = webview_section_tmp_manager("atomic-write");
 
-        manager.set_webview_section(false, 2020, "127.0.0.1".to_string(), false).unwrap();
+        manager
+            .set_webview_section(false, 2020, "127.0.0.1".to_string(), false)
+            .unwrap();
 
         let tmp_files: Vec<_> = std::fs::read_dir(&dir)
             .unwrap()
             .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.file_name()
-                    .to_str()
-                    .is_some_and(|n| n.ends_with(".tmp"))
-            })
+            .filter(|e| e.file_name().to_str().is_some_and(|n| n.ends_with(".tmp")))
             .collect();
-        assert!(tmp_files.is_empty(), "atomic write must not leave a .tmp file behind");
+        assert!(
+            tmp_files.is_empty(),
+            "atomic write must not leave a .tmp file behind"
+        );
 
-        assert!(dir.join("settings.json").exists(), "settings.json must exist");
+        assert!(
+            dir.join("settings.json").exists(),
+            "settings.json must exist"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -2448,7 +2524,9 @@ mod tests {
             (7070, "192.168.1.100", true),
             (1024, "0.0.0.0", true),
         ] {
-            manager.set_webview_section(true, port, addr.to_string(), upnp).unwrap();
+            manager
+                .set_webview_section(true, port, addr.to_string(), upnp)
+                .unwrap();
             assert_eq!(
                 manager.load().unwrap(),
                 read_disk_settings(&dir),

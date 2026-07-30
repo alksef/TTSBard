@@ -85,23 +85,28 @@ pub async fn save_webview_settings(
     drop(old_settings);
 
     // Get SettingsManager once and persist to config atomically
-    let settings_manager = app_handle.try_state::<SettingsManager>();
-    if let Some(manager) = settings_manager {
-        let start_on_boot = settings.start_on_boot;
-        let port = settings.port;
-        let bind_addr = settings.bind_address.clone();
-        let upnp_enabled = settings.upnp_enabled;
-        super::persist_blocking(manager.inner(), move |mgr| {
-            mgr.set_webview_section(start_on_boot, port, bind_addr, upnp_enabled)
-        })
-        .await?;
-        super::emit_settings_changed(&app_handle);
-    }
+    let settings_manager = app_handle
+        .try_state::<SettingsManager>()
+        .ok_or_else(|| "SettingsManager not available".to_string())?;
+    let start_on_boot = settings.start_on_boot;
+    let port = settings.port;
+    let bind_addr = settings.bind_address.clone();
+    let upnp_enabled = settings.upnp_enabled;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_webview_section(start_on_boot, port, bind_addr, upnp_enabled)
+    })
+    .await?;
 
     // Only after successful file save, update AppState (runtime state)
     let mut s = state.webview.settings.write().await;
-    *s = settings.clone();
+    s.enabled = settings.enabled;
+    s.start_on_boot = settings.start_on_boot;
+    s.port = settings.port;
+    s.bind_address = settings.bind_address.clone();
+    s.upnp_enabled = settings.upnp_enabled;
     drop(s);
+
+    super::emit_settings_changed(&app_handle);
 
     // Trigger UPnP toggle if it changed (without server restart)
     if upnp_changed {
@@ -222,21 +227,17 @@ pub async fn generate_webview_token(
 ) -> Result<String, String> {
     let token = uuid::Uuid::new_v4().to_string();
 
-    // Update both runtime state and persistent settings
-    let mut settings = state.webview.settings.write().await;
-    settings.access_token = Some(token.clone());
-    drop(settings);
+    let settings_manager = app_handle
+        .try_state::<SettingsManager>()
+        .ok_or_else(|| "SettingsManager not available".to_string())?;
+    let persisted_token = token.clone();
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_webview_access_token(Some(persisted_token))
+    })
+    .await?;
 
-    // Persist to settings
-    let settings_manager = app_handle.try_state::<SettingsManager>();
-    if let Some(manager) = settings_manager {
-        let t = token.clone();
-        super::persist_blocking(manager.inner(), move |mgr| {
-            mgr.set_webview_access_token(Some(t))
-        })
-        .await?;
-        super::emit_settings_changed(&app_handle);
-    }
+    state.webview.settings.write().await.access_token = Some(token.clone());
+    super::emit_settings_changed(&app_handle);
 
     Ok(token)
 }
@@ -275,21 +276,17 @@ pub async fn regenerate_webview_token(
 ) -> Result<String, String> {
     let token = uuid::Uuid::new_v4().to_string();
 
-    // Update both runtime state and persistent settings
-    let mut settings = state.webview.settings.write().await;
-    settings.access_token = Some(token.clone());
-    drop(settings);
+    let settings_manager = app_handle
+        .try_state::<SettingsManager>()
+        .ok_or_else(|| "SettingsManager not available".to_string())?;
+    let persisted_token = token.clone();
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_webview_access_token(Some(persisted_token))
+    })
+    .await?;
 
-    // Persist to settings
-    let settings_manager = app_handle.try_state::<SettingsManager>();
-    if let Some(manager) = settings_manager {
-        let t = token.clone();
-        super::persist_blocking(manager.inner(), move |mgr| {
-            mgr.set_webview_access_token(Some(t))
-        })
-        .await?;
-        super::emit_settings_changed(&app_handle);
-    }
+    state.webview.settings.write().await.access_token = Some(token);
+    super::emit_settings_changed(&app_handle);
 
     // Restart server to apply new token
     state
@@ -309,20 +306,16 @@ pub async fn set_webview_upnp_enabled(
     let access_token = state.webview.settings.read().await.access_token.clone();
     validate_upnp_token(enabled, access_token.as_deref())?;
 
-    // Update runtime state
-    let mut settings = state.webview.settings.write().await;
-    settings.upnp_enabled = enabled;
-    drop(settings);
+    let settings_manager = app_handle
+        .try_state::<SettingsManager>()
+        .ok_or_else(|| "SettingsManager not available".to_string())?;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_webview_upnp_enabled(enabled)
+    })
+    .await?;
 
-    // Persist to settings
-    let settings_manager = app_handle.try_state::<SettingsManager>();
-    if let Some(manager) = settings_manager {
-        super::persist_blocking(manager.inner(), move |mgr| {
-            mgr.set_webview_upnp_enabled(enabled)
-        })
-        .await?;
-        super::emit_settings_changed(&app_handle);
-    }
+    state.webview.settings.write().await.upnp_enabled = enabled;
+    super::emit_settings_changed(&app_handle);
 
     // Toggle UPnP without server restart
     state

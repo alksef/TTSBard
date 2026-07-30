@@ -39,17 +39,21 @@ pub async fn save_twitch_settings(
     // Транзакционный подход: сначала сохраняем в файл, потом в память
     // Это предотвращает рассинхронизацию, если другой поток прочитает настройки между операциями
     // Получаем SettingsManager один раз
-    let settings_manager = app_handle.try_state::<SettingsManager>();
-    if let Some(manager) = settings_manager {
-        let s = settings.clone();
-        super::persist_blocking(manager.inner(), move |mgr| mgr.set_twitch_settings(&s)).await?;
-        super::emit_settings_changed(&app_handle);
-    }
+    let settings_manager = app_handle
+        .try_state::<SettingsManager>()
+        .ok_or_else(|| "SettingsManager not available".to_string())?;
+    let persisted_settings = settings.clone();
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_twitch_settings(&persisted_settings)
+    })
+    .await?;
 
     // Только после успешного сохранения в файл обновляем AppState
     let mut s = state.twitch.settings.write().await;
     *s = settings.clone();
     drop(s);
+
+    super::emit_settings_changed(&app_handle);
 
     // Отправить событие для перезапуска клиента только если есть изменения
     if enabled_changed || credentials_changed {

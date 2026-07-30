@@ -19,6 +19,27 @@ fn emit_vts_item_status(app_handle: &AppHandle, status: &VTubeStudioItemStatus) 
     let _ = app_handle.emit(VTS_ITEM_STATUS_CHANGED_EVENT, status);
 }
 
+fn emit_vts_runtime_status(app_handle: &AppHandle, state: &AppState) {
+    emit_vts_status(app_handle, &state.vtube_studio.get_connection_status());
+    emit_vts_item_status(app_handle, &state.vtube_studio.get_item_status());
+}
+
+async fn persist_and_apply_vts_token(
+    manager: &SettingsManager,
+    runtime_settings: &tokio::sync::RwLock<VTubeStudioSettings>,
+    token: String,
+) -> Result<(), String> {
+    let mgr = manager.clone();
+    let persisted_token = token.clone();
+    crate::commands::persist_blocking(&mgr, move |m| {
+        m.set_vtube_studio_token(Some(persisted_token))
+    })
+    .await?;
+
+    runtime_settings.write().await.token = Some(token);
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn get_vtube_studio_settings(
     state: State<'_, AppState>,
@@ -304,6 +325,9 @@ pub async fn test_vtube_studio_connection(
     state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
+    let settings_manager = app_handle
+        .try_state::<SettingsManager>()
+        .ok_or_else(|| "SettingsManager not available".to_string())?;
     let (port, stored_token) = {
         let settings = state.vtube_studio.settings.read().await;
         (settings.port, settings.token.clone())
@@ -322,25 +346,22 @@ pub async fn test_vtube_studio_connection(
 
     match result {
         Ok(new_token) => {
-            state.vtube_studio.mark_authenticated(true);
-            if let Some(ref tok) = new_token {
+            if let Some(tok) = new_token {
                 info!("Persisting new VTS authentication token");
-                let mut s = state.vtube_studio.settings.write().await;
-                s.token = Some(tok.clone());
-                drop(s);
-
-                let settings_manager = app_handle
-                    .try_state::<SettingsManager>()
-                    .ok_or_else(|| "SettingsManager not available".to_string())?;
-                let mgr = settings_manager.inner().clone();
-                let tok_clone = tok.clone();
-                crate::commands::persist_blocking(&mgr, move |m| {
-                    let mut vts = m.get_vtube_studio_settings();
-                    vts.token = Some(tok_clone);
-                    m.set_vtube_studio_settings(&vts)
-                })
-                .await?;
+                if let Err(error) = persist_and_apply_vts_token(
+                    settings_manager.inner(),
+                    &state.vtube_studio.settings,
+                    tok,
+                )
+                .await
+                {
+                    state.vtube_studio.disconnect().await;
+                    emit_vts_runtime_status(&app_handle, state.inner());
+                    return Err(error);
+                }
             }
+
+            state.vtube_studio.mark_authenticated(true);
 
             let item_status = state.vtube_studio.get_item_status();
             emit_vts_item_status(&app_handle, &item_status);
@@ -361,6 +382,9 @@ pub async fn connect_vtube_studio(
     state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
+    let settings_manager = app_handle
+        .try_state::<SettingsManager>()
+        .ok_or_else(|| "SettingsManager not available".to_string())?;
     let (port, stored_token) = {
         let settings = state.vtube_studio.settings.read().await;
         (settings.port, settings.token.clone())
@@ -377,34 +401,29 @@ pub async fn connect_vtube_studio(
         .connect(port, stored_token.as_deref())
         .await;
 
-    let status = state.vtube_studio.get_connection_status();
-    emit_vts_status(&app_handle, &status);
-    let item_status = state.vtube_studio.get_item_status();
-    emit_vts_item_status(&app_handle, &item_status);
-
     match result {
         Ok(new_token) => {
-            if let Some(ref tok) = new_token {
+            if let Some(tok) = new_token {
                 info!("Persisting new VTS authentication token");
-                let mut s = state.vtube_studio.settings.write().await;
-                s.token = Some(tok.clone());
-                drop(s);
-
-                let settings_manager = app_handle
-                    .try_state::<SettingsManager>()
-                    .ok_or_else(|| "SettingsManager not available".to_string())?;
-                let mgr = settings_manager.inner().clone();
-                let tok_clone = tok.clone();
-                crate::commands::persist_blocking(&mgr, move |m| {
-                    let mut vts = m.get_vtube_studio_settings();
-                    vts.token = Some(tok_clone);
-                    m.set_vtube_studio_settings(&vts)
-                })
-                .await?;
+                if let Err(error) = persist_and_apply_vts_token(
+                    settings_manager.inner(),
+                    &state.vtube_studio.settings,
+                    tok,
+                )
+                .await
+                {
+                    state.vtube_studio.disconnect().await;
+                    emit_vts_runtime_status(&app_handle, state.inner());
+                    return Err(error);
+                }
             }
+            emit_vts_runtime_status(&app_handle, state.inner());
             Ok("Подключено к VTube Studio".to_string())
         }
-        Err(e) => Err(e),
+        Err(e) => {
+            emit_vts_runtime_status(&app_handle, state.inner());
+            Err(e)
+        }
     }
 }
 
@@ -427,6 +446,9 @@ pub async fn restart_vtube_studio(
     state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
+    let settings_manager = app_handle
+        .try_state::<SettingsManager>()
+        .ok_or_else(|| "SettingsManager not available".to_string())?;
     info!("Restart VTube Studio");
 
     state.vtube_studio.disconnect().await;
@@ -441,34 +463,29 @@ pub async fn restart_vtube_studio(
         .connect(port, stored_token.as_deref())
         .await;
 
-    let status = state.vtube_studio.get_connection_status();
-    emit_vts_status(&app_handle, &status);
-    let item_status = state.vtube_studio.get_item_status();
-    emit_vts_item_status(&app_handle, &item_status);
-
     match result {
         Ok(new_token) => {
-            if let Some(ref tok) = new_token {
+            if let Some(tok) = new_token {
                 info!("Persisting new VTS authentication token");
-                let mut s = state.vtube_studio.settings.write().await;
-                s.token = Some(tok.clone());
-                drop(s);
-
-                let settings_manager = app_handle
-                    .try_state::<SettingsManager>()
-                    .ok_or_else(|| "SettingsManager not available".to_string())?;
-                let mgr = settings_manager.inner().clone();
-                let tok_clone = tok.clone();
-                crate::commands::persist_blocking(&mgr, move |m| {
-                    let mut vts = m.get_vtube_studio_settings();
-                    vts.token = Some(tok_clone);
-                    m.set_vtube_studio_settings(&vts)
-                })
-                .await?;
+                if let Err(error) = persist_and_apply_vts_token(
+                    settings_manager.inner(),
+                    &state.vtube_studio.settings,
+                    tok,
+                )
+                .await
+                {
+                    state.vtube_studio.disconnect().await;
+                    emit_vts_runtime_status(&app_handle, state.inner());
+                    return Err(error);
+                }
             }
+            emit_vts_runtime_status(&app_handle, state.inner());
             Ok("Restarted VTube Studio".to_string())
         }
-        Err(e) => Err(e),
+        Err(e) => {
+            emit_vts_runtime_status(&app_handle, state.inner());
+            Err(e)
+        }
     }
 }
 
@@ -655,6 +672,77 @@ fn resolve_item_metadata(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vts_token_persist_failure_preserves_runtime_token() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-vts-token-failure-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        let manager = SettingsManager::with_config_dir(dir.clone()).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        let runtime_settings = tokio::sync::RwLock::new(VTubeStudioSettings {
+            token: Some("old-token".to_string()),
+            ..VTubeStudioSettings::default()
+        });
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let result = runtime.block_on(persist_and_apply_vts_token(
+            &manager,
+            &runtime_settings,
+            "new-token".to_string(),
+        ));
+
+        assert!(result.is_err());
+        assert_eq!(
+            runtime.block_on(async { runtime_settings.read().await.token.clone() }),
+            Some("old-token".to_string())
+        );
+    }
+
+    #[test]
+    fn vts_token_commit_updates_persistence_before_runtime() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-vts-token-success-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        let manager = SettingsManager::with_config_dir(dir.clone()).unwrap();
+        let runtime_settings = tokio::sync::RwLock::new(VTubeStudioSettings::default());
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+
+        runtime
+            .block_on(persist_and_apply_vts_token(
+                &manager,
+                &runtime_settings,
+                "new-token".to_string(),
+            ))
+            .unwrap();
+
+        assert_eq!(
+            manager.get_vtube_studio_settings().token,
+            Some("new-token".to_string())
+        );
+        assert_eq!(
+            runtime.block_on(async { runtime_settings.read().await.token.clone() }),
+            Some("new-token".to_string())
+        );
+        let disk: crate::config::AppSettings =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap())
+                .unwrap();
+        assert_eq!(disk.vtube_studio.token, Some("new-token".to_string()));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn make_record(
         file_name: &str,

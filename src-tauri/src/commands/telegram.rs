@@ -80,6 +80,19 @@ impl TelegramState {
         self.client.lock().await.take()
     }
 
+    /// Clear the client only when it is still the same logical instance that
+    /// started an asynchronous lifecycle operation.
+    pub(crate) async fn clear_client_if_current(&self, expected: &TelegramClient) -> bool {
+        let mut guard = self.client.lock().await;
+        let is_current = guard
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(&current.client, &expected.client));
+        if is_current {
+            guard.take();
+        }
+        is_current
+    }
+
     /// Replace the client with `new` and return the previous one (if any).
     /// Short lock only; the caller disconnects the old client AFTER the guard drops.
     pub(crate) async fn swap_client(&self, new: TelegramClient) -> Option<TelegramClient> {
@@ -183,7 +196,9 @@ pub async fn telegram_init(
 /// Запрос кода подтверждения
 #[tauri::command]
 pub async fn telegram_request_code(state: State<'_, TelegramState>) -> Result<(), String> {
-    let client = state.current_client().await
+    let client = state
+        .current_client()
+        .await
         .ok_or_else(|| "Клиент не инициализирован. Сначала вызовите telegram_init.".to_string())?;
 
     client
@@ -205,7 +220,9 @@ pub async fn telegram_sign_in(
         return Err("Код не может быть пустым".to_string());
     }
 
-    let client = state.current_client().await
+    let client = state
+        .current_client()
+        .await
         .ok_or_else(|| "Клиент не инициализирован. Сначала вызовите telegram_init.".to_string())?;
 
     let auth_state = client
@@ -245,7 +262,9 @@ pub async fn telegram_check_password(
         return Err("Пароль не может быть пустым".to_string());
     }
 
-    let client = state.current_client().await
+    let client = state
+        .current_client()
+        .await
         .ok_or_else(|| "Клиент не инициализирован".to_string())?;
 
     let auth_state = client
@@ -294,7 +313,9 @@ pub async fn telegram_sign_out(
     settings_manager: State<'_, SettingsManager>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
-    let client = state.current_client().await
+    let client = state
+        .current_client()
+        .await
         .ok_or_else(|| "Клиент не инициализирован".to_string())?;
 
     client
@@ -302,8 +323,13 @@ pub async fn telegram_sign_out(
         .await
         .map_err(|e| format!("Ошибка выхода: {}", e))?;
 
-    // Удаляем клиент из состояния
-    let _ = state.clear_client().await;
+    // A newer init/reconnect may have replaced the client while sign_out was
+    // awaiting network I/O. Never let this stale completion clear that client
+    // or its persisted session metadata.
+    if !state.clear_client_if_current(&client).await {
+        info!("Ignoring stale Telegram sign-out completion after client replacement");
+        return Ok(());
+    }
 
     // Удаляем сохранённый api_id из settings.json
     super::persist_blocking(settings_manager.inner(), move |mgr| {
@@ -364,10 +390,9 @@ pub async fn speak_text_silero(
     }
 
     // Получаем клиент
-    let client = state.current_client().await
-        .ok_or_else(|| {
-            "Telegram client not initialized. Please connect to Telegram first.".to_string()
-        })?;
+    let client = state.current_client().await.ok_or_else(|| {
+        "Telegram client not initialized. Please connect to Telegram first.".to_string()
+    })?;
 
     // Проверяем авторизацию
     let is_authorized = client.is_authorized().await?;
@@ -404,10 +429,9 @@ pub async fn telegram_get_current_voice(
     tracing::debug!("Getting current voice");
 
     // Получаем клиент
-    let client = state.current_client().await
-        .ok_or_else(|| {
-            "Telegram client not initialized. Please connect to Telegram first.".to_string()
-        })?;
+    let client = state.current_client().await.ok_or_else(|| {
+        "Telegram client not initialized. Please connect to Telegram first.".to_string()
+    })?;
 
     // Проверяем авторизацию
     let is_authorized = client.is_authorized().await?;
@@ -453,10 +477,9 @@ pub async fn telegram_get_limits(
     tracing::debug!("Getting limits");
 
     // Получаем клиент
-    let client = state.current_client().await
-        .ok_or_else(|| {
-            "Telegram client not initialized. Please connect to Telegram first.".to_string()
-        })?;
+    let client = state.current_client().await.ok_or_else(|| {
+        "Telegram client not initialized. Please connect to Telegram first.".to_string()
+    })?;
 
     // Проверяем авторизацию
     let is_authorized = client.is_authorized().await?;
@@ -569,7 +592,9 @@ pub async fn telegram_set_speaker(
     }
 
     // 2. Получить клиент из state
-    let client = state.current_client().await
+    let client = state
+        .current_client()
+        .await
         .ok_or_else(|| "Telegram client not initialized".to_string())?;
 
     // 3. Вызвать bot::set_speaker()
@@ -670,9 +695,7 @@ pub async fn telegram_select_voice(
     // 1. Отправить "/speaker {voice_id}" боту
     let speaker_voice_id = voice_id.clone();
     let success = state
-        .with_client(|client| {
-            Box::pin(async move { set_speaker(client, &speaker_voice_id).await })
-        })
+        .with_client(|client| Box::pin(async move { set_speaker(client, &speaker_voice_id).await }))
         .await?;
 
     // 2. Если успешно - обновить current_voice_id
@@ -745,6 +768,32 @@ mod tests {
     }
 
     #[test]
+    fn clear_client_if_current_rejects_stale_instance() {
+        let state = TelegramState::new();
+        let stale = TelegramClient::new();
+        let current = TelegramClient::new();
+        rt().block_on(async {
+            state.set_client(current.clone()).await;
+
+            assert!(!state.clear_client_if_current(&stale).await);
+            let stored = state.current_client().await.expect("current client");
+            assert!(Arc::ptr_eq(&stored.client, &current.client));
+        });
+    }
+
+    #[test]
+    fn clear_client_if_current_removes_matching_instance() {
+        let state = TelegramState::new();
+        let current = TelegramClient::new();
+        rt().block_on(async {
+            state.set_client(current.clone()).await;
+
+            assert!(state.clear_client_if_current(&current).await);
+            assert!(state.current_client().await.is_none());
+        });
+    }
+
+    #[test]
     fn swap_client_does_not_hold_lock_across_await() {
         // Structural assertion: swap_client returns the old client via Option,
         // so any disconnect must happen OUTSIDE the method. The signature is
@@ -757,4 +806,3 @@ mod tests {
         });
     }
 }
-
