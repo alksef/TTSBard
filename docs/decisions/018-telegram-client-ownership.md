@@ -1,7 +1,7 @@
 # DECISION-018 — Владение Telegram client state: контракт разделения Arc
 
 **Статус:** `accepted` (контракт разделения client Arc зафиксирован)
-**Связано:** [ROADMAP-059](../roadmap/active/059-integration-state-ownership-and-settings-atomicity.md),
+**Связано:** [ROADMAP-059](../roadmap/completed/059-integration-state-ownership-and-settings-atomicity.md),
 [DECISION-004](004-service-owned-state.md), [TASK-117](../tasks/117-appstate-decomposition.md)
 
 > **TL;DR.** `TelegramState.client: Arc<Mutex<Option<TelegramClient>>>` остаётся

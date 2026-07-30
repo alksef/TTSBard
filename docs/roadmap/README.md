@@ -40,6 +40,8 @@ related_tasks: []
 
 | Item | Статус | Следующий шаг |
 |---|---|---|
+| [ROADMAP-060 — Корректный lifecycle параметра печати VTube Studio](./active/060-vtube-studio-parameter-input-lifecycle.md) | `planned` | Создать task на единый ensure-before-inject путь и regression-тест уже подключённой сессии. |
+
 ## Завершённые направления
 
 ### Редактор и история
@@ -105,6 +107,7 @@ related_tasks: []
 - [ROADMAP-056 — IPC-контракты и AI-ready границы](./completed/056-ipc-contracts-and-ai-ready-boundaries.md)
 - [ROADMAP-057 — Достоверный handoff и продуктовые источники](./completed/057-truthful-handoff-and-product-sources.md)
 - [ROADMAP-058 — Исполнимые контракты и lifecycle-проверки](./completed/058-executable-contracts-and-lifecycle-proof.md)
+- [ROADMAP-059 — Владение integration state и атомарность settings](./completed/059-integration-state-ownership-and-settings-atomicity.md) — P0–P3: WebView atomic save, Telegram owner API, контракты DECISION-018/019.
 
 ### VTube Studio и WebView
 

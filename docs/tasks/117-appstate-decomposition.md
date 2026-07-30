@@ -3,7 +3,24 @@
 **Статус:** `deferred` — выполнять по одному сервису после стабилизации текущих
 runtime-функций
 **Связано:** [ROADMAP-018](../roadmap/completed/018-runtime-architecture-and-appstate.md),
+[ROADMAP-059](../roadmap/completed/059-integration-state-ownership-and-settings-atomicity.md)
+(integration-сервисы — отдельный слой, см. ниже),
+[DECISION-004](../decisions/004-service-owned-state.md),
 [архитектура](../development/architecture.md)
+
+## Два разных слоя — не смешивать
+
+Эта задача касается **`AppState`** — composition container'а, который держит
+`Arc<Mutex<_>>`/`Arc<RwLock<_>>` нескольких доменов (AI, TTS, input, playback).
+Это **отдельный слой** от инкапсуляции integration-сервисов (Telegram, WebView,
+Twitch, VTube Studio), которые живут **не в `AppState`**, а в собственных
+`State<...>` и управляются через
+[ROADMAP-059](../roadmap/completed/059-integration-state-ownership-and-settings-atomicity.md).
+
+| Слой | Что | Где ведётся |
+|---|---|---|
+| **AppState decomposition** (эта задача) | `Arc<Mutex<_>>` доменов внутри `AppState` | TASK-117 |
+| **Integration service encapsulation** | Telegram/WebView/Twitch/VTube public locks | ROADMAP-059 |
 
 ## Контекст
 
@@ -24,7 +41,7 @@ runtime-функций
 Сделать `AppState` тонким composition container: доменные данные и блокировки
 принадлежат сервисам, а команды работают через их методы.
 
-## Предлагаемые границы
+## Предлагаемые границы (фактические AppState seams)
 
 Рефакторинг выполняется независимо, по одному владельцу состояния:
 
@@ -34,8 +51,15 @@ runtime-функций
 4. Уточнить владельца playback handle и cached audio devices; не переносить их
    механически без проверки потоков воспроизведения.
 
-WebView, Twitch, VTube Studio и editor повторно не перерабатываются без
-конкретной найденной проблемы.
+> **Не относится к `AppState`.** Telegram client state живёт в отдельном
+> `TelegramState` (`commands/telegram.rs`, managed в `lib.rs`) и уже закрыт как
+> owner seam в ROADMAP-059 P1 (`current_client`/`set_client`/`clear_client`/
+> `swap_client`/`with_client`, контракт разделения Arc — DECISION-018). Эта
+> работа **завершена** и здесь не повторяется. WebView section persist тоже
+> закрыт атомарным `set_webview_section` (ROADMAP-059 P0).
+
+WebView, Twitch, VTube Studio и editor как **integration** seams повторно не
+перерабатываются без конкретной найденной проблемы — см. ROADMAP-059 P3.
 
 ## Правила выполнения
 
@@ -43,7 +67,8 @@ WebView, Twitch, VTube Studio и editor повторно не перерабат
 - Сигнатуры Tauri commands и имена frontend events сохраняются.
 - Сначала добавляется API владельца и тесты, затем мигрируют callers, после чего
   прямое публичное поле закрывается.
-- Lock guard не удерживается через сетевой вызов, аудиооперацию или `await`.
+- Lock guard не удерживается через сетевой вызов, аудиооперацию или `await`
+  (для seam'ов с shared Arc — см. допустимый контракт DECISION-018).
 - Не проводить big-bang rewrite `state.rs`, `commands/` и `setup.rs` одним diff.
 
 ## Критерии готовности
@@ -63,4 +88,6 @@ WebView, Twitch, VTube Studio и editor повторно не перерабат
 - смена TTS-провайдеров или аудиоалгоритмов;
 - редизайн frontend state management;
 - переименование всех исторических типов;
-- абстракции «на будущее», не уменьшающие текущий прямой доступ к state.
+- абстракции «на будущее», не уменьшающие текущий прямой доступ к state;
+- integration-сервисы (Telegram/WebView/Twitch/VTube) — это ROADMAP-059, не AppState.
+

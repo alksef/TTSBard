@@ -1,6 +1,6 @@
 ---
 id: ROADMAP-059
-status: planned
+status: completed
 created: 2026-07-30
 updated: 2026-07-30
 related_tasks: [TASK-117]
@@ -105,6 +105,26 @@ P0 — самостоятельный defect fix и выполняется пе�
 P1. P3 состоит из независимых service-scoped tasks и может завершиться после
 закрытия перечисленных public integration locks либо явного rescope с причиной.
 
+## Прогресс
+
+- **P0 (done)** — WebView section save атомарный: `set_webview_section`
+  (load → mutate → save), валидация порта до персиста, failure-injection tests.
+  Коммиты: `2b840a8`.
+- **P1 (done)** — Telegram owner extraction: команды делегируют `TelegramState`
+  owner-API (`current_client`/`set_client`/`clear_client`/`swap_client`/
+  `with_client`); устранены два lock-through-await (`telegram_select_voice`,
+  `reconnect_telegram`); `client` → `pub(crate)` по контракту DECISION-018.
+  Коммиты: `89d2536`, `dcd244e`, `e054dd3`. ROADMAP-041 invariants зелёные.
+- **P2 (done)** — TASK-117 актуализирован: AppState decomposition отделён от
+  integration encapsulation, Telegram/WebView owner work зафиксирован как
+  завершённый контекст.
+- **P3 (done — rescoped)** — Аудит Twitch / WebView / VTube Studio показал
+  отсутствие технических дефектов (нет lock-through-await, нет partial-commit,
+  persist→runtime порядок корректен). Их `settings: Arc<RwLock<_>>` зафиксированы
+  как допустимый контракт (DECISION-019) вместо owner-API: это кэш настроек, а не
+  lifecycle-state, и всем потребителям нужен только read-current. Owner-API
+  заводится под конкретный сервис только при появлении наблюдаемого дефекта.
+
 ## Критерии завершения
 
 - WebView section save имеет один атомарный persist path и failure-injection
@@ -114,10 +134,39 @@ P1. P3 состоит из независимых service-scoped tasks и мож
 - Telegram retry, cancel, restart и stale-result tests остаются зелёными;
 - TASK-117 соответствует фактическим owner seams и не предлагает уже
   завершённую TTS работу;
-- settings/status locks выбранных integration services private, а callers
-  используют owner APIs;
+- settings/status locks integration-сервисов либо приватны с owner-API (Telegram),
+  либо зафиксированы как допустимый Arc-контракт с явным правилом доступа
+  (Twitch/WebView/VTube, DECISION-019);
 - проходят focused tests, полный `cargo test --locked`, `cargo check --locked`,
   строгий Clippy и `./scripts/check-docs.ps1`.
+
+## Outcome
+
+ROADMAP-059 закрыт полностью:
+
+- **P0** — WebView section save атомарный (`set_webview_section`), валидация до
+  персиста, failure-injection tests (`2b840a8`).
+- **P1** — Telegram owner-API (`current_client`/`set_client`/`clear_client`/
+  `swap_client`/`with_client`), устранены два lock-through-await, `client` →
+  `pub(crate)` (`dcd244e`, `e054dd3`). ROADMAP-041 invariants зелёные.
+- **P2** — TASK-117 reconciled: AppState decomposition отделён от integration
+  encapsulation (`88b3b12`).
+- **P3** — Twitch/WebView/VTube settings-локи зафиксированы как допустимый контракт
+  (DECISION-019): owner-API не нужен (это кэш настроек, не lifecycle-state).
+  Первичный аудит P3 заявлял «дефектов нет», но **был неполным** — он проверял
+  только lock-through-await/partial-commit в section-save и пропустил нарушение
+  порядка `persist → runtime → emit` в соседних командах (Twitch emit-до-runtime,
+  WebView token/upnp runtime-до-persist и не-персист `enabled`, VTube token без
+  rollback, Telegram stale-result clear). Эти дефекты найдены и исправлены в
+  `0224039` (independently проверен: `cargo check/clippy --lib -D warnings`,
+  1066 lib-тестов зелёные). Урок: порядок операций проверять grep-проходкой по
+  всем persist/runtime/emit в каждом сервисе, а не доверять однобокому аудиту.
+
+Архитектурный итог: вместо тотальной инкапсуляции зафиксированы два
+**контракта доступа** — DECISION-018 (Telegram client Arc-share) и DECISION-019
+(integration settings-Arc) — с единым правилом `lock → clone → drop → await` и
+порядком `validate → persist → runtime → emit`. Owner-API вводится только под
+наблюдаемый дефект, а не ради единообразия.
 
 ## Не входит
 
