@@ -1181,6 +1181,17 @@ impl SettingsManager {
         })
     }
 
+    /// Create a SettingsManager with a custom config directory (for testing).
+    #[cfg(test)]
+    pub fn with_config_dir(config_dir: PathBuf) -> Result<Self> {
+        fs::create_dir_all(&config_dir).context("Failed to create config dir")?;
+        let settings = Self::load_from_disk(&config_dir)?;
+        Ok(Self {
+            config_dir,
+            cache: Arc::new(RwLock::new(settings)),
+        })
+    }
+
     /// Get the path to settings.json
     fn settings_path(&self) -> PathBuf {
         self.config_dir.join("settings.json")
@@ -1532,22 +1543,6 @@ impl SettingsManager {
 
     // ========== WebView Settings ==========
 
-    /// Set WebView start on boot
-    pub fn set_webview_start_on_boot(&self, start: bool) -> Result<()> {
-        self.update_field("/webview/start_on_boot", &start)
-    }
-
-    /// Set WebView port
-    pub fn set_webview_port(&self, port: u16) -> Result<()> {
-        let validated = validate_port(port).map_err(|e| anyhow::anyhow!(e))?;
-        self.update_field("/webview/port", &validated)
-    }
-
-    /// Set WebView bind address
-    pub fn set_webview_bind_address(&self, address: String) -> Result<()> {
-        self.update_field("/webview/bind_address", &address)
-    }
-
     /// Set WebView access token
     pub fn set_webview_access_token(&self, token: Option<String>) -> Result<()> {
         self.update_field("/webview/access_token", &token)
@@ -1556,6 +1551,25 @@ impl SettingsManager {
     /// Set WebView UPnP enabled
     pub fn set_webview_upnp_enabled(&self, enabled: bool) -> Result<()> {
         self.update_field("/webview/upnp_enabled", &enabled)
+    }
+
+    /// Atomically replace four mutable fields of the WebView section.
+    ///
+    /// Preserves `access_token` and `enabled` from the current config.
+    /// One load → mutate → save cycle; validated before call.
+    pub fn set_webview_section(
+        &self,
+        start_on_boot: bool,
+        port: u16,
+        bind_address: String,
+        upnp_enabled: bool,
+    ) -> Result<()> {
+        let mut app_settings = self.load()?;
+        app_settings.webview.start_on_boot = start_on_boot;
+        app_settings.webview.port = port;
+        app_settings.webview.bind_address = bind_address;
+        app_settings.webview.upnp_enabled = upnp_enabled;
+        self.save(&app_settings)
     }
 
     // ========== Logging Settings ==========
@@ -2266,6 +2280,184 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&config_dir);
+    }
+
+    #[test]
+    fn set_webview_section_persist_error_preserves_cache_and_disk() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let config_dir = std::env::temp_dir().join(format!(
+            "ttsbard-webview-persist-err-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let settings_path = config_dir.join("settings.json");
+        let mut settings = AppSettings::default();
+        settings.webview.port = 8080;
+        settings.webview.bind_address = "0.0.0.0".to_string();
+        settings.webview.start_on_boot = true;
+        settings.webview.upnp_enabled = false;
+        std::fs::write(
+            &settings_path,
+            serde_json::to_string_pretty(&settings).unwrap(),
+        )
+        .unwrap();
+
+        let cache = Arc::new(RwLock::new(settings));
+
+        // Write to a nonexistent subdir — rename will fail with "no such file"
+        let bad_config_dir = config_dir.join("nonexistent_subdir");
+        let bad_manager = SettingsManager {
+            config_dir: bad_config_dir,
+            cache: Arc::clone(&cache),
+        };
+
+        let result = bad_manager.set_webview_section(false, 9999, "127.0.0.1".to_string(), true);
+        assert!(result.is_err(), "persist to nonexistent dir must fail");
+
+        let after_cache = bad_manager.load().unwrap();
+        assert_eq!(
+            after_cache.webview.port, 8080,
+            "cache port must be unchanged"
+        );
+        assert_eq!(
+            after_cache.webview.bind_address, "0.0.0.0",
+            "cache bind_address must be unchanged"
+        );
+        assert!(
+            after_cache.webview.start_on_boot,
+            "cache start_on_boot must be unchanged"
+        );
+        assert!(
+            !after_cache.webview.upnp_enabled,
+            "cache upnp_enabled must be unchanged"
+        );
+
+        let actual_disk = std::fs::read_to_string(&settings_path).unwrap();
+        let disk_settings: AppSettings = serde_json::from_str(&actual_disk).unwrap();
+        assert_eq!(
+            disk_settings.webview.port, 8080,
+            "disk port must be unchanged"
+        );
+
+        let _ = std::fs::remove_dir_all(&config_dir);
+    }
+
+    /// Helper: build a SettingsManager over a fresh temp config dir.
+    fn webview_section_tmp_manager(label: &str) -> (SettingsManager, PathBuf) {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-webview-section-{}-{}-{}",
+            label,
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let manager = SettingsManager::with_config_dir(dir.clone()).unwrap();
+        (manager, dir)
+    }
+
+    fn read_disk_settings(config_dir: &Path) -> AppSettings {
+        let content = std::fs::read_to_string(config_dir.join("settings.json")).unwrap();
+        serde_json::from_str(&content).unwrap()
+    }
+
+    #[test]
+    fn set_webview_section_saves_four_fields_and_keeps_cache_in_sync() {
+        let (manager, dir) = webview_section_tmp_manager("save-four");
+
+        let result =
+            manager.set_webview_section(false, 9090, "127.0.0.1".to_string(), false);
+        assert!(result.is_ok(), "set_webview_section failed: {:?}", result.err());
+
+        let disk = read_disk_settings(&dir);
+        assert!(!disk.webview.start_on_boot);
+        assert_eq!(disk.webview.port, 9090);
+        assert_eq!(disk.webview.bind_address, "127.0.0.1");
+        assert!(!disk.webview.upnp_enabled);
+
+        let cache = manager.load().unwrap();
+        assert_eq!(cache, disk, "in-memory cache and disk must be identical");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn set_webview_section_preserves_access_token_and_enabled() {
+        let (manager, dir) = webview_section_tmp_manager("preserve");
+
+        // Seed unrelated fields via the still-public point setters.
+        manager.set_webview_access_token(Some("secret-token-123".to_string())).unwrap();
+        let before = manager.load().unwrap();
+        assert!(!before.webview.enabled, "default enabled must be false");
+        assert_eq!(before.webview.access_token, Some("secret-token-123".to_string()));
+
+        manager.set_webview_section(false, 9090, "0.0.0.0".to_string(), true).unwrap();
+
+        let after = manager.load().unwrap();
+        assert_eq!(
+            after.webview.access_token,
+            Some("secret-token-123".to_string()),
+            "access_token must survive section save"
+        );
+        assert!(!after.webview.enabled, "enabled must survive section save");
+        assert_eq!(after.webview.port, 9090);
+        assert!(after.webview.upnp_enabled);
+
+        assert_eq!(read_disk_settings(&dir), after, "disk and cache must agree");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn set_webview_section_leaves_no_residual_temp_file() {
+        let (manager, dir) = webview_section_tmp_manager("atomic-write");
+
+        manager.set_webview_section(false, 2020, "127.0.0.1".to_string(), false).unwrap();
+
+        let tmp_files: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_str()
+                    .is_some_and(|n| n.ends_with(".tmp"))
+            })
+            .collect();
+        assert!(tmp_files.is_empty(), "atomic write must not leave a .tmp file behind");
+
+        assert!(dir.join("settings.json").exists(), "settings.json must exist");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn set_webview_section_repeated_saves_keep_cache_and_disk_in_sync() {
+        let (manager, dir) = webview_section_tmp_manager("consistency");
+
+        for (port, addr, upnp) in [
+            (8080u16, "0.0.0.0", false),
+            (9090, "127.0.0.1", false),
+            (7070, "192.168.1.100", true),
+            (1024, "0.0.0.0", true),
+        ] {
+            manager.set_webview_section(true, port, addr.to_string(), upnp).unwrap();
+            assert_eq!(
+                manager.load().unwrap(),
+                read_disk_settings(&dir),
+                "cache and disk must match after save with port={}",
+                port
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Backward-compat: old settings.json without `dsp` field must deserialize.

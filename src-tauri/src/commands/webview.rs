@@ -1,3 +1,4 @@
+use crate::config::validate_port;
 use crate::config::SettingsManager;
 use crate::state::AppState;
 use crate::webview::WebViewSettings;
@@ -73,6 +74,7 @@ pub async fn save_webview_settings(
     };
 
     validate_upnp_token(settings.upnp_enabled, settings.access_token.as_deref())?;
+    validate_port(settings.port).map_err(|e| e.to_string())?;
 
     // Check if enabled status or port changed (start_on_boot doesn't require restart)
     let old_settings = state.webview.settings.read().await;
@@ -82,19 +84,15 @@ pub async fn save_webview_settings(
     let upnp_changed = old_settings.upnp_enabled != settings.upnp_enabled;
     drop(old_settings);
 
-    // Get SettingsManager once and persist to config
+    // Get SettingsManager once and persist to config atomically
     let settings_manager = app_handle.try_state::<SettingsManager>();
     if let Some(manager) = settings_manager {
-        let bind_addr = settings.bind_address.clone();
         let start_on_boot = settings.start_on_boot;
         let port = settings.port;
+        let bind_addr = settings.bind_address.clone();
         let upnp_enabled = settings.upnp_enabled;
         super::persist_blocking(manager.inner(), move |mgr| {
-            mgr.set_webview_start_on_boot(start_on_boot)?;
-            mgr.set_webview_port(port)?;
-            mgr.set_webview_bind_address(bind_addr)?;
-            mgr.set_webview_upnp_enabled(upnp_enabled)?;
-            Ok(())
+            mgr.set_webview_section(start_on_boot, port, bind_addr, upnp_enabled)
         })
         .await?;
         super::emit_settings_changed(&app_handle);
