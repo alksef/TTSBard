@@ -1988,7 +1988,7 @@ fn explain_event_error(err: &str, param_name: &str) -> String {
 /// Возвращает внутренний payload: либо строку после известного префикса операции
 /// (`Create parameter failed: `, `Inject parameter failed: `, `Hotkey trigger failed: `),
 /// либо исходную строку, если префикс не найден.
-fn inner_vts_error<'a>(err: &'a str) -> &'a str {
+fn inner_vts_error(err: &str) -> &str {
     const WRAPPERS: &[&str] = &[
         "Create parameter failed: ",
         "Inject parameter failed: ",

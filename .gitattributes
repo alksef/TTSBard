@@ -1,0 +1,5 @@
+# Text fixtures are compared verbatim against in-memory serialization in tests.
+# Force LF so a Windows checkout (core.autocrlf=true) does not turn them into CRLF
+# and break fixture-parity tests locally.
+scripts/contract-fixtures/** text eol=lf
+scripts/settings-fixtures/**   text eol=lf

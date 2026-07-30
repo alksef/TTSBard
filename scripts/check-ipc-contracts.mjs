@@ -118,7 +118,7 @@ function collectRegisteredCommands(root) {
   const commands = []
 
   let cursor = 0
-  for (const line of block.text.split('\n')) {
+  for (const line of block.text.replace(/\r\n?/g, '\n').split('\n')) {
     const code = line.replace(/\/\/.*$/, '').trim().replace(/,$/, '')
     if (code) {
       const match = code.match(/^(?:[a-zA-Z_][a-zA-Z0-9_]*::)*([a-zA-Z_][a-zA-Z0-9_]*)$/)
