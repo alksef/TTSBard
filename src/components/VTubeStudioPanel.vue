@@ -14,7 +14,8 @@ const {
   typingRepeatsError,
   canTestAction,
   canLoadHotkeys,
-  canSaveTypingAction,
+  canEditTypingAction,
+  canSubmitTypingAction,
   typingMode,
   eventName,
   startHotkeyId,
@@ -121,7 +122,7 @@ const {
 
       <div class="setting-row typing-action-row">
         <label>Способ:</label>
-        <select v-model="typingMode" class="text-input typing-mode-select" :disabled="busy">
+        <select v-model="typingMode" class="text-input typing-mode-select" :disabled="busy || !canEditTypingAction">
           <option value="Event">Параметр VTS</option>
           <option value="Hotkeys">Горячие клавиши</option>
           <option value="Item">Предмет сцены</option>
@@ -135,7 +136,7 @@ const {
             type="text"
             v-model="eventName"
             class="text-input"
-            :disabled="busy"
+            :disabled="busy || !canEditTypingAction"
             placeholder="TTSBardTyping"
           />
         </div>
@@ -166,7 +167,7 @@ const {
 
         <div class="setting-row typing-action-row">
           <label>Начало набора:</label>
-          <select v-model="startHotkeyId" class="text-input" :disabled="busy">
+          <select v-model="startHotkeyId" class="text-input" :disabled="busy || !canEditTypingAction">
             <option value="" disabled>— выберите —</option>
             <option v-for="h in hotkeys" :key="h.hotkeyID" :value="h.hotkeyID">
               {{ h.name }}<template v-if="h.type !== 'Сохранённая'"> ({{ h.type }})</template>
@@ -176,7 +177,7 @@ const {
 
         <div class="setting-row typing-action-row">
           <label>Окончание набора:</label>
-          <select v-model="stopHotkeyId" class="text-input" :disabled="busy">
+          <select v-model="stopHotkeyId" class="text-input" :disabled="busy || !canEditTypingAction">
             <option value="" disabled>— выберите —</option>
             <option v-for="h in hotkeys" :key="h.hotkeyID" :value="h.hotkeyID">
               {{ h.name }}<template v-if="h.type !== 'Сохранённая'"> ({{ h.type }})</template>
@@ -205,7 +206,7 @@ const {
 
         <div class="setting-row typing-action-row item-selection-row">
           <label>Предмет:</label>
-          <select v-model="itemFileName" class="text-input item-select" :disabled="busy">
+          <select v-model="itemFileName" class="text-input item-select" :disabled="busy || !canEditTypingAction">
             <option value="" disabled>— выберите —</option>
             <option v-if="itemFileName && !selectedSceneItem" :value="itemFileName">
               {{ itemFileName }} — нет в текущей сцене
@@ -228,12 +229,16 @@ const {
         {{ itemStatusWarning }}
       </div>
 
+      <p v-if="currentStatus !== 'Connected'" class="info-hint" role="status">
+        Подключитесь к VTube Studio, чтобы настроить действие.
+      </p>
+
       <div class="setting-row button-row">
         <button
           @click="saveTypingAction()"
           class="save-button-inline"
-          :disabled="busy || !canSaveTypingAction"
-          :class="{ disabled: busy || !canSaveTypingAction }"
+          :disabled="!canSubmitTypingAction"
+          :class="{ disabled: !canSubmitTypingAction }"
           title="Сохранить выбранное действие набора"
           aria-label="Сохранить действие"
         >

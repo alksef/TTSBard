@@ -1446,4 +1446,187 @@ describe('useVTubeStudio', () => {
       expect(composable.itemStatus.value.status).toBe('Ready')
     })
   })
+
+  describe('read-only disconnected UI (P3)', () => {
+    describe('canEditTypingAction', () => {
+      it('is true when Connected and not busy', async () => {
+        const { canEditTypingAction, currentStatus } = await setupAndMount(undefined, 'Connected')
+        currentStatus.value = 'Connected'
+        expect(canEditTypingAction.value).toBe(true)
+      })
+
+      it('is false when Disconnected', async () => {
+        const { canEditTypingAction, currentStatus } = await setupAndMount(undefined, 'Disconnected')
+        currentStatus.value = 'Disconnected'
+        expect(canEditTypingAction.value).toBe(false)
+      })
+
+      it('is false when Connecting', async () => {
+        const { canEditTypingAction, currentStatus } = await setupAndMount(undefined, 'Connecting')
+        currentStatus.value = 'Connecting'
+        expect(canEditTypingAction.value).toBe(false)
+      })
+
+      it('is false when Error', async () => {
+        const { canEditTypingAction, currentStatus } = await setupAndMount(undefined, 'Error')
+        currentStatus.value = 'Error'
+        expect(canEditTypingAction.value).toBe(false)
+      })
+
+      it('is false when Connected but busy', async () => {
+        const { canEditTypingAction, currentStatus, busy } = await setupAndMount(undefined, 'Connected')
+        currentStatus.value = 'Connected'
+        busy.value = true
+        expect(canEditTypingAction.value).toBe(false)
+      })
+    })
+
+    describe('canSubmitTypingAction', () => {
+      it('is true when form valid, Connected, and not busy', async () => {
+        const { canSubmitTypingAction, currentStatus } = await setupAndMount(undefined, 'Connected')
+        currentStatus.value = 'Connected'
+        expect(canSubmitTypingAction.value).toBe(true)
+      })
+
+      it('is false when Disconnected even if form is valid', async () => {
+        const { canSubmitTypingAction, currentStatus } = await setupAndMount(undefined, 'Disconnected')
+        currentStatus.value = 'Disconnected'
+        expect(canSubmitTypingAction.value).toBe(false)
+      })
+
+      it('is false when form invalid (empty Event name) even if Connected', async () => {
+        const { canSubmitTypingAction, currentStatus, eventName } = await setupAndMount(undefined, 'Connected')
+        currentStatus.value = 'Connected'
+        eventName.value = ''
+        expect(canSubmitTypingAction.value).toBe(false)
+      })
+
+      it('is false when busy even if form is valid', async () => {
+        const { canSubmitTypingAction, currentStatus, busy } = await setupAndMount(undefined, 'Connected')
+        currentStatus.value = 'Connected'
+        busy.value = true
+        expect(canSubmitTypingAction.value).toBe(false)
+      })
+    })
+
+    describe('saveTypingAction rejects when not connected', () => {
+      it('rejects with hint when canEditTypingAction is false (Disconnected), even with valid form', async () => {
+        const { saveTypingAction, currentStatus, errorMessage } = await setupAndMount(undefined, 'Disconnected')
+        currentStatus.value = 'Disconnected'
+        mockInvoke.mockClear()
+        mockInvoke.mockResolvedValue('ok')
+
+        await saveTypingAction()
+        await flushMicrotasks()
+
+        expect(mockInvoke).not.toHaveBeenCalledWith('save_vtube_studio_typing_action', expect.anything())
+        expect(errorMessage.value).toContain('Подключитесь к VTube Studio')
+      })
+
+      it('rejects with hint when Connecting, even with valid form', async () => {
+        const { saveTypingAction, currentStatus, errorMessage } = await setupAndMount(undefined, 'Connecting')
+        currentStatus.value = 'Connecting'
+        mockInvoke.mockClear()
+        mockInvoke.mockResolvedValue('ok')
+
+        await saveTypingAction()
+        await flushMicrotasks()
+
+        expect(mockInvoke).not.toHaveBeenCalledWith('save_vtube_studio_typing_action', expect.anything())
+        expect(errorMessage.value).toContain('Подключитесь к VTube Studio')
+      })
+
+      it('rejects with hint when Error status, even with valid form', async () => {
+        const { saveTypingAction, currentStatus, errorMessage } = await setupAndMount(undefined, 'Error')
+        currentStatus.value = 'Error'
+        mockInvoke.mockClear()
+        mockInvoke.mockResolvedValue('ok')
+
+        await saveTypingAction()
+        await flushMicrotasks()
+
+        expect(mockInvoke).not.toHaveBeenCalledWith('save_vtube_studio_typing_action', expect.anything())
+        expect(errorMessage.value).toContain('Подключитесь к VTube Studio')
+      })
+
+      it('still passes form validation after reconnecting', async () => {
+        const { saveTypingAction, currentStatus, canSubmitTypingAction } = await setupAndMount(undefined, 'Disconnected')
+        currentStatus.value = 'Disconnected'
+        expect(canSubmitTypingAction.value).toBe(false)
+
+        currentStatus.value = 'Connected'
+        expect(canSubmitTypingAction.value).toBe(true)
+
+        mockInvoke.mockResolvedValue('saved')
+        await saveTypingAction()
+        await flushMicrotasks()
+        expect(mockInvoke).toHaveBeenCalledWith('save_vtube_studio_typing_action', expect.anything())
+      })
+    })
+
+    describe('draft and saved not reset on disconnect/reconnect', () => {
+      it('preserves draft and saved typing action across Disconnected → Connected transition', async () => {
+        const composable = await setupAndMount(undefined, 'Connected')
+        composable.typingMode.value = 'Hotkeys'
+        composable.startHotkeyId.value = 'hk-start'
+        composable.stopHotkeyId.value = 'hk-stop'
+        composable.savedTypingAction.value = {
+          outputMode: 'Hotkeys',
+          parameterName: 'TTSBardTyping',
+          startHotkeyId: 'hk-start',
+          stopHotkeyId: 'hk-stop',
+          startHotkeyName: 'Start',
+          stopHotkeyName: 'Stop',
+          itemFileName: '',
+          itemType: '',
+        }
+
+        const cb = getCapturedListenCallback()
+        cb!({ payload: { Disconnected: null } })
+        await flushMicrotasks()
+        expect(composable.currentStatus.value).toBe('Disconnected')
+        expect(composable.typingMode.value).toBe('Hotkeys')
+        expect(composable.startHotkeyId.value).toBe('hk-start')
+        expect(composable.stopHotkeyId.value).toBe('hk-stop')
+        expect(composable.savedTypingAction.value.outputMode).toBe('Hotkeys')
+
+        cb!({ payload: { Connected: null } })
+        await flushMicrotasks()
+        expect(composable.currentStatus.value).toBe('Connected')
+        expect(composable.typingMode.value).toBe('Hotkeys')
+        expect(composable.startHotkeyId.value).toBe('hk-start')
+        expect(composable.stopHotkeyId.value).toBe('hk-stop')
+        expect(composable.savedTypingAction.value.startHotkeyName).toBe('Start')
+      })
+
+      it('preserves saved Event values visible in read-only after disconnect', async () => {
+        const composable = await setupAndMount(undefined, 'Connected')
+        composable.typingMode.value = 'Event'
+        composable.eventName.value = 'MyTypingParam'
+        composable.savedTypingAction.value = {
+          outputMode: 'Event',
+          parameterName: 'MyTypingParam',
+          startHotkeyId: '',
+          stopHotkeyId: '',
+          startHotkeyName: '',
+          stopHotkeyName: '',
+          itemFileName: '',
+          itemType: '',
+        }
+
+        const cb = getCapturedListenCallback()
+        cb!({ payload: { Disconnected: null } })
+        await flushMicrotasks()
+        expect(composable.currentStatus.value).toBe('Disconnected')
+        expect(composable.eventName.value).toBe('MyTypingParam')
+        expect(composable.savedTypingAction.value.parameterName).toBe('MyTypingParam')
+
+        cb!({ payload: { Connected: null } })
+        await flushMicrotasks()
+        expect(composable.currentStatus.value).toBe('Connected')
+        expect(composable.eventName.value).toBe('MyTypingParam')
+        expect(composable.savedTypingAction.value.parameterName).toBe('MyTypingParam')
+      })
+    })
+  })
 })

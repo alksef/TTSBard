@@ -161,6 +161,8 @@ export function useVTubeStudio() {
     const selected = selectedSceneItem.value
     return itemFileName.value.length > 0 && selected?.supported === true && selected.duplicateCount === 1
   })
+  const canEditTypingAction = computed(() => currentStatus.value === 'Connected' && !busy.value)
+  const canSubmitTypingAction = computed(() => canSaveTypingAction.value && canEditTypingAction.value)
   const itemStatusWarning = computed(() => {
     const status = itemStatus.value
     switch (status.status) {
@@ -467,6 +469,10 @@ export function useVTubeStudio() {
 
   async function saveTypingAction() {
     if (busy.value) return
+    if (!canEditTypingAction.value) {
+      showError('Подключитесь к VTube Studio, чтобы сохранить действие набора.')
+      return
+    }
     if (!canSaveTypingAction.value) {
       showError(typingMode.value === 'Event'
         ? 'Имя параметра не может быть пустым'
@@ -578,6 +584,8 @@ export function useVTubeStudio() {
     canTestAction,
     canLoadHotkeys,
     canSaveTypingAction,
+    canEditTypingAction,
+    canSubmitTypingAction,
     typingActionValid,
     typingMode,
     eventName,
