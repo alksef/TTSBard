@@ -366,26 +366,18 @@ pub async fn reconnect_telegram(
         }
     }
 
-    // Disconnect old client and replace it in state
-    let client_clone = {
-        let mut client_guard = telegram_state.client.lock().await;
-
-        // Disconnect and take old client if exists
-        if let Some(old_client) = (*client_guard).take() {
-            info!("Disconnecting existing Telegram client");
-            if let Err(e) = old_client.disconnect().await {
-                warn!("Failed to disconnect old client: {}", e);
-            }
+    // Atomically swap clients, then disconnect old one OUTSIDE the state lock
+    let old_client = telegram_state.swap_client(client.clone()).await;
+    if let Some(old) = old_client {
+        info!("Disconnecting existing Telegram client");
+        if let Err(e) = old.disconnect().await {
+            warn!("Failed to disconnect old client: {}", e);
         }
-
-        // Save new client
-        *client_guard = Some(client.clone());
-        client
-    };
+    }
 
     // Get proxy status and verify authorization without holding the state lock
-    let proxy_status = client_clone.get_proxy_status().await;
-    let is_authorized = client_clone.is_authorized().await?;
+    let proxy_status = client.get_proxy_status().await;
+    let is_authorized = client.is_authorized().await?;
 
     // Update cached proxy status
     telegram_state

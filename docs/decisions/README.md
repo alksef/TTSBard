@@ -23,6 +23,7 @@ implementation details и журналы обсуждений сюда не по
 - [DECISION-013 — Сетевая конфигурация](./013-network-configuration.md)
 - [DECISION-014 — Ошибки и проверка](./014-errors-and-validation.md)
 - [DECISION-017 — Лицензия GPL-3.0-only](./017-gpl-3-license.md)
+- [DECISION-018 — Telegram client ownership: контракт разделения Arc](./018-telegram-client-ownership.md) — почему `client` остаётся `pub(crate)` (не private) и правило доступа `lock → clone → drop → await`
 
 ## Заменённые решения
 

@@ -9,7 +9,10 @@ use tracing::debug;
 /// Silero TTS implementation using Telegram bot @silero_voice_bot
 #[derive(Clone, Debug)]
 pub struct SileroTts {
-    // Arc на Option<TelegramClient> - клиент может быть None если не подключен
+    // Arc на Option<TelegramClient> - клиент может быть None если не подключен.
+    // Контракт разделения этого Arc описан в DECISION-018: движок намеренно
+    // держит Arc сам (не просит client у владельца) и обязан соблюдать правило
+    // `lock → clone → drop guard → await` (ROADMAP-059 инвариант #3).
     client: Option<Arc<Mutex<Option<TelegramClient>>>>,
     configured: bool,
     event_tx: Option<EventSender>,
