@@ -21,9 +21,14 @@ New-Item -ItemType Directory -Force .work/ai | Out-Null
 ```powershell
 npm test
 npm run build
-cargo test --manifest-path src-tauri/Cargo.toml
-cargo check --manifest-path src-tauri/Cargo.toml
+./scripts/cargo.ps1 test --manifest-path src-tauri/Cargo.toml
+./scripts/cargo.ps1 check --manifest-path src-tauri/Cargo.toml
+./scripts/cargo.ps1 clippy --manifest-path src-tauri/Cargo.toml
 ```
+
+`./scripts/cargo.ps1` автоматически находит `libclang.dll` и передаёт все аргументы
+в `cargo`, сохраняя код возврата. При необходимости discovery можно вызвать
+напрямую: `./scripts/libclang-bootstrap.ps1`.
 
 Проверки выбираются по риску изменения. `npm run build` уже выполняет
 `vue-tsc --noEmit`; Rust-тесты по возможности сначала запускаются точечно.

@@ -1,5 +1,5 @@
 use crate::commands::playback::PlaybackState;
-use crate::ipc::{speech as speech_contract, CommandError};
+use crate::ipc::{self, speech as speech_contract, CommandError};
 use crate::speech_queue::{
     AcceptedJob, JobStatus, QueueError, Snapshot, SpeechQueue, SpeechQueueStateDto,
 };
@@ -47,11 +47,12 @@ fn emit_queue_changed(app_handle: &AppHandle, dto: SpeechQueueStateDto) {
 }
 
 fn map_submit_queue_error(error: QueueError) -> CommandError {
-    let (code, retryable) = match error {
-        QueueError::EmptyText => (speech_contract::error_code::EMPTY_TEXT, false),
-        QueueError::QueueFull(_) => (speech_contract::error_code::QUEUE_FULL, true),
-        _ => (speech_contract::error_code::QUEUE_REJECTED, false),
+    let code = match &error {
+        QueueError::EmptyText => speech_contract::error_code::EMPTY_TEXT,
+        QueueError::QueueFull(_) => speech_contract::error_code::QUEUE_FULL,
+        _ => speech_contract::error_code::QUEUE_REJECTED,
     };
+    let retryable = ipc::speech_error_code_to_retryable(code);
     CommandError::new(code, error.to_string(), retryable)
 }
 
@@ -128,7 +129,7 @@ pub fn submit_speech(
         CommandError::new(
             speech_contract::error_code::SNAPSHOT_UNAVAILABLE,
             format!("Snapshot error: {error}"),
-            false,
+            ipc::speech_error_code_to_retryable(speech_contract::error_code::SNAPSHOT_UNAVAILABLE),
         )
     })?;
     let mut q = queue.lock();

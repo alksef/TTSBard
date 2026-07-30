@@ -43,11 +43,11 @@ export const TtsProviderType = {
 export type TtsProviderType = (typeof TtsProviderType)[keyof typeof TtsProviderType]
 
 export interface OpenAiSettingsDto {
-  api_key?: string
+  api_key: string | null
   voice: string
-  proxy_host?: string
-  proxy_port?: number
-  use_proxy?: boolean
+  proxy_host: string | null
+  proxy_port: number | null
+  use_proxy: boolean
 }
 
 export interface LocalTtsSettingsDto {
@@ -58,29 +58,29 @@ export interface LocalTtsSettingsDto {
 export interface VoiceModel {
   id: string
   title: string
-  description?: string
-  cover_image?: string
+  description: string | null
+  cover_image: string | null
   languages: string[]
-  author_nickname?: string
+  author_nickname: string | null
 }
 
 export interface FishAudioSettingsDto {
-  api_key?: string
+  api_key: string | null
   voices: VoiceModel[]
   reference_id: string
   format: string
   temperature: number
   sample_rate: number
-  use_proxy?: boolean
+  use_proxy: boolean
 }
 
 export interface TelegramTtsSettingsDto {
-  api_id?: number
-  proxy_mode?: string
-  voices?: VoiceCode[]
-  current_voice_id?: string
-  synthesis_response_timeout_ms?: number
-  download_retry_delay_ms?: number
+  api_id: number | null
+  proxy_mode: string
+  voices: VoiceCode[]
+  current_voice_id: string
+  synthesis_response_timeout_ms: number
+  download_retry_delay_ms: number
 }
 
 export interface VoiceCode {
@@ -89,14 +89,14 @@ export interface VoiceCode {
 }
 
 export interface Socks5SettingsDto {
-  proxy_url?: string
+  proxy_url: string | null
 }
 
 export interface MtProxySettingsDto {
-  host?: string
+  host: string | null
   port: number
-  secret?: string
-  dc_id?: number
+  secret: string | null
+  dc_id: number | null
 }
 
 export interface NetworkSettingsDto {
@@ -109,12 +109,12 @@ export interface TtsProviderInfoDto {
   display_name: string
   kind: string
   active: boolean
-  runtime_status?: 'discovered' | 'ready'
+  runtime_status?: string
 }
 
 export interface TtsSettingsDto {
   provider: TtsProviderType
-  provider_id?: string
+  provider_id: string | null
   providers: TtsProviderInfoDto[]
   openai: OpenAiSettingsDto
   local: LocalTtsSettingsDto
@@ -143,7 +143,7 @@ export interface WebViewSettingsDto {
   start_on_boot: boolean
   port: number
   bind_address: string
-  access_token?: string
+  access_token: string | null
   upnp_enabled: boolean
 }
 
@@ -164,10 +164,10 @@ export interface TwitchSettingsDto {
 // ============================================================================
 
 export interface AudioSettingsDto {
-  speaker_device?: string
+  speaker_device: string | null
   speaker_enabled: boolean
   speaker_volume: number
-  virtual_mic_device?: string
+  virtual_mic_device: string | null
   virtual_mic_volume: number
 }
 
@@ -245,8 +245,8 @@ export interface LoggingSettingsDto {
 // ============================================================================
 
 export interface MainWindowSettingsDto {
-  x?: number
-  y?: number
+  x: number | null
+  y: number | null
   custom_background: boolean
   opacity: number
   bg_color: string
@@ -257,8 +257,8 @@ export interface MainWindowSettingsDto {
 }
 
 export interface SoundPanelWindowSettingsDto {
-  x?: number
-  y?: number
+  x: number | null
+  y: number | null
   opacity: number
   bg_color: string
   clickthrough: boolean
@@ -268,8 +268,8 @@ export interface SoundPanelWindowSettingsDto {
 }
 
 export interface PlaybackWindowSettingsDto {
-  x?: number
-  y?: number
+  x: number | null
+  y: number | null
   opacity: number
   bg_color: string
   appearance_source: string
@@ -294,7 +294,6 @@ export type Theme = 'dark' | 'light'
 
 export interface GeneralSettingsDto {
   hotkey_enabled: boolean
-  enter_closes_disabled: boolean
   theme?: Theme
   show_playback_on_start: boolean
 }
@@ -338,27 +337,27 @@ export const AiProviderType = {
 export type AiProviderType = (typeof AiProviderType)[keyof typeof AiProviderType]
 
 export interface AiOpenAiSettingsDto {
-  api_key?: string
-  use_proxy?: boolean
-  model?: string
+  api_key: string | null
+  use_proxy: boolean
+  model: string
 }
 
 export interface AiZAiSettingsDto {
-  url?: string
-  api_key?: string
+  url: string | null
+  api_key: string | null
   model: string
 }
 
 export interface AiDeepSeekSettingsDto {
-  api_key?: string
-  use_proxy?: boolean
+  api_key: string | null
+  use_proxy: boolean
   model: string
 }
 
 export interface AiCustomSettingsDto {
-  url?: string
-  api_key?: string
-  use_proxy?: boolean
+  url: string | null
+  api_key: string | null
+  use_proxy: boolean
   model: string
 }
 
@@ -371,7 +370,7 @@ export interface AiSettingsDto {
   deepseek: AiDeepSeekSettingsDto
   custom: AiCustomSettingsDto
   prompt: string
-  timeout?: number
+  timeout: number
 }
 
 // ============================================================================

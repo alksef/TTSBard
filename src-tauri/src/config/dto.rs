@@ -1330,3 +1330,632 @@ impl AppSettingsDto {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Populated fixture: every reachable array/object shape is present
+    fn build_populated() -> AppSettingsDto {
+        let tts = TtsSettingsDto {
+            provider: TtsProviderType::OpenAi,
+            openai: OpenAiSettingsDto {
+                api_key: Some("sk-test-key".into()),
+                voice: "alloy".into(),
+                proxy_host: None,
+                proxy_port: None,
+                use_proxy: false,
+            },
+            local: LocalTtsSettingsDto {
+                url: "http://localhost:5002".into(),
+            },
+            fish: FishAudioSettingsDto {
+                api_key: Some("fish-test-key".into()),
+                voices: vec![VoiceModelDto {
+                    id: "voice-1".into(),
+                    title: "Test Voice".into(),
+                    description: Some("A test voice".into()),
+                    cover_image: None,
+                    languages: vec!["en".into(), "ru".into()],
+                    author_nickname: Some("author1".into()),
+                }],
+                reference_id: "ref-abc".into(),
+                format: "mp3".into(),
+                temperature: 0.7,
+                sample_rate: 44100,
+                use_proxy: true,
+            },
+            telegram: TelegramTtsSettingsDto {
+                api_id: Some(12345),
+                proxy_mode: "none".to_string(),
+                voices: vec![],
+                current_voice_id: String::new(),
+                synthesis_response_timeout_ms: 10000,
+                download_retry_delay_ms: 1000,
+            },
+            network: NetworkSettingsDto {
+                proxy: Socks5SettingsDto { proxy_url: None },
+                mtproxy: MtProxySettingsDto {
+                    host: None,
+                    port: 443,
+                    secret: None,
+                    dc_id: None,
+                },
+            },
+            provider_id: Some("openai".into()),
+            providers: vec![TtsProviderInfoDto {
+                id: "silero-0".into(),
+                display_name: "Silero".into(),
+                kind: "silero".into(),
+                active: false,
+                runtime_status: Some("Ready".into()),
+            }],
+        };
+
+        let webview = WebViewSettingsDto {
+            enabled: true,
+            start_on_boot: false,
+            port: 8080,
+            bind_address: "127.0.0.1".into(),
+            access_token: None,
+            upnp_enabled: false,
+        };
+
+        let twitch = TwitchSettingsDto {
+            enabled: false,
+            username: String::new(),
+            token: String::new(),
+            channel: String::new(),
+            start_on_boot: false,
+        };
+
+        let windows = WindowsSettingsDto {
+            global: GlobalSettingsDto {
+                exclude_from_capture: false,
+            },
+            main: MainWindowSettingsDto {
+                x: Some(100),
+                y: Some(200),
+                custom_background: false,
+                opacity: 100,
+                bg_color: "#1e1e2e".into(),
+                custom_opacity: false,
+                opacity_compact_only: false,
+                compact_width: 400,
+                compact_height: 500,
+            },
+            soundpanel: SoundPanelWindowSettingsDto {
+                x: None,
+                y: None,
+                opacity: 90,
+                bg_color: "#181825".into(),
+                clickthrough: false,
+                stay_visible: true,
+                hide_on_blur: false,
+                appearance_source: "main".into(),
+            },
+            playback: PlaybackWindowSettingsDto {
+                x: None,
+                y: None,
+                opacity: 100,
+                bg_color: "#11111b".into(),
+                appearance_source: "main".into(),
+            },
+        };
+
+        let audio = AudioSettingsDto {
+            speaker_device: None,
+            speaker_enabled: true,
+            speaker_volume: 80,
+            virtual_mic_device: Some("CABLE Input".into()),
+            virtual_mic_volume: 100,
+        };
+
+        let audio_effects = AudioEffectsSettingsDto {
+            enabled: true,
+            pitch: 0,
+            speed: 0,
+            volume: 100,
+            enhance_enabled: true,
+            enhance_atten_db: 12.0,
+            formant_preserved: true,
+            boundary_cleanup_enabled: true,
+        };
+
+        let dsp = DspSettingsDto {
+            eq: DspEqSettingsDto {
+                enabled: true,
+                low_cut_enabled: true,
+                low_cut_hz: 80.0,
+                low_cut_slope_db: 12.0,
+                bands: vec![DspEqBandSettingsDto {
+                    enabled: true,
+                    frequency_hz: 1000.0,
+                    gain_db: 3.0,
+                    q: 1.414,
+                }],
+                high_shelf_enabled: false,
+                high_shelf_hz: 8000.0,
+                high_shelf_gain_db: 0.0,
+            },
+            compressor: DspCompressorSettingsDto {
+                enabled: false,
+                threshold_db: -24.0,
+                ratio: 4.0,
+                attack_ms: 5.0,
+                release_ms: 50.0,
+                knee_db: 2.0,
+                makeup_db: 0.0,
+            },
+            limiter: DspLimiterSettingsDto {
+                enabled: true,
+                ceiling_db: -1.0,
+                release_ms: 20.0,
+            },
+        };
+
+        let general = GeneralSettingsDto {
+            hotkey_enabled: true,
+            theme: Some("dark".into()),
+            show_playback_on_start: false,
+        };
+
+        let editor = EditorSettingsDto {
+            quick: "collapse".into(),
+            ai: true,
+            ai_completion: false,
+            spellcheck_enabled: true,
+            spellcheck_source: SpellSourceDto::Online,
+            editor_height: 300,
+            typing_idle_timeout_ms: 800,
+        };
+
+        let logging = LoggingSettingsDto {
+            enabled: true,
+            level: "info".into(),
+            module_levels: {
+                let mut m = std::collections::HashMap::new();
+                m.insert("tts".into(), "debug".into());
+                m
+            },
+        };
+
+        let preprocessor = PreprocessorSettingsDto {
+            enabled: true,
+            replacements_count: 12,
+        };
+
+        let soundpanel_bindings: Vec<SoundBindingDto> = vec![SoundBinding {
+            key: 'a',
+            description: "Test sound A".into(),
+            filename: "test_a.wav".into(),
+            original_path: Some("D:\\sounds\\test_a.wav".into()),
+        }];
+
+        let ai = AiSettingsDto {
+            provider: AiProviderTypeDto::OpenAi,
+            openai: AiOpenAiSettingsDto {
+                api_key: Some("sk-ai-test".into()),
+                use_proxy: false,
+                model: "gpt-4o-mini".into(),
+            },
+            zai: AiZAiSettingsDto {
+                url: None,
+                api_key: None,
+                model: "glm-4.5".into(),
+            },
+            deepseek: AiDeepSeekSettingsDto {
+                api_key: None,
+                use_proxy: false,
+                model: "deepseek-chat".into(),
+            },
+            custom: AiCustomSettingsDto {
+                url: None,
+                api_key: None,
+                use_proxy: false,
+                model: String::new(),
+            },
+            prompt: String::new(),
+            timeout: 20,
+        };
+
+        let hotkeys = HotkeySettingsDto {
+            main_window: HotkeyDto {
+                modifiers: vec![HotkeyModifierDto::Ctrl],
+                key: "F3".into(),
+            },
+            sound_panel: HotkeyDto {
+                modifiers: vec![HotkeyModifierDto::Ctrl],
+                key: "F2".into(),
+            },
+            playback_pause: HotkeyDto {
+                modifiers: vec![],
+                key: "F5".into(),
+            },
+            playback_stop: HotkeyDto {
+                modifiers: vec![],
+                key: "F6".into(),
+            },
+            playback_repeat: HotkeyDto {
+                modifiers: vec![],
+                key: "F7".into(),
+            },
+            playback_control_window: HotkeyDto {
+                modifiers: vec![],
+                key: "F8".into(),
+            },
+            return_previous_window: HotkeyDto {
+                modifiers: vec![HotkeyModifierDto::Ctrl],
+                key: "F".into(),
+            },
+        };
+
+        let vtube_studio = VTubeStudioSettingsDto {
+            enabled: false,
+            port: 8001,
+            start_on_boot: false,
+            typing_action: VTubeStudioTypingActionDto {
+                output_mode: VTubeStudioTypingMode::Event,
+                parameter_name: String::new(),
+                start_hotkey_id: String::new(),
+                stop_hotkey_id: String::new(),
+                start_hotkey_name: String::new(),
+                stop_hotkey_name: String::new(),
+                item_file_name: String::new(),
+                item_type: String::new(),
+            },
+        };
+
+        AppSettingsDto {
+            notifications: vec!["startup-message".into()],
+            tts,
+            webview,
+            twitch,
+            windows,
+            audio,
+            audio_effects,
+            dsp,
+            general,
+            editor,
+            logging,
+            preprocessor,
+            soundpanel_bindings,
+            ai,
+            hotkeys,
+            vtube_studio,
+        }
+    }
+
+    /// Omitted-or-null fixture: skip_serializing_if fields absent, required nullables null, empty collections
+    fn build_omitted_or_null() -> AppSettingsDto {
+        let tts = TtsSettingsDto {
+            provider: TtsProviderType::OpenAi,
+            openai: OpenAiSettingsDto {
+                api_key: None,
+                voice: "alloy".into(),
+                proxy_host: None,
+                proxy_port: None,
+                use_proxy: false,
+            },
+            local: LocalTtsSettingsDto {
+                url: "http://localhost:5002".into(),
+            },
+            fish: FishAudioSettingsDto {
+                api_key: None,
+                voices: vec![VoiceModelDto {
+                    id: "voice-omit".into(),
+                    title: "Omit Voice".into(),
+                    description: None,
+                    cover_image: None,
+                    languages: vec!["en".into()],
+                    author_nickname: None,
+                }],
+                ..Default::default()
+            },
+            telegram: TelegramTtsSettingsDto {
+                api_id: None,
+                proxy_mode: "none".to_string(),
+                voices: vec![],
+                current_voice_id: String::new(),
+                synthesis_response_timeout_ms: 10000,
+                download_retry_delay_ms: 1000,
+            },
+            network: NetworkSettingsDto {
+                proxy: Socks5SettingsDto { proxy_url: None },
+                mtproxy: MtProxySettingsDto {
+                    host: None,
+                    port: 443,
+                    secret: None,
+                    dc_id: None,
+                },
+            },
+            provider_id: None,
+            providers: vec![TtsProviderInfoDto {
+                id: "silero-0".into(),
+                display_name: "Silero".into(),
+                kind: "silero".into(),
+                active: false,
+                runtime_status: None,
+            }],
+        };
+
+        let webview = WebViewSettingsDto {
+            enabled: false,
+            start_on_boot: false,
+            port: 8080,
+            bind_address: "0.0.0.0".into(),
+            access_token: None,
+            upnp_enabled: false,
+        };
+
+        let twitch = TwitchSettingsDto {
+            enabled: false,
+            username: String::new(),
+            token: String::new(),
+            channel: String::new(),
+            start_on_boot: false,
+        };
+
+        let windows = WindowsSettingsDto {
+            global: GlobalSettingsDto {
+                exclude_from_capture: false,
+            },
+            main: MainWindowSettingsDto {
+                x: None,
+                y: None,
+                custom_background: false,
+                opacity: 100,
+                bg_color: "#1e1e2e".into(),
+                custom_opacity: false,
+                opacity_compact_only: false,
+                compact_width: 400,
+                compact_height: 500,
+            },
+            soundpanel: SoundPanelWindowSettingsDto {
+                x: None,
+                y: None,
+                opacity: 100,
+                bg_color: "#181825".into(),
+                clickthrough: true,
+                stay_visible: false,
+                hide_on_blur: true,
+                appearance_source: "main".into(),
+            },
+            playback: PlaybackWindowSettingsDto {
+                x: None,
+                y: None,
+                opacity: 100,
+                bg_color: "#11111b".into(),
+                appearance_source: "main".into(),
+            },
+        };
+
+        let audio = AudioSettingsDto {
+            speaker_device: None,
+            speaker_enabled: false,
+            speaker_volume: 0,
+            virtual_mic_device: None,
+            virtual_mic_volume: 0,
+        };
+
+        let audio_effects = AudioEffectsSettingsDto {
+            enabled: false,
+            pitch: 0,
+            speed: 0,
+            volume: 0,
+            enhance_enabled: false,
+            enhance_atten_db: 0.0,
+            formant_preserved: false,
+            boundary_cleanup_enabled: false,
+        };
+
+        let dsp = DspSettingsDto {
+            eq: DspEqSettingsDto {
+                enabled: false,
+                low_cut_enabled: false,
+                low_cut_hz: 0.0,
+                low_cut_slope_db: 0.0,
+                bands: vec![],
+                high_shelf_enabled: false,
+                high_shelf_hz: 0.0,
+                high_shelf_gain_db: 0.0,
+            },
+            compressor: DspCompressorSettingsDto {
+                enabled: false,
+                threshold_db: 0.0,
+                ratio: 0.0,
+                attack_ms: 0.0,
+                release_ms: 0.0,
+                knee_db: 0.0,
+                makeup_db: 0.0,
+            },
+            limiter: DspLimiterSettingsDto {
+                enabled: false,
+                ceiling_db: 0.0,
+                release_ms: 0.0,
+            },
+        };
+
+        let general = GeneralSettingsDto {
+            hotkey_enabled: false,
+            theme: None,
+            show_playback_on_start: false,
+        };
+
+        let editor = EditorSettingsDto {
+            quick: "disabled".into(),
+            ai: false,
+            ai_completion: false,
+            spellcheck_enabled: false,
+            spellcheck_source: SpellSourceDto::Offline,
+            editor_height: 200,
+            typing_idle_timeout_ms: 500,
+        };
+
+        let logging = LoggingSettingsDto {
+            enabled: false,
+            level: "warn".into(),
+            module_levels: std::collections::HashMap::new(),
+        };
+
+        let preprocessor = PreprocessorSettingsDto {
+            enabled: false,
+            replacements_count: 0,
+        };
+
+        let ai = AiSettingsDto {
+            provider: AiProviderTypeDto::OpenAi,
+            openai: AiOpenAiSettingsDto {
+                api_key: None,
+                use_proxy: false,
+                model: "gpt-4o-mini".into(),
+            },
+            zai: AiZAiSettingsDto {
+                url: None,
+                api_key: None,
+                model: "glm-4.5".into(),
+            },
+            deepseek: AiDeepSeekSettingsDto {
+                api_key: None,
+                use_proxy: false,
+                model: "deepseek-chat".into(),
+            },
+            custom: AiCustomSettingsDto {
+                url: None,
+                api_key: None,
+                use_proxy: false,
+                model: String::new(),
+            },
+            prompt: String::new(),
+            timeout: 20,
+        };
+
+        let hotkeys = HotkeySettingsDto {
+            main_window: HotkeyDto {
+                modifiers: vec![],
+                key: String::new(),
+            },
+            sound_panel: HotkeyDto {
+                modifiers: vec![],
+                key: String::new(),
+            },
+            playback_pause: HotkeyDto {
+                modifiers: vec![],
+                key: String::new(),
+            },
+            playback_stop: HotkeyDto {
+                modifiers: vec![],
+                key: String::new(),
+            },
+            playback_repeat: HotkeyDto {
+                modifiers: vec![],
+                key: String::new(),
+            },
+            playback_control_window: HotkeyDto {
+                modifiers: vec![],
+                key: String::new(),
+            },
+            return_previous_window: HotkeyDto {
+                modifiers: vec![],
+                key: String::new(),
+            },
+        };
+
+        let vtube_studio = VTubeStudioSettingsDto {
+            enabled: false,
+            port: 8001,
+            start_on_boot: false,
+            typing_action: VTubeStudioTypingActionDto {
+                output_mode: VTubeStudioTypingMode::Event,
+                parameter_name: String::new(),
+                start_hotkey_id: String::new(),
+                stop_hotkey_id: String::new(),
+                start_hotkey_name: String::new(),
+                stop_hotkey_name: String::new(),
+                item_file_name: String::new(),
+                item_type: String::new(),
+            },
+        };
+
+        AppSettingsDto {
+            notifications: Vec::new(),
+            tts,
+            webview,
+            twitch,
+            windows,
+            audio,
+            audio_effects,
+            dsp,
+            general,
+            editor,
+            logging,
+            preprocessor,
+            soundpanel_bindings: vec![SoundBinding {
+                key: 'z',
+                description: "Null-path sound".into(),
+                filename: "z.wav".into(),
+                original_path: None,
+            }],
+            ai,
+            hotkeys,
+            vtube_studio,
+        }
+    }
+
+    fn check_fixture_vs_serde(fixture_name: &str, dto: &AppSettingsDto) {
+        let current = serde_json::to_string_pretty(dto).expect("serialize");
+        let fixture_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../scripts/settings-fixtures");
+        let full_path = format!("{}/{}.json", fixture_path, fixture_name);
+        let fixture = std::fs::read_to_string(&full_path).unwrap_or_else(|_| {
+            panic!(
+                "Fixture '{}.json' missing — regenerate with `cargo test app_settings_dto_fixtures_regenerate -- --ignored`",
+                fixture_name
+            )
+        });
+        assert_eq!(
+            current, fixture,
+            "Fixture '{}.json' is stale — regenerate with `cargo test app_settings_dto_fixtures_regenerate -- --ignored`",
+            fixture_name
+        );
+    }
+
+    #[test]
+    fn app_settings_dto_fixture_populated_is_current() {
+        let dto = build_populated();
+        check_fixture_vs_serde("populated", &dto);
+    }
+
+    #[test]
+    fn app_settings_dto_fixture_omit_null_is_current() {
+        let dto = build_omitted_or_null();
+        check_fixture_vs_serde("omit-null", &dto);
+    }
+
+    #[test]
+    fn app_settings_dto_round_trip() {
+        let dto = build_populated();
+        let json1 = serde_json::to_string_pretty(&dto).expect("first serialize");
+        let deserialized: AppSettingsDto = serde_json::from_str(&json1).expect("deserialize");
+        let json2 = serde_json::to_string_pretty(&deserialized).expect("second serialize");
+        assert_eq!(json1, json2, "Round-trip produced different JSON");
+    }
+
+    /// Regenerates all fixture files. Excluded from standard test runs.
+    #[test]
+    #[ignore]
+    fn app_settings_dto_fixtures_regenerate() {
+        let fixture_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../scripts/settings-fixtures");
+
+        let populated = build_populated();
+        let populated_json = serde_json::to_string_pretty(&populated).expect("serialize populated");
+        std::fs::write(format!("{}/populated.json", fixture_dir), &populated_json)
+            .expect("write populated fixture");
+        eprintln!("Fixture written: {}/populated.json", fixture_dir);
+
+        let omit_null = build_omitted_or_null();
+        let omit_null_json = serde_json::to_string_pretty(&omit_null).expect("serialize omit-null");
+        std::fs::write(format!("{}/omit-null.json", fixture_dir), &omit_null_json)
+            .expect("write omit-null fixture");
+        eprintln!("Fixture written: {}/omit-null.json", fixture_dir);
+    }
+}

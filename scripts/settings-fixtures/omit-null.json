@@ -1,0 +1,255 @@
+{
+  "tts": {
+    "provider": "openai",
+    "openai": {
+      "api_key": null,
+      "voice": "alloy",
+      "proxy_host": null,
+      "proxy_port": null,
+      "use_proxy": false
+    },
+    "local": {
+      "url": "http://localhost:5002"
+    },
+    "fish": {
+      "api_key": null,
+      "voices": [
+        {
+          "id": "voice-omit",
+          "title": "Omit Voice",
+          "description": null,
+          "cover_image": null,
+          "languages": [
+            "en"
+          ],
+          "author_nickname": null
+        }
+      ],
+      "reference_id": "",
+      "format": "",
+      "temperature": 0.0,
+      "sample_rate": 0,
+      "use_proxy": false
+    },
+    "telegram": {
+      "api_id": null,
+      "proxy_mode": "none",
+      "voices": [],
+      "current_voice_id": "",
+      "synthesis_response_timeout_ms": 10000,
+      "download_retry_delay_ms": 1000
+    },
+    "network": {
+      "proxy": {
+        "proxy_url": null
+      },
+      "mtproxy": {
+        "host": null,
+        "port": 443,
+        "secret": null,
+        "dc_id": null
+      }
+    },
+    "provider_id": null,
+    "providers": [
+      {
+        "id": "silero-0",
+        "display_name": "Silero",
+        "kind": "silero",
+        "active": false
+      }
+    ]
+  },
+  "webview": {
+    "enabled": false,
+    "start_on_boot": false,
+    "port": 8080,
+    "bind_address": "0.0.0.0",
+    "access_token": null,
+    "upnp_enabled": false
+  },
+  "twitch": {
+    "enabled": false,
+    "username": "",
+    "token": "",
+    "channel": "",
+    "start_on_boot": false
+  },
+  "windows": {
+    "global": {
+      "exclude_from_capture": false
+    },
+    "main": {
+      "x": null,
+      "y": null,
+      "custom_background": false,
+      "opacity": 100,
+      "bg_color": "#1e1e2e",
+      "custom_opacity": false,
+      "opacity_compact_only": false,
+      "compact_width": 400,
+      "compact_height": 500
+    },
+    "soundpanel": {
+      "x": null,
+      "y": null,
+      "opacity": 100,
+      "bg_color": "#181825",
+      "clickthrough": true,
+      "stay_visible": false,
+      "hide_on_blur": true,
+      "appearance_source": "main"
+    },
+    "playback": {
+      "x": null,
+      "y": null,
+      "opacity": 100,
+      "bg_color": "#11111b",
+      "appearance_source": "main"
+    }
+  },
+  "audio": {
+    "speaker_device": null,
+    "speaker_enabled": false,
+    "speaker_volume": 0,
+    "virtual_mic_device": null,
+    "virtual_mic_volume": 0
+  },
+  "audio_effects": {
+    "enabled": false,
+    "pitch": 0,
+    "speed": 0,
+    "volume": 0,
+    "enhance_enabled": false,
+    "enhance_atten_db": 0.0,
+    "formant_preserved": false,
+    "boundary_cleanup_enabled": false
+  },
+  "dsp": {
+    "eq": {
+      "enabled": false,
+      "low_cut_enabled": false,
+      "low_cut_hz": 0.0,
+      "low_cut_slope_db": 0.0,
+      "bands": [],
+      "high_shelf_enabled": false,
+      "high_shelf_hz": 0.0,
+      "high_shelf_gain_db": 0.0
+    },
+    "compressor": {
+      "enabled": false,
+      "threshold_db": 0.0,
+      "ratio": 0.0,
+      "attack_ms": 0.0,
+      "release_ms": 0.0,
+      "knee_db": 0.0,
+      "makeup_db": 0.0
+    },
+    "limiter": {
+      "enabled": false,
+      "ceiling_db": 0.0,
+      "release_ms": 0.0
+    }
+  },
+  "general": {
+    "hotkey_enabled": false,
+    "show_playback_on_start": false
+  },
+  "editor": {
+    "quick": "disabled",
+    "ai": false,
+    "ai_completion": false,
+    "spellcheck_enabled": false,
+    "spellcheck_source": "offline",
+    "editor_height": 200,
+    "typing_idle_timeout_ms": 500
+  },
+  "logging": {
+    "enabled": false,
+    "level": "warn",
+    "module_levels": {}
+  },
+  "preprocessor": {
+    "enabled": false,
+    "replacements_count": 0
+  },
+  "soundpanel_bindings": [
+    {
+      "key": "z",
+      "description": "Null-path sound",
+      "filename": "z.wav",
+      "original_path": null
+    }
+  ],
+  "ai": {
+    "provider": "openai",
+    "openai": {
+      "api_key": null,
+      "use_proxy": false,
+      "model": "gpt-4o-mini"
+    },
+    "zai": {
+      "url": null,
+      "api_key": null,
+      "model": "glm-4.5"
+    },
+    "deepseek": {
+      "api_key": null,
+      "use_proxy": false,
+      "model": "deepseek-chat"
+    },
+    "custom": {
+      "url": null,
+      "api_key": null,
+      "use_proxy": false,
+      "model": ""
+    },
+    "prompt": "",
+    "timeout": 20
+  },
+  "hotkeys": {
+    "main_window": {
+      "modifiers": [],
+      "key": ""
+    },
+    "sound_panel": {
+      "modifiers": [],
+      "key": ""
+    },
+    "playback_pause": {
+      "modifiers": [],
+      "key": ""
+    },
+    "playback_stop": {
+      "modifiers": [],
+      "key": ""
+    },
+    "playback_repeat": {
+      "modifiers": [],
+      "key": ""
+    },
+    "playback_control_window": {
+      "modifiers": [],
+      "key": ""
+    },
+    "return_previous_window": {
+      "modifiers": [],
+      "key": ""
+    }
+  },
+  "vtube_studio": {
+    "enabled": false,
+    "port": 8001,
+    "start_on_boot": false,
+    "typingAction": {
+      "outputMode": "Event",
+      "parameterName": "",
+      "startHotkeyId": "",
+      "stopHotkeyId": "",
+      "startHotkeyName": "",
+      "stopHotkeyName": "",
+      "itemFileName": "",
+      "itemType": ""
+    }
+  }
+}

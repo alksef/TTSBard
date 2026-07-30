@@ -2,7 +2,8 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
-import { emit } from '@tauri-apps/api/event'
+import { createAsyncCleanupScope } from '../src/utils/asyncCleanup'
+import { registerSoundPanelAppListeners, installSoundPanelKeydown } from '../src/playback/listeners'
 
 interface SoundBinding {
   key: string
@@ -167,6 +168,17 @@ defineExpose({
   showNoBinding
 })
 
+const listenerScope = createAsyncCleanupScope()
+
+onUnmounted(() => {
+  listenerScope.dispose()
+  window.removeEventListener('keydown', onKeydown)
+  if (messageTimeout !== null) {
+    clearTimeout(messageTimeout)
+    messageTimeout = null
+  }
+})
+
 onMounted(async () => {
   await loadSets()
   await loadBindings()
@@ -192,7 +204,7 @@ onMounted(async () => {
     console.error('Failed to load stay_visible:', e)
   }
 
-  const unlisten = await listen('soundpanel-appearance-update', async () => {
+  async function onAppearanceUpdate() {
     console.log('[SoundPanel] Appearance update event received')
     const [newOpacity, newColor] = await invoke<[number, string]>('sp_get_floating_appearance')
     console.log('[SoundPanel] New appearance:', { opacity: newOpacity, color: newColor })
@@ -209,34 +221,24 @@ onMounted(async () => {
       console.error('Failed to reload stay_visible:', e)
     }
     console.log('[SoundPanel] Updated refs:', { opacity: opacity.value, bgColor: bgColor.value })
-  })
-  console.log('[SoundPanel] Registered appearance update listener')
+  }
 
-  const unlistenBindings = await listen('soundpanel-bindings-changed', async () => {
-    console.log('[SoundPanel] Bindings changed event received, reloading')
+  async function onBindingsOrSetChanged() {
+    console.log('[SoundPanel] Bindings or active set changed event received, reloading')
     await loadSets()
     await loadBindings()
-  })
-  console.log('[SoundPanel] Registered bindings changed listener')
+  }
 
-  const unlistenActiveSet = await listen('soundpanel-active-set-changed', async () => {
-    console.log('[SoundPanel] Active set changed event received, reloading')
-    await loadSets()
-    await loadBindings()
-  })
-  console.log('[SoundPanel] Registered active set changed listener')
-
-  window.addEventListener('keydown', onKeydown)
-
-  onUnmounted(() => {
-    unlisten()
-    unlistenBindings()
-    unlistenActiveSet()
-    window.removeEventListener('keydown', onKeydown)
-    if (messageTimeout !== null) {
-      clearTimeout(messageTimeout)
-    }
-  })
+  try {
+    await registerSoundPanelAppListeners(listen, listenerScope, {
+      onAppearanceUpdate,
+      onBindingsChanged: onBindingsOrSetChanged,
+      onActiveSetChanged: onBindingsOrSetChanged,
+    })
+    installSoundPanelKeydown(listenerScope, onKeydown)
+  } catch (e) {
+    console.error('Failed to register soundpanel listeners:', e)
+  }
 })
 </script>
 

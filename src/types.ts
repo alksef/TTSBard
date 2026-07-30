@@ -38,7 +38,7 @@ export interface SoundBinding {
   key: string
   description: string
   filename: string
-  original_path?: string
+  original_path: string | null
 }
 
 /**

@@ -1,0 +1,276 @@
+{
+  "notifications": [
+    "startup-message"
+  ],
+  "tts": {
+    "provider": "openai",
+    "openai": {
+      "api_key": "sk-test-key",
+      "voice": "alloy",
+      "proxy_host": null,
+      "proxy_port": null,
+      "use_proxy": false
+    },
+    "local": {
+      "url": "http://localhost:5002"
+    },
+    "fish": {
+      "api_key": "fish-test-key",
+      "voices": [
+        {
+          "id": "voice-1",
+          "title": "Test Voice",
+          "description": "A test voice",
+          "cover_image": null,
+          "languages": [
+            "en",
+            "ru"
+          ],
+          "author_nickname": "author1"
+        }
+      ],
+      "reference_id": "ref-abc",
+      "format": "mp3",
+      "temperature": 0.7,
+      "sample_rate": 44100,
+      "use_proxy": true
+    },
+    "telegram": {
+      "api_id": 12345,
+      "proxy_mode": "none",
+      "voices": [],
+      "current_voice_id": "",
+      "synthesis_response_timeout_ms": 10000,
+      "download_retry_delay_ms": 1000
+    },
+    "network": {
+      "proxy": {
+        "proxy_url": null
+      },
+      "mtproxy": {
+        "host": null,
+        "port": 443,
+        "secret": null,
+        "dc_id": null
+      }
+    },
+    "provider_id": "openai",
+    "providers": [
+      {
+        "id": "silero-0",
+        "display_name": "Silero",
+        "kind": "silero",
+        "active": false,
+        "runtime_status": "Ready"
+      }
+    ]
+  },
+  "webview": {
+    "enabled": true,
+    "start_on_boot": false,
+    "port": 8080,
+    "bind_address": "127.0.0.1",
+    "access_token": null,
+    "upnp_enabled": false
+  },
+  "twitch": {
+    "enabled": false,
+    "username": "",
+    "token": "",
+    "channel": "",
+    "start_on_boot": false
+  },
+  "windows": {
+    "global": {
+      "exclude_from_capture": false
+    },
+    "main": {
+      "x": 100,
+      "y": 200,
+      "custom_background": false,
+      "opacity": 100,
+      "bg_color": "#1e1e2e",
+      "custom_opacity": false,
+      "opacity_compact_only": false,
+      "compact_width": 400,
+      "compact_height": 500
+    },
+    "soundpanel": {
+      "x": null,
+      "y": null,
+      "opacity": 90,
+      "bg_color": "#181825",
+      "clickthrough": false,
+      "stay_visible": true,
+      "hide_on_blur": false,
+      "appearance_source": "main"
+    },
+    "playback": {
+      "x": null,
+      "y": null,
+      "opacity": 100,
+      "bg_color": "#11111b",
+      "appearance_source": "main"
+    }
+  },
+  "audio": {
+    "speaker_device": null,
+    "speaker_enabled": true,
+    "speaker_volume": 80,
+    "virtual_mic_device": "CABLE Input",
+    "virtual_mic_volume": 100
+  },
+  "audio_effects": {
+    "enabled": true,
+    "pitch": 0,
+    "speed": 0,
+    "volume": 100,
+    "enhance_enabled": true,
+    "enhance_atten_db": 12.0,
+    "formant_preserved": true,
+    "boundary_cleanup_enabled": true
+  },
+  "dsp": {
+    "eq": {
+      "enabled": true,
+      "low_cut_enabled": true,
+      "low_cut_hz": 80.0,
+      "low_cut_slope_db": 12.0,
+      "bands": [
+        {
+          "enabled": true,
+          "frequency_hz": 1000.0,
+          "gain_db": 3.0,
+          "q": 1.414
+        }
+      ],
+      "high_shelf_enabled": false,
+      "high_shelf_hz": 8000.0,
+      "high_shelf_gain_db": 0.0
+    },
+    "compressor": {
+      "enabled": false,
+      "threshold_db": -24.0,
+      "ratio": 4.0,
+      "attack_ms": 5.0,
+      "release_ms": 50.0,
+      "knee_db": 2.0,
+      "makeup_db": 0.0
+    },
+    "limiter": {
+      "enabled": true,
+      "ceiling_db": -1.0,
+      "release_ms": 20.0
+    }
+  },
+  "general": {
+    "hotkey_enabled": true,
+    "theme": "dark",
+    "show_playback_on_start": false
+  },
+  "editor": {
+    "quick": "collapse",
+    "ai": true,
+    "ai_completion": false,
+    "spellcheck_enabled": true,
+    "spellcheck_source": "online",
+    "editor_height": 300,
+    "typing_idle_timeout_ms": 800
+  },
+  "logging": {
+    "enabled": true,
+    "level": "info",
+    "module_levels": {
+      "tts": "debug"
+    }
+  },
+  "preprocessor": {
+    "enabled": true,
+    "replacements_count": 12
+  },
+  "soundpanel_bindings": [
+    {
+      "key": "a",
+      "description": "Test sound A",
+      "filename": "test_a.wav",
+      "original_path": "D:\\sounds\\test_a.wav"
+    }
+  ],
+  "ai": {
+    "provider": "openai",
+    "openai": {
+      "api_key": "sk-ai-test",
+      "use_proxy": false,
+      "model": "gpt-4o-mini"
+    },
+    "zai": {
+      "url": null,
+      "api_key": null,
+      "model": "glm-4.5"
+    },
+    "deepseek": {
+      "api_key": null,
+      "use_proxy": false,
+      "model": "deepseek-chat"
+    },
+    "custom": {
+      "url": null,
+      "api_key": null,
+      "use_proxy": false,
+      "model": ""
+    },
+    "prompt": "",
+    "timeout": 20
+  },
+  "hotkeys": {
+    "main_window": {
+      "modifiers": [
+        "ctrl"
+      ],
+      "key": "F3"
+    },
+    "sound_panel": {
+      "modifiers": [
+        "ctrl"
+      ],
+      "key": "F2"
+    },
+    "playback_pause": {
+      "modifiers": [],
+      "key": "F5"
+    },
+    "playback_stop": {
+      "modifiers": [],
+      "key": "F6"
+    },
+    "playback_repeat": {
+      "modifiers": [],
+      "key": "F7"
+    },
+    "playback_control_window": {
+      "modifiers": [],
+      "key": "F8"
+    },
+    "return_previous_window": {
+      "modifiers": [
+        "ctrl"
+      ],
+      "key": "F"
+    }
+  },
+  "vtube_studio": {
+    "enabled": false,
+    "port": 8001,
+    "start_on_boot": false,
+    "typingAction": {
+      "outputMode": "Event",
+      "parameterName": "",
+      "startHotkeyId": "",
+      "stopHotkeyId": "",
+      "startHotkeyName": "",
+      "stopHotkeyName": "",
+      "itemFileName": "",
+      "itemType": ""
+    }
+  }
+}

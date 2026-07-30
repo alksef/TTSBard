@@ -5,6 +5,7 @@ import { open, confirm } from '@tauri-apps/plugin-dialog'
 import type { SoundBinding, SoundSets, SoundSet } from '../types'
 import { debugLog, debugError } from '../utils/debug'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
+import { registerSoundPanelTabListeners } from '../playback/listeners'
 
 export function useSoundPanel() {
   const bindings = ref<SoundBinding[]>([])
@@ -240,21 +241,17 @@ export function useSoundPanel() {
     await loadSets()
     await loadBindings()
 
-    await listenerScope.track(
-      listen('soundpanel-bindings-changed', async () => {
-        debugLog('[SoundPanelTab] Bindings changed event, reloading')
-        await loadSets()
-        await loadBindings()
-      }),
-    )
-
-    await listenerScope.track(
-      listen('soundpanel-active-set-changed', async () => {
-        debugLog('[SoundPanelTab] Active set changed event, reloading')
-        await loadSets()
-        await loadBindings()
-      }),
-    )
+    try {
+      await registerSoundPanelTabListeners(listen, listenerScope, {
+        onChanged: async () => {
+          debugLog('[SoundPanelTab] Event received, reloading')
+          await loadSets()
+          await loadBindings()
+        },
+      })
+    } catch (e) {
+      debugError('[SoundPanelTab] Failed to register event listeners:', e)
+    }
   })
 
   return {

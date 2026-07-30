@@ -102,6 +102,32 @@ impl SpeechJob {
             handoff_guard: Arc::new(parking_lot::Mutex::new(())),
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn test_job(
+        job_id: Uuid,
+        original_text: String,
+        spoken_text: Option<String>,
+        status: JobStatus,
+        error: Option<String>,
+        attempt: u32,
+        created_at_ms: i64,
+        last_activity_at_ms: i64,
+        snapshot: Snapshot,
+    ) -> Self {
+        Self {
+            job_id,
+            original_text,
+            spoken_text,
+            status,
+            error,
+            attempt,
+            created_at_ms,
+            last_activity_at_ms,
+            snapshot,
+            handoff_guard: Arc::new(parking_lot::Mutex::new(())),
+        }
+    }
 }
 
 // ── Errors ──
@@ -173,6 +199,11 @@ impl SpeechQueue {
         Self {
             jobs: VecDeque::new(),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn push_job(&mut self, job: SpeechJob) {
+        self.jobs.push_back(job);
     }
 
     pub fn len(&self) -> usize {
@@ -2428,5 +2459,126 @@ mod tests {
         };
 
         assert!(!Arc::ptr_eq(&guard1, &guard2));
+    }
+
+    // ── event DTO fixtures ──
+
+    pub(crate) fn build_populated_speech_queue_state_dto() -> SpeechQueueStateDto {
+        let snapshot = Snapshot {
+            provider: "test-provider".into(),
+            voice: "test-voice".into(),
+            skip_twitch: true,
+            skip_webview: false,
+            ai_enabled: true,
+            audio_effects: AudioEffectsSettings::default(),
+            dsp: DspSettings::default(),
+            audio: AudioSettings::default(),
+            ai: AiSettings::default(),
+            tts_provider: TtsProvider::Local(
+                crate::tts::local_http_server::LocalHttpServerTts::new(),
+            ),
+            preprocessor: None,
+            network_settings: NetworkSettings::default(),
+        };
+
+        let mut q = SpeechQueue::new();
+
+        let job1 = SpeechJob::test_job(
+            Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
+            "Hello world".into(),
+            Some("Processed hello".into()),
+            JobStatus::Completed,
+            None,
+            1,
+            1000000000000i64,
+            1000000000000i64,
+            snapshot.clone(),
+        );
+        q.push_job(job1);
+
+        let job2 = SpeechJob::test_job(
+            Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap(),
+            "Goodbye".into(),
+            None,
+            JobStatus::Failed,
+            Some("TTS provider timeout".into()),
+            1,
+            1000000000000i64,
+            1000000000000i64,
+            snapshot,
+        );
+        q.push_job(job2);
+
+        q.state()
+    }
+
+    pub(crate) fn build_empty_speech_queue_state_dto() -> SpeechQueueStateDto {
+        SpeechQueue::new().state()
+    }
+
+    #[test]
+    fn speech_contract_event_fixture_populated_is_current() {
+        let dto = build_populated_speech_queue_state_dto();
+        let current = serde_json::to_string_pretty(&dto).expect("serialize");
+        let fixture_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../scripts/contract-fixtures/speech/speech-queue-populated.json"
+        );
+        let on_disk = std::fs::read_to_string(fixture_path).unwrap_or_else(|_| {
+            panic!(
+                "Fixture 'speech-queue-populated.json' missing — regenerate with \
+                 `cargo test speech_contract_fixtures_regenerate -- --ignored`"
+            );
+        });
+        assert_eq!(
+            current, on_disk,
+            "Fixture 'speech-queue-populated.json' is stale — regenerate with \
+             `cargo test speech_contract_fixtures_regenerate -- --ignored`",
+        );
+    }
+
+    #[test]
+    fn speech_contract_event_fixture_empty_is_current() {
+        let dto = build_empty_speech_queue_state_dto();
+        let current = serde_json::to_string_pretty(&dto).expect("serialize");
+        let fixture_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../scripts/contract-fixtures/speech/speech-queue-empty.json"
+        );
+        let on_disk = std::fs::read_to_string(fixture_path).unwrap_or_else(|_| {
+            panic!(
+                "Fixture 'speech-queue-empty.json' missing — regenerate with \
+                 `cargo test speech_contract_fixtures_regenerate -- --ignored`"
+            )
+        });
+        assert_eq!(
+            current, on_disk,
+            "Fixture 'speech-queue-empty.json' is stale — regenerate with \
+             `cargo test speech_contract_fixtures_regenerate -- --ignored`"
+        );
+    }
+
+    /// Regenerates all speech queue event fixtures. Excluded from standard test runs.
+    #[test]
+    #[ignore]
+    fn speech_contract_fixtures_regenerate() {
+        let fixture_dir = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../scripts/contract-fixtures/speech"
+        );
+
+        std::fs::create_dir_all(fixture_dir).expect("create fixture dir");
+
+        let populated = build_populated_speech_queue_state_dto();
+        let populated_json = serde_json::to_string_pretty(&populated).expect("serialize populated");
+        let populated_path = format!("{}/speech-queue-populated.json", fixture_dir);
+        std::fs::write(&populated_path, &populated_json).expect("write populated fixture");
+        eprintln!("Fixture written: {}", populated_path);
+
+        let empty = build_empty_speech_queue_state_dto();
+        let empty_json = serde_json::to_string_pretty(&empty).expect("serialize empty");
+        let empty_path = format!("{}/speech-queue-empty.json", fixture_dir);
+        std::fs::write(&empty_path, &empty_json).expect("write empty fixture");
+        eprintln!("Fixture written: {}", empty_path);
     }
 }

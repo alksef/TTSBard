@@ -11,6 +11,10 @@
     "test": "vitest run",
     "test:ipc": "node --test scripts/check-ipc-contracts.test.mjs",
     "check:ipc": "node scripts/check-ipc-contracts.mjs",
+    "check:settings": "node scripts/check-settings-parity.mjs",
+    "test:settings": "node --test scripts/check-settings-parity.test.mjs",
+    "check:speech-contract": "node scripts/check-speech-contract.mjs",
+    "test:speech-contract": "node --test scripts/check-speech-contract.test.mjs",
     "test:watch": "vitest",
     "tauri": "tauri"
   },

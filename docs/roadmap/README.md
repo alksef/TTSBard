@@ -104,6 +104,7 @@ related_tasks: []
 - [ROADMAP-055 — Качество и AI-ready foundation](./completed/055-quality-and-ai-ready-architecture.md)
 - [ROADMAP-056 — IPC-контракты и AI-ready границы](./completed/056-ipc-contracts-and-ai-ready-boundaries.md)
 - [ROADMAP-057 — Достоверный handoff и продуктовые источники](./completed/057-truthful-handoff-and-product-sources.md)
+- [ROADMAP-058 — Исполнимые контракты и lifecycle-проверки](./completed/058-executable-contracts-and-lifecycle-proof.md)
 
 ### VTube Studio и WebView
 

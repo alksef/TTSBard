@@ -1,0 +1,25 @@
+{
+  "codes": [
+    {
+      "code": "speech.snapshot_unavailable",
+      "retryable": false
+    },
+    {
+      "code": "speech.empty_text",
+      "retryable": false
+    },
+    {
+      "code": "speech.queue_full",
+      "retryable": true
+    },
+    {
+      "code": "speech.queue_rejected",
+      "retryable": false
+    }
+  ],
+  "envelope": {
+    "code": "speech.queue_full",
+    "message": "queue full",
+    "retryable": true
+  }
+}

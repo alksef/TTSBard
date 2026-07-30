@@ -1,0 +1,26 @@
+{
+  "jobs": [
+    {
+      "job_id": "00000000-0000-0000-0000-000000000001",
+      "original_text": "Hello world",
+      "spoken_text": "Processed hello",
+      "status": "completed",
+      "error": null,
+      "attempt": 1,
+      "created_at_ms": 1000000000000,
+      "last_activity_at_ms": 1000000000000
+    },
+    {
+      "job_id": "00000000-0000-0000-0000-000000000002",
+      "original_text": "Goodbye",
+      "spoken_text": null,
+      "status": "failed",
+      "error": "TTS provider timeout",
+      "attempt": 1,
+      "created_at_ms": 1000000000000,
+      "last_activity_at_ms": 1000000000000
+    }
+  ],
+  "blocked": true,
+  "blocked_reason": "Job 00000000-0000-0000-0000-000000000002 failed: TTS provider timeout"
+}

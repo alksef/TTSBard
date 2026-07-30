@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { LogicalSize } from '@tauri-apps/api/dpi'
+import { createAsyncCleanupScope } from '../src/utils/asyncCleanup'
+import { registerPlaybackControlListeners } from './listeners'
 import {
   type ActivityRow,
   type PlaybackActivityDto,
@@ -103,7 +105,7 @@ function formatError(e: unknown): string {
   return String(e)
 }
 
-let unlisteners: UnlistenFn[] = []
+const listenerScope = createAsyncCleanupScope()
 
 async function fetchActivity() {
   fetchGeneration += 1
@@ -359,49 +361,31 @@ onMounted(async () => {
 
   await Promise.all([fetchActivity(), fetchSpeechQueue(), fetchPlaybackStatus()])
 
-  unlisteners = [
-    await listen('playback-started', () => {
-      fetchPlaybackStatus()
-      fetchActivity()
-    }),
-    await listen('playback-finished', () => {
-      fetchPlaybackStatus()
-      fetchActivity()
-    }),
-    await listen('playback-paused', () => {
-      fetchPlaybackStatus()
-      fetchActivity()
-    }),
-    await listen('playback-resumed', () => {
-      fetchPlaybackStatus()
-      fetchActivity()
-    }),
-    await listen('playback-stopped', () => {
-      fetchPlaybackStatus()
-      fetchActivity()
-    }),
-    await listen('queue-changed', () => {
-      fetchPlaybackStatus()
-      fetchActivity()
-    }),
-    await listen('refresh-state', () => {
-      fetchPlaybackStatus()
-      fetchActivity()
-    }),
-    await listen('speech-queue-changed', (event) => {
-      applySpeechQueuePayload(event.payload)
-    }),
-    await listen('playback-appearance-update', async () => {
-      try {
-        const [newOpacity, newColor] = await invoke<[number, string]>('pc_get_appearance')
-        opacity.value = newOpacity
-        bgColor.value = newColor
-        await resizeToFit()
-      } catch {
-        // silent
-      }
-    }),
-  ]
+  const refreshStatus = () => {
+    fetchPlaybackStatus()
+    fetchActivity()
+  }
+
+  async function onAppearanceUpdate() {
+    try {
+      const [newOpacity, newColor] = await invoke<[number, string]>('pc_get_appearance')
+      opacity.value = newOpacity
+      bgColor.value = newColor
+      await resizeToFit()
+    } catch {
+      // silent
+    }
+  }
+
+  try {
+    await registerPlaybackControlListeners(listen, listenerScope, {
+      refreshStatus,
+      onSpeechQueueChanged: applySpeechQueuePayload,
+      onAppearanceUpdate,
+    })
+  } catch (e) {
+    console.warn('Failed to register playback listeners:', e)
+  }
 
   await resizeToFit()
 })
@@ -409,7 +393,7 @@ onMounted(async () => {
 watch(() => activityRows.value, () => { resizeToFit() }, { deep: true })
 
 onUnmounted(() => {
-  unlisteners.forEach((u) => u())
+  listenerScope.dispose()
 })
 
 const pauseIcon = () =>
