@@ -831,6 +831,45 @@ impl VTubeStudioService {
         Ok(())
     }
 
+    pub async fn ensure_event_parameter_if_connected(
+        &self,
+        parameter_name: &str,
+    ) -> Result<bool, String> {
+        if !self.is_desired_running() {
+            return Ok(false);
+        }
+
+        let status = self.get_connection_status();
+        if status != VTubeStudioConnectionStatus::Connected {
+            return Ok(false);
+        }
+
+        if !self.is_authenticated.load(Ordering::SeqCst) {
+            return Ok(false);
+        }
+
+        let mut inner = self.inner.lock().await;
+        let ws = match inner.ws.as_mut() {
+            Some(ws) => ws,
+            None => return Ok(false),
+        };
+
+        match ensure_event_parameter(ws, self.next_id(), parameter_name).await {
+            Ok(()) => Ok(true),
+            Err(e) => {
+                if is_semantic_vts_error(&e) {
+                    Err(explain_event_error(&e, parameter_name))
+                } else {
+                    debug!(error = %e, "VTS ensure event parameter transport failure, discarding broken socket");
+                    inner.ws = None;
+                    self.is_authenticated.store(false, Ordering::SeqCst);
+                    self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                    Err(e)
+                }
+            }
+        }
+    }
+
     pub async fn refresh_item_action(&self) -> VTubeStudioItemStatus {
         let typing_action = { self.settings.read().await.typing_action.clone() };
 
@@ -5257,5 +5296,49 @@ mod tests {
             "status must be Error"
         );
         assert!(!svc.is_authenticated.load(Ordering::SeqCst));
+    }
+
+    // ---------------------------------------------------------------------------
+    // ensure_event_parameter_if_connected tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn ensure_param_disconnected_no_socket_returns_false_no_mutation() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_desired_running(true);
+        svc.set_connection_status(VTubeStudioConnectionStatus::Connected);
+        svc.is_authenticated.store(true, Ordering::SeqCst);
+        let session_before = svc.read_session();
+        rt.block_on(async {
+            let result = svc.ensure_event_parameter_if_connected("MyParam").await;
+            assert_eq!(result, Ok(false));
+        });
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Connected,
+            "connection status unchanged when no socket"
+        );
+        assert!(svc.is_authenticated.load(Ordering::SeqCst));
+        assert_eq!(svc.read_session(), session_before, "session unchanged");
+        assert!(svc.is_desired_running());
+    }
+
+    #[test]
+    fn ensure_param_not_desired_running_returns_false() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        rt.block_on(async {
+            assert_eq!(
+                svc.ensure_event_parameter_if_connected("MyParam").await,
+                Ok(false)
+            );
+        });
     }
 }

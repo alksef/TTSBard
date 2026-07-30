@@ -19,6 +19,24 @@ fn emit_vts_item_status(app_handle: &AppHandle, status: &VTubeStudioItemStatus) 
     let _ = app_handle.emit(VTS_ITEM_STATUS_CHANGED_EVENT, status);
 }
 
+fn should_publish_event_parameter(is_event_mode: bool, old_name: &str, new_name: &str) -> bool {
+    is_event_mode && old_name != new_name
+}
+
+fn format_event_save_message(created_or_error: Result<bool, String>, param_name: &str) -> String {
+    match created_or_error {
+        Ok(true) => format!(
+            "Параметр '{}' создан в VTube Studio. Действие при наборе сохранено.",
+            param_name
+        ),
+        Ok(false) => "Действие при наборе сохранено".to_string(),
+        Err(e) => format!(
+            "Действие при наборе сохранено, но не удалось создать параметр '{}' в VTube Studio: {}",
+            param_name, e
+        ),
+    }
+}
+
 fn emit_vts_runtime_status(app_handle: &AppHandle, state: &AppState) {
     emit_vts_status(app_handle, &state.vtube_studio.get_connection_status());
     emit_vts_item_status(app_handle, &state.vtube_studio.get_item_status());
@@ -189,7 +207,15 @@ pub async fn save_vtube_studio_typing_action(
         }
     }
 
-    let (existing_file_name, existing_item_type, enabled, port, token, start_on_boot) = {
+    let (
+        existing_file_name,
+        existing_item_type,
+        enabled,
+        port,
+        token,
+        start_on_boot,
+        old_parameter_name,
+    ) = {
         let s = state.vtube_studio.settings.read().await;
         (
             s.typing_action.item_file_name.clone(),
@@ -198,6 +224,7 @@ pub async fn save_vtube_studio_typing_action(
             s.port,
             s.token.clone(),
             s.start_on_boot,
+            s.typing_action.parameter_name.clone(),
         )
     };
 
@@ -241,6 +268,8 @@ pub async fn save_vtube_studio_typing_action(
     .await?;
 
     let is_item_mode = typing_action.output_mode == VTubeStudioTypingMode::Item;
+    let is_event_mode = typing_action.output_mode == VTubeStudioTypingMode::Event;
+    let param_name = typing_action.parameter_name.clone();
 
     {
         let mut s = state.vtube_studio.settings.write().await;
@@ -260,6 +289,15 @@ pub async fn save_vtube_studio_typing_action(
                 "Item action saved but item is not ready: {:?}. Check that the item exists in the scene.",
                 item_status
             ))
+        }
+    } else if should_publish_event_parameter(is_event_mode, &old_parameter_name, &param_name) {
+        match state
+            .vtube_studio
+            .ensure_event_parameter_if_connected(&param_name)
+            .await
+        {
+            Ok(created) => Ok(format_event_save_message(Ok(created), &param_name)),
+            Err(e) => Ok(format_event_save_message(Err(e), &param_name)),
         }
     } else {
         Ok("Действие при наборе сохранено".to_string())
@@ -1028,5 +1066,58 @@ mod tests {
         );
         assert_eq!(result.0, "new.png");
         assert_eq!(result.1, "GIF");
+    }
+
+    #[test]
+    fn format_event_save_true_includes_param_name() {
+        let msg = format_event_save_message(Ok(true), "TTSBardTyping");
+        assert!(msg.contains("создан в VTube Studio"), "got: {}", msg);
+        assert!(msg.contains("TTSBardTyping"), "got: {}", msg);
+        assert!(
+            msg.contains("Действие при наборе сохранено"),
+            "got: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn format_event_save_false_returns_generic_saved_message() {
+        let msg = format_event_save_message(Ok(false), "MyCustomParam");
+        assert_eq!(msg, "Действие при наборе сохранено");
+    }
+
+    #[test]
+    fn format_event_save_error_reports_saved_but_creation_failed() {
+        let msg = format_event_save_message(
+            Err("VTS error 356: invalid parameter name".to_string()),
+            "BadParam",
+        );
+        assert!(
+            msg.contains("Действие при наборе сохранено"),
+            "got: {}",
+            msg
+        );
+        assert!(
+            msg.contains("не удалось создать параметр 'BadParam'"),
+            "got: {}",
+            msg
+        );
+        assert!(msg.contains("VTS error 356"), "got: {}", msg);
+        assert!(!msg.contains("откат"), "got: {}", msg);
+    }
+
+    #[test]
+    fn should_publish_event_parameter_event_changed() {
+        assert!(should_publish_event_parameter(true, "old", "new"));
+    }
+
+    #[test]
+    fn should_publish_event_parameter_event_unchanged() {
+        assert!(!should_publish_event_parameter(true, "same", "same"));
+    }
+
+    #[test]
+    fn should_publish_event_parameter_non_event_changed() {
+        assert!(!should_publish_event_parameter(false, "old", "new"));
     }
 }
