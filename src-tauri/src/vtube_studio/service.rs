@@ -642,16 +642,6 @@ impl VTubeStudioService {
                 }
             }
 
-            if typing_action.output_mode == VTubeStudioTypingMode::Event {
-                let param_name = typing_action.parameter_name.clone();
-                if let Err(e) = create_typing_param(&mut ws, self.next_id(), &param_name).await {
-                    debug!(error = %e, "VTS create param for typing=true failed, discarding broken socket");
-                    self.is_authenticated.store(false, Ordering::SeqCst);
-                    self.set_connection_status(VTubeStudioConnectionStatus::Error);
-                    return Err(e);
-                }
-            }
-
             inner.ws = Some(ws);
             self.set_connection_status(VTubeStudioConnectionStatus::Connected);
         }
@@ -669,6 +659,15 @@ impl VTubeStudioService {
                         return Ok(());
                     }
                 };
+
+                if let Err(e) = ensure_event_parameter(ws, self.next_id(), &param_name).await {
+                    debug!(error = %e, "VTS ensure event parameter failed, discarding broken socket");
+                    inner.ws = None;
+                    inner.typing_active = false;
+                    self.is_authenticated.store(false, Ordering::SeqCst);
+                    self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                    return Err(e);
+                }
 
                 if let Err(e) = inject_typing(ws, self.next_id(), &param_name, 1.0).await {
                     debug!(error = %e, "VTS inject typing=true failed, discarding broken socket");
@@ -1146,6 +1145,16 @@ impl VTubeStudioService {
             match typing_action.output_mode {
                 VTubeStudioTypingMode::Event => {
                     let param_name = typing_action.parameter_name.clone();
+                    if let Err(e) = ensure_event_parameter(ws, self.next_id(), &param_name).await {
+                        inner.ws = None;
+                        self.is_authenticated.store(false, Ordering::SeqCst);
+                        self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                        return Err(format!(
+                            "VTube Studio action test failed at repeat {} (ensure): {}",
+                            i + 1,
+                            e
+                        ));
+                    }
                     if let Err(e) = inject_typing(ws, self.next_id(), &param_name, 1.0).await {
                         inner.ws = None;
                         self.is_authenticated.store(false, Ordering::SeqCst);
@@ -1309,7 +1318,9 @@ async fn perform_authentication(
     Ok(Some(token))
 }
 
-async fn create_typing_param(
+/// Идемпотентно гарантирует custom INPUT перед inject в Event-режиме.
+/// VTS повторно создаёт тот же параметр тем же plugin identity без ошибки.
+async fn ensure_event_parameter(
     ws: &mut WsStream,
     request_id: String,
     parameter_name: &str,
@@ -3968,5 +3979,84 @@ mod tests {
             VTubeStudioConnectionStatus::Disconnected
         );
         assert_eq!(svc.get_item_status(), VTubeStudioItemStatus::Inactive);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Event/parameter lifecycle VTS error classification
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn classify_inject_error_453_param_name_not_found() {
+        let resp = make_response(
+            "APIError",
+            "inj-453",
+            serde_json::json!({"errorID": 453, "message": "InjectDataParamNameNotFound"}),
+        );
+        match classify_vts_response(&resp, "inj-453", "InjectParameterDataResponse") {
+            RecvResult::Error(e) => {
+                assert!(e.contains("VTS error 453"), "got: {}", e);
+            }
+            _ => panic!("expected Error for VTS error 453 on InjectParameterDataResponse"),
+        }
+    }
+
+    #[test]
+    fn classify_creation_error_352_param_created_by_other_plugin() {
+        let resp = make_response(
+            "APIError",
+            "cr-352",
+            serde_json::json!({"errorID": 352, "message": "CustomParamAlreadyCreatedByOtherPlugin"}),
+        );
+        match classify_vts_response(&resp, "cr-352", "ParameterCreationResponse") {
+            RecvResult::Error(e) => {
+                assert!(e.contains("VTS error 352"), "got: {}", e);
+            }
+            _ => panic!("expected Error for VTS error 352 on ParameterCreationResponse"),
+        }
+    }
+
+    #[test]
+    fn classify_creation_error_350_parameter_already_exists() {
+        let resp = make_response(
+            "APIError",
+            "cr-350",
+            serde_json::json!({"errorID": 350, "message": "ParameterAlreadyCreatedByThisPlugin"}),
+        );
+        match classify_vts_response(&resp, "cr-350", "ParameterCreationResponse") {
+            RecvResult::Error(e) => {
+                assert!(e.contains("VTS error 350"), "got: {}", e);
+            }
+            _ => panic!("expected Error for VTS error 350 on ParameterCreationResponse"),
+        }
+    }
+
+    #[test]
+    fn classify_creation_error_355_max_parameter_limit() {
+        let resp = make_response(
+            "APIError",
+            "cr-355",
+            serde_json::json!({"errorID": 355, "message": "TooManyCustomParams"}),
+        );
+        match classify_vts_response(&resp, "cr-355", "ParameterCreationResponse") {
+            RecvResult::Error(e) => {
+                assert!(e.contains("VTS error 355"), "got: {}", e);
+            }
+            _ => panic!("expected Error for VTS error 355 on ParameterCreationResponse"),
+        }
+    }
+
+    #[test]
+    fn classify_creation_error_356_invalid_parameter_name() {
+        let resp = make_response(
+            "APIError",
+            "cr-356",
+            serde_json::json!({"errorID": 356, "message": "InvalidParameterName"}),
+        );
+        match classify_vts_response(&resp, "cr-356", "ParameterCreationResponse") {
+            RecvResult::Error(e) => {
+                assert!(e.contains("VTS error 356"), "got: {}", e);
+            }
+            _ => panic!("expected Error for VTS error 356 on ParameterCreationResponse"),
+        }
     }
 }
