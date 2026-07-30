@@ -203,6 +203,13 @@ pub(crate) struct ItemAnimationControlResponseData {
     pub animation_playing: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct APIStateResponseData {
+    pub active: bool,
+    #[serde(rename = "currentSessionAuthenticated")]
+    pub current_session_authenticated: bool,
+}
+
 impl VtsRequest {
     pub(crate) fn new(message_type: &str, request_id: &str, data: serde_json::Value) -> Self {
         Self {
@@ -315,6 +322,10 @@ impl VtsRequest {
         })
         .unwrap();
         Self::new("ItemAnimationControlRequest", request_id, data)
+    }
+
+    pub(crate) fn api_state_request(request_id: &str) -> Self {
+        Self::new("APIStateRequest", request_id, serde_json::json!({}))
     }
 }
 
@@ -1031,19 +1042,76 @@ mod tests {
     }
 
     #[test]
-    fn item_list_api_error_deserializes() {
+    fn api_state_request_payload() {
+        let req = VtsRequest::api_state_request("api-state-1");
+        let json = serde_json::to_string(&req).unwrap();
+        let expected = serde_json::json!({
+            "apiName": "VTubeStudioPublicAPI",
+            "apiVersion": "1.0",
+            "requestID": "api-state-1",
+            "messageType": "APIStateRequest",
+            "data": {}
+        });
+        let actual: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn api_state_response_deserializes_authenticated() {
         let json = r#"{
             "apiName": "VTubeStudioPublicAPI",
             "apiVersion": "1.0",
-            "requestID": "item-list-err",
-            "messageType": "APIError",
-            "data": { "errorID": 150, "message": "Permission not granted" }
+            "requestID": "api-state-resp-1",
+            "messageType": "APIStateResponse",
+            "data": {
+                "active": true,
+                "vTubeStudioVersion": "1.29.10",
+                "currentSessionAuthenticated": true
+            }
         }"#;
         let resp: VtsResponse = serde_json::from_str(json).unwrap();
-        assert_eq!(resp.message_type, "APIError");
-        assert_eq!(resp.request_id, "item-list-err");
-        let err: VtsErrorData = serde_json::from_value(resp.data).unwrap();
-        assert_eq!(err.error_id, 150);
-        assert_eq!(err.message, "Permission not granted");
+        assert_eq!(resp.message_type, "APIStateResponse");
+        assert_eq!(resp.request_id, "api-state-resp-1");
+        let data: APIStateResponseData = serde_json::from_value(resp.data).unwrap();
+        assert!(data.active);
+        assert!(data.current_session_authenticated);
+    }
+
+    #[test]
+    fn api_state_response_deserializes_not_authenticated() {
+        let json = r#"{
+            "apiName": "VTubeStudioPublicAPI",
+            "apiVersion": "1.0",
+            "requestID": "api-state-resp-2",
+            "messageType": "APIStateResponse",
+            "data": {
+                "active": true,
+                "vTubeStudioVersion": "1.29.10",
+                "currentSessionAuthenticated": false
+            }
+        }"#;
+        let resp: VtsResponse = serde_json::from_str(json).unwrap();
+        let data: APIStateResponseData = serde_json::from_value(resp.data).unwrap();
+        assert!(data.active);
+        assert!(!data.current_session_authenticated);
+    }
+
+    #[test]
+    fn api_state_response_deserializes_inactive() {
+        let json = r#"{
+            "apiName": "VTubeStudioPublicAPI",
+            "apiVersion": "1.0",
+            "requestID": "api-state-resp-3",
+            "messageType": "APIStateResponse",
+            "data": {
+                "active": false,
+                "vTubeStudioVersion": "1.29.10",
+                "currentSessionAuthenticated": true
+            }
+        }"#;
+        let resp: VtsResponse = serde_json::from_str(json).unwrap();
+        let data: APIStateResponseData = serde_json::from_value(resp.data).unwrap();
+        assert!(!data.active);
+        assert!(data.current_session_authenticated);
     }
 }

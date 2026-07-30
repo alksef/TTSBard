@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { shallowRef } from 'vue'
+import type { VTubeStudioSettingsDto } from '../types/settings'
 
 vi.stubGlobal('window', globalThis)
 
@@ -41,7 +43,7 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: mockInvoke,
 }))
 
-const mockVtubeSettingsRef = { value: { enabled: false, port: 8001, start_on_boot: false }, __v_isRef: true }
+let mockVtubeSettingsRef = shallowRef<VTubeStudioSettingsDto | undefined>()
 vi.mock('./useAppSettings', () => ({
   useVTubeStudioSettings: vi.fn(() => mockVtubeSettingsRef),
 }))
@@ -94,7 +96,21 @@ async function setupAndMount(settings?: Partial<VTubeStudioSettings>, status?: s
 describe('useVTubeStudio', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockVtubeSettingsRef.value = { enabled: false, port: 8001, start_on_boot: false }
+    mockVtubeSettingsRef.value = {
+      enabled: false,
+      port: 8001,
+      start_on_boot: false,
+      typingAction: {
+        outputMode: 'Event',
+        parameterName: 'TTSBardTyping',
+        startHotkeyId: '',
+        stopHotkeyId: '',
+        startHotkeyName: '',
+        stopHotkeyName: '',
+        itemFileName: '',
+        itemType: '',
+      },
+    }
     capturedOnMountedCb = null
     capturedOnUnmountedCb = null
     setCapturedListenCallback('', null)
@@ -748,6 +764,7 @@ describe('useVTubeStudio', () => {
 
   describe('typingAction draft loading', () => {
     it('loads typingAction from settings and sets drafts', async () => {
+      mockVtubeSettingsRef.value = undefined
       mockInvoke.mockImplementation(async (cmd: string) => {
         if (cmd === 'get_vtube_studio_settings') {
           return {
@@ -783,6 +800,7 @@ describe('useVTubeStudio', () => {
     })
 
     it('normalizes legacy typingAction that lacks itemFileName and itemType', async () => {
+      mockVtubeSettingsRef.value = undefined
       mockInvoke.mockImplementation(async (cmd: string) => {
         if (cmd === 'get_vtube_studio_settings') {
           return {
@@ -834,6 +852,133 @@ describe('useVTubeStudio', () => {
         itemFileName: '',
         itemType: '',
       })
+    })
+  })
+
+  describe('shared settings typing action sync', () => {
+    it('applies typingAction from shared settings via immediate watcher', async () => {
+      mockVtubeSettingsRef.value = {
+        enabled: false, port: 8001, start_on_boot: false,
+        typingAction: {
+          outputMode: 'Event', parameterName: 'TTSBardTyping2',
+          startHotkeyId: '', stopHotkeyId: '', startHotkeyName: '', stopHotkeyName: '',
+          itemFileName: '', itemType: '',
+        },
+      }
+      setupBaseMock()
+      capturedOnMountedCb = null
+
+      const composable = useVTubeStudio()
+
+      expect(composable.eventName.value).toBe('TTSBardTyping2')
+      expect(composable.savedTypingAction.value.parameterName).toBe('TTSBardTyping2')
+      expect(composable.typingMode.value).toBe('Event')
+    })
+
+    it('applies full typing action (Hotkeys mode, saved hotkeys) from shared settings', async () => {
+      mockVtubeSettingsRef.value = {
+        enabled: false, port: 8001, start_on_boot: false,
+        typingAction: {
+          outputMode: 'Hotkeys', parameterName: 'TTSBardTyping2',
+          startHotkeyId: 'hkA', stopHotkeyId: 'hkB',
+          startHotkeyName: 'Start Speak', stopHotkeyName: 'Stop Speak',
+          itemFileName: '', itemType: '',
+        },
+      }
+      setupBaseMock()
+      capturedOnMountedCb = null
+
+      const composable = useVTubeStudio()
+
+      expect(composable.typingMode.value).toBe('Hotkeys')
+      expect(composable.eventName.value).toBe('TTSBardTyping2')
+      expect(composable.startHotkeyId.value).toBe('hkA')
+      expect(composable.stopHotkeyId.value).toBe('hkB')
+      expect(composable.hotkeys.value).toEqual([
+        { hotkeyID: 'hkA', name: 'Start Speak', type: 'Сохранённая', description: '' },
+        { hotkeyID: 'hkB', name: 'Stop Speak', type: 'Сохранённая', description: '' },
+      ])
+      expect(composable.savedTypingAction.value.startHotkeyName).toBe('Start Speak')
+    })
+
+    it('generation counter discards stale loadSettings when shared settings arrive concurrently', async () => {
+      mockVtubeSettingsRef.value = undefined
+      setupBaseMock()
+      capturedOnMountedCb = null
+
+      const composable = useVTubeStudio()
+      expect(composable.eventName.value).toBe('TTSBardTyping')
+
+      let resolveLoad: (value: unknown) => void
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'get_vtube_studio_settings') {
+          await new Promise(r => { resolveLoad = r })
+          return {
+            enabled: false, port: 8001, start_on_boot: false,
+            typingAction: {
+              outputMode: 'Event', parameterName: 'TTSBardTyping_old',
+              startHotkeyId: '', stopHotkeyId: '', startHotkeyName: '', stopHotkeyName: '',
+              itemFileName: '', itemType: '',
+            },
+          }
+        }
+        if (cmd === 'get_vtube_studio_status') return 'Disconnected'
+        if (cmd === 'get_vtube_studio_item_status') return { status: 'Inactive' }
+        return undefined
+      })
+
+      const loadPromise = composable.loadSettings()
+
+      mockVtubeSettingsRef.value = {
+        enabled: false, port: 8001, start_on_boot: false,
+        typingAction: {
+          outputMode: 'Event', parameterName: 'TTSBardTyping2',
+          startHotkeyId: '', stopHotkeyId: '', startHotkeyName: '', stopHotkeyName: '',
+          itemFileName: '', itemType: '',
+        },
+      }
+      await flushMicrotasks()
+
+      expect(composable.eventName.value).toBe('TTSBardTyping2')
+      expect(composable.savedTypingAction.value.parameterName).toBe('TTSBardTyping2')
+
+      resolveLoad!({
+        enabled: false, port: 8001, start_on_boot: false,
+        typingAction: {
+          outputMode: 'Event', parameterName: 'TTSBardTyping_old',
+          startHotkeyId: '', stopHotkeyId: '', startHotkeyName: '', stopHotkeyName: '',
+          itemFileName: '', itemType: '',
+        },
+      })
+      await loadPromise
+      await flushMicrotasks()
+
+      expect(composable.eventName.value).toBe('TTSBardTyping2')
+      expect(composable.savedTypingAction.value.parameterName).toBe('TTSBardTyping2')
+    })
+
+    it('onMounted loadSettings preserves shared settings order (watch before onMounted)', async () => {
+      mockVtubeSettingsRef.value = {
+        enabled: false, port: 8001, start_on_boot: false,
+        typingAction: {
+          outputMode: 'Event', parameterName: 'TTSBardTyping2',
+          startHotkeyId: '', stopHotkeyId: '', startHotkeyName: '', stopHotkeyName: '',
+          itemFileName: '', itemType: '',
+        },
+      }
+      setupBaseMock()
+      capturedOnUnmountedCb = null
+
+      const composable = useVTubeStudio()
+      expect(composable.eventName.value).toBe('TTSBardTyping2')
+
+      if (capturedOnMountedCb) {
+        await capturedOnMountedCb()
+      }
+      await flushMicrotasks()
+
+      expect(composable.eventName.value).toBe('TTSBardTyping2')
+      expect(composable.savedTypingAction.value.parameterName).toBe('TTSBardTyping2')
     })
   })
 

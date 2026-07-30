@@ -126,6 +126,7 @@ export function useVTubeStudio() {
   const sceneItemsError = ref<string | null>(null)
   const itemStatus = ref<VTubeStudioItemStatus>({ status: 'Inactive' })
   let sceneItemLoadGeneration = 0
+  let loadSettingsGeneration = 0
 
   const typingTimeoutError = computed(() => {
     const v = typingTimeout.value
@@ -216,27 +217,35 @@ export function useVTubeStudio() {
     }, 3000)
   }
 
+  function applyTypingAction(action: Partial<TypingActionDraft> | undefined) {
+    const normalized = normalizeTypingAction(action)
+    savedTypingAction.value = normalized
+    typingMode.value = normalized.outputMode
+    eventName.value = normalized.parameterName
+    startHotkeyId.value = normalized.startHotkeyId
+    stopHotkeyId.value = normalized.stopHotkeyId
+    itemFileName.value = normalized.itemFileName
+    itemType.value = normalized.itemType
+    if (normalized.outputMode === 'Hotkeys') {
+      const savedHotkeys: VtsHotkeyInfoDto[] = []
+      if (normalized.startHotkeyId && normalized.startHotkeyName) {
+        savedHotkeys.push({ hotkeyID: normalized.startHotkeyId, name: normalized.startHotkeyName, type: 'Сохранённая', description: '' })
+      }
+      if (normalized.stopHotkeyId && normalized.stopHotkeyName && normalized.stopHotkeyId !== normalized.startHotkeyId) {
+        savedHotkeys.push({ hotkeyID: normalized.stopHotkeyId, name: normalized.stopHotkeyName, type: 'Сохранённая', description: '' })
+      }
+      hotkeys.value = savedHotkeys
+    }
+  }
+
   async function loadSettings() {
+    const gen = ++loadSettingsGeneration
     try {
       const data = await invoke<VTubeStudioSettings & { typingAction?: TypingActionDraft }>('get_vtube_studio_settings')
+      if (gen !== loadSettingsGeneration) return
       settings.value = { enabled: data.enabled, port: data.port, start_on_boot: data.start_on_boot }
-      const normalized = normalizeTypingAction(data.typingAction)
-      savedTypingAction.value = normalized
-      typingMode.value = normalized.outputMode
-      eventName.value = normalized.parameterName
-      startHotkeyId.value = normalized.startHotkeyId
-      stopHotkeyId.value = normalized.stopHotkeyId
-      itemFileName.value = normalized.itemFileName
-      itemType.value = normalized.itemType
-      if (normalized.outputMode === 'Hotkeys') {
-        const savedHotkeys: VtsHotkeyInfoDto[] = []
-        if (normalized.startHotkeyId && normalized.startHotkeyName) {
-          savedHotkeys.push({ hotkeyID: normalized.startHotkeyId, name: normalized.startHotkeyName, type: 'Сохранённая', description: '' })
-        }
-        if (normalized.stopHotkeyId && normalized.stopHotkeyName && normalized.stopHotkeyId !== normalized.startHotkeyId) {
-          savedHotkeys.push({ hotkeyID: normalized.stopHotkeyId, name: normalized.stopHotkeyName, type: 'Сохранённая', description: '' })
-        }
-        hotkeys.value = savedHotkeys
+      if (!vtubeSettingsFromComposable.value) {
+        applyTypingAction(data.typingAction)
       }
       debugLog('[VTubeStudio] Loaded settings:', settings.value)
     } catch (e) {
@@ -538,12 +547,14 @@ export function useVTubeStudio() {
 
   watch(vtubeSettingsFromComposable, (newSettings) => {
     if (!newSettings) return
+    loadSettingsGeneration += 1
     debugLog('[VTubeStudio] Settings updated from composable')
     settings.value = {
       enabled: newSettings.enabled,
       port: newSettings.port,
       start_on_boot: newSettings.start_on_boot,
     }
+    applyTypingAction(newSettings.typingAction)
   }, { immediate: true })
 
   onUnmounted(() => {

@@ -140,7 +140,7 @@ const {
           />
         </div>
         <p class="info-hint">
-          Входной параметр <code>INPUT TTSBardTyping</code> сопоставьте с <code>OUTPUT</code>
+          Входной параметр <code>INPUT {{ eventName.trim() || 'TTSBardTyping' }}</code> сопоставьте с <code>OUTPUT</code>
           модели (напр. <code>ParamTyping</code>) в VTS Parameter Setup.
           Диапазон <code>0..1</code>, smoothing <code>0</code> для дискретного индикатора.
         </p>

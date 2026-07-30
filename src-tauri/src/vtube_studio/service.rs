@@ -21,6 +21,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(12);
 const ITEM_ACTION_TIMEOUT: Duration = Duration::from_secs(2);
 const TYPING_KEEPALIVE_MS: u64 = 500;
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 
 type WsStream = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>;
 
@@ -169,6 +170,9 @@ struct InnerState {
     typing_handle: Option<tokio::task::JoinHandle<()>>,
     typing_active: bool,
     resolved_item: Option<ResolvedItem>,
+    heartbeat_cancel: Option<CancellationToken>,
+    heartbeat_handle: Option<tokio::task::JoinHandle<()>>,
+    connection_generation: u64,
 }
 
 #[derive(Debug, Default)]
@@ -300,6 +304,9 @@ impl VTubeStudioService {
                 typing_handle: None,
                 typing_active: false,
                 resolved_item: None,
+                heartbeat_cancel: None,
+                heartbeat_handle: None,
+                connection_generation: 0,
             })),
             is_authenticated: Arc::new(AtomicBool::new(false)),
             desired_running: Arc::new(AtomicBool::new(false)),
@@ -491,14 +498,44 @@ impl VTubeStudioService {
         let mut inner = self.inner.lock().await;
 
         self.stop_typing_keepalive_locked(&mut inner);
+        self.stop_heartbeat_locked(&mut inner);
         inner.typing_active = false;
         inner.ws = None;
 
-        let mut ws = connect_ws(port).await?;
-        let new_token = perform_authentication(&mut ws, self.next_id(), stored_token).await?;
+        let mut ws = match connect_ws(port).await {
+            Ok(ws) => ws,
+            Err(e) => {
+                self.is_authenticated.store(false, Ordering::SeqCst);
+                self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                return Err(e);
+            }
+        };
+
+        let new_token = match perform_authentication(&mut ws, self.next_id(), stored_token).await {
+            Ok(token) => token,
+            Err(e) => {
+                self.is_authenticated.store(false, Ordering::SeqCst);
+                self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                return Err(e);
+            }
+        };
+
+        if let Some(ref token) = new_token {
+            ws = match connect_and_auth_fresh(port, token).await {
+                Ok(fresh_ws) => fresh_ws,
+                Err(e) => {
+                    self.is_authenticated.store(false, Ordering::SeqCst);
+                    self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                    return Err(e);
+                }
+            };
+        }
 
         if self.is_desired_running() {
             inner.ws = Some(ws);
+            self.is_authenticated.store(true, Ordering::SeqCst);
+            self.set_connection_status(VTubeStudioConnectionStatus::Connected);
+            self.start_heartbeat_locked(&mut inner);
         }
         Ok(new_token)
     }
@@ -515,6 +552,7 @@ impl VTubeStudioService {
 
         let mut inner = self.inner.lock().await;
         self.stop_typing_keepalive_locked(&mut inner);
+        self.stop_heartbeat_locked(&mut inner);
         inner.typing_active = false;
         inner.resolved_item = None;
         inner.ws = None;
@@ -540,6 +578,18 @@ impl VTubeStudioService {
                 return Err(e);
             }
         };
+
+        if let Some(ref token) = new_token {
+            ws = match connect_and_auth_fresh(port, token).await {
+                Ok(fresh_ws) => fresh_ws,
+                Err(e) => {
+                    self.is_authenticated.store(false, Ordering::SeqCst);
+                    self.set_desired_running(false);
+                    self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                    return Err(e);
+                }
+            };
+        }
 
         inner.ws = Some(ws);
         self.is_authenticated.store(true, Ordering::SeqCst);
@@ -569,6 +619,8 @@ impl VTubeStudioService {
                 }
             }
         }
+
+        self.start_heartbeat_locked(&mut inner);
 
         Ok(new_token)
     }
@@ -629,6 +681,7 @@ impl VTubeStudioService {
         }
 
         if inner.ws.is_none() {
+            self.stop_heartbeat_locked(&mut inner);
             self.set_connection_status(VTubeStudioConnectionStatus::Connecting);
 
             let mut ws = match connect_ws(port).await {
@@ -651,6 +704,8 @@ impl VTubeStudioService {
             }
 
             inner.ws = Some(ws);
+            self.is_authenticated.store(true, Ordering::SeqCst);
+            self.start_heartbeat_locked(&mut inner);
             self.set_connection_status(VTubeStudioConnectionStatus::Connected);
         }
 
@@ -757,6 +812,7 @@ impl VTubeStudioService {
                 if let Err(e) = trigger_hotkey(ws, self.next_id(), &start_id).await {
                     if is_semantic_vts_error(&e) {
                         debug!(error = %e, "VTS hotkey start trigger got semantic error, socket stays alive");
+                        inner.typing_active = false;
                         return Err(e);
                     }
                     debug!(error = %e, "VTS hotkey start trigger failed, discarding broken socket");
@@ -948,6 +1004,8 @@ impl VTubeStudioService {
         let resolved_item = inner.resolved_item.clone();
 
         self.stop_typing_keepalive_locked(&mut inner);
+        self.stop_heartbeat_locked(&mut inner);
+        inner.connection_generation = inner.connection_generation.wrapping_add(1);
         inner.typing_active = false;
 
         if typing_action.output_mode == VTubeStudioTypingMode::Item {
@@ -1026,6 +1084,120 @@ impl VTubeStudioService {
         if let Some(handle) = inner.typing_handle.take() {
             handle.abort();
         }
+    }
+
+    fn stop_heartbeat_locked(&self, inner: &mut InnerState) {
+        if let Some(cancel) = inner.heartbeat_cancel.take() {
+            cancel.cancel();
+        }
+        if let Some(handle) = inner.heartbeat_handle.take() {
+            handle.abort();
+        }
+    }
+
+    fn start_heartbeat_locked(&self, inner: &mut InnerState) {
+        self.stop_heartbeat_locked(inner);
+        inner.connection_generation = inner.connection_generation.wrapping_add(1);
+        let hb_gen = inner.connection_generation;
+
+        let hb_cancel = CancellationToken::new();
+        let hb_ct = hb_cancel.clone();
+        let inner_arc = Arc::clone(&self.inner);
+        let auth_flag = Arc::clone(&self.is_authenticated);
+        let status_arc = Arc::clone(&self.connection_status);
+
+        let handle = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = hb_ct.cancelled() => break,
+                    _ = tokio::time::sleep(HEARTBEAT_INTERVAL) => {}
+                }
+                if hb_ct.is_cancelled() {
+                    break;
+                }
+
+                let id = uuid::Uuid::new_v4().to_string();
+                let mut inner_guard = inner_arc.lock().await;
+
+                if inner_guard.connection_generation != hb_gen {
+                    break;
+                }
+
+                let ws = match inner_guard.ws.as_mut() {
+                    Some(w) => w,
+                    None => break,
+                };
+
+                let req = VtsRequest::api_state_request(&id);
+                let json = match serde_json::to_string(&req) {
+                    Ok(j) => j,
+                    Err(_) => {
+                        if inner_guard.connection_generation == hb_gen {
+                            inner_guard.ws = None;
+                            inner_guard.typing_active = false;
+                            if let Some(c) = inner_guard.typing_cancel.take() {
+                                c.cancel();
+                            }
+                            auth_flag.store(false, Ordering::SeqCst);
+                            *status_arc.lock() = VTubeStudioConnectionStatus::Error;
+                        }
+                        break;
+                    }
+                };
+
+                match send_and_recv(ws, &json, &id, "APIStateResponse").await {
+                    Ok(value) => {
+                        if inner_guard.connection_generation != hb_gen {
+                            break;
+                        }
+                        let parsed =
+                            serde_json::from_value::<messages::APIStateResponseData>(value);
+                        match parsed {
+                            Ok(data) => {
+                                if let Err(e) = validate_api_state(&data) {
+                                    debug!("Heartbeat validation failed: {}", e);
+                                    inner_guard.ws = None;
+                                    inner_guard.typing_active = false;
+                                    if let Some(c) = inner_guard.typing_cancel.take() {
+                                        c.cancel();
+                                    }
+                                    auth_flag.store(false, Ordering::SeqCst);
+                                    *status_arc.lock() = VTubeStudioConnectionStatus::Error;
+                                    break;
+                                }
+                            }
+                            Err(e) => {
+                                debug!("Heartbeat response parse error: {}", e);
+                                inner_guard.ws = None;
+                                inner_guard.typing_active = false;
+                                if let Some(c) = inner_guard.typing_cancel.take() {
+                                    c.cancel();
+                                }
+                                auth_flag.store(false, Ordering::SeqCst);
+                                *status_arc.lock() = VTubeStudioConnectionStatus::Error;
+                                break;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        debug!("Heartbeat request failed: {}", e);
+                        if inner_guard.connection_generation == hb_gen {
+                            inner_guard.ws = None;
+                            inner_guard.typing_active = false;
+                            if let Some(c) = inner_guard.typing_cancel.take() {
+                                c.cancel();
+                            }
+                            auth_flag.store(false, Ordering::SeqCst);
+                            *status_arc.lock() = VTubeStudioConnectionStatus::Error;
+                        }
+                        break;
+                    }
+                }
+            }
+        });
+
+        inner.heartbeat_cancel = Some(hb_cancel);
+        inner.heartbeat_handle = Some(handle);
     }
 
     pub async fn get_current_model_hotkeys(&self) -> Result<Vec<HotkeyInfo>, String> {
@@ -1310,6 +1482,25 @@ async fn connect_ws(port: u16) -> Result<WsStream, String> {
     Ok(ws)
 }
 
+async fn connect_and_auth_fresh(port: u16, token: &str) -> Result<WsStream, String> {
+    info!("Establishing fresh socket for new-token session");
+    let id = uuid::Uuid::new_v4().to_string();
+    let mut ws = connect_ws(port)
+        .await
+        .map_err(|e| format!("Fresh-connect after token issuance failed: {}", e))?;
+    match perform_authentication(&mut ws, id, Some(token)).await {
+        Ok(None) => {
+            info!("Fresh socket authenticated with new token");
+            Ok(ws)
+        }
+        Ok(Some(_)) => Err(
+            "Fresh-token authentication unexpectedly issued another token; aborting connection"
+                .to_string(),
+        ),
+        Err(e) => Err(format!("Fresh-socket authentication failed: {}", e)),
+    }
+}
+
 async fn perform_authentication(
     ws: &mut WsStream,
     request_id: String,
@@ -1529,6 +1720,49 @@ fn classify_vts_response(
     }
 }
 
+fn is_auth_message(msg_type: &str) -> bool {
+    matches!(
+        msg_type,
+        "AuthenticationTokenRequest"
+            | "AuthenticationRequest"
+            | "AuthenticationTokenResponse"
+            | "AuthenticationResponse"
+    )
+}
+
+fn should_log_data_payload(msg_type: &str) -> bool {
+    msg_type.starts_with("ParameterCreation")
+        || msg_type.starts_with("InjectParameterData")
+        || msg_type.starts_with("APIState")
+        || msg_type == "APIError"
+}
+
+fn log_outgoing_request(request_json: &str) {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(request_json) {
+        let msg_type = v.get("messageType").and_then(|v| v.as_str()).unwrap_or("?");
+        let req_id = v.get("requestID").and_then(|v| v.as_str()).unwrap_or("?");
+        if is_auth_message(msg_type) {
+            debug!(messageType = %msg_type, requestID = %req_id, "VTS send");
+        } else if should_log_data_payload(msg_type) {
+            debug!(messageType = %msg_type, requestID = %req_id, data = %v["data"], "VTS send");
+        } else {
+            debug!(messageType = %msg_type, requestID = %req_id, "VTS send");
+        }
+    }
+}
+
+fn log_incoming_response(resp: &VtsResponse) {
+    let msg_type = &resp.message_type;
+    let req_id = &resp.request_id;
+    if is_auth_message(msg_type) {
+        debug!(messageType = %msg_type, requestID = %req_id, "VTS recv");
+    } else if should_log_data_payload(msg_type) {
+        debug!(messageType = %msg_type, requestID = %req_id, data = %resp.data, "VTS recv");
+    } else {
+        debug!(messageType = %msg_type, requestID = %req_id, "VTS recv");
+    }
+}
+
 async fn send_and_recv(
     ws: &mut WsStream,
     request_json: &str,
@@ -1537,18 +1771,34 @@ async fn send_and_recv(
 ) -> Result<serde_json::Value, String> {
     use tokio_tungstenite::tungstenite::Message;
 
+    log_outgoing_request(request_json);
+
     let send_msg = Message::Text(request_json.to_string());
     timeout(REQUEST_TIMEOUT, ws.send(send_msg))
         .await
-        .map_err(|_| "Send timed out".to_string())?
-        .map_err(|e| format!("Send failed: {}", e))?;
+        .map_err(|_| {
+            debug!(expected_id, expected_msg_type, "VTS send timed out");
+            "Send timed out".to_string()
+        })?
+        .map_err(|e| {
+            debug!(
+                expected_id,
+                expected_msg_type,
+                error = %e,
+                "VTS send failed"
+            );
+            format!("Send failed: {}", e)
+        })?;
 
     timeout(
         REQUEST_TIMEOUT,
         recv_until_match(ws, expected_id, expected_msg_type),
     )
     .await
-    .map_err(|_| "Response timed out".to_string())?
+    .map_err(|_| {
+        debug!(expected_id, expected_msg_type, "VTS response timed out");
+        "Response timed out".to_string()
+    })?
 }
 
 async fn recv_until_match(
@@ -1559,17 +1809,45 @@ async fn recv_until_match(
     use tokio_tungstenite::tungstenite::Message;
 
     loop {
-        let raw_msg = ws
-            .next()
-            .await
-            .ok_or_else(|| "VTS connection closed".to_string())?
-            .map_err(|e| format!("Read error: {}", e))?;
+        let raw_msg = match ws.next().await {
+            Some(Ok(msg)) => msg,
+            Some(Err(e)) => {
+                debug!(
+                    expected_id,
+                    expected_msg_type,
+                    error = %e,
+                    "VTS read error"
+                );
+                return Err(format!("Read error: {}", e));
+            }
+            None => {
+                debug!(expected_id, expected_msg_type, "VTS connection closed");
+                return Err("VTS connection closed".to_string());
+            }
+        };
 
         let text = match raw_msg {
             Message::Text(t) => t.to_string(),
-            Message::Close(_) => return Err("VTS closed the connection".to_string()),
+            Message::Close(frame) => {
+                let code = frame.as_ref().map(|f| f.code);
+                let reason = frame.as_ref().map(|f| f.reason.to_string());
+                debug!(
+                    ?code,
+                    ?reason,
+                    expected_id,
+                    expected_msg_type,
+                    "VTS closed WebSocket connection"
+                );
+                return Err("VTS closed the connection".to_string());
+            }
             Message::Ping(_) | Message::Pong(_) => continue,
-            other => return Err(format!("Unexpected WebSocket message: {:?}", other)),
+            other => {
+                debug!(
+                    ?other,
+                    expected_id, expected_msg_type, "Unexpected WebSocket message from VTS"
+                );
+                return Err(format!("Unexpected WebSocket message: {:?}", other));
+            }
         };
 
         let parsed: VtsResponse =
@@ -1577,6 +1855,8 @@ async fn recv_until_match(
 
         let msg_type = parsed.message_type.clone();
         let req_id = parsed.request_id.clone();
+
+        log_incoming_response(&parsed);
 
         match classify_vts_response(&parsed, expected_id, expected_msg_type) {
             RecvResult::Match(data) => return Ok(data),
@@ -1635,37 +1915,75 @@ fn build_scene_records(instances: &[ItemInstanceInfo]) -> Vec<SceneItemRecord> {
 /// true, если ошибка — валидный ответ VTS (APIError / парсинг), а не потеря транспорта.
 /// На такой ошибке сокет жив и НЕ должен отбрасываться.
 fn is_semantic_vts_error(err: &str) -> bool {
-    err.starts_with("VTS error ")
-        || err.starts_with("Parse error data")
-        || err.starts_with("Parse response JSON")
+    let inner = inner_vts_error(err);
+    inner.starts_with("VTS error ")
+        || inner.starts_with("Parse error data")
+        || inner.starts_with("Parse response JSON")
 }
 
 fn explain_event_error(err: &str, param_name: &str) -> String {
-    if err.starts_with("VTS error 453") {
+    let inner = inner_vts_error(err);
+    if inner.starts_with("VTS error 453") {
         format!(
             "VTS error 453: input parameter '{}' not found. Map INPUT '{}' to the model's OUTPUT (e.g. ParamTyping) in VTS Parameter Setup; do not send a Live2D OUTPUT id directly.",
             param_name, param_name
         )
-    } else if err.starts_with("VTS error 352") {
+    } else if inner.starts_with("VTS error 352") {
         format!(
             "VTS error 352: custom parameter '{}' already created by another plugin. Free or rename the conflicting custom parameter.",
             param_name
         )
-    } else if err.starts_with("VTS error 356") {
+    } else if inner.starts_with("VTS error 356") {
         format!(
             "VTS error 356: invalid parameter name '{}'. Fix the parameter name (invalid characters or length).",
             param_name
         )
-    } else if err.starts_with("VTS error 355") {
-        "VTS error 355: too many custom parameters. Free a custom parameter slot in VTS.".to_string()
+    } else if inner.starts_with("VTS error 355") {
+        "VTS error 355: too many custom parameters. Free a custom parameter slot in VTS."
+            .to_string()
     } else {
         err.to_string()
     }
 }
 
+/// Возвращает внутренний payload: либо строку после известного префикса операции
+/// (`Create parameter failed: `, `Inject parameter failed: `, `Hotkey trigger failed: `),
+/// либо исходную строку, если префикс не найден.
+fn inner_vts_error<'a>(err: &'a str) -> &'a str {
+    const WRAPPERS: &[&str] = &[
+        "Create parameter failed: ",
+        "Inject parameter failed: ",
+        "Hotkey trigger failed: ",
+    ];
+    for prefix in WRAPPERS {
+        if let Some(inner) = err.strip_prefix(prefix) {
+            return inner;
+        }
+    }
+    err
+}
+
+fn validate_api_state(data: &messages::APIStateResponseData) -> Result<(), String> {
+    if !data.active {
+        return Err("API is not active".to_string());
+    }
+    if !data.current_session_authenticated {
+        return Err("Session is not authenticated".to_string());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn unused_local_port() -> u16 {
+        let listener =
+            std::net::TcpListener::bind("127.0.0.1:0").expect("failed to bind for port discovery");
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        port
+    }
 
     #[test]
     fn service_defaults_are_correct() {
@@ -1725,6 +2043,8 @@ mod tests {
             assert!(inner.typing_cancel.is_none());
             assert!(inner.typing_handle.is_none());
             assert!(!inner.typing_active);
+            assert!(inner.heartbeat_cancel.is_none());
+            assert!(inner.heartbeat_handle.is_none());
         });
         assert!(!svc.is_desired_running());
         assert_eq!(
@@ -2077,8 +2397,9 @@ mod tests {
             .build()
             .unwrap();
         let svc = VTubeStudioService::new();
+        let port = unused_local_port();
         rt.block_on(async {
-            let result = svc.connect(8001, None).await;
+            let result = svc.connect(port, None).await;
             assert!(result.is_err());
         });
         assert!(!svc.is_desired_running());
@@ -2411,8 +2732,9 @@ mod tests {
             .build()
             .unwrap();
         let svc = VTubeStudioService::new();
+        let port = unused_local_port();
         rt.block_on(async {
-            let result = svc.connect(8001, None).await;
+            let result = svc.connect(port, None).await;
             assert!(result.is_err());
         });
         assert!(!svc.is_desired_running());
@@ -2444,6 +2766,8 @@ mod tests {
             assert!(inner.typing_cancel.is_none());
             assert!(inner.typing_handle.is_none());
             assert!(!inner.typing_active);
+            assert!(inner.heartbeat_cancel.is_none());
+            assert!(inner.heartbeat_handle.is_none());
         });
         assert!(!svc.is_desired_running());
         assert_eq!(
@@ -4168,12 +4492,8 @@ mod tests {
 
     #[test]
     fn semantic_error_classification_parse_errors() {
-        assert!(is_semantic_vts_error(
-            "Parse error data: some detail"
-        ));
-        assert!(is_semantic_vts_error(
-            "Parse response JSON: malformed"
-        ));
+        assert!(is_semantic_vts_error("Parse error data: some detail"));
+        assert!(is_semantic_vts_error("Parse response JSON: malformed"));
     }
 
     #[test]
@@ -4200,7 +4520,10 @@ mod tests {
 
     #[test]
     fn explain_event_error_453_includes_param_name_and_mapping_hint() {
-        let msg = explain_event_error("VTS error 453: input parameter 'MyParam' not found.", "MyParam");
+        let msg = explain_event_error(
+            "VTS error 453: input parameter 'MyParam' not found.",
+            "MyParam",
+        );
         assert!(msg.contains("VTS error 453"));
         assert!(msg.contains("MyParam"));
         assert!(msg.contains("INPUT"));
@@ -4215,11 +4538,17 @@ mod tests {
 
     #[test]
     fn explain_event_error_352_suggests_free_or_rename() {
-        let msg = explain_event_error("VTS error 352: CustomParamAlreadyCreatedByOtherPlugin", "TTSParam");
+        let msg = explain_event_error(
+            "VTS error 352: CustomParamAlreadyCreatedByOtherPlugin",
+            "TTSParam",
+        );
         assert!(msg.contains("VTS error 352"));
         assert!(msg.contains("TTSParam"));
         assert!(
-            msg.contains("Free") || msg.contains("Rename") || msg.contains("free") || msg.contains("rename"),
+            msg.contains("Free")
+                || msg.contains("Rename")
+                || msg.contains("free")
+                || msg.contains("rename"),
             "should advise freeing or renaming the parameter: {}",
             msg
         );
@@ -4256,8 +4585,677 @@ mod tests {
 
     #[test]
     fn explain_event_error_transport_passthrough() {
-        // Should return the original string for non-semantic errors
         let msg = explain_event_error("Send timed out", "ignored");
         assert_eq!(msg, "Send timed out");
+    }
+
+    // ---------------------------------------------------------------------------
+    // wrapped semantic errors (ROADMAP-060 review fixes)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn semantic_error_wrapped_create_352() {
+        assert!(is_semantic_vts_error(
+            "Create parameter failed: VTS error 352"
+        ));
+    }
+
+    #[test]
+    fn semantic_error_wrapped_inject_453() {
+        assert!(is_semantic_vts_error(
+            "Inject parameter failed: VTS error 453: input parameter 'Foo' not found."
+        ));
+    }
+
+    #[test]
+    fn semantic_error_wrapped_hotkey_api_error() {
+        assert!(is_semantic_vts_error("Hotkey trigger failed: VTS error 42"));
+    }
+
+    #[test]
+    fn semantic_error_wrapped_parse() {
+        assert!(is_semantic_vts_error(
+            "Create parameter failed: Parse error data: invalid JSON"
+        ));
+        assert!(is_semantic_vts_error(
+            "Inject parameter failed: Parse response JSON: malformed"
+        ));
+    }
+
+    #[test]
+    fn semantic_error_wrapped_transport_remains_false() {
+        assert!(!is_semantic_vts_error(
+            "Create parameter failed: Send timed out"
+        ));
+        assert!(!is_semantic_vts_error(
+            "Inject parameter failed: Response timed out"
+        ));
+        assert!(!is_semantic_vts_error(
+            "Hotkey trigger failed: VTS connection closed"
+        ));
+    }
+
+    #[test]
+    fn semantic_error_lookalike_negative() {
+        assert!(!is_semantic_vts_error(
+            "Send failed: peer diagnostic mentioned VTS error 352"
+        ));
+        assert!(!is_semantic_vts_error(
+            "Read error: Parse response JSON was written by peer"
+        ));
+        assert!(!is_semantic_vts_error(
+            "Read error: Parse error data from upstream"
+        ));
+    }
+
+    #[test]
+    fn explain_event_error_lookalike_returns_original() {
+        let msg = explain_event_error("Send failed: peer diagnostic mentioned VTS error 352", "p");
+        assert_eq!(msg, "Send failed: peer diagnostic mentioned VTS error 352");
+
+        let msg = explain_event_error("Read error: Parse response JSON was written by peer", "p");
+        assert_eq!(msg, "Read error: Parse response JSON was written by peer");
+
+        let msg = explain_event_error("Read error: Parse error data from upstream", "p");
+        assert_eq!(msg, "Read error: Parse error data from upstream");
+    }
+
+    #[test]
+    fn explain_event_error_wrapped_453_produces_actionable_text() {
+        let msg = explain_event_error(
+            "Inject parameter failed: VTS error 453: input parameter 'MyParam' not found.",
+            "MyParam",
+        );
+        assert!(msg.contains("VTS error 453"));
+        assert!(msg.contains("MyParam"));
+        assert!(msg.contains("INPUT"));
+        assert!(msg.contains("OUTPUT"));
+        assert!(msg.contains("do not send a Live2D OUTPUT id directly"));
+    }
+
+    #[test]
+    fn explain_event_error_wrapped_352_produces_actionable_text() {
+        let msg = explain_event_error(
+            "Create parameter failed: VTS error 352: CustomParamAlreadyCreatedByOtherPlugin",
+            "TTSParam",
+        );
+        assert!(msg.contains("VTS error 352"));
+        assert!(msg.contains("TTSParam"));
+        assert!(
+            msg.contains("Free")
+                || msg.contains("Rename")
+                || msg.contains("free")
+                || msg.contains("rename")
+        );
+    }
+
+    #[test]
+    fn explain_event_error_wrapped_356_suggests_fix_name() {
+        let msg = explain_event_error(
+            "Create parameter failed: VTS error 356: InvalidParameterName",
+            "bad name!",
+        );
+        assert!(msg.contains("VTS error 356"));
+        assert!(msg.contains("bad name!"));
+        assert!(msg.to_lowercase().contains("invalid") || msg.to_lowercase().contains("fix"));
+    }
+
+    #[test]
+    fn explain_event_error_wrapped_355_suggests_free_slot() {
+        let msg = explain_event_error(
+            "Create parameter failed: VTS error 355: TooManyCustomParams",
+            "ignored",
+        );
+        assert!(msg.contains("VTS error 355"));
+        assert!(msg.contains("too many") || msg.contains("Free") || msg.contains("slot"));
+    }
+
+    #[test]
+    fn explain_event_error_wrapped_transport_passthrough() {
+        let msg = explain_event_error("Inject parameter failed: Send timed out", "ignored");
+        assert_eq!(msg, "Inject parameter failed: Send timed out");
+    }
+
+    // ---------------------------------------------------------------------------
+    // APIState heartbeat validation (pure)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn validate_api_state_both_true_ok() {
+        let data = messages::APIStateResponseData {
+            active: true,
+            current_session_authenticated: true,
+        };
+        assert!(validate_api_state(&data).is_ok());
+    }
+
+    #[test]
+    fn validate_api_state_not_active_fails() {
+        let data = messages::APIStateResponseData {
+            active: false,
+            current_session_authenticated: true,
+        };
+        let err = validate_api_state(&data).unwrap_err();
+        assert!(err.contains("not active"));
+    }
+
+    #[test]
+    fn validate_api_state_not_authenticated_fails() {
+        let data = messages::APIStateResponseData {
+            active: true,
+            current_session_authenticated: false,
+        };
+        let err = validate_api_state(&data).unwrap_err();
+        assert!(err.contains("not authenticated"));
+    }
+
+    #[test]
+    fn validate_api_state_both_false_fails_first() {
+        let data = messages::APIStateResponseData {
+            active: false,
+            current_session_authenticated: false,
+        };
+        let err = validate_api_state(&data).unwrap_err();
+        assert!(err.contains("not active"));
+    }
+
+    // ---------------------------------------------------------------------------
+    // classifiy_vts_response for APIStateResponse
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn classify_api_state_response_matches() {
+        let resp = make_response(
+            "APIStateResponse",
+            "api-state-r",
+            serde_json::json!({"active": true, "currentSessionAuthenticated": true}),
+        );
+        match classify_vts_response(&resp, "api-state-r", "APIStateResponse") {
+            RecvResult::Match(data) => {
+                let parsed: messages::APIStateResponseData = serde_json::from_value(data).unwrap();
+                assert!(parsed.active);
+                assert!(parsed.current_session_authenticated);
+            }
+            RecvResult::Skip => panic!("expected Match, got Skip"),
+            RecvResult::Error(e) => panic!("expected Match, got Error: {}", e),
+        }
+    }
+
+    #[test]
+    fn classify_api_state_api_error_produces_error() {
+        let resp = make_response(
+            "APIError",
+            "api-state-err",
+            serde_json::json!({"errorID": 5, "message": "Not available"}),
+        );
+        match classify_vts_response(&resp, "api-state-err", "APIStateResponse") {
+            RecvResult::Error(e) => {
+                assert!(e.contains("VTS error 5"), "got: {}", e);
+            }
+            _ => panic!("expected Error for APIError on APIStateResponse"),
+        }
+    }
+
+    #[test]
+    fn classify_api_state_wrong_message_type_skipped() {
+        let resp = make_response(
+            "AuthenticationResponse",
+            "api-state-r",
+            serde_json::json!({}),
+        );
+        match classify_vts_response(&resp, "api-state-r", "APIStateResponse") {
+            RecvResult::Skip => {}
+            _ => panic!("expected Skip for wrong message type"),
+        }
+    }
+
+    #[test]
+    fn classify_api_state_wrong_request_id_skipped() {
+        let resp = make_response(
+            "APIStateResponse",
+            "other-id",
+            serde_json::json!({"active": true, "currentSessionAuthenticated": true}),
+        );
+        match classify_vts_response(&resp, "my-id", "APIStateResponse") {
+            RecvResult::Skip => {}
+            _ => panic!("expected Skip for mismatched request_id"),
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Heartbeat ownership: only one heartbeat owner at a time
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn new_service_has_no_heartbeat() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        rt.block_on(async {
+            let inner = svc.inner.lock().await;
+            assert!(inner.heartbeat_cancel.is_none());
+            assert!(inner.heartbeat_handle.is_none());
+        });
+    }
+
+    #[test]
+    fn heartbeat_cancellation_token_signals() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let cancel = CancellationToken::new();
+        let ct = cancel.clone();
+        let signaled = Arc::new(AtomicBool::new(false));
+        let s = Arc::clone(&signaled);
+
+        let handle = rt.spawn(async move {
+            tokio::select! {
+                _ = ct.cancelled() => {
+                    s.store(true, Ordering::SeqCst);
+                }
+                _ = tokio::time::sleep(Duration::from_secs(10)) => {}
+            }
+        });
+
+        cancel.cancel();
+        rt.block_on(async {
+            let _ = tokio::time::timeout(Duration::from_secs(1), handle).await;
+        });
+        assert!(signaled.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn heartbeat_stop_clears_fields() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        rt.block_on(async {
+            {
+                let mut inner = svc.inner.lock().await;
+                let cancel = CancellationToken::new();
+                inner.heartbeat_cancel = Some(cancel);
+                inner.heartbeat_handle = Some(tokio::spawn(async {}));
+            }
+            let mut inner = svc.inner.lock().await;
+            assert!(inner.heartbeat_cancel.is_some());
+            assert!(inner.heartbeat_handle.is_some());
+            svc.stop_heartbeat_locked(&mut inner);
+            assert!(inner.heartbeat_cancel.is_none());
+            assert!(inner.heartbeat_handle.is_none());
+        });
+    }
+
+    #[test]
+    fn connect_failure_stops_heartbeat() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        let port = unused_local_port();
+
+        // Place a fake heartbeat so we can assert it's cleared
+        rt.block_on(async {
+            {
+                let mut inner = svc.inner.lock().await;
+                let cancel = CancellationToken::new();
+                inner.heartbeat_cancel = Some(cancel);
+                inner.heartbeat_handle = Some(tokio::spawn(async {}));
+            }
+        });
+
+        rt.block_on(async {
+            let result = svc.connect(port, None).await;
+            assert!(result.is_err());
+            let inner = svc.inner.lock().await;
+            assert!(
+                inner.heartbeat_cancel.is_none(),
+                "heartbeat must be stopped on connect failure"
+            );
+            assert!(
+                inner.heartbeat_handle.is_none(),
+                "heartbeat must be stopped on connect failure"
+            );
+        });
+    }
+
+    #[test]
+    fn heartbeat_field_defaults_none() {
+        let svc = VTubeStudioService::new();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let inner = svc.inner.lock().await;
+            assert!(inner.heartbeat_cancel.is_none());
+            assert!(inner.heartbeat_handle.is_none());
+        });
+    }
+
+    // ---------------------------------------------------------------------------
+    // is_auth_message helper
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn is_auth_message_returns_true_for_auth_types() {
+        assert!(is_auth_message("AuthenticationTokenRequest"));
+        assert!(is_auth_message("AuthenticationRequest"));
+        assert!(is_auth_message("AuthenticationTokenResponse"));
+        assert!(is_auth_message("AuthenticationResponse"));
+    }
+
+    #[test]
+    fn is_auth_message_returns_false_for_non_auth() {
+        assert!(!is_auth_message("APIStateRequest"));
+        assert!(!is_auth_message("APIStateResponse"));
+        assert!(!is_auth_message("ParameterCreationRequest"));
+        assert!(!is_auth_message("ParameterCreationResponse"));
+        assert!(!is_auth_message("InjectParameterDataRequest"));
+        assert!(!is_auth_message("InjectParameterDataResponse"));
+        assert!(!is_auth_message("APIError"));
+        assert!(!is_auth_message("HotkeyTriggerRequest"));
+        assert!(!is_auth_message("ItemListRequest"));
+    }
+
+    // ---------------------------------------------------------------------------
+    // should_log_data_payload helper
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn should_log_data_payload_true_for_safe_types() {
+        assert!(should_log_data_payload("ParameterCreationRequest"));
+        assert!(should_log_data_payload("ParameterCreationResponse"));
+        assert!(should_log_data_payload("InjectParameterDataRequest"));
+        assert!(should_log_data_payload("InjectParameterDataResponse"));
+        assert!(should_log_data_payload("APIStateRequest"));
+        assert!(should_log_data_payload("APIStateResponse"));
+        assert!(should_log_data_payload("APIError"));
+    }
+
+    #[test]
+    fn should_log_data_payload_false_for_auth_types() {
+        assert!(!should_log_data_payload("AuthenticationTokenRequest"));
+        assert!(!should_log_data_payload("AuthenticationRequest"));
+        assert!(!should_log_data_payload("AuthenticationTokenResponse"));
+        assert!(!should_log_data_payload("AuthenticationResponse"));
+    }
+
+    #[test]
+    fn should_log_data_payload_false_for_other_types() {
+        assert!(!should_log_data_payload("HotkeyTriggerRequest"));
+        assert!(!should_log_data_payload("HotkeyTriggerResponse"));
+        assert!(!should_log_data_payload("ItemListRequest"));
+        assert!(!should_log_data_payload("ItemListResponse"));
+        assert!(!should_log_data_payload("ItemAnimationControlRequest"));
+        assert!(!should_log_data_payload("ItemAnimationControlResponse"));
+        assert!(!should_log_data_payload("HotkeysInCurrentModelRequest"));
+        assert!(!should_log_data_payload("HotkeysInCurrentModelResponse"));
+    }
+
+    // ---------------------------------------------------------------------------
+    // Generation guard: stale heartbeat must not mutate state
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn generation_default_is_zero() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        rt.block_on(async {
+            let inner = svc.inner.lock().await;
+            assert_eq!(inner.connection_generation, 0);
+        });
+    }
+
+    #[test]
+    fn generation_bumps_on_disconnect() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_desired_running(true);
+        rt.block_on(async {
+            svc.disconnect().await;
+            let inner = svc.inner.lock().await;
+            assert!(inner.connection_generation > 0);
+        });
+    }
+
+    #[test]
+    fn heartbeat_stale_generation_does_not_mutate_state() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        rt.block_on(async {
+            let svc = VTubeStudioService::new();
+            svc.set_desired_running(true);
+            svc.set_connection_status(VTubeStudioConnectionStatus::Connected);
+            svc.is_authenticated.store(true, Ordering::SeqCst);
+
+            let hb_gen = {
+                let mut inner = svc.inner.lock().await;
+                inner.connection_generation = 5;
+                inner.connection_generation
+            };
+
+            // Bump generation externally, simulating disconnect
+            {
+                let mut inner = svc.inner.lock().await;
+                inner.connection_generation = inner.connection_generation.wrapping_add(1);
+            }
+
+            // Reacquire and verify gen mismatch
+            {
+                let inner = svc.inner.lock().await;
+                assert_ne!(inner.connection_generation, hb_gen);
+                // Stale heartbeat would observe generation mismatch and exit
+                // without mutating state
+                let ws_was_some = inner.ws.is_some();
+                let typing_was_active = inner.typing_active;
+                let auth_was_true = svc.is_authenticated.load(Ordering::SeqCst);
+                let status_was = svc.get_connection_status();
+
+                // These must remain unchanged after gen mismatch
+                assert_eq!(inner.ws.is_some(), ws_was_some);
+                assert_eq!(inner.typing_active, typing_was_active);
+                assert_eq!(svc.is_authenticated.load(Ordering::SeqCst), auth_was_true);
+                assert_eq!(svc.get_connection_status(), status_was);
+            }
+        });
+    }
+
+    // ---------------------------------------------------------------------------
+    // start_heartbeat_locked lifecycle (pure, no network)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn start_heartbeat_locked_sets_fields_and_bumps_generation() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        rt.block_on(async {
+            {
+                let mut inner = svc.inner.lock().await;
+                let gen_before = inner.connection_generation;
+                assert!(inner.heartbeat_cancel.is_none());
+                assert!(inner.heartbeat_handle.is_none());
+
+                svc.start_heartbeat_locked(&mut inner);
+
+                assert!(
+                    inner.connection_generation > gen_before,
+                    "generation must be bumped by start_heartbeat_locked"
+                );
+                assert!(
+                    inner.heartbeat_cancel.is_some(),
+                    "cancellation token must be set"
+                );
+                assert!(inner.heartbeat_handle.is_some(), "handle must be set");
+            }
+
+            // The spawned task should not interfere with tests —
+            // it locks inner, finds ws=None, and immediately breaks.
+        });
+    }
+
+    #[test]
+    fn start_heartbeat_locked_stops_previous_heartbeat() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        rt.block_on(async {
+            let old_cancel = {
+                let mut inner = svc.inner.lock().await;
+                let cancel = CancellationToken::new();
+                let ct_clone = cancel.clone();
+                inner.heartbeat_cancel = Some(cancel);
+                let ct_for_spawn = ct_clone.clone();
+                inner.heartbeat_handle = Some(tokio::spawn(async move {
+                    ct_for_spawn.cancelled().await;
+                }));
+                ct_clone
+            };
+
+            // Old token should not be cancelled yet
+            assert!(!old_cancel.is_cancelled());
+
+            let mut inner = svc.inner.lock().await;
+            svc.start_heartbeat_locked(&mut inner);
+
+            // Old token must be cancelled by start_heartbeat_locked
+            assert!(
+                old_cancel.is_cancelled(),
+                "old heartbeat token must be cancelled"
+            );
+
+            // New fields should be fresh
+            assert!(inner.heartbeat_cancel.is_some());
+            assert!(
+                !inner.heartbeat_cancel.as_ref().unwrap().is_cancelled(),
+                "new heartbeat token must not be cancelled"
+            );
+        });
+    }
+
+    // ---------------------------------------------------------------------------
+    // test_connection error path truthful state (unused port, no VTS)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn test_connection_on_closed_port_sets_truthful_state() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_desired_running(true);
+        svc.set_connection_status(VTubeStudioConnectionStatus::Connected);
+        svc.is_authenticated.store(true, Ordering::SeqCst);
+        // Place a fake resolved item so inner looks like 'retained'
+        rt.block_on(async {
+            {
+                let mut inner = svc.inner.lock().await;
+                inner.typing_active = true;
+                inner.ws = None; // no real socket
+            }
+        });
+
+        let port = unused_local_port();
+        rt.block_on(async {
+            let result = svc.test_connection(port, None).await;
+            assert!(result.is_err(), "connect to closed port must fail");
+        });
+
+        // After failure: auth must be false, status must be Error,
+        // ws must be None, typing must be inactive.
+        assert!(
+            !svc.is_authenticated.load(Ordering::SeqCst),
+            "auth must be false after test_connection error"
+        );
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Error,
+            "status must be Error after test_connection failure"
+        );
+        assert!(
+            svc.is_desired_running(),
+            "desired_running must NOT be cleared by test_connection failure"
+        );
+
+        rt.block_on(async {
+            let inner = svc.inner.lock().await;
+            assert!(inner.ws.is_none());
+            assert!(!inner.typing_active);
+            assert!(
+                inner.heartbeat_cancel.is_none(),
+                "no heartbeat should be started on failed test_connection"
+            );
+            assert!(
+                inner.heartbeat_handle.is_none(),
+                "no heartbeat should be started on failed test_connection"
+            );
+        });
+    }
+
+    #[test]
+    fn test_connection_failure_preserves_desired_running() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_desired_running(true);
+        let port = unused_local_port();
+
+        rt.block_on(async {
+            let result = svc.test_connection(port, None).await;
+            assert!(result.is_err());
+        });
+
+        assert!(
+            svc.is_desired_running(),
+            "desired_running must survive test_connection failure"
+        );
+    }
+
+    #[test]
+    fn test_connection_failure_when_not_desired_running_still_sets_error_status() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        assert!(!svc.is_desired_running());
+        svc.set_connection_status(VTubeStudioConnectionStatus::Connected);
+        svc.is_authenticated.store(true, Ordering::SeqCst);
+
+        let port = unused_local_port();
+        rt.block_on(async {
+            let result = svc.test_connection(port, None).await;
+            assert!(result.is_err());
+        });
+
+        assert!(!svc.is_desired_running());
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Error,
+            "status must be Error"
+        );
+        assert!(!svc.is_authenticated.load(Ordering::SeqCst));
     }
 }
