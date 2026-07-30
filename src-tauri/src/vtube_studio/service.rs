@@ -283,6 +283,27 @@ impl ItemTransitionState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SkipReason {
+    NotDesiredRunning,
+    NotConnected,
+    NotAuthenticated,
+    NoSocket,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EnsureOutcome {
+    Ensured,
+    Skipped(SkipReason),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DeleteOutcome {
+    Deleted,
+    Skipped(SkipReason),
+    NotFound,
+}
+
 pub struct VTubeStudioService {
     pub settings: Arc<tokio::sync::RwLock<VTubeStudioSettings>>,
     inner: Arc<tokio::sync::Mutex<InnerState>>,
@@ -347,6 +368,32 @@ impl VTubeStudioService {
     #[allow(dead_code)]
     pub fn mark_authenticated(&self, value: bool) {
         self.is_authenticated.store(value, Ordering::SeqCst);
+    }
+
+    pub fn is_authenticated(&self) -> bool {
+        self.is_authenticated.load(Ordering::SeqCst)
+    }
+
+    pub fn is_live_authenticated_connection(&self) -> bool {
+        self.is_desired_running()
+            && self.get_connection_status() == VTubeStudioConnectionStatus::Connected
+            && self.is_authenticated()
+    }
+
+    pub(crate) async fn live_connection_skip_reason(&self) -> Option<SkipReason> {
+        if !self.is_desired_running() {
+            return Some(SkipReason::NotDesiredRunning);
+        }
+        if self.get_connection_status() != VTubeStudioConnectionStatus::Connected {
+            return Some(SkipReason::NotConnected);
+        }
+        if !self.is_authenticated() {
+            return Some(SkipReason::NotAuthenticated);
+        }
+        if self.inner.lock().await.ws.is_none() {
+            return Some(SkipReason::NoSocket);
+        }
+        None
     }
 
     fn next_id(&self) -> String {
@@ -831,31 +878,31 @@ impl VTubeStudioService {
         Ok(())
     }
 
-    pub async fn ensure_event_parameter_if_connected(
+    pub(crate) async fn ensure_event_parameter_if_connected(
         &self,
         parameter_name: &str,
-    ) -> Result<bool, String> {
+    ) -> Result<EnsureOutcome, String> {
         if !self.is_desired_running() {
-            return Ok(false);
+            return Ok(EnsureOutcome::Skipped(SkipReason::NotDesiredRunning));
         }
 
         let status = self.get_connection_status();
         if status != VTubeStudioConnectionStatus::Connected {
-            return Ok(false);
+            return Ok(EnsureOutcome::Skipped(SkipReason::NotConnected));
         }
 
         if !self.is_authenticated.load(Ordering::SeqCst) {
-            return Ok(false);
+            return Ok(EnsureOutcome::Skipped(SkipReason::NotAuthenticated));
         }
 
         let mut inner = self.inner.lock().await;
         let ws = match inner.ws.as_mut() {
             Some(ws) => ws,
-            None => return Ok(false),
+            None => return Ok(EnsureOutcome::Skipped(SkipReason::NoSocket)),
         };
 
         match ensure_event_parameter(ws, self.next_id(), parameter_name).await {
-            Ok(()) => Ok(true),
+            Ok(()) => Ok(EnsureOutcome::Ensured),
             Err(e) => {
                 if is_semantic_vts_error(&e) {
                     Err(explain_event_error(&e, parameter_name))
@@ -866,6 +913,64 @@ impl VTubeStudioService {
                     self.set_connection_status(VTubeStudioConnectionStatus::Error);
                     Err(e)
                 }
+            }
+        }
+    }
+
+    pub(crate) async fn delete_event_parameter_if_connected(
+        &self,
+        parameter_name: &str,
+    ) -> Result<DeleteOutcome, String> {
+        if !self.is_desired_running() {
+            return Ok(DeleteOutcome::Skipped(SkipReason::NotDesiredRunning));
+        }
+
+        let status = self.get_connection_status();
+        if status != VTubeStudioConnectionStatus::Connected {
+            return Ok(DeleteOutcome::Skipped(SkipReason::NotConnected));
+        }
+
+        if !self.is_authenticated.load(Ordering::SeqCst) {
+            return Ok(DeleteOutcome::Skipped(SkipReason::NotAuthenticated));
+        }
+
+        let mut inner = self.inner.lock().await;
+        let ws = match inner.ws.as_mut() {
+            Some(ws) => ws,
+            None => return Ok(DeleteOutcome::Skipped(SkipReason::NoSocket)),
+        };
+
+        match delete_event_parameter(ws, self.next_id(), parameter_name).await {
+            Ok(()) => Ok(DeleteOutcome::Deleted),
+            Err(e) => {
+                if is_semantic_vts_error(&e) {
+                    if inner_vts_error(&e) == "VTS error 401" {
+                        debug!(
+                            parameter_name,
+                            "VTS delete parameter not found (401), already cleaned up"
+                        );
+                        Ok(DeleteOutcome::NotFound)
+                    } else {
+                        Err(e)
+                    }
+                } else {
+                    debug!(error = %e, "VTS delete event parameter transport failure, discarding broken socket");
+                    inner.ws = None;
+                    self.is_authenticated.store(false, Ordering::SeqCst);
+                    self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    pub async fn stop_event_typing_and_reset(&self, parameter_name: &str) {
+        let mut inner = self.inner.lock().await;
+        self.stop_typing_keepalive_locked(&mut inner);
+        if inner.typing_active {
+            inner.typing_active = false;
+            if let Some(ref mut ws) = inner.ws {
+                let _ = inject_typing(ws, self.next_id(), parameter_name, 0.0).await;
             }
         }
     }
@@ -1628,6 +1733,22 @@ async fn ensure_event_parameter(
     Ok(())
 }
 
+async fn delete_event_parameter(
+    ws: &mut WsStream,
+    request_id: String,
+    parameter_name: &str,
+) -> Result<(), String> {
+    let req = VtsRequest::parameter_deletion_request(&request_id, parameter_name);
+    let json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+
+    let _value = send_and_recv(ws, &json, &request_id, "ParameterDeletionResponse")
+        .await
+        .map_err(|e| format!("Delete parameter failed: {}", e))?;
+
+    debug!(parameter_name, "Parameter deleted");
+    Ok(())
+}
+
 async fn inject_typing(
     ws: &mut WsStream,
     request_id: String,
@@ -1953,7 +2074,7 @@ fn build_scene_records(instances: &[ItemInstanceInfo]) -> Vec<SceneItemRecord> {
 
 /// true, если ошибка — валидный ответ VTS (APIError / парсинг), а не потеря транспорта.
 /// На такой ошибке сокет жив и НЕ должен отбрасываться.
-fn is_semantic_vts_error(err: &str) -> bool {
+pub(crate) fn is_semantic_vts_error(err: &str) -> bool {
     let inner = inner_vts_error(err);
     inner.starts_with("VTS error ")
         || inner.starts_with("Parse error data")
@@ -1991,6 +2112,7 @@ fn explain_event_error(err: &str, param_name: &str) -> String {
 fn inner_vts_error(err: &str) -> &str {
     const WRAPPERS: &[&str] = &[
         "Create parameter failed: ",
+        "Delete parameter failed: ",
         "Inject parameter failed: ",
         "Hotkey trigger failed: ",
     ];
@@ -5303,7 +5425,7 @@ mod tests {
     // ---------------------------------------------------------------------------
 
     #[test]
-    fn ensure_param_disconnected_no_socket_returns_false_no_mutation() {
+    fn ensure_param_disconnected_no_socket_returns_no_socket() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -5315,7 +5437,7 @@ mod tests {
         let session_before = svc.read_session();
         rt.block_on(async {
             let result = svc.ensure_event_parameter_if_connected("MyParam").await;
-            assert_eq!(result, Ok(false));
+            assert_eq!(result, Ok(EnsureOutcome::Skipped(SkipReason::NoSocket)));
         });
         assert_eq!(
             svc.get_connection_status(),
@@ -5328,7 +5450,7 @@ mod tests {
     }
 
     #[test]
-    fn ensure_param_not_desired_running_returns_false() {
+    fn ensure_param_not_desired_running_returns_skipped() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -5337,8 +5459,269 @@ mod tests {
         rt.block_on(async {
             assert_eq!(
                 svc.ensure_event_parameter_if_connected("MyParam").await,
-                Ok(false)
+                Ok(EnsureOutcome::Skipped(SkipReason::NotDesiredRunning))
             );
+        });
+    }
+
+    // ---------------------------------------------------------------------------
+    // delete_event_parameter_if_connected tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn delete_param_disconnected_returns_skipped_no_mutation() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        rt.block_on(async {
+            let result = svc.delete_event_parameter_if_connected("OldParam").await;
+            assert_eq!(
+                result,
+                Ok(DeleteOutcome::Skipped(SkipReason::NotDesiredRunning))
+            );
+        });
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Disconnected,
+            "connection status unchanged when disconnected"
+        );
+        assert!(!svc.is_authenticated.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn delete_param_not_desired_running_returns_skipped() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        rt.block_on(async {
+            let result = svc.delete_event_parameter_if_connected("OldParam").await;
+            assert_eq!(
+                result,
+                Ok(DeleteOutcome::Skipped(SkipReason::NotDesiredRunning))
+            );
+        });
+    }
+
+    #[test]
+    fn delete_param_not_authenticated_returns_skipped() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_desired_running(true);
+        svc.set_connection_status(VTubeStudioConnectionStatus::Connected);
+        assert!(!svc.is_authenticated());
+        rt.block_on(async {
+            let result = svc.delete_event_parameter_if_connected("OldParam").await;
+            assert_eq!(
+                result,
+                Ok(DeleteOutcome::Skipped(SkipReason::NotAuthenticated))
+            );
+        });
+        assert!(svc.is_desired_running());
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Connected
+        );
+    }
+
+    #[test]
+    fn delete_param_no_socket_returns_skipped() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_desired_running(true);
+        svc.set_connection_status(VTubeStudioConnectionStatus::Connected);
+        svc.is_authenticated.store(true, Ordering::SeqCst);
+        rt.block_on(async {
+            let result = svc.delete_event_parameter_if_connected("OldParam").await;
+            assert_eq!(result, Ok(DeleteOutcome::Skipped(SkipReason::NoSocket)));
+        });
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Connected,
+            "connection status unchanged when no socket"
+        );
+        assert!(svc.is_authenticated.load(Ordering::SeqCst));
+    }
+
+    // ---------------------------------------------------------------------------
+    // inner_vts_error — "Delete parameter failed: " prefix
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn inner_vts_error_strips_delete_prefix() {
+        let err = "Delete parameter failed: VTS error 401";
+        assert_eq!(inner_vts_error(err), "VTS error 401");
+    }
+
+    #[test]
+    fn inner_vts_error_strips_delete_prefix_400() {
+        let err = "Delete parameter failed: VTS error 400";
+        assert_eq!(inner_vts_error(err), "VTS error 400");
+    }
+
+    #[test]
+    fn inner_vts_error_strips_create_prefix() {
+        let err = "Create parameter failed: VTS error 350";
+        assert_eq!(inner_vts_error(err), "VTS error 350");
+    }
+
+    #[test]
+    fn inner_vts_error_passes_unknown_prefix_through() {
+        let err = "Some unknown error";
+        assert_eq!(inner_vts_error(err), "Some unknown error");
+    }
+
+    // ---------------------------------------------------------------------------
+    // is_semantic_vts_error with delete prefix
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn is_semantic_delete_error_401() {
+        assert!(is_semantic_vts_error(
+            "Delete parameter failed: VTS error 401"
+        ));
+    }
+
+    #[test]
+    fn is_semantic_delete_error_402() {
+        assert!(is_semantic_vts_error(
+            "Delete parameter failed: VTS error 402"
+        ));
+    }
+
+    #[test]
+    fn is_semantic_delete_error_403() {
+        assert!(is_semantic_vts_error(
+            "Delete parameter failed: VTS error 403"
+        ));
+    }
+
+    #[test]
+    fn is_semantic_delete_error_400() {
+        assert!(is_semantic_vts_error(
+            "Delete parameter failed: VTS error 400"
+        ));
+    }
+
+    #[test]
+    fn is_not_semantic_transport_delete_error() {
+        assert!(!is_semantic_vts_error(
+            "Delete parameter failed: Read error: connection lost"
+        ));
+    }
+
+    // ---------------------------------------------------------------------------
+    // classify_vts_response — ParameterDeletionResponse
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn classify_parameter_deletion_response() {
+        let resp = make_response(
+            "ParameterDeletionResponse",
+            "del-1",
+            serde_json::json!({"parameterName": "TTSBardTyping"}),
+        );
+        match classify_vts_response(&resp, "del-1", "ParameterDeletionResponse") {
+            RecvResult::Match(data) => {
+                assert_eq!(data["parameterName"].as_str().unwrap(), "TTSBardTyping");
+            }
+            _ => panic!("expected Match for ParameterDeletionResponse"),
+        }
+    }
+
+    #[test]
+    fn classify_deletion_api_error() {
+        let resp = make_response(
+            "APIError",
+            "del-err",
+            serde_json::json!({"errorID": 401, "message": "CustomParamDeletionNotFound"}),
+        );
+        match classify_vts_response(&resp, "del-err", "ParameterDeletionResponse") {
+            RecvResult::Error(e) => {
+                assert!(e.contains("VTS error 401"), "got: {}", e);
+            }
+            _ => panic!("expected Error for deletion APIError"),
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // stop_event_typing_and_reset lifecycle (no network)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn stop_event_typing_and_reset_clears_typing_active_no_socket() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        rt.block_on(async {
+            {
+                let mut inner = svc.inner.lock().await;
+                inner.typing_active = true;
+            }
+            svc.stop_event_typing_and_reset("OldInput").await;
+            let inner = svc.inner.lock().await;
+            assert!(
+                !inner.typing_active,
+                "typing_active must be cleared by stop_event_typing_and_reset"
+            );
+            assert!(inner.typing_cancel.is_none());
+            assert!(inner.typing_handle.is_none());
+        });
+    }
+
+    #[test]
+    fn stop_event_typing_and_reset_stops_keepalive() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        rt.block_on(async {
+            {
+                let mut inner = svc.inner.lock().await;
+                let cancel = tokio_util::sync::CancellationToken::new();
+                inner.typing_cancel = Some(cancel);
+                inner.typing_handle = Some(tokio::spawn(async {}));
+                inner.typing_active = true;
+            }
+            svc.stop_event_typing_and_reset("OldInput").await;
+            let inner = svc.inner.lock().await;
+            assert!(
+                inner.typing_cancel.is_none(),
+                "typing_cancel must be cleared"
+            );
+            assert!(
+                inner.typing_handle.is_none(),
+                "typing_handle must be cleared"
+            );
+            assert!(!inner.typing_active);
+        });
+    }
+
+    #[test]
+    fn stop_event_typing_and_reset_noop_when_not_active() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        rt.block_on(async {
+            svc.stop_event_typing_and_reset("Irrelevant").await;
+            let inner = svc.inner.lock().await;
+            assert!(!inner.typing_active);
+            assert!(inner.typing_cancel.is_none());
+            assert!(inner.typing_handle.is_none());
         });
     }
 }

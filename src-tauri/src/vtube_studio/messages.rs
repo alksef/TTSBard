@@ -80,6 +80,12 @@ pub(crate) struct ParameterCreationRequestData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct ParameterDeletionRequestData {
+    #[serde(rename = "parameterName")]
+    pub parameter_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ParameterValue {
     pub id: String,
     pub value: f64,
@@ -255,6 +261,14 @@ impl VtsRequest {
         Self::new("ParameterCreationRequest", request_id, data)
     }
 
+    pub(crate) fn parameter_deletion_request(request_id: &str, parameter_name: &str) -> Self {
+        let data = serde_json::to_value(ParameterDeletionRequestData {
+            parameter_name: parameter_name.to_string(),
+        })
+        .unwrap();
+        Self::new("ParameterDeletionRequest", request_id, data)
+    }
+
     pub(crate) fn inject_parameter_request(
         request_id: &str,
         parameter_name: &str,
@@ -392,6 +406,23 @@ mod tests {
     }
 
     #[test]
+    fn parameter_deletion_request_payload() {
+        let req = VtsRequest::parameter_deletion_request("req-del", "TTSBardTyping");
+        let json = serde_json::to_string(&req).unwrap();
+        let expected = serde_json::json!({
+            "apiName": "VTubeStudioPublicAPI",
+            "apiVersion": "1.0",
+            "requestID": "req-del",
+            "messageType": "ParameterDeletionRequest",
+            "data": {
+                "parameterName": "TTSBardTyping"
+            }
+        });
+        let actual: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn inject_parameter_request_payload() {
         let req = VtsRequest::inject_parameter_request("req-4", "TTSBardTyping", 1.0);
         let json = serde_json::to_string(&req).unwrap();
@@ -509,6 +540,24 @@ mod tests {
         let resp: VtsResponse = serde_json::from_str(json).unwrap();
         assert_eq!(resp.message_type, "ParameterCreationResponse");
         assert_eq!(resp.request_id, "param-1");
+        assert_eq!(
+            resp.data["parameterName"].as_str().unwrap(),
+            "TTSBardTyping"
+        );
+    }
+
+    #[test]
+    fn typed_parameter_deletion_response_deserializes() {
+        let json = r#"{
+            "apiName": "VTubeStudioPublicAPI",
+            "apiVersion": "1.0",
+            "requestID": "del-1",
+            "messageType": "ParameterDeletionResponse",
+            "data": { "parameterName": "TTSBardTyping" }
+        }"#;
+        let resp: VtsResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.message_type, "ParameterDeletionResponse");
+        assert_eq!(resp.request_id, "del-1");
         assert_eq!(
             resp.data["parameterName"].as_str().unwrap(),
             "TTSBardTyping"

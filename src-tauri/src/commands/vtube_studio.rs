@@ -6,7 +6,7 @@ use crate::events::VTubeStudioConnectionStatus;
 use crate::state::AppState;
 use crate::vtube_studio::{SceneItemRecord, VTubeStudioItemStatus};
 use tauri::{AppHandle, Emitter, Manager, State};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 pub const VTS_STATUS_CHANGED_EVENT: &str = "vtube-studio-status-changed";
 pub const VTS_ITEM_STATUS_CHANGED_EVENT: &str = "vtube-studio-item-status-changed";
@@ -19,10 +19,38 @@ fn emit_vts_item_status(app_handle: &AppHandle, status: &VTubeStudioItemStatus) 
     let _ = app_handle.emit(VTS_ITEM_STATUS_CHANGED_EVENT, status);
 }
 
+fn should_ensure_event_parameter(
+    new_output_mode: &VTubeStudioTypingMode,
+    old_output_mode: &VTubeStudioTypingMode,
+    old_name: &str,
+    new_name: &str,
+) -> bool {
+    *new_output_mode == VTubeStudioTypingMode::Event
+        && (*old_output_mode != VTubeStudioTypingMode::Event || old_name != new_name)
+}
+
+#[cfg(test)]
 fn should_publish_event_parameter(is_event_mode: bool, old_name: &str, new_name: &str) -> bool {
     is_event_mode && old_name != new_name
 }
 
+/// Whether the previous Event INPUT must be deleted after switching to a new
+/// action. Only a real rename `Event(old) -> Event(new)` with distinct names
+/// deletes; mode switches `Event <-> Hotkeys/Item` and unchanged names do not
+/// (ROADMAP-061 contracts 8-10).
+fn should_delete_old_parameter(
+    new_is_event: bool,
+    old_output_mode: &VTubeStudioTypingMode,
+    old_name: &str,
+    new_name: &str,
+) -> bool {
+    new_is_event
+        && *old_output_mode == VTubeStudioTypingMode::Event
+        && !old_name.is_empty()
+        && old_name != new_name
+}
+
+#[allow(dead_code)]
 fn format_event_save_message(created_or_error: Result<bool, String>, param_name: &str) -> String {
     match created_or_error {
         Ok(true) => format!(
@@ -162,11 +190,12 @@ pub async fn save_vtube_studio_typing_action(
     let trimmed_start = start_hotkey_id.trim().to_string();
     let trimmed_stop = stop_hotkey_id.trim().to_string();
 
-    match mode {
+    let (item_file_name_raw, item_type_raw) = match mode {
         VTubeStudioTypingMode::Event => {
             if trimmed_parameter_name.is_empty() {
                 return Err("Parameter name must be non-empty.".to_string());
             }
+            (None, None)
         }
         VTubeStudioTypingMode::Hotkeys => {
             if trimmed_start.is_empty() {
@@ -175,6 +204,7 @@ pub async fn save_vtube_studio_typing_action(
             if trimmed_stop.is_empty() {
                 return Err("Stop hotkey ID must be non-empty for Hotkeys mode.".to_string());
             }
+            (None, None)
         }
         VTubeStudioTypingMode::Item => {
             let file_name = match &item_file_name {
@@ -193,18 +223,27 @@ pub async fn save_vtube_studio_typing_action(
                     );
                 }
             };
-
-            let records = state.vtube_studio.list_scene_items().await.map_err(|e| {
-                let status = state.vtube_studio.get_connection_status();
-                emit_vts_status(&app_handle, &status);
-                format!(
-                    "Cannot validate item selection: {}. Make sure VTube Studio is connected.",
-                    e
-                )
-            })?;
-
-            validate_item_selection(&records, &file_name, &item_type_val)?;
+            (Some(file_name), Some(item_type_val))
         }
+    };
+
+    if !state.vtube_studio.is_live_authenticated_connection() {
+        return Err("Подключитесь к VTube Studio, чтобы настроить действие.".to_string());
+    }
+
+    if mode == VTubeStudioTypingMode::Item {
+        let file_name = item_file_name_raw.as_deref().unwrap_or("");
+        let item_type_val = item_type_raw.as_deref().unwrap_or("");
+        let records = state.vtube_studio.list_scene_items().await.map_err(|e| {
+            let status = state.vtube_studio.get_connection_status();
+            emit_vts_status(&app_handle, &status);
+            format!(
+                "Cannot validate item selection: {}. Make sure VTube Studio is connected.",
+                e
+            )
+        })?;
+
+        validate_item_selection(&records, file_name, item_type_val)?;
     }
 
     let (
@@ -215,6 +254,7 @@ pub async fn save_vtube_studio_typing_action(
         token,
         start_on_boot,
         old_parameter_name,
+        old_output_mode,
     ) = {
         let s = state.vtube_studio.settings.read().await;
         (
@@ -225,6 +265,7 @@ pub async fn save_vtube_studio_typing_action(
             s.token.clone(),
             s.start_on_boot,
             s.typing_action.parameter_name.clone(),
+            s.typing_action.output_mode.clone(),
         )
     };
 
@@ -253,55 +294,229 @@ pub async fn save_vtube_studio_typing_action(
         .try_state::<SettingsManager>()
         .ok_or_else(|| "SettingsManager not available".to_string())?;
 
-    let persist_settings = VTubeStudioSettings {
+    let operations = LiveTypingActionSaveOperations {
+        service: &state.vtube_studio,
+        settings_manager: settings_manager.inner(),
+        app_handle: &app_handle,
         enabled,
         port,
         token,
         start_on_boot,
-        typing_action: typing_action.clone(),
     };
-
-    let mgr = settings_manager.inner().clone();
-    crate::commands::persist_blocking(&mgr, move |mgr| {
-        mgr.set_vtube_studio_settings(&persist_settings)
-    })
+    let save_result = orchestrate_typing_action_save(
+        &operations,
+        &old_output_mode,
+        &old_parameter_name,
+        &typing_action,
+    )
     .await?;
 
     let is_item_mode = typing_action.output_mode == VTubeStudioTypingMode::Item;
-    let is_event_mode = typing_action.output_mode == VTubeStudioTypingMode::Event;
-    let param_name = typing_action.parameter_name.clone();
-
-    {
-        let mut s = state.vtube_studio.settings.write().await;
-        s.typing_action = typing_action;
-    }
-
-    crate::commands::emit_settings_changed(&app_handle);
-
     let item_status = state.vtube_studio.refresh_item_action().await;
     emit_vts_item_status(&app_handle, &item_status);
 
     if is_item_mode {
         if matches!(item_status, VTubeStudioItemStatus::Ready { .. }) {
-            Ok("Действие при наборе сохранено".to_string())
+            return Ok("Действие при наборе сохранено".to_string());
         } else {
-            Err(format!(
+            return Err(format!(
                 "Item action saved but item is not ready: {:?}. Check that the item exists in the scene.",
                 item_status
-            ))
+            ));
         }
-    } else if should_publish_event_parameter(is_event_mode, &old_parameter_name, &param_name) {
-        match state
-            .vtube_studio
-            .ensure_event_parameter_if_connected(&param_name)
-            .await
-        {
-            Ok(created) => Ok(format_event_save_message(Ok(created), &param_name)),
-            Err(e) => Ok(format_event_save_message(Err(e), &param_name)),
-        }
+    }
+
+    if let Some(warning) = save_result.cleanup_warning {
+        return Ok(warning);
+    }
+
+    if save_result.ensured_parameter {
+        Ok(format!(
+            "Параметр '{}' создан в VTube Studio. Действие при наборе сохранено.",
+            typing_action.parameter_name
+        ))
     } else {
         Ok("Действие при наборе сохранено".to_string())
     }
+}
+
+fn skip_reason_text(reason: crate::vtube_studio::SkipReason) -> &'static str {
+    use crate::vtube_studio::SkipReason;
+    match reason {
+        SkipReason::NotDesiredRunning => "VTube Studio не запущен",
+        SkipReason::NotConnected => "нет соединения с VTube Studio",
+        SkipReason::NotAuthenticated => "нет аутентификации",
+        SkipReason::NoSocket => "соединение потеряно",
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct TypingActionSaveResult {
+    ensured_parameter: bool,
+    cleanup_warning: Option<String>,
+}
+
+#[async_trait::async_trait]
+trait TypingActionSaveOperations: Sync {
+    async fn require_live_connection(&self) -> Result<(), String>;
+    async fn ensure_parameter(
+        &self,
+        parameter_name: &str,
+    ) -> Result<crate::vtube_studio::EnsureOutcome, String>;
+    async fn persist_action(&self, action: &VTubeStudioTypingAction) -> Result<(), String>;
+    async fn apply_runtime(&self, action: &VTubeStudioTypingAction);
+    fn notify_settings_changed(&self);
+    async fn stop_old_event(&self, parameter_name: &str);
+    async fn delete_parameter(
+        &self,
+        parameter_name: &str,
+    ) -> Result<crate::vtube_studio::DeleteOutcome, String>;
+}
+
+struct LiveTypingActionSaveOperations<'a> {
+    service: &'a crate::vtube_studio::VTubeStudioService,
+    settings_manager: &'a SettingsManager,
+    app_handle: &'a AppHandle,
+    enabled: bool,
+    port: u16,
+    token: Option<String>,
+    start_on_boot: bool,
+}
+
+#[async_trait::async_trait]
+impl TypingActionSaveOperations for LiveTypingActionSaveOperations<'_> {
+    async fn require_live_connection(&self) -> Result<(), String> {
+        match self.service.live_connection_skip_reason().await {
+            None => Ok(()),
+            Some(reason) => Err(format!(
+                "Подключитесь к VTube Studio, чтобы настроить действие: {}.",
+                skip_reason_text(reason)
+            )),
+        }
+    }
+
+    async fn ensure_parameter(
+        &self,
+        parameter_name: &str,
+    ) -> Result<crate::vtube_studio::EnsureOutcome, String> {
+        self.service
+            .ensure_event_parameter_if_connected(parameter_name)
+            .await
+    }
+
+    async fn persist_action(&self, action: &VTubeStudioTypingAction) -> Result<(), String> {
+        let persist_settings = VTubeStudioSettings {
+            enabled: self.enabled,
+            port: self.port,
+            token: self.token.clone(),
+            start_on_boot: self.start_on_boot,
+            typing_action: action.clone(),
+        };
+        crate::commands::persist_blocking(self.settings_manager, move |manager| {
+            manager.set_vtube_studio_settings(&persist_settings)
+        })
+        .await
+    }
+
+    async fn apply_runtime(&self, action: &VTubeStudioTypingAction) {
+        self.service.settings.write().await.typing_action = action.clone();
+    }
+
+    fn notify_settings_changed(&self) {
+        crate::commands::emit_settings_changed(self.app_handle);
+    }
+
+    async fn stop_old_event(&self, parameter_name: &str) {
+        self.service
+            .stop_event_typing_and_reset(parameter_name)
+            .await;
+    }
+
+    async fn delete_parameter(
+        &self,
+        parameter_name: &str,
+    ) -> Result<crate::vtube_studio::DeleteOutcome, String> {
+        self.service
+            .delete_event_parameter_if_connected(parameter_name)
+            .await
+    }
+}
+
+async fn orchestrate_typing_action_save<O: TypingActionSaveOperations>(
+    operations: &O,
+    old_output_mode: &VTubeStudioTypingMode,
+    old_parameter_name: &str,
+    new_action: &VTubeStudioTypingAction,
+) -> Result<TypingActionSaveResult, String> {
+    operations.require_live_connection().await?;
+
+    let should_ensure = should_ensure_event_parameter(
+        &new_action.output_mode,
+        old_output_mode,
+        old_parameter_name,
+        &new_action.parameter_name,
+    );
+
+    if should_ensure {
+        use crate::vtube_studio::EnsureOutcome;
+        match operations
+            .ensure_parameter(&new_action.parameter_name)
+            .await?
+        {
+            EnsureOutcome::Ensured => {}
+            EnsureOutcome::Skipped(reason) => {
+                return Err(format!(
+                    "Не удалось создать параметр '{}' в VTube Studio: {}",
+                    new_action.parameter_name,
+                    skip_reason_text(reason)
+                ));
+            }
+        }
+    }
+
+    if let Err(persist_error) = operations.persist_action(new_action).await {
+        if should_ensure {
+            warn!(
+                new_param = %new_action.parameter_name,
+                error = %persist_error,
+                "Persist failed after creating new Event INPUT; INPUT may remain in VTS (recoverable, not deleted)."
+            );
+        }
+        return Err(persist_error);
+    }
+
+    operations.apply_runtime(new_action).await;
+    operations.notify_settings_changed();
+
+    let needs_delete = should_delete_old_parameter(
+        new_action.output_mode == VTubeStudioTypingMode::Event,
+        old_output_mode,
+        old_parameter_name,
+        &new_action.parameter_name,
+    );
+    let cleanup_warning = if needs_delete {
+        operations.stop_old_event(old_parameter_name).await;
+        match operations.delete_parameter(old_parameter_name).await {
+            Ok(crate::vtube_studio::DeleteOutcome::Deleted)
+            | Ok(crate::vtube_studio::DeleteOutcome::NotFound) => None,
+            Ok(crate::vtube_studio::DeleteOutcome::Skipped(reason)) => Some(format!(
+                "Действие при наборе сохранено, но старый параметр '{}' мог не удалиться: {}",
+                old_parameter_name,
+                skip_reason_text(reason)
+            )),
+            Err(error) => Some(format!(
+                "Действие при наборе сохранено, но не удалось удалить старый параметр '{}': {}",
+                old_parameter_name, error
+            )),
+        }
+    } else {
+        None
+    };
+
+    Ok(TypingActionSaveResult {
+        ensured_parameter: should_ensure,
+        cleanup_warning,
+    })
 }
 
 #[tauri::command]
@@ -1119,5 +1334,532 @@ mod tests {
     #[test]
     fn should_publish_event_parameter_non_event_changed() {
         assert!(!should_publish_event_parameter(false, "old", "new"));
+    }
+
+    #[test]
+    fn guard_condition_fresh_service_rejected() {
+        let svc = crate::vtube_studio::VTubeStudioService::new();
+        assert!(!svc.is_live_authenticated_connection());
+    }
+
+    #[test]
+    fn guard_condition_connected_not_authenticated_fails() {
+        let svc = crate::vtube_studio::VTubeStudioService::new();
+        svc.set_desired_running(true);
+        svc.set_connection_status(VTubeStudioConnectionStatus::Connected);
+        assert!(!svc.is_live_authenticated_connection());
+    }
+
+    #[test]
+    fn guard_condition_connected_and_authenticated_passes() {
+        let svc = crate::vtube_studio::VTubeStudioService::new();
+        svc.set_desired_running(true);
+        svc.set_connection_status(VTubeStudioConnectionStatus::Connected);
+        svc.mark_authenticated(true);
+        assert!(svc.is_live_authenticated_connection());
+    }
+
+    #[test]
+    fn guard_condition_not_desired_running_fails() {
+        let svc = crate::vtube_studio::VTubeStudioService::new();
+        svc.set_connection_status(VTubeStudioConnectionStatus::Connected);
+        svc.mark_authenticated(true);
+        assert!(!svc.is_live_authenticated_connection());
+    }
+
+    #[test]
+    fn guard_condition_authenticated_but_disconnected_fails() {
+        let svc = crate::vtube_studio::VTubeStudioService::new();
+        svc.set_desired_running(true);
+        svc.mark_authenticated(true);
+        assert!(!svc.is_live_authenticated_connection());
+    }
+
+    #[test]
+    fn ensure_event_parameter_if_connected_skips_when_disconnected() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = crate::vtube_studio::VTubeStudioService::new();
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Disconnected
+        );
+        let result = rt.block_on(svc.ensure_event_parameter_if_connected("TestParam"));
+        assert!(
+            matches!(result, Ok(crate::vtube_studio::EnsureOutcome::Skipped(_))),
+            "expected Skipped, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn ensure_event_parameter_if_connected_skips_when_not_authenticated() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = crate::vtube_studio::VTubeStudioService::new();
+        svc.set_connection_status(VTubeStudioConnectionStatus::Connected);
+        svc.set_desired_running(true);
+        assert!(!svc.is_authenticated());
+        let result = rt.block_on(svc.ensure_event_parameter_if_connected("TestParam"));
+        assert!(
+            matches!(result, Ok(crate::vtube_studio::EnsureOutcome::Skipped(_))),
+            "expected Skipped, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn create_before_persist_old_differs_from_new_triggers_publish() {
+        assert!(should_publish_event_parameter(true, "OldInput", "NewInput"));
+    }
+
+    #[test]
+    fn create_before_persist_old_equals_new_skips_publish() {
+        assert!(!should_publish_event_parameter(
+            true,
+            "SameInput",
+            "SameInput"
+        ));
+    }
+
+    #[test]
+    fn create_before_persist_hotkeys_mode_never_publishes() {
+        assert!(!should_publish_event_parameter(
+            false, "OldInput", "NewInput"
+        ));
+    }
+
+    #[test]
+    fn create_before_persist_item_mode_never_publishes() {
+        assert!(!should_publish_event_parameter(false, "old", "new"));
+    }
+
+    #[test]
+    fn guard_rejects_race_connected_to_connecting() {
+        let svc = crate::vtube_studio::VTubeStudioService::new();
+        svc.set_connection_status(VTubeStudioConnectionStatus::Connecting);
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Connecting
+        );
+        assert!(!svc.is_authenticated());
+    }
+
+    #[test]
+    fn guard_rejects_race_connected_to_error() {
+        let svc = crate::vtube_studio::VTubeStudioService::new();
+        svc.set_connection_status(VTubeStudioConnectionStatus::Error);
+        assert!(!svc.is_authenticated());
+    }
+
+    // ---------------------------------------------------------------------------
+    // delete_event_parameter_if_connected guard condition tests (pure)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn delete_param_if_connected_skips_when_disconnected() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = crate::vtube_studio::VTubeStudioService::new();
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Disconnected
+        );
+        let result = rt.block_on(svc.delete_event_parameter_if_connected("OldParam"));
+        assert!(
+            matches!(result, Ok(crate::vtube_studio::DeleteOutcome::Skipped(_))),
+            "expected Skipped, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn delete_param_if_connected_skips_when_not_authenticated() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = crate::vtube_studio::VTubeStudioService::new();
+        svc.set_connection_status(VTubeStudioConnectionStatus::Connected);
+        svc.set_desired_running(true);
+        assert!(!svc.is_authenticated());
+        let result = rt.block_on(svc.delete_event_parameter_if_connected("OldParam"));
+        assert!(
+            matches!(result, Ok(crate::vtube_studio::DeleteOutcome::Skipped(_))),
+            "expected Skipped, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn delete_param_if_connected_skips_when_not_desired_running() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = crate::vtube_studio::VTubeStudioService::new();
+        let result = rt.block_on(svc.delete_event_parameter_if_connected("OldParam"));
+        assert!(
+            matches!(result, Ok(crate::vtube_studio::DeleteOutcome::Skipped(_))),
+            "expected Skipped, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn delete_param_if_connected_skips_when_no_socket() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = crate::vtube_studio::VTubeStudioService::new();
+        svc.set_desired_running(true);
+        svc.set_connection_status(VTubeStudioConnectionStatus::Connected);
+        svc.mark_authenticated(true);
+        let result = rt.block_on(svc.delete_event_parameter_if_connected("OldParam"));
+        assert!(
+            matches!(result, Ok(crate::vtube_studio::DeleteOutcome::Skipped(_))),
+            "expected Skipped, got {:?}",
+            result
+        );
+        assert_eq!(
+            svc.get_connection_status(),
+            VTubeStudioConnectionStatus::Connected,
+            "connection status unchanged when no socket"
+        );
+        assert!(svc.is_authenticated());
+    }
+
+    // ---------------------------------------------------------------------------
+    // Transition tests: Event↔Hotkeys/Item → deletion НЕ выполняется
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn event_to_hotkeys_should_not_delete() {
+        assert!(!should_publish_event_parameter(
+            false, "OldInput", "NewInput"
+        ));
+    }
+
+    #[test]
+    fn event_to_item_should_not_delete() {
+        assert!(!should_publish_event_parameter(
+            false, "OldInput", "NewInput"
+        ));
+    }
+
+    #[test]
+    fn hotkeys_to_event_creates_new_param() {
+        // Hotkeys -> Event with a fresh name: the new INPUT must be created.
+        // (Deletion of an old INPUT is gated separately by needs_delete, which
+        // requires old_output_mode == Event; that path is covered by the
+        // command-level order, not by should_publish_event_parameter.)
+        assert!(should_publish_event_parameter(true, "", "NewInput"));
+    }
+
+    #[test]
+    fn event_to_event_old_equals_new_should_not_delete() {
+        assert!(!should_publish_event_parameter(true, "Same", "Same"));
+    }
+
+    #[test]
+    fn event_to_event_old_differs_new_should_delete() {
+        assert!(should_publish_event_parameter(true, "OldInput", "NewInput"));
+    }
+
+    // ---------------------------------------------------------------------------
+    // semantic vs non-semantic errors for deletion
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn delete_semantic_error_401_is_semantic() {
+        use crate::vtube_studio::is_semantic_vts_error;
+        assert!(is_semantic_vts_error(
+            "Delete parameter failed: VTS error 401"
+        ));
+    }
+
+    #[test]
+    fn delete_transport_error_is_not_semantic() {
+        use crate::vtube_studio::is_semantic_vts_error;
+        assert!(!is_semantic_vts_error(
+            "Delete parameter failed: Read error: connection reset"
+        ));
+    }
+
+    struct RecordingSaveOperations {
+        events: std::sync::Mutex<Vec<String>>,
+        live_error: Option<String>,
+        ensure_outcome: Result<crate::vtube_studio::EnsureOutcome, String>,
+        persist_error: Option<String>,
+        delete_outcome: Result<crate::vtube_studio::DeleteOutcome, String>,
+        runtime_action: std::sync::Mutex<Option<VTubeStudioTypingAction>>,
+    }
+
+    impl Default for RecordingSaveOperations {
+        fn default() -> Self {
+            Self {
+                events: std::sync::Mutex::new(Vec::new()),
+                live_error: None,
+                ensure_outcome: Ok(crate::vtube_studio::EnsureOutcome::Ensured),
+                persist_error: None,
+                delete_outcome: Ok(crate::vtube_studio::DeleteOutcome::Deleted),
+                runtime_action: std::sync::Mutex::new(None),
+            }
+        }
+    }
+
+    impl RecordingSaveOperations {
+        fn record(&self, event: impl Into<String>) {
+            self.events.lock().unwrap().push(event.into());
+        }
+
+        fn recorded(&self) -> Vec<String> {
+            self.events.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl TypingActionSaveOperations for RecordingSaveOperations {
+        async fn require_live_connection(&self) -> Result<(), String> {
+            self.record("live");
+            match &self.live_error {
+                Some(error) => Err(error.clone()),
+                None => Ok(()),
+            }
+        }
+
+        async fn ensure_parameter(
+            &self,
+            parameter_name: &str,
+        ) -> Result<crate::vtube_studio::EnsureOutcome, String> {
+            self.record(format!("ensure:{parameter_name}"));
+            self.ensure_outcome.clone()
+        }
+
+        async fn persist_action(&self, action: &VTubeStudioTypingAction) -> Result<(), String> {
+            self.record(format!("persist:{}", action.parameter_name));
+            match &self.persist_error {
+                Some(error) => Err(error.clone()),
+                None => Ok(()),
+            }
+        }
+
+        async fn apply_runtime(&self, action: &VTubeStudioTypingAction) {
+            self.record(format!("runtime:{}", action.parameter_name));
+            *self.runtime_action.lock().unwrap() = Some(action.clone());
+        }
+
+        fn notify_settings_changed(&self) {
+            self.record("notify");
+        }
+
+        async fn stop_old_event(&self, parameter_name: &str) {
+            self.record(format!("stop:{parameter_name}"));
+        }
+
+        async fn delete_parameter(
+            &self,
+            parameter_name: &str,
+        ) -> Result<crate::vtube_studio::DeleteOutcome, String> {
+            self.record(format!("delete:{parameter_name}"));
+            self.delete_outcome.clone()
+        }
+    }
+
+    fn regression_action(
+        output_mode: VTubeStudioTypingMode,
+        parameter_name: &str,
+    ) -> VTubeStudioTypingAction {
+        VTubeStudioTypingAction {
+            output_mode,
+            parameter_name: parameter_name.to_string(),
+            start_hotkey_id: "start".to_string(),
+            stop_hotkey_id: "stop".to_string(),
+            start_hotkey_name: String::new(),
+            stop_hotkey_name: String::new(),
+            item_file_name: String::new(),
+            item_type: String::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn regression_full_rename_order_is_executable() {
+        let operations = RecordingSaveOperations::default();
+        let action = regression_action(VTubeStudioTypingMode::Event, "NewInput");
+
+        let result = orchestrate_typing_action_save(
+            &operations,
+            &VTubeStudioTypingMode::Event,
+            "OldInput",
+            &action,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            operations.recorded(),
+            [
+                "live",
+                "ensure:NewInput",
+                "persist:NewInput",
+                "runtime:NewInput",
+                "notify",
+                "stop:OldInput",
+                "delete:OldInput",
+            ]
+        );
+        assert!(result.ensured_parameter);
+        assert_eq!(result.cleanup_warning, None);
+        assert_eq!(
+            operations
+                .runtime_action
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|saved| saved.parameter_name.as_str()),
+            Some("NewInput")
+        );
+    }
+
+    #[tokio::test]
+    async fn regression_skipped_ensure_never_persists_or_applies_runtime() {
+        let operations = RecordingSaveOperations {
+            ensure_outcome: Ok(crate::vtube_studio::EnsureOutcome::Skipped(
+                crate::vtube_studio::SkipReason::NoSocket,
+            )),
+            ..Default::default()
+        };
+        let action = regression_action(VTubeStudioTypingMode::Event, "NewInput");
+
+        let error = orchestrate_typing_action_save(
+            &operations,
+            &VTubeStudioTypingMode::Event,
+            "OldInput",
+            &action,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.contains("соединение потеряно"));
+        assert_eq!(operations.recorded(), ["live", "ensure:NewInput"]);
+        assert!(operations.runtime_action.lock().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn regression_mode_to_event_same_name_still_ensures() {
+        for old_mode in [VTubeStudioTypingMode::Hotkeys, VTubeStudioTypingMode::Item] {
+            let operations = RecordingSaveOperations::default();
+            let action = regression_action(VTubeStudioTypingMode::Event, "SameInput");
+            orchestrate_typing_action_save(&operations, &old_mode, "SameInput", &action)
+                .await
+                .unwrap();
+            assert_eq!(
+                operations.recorded(),
+                [
+                    "live",
+                    "ensure:SameInput",
+                    "persist:SameInput",
+                    "runtime:SameInput",
+                    "notify",
+                ]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn regression_unchanged_event_does_not_ensure_or_delete() {
+        let operations = RecordingSaveOperations::default();
+        let action = regression_action(VTubeStudioTypingMode::Event, "SameInput");
+        let result = orchestrate_typing_action_save(
+            &operations,
+            &VTubeStudioTypingMode::Event,
+            "SameInput",
+            &action,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            operations.recorded(),
+            ["live", "persist:SameInput", "runtime:SameInput", "notify"]
+        );
+        assert!(!result.ensured_parameter);
+    }
+
+    #[tokio::test]
+    async fn regression_persist_failure_does_not_compensate_or_apply_runtime() {
+        let operations = RecordingSaveOperations {
+            persist_error: Some("disk full".to_string()),
+            ..Default::default()
+        };
+        let action = regression_action(VTubeStudioTypingMode::Event, "NewInput");
+
+        let error = orchestrate_typing_action_save(
+            &operations,
+            &VTubeStudioTypingMode::Event,
+            "OldInput",
+            &action,
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error, "disk full");
+        assert_eq!(
+            operations.recorded(),
+            ["live", "ensure:NewInput", "persist:NewInput"]
+        );
+        assert!(operations.runtime_action.lock().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn regression_skipped_delete_returns_partial_success_warning() {
+        let operations = RecordingSaveOperations {
+            delete_outcome: Ok(crate::vtube_studio::DeleteOutcome::Skipped(
+                crate::vtube_studio::SkipReason::NoSocket,
+            )),
+            ..Default::default()
+        };
+        let action = regression_action(VTubeStudioTypingMode::Event, "NewInput");
+
+        let result = orchestrate_typing_action_save(
+            &operations,
+            &VTubeStudioTypingMode::Event,
+            "OldInput",
+            &action,
+        )
+        .await
+        .unwrap();
+
+        let warning = result.cleanup_warning.unwrap();
+        assert!(warning.contains("OldInput"));
+        assert!(warning.contains("соединение потеряно"));
+    }
+
+    #[tokio::test]
+    async fn regression_delete_not_found_is_full_success() {
+        let operations = RecordingSaveOperations {
+            delete_outcome: Ok(crate::vtube_studio::DeleteOutcome::NotFound),
+            ..Default::default()
+        };
+        let action = regression_action(VTubeStudioTypingMode::Event, "NewInput");
+
+        let result = orchestrate_typing_action_save(
+            &operations,
+            &VTubeStudioTypingMode::Event,
+            "OldInput",
+            &action,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.cleanup_warning, None);
+        assert_eq!(operations.recorded().last().unwrap(), "delete:OldInput");
     }
 }
