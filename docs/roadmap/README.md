@@ -40,7 +40,7 @@ related_tasks: []
 
 | Item | Статус | Следующий шаг |
 |---|---|---|
-| [ROADMAP-060 — Корректный lifecycle параметра печати VTube Studio](./active/060-vtube-studio-parameter-input-lifecycle.md) | `planned` | Создать task на единый ensure-before-inject путь и regression-тест уже подключённой сессии. |
+| _Нет активных направлений VTube Studio._ | | |
 
 ## Завершённые направления
 
@@ -116,6 +116,8 @@ related_tasks: []
 - [ROADMAP-044 — VTube Studio connection lifecycle](./completed/044-vtube-studio-connection-lifecycle-ui.md)
 - [ROADMAP-045 — typing output modes](./completed/045-vtube-studio-typing-output-modes.md)
 - [ROADMAP-054 — Детерминированная видимость предмета VTube Studio](./completed/054-vtube-studio-item-visibility.md)
+- [ROADMAP-060 — Корректный lifecycle параметра печати VTube Studio](./completed/060-vtube-studio-parameter-input-lifecycle.md)
+- [ROADMAP-061 — Настройка действия и замена custom INPUT VTube Studio](./completed/061-vtube-studio-action-configuration-and-parameter-replacement.md)
 
 ## Отклонённые направления
 

@@ -1,8 +1,8 @@
 ---
 id: ROADMAP-060
-status: in_progress
+status: completed
 created: 2026-07-30
-updated: 2026-07-30
+updated: 2026-07-31
 related_tasks: []
 ---
 
@@ -158,6 +158,26 @@ acceptance-сценарием; ручной checklist агента без наб
 - миграция сериализованного enum `Event` без отдельного compatibility plan;
 - общий рефакторинг VTube Studio service, connection manager или всех API errors;
 - автоматический выбор `ParamTyping`: OUTPUT может иметь другое имя и остаётся выбором пользователя.
+
+## Outcome
+
+Реализован единый ensure-before-inject lifecycle для parameter-режима (коммиты
+`3f32823` P0, `e22b73a` P1, `944469d` P2):
+
+- один service-level путь гарантирует custom INPUT через `ParameterCreationRequest`
+  перед inject — и для тестового импульса, и для реального `typing=true`, при уже
+  открытом и заново восстановленном WebSocket;
+- смена имени или режима не требует ручного Stop/Start соединения;
+- semantic API errors (`453/452/355/356`) не разрушают живой socket, transport
+  errors не оставляют ложный `Connected`;
+- UI использует термин «Параметр VTS», объясняет INPUT/OUTPUT mapping и сохраняет
+  совместимый wire/config enum `Event`;
+- сохранение изменённого имени на активном соединении делает новый INPUT видимым
+  без отдельного теста (`4d8a6f8`).
+
+`docs/integrations/vtube-studio.md` приведён в соответствие с выпущенным
+поведением. Дальнейшее развитие контракта сохранения — ROADMAP-061 и
+DECISION-020.
 
 ## Источники
 

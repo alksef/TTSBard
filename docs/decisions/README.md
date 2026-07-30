@@ -25,6 +25,7 @@ implementation details и журналы обсуждений сюда не по
 - [DECISION-017 — Лицензия GPL-3.0-only](./017-gpl-3-license.md)
 - [DECISION-018 — Telegram client ownership: контракт разделения Arc](./018-telegram-client-ownership.md) — почему `client` остаётся `pub(crate)` (не private) и правило доступа `lock → clone → drop → await`
 - [DECISION-019 — Контракт settings-локов integration-сервисов](./019-integration-settings-arc-contract.md) — Twitch/WebView/VTube `settings: Arc<RwLock<_>>` остаётся публичным; owner-API не нужен (нет дефектов)
+- [DECISION-020 — Настройка действия VTube Studio требует живого подключения](./020-vtube-action-requires-live-connection.md) — `save_vtube_studio_typing_action` отклоняется без живого соединения (отменяет ROADMAP-060 P0.4); переименование = create→persist→delete
 
 ## Заменённые решения
 
