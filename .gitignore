@@ -46,5 +46,8 @@ images
 promts/
 .scripts/
 
+# Claude Code local settings (per-user, not shared)
+.claude/settings.local.json
+
 # Local work artifacts (AI tasks, reviews, logs, screenshots)
 .work/
