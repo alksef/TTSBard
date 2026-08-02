@@ -7,9 +7,13 @@ vi.stubGlobal('window', globalThis)
 const {
   mockInvoke,
   listenMock,
+  mockDebugLog,
+  mockDebugError,
 } = vi.hoisted(() => ({
   mockInvoke: vi.fn(),
   listenMock: vi.fn(async () => vi.fn()),
+  mockDebugLog: vi.fn(),
+  mockDebugError: vi.fn(),
 }))
 
 let capturedOnMountedCb: (() => void) | null = null
@@ -36,8 +40,8 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
 }))
 
 vi.mock('../utils/debug', () => ({
-  debugLog: vi.fn(),
-  debugError: vi.fn(),
+  debugLog: mockDebugLog,
+  debugError: mockDebugError,
 }))
 
 let mockWebViewSettingsRef = shallowRef<WebViewSettingsDto | undefined>(undefined)
@@ -98,5 +102,82 @@ describe('useWebView displayUrl', () => {
     await setupAndMount()
     await nextTick()
     expect(mockInvoke).not.toHaveBeenCalledWith('get_local_ip')
+  })
+})
+
+describe('saveUpnpEnabled', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    capturedOnMountedCb = null
+  })
+
+  it('rolls back to false on plain-string rejection, shows error, logs debug', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ upnp_enabled: false })
+    const { settings, saveUpnpEnabled, errorMessage } = await setupAndMount()
+    await nextTick()
+
+    settings.value.upnp_enabled = true
+
+    mockInvoke.mockRejectedValueOnce('Token required')
+
+    await saveUpnpEnabled()
+    await nextTick()
+
+    expect(settings.value.upnp_enabled).toBe(false)
+    expect(errorMessage.value).toBe('Ошибка: Token required')
+    expect(mockDebugError).toHaveBeenCalledWith('[WebView] UPnP toggle failed:', 'Token required')
+    expect(mockInvoke).toHaveBeenCalledWith('set_webview_upnp_enabled', { enabled: true })
+  })
+
+  it('rolls back to last confirmed true when disabling fails with Error', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ upnp_enabled: true })
+    const { settings, saveUpnpEnabled, errorMessage } = await setupAndMount()
+    await nextTick()
+
+    settings.value.upnp_enabled = false
+
+    mockInvoke.mockRejectedValueOnce(new Error('Cannot disable'))
+
+    await saveUpnpEnabled()
+    await nextTick()
+
+    expect(settings.value.upnp_enabled).toBe(true)
+    expect(errorMessage.value).toBe('Ошибка: Cannot disable')
+    expect(mockDebugError).toHaveBeenCalledWith('[WebView] UPnP toggle failed:', 'Cannot disable')
+    expect(mockInvoke).toHaveBeenCalledWith('set_webview_upnp_enabled', { enabled: false })
+  })
+
+  it('preserves requested value on success', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ upnp_enabled: false })
+    const { settings, saveUpnpEnabled, errorMessage } = await setupAndMount()
+    await nextTick()
+
+    settings.value.upnp_enabled = true
+
+    mockInvoke.mockResolvedValueOnce('UPnP включён')
+
+    await saveUpnpEnabled()
+    await nextTick()
+
+    expect(settings.value.upnp_enabled).toBe(true)
+    expect(errorMessage.value).toBe('UPnP включён')
+    expect(mockInvoke).toHaveBeenCalledWith('set_webview_upnp_enabled', { enabled: true })
+  })
+
+  it('preserves disabled on successful disable', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ upnp_enabled: true })
+    const { settings, saveUpnpEnabled, errorMessage } = await setupAndMount()
+    await nextTick()
+
+    settings.value.upnp_enabled = false
+
+    mockInvoke.mockResolvedValueOnce('UPnP выключен')
+
+    await saveUpnpEnabled()
+    await nextTick()
+
+    expect(settings.value.upnp_enabled).toBe(false)
+    expect(errorMessage.value).toBe('UPnP выключен')
+    expect(mockInvoke).toHaveBeenCalledWith('set_webview_upnp_enabled', { enabled: false })
   })
 })

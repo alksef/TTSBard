@@ -303,8 +303,13 @@ pub async fn set_webview_upnp_enabled(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
+    tracing::info!(enabled = enabled, "Setting UPnP enabled");
+
     let access_token = state.webview.settings.read().await.access_token.clone();
-    validate_upnp_token(enabled, access_token.as_deref())?;
+    validate_upnp_token(enabled, access_token.as_deref()).map_err(|e| {
+        tracing::warn!(enabled = enabled, error = %e, "UPnP validation failed");
+        e
+    })?;
 
     let settings_manager = app_handle
         .try_state::<SettingsManager>()
@@ -312,7 +317,11 @@ pub async fn set_webview_upnp_enabled(
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_webview_upnp_enabled(enabled)
     })
-    .await?;
+    .await
+    .map_err(|e| {
+        tracing::warn!(enabled = enabled, error = %e, "Failed to persist UPnP setting");
+        e
+    })?;
 
     state.webview.settings.write().await.upnp_enabled = enabled;
     super::emit_settings_changed(&app_handle);

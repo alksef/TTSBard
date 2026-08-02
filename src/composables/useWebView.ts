@@ -154,6 +154,7 @@ export function useWebView() {
   }
 
   async function saveUpnpEnabled() {
+    const confirmedBefore = webviewSettingsFromComposable.value?.upnp_enabled ?? settings.value.upnp_enabled
     try {
       await invoke<string>('set_webview_upnp_enabled', { enabled: settings.value.upnp_enabled })
       if (settings.value.upnp_enabled) {
@@ -162,7 +163,10 @@ export function useWebView() {
         showError('UPnP выключен')
       }
     } catch (e) {
-      showError('Ошибка: ' + (e as Error).message)
+      const errorMsg = e instanceof Error ? e.message : String(e)
+      debugError('[WebView] UPnP toggle failed:', errorMsg)
+      settings.value.upnp_enabled = webviewSettingsFromComposable.value?.upnp_enabled ?? confirmedBefore
+      showError('Ошибка: ' + errorMsg)
     }
   }
 
