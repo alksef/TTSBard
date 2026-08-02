@@ -28,7 +28,6 @@ export function useWebView() {
     upnp_enabled: false,
   })
 
-  const localIp = ref('192.168.1.100')
   const externalIp = ref<string | null>(null)
   const maskedToken = ref<string | null>(null)
   const errorMessage = ref<string | null>(null)
@@ -39,8 +38,7 @@ export function useWebView() {
   const listenerScope = createAsyncCleanupScope()
 
   function updateDisplayUrl() {
-    const host = settings.value.bind_address === '127.0.0.1' ? '127.0.0.1' : localIp.value
-    displayUrl.value = `http://${host}:${settings.value.port}`
+    displayUrl.value = `http://127.0.0.1:${settings.value.port}`
   }
 
   const externalUrl = computed(() => {
@@ -129,14 +127,6 @@ export function useWebView() {
     } catch (e) {
       debugError('[WebView] Failed to save server settings:', e)
       showError('Failed to save server settings: ' + (e as Error).message)
-    }
-  }
-
-  async function refreshIp() {
-    try {
-      localIp.value = await invoke<string>('get_local_ip')
-    } catch (e) {
-      showError('Failed to get local IP: ' + (e as Error).message)
     }
   }
 
@@ -240,7 +230,6 @@ export function useWebView() {
   }
 
   onMounted(async () => {
-    await refreshIp()
     await loadToken()
     updateDisplayUrl()
     await listenerScope.track(
@@ -272,7 +261,6 @@ export function useWebView() {
 
   return {
     settings,
-    localIp,
     externalIp,
     maskedToken,
     errorMessage,
@@ -290,7 +278,6 @@ export function useWebView() {
     restartServer,
     saveStartOnBoot,
     saveServerSettings,
-    refreshIp,
     copyUrl,
     loadToken,
     copyToken,
