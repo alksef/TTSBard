@@ -23,7 +23,7 @@ const {
     <div v-if="errorMessage" class="message-box" :class="{
       error: errorMessage.includes('Failed') || errorMessage.includes('failed') || errorMessage.includes('Error') || errorMessage.includes('Ошибка'),
       success: errorMessage.includes('saved') || errorMessage.includes('сохранен') || errorMessage.includes('валид') || errorMessage.includes('Подключено') || errorMessage.includes('Подключение к Twitch') || errorMessage.includes('Перезапуск') || errorMessage.includes('Переподключение'),
-      info: errorMessage.includes('Отключено') || errorMessage.includes('disconnect') || errorMessage.includes('Stopped') || errorMessage.includes('Disconnected')
+      info: errorMessage.includes('Тестовое сообщение отправлено') || errorMessage.includes('Отключено') || errorMessage.includes('disconnect') || errorMessage.includes('Stopped') || errorMessage.includes('Disconnected')
     }">
       {{ errorMessage }}
     </div>
