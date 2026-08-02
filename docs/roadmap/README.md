@@ -40,7 +40,6 @@ related_tasks: []
 
 | Item | Статус | Следующий шаг |
 |---|---|---|
-| _Нет активных направлений VTube Studio._ | | |
 
 ## Завершённые направления
 
@@ -118,6 +117,7 @@ related_tasks: []
 - [ROADMAP-054 — Детерминированная видимость предмета VTube Studio](./completed/054-vtube-studio-item-visibility.md)
 - [ROADMAP-060 — Корректный lifecycle параметра печати VTube Studio](./completed/060-vtube-studio-parameter-input-lifecycle.md)
 - [ROADMAP-061 — Настройка действия и замена custom INPUT VTube Studio](./completed/061-vtube-studio-action-configuration-and-parameter-replacement.md)
+- [ROADMAP-062 — Достоверное runtime-состояние соединения VTube Studio](./completed/062-vtube-studio-runtime-connection-truth.md)
 
 ## Отклонённые направления
 

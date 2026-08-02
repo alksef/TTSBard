@@ -5,7 +5,9 @@ use std::time::{Duration, Instant};
 
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter};
 use tokio::net::TcpStream;
+use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
@@ -17,13 +19,57 @@ use super::messages::{
 use crate::config::{VTubeStudioSettings, VTubeStudioTypingMode};
 use crate::events::VTubeStudioConnectionStatus;
 
+/// Имя Tauri-события изменения статуса соединения VTS.
+/// Дублирует константу из `commands/vtube_studio.rs`, чтобы connection-actor мог
+/// эмитить переходы (transport failure из idle) без зависимости от командного слоя.
+const VTS_STATUS_CHANGED_EVENT: &str = "vtube-studio-status-changed";
+
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(12);
 const ITEM_ACTION_TIMEOUT: Duration = Duration::from_secs(2);
 const TYPING_KEEPALIVE_MS: u64 = 500;
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
+/// Таймаут на отправку одного WebSocket-фрейма (только сторона клиента: TCP-буфер).
+const SEND_TIMEOUT: Duration = Duration::from_secs(5);
+/// Период вычистки «зависших» pending-entries (см. ActorRequest::timeout) в actor-задаче.
+const ACTOR_SWEEP_INTERVAL: Duration = Duration::from_secs(5);
+/// Ёмкость канала исходящих запросов к connection-actor.
+const ACTOR_CHANNEL_CAPACITY: usize = 64;
 
 type WsStream = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>;
+
+/// Класс transport-failure, зафиксированный connection-actor (для логирования).
+#[derive(Debug, Clone, Copy)]
+enum FailureClass {
+    Read,
+    Closed,
+    Send,
+    SendTimeout,
+}
+
+/// Запрос на отправку VTS-сообщения и получение ответа, адресованный connection-actor.
+struct ActorRequest {
+    request_id: String,
+    json: String,
+    expected_msg_type: String,
+    timeout: Duration,
+    reply: oneshot::Sender<Result<serde_json::Value, String>>,
+}
+
+/// Ожидаемый ответ внутри actor-задачи: reply-канал + ожидаемый messageType + старт.
+struct Pending {
+    reply: oneshot::Sender<Result<serde_json::Value, String>>,
+    expected_msg_type: String,
+    started: Instant,
+    timeout: Duration,
+}
+
+/// Handle на запущенный connection-actor: канал исходящих, cancel-токен, join.
+struct ConnectionActorHandle {
+    sender: mpsc::Sender<ActorRequest>,
+    cancel: CancellationToken,
+    join: tokio::task::JoinHandle<()>,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 enum ItemKind {
@@ -165,7 +211,7 @@ fn resolve_item(
 }
 
 struct InnerState {
-    ws: Option<WsStream>,
+    actor: Option<ConnectionActorHandle>,
     typing_cancel: Option<CancellationToken>,
     typing_handle: Option<tokio::task::JoinHandle<()>>,
     typing_active: bool,
@@ -313,6 +359,10 @@ pub struct VTubeStudioService {
     item_status: Arc<parking_lot::Mutex<VTubeStudioItemStatus>>,
     item_transition: ItemTransitionState,
     session: AtomicU64,
+    /// Tauri AppHandle для эмиттинга статуса из connection-actor.
+    /// Лениво подключается через `attach_app_handle` из `setup::init_vtube_studio`,
+    /// т.к. сервис конструируется до появления AppHandle.
+    app_handle: parking_lot::Mutex<Option<AppHandle>>,
 }
 
 impl VTubeStudioService {
@@ -320,7 +370,7 @@ impl VTubeStudioService {
         Self {
             settings: Arc::new(tokio::sync::RwLock::new(VTubeStudioSettings::default())),
             inner: Arc::new(tokio::sync::Mutex::new(InnerState {
-                ws: None,
+                actor: None,
                 typing_cancel: None,
                 typing_handle: None,
                 typing_active: false,
@@ -337,6 +387,23 @@ impl VTubeStudioService {
             item_status: Arc::new(parking_lot::Mutex::new(VTubeStudioItemStatus::Inactive)),
             item_transition: ItemTransitionState::new(),
             session: AtomicU64::new(0),
+            app_handle: parking_lot::Mutex::new(None),
+        }
+    }
+
+    /// Подключает AppHandle, чтобы connection-actor мог эмитить `vtube-studio-status-changed`
+    /// при transport-failure из idle. Вызывается из `setup::init_vtube_studio` ПЕРВОЙ строкой,
+    /// до чтения `start_on_boot` — handle нужен независимо от автозапуска.
+    pub fn attach_app_handle(&self, handle: AppHandle) {
+        *self.app_handle.lock() = Some(handle);
+    }
+
+    /// Эмитит текущий connection-status во фронтенд, если AppHandle подключён.
+    /// Безопасно для вызова из connection-actor / heartbeat / typing-задач.
+    fn emit_status(&self) {
+        if let Some(h) = self.app_handle.lock().as_ref() {
+            let status = self.connection_status.lock().clone();
+            let _ = h.emit(VTS_STATUS_CHANGED_EVENT, &status);
         }
     }
 
@@ -390,7 +457,7 @@ impl VTubeStudioService {
         if !self.is_authenticated() {
             return Some(SkipReason::NotAuthenticated);
         }
-        if self.inner.lock().await.ws.is_none() {
+        if self.inner.lock().await.actor.is_none() {
             return Some(SkipReason::NoSocket);
         }
         None
@@ -402,7 +469,153 @@ impl VTubeStudioService {
 
     #[allow(dead_code)]
     pub async fn is_connected(&self) -> bool {
-        self.inner.lock().await.ws.is_some()
+        self.inner.lock().await.actor.is_some()
+    }
+
+    /// Универсальный путь «отправить запрос — получить ответ» через connection-actor.
+    /// Заменяет прежний `send_and_recv(&mut ws)` + удержание `inner` через await.
+    ///
+    /// ВАЖНО: лок `inner` берётся ТОЛЬКО чтобы склонировать `mpsc::Sender` и
+    /// прочитать generation, и НЕ удерживается через `await` — это устраняет
+    /// прежний дедлок (heartbeat держал inner до 12 с во время send_and_recv).
+    ///
+    /// При таймауте вызывающего actor НЕ убивается: entry остаётся в `pending`,
+    /// поздний ответ безвредно дропнется (или вычистится sweep-тиком, или при
+    /// смерти actor-а).
+    async fn actor_request(
+        &self,
+        expected_msg_type: &str,
+        build_req: impl FnOnce(&str) -> VtsRequest,
+        request_timeout: Duration,
+    ) -> Result<serde_json::Value, String> {
+        let (sender, my_generation) = {
+            let inner = self.inner.lock().await;
+            match inner.actor.as_ref() {
+                Some(h) => (h.sender.clone(), inner.connection_generation),
+                None => return Err("VTube Studio WebSocket is not available.".to_string()),
+            }
+        };
+
+        let request_id = self.next_id();
+        let req = build_req(&request_id);
+        let json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+
+        let (tx, rx) = oneshot::channel();
+        sender
+            .send(ActorRequest {
+                request_id: request_id.clone(),
+                json,
+                expected_msg_type: expected_msg_type.to_string(),
+                timeout: request_timeout,
+                reply: tx,
+            })
+            .await
+            .map_err(|_| {
+                debug!(expected_msg_type, "VTS actor sender closed");
+                "VTube Studio WebSocket is not available.".to_string()
+            })?;
+
+        match timeout(request_timeout, rx).await {
+            Ok(Ok(value)) => value,
+            Ok(Err(_)) => {
+                debug!(expected_msg_type, %my_generation, "VTS actor dropped reply");
+                Err("VTube Studio request was cancelled.".to_string())
+            }
+            Err(_) => {
+                // Наш таймаут: actor жив, entry в pending вычистится sweep-тиком
+                // или при позднем ответе. Actor НЕ инвалидируем.
+                debug!(
+                    expected_msg_type,
+                    %request_id, %my_generation, "VTS response timed out"
+                );
+                Err("Response timed out".to_string())
+            }
+        }
+    }
+
+    /// Создаёт connection-actor из уже аутентифицированного сокета и сохраняет handle.
+    /// Вызывается из connect/test_connection/set_typing ПОСЛЕ успешного auth.
+    fn start_actor_locked(&self, inner: &mut InnerState, ws: WsStream) {
+        self.stop_actor_locked(inner);
+        inner.connection_generation = inner.connection_generation.wrapping_add(1);
+        let actor_generation = inner.connection_generation;
+
+        let (sender, receiver) = mpsc::channel::<ActorRequest>(ACTOR_CHANNEL_CAPACITY);
+        let cancel = CancellationToken::new();
+        let app_handle = self.app_handle.lock().clone();
+
+        let join = tokio::spawn(actor_task(
+            ws,
+            receiver,
+            cancel.clone(),
+            Arc::clone(&self.inner),
+            Arc::clone(&self.is_authenticated),
+            Arc::clone(&self.connection_status),
+            app_handle,
+            actor_generation,
+        ));
+
+        inner.actor = Some(ConnectionActorHandle {
+            sender,
+            cancel,
+            join,
+        });
+    }
+
+    /// Останавливает connection-actor: cancel + drop sender (закрывает rx) + abort join.
+    /// НЕ await-ит join под `inner`-локом (иначе deadlock, если actor внутри
+    /// `handle_transport_failure_locked` ждёт тот же лок). Abort безопасен: actor
+    /// владеет WsStream — при abort он дропается, TCP закрывается.
+    fn stop_actor_locked(&self, inner: &mut InnerState) {
+        if let Some(h) = inner.actor.take() {
+            h.cancel.cancel();
+            drop(h.sender);
+            h.join.abort();
+        }
+    }
+
+    /// Единый путь transport-failure: generation-guarded атомарная инвалидация + emit.
+    /// Вызывается из actor (read/Close/send failure) и heartbeat/typing (не-semantic Err).
+    ///
+    /// Generation guard: устаревший actor/heartbeat не может перезаписать состояние
+    /// свежего connect. Emit ровно один раз за failure (только если actor был Some).
+    async fn handle_transport_failure_locked(
+        &self,
+        failure_generation: u64,
+        class: FailureClass,
+        detail: Option<String>,
+    ) {
+        let mut inner = self.inner.lock().await;
+        if inner.connection_generation != failure_generation {
+            debug!(
+                failure_generation,
+                current_generation = inner.connection_generation,
+                "stale transport failure ignored"
+            );
+            return;
+        }
+
+        let had_actor = inner.actor.is_some();
+        if had_actor {
+            self.stop_actor_locked(&mut inner);
+            self.stop_typing_keepalive_locked(&mut inner);
+            self.stop_heartbeat_locked(&mut inner);
+            inner.typing_active = false;
+            inner.resolved_item = None;
+            self.is_authenticated.store(false, Ordering::SeqCst);
+            *self.connection_status.lock() = VTubeStudioConnectionStatus::Error;
+
+            info!(
+                class = ?class,
+                ?detail,
+                generation = failure_generation,
+                "VTS transport failure: connection invalidated"
+            );
+
+            // P1: эмитим переход Error во фронтенд (раньше heartbeat/typing писали
+            // статус без emit — UI залипал на ложном Connected).
+            self.emit_status();
+        }
     }
 
     pub fn get_item_status(&self) -> VTubeStudioItemStatus {
@@ -435,19 +648,18 @@ impl VTubeStudioService {
 
             let (desired, gen) = self.item_transition.read_desired();
 
-            let (mut sock, resolved, item_type_for_log) = {
-                let mut inner = self.inner.lock().await;
+            let (resolved, item_type_for_log) = {
+                let inner = self.inner.lock().await;
                 if self.read_session() != session {
                     self.item_transition.end_work();
                     break;
                 }
-                let ws = inner.ws.take();
                 let resolved = inner.resolved_item.clone();
                 let it = match &resolved {
                     Some(r) => r.item_type.clone(),
                     None => String::new(),
                 };
-                (ws, resolved, it)
+                (resolved, it)
             };
 
             let file_name_for_log = match &resolved {
@@ -455,10 +667,10 @@ impl VTubeStudioService {
                 None => typing_action.item_file_name.clone(),
             };
 
-            let result = match (sock.as_mut(), &resolved) {
-                (Some(ws), Some(item)) => {
+            let result = match &resolved {
+                Some(item) => {
                     let start = Instant::now();
-                    let res = animate_item(ws, self.next_id(), item, desired).await;
+                    let res = animate_item(self, item, desired).await;
                     let duration = start.elapsed();
                     info!(
                         mode = "Item",
@@ -470,28 +682,14 @@ impl VTubeStudioService {
                     );
                     res
                 }
-                (None, _) => {
-                    warn!(
-                        mode = "Item",
-                        file_name = %file_name_for_log,
-                        "No WebSocket available for item sync"
-                    );
-                    self.item_transition.end_work();
-                    return self.get_item_status();
-                }
-                (_, None) => {
+                None => {
                     self.item_transition.end_work();
                     return self.get_item_status();
                 }
             };
 
-            if let Some(s) = sock {
-                let mut inner = self.inner.lock().await;
-                if self.read_session() == session {
-                    inner.ws = Some(s);
-                }
-            }
-
+            // Transport-failure handled solely by the connection actor; caller-side
+            // invalidation is removed to prevent stale generation from destroying a new actor.
             match result {
                 Ok(()) => {
                     if self.read_session() == session {
@@ -546,8 +744,8 @@ impl VTubeStudioService {
 
         self.stop_typing_keepalive_locked(&mut inner);
         self.stop_heartbeat_locked(&mut inner);
+        self.stop_actor_locked(&mut inner);
         inner.typing_active = false;
-        inner.ws = None;
 
         let mut ws = match connect_ws(port).await {
             Ok(ws) => ws,
@@ -579,7 +777,7 @@ impl VTubeStudioService {
         }
 
         if self.is_desired_running() {
-            inner.ws = Some(ws);
+            self.start_actor_locked(&mut inner, ws);
             self.is_authenticated.store(true, Ordering::SeqCst);
             self.set_connection_status(VTubeStudioConnectionStatus::Connected);
             self.start_heartbeat_locked(&mut inner);
@@ -600,9 +798,9 @@ impl VTubeStudioService {
         let mut inner = self.inner.lock().await;
         self.stop_typing_keepalive_locked(&mut inner);
         self.stop_heartbeat_locked(&mut inner);
+        self.stop_actor_locked(&mut inner);
         inner.typing_active = false;
         inner.resolved_item = None;
-        inner.ws = None;
 
         let ws_result = connect_ws(port).await;
         let mut ws = match ws_result {
@@ -638,13 +836,15 @@ impl VTubeStudioService {
             };
         }
 
-        inner.ws = Some(ws);
+        // Handoff аутентифицированного сокета в connection-actor.
+        self.start_actor_locked(&mut inner, ws);
         self.is_authenticated.store(true, Ordering::SeqCst);
         self.set_connection_status(VTubeStudioConnectionStatus::Connected);
 
-        match typing_action.output_mode {
+        let item_file_name = match typing_action.output_mode {
             VTubeStudioTypingMode::Event | VTubeStudioTypingMode::Hotkeys => {
                 *self.item_status.lock() = VTubeStudioItemStatus::Inactive;
+                None
             }
             VTubeStudioTypingMode::Item => {
                 let file_name = typing_action.item_file_name.clone();
@@ -652,19 +852,27 @@ impl VTubeStudioService {
                     *self.item_status.lock() = VTubeStudioItemStatus::Missing {
                         file_name: String::new(),
                     };
+                    None
                 } else {
-                    let session = self.read_session();
-                    let mut sock = inner.ws.take().unwrap();
-                    let (resolved, status) = self
-                        .do_item_refresh_with_desired(&mut sock, &file_name, session)
-                        .await;
-                    if self.read_session() == session {
-                        inner.ws = Some(sock);
-                        inner.resolved_item = resolved;
-                        *self.item_status.lock() = status;
-                    }
+                    Some(file_name)
                 }
             }
+        };
+
+        // item-refresh (если нужен) идёт через actor: освобождаем `inner`, чтобы
+        // actor-задача могла отвечать (actor сам не блокируется на inner, но мы
+        // не хотим держать лок во время сетевого запроса).
+        if let Some(file_name) = item_file_name {
+            let session = self.read_session();
+            drop(inner);
+            let (resolved, status) = self.do_item_refresh_with_desired(&file_name, session).await;
+            if self.read_session() == session {
+                let mut inner = self.inner.lock().await;
+                inner.resolved_item = resolved;
+                *self.item_status.lock() = status;
+                self.start_heartbeat_locked(&mut inner);
+            }
+            return Ok(new_token);
         }
 
         self.start_heartbeat_locked(&mut inner);
@@ -673,47 +881,42 @@ impl VTubeStudioService {
     }
 
     pub async fn set_typing(
-        &self,
+        self: &Arc<Self>,
         typing: bool,
         port: u16,
         stored_token: &str,
     ) -> Result<(), String> {
         let typing_action = { self.settings.read().await.typing_action.clone() };
 
-        let mut inner = self.inner.lock().await;
-
         if !typing {
-            self.stop_typing_keepalive_locked(&mut inner);
-            inner.typing_active = false;
+            {
+                let mut inner = self.inner.lock().await;
+                self.stop_typing_keepalive_locked(&mut inner);
+                inner.typing_active = false;
+            }
 
-            if typing_action.output_mode == VTubeStudioTypingMode::Event {
-                if let Some(ref mut ws) = inner.ws {
+            // inject=0.0 / stop-hotkey идут через actor; статус-инвалидацию на
+            // transport-failure делает сам actor (handle_transport_failure_locked).
+            match typing_action.output_mode {
+                VTubeStudioTypingMode::Event => {
                     let param_name = typing_action.parameter_name.clone();
-                    if let Err(ref e) = inject_typing(ws, self.next_id(), &param_name, 0.0).await {
-                        if is_semantic_vts_error(e) {
-                            debug!(error = %e, "VTS inject typing=false got semantic error, socket stays alive");
-                        } else {
-                            debug!(error = %e, "VTS inject typing=false failed, discarding broken socket");
-                            inner.ws = None;
-                            self.is_authenticated.store(false, Ordering::SeqCst);
+                    if let Err(ref e) = inject_typing(self, &param_name, 0.0).await {
+                        if !is_semantic_vts_error(e) {
+                            debug!(error = %e, "VTS inject typing=false transport failure");
                         }
                     }
                 }
-            } else if typing_action.output_mode == VTubeStudioTypingMode::Hotkeys {
-                if let Some(ref mut ws) = inner.ws {
+                VTubeStudioTypingMode::Hotkeys => {
                     let stop_id = typing_action.stop_hotkey_id.clone();
-                    if let Err(ref e) = trigger_hotkey(ws, self.next_id(), &stop_id).await {
-                        if is_semantic_vts_error(e) {
-                            debug!(error = %e, "VTS hotkey stop trigger got semantic error, socket stays alive");
-                        } else {
-                            debug!(error = %e, "VTS hotkey stop trigger failed, discarding broken socket");
-                            inner.ws = None;
-                            self.is_authenticated.store(false, Ordering::SeqCst);
+                    if let Err(ref e) = trigger_hotkey(self, &stop_id).await {
+                        if !is_semantic_vts_error(e) {
+                            debug!(error = %e, "VTS hotkey stop trigger transport failure");
                         }
                     }
                 }
-            } else if typing_action.output_mode == VTubeStudioTypingMode::Item {
-                self.item_transition.record_desired(false);
+                VTubeStudioTypingMode::Item => {
+                    self.item_transition.record_desired(false);
+                }
             }
             return Ok(());
         }
@@ -727,7 +930,10 @@ impl VTubeStudioService {
             return Ok(());
         }
 
-        if inner.ws.is_none() {
+        // Если actor-а нет — поднимаем соединение (raw-socket auth → start_actor_locked).
+        let needs_reconnect = { self.inner.lock().await.actor.is_none() };
+        if needs_reconnect {
+            let mut inner = self.inner.lock().await;
             self.stop_heartbeat_locked(&mut inner);
             self.set_connection_status(VTubeStudioConnectionStatus::Connecting);
 
@@ -750,123 +956,67 @@ impl VTubeStudioService {
                 }
             }
 
-            inner.ws = Some(ws);
+            self.start_actor_locked(&mut inner, ws);
             self.is_authenticated.store(true, Ordering::SeqCst);
             self.start_heartbeat_locked(&mut inner);
             self.set_connection_status(VTubeStudioConnectionStatus::Connected);
         }
 
-        self.stop_typing_keepalive_locked(&mut inner);
-        inner.typing_active = true;
+        {
+            let mut inner = self.inner.lock().await;
+            self.stop_typing_keepalive_locked(&mut inner);
+            inner.typing_active = true;
+        }
 
         match typing_action.output_mode {
             VTubeStudioTypingMode::Event => {
                 let param_name = typing_action.parameter_name.clone();
-                let ws = match inner.ws.as_mut() {
-                    Some(ws) => ws,
-                    None => {
+
+                if let Err(e) = ensure_event_parameter(self, &param_name).await {
+                    if is_semantic_vts_error(&e) {
+                        let mut inner = self.inner.lock().await;
                         inner.typing_active = false;
-                        return Ok(());
+                        return Err(explain_event_error(&e, &param_name));
                     }
+                    debug!(error = %e, "VTS ensure event parameter transport failure");
+                    let mut inner = self.inner.lock().await;
+                    inner.typing_active = false;
+                    return Err(e);
+                }
+
+                if let Err(e) = inject_typing(self, &param_name, 1.0).await {
+                    if is_semantic_vts_error(&e) {
+                        let mut inner = self.inner.lock().await;
+                        inner.typing_active = false;
+                        return Err(explain_event_error(&e, &param_name));
+                    }
+                    debug!(error = %e, "VTS inject typing=true transport failure");
+                    let mut inner = self.inner.lock().await;
+                    inner.typing_active = false;
+                    return Err(e);
+                }
+
+                let (cancel, keepalive_gen) = {
+                    let cancel = CancellationToken::new();
+                    let mut inner = self.inner.lock().await;
+                    let gen = inner.connection_generation;
+                    inner.typing_cancel = Some(cancel.clone());
+                    (cancel, gen)
                 };
-
-                if let Err(e) = ensure_event_parameter(ws, self.next_id(), &param_name).await {
-                    if is_semantic_vts_error(&e) {
-                        debug!(error = %e, "VTS ensure event parameter got semantic error, socket stays alive");
-                        inner.typing_active = false;
-                        return Err(explain_event_error(&e, &param_name));
-                    }
-                    debug!(error = %e, "VTS ensure event parameter failed, discarding broken socket");
-                    inner.ws = None;
-                    inner.typing_active = false;
-                    self.is_authenticated.store(false, Ordering::SeqCst);
-                    self.set_connection_status(VTubeStudioConnectionStatus::Error);
-                    return Err(e);
-                }
-
-                if let Err(e) = inject_typing(ws, self.next_id(), &param_name, 1.0).await {
-                    if is_semantic_vts_error(&e) {
-                        debug!(error = %e, "VTS inject typing=true got semantic error, socket stays alive");
-                        inner.typing_active = false;
-                        return Err(explain_event_error(&e, &param_name));
-                    }
-                    debug!(error = %e, "VTS inject typing=true failed, discarding broken socket");
-                    inner.ws = None;
-                    inner.typing_active = false;
-                    self.is_authenticated.store(false, Ordering::SeqCst);
-                    self.set_connection_status(VTubeStudioConnectionStatus::Error);
-                    return Err(e);
-                }
-
-                let cancel = CancellationToken::new();
-                let cancel_ct = cancel.clone();
-                inner.typing_cancel = Some(cancel);
-
-                let inner_arc = Arc::clone(&self.inner);
-                let auth_flag = Arc::clone(&self.is_authenticated);
-                let status_arc = Arc::clone(&self.connection_status);
-
-                let handle = tokio::spawn(async move {
-                    loop {
-                        if cancel_ct.is_cancelled() {
-                            break;
-                        }
-
-                        tokio::time::sleep(Duration::from_millis(TYPING_KEEPALIVE_MS)).await;
-
-                        if cancel_ct.is_cancelled() {
-                            break;
-                        }
-
-                        let mut inner_guard = inner_arc.lock().await;
-                        let id = uuid::Uuid::new_v4().to_string();
-                        if let Some(ref mut ws) = inner_guard.ws {
-                            if let Err(e) = inject_typing(ws, id, &param_name, 1.0).await {
-                                if is_semantic_vts_error(&e) {
-                                    debug!(error = %e, "VTS typing keep-alive inject got semantic error, socket stays alive");
-                                    // continue loop without destroying state
-                                } else {
-                                    debug!(error = %e, "VTS typing keep-alive inject failed, discarding broken socket");
-                                    inner_guard.ws = None;
-                                    inner_guard.typing_active = false;
-                                    auth_flag.store(false, Ordering::SeqCst);
-                                    *status_arc.lock() = VTubeStudioConnectionStatus::Error;
-                                    break;
-                                }
-                            }
-                        } else {
-                            break;
-                        }
-                    }
-                    if !cancel_ct.is_cancelled() {
-                        auth_flag.store(false, Ordering::SeqCst);
-                    }
-                    debug!("VTS typing keep-alive stopped");
-                });
-
-                inner.typing_handle = Some(handle);
+                self.spawn_typing_keepalive(&param_name, cancel, keepalive_gen);
             }
             VTubeStudioTypingMode::Hotkeys => {
                 let start_id = typing_action.start_hotkey_id.clone();
-                let ws = match inner.ws.as_mut() {
-                    Some(ws) => ws,
-                    None => {
-                        inner.typing_active = false;
-                        return Ok(());
-                    }
-                };
-
-                if let Err(e) = trigger_hotkey(ws, self.next_id(), &start_id).await {
+                if let Err(e) = trigger_hotkey(self, &start_id).await {
                     if is_semantic_vts_error(&e) {
                         debug!(error = %e, "VTS hotkey start trigger got semantic error, socket stays alive");
+                        let mut inner = self.inner.lock().await;
                         inner.typing_active = false;
                         return Err(e);
                     }
-                    debug!(error = %e, "VTS hotkey start trigger failed, discarding broken socket");
-                    inner.ws = None;
+                    debug!(error = %e, "VTS hotkey start trigger transport failure");
+                    let mut inner = self.inner.lock().await;
                     inner.typing_active = false;
-                    self.is_authenticated.store(false, Ordering::SeqCst);
-                    self.set_connection_status(VTubeStudioConnectionStatus::Error);
                     return Err(e);
                 }
             }
@@ -876,6 +1026,56 @@ impl VTubeStudioService {
         }
 
         Ok(())
+    }
+
+    /// Запускает typing keep-alive. Каждые TYPING_KEEPALIVE_MS шлёт inject=1.0
+    /// через actor (без удержания `inner`), на transport-failure инвалидирует
+    /// соединение единым путём (P1: с emit). `cancel` уже сохранён в `inner.typing_cancel`
+    /// вызывающей стороной.
+    fn spawn_typing_keepalive(
+        self: &Arc<Self>,
+        param_name: &str,
+        cancel: CancellationToken,
+        generation: u64,
+    ) {
+        let param_name = param_name.to_string();
+        let cancel_ct = cancel.clone();
+        let svc = Arc::clone(self);
+
+        let handle = tokio::spawn(async move {
+            loop {
+                if cancel_ct.is_cancelled() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(TYPING_KEEPALIVE_MS)).await;
+                if cancel_ct.is_cancelled() {
+                    break;
+                }
+
+                match inject_typing(&svc, &param_name, 1.0).await {
+                    Ok(()) => {}
+                    Err(e) if is_semantic_vts_error(&e) => {
+                        debug!(error = %e, "VTS typing keep-alive inject got semantic error, socket stays alive");
+                    }
+                    Err(e) => {
+                        debug!(error = %e, "VTS typing keep-alive inject failed, invalidating connection");
+                        svc.handle_transport_failure_locked(generation, FailureClass::Send, None)
+                            .await;
+                        break;
+                    }
+                }
+            }
+            debug!("VTS typing keep-alive stopped");
+        });
+
+        if let Ok(mut inner) = self.inner.try_lock() {
+            inner.typing_handle = Some(handle);
+        } else {
+            // Если лок не взят сразу (редкий случай) — abort-им задачу, т.к. handle
+            // негде сохранить; cancel всё равно остановит её.
+            debug!("VTS typing keep-alive: could not store handle immediately");
+            handle.abort();
+        }
     }
 
     pub(crate) async fn ensure_event_parameter_if_connected(
@@ -895,22 +1095,19 @@ impl VTubeStudioService {
             return Ok(EnsureOutcome::Skipped(SkipReason::NotAuthenticated));
         }
 
-        let mut inner = self.inner.lock().await;
-        let ws = match inner.ws.as_mut() {
-            Some(ws) => ws,
-            None => return Ok(EnsureOutcome::Skipped(SkipReason::NoSocket)),
-        };
+        if self.inner.lock().await.actor.is_none() {
+            return Ok(EnsureOutcome::Skipped(SkipReason::NoSocket));
+        }
 
-        match ensure_event_parameter(ws, self.next_id(), parameter_name).await {
+        match ensure_event_parameter(self, parameter_name).await {
             Ok(()) => Ok(EnsureOutcome::Ensured),
             Err(e) => {
                 if is_semantic_vts_error(&e) {
                     Err(explain_event_error(&e, parameter_name))
                 } else {
-                    debug!(error = %e, "VTS ensure event parameter transport failure, discarding broken socket");
-                    inner.ws = None;
-                    self.is_authenticated.store(false, Ordering::SeqCst);
-                    self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                    // transport failure: actor сам зафиксирует read-failure и
+                    // инвалидирует соединение единым путём (с emit).
+                    debug!(error = %e, "VTS ensure event parameter transport failure");
                     Err(e)
                 }
             }
@@ -934,13 +1131,11 @@ impl VTubeStudioService {
             return Ok(DeleteOutcome::Skipped(SkipReason::NotAuthenticated));
         }
 
-        let mut inner = self.inner.lock().await;
-        let ws = match inner.ws.as_mut() {
-            Some(ws) => ws,
-            None => return Ok(DeleteOutcome::Skipped(SkipReason::NoSocket)),
-        };
+        if self.inner.lock().await.actor.is_none() {
+            return Ok(DeleteOutcome::Skipped(SkipReason::NoSocket));
+        }
 
-        match delete_event_parameter(ws, self.next_id(), parameter_name).await {
+        match delete_event_parameter(self, parameter_name).await {
             Ok(()) => Ok(DeleteOutcome::Deleted),
             Err(e) => {
                 if is_semantic_vts_error(&e) {
@@ -954,10 +1149,8 @@ impl VTubeStudioService {
                         Err(e)
                     }
                 } else {
-                    debug!(error = %e, "VTS delete event parameter transport failure, discarding broken socket");
-                    inner.ws = None;
-                    self.is_authenticated.store(false, Ordering::SeqCst);
-                    self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                    // transport failure: actor сам инвалидирует соединение.
+                    debug!(error = %e, "VTS delete event parameter transport failure");
                     Err(e)
                 }
             }
@@ -965,13 +1158,19 @@ impl VTubeStudioService {
     }
 
     pub async fn stop_event_typing_and_reset(&self, parameter_name: &str) {
-        let mut inner = self.inner.lock().await;
-        self.stop_typing_keepalive_locked(&mut inner);
-        if inner.typing_active {
-            inner.typing_active = false;
-            if let Some(ref mut ws) = inner.ws {
-                let _ = inject_typing(ws, self.next_id(), parameter_name, 0.0).await;
+        let was_active = {
+            let mut inner = self.inner.lock().await;
+            self.stop_typing_keepalive_locked(&mut inner);
+            if inner.typing_active {
+                inner.typing_active = false;
+                true
+            } else {
+                false
             }
+        };
+        if was_active {
+            // inject=0.0 через actor; transport-failure (если есть) фиксирует actor.
+            let _ = inject_typing(self, parameter_name, 0.0).await;
         }
     }
 
@@ -999,27 +1198,22 @@ impl VTubeStudioService {
                     return status;
                 }
 
-                let mut inner = self.inner.lock().await;
-
-                let mut sock = match inner.ws.take() {
-                    Some(ws) => ws,
-                    None => {
-                        inner.resolved_item = None;
-                        let status = VTubeStudioItemStatus::Error {
-                            file_name: file_name.clone(),
-                            message: "WebSocket not available".to_string(),
-                        };
-                        *self.item_status.lock() = status.clone();
-                        return status;
-                    }
-                };
+                let has_actor = { self.inner.lock().await.actor.is_some() };
+                if !has_actor {
+                    let mut inner = self.inner.lock().await;
+                    inner.resolved_item = None;
+                    let status = VTubeStudioItemStatus::Error {
+                        file_name: file_name.clone(),
+                        message: "WebSocket not available".to_string(),
+                    };
+                    *self.item_status.lock() = status.clone();
+                    return status;
+                }
 
                 let session = self.read_session();
-                let (resolved, status) = self
-                    .do_item_refresh_with_desired(&mut sock, &file_name, session)
-                    .await;
+                let (resolved, status) = self.do_item_refresh_with_desired(&file_name, session).await;
                 if self.read_session() == session {
-                    inner.ws = Some(sock);
+                    let mut inner = self.inner.lock().await;
                     inner.resolved_item = resolved;
                     *self.item_status.lock() = status.clone();
                 }
@@ -1030,13 +1224,12 @@ impl VTubeStudioService {
 
     async fn do_item_refresh_with_desired(
         &self,
-        ws: &mut WsStream,
         file_name: &str,
         session: u64,
     ) -> (Option<ResolvedItem>, VTubeStudioItemStatus) {
         let (desired, desired_gen) = self.item_transition.read_desired();
 
-        match fetch_scene_instances(ws, self.next_id(), Some(file_name)).await {
+        match fetch_scene_instances(self, Some(file_name)).await {
             Ok(instances) => {
                 if self.read_session() != session {
                     return (None, VTubeStudioItemStatus::Inactive);
@@ -1045,7 +1238,7 @@ impl VTubeStudioService {
                 match resolve_item(&instances, file_name) {
                     Ok(item) => {
                         let resolved = item.clone();
-                        match animate_item(ws, self.next_id(), &item, desired).await {
+                        match animate_item(self, &item, desired).await {
                             Ok(_) => {
                                 if self.read_session() == session {
                                     self.item_transition
@@ -1128,84 +1321,68 @@ impl VTubeStudioService {
             return Err("VTube Studio is not authenticated.".to_string());
         }
 
-        let mut inner = self.inner.lock().await;
-        let ws = inner
-            .ws
-            .as_mut()
-            .ok_or_else(|| "VTube Studio WebSocket is not available.".to_string())?;
+        if self.inner.lock().await.actor.is_none() {
+            return Err("VTube Studio WebSocket is not available.".to_string());
+        }
 
-        let instances = fetch_scene_instances(ws, self.next_id(), None).await?;
+        let instances = fetch_scene_instances(self, None).await?;
 
         Ok(build_scene_records(&instances))
     }
 
     pub async fn disconnect(&self) {
         let typing_action = { self.settings.read().await.typing_action.clone() };
-        let mut inner = self.inner.lock().await;
+
+        // Собираем состояние под кратким локом, не держа его через await.
+        let (typing_active, resolved_item, has_actor) = {
+            let inner = self.inner.lock().await;
+            (
+                inner.typing_active,
+                inner.resolved_item.clone(),
+                inner.actor.is_some(),
+            )
+        };
+
         self.set_desired_running(false);
 
-        let typing_active = inner.typing_active;
-        let resolved_item = inner.resolved_item.clone();
-
-        self.stop_typing_keepalive_locked(&mut inner);
-        self.stop_heartbeat_locked(&mut inner);
-        inner.connection_generation = inner.connection_generation.wrapping_add(1);
-        inner.typing_active = false;
-
-        if typing_action.output_mode == VTubeStudioTypingMode::Item {
-            let applied = self.item_transition.read_applied();
-            self.invalidate_session();
-            self.item_transition.reset();
-
-            let should_hide = matches!(
-                (resolved_item.as_ref(), applied),
-                (Some(_), Some(true)) | (Some(_), None)
-            );
-
-            if should_hide {
-                if let (Some(ref mut ws), Some(ref item)) = (&mut inner.ws, &resolved_item) {
-                    let start = Instant::now();
-                    if let Err(_e) = animate_item(ws, self.next_id(), item, false).await {
-                        warn!(
+        // Best-effort отправки ПЕРЕД teardown (через actor, без удержания inner).
+        // Конкурентная heartbeat-failure может убить actor mid-send (Q7) — допустимо.
+        if has_actor {
+            if typing_action.output_mode == VTubeStudioTypingMode::Item {
+                let applied = self.item_transition.read_applied();
+                let should_hide = matches!(
+                    (resolved_item.as_ref(), applied),
+                    (Some(_), Some(true)) | (Some(_), None)
+                );
+                if should_hide {
+                    if let Some(ref item) = resolved_item {
+                        let start = Instant::now();
+                        if let Err(_e) = animate_item(self, item, false).await {
+                            warn!(
+                                mode = "Item",
+                                file_name = %item.file_name,
+                                "Best-effort hide during disconnect failed"
+                            );
+                        }
+                        let duration = start.elapsed();
+                        info!(
                             mode = "Item",
+                            item_type = %item.item_type,
                             file_name = %item.file_name,
-                            "Best-effort hide during disconnect failed"
+                            desired = false,
+                            duration_ms = duration.as_millis(),
+                            "Disconnect hide completed"
                         );
                     }
-                    let duration = start.elapsed();
-                    info!(
-                        mode = "Item",
-                        item_type = %item.item_type,
-                        file_name = %item.file_name,
-                        desired = false,
-                        duration_ms = duration.as_millis(),
-                        "Disconnect hide completed"
-                    );
                 }
-            }
-
-            inner.ws = None;
-            inner.resolved_item = None;
-            self.is_authenticated.store(false, Ordering::SeqCst);
-            self.set_connection_status(VTubeStudioConnectionStatus::Disconnected);
-            *self.item_status.lock() = VTubeStudioItemStatus::Inactive;
-            info!("VTube Studio disconnected");
-            return;
-        }
-
-        if typing_active {
-            if let Some(ref mut ws) = inner.ws {
+            } else if typing_active {
                 match typing_action.output_mode {
                     VTubeStudioTypingMode::Event => {
-                        let _ =
-                            inject_typing(ws, self.next_id(), &typing_action.parameter_name, 0.0)
-                                .await;
+                        let _ = inject_typing(self, &typing_action.parameter_name, 0.0).await;
                     }
                     VTubeStudioTypingMode::Hotkeys => {
                         if !typing_action.stop_hotkey_id.is_empty() {
-                            let _ =
-                                trigger_hotkey(ws, self.next_id(), &typing_action.stop_hotkey_id)
-                                    .await;
+                            let _ = trigger_hotkey(self, &typing_action.stop_hotkey_id).await;
                         }
                     }
                     VTubeStudioTypingMode::Item => {}
@@ -1213,11 +1390,24 @@ impl VTubeStudioService {
             }
         }
 
-        inner.ws = None;
-        inner.resolved_item = None;
-        self.is_authenticated.store(false, Ordering::SeqCst);
-        self.set_connection_status(VTubeStudioConnectionStatus::Disconnected);
-        *self.item_status.lock() = VTubeStudioItemStatus::Inactive;
+        if typing_action.output_mode == VTubeStudioTypingMode::Item {
+            self.invalidate_session();
+            self.item_transition.reset();
+        }
+
+        // Teardown: атомарно останавливаем actor/heartbeat/typing, инвалидируем состояние.
+        {
+            let mut inner = self.inner.lock().await;
+            self.stop_typing_keepalive_locked(&mut inner);
+            self.stop_heartbeat_locked(&mut inner);
+            self.stop_actor_locked(&mut inner);
+            inner.connection_generation = inner.connection_generation.wrapping_add(1);
+            inner.typing_active = false;
+            inner.resolved_item = None;
+            self.is_authenticated.store(false, Ordering::SeqCst);
+            self.set_connection_status(VTubeStudioConnectionStatus::Disconnected);
+            *self.item_status.lock() = VTubeStudioItemStatus::Inactive;
+        }
         info!("VTube Studio disconnected");
     }
 
@@ -1241,14 +1431,23 @@ impl VTubeStudioService {
 
     fn start_heartbeat_locked(&self, inner: &mut InnerState) {
         self.stop_heartbeat_locked(inner);
-        inner.connection_generation = inner.connection_generation.wrapping_add(1);
+        // heartbeat captures generation of the currently-owned actor;
+        // starting/restarting heartbeat must NOT bump generation.
         let hb_gen = inner.connection_generation;
+
+        // Клонируем actor-sender под текущим локом (heartbeat не должен держать
+        // `inner` через await — это прежний источник дедлока).
+        let sender = match inner.actor.as_ref() {
+            Some(h) => h.sender.clone(),
+            None => return,
+        };
 
         let hb_cancel = CancellationToken::new();
         let hb_ct = hb_cancel.clone();
         let inner_arc = Arc::clone(&self.inner);
         let auth_flag = Arc::clone(&self.is_authenticated);
         let status_arc = Arc::clone(&self.connection_status);
+        let app_handle = self.app_handle.lock().clone();
 
         let handle = tokio::spawn(async move {
             loop {
@@ -1260,80 +1459,86 @@ impl VTubeStudioService {
                     break;
                 }
 
-                let id = uuid::Uuid::new_v4().to_string();
-                let mut inner_guard = inner_arc.lock().await;
-
-                if inner_guard.connection_generation != hb_gen {
+                // Текущая generation может измениться (disconnect/connect) — проверяем.
+                if inner_arc.lock().await.connection_generation != hb_gen {
                     break;
                 }
 
-                let ws = match inner_guard.ws.as_mut() {
-                    Some(w) => w,
-                    None => break,
-                };
-
+                let id = uuid::Uuid::new_v4().to_string();
                 let req = VtsRequest::api_state_request(&id);
                 let json = match serde_json::to_string(&req) {
                     Ok(j) => j,
                     Err(_) => {
-                        if inner_guard.connection_generation == hb_gen {
-                            inner_guard.ws = None;
-                            inner_guard.typing_active = false;
-                            if let Some(c) = inner_guard.typing_cancel.take() {
-                                c.cancel();
-                            }
-                            auth_flag.store(false, Ordering::SeqCst);
-                            *status_arc.lock() = VTubeStudioConnectionStatus::Error;
-                        }
+                        // Сериализация не падает на детерминированном запросе; если упало — транспорт не виноват.
                         break;
                     }
                 };
 
-                match send_and_recv(ws, &json, &id, "APIStateResponse").await {
-                    Ok(value) => {
-                        if inner_guard.connection_generation != hb_gen {
-                            break;
-                        }
-                        let parsed =
-                            serde_json::from_value::<messages::APIStateResponseData>(value);
+                let (tx, rx) = oneshot::channel::<Result<serde_json::Value, String>>();
+                if sender
+                    .send(ActorRequest {
+                        request_id: id.clone(),
+                        json,
+                        expected_msg_type: "APIStateResponse".to_string(),
+                        timeout: REQUEST_TIMEOUT,
+                        reply: tx,
+                    })
+                    .await
+                    .is_err()
+                {
+                    // Actor уже мёртв — transport failure уже зафиксирован самим actor-ом.
+                    break;
+                }
+
+                match timeout(REQUEST_TIMEOUT, rx).await {
+                    Ok(Ok(Ok(value))) => {
+                        let parsed = serde_json::from_value::<messages::APIStateResponseData>(value);
                         match parsed {
                             Ok(data) => {
                                 if let Err(e) = validate_api_state(&data) {
                                     debug!("Heartbeat validation failed: {}", e);
-                                    inner_guard.ws = None;
-                                    inner_guard.typing_active = false;
-                                    if let Some(c) = inner_guard.typing_cancel.take() {
-                                        c.cancel();
-                                    }
-                                    auth_flag.store(false, Ordering::SeqCst);
-                                    *status_arc.lock() = VTubeStudioConnectionStatus::Error;
+                                    actor_transport_failure(
+                                        &inner_arc,
+                                        &auth_flag,
+                                        &status_arc,
+                                        app_handle.clone(),
+                                        hb_gen,
+                                        FailureClass::Read,
+                                        Some(e),
+                                        &mut HashMap::new(),
+                                    )
+                                    .await;
                                     break;
                                 }
                             }
                             Err(e) => {
-                                debug!("Heartbeat response parse error: {}", e);
-                                inner_guard.ws = None;
-                                inner_guard.typing_active = false;
-                                if let Some(c) = inner_guard.typing_cancel.take() {
-                                    c.cancel();
-                                }
-                                auth_flag.store(false, Ordering::SeqCst);
-                                *status_arc.lock() = VTubeStudioConnectionStatus::Error;
-                                break;
+                                // Семантическая ошибка парсинга — сокет жив, не инвалидируем.
+                                debug!(error = %e, "Heartbeat response parse error (socket stays alive)");
                             }
                         }
                     }
-                    Err(e) => {
-                        debug!("Heartbeat request failed: {}", e);
-                        if inner_guard.connection_generation == hb_gen {
-                            inner_guard.ws = None;
-                            inner_guard.typing_active = false;
-                            if let Some(c) = inner_guard.typing_cancel.take() {
-                                c.cancel();
-                            }
-                            auth_flag.store(false, Ordering::SeqCst);
-                            *status_arc.lock() = VTubeStudioConnectionStatus::Error;
-                        }
+                    Ok(Ok(Err(e))) => {
+                        // Semantic VTS error на heartbeat-ответе (редко) — сокет жив.
+                        debug!(error = %e, "Heartbeat got semantic error (socket stays alive)");
+                    }
+                    Ok(Err(_)) => {
+                        // Reply-канал закрыт: actor умер и сам зафиксировал transport failure.
+                        break;
+                    }
+                    Err(_) => {
+                        // Таймаут. Actor сам зафиксирует read-failure; здесь дублируем
+                        // инвалидацию (exactly-once через generation guard).
+                        actor_transport_failure(
+                            &inner_arc,
+                            &auth_flag,
+                            &status_arc,
+                            app_handle.clone(),
+                            hb_gen,
+                            FailureClass::Read,
+                            None,
+                            &mut HashMap::new(),
+                        )
+                        .await;
                         break;
                     }
                 }
@@ -1361,17 +1566,16 @@ impl VTubeStudioService {
             return Err("VTube Studio is not authenticated.".to_string());
         }
 
-        let mut inner = self.inner.lock().await;
-        let ws = inner
-            .ws
-            .as_mut()
-            .ok_or_else(|| "VTube Studio WebSocket is not available.".to_string())?;
+        if self.inner.lock().await.actor.is_none() {
+            return Err("VTube Studio WebSocket is not available.".to_string());
+        }
 
-        let req = VtsRequest::hotkeys_in_current_model_request(&self.next_id());
-        let req_id = req.request_id.clone();
-        let json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
-
-        let value = send_and_recv(ws, &json, &req_id, "HotkeysInCurrentModelResponse")
+        let value = self
+            .actor_request(
+                "HotkeysInCurrentModelResponse",
+                VtsRequest::hotkeys_in_current_model_request,
+                REQUEST_TIMEOUT,
+            )
             .await
             .map_err(|e| format!("Hotkeys request failed: {}", e))?;
 
@@ -1411,23 +1615,23 @@ impl VTubeStudioService {
             ));
         }
 
-        let mut inner = self.inner.lock().await;
-
-        if inner.ws.is_none() {
+        if self.inner.lock().await.actor.is_none() {
             return Err("VTube Studio WebSocket is not available.".to_string());
         }
 
-        self.stop_typing_keepalive_locked(&mut inner);
+        {
+            let mut inner = self.inner.lock().await;
+            self.stop_typing_keepalive_locked(&mut inner);
+        }
 
         if typing_action.output_mode == VTubeStudioTypingMode::Item {
             // Invalidate session so any in-flight worker completes without
             // restoring state after this test ends (requirement 4).
             let session = self.invalidate_session();
-            let resolved = inner.resolved_item.clone();
-            let ws = inner.ws.as_mut().unwrap();
+            let resolved = { self.inner.lock().await.resolved_item.clone() };
 
             let item = match resolved {
-                Some(ref item) => item.clone(),
+                Some(item) => item,
                 None => {
                     return Err(
                         "No resolved item available for testing. Refresh the item first."
@@ -1437,7 +1641,7 @@ impl VTubeStudioService {
             };
 
             for i in 0..repeat_count {
-                if let Err(e) = animate_item(ws, self.next_id(), &item, true).await {
+                if let Err(e) = animate_item(self, &item, true).await {
                     self.item_transition.mark_applied_unknown();
                     *self.item_status.lock() = VTubeStudioItemStatus::Error {
                         file_name: item.file_name.clone(),
@@ -1449,7 +1653,7 @@ impl VTubeStudioService {
 
                 tokio::time::sleep(Duration::from_millis(timeout_ms)).await;
 
-                if let Err(e) = animate_item(ws, self.next_id(), &item, false).await {
+                if let Err(e) = animate_item(self, &item, false).await {
                     self.item_transition.mark_applied_unknown();
                     *self.item_status.lock() = VTubeStudioItemStatus::Error {
                         file_name: item.file_name.clone(),
@@ -1483,12 +1687,10 @@ impl VTubeStudioService {
         let timeout_dur = Duration::from_millis(timeout_ms);
 
         for i in 0..repeat_count {
-            let ws = inner.ws.as_mut().unwrap();
-
             match typing_action.output_mode {
                 VTubeStudioTypingMode::Event => {
                     let param_name = typing_action.parameter_name.clone();
-                    if let Err(e) = ensure_event_parameter(ws, self.next_id(), &param_name).await {
+                    if let Err(e) = ensure_event_parameter(self, &param_name).await {
                         if is_semantic_vts_error(&e) {
                             return Err(format!(
                                 "VTube Studio action test failed at repeat {} (ensure): {}",
@@ -1496,16 +1698,15 @@ impl VTubeStudioService {
                                 explain_event_error(&e, &param_name)
                             ));
                         }
-                        inner.ws = None;
-                        self.is_authenticated.store(false, Ordering::SeqCst);
-                        self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                        // transport failure: actor сам зафиксирует read-failure и
+                        // инвалидирует соединение. Просто возвращаем ошибку.
                         return Err(format!(
                             "VTube Studio action test failed at repeat {} (ensure): {}",
                             i + 1,
                             e
                         ));
                     }
-                    if let Err(e) = inject_typing(ws, self.next_id(), &param_name, 1.0).await {
+                    if let Err(e) = inject_typing(self, &param_name, 1.0).await {
                         if is_semantic_vts_error(&e) {
                             return Err(format!(
                                 "VTube Studio action test failed at repeat {} (start): {}",
@@ -1513,9 +1714,6 @@ impl VTubeStudioService {
                                 explain_event_error(&e, &param_name)
                             ));
                         }
-                        inner.ws = None;
-                        self.is_authenticated.store(false, Ordering::SeqCst);
-                        self.set_connection_status(VTubeStudioConnectionStatus::Error);
                         return Err(format!(
                             "VTube Studio action test failed at repeat {} (start): {}",
                             i + 1,
@@ -1525,7 +1723,7 @@ impl VTubeStudioService {
                 }
                 VTubeStudioTypingMode::Hotkeys => {
                     let start_id = typing_action.start_hotkey_id.clone();
-                    if let Err(e) = trigger_hotkey(ws, self.next_id(), &start_id).await {
+                    if let Err(e) = trigger_hotkey(self, &start_id).await {
                         if is_semantic_vts_error(&e) {
                             return Err(format!(
                                 "VTube Studio action test failed at repeat {} (start): {}",
@@ -1533,9 +1731,6 @@ impl VTubeStudioService {
                                 e
                             ));
                         }
-                        inner.ws = None;
-                        self.is_authenticated.store(false, Ordering::SeqCst);
-                        self.set_connection_status(VTubeStudioConnectionStatus::Error);
                         return Err(format!(
                             "VTube Studio action test failed at repeat {} (start): {}",
                             i + 1,
@@ -1550,12 +1745,10 @@ impl VTubeStudioService {
 
             tokio::time::sleep(timeout_dur).await;
 
-            let ws = inner.ws.as_mut().unwrap();
-
             match typing_action.output_mode {
                 VTubeStudioTypingMode::Event => {
                     let param_name = typing_action.parameter_name.clone();
-                    if let Err(e) = inject_typing(ws, self.next_id(), &param_name, 0.0).await {
+                    if let Err(e) = inject_typing(self, &param_name, 0.0).await {
                         if is_semantic_vts_error(&e) {
                             return Err(format!(
                                 "VTube Studio action test failed at repeat {} (stop): {}",
@@ -1563,9 +1756,6 @@ impl VTubeStudioService {
                                 explain_event_error(&e, &param_name)
                             ));
                         }
-                        inner.ws = None;
-                        self.is_authenticated.store(false, Ordering::SeqCst);
-                        self.set_connection_status(VTubeStudioConnectionStatus::Error);
                         return Err(format!(
                             "VTube Studio action test failed at repeat {} (stop): {}",
                             i + 1,
@@ -1575,7 +1765,7 @@ impl VTubeStudioService {
                 }
                 VTubeStudioTypingMode::Hotkeys => {
                     let stop_id = typing_action.stop_hotkey_id.clone();
-                    if let Err(e) = trigger_hotkey(ws, self.next_id(), &stop_id).await {
+                    if let Err(e) = trigger_hotkey(self, &stop_id).await {
                         if is_semantic_vts_error(&e) {
                             return Err(format!(
                                 "VTube Studio action test failed at repeat {} (stop): {}",
@@ -1583,9 +1773,6 @@ impl VTubeStudioService {
                                 e
                             ));
                         }
-                        inner.ws = None;
-                        self.is_authenticated.store(false, Ordering::SeqCst);
-                        self.set_connection_status(VTubeStudioConnectionStatus::Error);
                         return Err(format!(
                             "VTube Studio action test failed at repeat {} (stop): {}",
                             i + 1,
@@ -1607,6 +1794,253 @@ impl VTubeStudioService {
             "Тест действия выполнен: повторов — {}, таймаут — {} мс",
             repeat_count, timeout_ms
         ))
+    }
+}
+
+/// Connection-actor: единственный долгоживущий владелец аутентифицированного WsStream.
+///
+/// Постоянный reader-loop (P0-фикс): `ws.next()` опрашивается каждую итерацию через
+/// `select!`, поэтому входящие PING от VTube Studio читаются, и tungstenite 0.24
+/// авто-отправляет queued PONG при следующем read. Раньше Ping не читался в idle →
+/// PONG не уходил → VTS рвал TCP (10053).
+///
+/// Записи сериализованы: `ws.send` зовёт только этот actor (callers пушат в mpsc).
+/// Ответы коррелируются по requestID через `pending: HashMap`.
+#[allow(clippy::too_many_arguments)]
+async fn actor_task(
+    mut ws: WsStream,
+    mut rx: mpsc::Receiver<ActorRequest>,
+    cancel: CancellationToken,
+    inner: Arc<tokio::sync::Mutex<InnerState>>,
+    is_authenticated: Arc<AtomicBool>,
+    connection_status: Arc<parking_lot::Mutex<VTubeStudioConnectionStatus>>,
+    app_handle: Option<AppHandle>,
+    actor_generation: u64,
+) {
+    use tokio_tungstenite::tungstenite::Message;
+
+    // shared Arc-ы в контексте actor для вызова handle_transport_failure через временный
+    // «view»: создаём placeholder-сервис невозможен, поэтому реализуем инвалидацию inline,
+    // переиспользуя те же поля, что и VTubeStudioService::handle_transport_failure_locked.
+
+    let mut pending: HashMap<String, Pending> = HashMap::new();
+    let mut sweep = tokio::time::interval(ACTOR_SWEEP_INTERVAL);
+    sweep.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    loop {
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => {
+                let _ = ws.close(None).await;
+                fail_all_pending(&mut pending, "actor cancelled");
+                return;
+            }
+            // sweep «зависших» pending-entries (защита от утечки при caller-timeout,
+            // когда сервер молча не отвечает, но сокет жив).
+            _ = sweep.tick() => {
+                let now = Instant::now();
+                pending.retain(|_, p| {
+                    if now.duration_since(p.started) > p.timeout * 2 {
+                        debug!("VTS actor pending sweep: dropping stale entry");
+                        false
+                    } else {
+                        true
+                    }
+                });
+                // sendable-continue; чтение/запись не блокируются
+            }
+            req = rx.recv() => {
+                let Some(req) = req else {
+                    let _ = ws.close(None).await;
+                    fail_all_pending(&mut pending, "actor sender closed");
+                    return;
+                };
+                log_outgoing_request(&req.json);
+                let started = Instant::now();
+                match timeout(SEND_TIMEOUT, ws.send(Message::Text(req.json))).await {
+                    Ok(Ok(())) => {
+                        pending.insert(req.request_id.clone(), Pending {
+                            reply: req.reply,
+                            expected_msg_type: req.expected_msg_type,
+                            started,
+                            timeout: req.timeout,
+                        });
+                    }
+                    Ok(Err(e)) => {
+                        debug!(error = %e, generation = actor_generation, "VTS send failed");
+                        let _ = req.reply.send(Err("Send failed".to_string()));
+                        actor_transport_failure(
+                            &inner, &is_authenticated, &connection_status,
+                            app_handle.clone(), actor_generation,
+                            FailureClass::Send, Some(e.to_string()), &mut pending,
+                        ).await;
+                        return;
+                    }
+                    Err(_) => {
+                        debug!(generation = actor_generation, "VTS send timed out");
+                        let _ = req.reply.send(Err("Send timed out".to_string()));
+                        actor_transport_failure(
+                            &inner, &is_authenticated, &connection_status,
+                            app_handle.clone(), actor_generation,
+                            FailureClass::SendTimeout, None, &mut pending,
+                        ).await;
+                        return;
+                    }
+                }
+            }
+            frame = ws.next() => {
+                let class = match frame {
+                    None => Some(FailureClass::Closed),
+                    Some(Err(e)) => {
+                        debug!(error = %e, generation = actor_generation, "VTS read error");
+                        Some(FailureClass::Read)
+                    }
+                    Some(Ok(Message::Close(frame))) => {
+                        let code = frame.as_ref().map(|f| f.code);
+                        let reason = frame.as_ref().map(|f| f.reason.to_string());
+                        debug!(?code, ?reason, generation = actor_generation, "VTS closed WebSocket connection");
+                        Some(FailureClass::Closed)
+                    }
+                    // PONG уже в очереди tungstenite при парсинге Ping; отправится при
+                    // следующем read/flush. Просто продолжаем цикл.
+                    Some(Ok(Message::Ping(_) | Message::Pong(_))) => None,
+                    Some(Ok(Message::Text(t))) => {
+                        route_text(t, &mut pending);
+                        None
+                    }
+                    Some(Ok(other)) => {
+                        debug!(?other, generation = actor_generation, "Unexpected WebSocket message from VTS, ignoring");
+                        None
+                    }
+                };
+                if let Some(failure_class) = class {
+                    actor_transport_failure(
+                        &inner, &is_authenticated, &connection_status,
+                        app_handle.clone(), actor_generation,
+                        failure_class, None, &mut pending,
+                    ).await;
+                    return;
+                }
+            }
+        }
+    }
+}
+
+/// Маршрутизирует входящее text-сообщение по requestID в ожидающий reply-канал.
+/// Semantic APIError завершает конкретный запрос, но сокет остаётся живым.
+fn route_text(text: String, pending: &mut HashMap<String, Pending>) {
+    let parsed: VtsResponse = match serde_json::from_str(&text) {
+        Ok(p) => p,
+        Err(e) => {
+            debug!(error = %e, "VTS parse error, dropping frame");
+            return;
+        }
+    };
+
+    log_incoming_response(&parsed);
+
+    let req_id = parsed.request_id.clone();
+    let msg_type = parsed.message_type.clone();
+
+    if let Some(p) = pending.remove(&req_id) {
+        let elapsed = p.started.elapsed();
+        match classify_vts_response(&parsed, &req_id, &p.expected_msg_type) {
+            RecvResult::Match(data) => {
+                debug!(messageType = %msg_type, %req_id, elapsed_ms = elapsed.as_millis(), "VTS recv routed");
+                let _ = p.reply.send(Ok(data));
+            }
+            RecvResult::Error(e) => {
+                // semantic error: сокет ЖИВ, actor не инвалидируется.
+                debug!(messageType = %msg_type, %req_id, error = %e, "VTS recv semantic error");
+                let _ = p.reply.send(Err(e));
+            }
+            RecvResult::Skip => {
+                // requestID совпал, но messageType не тот — protocol violation.
+                debug!(messageType = %msg_type, %req_id, expected_msg_type = %p.expected_msg_type, "VTS recv unexpected message type");
+                let _ = p.reply.send(Err(format!(
+                    "Unexpected WebSocket message: {}",
+                    msg_type
+                )));
+            }
+        }
+    } else {
+        // Unsolicited event / ответ на уже отменённый запрос — лог-и-дроп.
+        debug!(messageType = %msg_type, %req_id, "Unsolicited VTS message, no pending request — dropping");
+    }
+}
+
+/// Завершает все pending reply с ошибкой (при shutdown / transport failure).
+fn fail_all_pending(pending: &mut HashMap<String, Pending>, reason: &str) {
+    for (_, p) in pending.drain() {
+        let _ = p.reply.send(Err(reason.to_string()));
+    }
+}
+
+/// Inline-копия VTubeStudioService::handle_transport_failure_locked для actor-задачи
+/// (actor не владеет `&self`). Тело намеренно идентично методу, чтобы инвалидация
+/// была единой.
+#[allow(clippy::too_many_arguments)]
+async fn actor_transport_failure(
+    inner: &Arc<tokio::sync::Mutex<InnerState>>,
+    is_authenticated: &Arc<AtomicBool>,
+    connection_status: &Arc<parking_lot::Mutex<VTubeStudioConnectionStatus>>,
+    app_handle: Option<AppHandle>,
+    actor_generation: u64,
+    class: FailureClass,
+    detail: Option<String>,
+    pending: &mut HashMap<String, Pending>,
+) {
+    fail_all_pending(pending, "transport failure");
+
+    let mut guard = inner.lock().await;
+    if guard.connection_generation != actor_generation {
+        debug!(
+            failure_generation = actor_generation,
+            current_generation = guard.connection_generation,
+            "stale transport failure ignored"
+        );
+        return;
+    }
+
+    let had_actor = guard.actor.is_some();
+    if !had_actor {
+        return;
+    }
+
+    // Те же шаги инвалидации, что в VTubeStudioService::stop_*_locked.
+    if let Some(h) = guard.actor.take() {
+        h.cancel.cancel();
+        drop(h.sender);
+        h.join.abort();
+    }
+    if let Some(c) = guard.typing_cancel.take() {
+        c.cancel();
+    }
+    if let Some(h) = guard.typing_handle.take() {
+        h.abort();
+    }
+    if let Some(c) = guard.heartbeat_cancel.take() {
+        c.cancel();
+    }
+    if let Some(h) = guard.heartbeat_handle.take() {
+        h.abort();
+    }
+    guard.typing_active = false;
+    guard.resolved_item = None;
+    is_authenticated.store(false, Ordering::SeqCst);
+    *connection_status.lock() = VTubeStudioConnectionStatus::Error;
+
+    info!(
+        class = ?class,
+        ?detail,
+        generation = actor_generation,
+        "VTS transport failure: connection invalidated"
+    );
+
+    // P1: emit перехода Error.
+    if let Some(h) = &app_handle {
+        let status = connection_status.lock().clone();
+        let _ = h.emit(VTS_STATUS_CHANGED_EVENT, &status);
     }
 }
 
@@ -1718,14 +2152,14 @@ async fn perform_authentication(
 /// Идемпотентно гарантирует custom INPUT перед inject в Event-режиме.
 /// VTS повторно создаёт тот же параметр тем же plugin identity без ошибки.
 async fn ensure_event_parameter(
-    ws: &mut WsStream,
-    request_id: String,
+    svc: &VTubeStudioService,
     parameter_name: &str,
 ) -> Result<(), String> {
-    let req = VtsRequest::parameter_creation_request(&request_id, parameter_name);
-    let json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
-
-    let _value = send_and_recv(ws, &json, &request_id, "ParameterCreationResponse")
+    let name = parameter_name.to_string();
+    let _value = svc
+        .actor_request("ParameterCreationResponse", |id| {
+            VtsRequest::parameter_creation_request(id, &name)
+        }, REQUEST_TIMEOUT)
         .await
         .map_err(|e| format!("Create parameter failed: {}", e))?;
 
@@ -1734,14 +2168,14 @@ async fn ensure_event_parameter(
 }
 
 async fn delete_event_parameter(
-    ws: &mut WsStream,
-    request_id: String,
+    svc: &VTubeStudioService,
     parameter_name: &str,
 ) -> Result<(), String> {
-    let req = VtsRequest::parameter_deletion_request(&request_id, parameter_name);
-    let json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
-
-    let _value = send_and_recv(ws, &json, &request_id, "ParameterDeletionResponse")
+    let name = parameter_name.to_string();
+    let _value = svc
+        .actor_request("ParameterDeletionResponse", |id| {
+            VtsRequest::parameter_deletion_request(id, &name)
+        }, REQUEST_TIMEOUT)
         .await
         .map_err(|e| format!("Delete parameter failed: {}", e))?;
 
@@ -1750,15 +2184,15 @@ async fn delete_event_parameter(
 }
 
 async fn inject_typing(
-    ws: &mut WsStream,
-    request_id: String,
+    svc: &VTubeStudioService,
     parameter_name: &str,
     value: f64,
 ) -> Result<(), String> {
-    let req = VtsRequest::inject_parameter_request(&request_id, parameter_name, value);
-    let json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
-
-    let _value = send_and_recv(ws, &json, &request_id, "InjectParameterDataResponse")
+    let name = parameter_name.to_string();
+    let _value = svc
+        .actor_request("InjectParameterDataResponse", |id| {
+            VtsRequest::inject_parameter_request(id, &name, value)
+        }, REQUEST_TIMEOUT)
         .await
         .map_err(|e| format!("Inject parameter failed: {}", e))?;
 
@@ -1766,15 +2200,12 @@ async fn inject_typing(
     Ok(())
 }
 
-async fn trigger_hotkey(
-    ws: &mut WsStream,
-    request_id: String,
-    hotkey_id: &str,
-) -> Result<(), String> {
-    let req = VtsRequest::hotkey_trigger_request(&request_id, hotkey_id);
-    let json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
-
-    let _value = send_and_recv(ws, &json, &request_id, "HotkeyTriggerResponse")
+async fn trigger_hotkey(svc: &VTubeStudioService, hotkey_id: &str) -> Result<(), String> {
+    let id_param = hotkey_id.to_string();
+    let _value = svc
+        .actor_request("HotkeyTriggerResponse", |id| {
+            VtsRequest::hotkey_trigger_request(id, &id_param)
+        }, REQUEST_TIMEOUT)
         .await
         .map_err(|e| format!("Hotkey trigger failed: {}", e))?;
 
@@ -1783,16 +2214,12 @@ async fn trigger_hotkey(
 }
 
 async fn fetch_scene_instances(
-    ws: &mut WsStream,
-    request_id: String,
+    svc: &VTubeStudioService,
     file_name: Option<&str>,
 ) -> Result<Vec<ItemInstanceInfo>, String> {
-    let req = VtsRequest::item_list_request(&request_id, file_name);
-    let json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
-
-    let value = send_and_recv(ws, &json, &request_id, "ItemListResponse")
-        .await
-        .map_err(|e| e.to_string())?;
+    let value = svc
+        .actor_request("ItemListResponse", |id| VtsRequest::item_list_request(id, file_name), REQUEST_TIMEOUT)
+        .await?;
 
     let data: ItemListResponseData =
         serde_json::from_value(value).map_err(|e| format!("Parse item list response: {}", e))?;
@@ -1801,8 +2228,7 @@ async fn fetch_scene_instances(
 }
 
 async fn animate_item(
-    ws: &mut WsStream,
-    request_id: String,
+    svc: &VTubeStudioService,
     resolved: &ResolvedItem,
     show: bool,
 ) -> Result<(), String> {
@@ -1819,22 +2245,16 @@ async fn animate_item(
         }
     };
 
-    let req = VtsRequest::item_animation_control_request(
-        &request_id,
-        &resolved.instance_id,
-        opacity,
-        frame,
-        play_state,
-    );
-    let json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
-
-    let value = timeout(
-        ITEM_ACTION_TIMEOUT,
-        send_and_recv(ws, &json, &request_id, "ItemAnimationControlResponse"),
-    )
-    .await
-    .map_err(|_| "Item animation request timed out".to_string())?
-    .map_err(|e| format!("Item animation request failed: {}", e))?;
+    let instance_id = resolved.instance_id.clone();
+    let value = svc
+        .actor_request(
+            "ItemAnimationControlResponse",
+            |id| {
+                VtsRequest::item_animation_control_request(id, &instance_id, opacity, frame, play_state)
+            },
+            ITEM_ACTION_TIMEOUT,
+        )
+        .await?;
 
     let _data: ItemAnimationControlResponseData = serde_json::from_value(value)
         .map_err(|e| format!("Malformed item animation response: {}", e))?;
@@ -2200,7 +2620,7 @@ mod tests {
         rt.block_on(async {
             svc.disconnect().await;
             let inner = svc.inner.lock().await;
-            assert!(inner.ws.is_none());
+            assert!(inner.actor.is_none());
             assert!(inner.typing_cancel.is_none());
             assert!(inner.typing_handle.is_none());
             assert!(!inner.typing_active);
@@ -2220,7 +2640,7 @@ mod tests {
             .enable_all()
             .build()
             .unwrap();
-        let svc = VTubeStudioService::new();
+        let svc = Arc::new(VTubeStudioService::new());
         rt.block_on(async {
             let result = svc.set_typing(false, 8001, "").await;
             assert!(result.is_ok());
@@ -2235,13 +2655,13 @@ mod tests {
             .enable_all()
             .build()
             .unwrap();
-        let svc = VTubeStudioService::new();
+        let svc = Arc::new(VTubeStudioService::new());
         svc.set_desired_running(true);
         rt.block_on(async {
             let result = svc.set_typing(true, 8001, "").await;
             assert!(result.is_ok());
             let inner = svc.inner.lock().await;
-            assert!(inner.ws.is_none());
+            assert!(inner.actor.is_none());
         });
     }
 
@@ -2251,13 +2671,13 @@ mod tests {
             .enable_all()
             .build()
             .unwrap();
-        let svc = VTubeStudioService::new();
+        let svc = Arc::new(VTubeStudioService::new());
         assert!(!svc.is_desired_running());
         rt.block_on(async {
             let result = svc.set_typing(true, 8001, "test-token").await;
             assert!(result.is_ok());
             let inner = svc.inner.lock().await;
-            assert!(inner.ws.is_none());
+            assert!(inner.actor.is_none());
         });
     }
 
@@ -2923,7 +3343,7 @@ mod tests {
             }
             svc.disconnect().await;
             let inner = svc.inner.lock().await;
-            assert!(inner.ws.is_none());
+            assert!(inner.actor.is_none());
             assert!(inner.typing_cancel.is_none());
             assert!(inner.typing_handle.is_none());
             assert!(!inner.typing_active);
@@ -3840,7 +4260,7 @@ mod tests {
                     kind: ItemKind::Static,
                 });
             }
-            assert!(svc.inner.lock().await.ws.is_none());
+            assert!(svc.inner.lock().await.actor.is_none());
 
             let status = svc.refresh_item_action().await;
             assert_eq!(
@@ -4417,11 +4837,11 @@ mod tests {
             // Because session is stale, do NOT restore socket/change state
             // The inner guard is dropped without restoring
             inner.resolved_item = None;
-            // (In production: inner.ws would NOT be restored for stale session)
+            // (In production: inner.actor would NOT be created for stale session)
 
             assert!(
-                inner.ws.is_none(),
-                "no socket should be placed for stale session"
+                inner.actor.is_none(),
+                "no actor should exist for stale session"
             );
         });
     }
@@ -5222,13 +5642,13 @@ mod tests {
                 assert_ne!(inner.connection_generation, hb_gen);
                 // Stale heartbeat would observe generation mismatch and exit
                 // without mutating state
-                let ws_was_some = inner.ws.is_some();
+                let actor_was_some = inner.actor.is_some();
                 let typing_was_active = inner.typing_active;
                 let auth_was_true = svc.is_authenticated.load(Ordering::SeqCst);
                 let status_was = svc.get_connection_status();
 
                 // These must remain unchanged after gen mismatch
-                assert_eq!(inner.ws.is_some(), ws_was_some);
+                assert_eq!(inner.actor.is_some(), actor_was_some);
                 assert_eq!(inner.typing_active, typing_was_active);
                 assert_eq!(svc.is_authenticated.load(Ordering::SeqCst), auth_was_true);
                 assert_eq!(svc.get_connection_status(), status_was);
@@ -5241,34 +5661,29 @@ mod tests {
     // ---------------------------------------------------------------------------
 
     #[test]
-    fn start_heartbeat_locked_sets_fields_and_bumps_generation() {
+    fn start_heartbeat_locked_noop_without_actor() {
+        // Без connection-actor heartbeat не запускается (некуда слать запросы),
+        // но generation не меняется и старые задачи останавливаются.
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap();
         let svc = VTubeStudioService::new();
         rt.block_on(async {
-            {
-                let mut inner = svc.inner.lock().await;
-                let gen_before = inner.connection_generation;
-                assert!(inner.heartbeat_cancel.is_none());
-                assert!(inner.heartbeat_handle.is_none());
+            let mut inner = svc.inner.lock().await;
+            let gen_before = inner.connection_generation;
+            assert!(inner.heartbeat_cancel.is_none());
+            assert!(inner.heartbeat_handle.is_none());
 
-                svc.start_heartbeat_locked(&mut inner);
+            svc.start_heartbeat_locked(&mut inner);
 
-                assert!(
-                    inner.connection_generation > gen_before,
-                    "generation must be bumped by start_heartbeat_locked"
-                );
-                assert!(
-                    inner.heartbeat_cancel.is_some(),
-                    "cancellation token must be set"
-                );
-                assert!(inner.heartbeat_handle.is_some(), "handle must be set");
-            }
-
-            // The spawned task should not interfere with tests —
-            // it locks inner, finds ws=None, and immediately breaks.
+            // generation НЕ bumped, handle/cancel не установлены (actor отсутствует)
+            assert_eq!(
+                inner.connection_generation, gen_before,
+                "generation must NOT change without an actor"
+            );
+            assert!(inner.heartbeat_cancel.is_none());
+            assert!(inner.heartbeat_handle.is_none());
         });
     }
 
@@ -5298,18 +5713,16 @@ mod tests {
             let mut inner = svc.inner.lock().await;
             svc.start_heartbeat_locked(&mut inner);
 
-            // Old token must be cancelled by start_heartbeat_locked
+            // Old token must be cancelled by start_heartbeat_locked (stop_heartbeat_locked
+            // вызывается в начале даже без actor).
             assert!(
                 old_cancel.is_cancelled(),
                 "old heartbeat token must be cancelled"
             );
 
-            // New fields should be fresh
-            assert!(inner.heartbeat_cancel.is_some());
-            assert!(
-                !inner.heartbeat_cancel.as_ref().unwrap().is_cancelled(),
-                "new heartbeat token must not be cancelled"
-            );
+            // Без actor новый heartbeat не запускается.
+            assert!(inner.heartbeat_cancel.is_none());
+            assert!(inner.heartbeat_handle.is_none());
         });
     }
 
@@ -5332,7 +5745,7 @@ mod tests {
             {
                 let mut inner = svc.inner.lock().await;
                 inner.typing_active = true;
-                inner.ws = None; // no real socket
+                // no real socket: actor stays None by default
             }
         });
 
@@ -5360,7 +5773,7 @@ mod tests {
 
         rt.block_on(async {
             let inner = svc.inner.lock().await;
-            assert!(inner.ws.is_none());
+            assert!(inner.actor.is_none());
             assert!(!inner.typing_active);
             assert!(
                 inner.heartbeat_cancel.is_none(),
@@ -5722,6 +6135,148 @@ mod tests {
             assert!(!inner.typing_active);
             assert!(inner.typing_cancel.is_none());
             assert!(inner.typing_handle.is_none());
+        });
+    }
+
+    // ---------------------------------------------------------------------------
+    // Generation guard regression tests (ROADMAP-062 review correction)
+    // ---------------------------------------------------------------------------
+
+    fn make_fake_actor_handle() -> ConnectionActorHandle {
+        let (tx, _rx) = mpsc::channel::<ActorRequest>(1);
+        let cancel = CancellationToken::new();
+        let join = tokio::spawn(async {});
+        ConnectionActorHandle {
+            sender: tx.clone(),
+            cancel,
+            join,
+        }
+    }
+
+    /// Heartbeat preserves the actor's generation — start_heartbeat_locked
+    /// must NOT bump connection_generation.
+    #[test]
+    fn heartbeat_preserves_actor_generation() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        rt.block_on(async {
+            let mut inner = svc.inner.lock().await;
+            inner.actor = Some(make_fake_actor_handle());
+            inner.connection_generation = 42;
+
+            svc.start_heartbeat_locked(&mut inner);
+
+            assert_eq!(
+                inner.connection_generation, 42,
+                "heartbeat start must NOT bump generation"
+            );
+            assert!(
+                inner.heartbeat_cancel.is_some(),
+                "heartbeat cancel must be set"
+            );
+            assert!(
+                inner.heartbeat_handle.is_some(),
+                "heartbeat handle must be set"
+            );
+        });
+    }
+
+    /// actor_transport_failure free-function with stale generation
+    /// preserves fresh actor state.
+    #[test]
+    fn actor_transport_failure_stale_gen_preserves_state() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let svc = VTubeStudioService::new();
+            svc.set_desired_running(true);
+            svc.set_connection_status(VTubeStudioConnectionStatus::Connected);
+            svc.is_authenticated.store(true, Ordering::SeqCst);
+
+            {
+                let mut inner = svc.inner.lock().await;
+                inner.connection_generation = 99;
+                inner.actor = Some(make_fake_actor_handle());
+                inner.typing_active = true;
+            }
+
+            let mut pending: HashMap<String, Pending> = HashMap::new();
+            actor_transport_failure(
+                &svc.inner,
+                &svc.is_authenticated,
+                &svc.connection_status,
+                None,
+                5, // stale
+                FailureClass::Read,
+                None,
+                &mut pending,
+            )
+            .await;
+
+            let inner = svc.inner.lock().await;
+            assert!(
+                inner.actor.is_some(),
+                "fresh actor must survive stale failure"
+            );
+            assert!(
+                svc.is_authenticated.load(Ordering::SeqCst),
+                "auth must survive stale failure"
+            );
+        });
+    }
+
+    /// actor_transport_failure free-function with matching generation
+    /// MUST invalidate state.
+    #[test]
+    fn actor_transport_failure_current_gen_invalidates() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let svc = VTubeStudioService::new();
+            svc.set_desired_running(true);
+            svc.set_connection_status(VTubeStudioConnectionStatus::Connected);
+            svc.is_authenticated.store(true, Ordering::SeqCst);
+
+            let gen = {
+                let mut inner = svc.inner.lock().await;
+                inner.connection_generation = 8;
+                inner.actor = Some(make_fake_actor_handle());
+                inner.typing_active = true;
+                inner.typing_cancel = Some(CancellationToken::new());
+                inner.heartbeat_cancel = Some(CancellationToken::new());
+                8u64
+            };
+
+            let mut pending: HashMap<String, Pending> = HashMap::new();
+            actor_transport_failure(
+                &svc.inner,
+                &svc.is_authenticated,
+                &svc.connection_status,
+                None,
+                gen, // matching generation
+                FailureClass::Read,
+                None,
+                &mut pending,
+            )
+            .await;
+
+            let inner = svc.inner.lock().await;
+            assert!(
+                inner.actor.is_none(),
+                "actor must be cleared on matching failure"
+            );
+            assert!(!svc.is_authenticated.load(Ordering::SeqCst));
+            assert_eq!(
+                svc.get_connection_status(),
+                VTubeStudioConnectionStatus::Error
+            );
         });
     }
 }

@@ -677,6 +677,10 @@ fn init_window_protection(app: &App, windows_manager: &WindowsManager) {
 }
 
 fn init_vtube_studio(app_state: &AppState, app_handle: AppHandle) {
+    // Подключаем AppHandle ДО всего: connection-actor должен уметь эмитить статус
+    // при transport-failure из idle независимо от того, включён ли автозапуск.
+    app_state.vtube_studio.attach_app_handle(app_handle.clone());
+
     let start_on_boot = {
         let settings = app_state.vtube_studio.settings.blocking_read();
         settings.start_on_boot
