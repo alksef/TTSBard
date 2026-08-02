@@ -40,6 +40,7 @@ related_tasks: []
 
 | Item | Статус | Следующий шаг |
 |---|---|---|
+| [ROADMAP-063 — Фактическое runtime-состояние WebView-сервера](./active/063-webview-runtime-server-status.md) | `planned` | Runtime status, readiness signal и наблюдение server task |
 
 ## Завершённые направления
 
