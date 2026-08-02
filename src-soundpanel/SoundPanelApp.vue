@@ -87,6 +87,15 @@ async function loadSets() {
   }
 }
 
+async function loadStayVisible() {
+  try {
+    stayVisible.value = await invoke<boolean>('sp_get_stay_visible')
+    console.log('[SoundPanel] Loaded stay_visible:', stayVisible.value)
+  } catch (e) {
+    console.error('Failed to load stay_visible:', e)
+  }
+}
+
 function getNextSetIdx(): number {
   const idx = sets.value.findIndex(s => s.id === activeSetId.value)
   if (idx < 0) return 0
@@ -127,6 +136,14 @@ async function closeWindow() {
   }
 }
 
+async function escapeWindow() {
+  try {
+    await invoke('sp_escape_soundpanel')
+  } catch (e) {
+    console.error('Failed to leave sound panel:', e)
+  }
+}
+
 async function toggleClickthrough() {
   try {
     clickthroughEnabled.value = await invoke<boolean>('sp_set_floating_clickthrough', { enabled: !clickthroughEnabled.value })
@@ -143,9 +160,15 @@ function codeToLetter(code: string): string | null {
   return null
 }
 
+function playBinding(key: string) {
+  invoke('sp_play_binding', { key }).catch(e => {
+    console.error('[SoundPanel] Failed to play binding:', e)
+  })
+}
+
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
-    closeWindow()
+    escapeWindow()
     return
   }
   if (e.ctrlKey || e.shiftKey || e.altKey || e.metaKey) {
@@ -156,9 +179,7 @@ function onKeydown(e: KeyboardEvent) {
   const b = bindings.value.find(x => x.key === key)
   if (b) {
     e.preventDefault()
-    invoke('sp_play_binding', { key }).then(() => {
-      if (!stayVisible.value) closeWindow()
-    })
+    playBinding(key)
   } else {
     showNoBinding(key)
   }
@@ -182,6 +203,7 @@ onUnmounted(() => {
 onMounted(async () => {
   await loadSets()
   await loadBindings()
+  await loadStayVisible()
 
   try {
     const [loadedOpacity, loadedColor] = await invoke<[number, string]>('sp_get_floating_appearance')
@@ -198,12 +220,6 @@ onMounted(async () => {
     console.error('Failed to load clickthrough:', e)
   }
 
-  try {
-    stayVisible.value = await invoke<boolean>('sp_get_stay_visible')
-  } catch (e) {
-    console.error('Failed to load stay_visible:', e)
-  }
-
   async function onAppearanceUpdate() {
     console.log('[SoundPanel] Appearance update event received')
     const [newOpacity, newColor] = await invoke<[number, string]>('sp_get_floating_appearance')
@@ -215,11 +231,7 @@ onMounted(async () => {
     } catch (e) {
       console.error('Failed to reload clickthrough:', e)
     }
-    try {
-      stayVisible.value = await invoke<boolean>('sp_get_stay_visible')
-    } catch (e) {
-      console.error('Failed to reload stay_visible:', e)
-    }
+    await loadStayVisible()
     console.log('[SoundPanel] Updated refs:', { opacity: opacity.value, bgColor: bgColor.value })
   }
 
@@ -247,6 +259,12 @@ onMounted(async () => {
     <div class="title-bar" data-tauri-drag-region>
       <div class="title-left">
         <span class="title">SoundPanel</span>
+        <span
+          v-if="stayVisible"
+          class="persistent-mode-label"
+          title="Панель остаётся видимой после выбора звука"
+          aria-label="Панель закреплена: автоматическое скрытие при потере фокуса приостановлено"
+        >панель закреплена</span>
         <div v-if="sets.length > 0" class="set-selector">
           <button
             v-if="sets.length > 1"
@@ -287,10 +305,18 @@ onMounted(async () => {
       <div v-else class="content-inner">
         <div v-if="bindings.length > 0" class="bindings-list">
           <div class="bindings-grid">
-            <div v-for="binding in bindings" :key="binding.key" class="binding-item">
+            <button
+              v-for="binding in bindings"
+              :key="binding.key"
+              type="button"
+              class="binding-item"
+              :title="`${binding.key} — ${binding.description}`"
+              :aria-label="`${binding.key}: ${binding.description}`"
+              @click="playBinding(binding.key)"
+            >
               <kbd class="binding-key">{{ binding.key }}</kbd>
               <span class="binding-desc">{{ binding.description }}</span>
-            </div>
+            </button>
           </div>
         </div>
 
@@ -375,6 +401,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .title {
@@ -382,6 +409,24 @@ body {
   font-weight: 500;
   opacity: 0.9;
   color: var(--panel-text);
+}
+
+.persistent-mode-label {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 6px;
+  font-size: 9px;
+  line-height: 1.4;
+  font-weight: 400;
+  color: var(--panel-muted);
+  background: color-mix(in srgb, var(--panel-text) 6%, transparent);
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  -webkit-app-region: no-drag;
+  user-select: none;
 }
 
 .set-selector {
@@ -502,15 +547,30 @@ button.active {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: flex-start;
   gap: 0.25rem;
   padding: 0.5rem;
   background: rgba(255, 255, 255, 0.05);
+  border: 1px solid transparent;
   border-radius: 6px;
-  transition: background 0.2s;
+  transition: background 0.2s, border-color 0.2s;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  width: 100%;
+  height: auto;
+  outline: none;
 }
 
 .binding-item:hover {
   background: rgba(255, 255, 255, 0.1);
+}
+
+.binding-item:focus-visible {
+  border-color: var(--panel-text);
+  outline: 2px solid color-mix(in srgb, var(--panel-text) 40%, transparent);
+  outline-offset: 1px;
 }
 
 .binding-key {

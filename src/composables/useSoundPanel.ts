@@ -37,6 +37,8 @@ export function useSoundPanel() {
   const editingSetName = ref('')
   const editingInputRef = ref<HTMLInputElement | null>(null)
 
+  const stayVisible = ref(false)
+
   async function loadSets() {
     try {
       const result = await invoke<SoundSets>('sp_get_sets')
@@ -232,6 +234,17 @@ export function useSoundPanel() {
     setTimeout(() => errorMessage.value = null, 5000)
   }
 
+  async function toggleStayVisible() {
+    const newValue = !stayVisible.value
+    stayVisible.value = newValue
+    try {
+      await invoke('sp_set_stay_visible', { enabled: newValue })
+    } catch (e) {
+      stayVisible.value = !newValue
+      showError('Ошибка сохранения настройки: ' + (e as Error).message)
+    }
+  }
+
   function getAvailableKeys(): string[] {
     const usedKeys = new Set(bindings.value.map(b => b.key))
     return availableKeys.filter(key => !usedKeys.has(key))
@@ -240,6 +253,13 @@ export function useSoundPanel() {
   onMounted(async () => {
     await loadSets()
     await loadBindings()
+
+    try {
+      stayVisible.value = await invoke<boolean>('sp_get_stay_visible')
+    } catch (e) {
+      debugError('[SoundPanelTab] Failed to load stay_visible:', e)
+      showError('Не удалось загрузить настройку видимости панели')
+    }
 
     try {
       await registerSoundPanelTabListeners(listen, listenerScope, {
@@ -273,6 +293,8 @@ export function useSoundPanel() {
     editingSetId,
     editingSetName,
     editingInputRef,
+    stayVisible,
+    toggleStayVisible,
     loadSets,
     switchSet,
     addSet,

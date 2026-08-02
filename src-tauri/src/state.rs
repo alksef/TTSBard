@@ -133,6 +133,12 @@ pub struct AppState {
     /// Сохранённый HWND внешнего окна, бывшего на переднем плане перед активацией TTSBard
     pub previous_foreground_hwnd: Arc<Mutex<Option<isize>>>,
 
+    /// Сохранённый HWND внешнего окна, бывшего на переднем плане перед активацией SoundPanel.
+    ///
+    /// Отдельный слот: не конфликтует с `previous_foreground_hwnd` (главное окно),
+    /// потоки не перезаписывают друг друга.
+    pub soundpanel_previous_foreground_hwnd: Arc<Mutex<Option<isize>>>,
+
     /// Async mutex serialising concurrent provider selection operations.
     /// Selected by concrete provider ID.
     pub selection_mutex: Arc<tokio::sync::Mutex<()>>,
@@ -183,6 +189,7 @@ impl AppState {
             soundpanel_hook: Arc::new(Mutex::new(None)),
             shutdown: CancellationToken::new(),
             previous_foreground_hwnd: Arc::new(Mutex::new(None)),
+            soundpanel_previous_foreground_hwnd: Arc::new(Mutex::new(None)),
             selection_mutex: Arc::new(tokio::sync::Mutex::new(())),
             pending_notifications: Arc::new(Mutex::new(Vec::new())),
         }

@@ -20,6 +20,8 @@ const {
   editingSetId,
   editingSetName,
   editingInputRef,
+  stayVisible,
+  toggleStayVisible,
   switchSet,
   addSet,
   confirmAddSet,
@@ -53,6 +55,23 @@ void editingInputRef
       </p>
       <p class="hint">
         Поддерживаемые форматы: MP3, WAV, OGG, FLAC
+      </p>
+    </section>
+
+    <section class="persistent-mode-section">
+      <div class="persistent-mode-row">
+        <label class="checkbox-label">
+          <input
+            :checked="stayVisible"
+            type="checkbox"
+            class="checkbox-input"
+            @change="toggleStayVisible"
+          />
+          <span>Оставлять панель открытой</span>
+        </label>
+      </div>
+      <p class="persistent-mode-note">
+        После выбора звука фокус вернётся в предыдущее окно до начала воспроизведения. С включённой галкой панель останется видимой; без неё — скроется. Esc работает так же, но без запуска звука. Открытую панель можно перетаскивать за заголовок.
       </p>
     </section>
 
@@ -315,6 +334,53 @@ void editingInputRef
 .hint {
   font-size: 0.85rem;
   color: var(--color-text-secondary);
+}
+
+.persistent-mode-section {
+  padding: 12px 16px;
+  margin-bottom: 1rem;
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
+}
+
+.persistent-mode-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  overflow-wrap: normal;
+  word-break: normal;
+  line-height: 1.4;
+}
+
+.checkbox-input {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.persistent-mode-note {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 /* Sets tabs */

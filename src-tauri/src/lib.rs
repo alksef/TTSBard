@@ -79,11 +79,12 @@ use commands::{
 use config::{SettingsManager, WindowsManager};
 use soundpanel::{
     clear_intercept_binding, get_intercept_settings, set_intercept_binding, set_intercept_enabled,
-    sp_add_binding, sp_add_set, sp_get_active_set, sp_get_bindings, sp_get_floating_appearance,
-    sp_get_sets, sp_get_stay_visible, sp_is_floating_clickthrough_enabled, sp_is_supported_format,
-    sp_play_binding, sp_remove_binding, sp_remove_set, sp_rename_set, sp_set_active_set,
-    sp_set_floating_bg_color, sp_set_floating_clickthrough, sp_set_floating_opacity,
-    sp_set_hide_on_blur, sp_set_stay_visible, sp_test_sound,
+    sp_add_binding, sp_add_set, sp_escape_soundpanel, sp_get_active_set, sp_get_bindings,
+    sp_get_floating_appearance, sp_get_sets, sp_get_stay_visible,
+    sp_is_floating_clickthrough_enabled, sp_is_supported_format, sp_play_binding,
+    sp_remove_binding, sp_remove_set, sp_rename_set, sp_set_active_set, sp_set_floating_bg_color,
+    sp_set_floating_clickthrough, sp_set_floating_opacity, sp_set_hide_on_blur,
+    sp_set_stay_visible, sp_test_sound,
 };
 use state::AppState;
 use std::path::PathBuf;
@@ -97,6 +98,38 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter, Registry};
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
+}
+
+/// Determines whether the SoundPanel should hide on focus loss.
+///
+/// Hides only when `hide_on_blur` is enabled AND `stay_visible` is disabled.
+fn should_hide_soundpanel_on_blur(hide_on_blur: bool, stay_visible: bool) -> bool {
+    hide_on_blur && !stay_visible
+}
+
+#[cfg(test)]
+mod should_hide_tests {
+    use super::*;
+
+    #[test]
+    fn hide_on_blur_ordinary() {
+        assert!(should_hide_soundpanel_on_blur(true, false));
+    }
+
+    #[test]
+    fn no_hide_when_hide_on_blur_disabled() {
+        assert!(!should_hide_soundpanel_on_blur(false, false));
+    }
+
+    #[test]
+    fn stay_visible_bypasses_hide_on_blur() {
+        assert!(!should_hide_soundpanel_on_blur(true, true));
+    }
+
+    #[test]
+    fn stay_visible_without_hide_on_blur_still_no_hide() {
+        assert!(!should_hide_soundpanel_on_blur(false, true));
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -365,6 +398,7 @@ pub fn run() {
             sp_set_stay_visible,
             sp_set_hide_on_blur,
             sp_play_binding,
+            sp_escape_soundpanel,
             sp_get_sets,
             sp_get_active_set,
             sp_set_active_set,
@@ -657,14 +691,20 @@ pub fn run() {
             if window.label() == "soundpanel" {
                 if let tauri::WindowEvent::Focused(focused) = event {
                     if !*focused {
-                        let win_mgr = window.app_handle().state::<WindowsManager>();
-                        if win_mgr.get_soundpanel_hide_on_blur() {
+                        let app_handle = window.app_handle();
+                        let win_mgr = app_handle.state::<WindowsManager>();
+                        let soundpanel_state = app_handle.state::<soundpanel::SoundPanelState>();
+                        let hide_on_blur = win_mgr.get_soundpanel_hide_on_blur();
+                        let stay_visible = soundpanel_state.get_stay_visible();
+                        if should_hide_soundpanel_on_blur(hide_on_blur, stay_visible) {
                             info!("Soundpanel lost focus - hiding via hide_on_blur");
-                            let app_state = window.app_handle().state::<AppState>();
-                            let _ = soundpanel_window::hide_soundpanel_window(
-                                window.app_handle(),
-                                &app_state,
-                            );
+                            let app_state = app_handle.state::<AppState>();
+                            let _ =
+                                soundpanel_window::hide_soundpanel_window(app_handle, &app_state);
+                        } else if stay_visible {
+                            info!("Soundpanel lost focus - stay_visible bypass");
+                        } else {
+                            info!("Soundpanel lost focus - hide_on_blur disabled");
                         }
                     }
                 }

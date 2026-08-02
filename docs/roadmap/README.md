@@ -73,6 +73,7 @@ related_tasks: []
 - [ROADMAP-026 — compact appearance](./completed/026-main-window-compact-appearance.md)
 - [ROADMAP-037 — Hotkeys и возврат фокуса](./completed/037-application-hotkeys-and-previous-window-focus.md)
 - [ROADMAP-051 — вызов плавающих окон мышью](./completed/051-mouse-access-to-floating-windows.md)
+- [ROADMAP-064 — интерактивный постоянный режим SoundPanel](./completed/064-interactive-persistent-soundpanel.md)
 
 ### Audio и playback pipeline
 

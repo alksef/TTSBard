@@ -380,7 +380,6 @@ watch(
           />
           <span>Скрывать при потере фокуса</span>
         </label>
-        <span class="setting-hint">Выключите, чтобы настроить положение панели перетаскиванием</span>
       </div>
     </section>
 

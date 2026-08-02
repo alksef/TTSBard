@@ -4,12 +4,15 @@
 
 use crate::commands::window::resolve_main_appearance;
 use crate::config::{is_valid_hex_color, SettingsManager, WindowsManager};
-use crate::events::AppEvent;
 use crate::soundpanel::audio::play_audio_file;
 use crate::soundpanel::intercept::InterceptSettings;
 use crate::soundpanel::state::{SoundBinding, SoundPanelState, SoundSet, SoundSets};
 use crate::soundpanel::storage::{copy_sound_file, delete_sound_file, save_sets};
-use crate::soundpanel_window::emit_soundpanel_bindings_changed;
+use crate::soundpanel_window::{
+    emit_soundpanel_bindings_changed, hide_soundpanel_window, restore_soundpanel_foreground,
+    restore_soundpanel_foreground_retaining_target, update_soundpanel_appearance,
+};
+use crate::state::AppState;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tracing::{debug, info};
 
@@ -190,24 +193,30 @@ pub fn sp_is_floating_clickthrough_enabled(
     Ok(state.is_floating_clickthrough_enabled())
 }
 
-/// Проверить, оставлять ли окно видимым после воспроизведения звука
+/// Проверить, включён ли stay_visible
 #[tauri::command]
 pub fn sp_get_stay_visible(state: State<'_, SoundPanelState>) -> Result<bool, String> {
     Ok(state.get_stay_visible())
 }
 
-/// Установить, оставлять ли окно видимым после воспроизведения звука
+/// Установить stay_visible
+///
+/// Сначала сохраняет настройку на диск, затем обновляет runtime-состояние
+/// и отправляет событие `soundpanel-appearance-update` для обновления
+/// открытой панели.
 #[tauri::command]
 pub fn sp_set_stay_visible(
     enabled: bool,
+    app_handle: AppHandle,
     state: State<'_, SoundPanelState>,
     windows_manager: State<'_, WindowsManager>,
 ) -> Result<(), String> {
     info!(enabled, "Setting stay_visible");
-    state.set_stay_visible(enabled);
     windows_manager
         .set_soundpanel_stay_visible(enabled)
         .map_err(|e| format!("Failed to save settings: {}", e))?;
+    state.set_stay_visible(enabled);
+    let _ = update_soundpanel_appearance(&app_handle);
     Ok(())
 }
 
@@ -224,7 +233,44 @@ pub fn sp_set_hide_on_blur(
     Ok(())
 }
 
-/// Воспроизвести звук по клавише (A-Z) и скрыть панель (если stay_visible выключен)
+/// Обработка Escape: следует той же политике видимости, что и активация
+/// звука, но без воспроизведения.
+///
+/// - `stay_visible == false`: `hide → restore`
+/// - `stay_visible == true`:  `restore` (панель остаётся видимой)
+#[tauri::command]
+pub fn sp_escape_soundpanel(
+    app_handle: AppHandle,
+    state: State<'_, SoundPanelState>,
+) -> Result<(), String> {
+    let stay_visible = state.get_stay_visible();
+    let app_state = app_handle.state::<AppState>();
+    handoff_soundpanel_ordered(
+        stay_visible,
+        || {
+            hide_soundpanel_window(&app_handle, &app_state)
+                .map_err(|e| format!("Failed to hide window: {}", e))
+        },
+        || {
+            if stay_visible {
+                restore_soundpanel_foreground_retaining_target(&app_state)
+            } else {
+                restore_soundpanel_foreground(&app_state)
+            }
+        },
+    )
+}
+
+/// Воспроизвести звук по клавише (A-Z).
+///
+/// При выключенном `stay_visible` сначала синхронно скрывается окно, затем
+/// предпринимается попытка вернуть фокус сохранённому внешнему окну, и только
+/// после этого начинается воспроизведение. Ошибка скрытия останавливает
+/// выполнение; ошибка восстановления фокуса возвращается, но не подавляет
+/// воспроизведение.
+///
+/// При включённом `stay_visible` панель остаётся видимой, фокус возвращается,
+/// и воспроизведение продолжается.
 #[tauri::command]
 pub fn sp_play_binding(key: String, app_handle: AppHandle) -> Result<(), String> {
     let key_char = key.chars().next().ok_or("Key is empty")?;
@@ -232,16 +278,65 @@ pub fn sp_play_binding(key: String, app_handle: AppHandle) -> Result<(), String>
         return Err("Key must be A-Z".to_string());
     }
     let state = app_handle.state::<SoundPanelState>();
-    if let Some(binding) = state.get_binding(key_char) {
-        info!(key = %key_char, description = binding.description, "Playing binding");
-        state.play_sound(&binding);
-        if !state.get_stay_visible() {
-            state.emit_event(AppEvent::HideSoundPanelWindow);
-        }
-        Ok(())
-    } else {
-        Err(format!("No binding for key {}", key_char))
+    let binding = state
+        .get_binding(key_char)
+        .ok_or_else(|| format!("No binding for key {}", key_char))?;
+    let stay_visible = state.get_stay_visible();
+    info!(key = %key_char, description = binding.description, stay_visible, "Playing binding");
+
+    let app_state = app_handle.state::<AppState>();
+    play_binding_ordered(
+        stay_visible,
+        || {
+            hide_soundpanel_window(&app_handle, &app_state)
+                .map_err(|e| format!("Failed to hide window: {}", e))
+        },
+        || {
+            if stay_visible {
+                restore_soundpanel_foreground_retaining_target(&app_state)
+            } else {
+                restore_soundpanel_foreground(&app_state)
+            }
+        },
+        || state.play_sound(&binding),
+    )
+}
+
+/// Единственный владелец последовательности «скрыть → восстановить фокус → воспроизвести».
+///
+/// При `stay_visible == true` скрытие пропускается. Восстановление фокуса
+/// всегда происходит до воспроизведения. Ошибка скрытия останавливает
+/// выполнение только в unchecked-режиме. Ошибка восстановления фокуса
+/// возвращается, но не подавляет воспроизведение в обоих режимах.
+fn play_binding_ordered<H, R, F>(
+    stay_visible: bool,
+    hide: H,
+    restore: R,
+    play: F,
+) -> Result<(), String>
+where
+    H: FnOnce() -> Result<(), String>,
+    R: FnOnce() -> Result<(), String>,
+    F: FnOnce(),
+{
+    if !stay_visible {
+        hide()?;
     }
+    let restore_result = restore();
+    play();
+    restore_result
+}
+
+/// Выполнить оконную часть Escape без воспроизведения.
+fn handoff_soundpanel_ordered<H, R>(stay_visible: bool, hide: H, restore: R) -> Result<(), String>
+where
+    H: FnOnce() -> Result<(), String>,
+    R: FnOnce() -> Result<(), String>,
+{
+    if !stay_visible {
+        hide()?;
+    }
+    restore()
 }
 
 /// Получить настройки перехвата
@@ -358,4 +453,111 @@ pub fn sp_remove_set(
     let _ = app_handle.emit("soundpanel-active-set-changed", "");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    fn play_with_recording(
+        stay_visible: bool,
+        hide_result: Result<(), String>,
+        restore_result: Result<(), String>,
+    ) -> (Result<(), String>, Vec<&'static str>) {
+        let order = RefCell::new(Vec::new());
+        let result = play_binding_ordered(
+            stay_visible,
+            || {
+                order.borrow_mut().push("hide");
+                hide_result.clone()
+            },
+            || {
+                order.borrow_mut().push("restore");
+                restore_result.clone()
+            },
+            || {
+                order.borrow_mut().push("play");
+            },
+        );
+        (result, order.into_inner())
+    }
+
+    #[test]
+    fn unchecked_hide_and_restore_complete_before_play() {
+        let (result, order) = play_with_recording(false, Ok(()), Ok(()));
+        assert!(result.is_ok());
+        assert_eq!(order, vec!["hide", "restore", "play"]);
+    }
+
+    #[test]
+    fn unchecked_hide_failure_prevents_restore_and_playback() {
+        let (result, order) = play_with_recording(false, Err("hide failed".to_string()), Ok(()));
+        assert!(result.is_err());
+        assert_eq!(order, vec!["hide"]);
+    }
+
+    #[test]
+    fn unchecked_restore_failure_still_permits_playback_and_reports_failure() {
+        let (result, order) = play_with_recording(false, Ok(()), Err("restore failed".to_string()));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("restore failed"));
+        assert_eq!(order, vec!["hide", "restore", "play"]);
+    }
+
+    #[test]
+    fn checked_skips_hide_and_orders_restore_then_play() {
+        let (result, order) = play_with_recording(true, Ok(()), Ok(()));
+        assert!(result.is_ok());
+        assert_eq!(order, vec!["restore", "play"]);
+    }
+
+    #[test]
+    fn checked_restore_failure_still_permits_playback_and_reports_failure() {
+        let (result, order) = play_with_recording(true, Ok(()), Err("restore failed".to_string()));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("restore failed"));
+        assert_eq!(order, vec!["restore", "play"]);
+    }
+
+    fn record_escape(
+        stay_visible: bool,
+        hide_result: Result<(), String>,
+        restore_result: Result<(), String>,
+    ) -> (Result<(), String>, Vec<&'static str>) {
+        let order = RefCell::new(Vec::new());
+        let result = handoff_soundpanel_ordered(
+            stay_visible,
+            || {
+                order.borrow_mut().push("hide");
+                hide_result.clone()
+            },
+            || {
+                order.borrow_mut().push("restore");
+                restore_result.clone()
+            },
+        );
+        (result, order.into_inner())
+    }
+
+    #[test]
+    fn escape_unchecked_orders_hide_then_restore() {
+        let (result, order) = record_escape(false, Ok(()), Ok(()));
+        assert!(result.is_ok());
+        assert_eq!(order, vec!["hide", "restore"]);
+    }
+
+    #[test]
+    fn escape_checked_orders_only_restore() {
+        let (result, order) = record_escape(true, Ok(()), Ok(()));
+        assert!(result.is_ok());
+        assert_eq!(order, vec!["restore"]);
+    }
+
+    #[test]
+    fn escape_unchecked_hide_failure_prevents_restore() {
+        let (result, order) = record_escape(false, Err("hide failed".to_string()), Ok(()));
+        assert!(result.is_err());
+        assert_eq!(order, vec!["hide"]);
+    }
 }

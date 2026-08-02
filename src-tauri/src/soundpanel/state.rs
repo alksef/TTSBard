@@ -91,7 +91,8 @@ pub struct SoundPanelState {
     /// Intercept-настройки (NumPad/F-keys → actions, persisted)
     pub intercept: Arc<Mutex<InterceptSettings>>,
 
-    /// Оставлять ли плавающее окно видимым после воспроизведения звука
+    /// When enabled, hide_on_blur is bypassed so the panel can persist and be
+    /// dragged by its title bar.
     pub stay_visible: Arc<Mutex<bool>>,
 
     /// Активные воспроизведения звука (thread handles)
@@ -391,12 +392,12 @@ impl SoundPanelState {
         }
     }
 
-    /// Проверить, оставлять ли окно видимым после воспроизведения
+    /// Проверить, включен ли stay_visible
     pub fn get_stay_visible(&self) -> bool {
         self.stay_visible.lock().map(|v| *v).unwrap_or(false)
     }
 
-    /// Установить, оставлять ли окно видимым после воспроизведения
+    /// Установить stay_visible
     pub fn set_stay_visible(&self, enabled: bool) {
         if let Ok(mut val) = self.stay_visible.lock() {
             *val = enabled;
