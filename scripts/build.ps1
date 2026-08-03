@@ -190,16 +190,11 @@ if ($rustBinDir) {
     $currentPath = $env:PATH
     $pathSeparator = ';'
     $entries = $currentPath -split $pathSeparator
-    $found = $false
-    foreach ($e in $entries) {
-        if ($e.TrimEnd('\') -eq $rustBinDir.TrimEnd('\')) {
-            $found = $true
-            break
-        }
-    }
-    if (-not $found) {
-        $env:PATH = "$rustBinDir;$currentPath"
-    }
+    $rustBinNormalized = $rustBinDir.TrimEnd('\')
+    $otherEntries = @($entries | Where-Object {
+        $_ -and $_.TrimEnd('\') -ne $rustBinNormalized
+    })
+    $env:PATH = (@($rustBinDir) + $otherEntries) -join $pathSeparator
 }
 
 # --- Информация о конфигурации -----------------------------------------------

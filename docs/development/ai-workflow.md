@@ -156,9 +156,13 @@ $openCodeExit = $LASTEXITCODE
 | Изменение | Проверка |
 |---|---|
 | TypeScript/Vue | `npm test` при затронутых тестах, затем `npm run build` |
-| Rust | целевые тесты и `cargo check --manifest-path src-tauri/Cargo.toml` |
+| Rust | целевые тесты и check через `scripts/cargo.ps1` с нужными аргументами `cargo` |
 | UI/runtime | релевантный ручной сценарий и состояния error/cancel/retry |
 | Packaging/native deps | `scripts/build.ps1 -Mode debug`, при необходимости release |
+
+На Windows task-файлы и независимая проверка не должны вызывать bare `cargo`:
+`scripts/cargo.ps1` подготавливает окружение для Rust-команд, а полная сборка
+выполняется только через `scripts/build.ps1`, учитывающий локальную конфигурацию.
 
 Review проводится по постоянному
 [шаблону code review](./templates/code-review.md). Он задаёт базовый профиль

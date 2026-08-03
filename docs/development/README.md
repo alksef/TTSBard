@@ -27,7 +27,9 @@ npm run build
 ```
 
 `./scripts/cargo.ps1` автоматически находит `libclang.dll` и передаёт все аргументы
-в `cargo`, сохраняя код возврата. При необходимости discovery можно вызвать
+в `cargo`, сохраняя код возврата. Обёртка также применяет `RustBinDir` из
+`TTSBARD_RUST_BIN_DIR` или `scripts/build.local.psd1` и поднимает его в начало
+`PATH`. При необходимости discovery можно вызвать
 напрямую: `./scripts/libclang-bootstrap.ps1`.
 
 Проверки выбираются по риску изменения. `npm run build` уже выполняет
