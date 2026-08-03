@@ -82,6 +82,21 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - name: Prepare Piper test data
+        run: |
+          cargo build --manifest-path src-tauri/Cargo.toml --package espeak-rs-sys --locked
+          espeak_data=""
+          while IFS= read -r candidate; do
+            if test -d "$candidate/voices" && test -d "$candidate/lang" && test -f "$candidate/en_dict"; then
+              espeak_data="$(realpath "$candidate")"
+              break
+            fi
+          done < <(find src-tauri/target/debug/build -path '*/out/share/espeak-ng-data' -type d)
+          test -n "$espeak_data"
+          test -d "$espeak_data/voices"
+          test -d "$espeak_data/lang"
+          test -f "$espeak_data/en_dict"
+          echo "PIPER_ESPEAKNG_DATA_DIRECTORY=$espeak_data" >> "$GITHUB_ENV"
       - name: Run tests
         working-directory: src-tauri
         env:

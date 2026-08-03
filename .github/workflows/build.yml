@@ -79,6 +79,27 @@ jobs:
       - name: Run frontend tests
         run: npm test
 
+      - name: Prepare Piper test data
+        shell: pwsh
+        run: |
+          .\scripts\cargo.ps1 build --manifest-path src-tauri/Cargo.toml --package espeak-rs-sys --locked
+          $espeakData = Get-ChildItem `
+            'src-tauri\target\debug\build\espeak-rs-sys-*\out\share\espeak-ng-data' `
+            -Directory -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+          if (-not $espeakData) { throw 'compiled espeak-ng-data not found' }
+          if (-not (Test-Path (Join-Path $espeakData.FullName 'voices') -PathType Container)) {
+            throw 'compiled espeak-ng-data is missing voices/'
+          }
+          if (-not (Test-Path (Join-Path $espeakData.FullName 'lang') -PathType Container)) {
+            throw 'compiled espeak-ng-data is missing lang/'
+          }
+          if (-not (Test-Path (Join-Path $espeakData.FullName 'en_dict') -PathType Leaf)) {
+            throw 'compiled espeak-ng-data is missing en_dict'
+          }
+          "PIPER_ESPEAKNG_DATA_DIRECTORY=$($espeakData.FullName)" >> $env:GITHUB_ENV
+
       - name: Run Rust tests
         shell: pwsh
         env:
