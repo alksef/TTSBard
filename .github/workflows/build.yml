@@ -80,7 +80,10 @@ jobs:
         run: npm test
 
       - name: Run Rust tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+        shell: pwsh
+        env:
+          TAURI_CONFIG: '{"bundle":{"resources":null}}'
+        run: .\scripts\cargo.ps1 test --manifest-path src-tauri/Cargo.toml --locked
 
       - name: Build application
         run: .\scripts\build.ps1 -Mode release
