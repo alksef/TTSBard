@@ -412,7 +412,6 @@ impl HistoryManager {
 
         let path = self.phrase_path.clone();
         let snapshot = phrases.clone();
-        drop(phrases);
         save_phrases_sync(path, snapshot);
     }
 
@@ -440,7 +439,6 @@ impl HistoryManager {
 
         let path = self.phrase_path.clone();
         let snapshot = phrases.clone();
-        drop(phrases);
         save_phrases_sync(path, snapshot);
     }
 
@@ -450,7 +448,6 @@ impl HistoryManager {
 
         let path = self.phrase_path.clone();
         let snapshot = phrases.clone();
-        drop(phrases);
         save_phrases_sync(path, snapshot);
     }
 }
