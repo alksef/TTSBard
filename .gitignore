@@ -26,6 +26,9 @@ dist-ssr
 # Rust / Tauri
 src-tauri/target
 
+# Local per-developer build configuration
+scripts/build.local.psd1
+
 # Temporary files
 nul
 notes/note-run-claude.txt

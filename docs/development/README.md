@@ -49,15 +49,59 @@ tracked scratch-артефактов. Она также запускается �
 ./scripts/build.ps1 -Mode release
 ```
 
-Debug-режим создаёт runnable `src-tauri/target/debug/ttsbard.exe` без
-инсталляторов. Release-режим собирает приложение и bundles в
-`src-tauri/target/release/bundle/`. Флаг `-Clean` удаляет build outputs перед
-сборкой; применять его следует только при доказанной проблеме кэша.
+Debug-режим по умолчанию создаёт runnable `src-tauri/target/debug/ttsbard.exe`
+без инсталляторов, release-режим — приложение и bundles в
+`src-tauri/target/release/bundle/`. Это расположение по умолчанию; при
+переопределении Cargo target directory (см. «Локальная конфигурация» ниже)
+артефакты окажутся в выбранном каталоге. Флаг `-Clean` удаляет build outputs
+перед сборкой; применять его следует только при доказанной проблеме кэша.
 
 Для запуска двойным кликом доступны `scripts/build-debug.bat` и
 `scripts/build-release.bat`. `scripts/build.ps1` сохранён как UTF-8 с BOM для
 совместимости кириллицы с Windows PowerShell 5.1 — при редактировании BOM нужно
 сохранить.
+
+### Локальная конфигурация
+
+Разработчик может переопределить Cargo target directory и путь к Rust toolchain
+через персональный конфигурационный файл, переменные окружения или параметры
+командной строки. Это позволяет разным разработчикам на разных машинах
+использовать `build.ps1` без правок.
+
+Приоритет (от высшего к низшему):
+1. Явный параметр командной строки (`-CargoTargetDir`, `-RustBinDir`);
+2. Переменная окружения (`CARGO_TARGET_DIR`, `TTSBARD_RUST_BIN_DIR`);
+3. Файл `scripts/build.local.psd1`;
+4. Умолчания (`src-tauri\target`, без переопределения PATH).
+
+Пример конфигурационного файла: `scripts/build.local.example.psd1`. Скопируйте
+его в `scripts/build.local.psd1` (игнорируется Git) и отредактируйте:
+
+```powershell
+Copy-Item scripts/build.local.example.psd1 scripts/build.local.psd1
+# Отредактируйте scripts/build.local.psd1
+```
+
+Затем запускайте сборку как обычно:
+
+```powershell
+./scripts/build.ps1 -Mode debug
+# или с явным параметром:
+./scripts/build.ps1 -Mode debug -CargoTargetDir D:\my-target
+```
+
+Разрешённые ключи в `.psd1`: `CargoTargetDir` и `RustBinDir` (оба строковые или
+`$null`). Ссылки `%NAME%` в путях раскрываются в значения переменных окружения.
+Относительные пути разрешаются относительно корня репозитория.
+
+При использовании внешней Cargo target directory (не `src-tauri\target`) перед
+первым `-Clean` необходима одна не-clean сборка, которая создаст маркерный файл
+`.ttsbard-build-target` внутри target-каталога. Этот маркер защищает от
+случайного удаления нецелевой директории. После разрешённой очистки каталог и
+маркер создаются заново.
+
+Фактическое расположение артефактов зависит от настроек целевой директории и
+выводится скриптом в начале и в конце сборки.
 
 ## Документы
 

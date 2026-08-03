@@ -6,18 +6,32 @@
 #   .\scripts\build.ps1 -Mode release    # полная релиз-сборка (exe + nsis/msi)
 #   .\scripts\build.ps1 -Clean           # очистить target/ и dist/ перед сборкой
 #
+# Локальная конфигурация (опционально):
+#   .\scripts\build.ps1 -CargoTargetDir D:\custom-target
+#   .\scripts\build.ps1 -RustBinDir %USERPROFILE%\.cargo\bin
+#   .\scripts\build.ps1 -ConfigFile my-config.psd1
+#
+# Конфигурация загружается из scripts/build.local.psd1 (игнорируется Git).
+# Пример: см. scripts/build.local.example.psd1.
+#
 # Обёртки для двойного клика: build-debug.bat, build-release.bat.
 #
 # Артефакты:
-#   exe:      src-tauri\target\<debug|release>\ttsbard.exe
-#   bundles:  src-tauri\target\release\bundle\{nsis,msi}\  (только release)
+#   exe:      <cargo-target>\<debug|release>\ttsbard.exe
+#   bundles:  <cargo-target>\release\bundle\{nsis,msi}\  (только release)
 
 [CmdletBinding()]
 param(
     [ValidateSet('debug', 'release')]
     [string]$Mode = 'release',
 
-    [switch]$Clean
+    [switch]$Clean,
+
+    [string]$CargoTargetDir,
+
+    [string]$RustBinDir,
+
+    [string]$ConfigFile
 )
 
 $ErrorActionPreference = 'Stop'
@@ -31,10 +45,172 @@ function Write-Err($msg)  { Write-Host "    X $msg" -ForegroundColor Red }
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 
+# --- Вспомогательные функции для путей ----------------------------------------
+
+function Expand-EnvRefs([string]$path) {
+    return [regex]::Replace($path, '%([^%]+)%', {
+        param($m)
+        $envVal = [Environment]::GetEnvironmentVariable($m.Groups[1].Value)
+        if ($null -ne $envVal -and $envVal -ne '') { return $envVal }
+        return $m.Value
+    })
+}
+
+function Resolve-Absolute([string]$path) {
+    if ([System.IO.Path]::IsPathRooted($path)) {
+        return [System.IO.Path]::GetFullPath($path)
+    }
+    return [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($repoRoot, $path))
+}
+
+function Test-IsAncestorOf([string]$candidate, [string]$child) {
+    $candidate = $candidate.TrimEnd('\') + '\'
+    $child = $child.TrimEnd('\') + '\'
+    return $child.StartsWith($candidate, [StringComparison]::OrdinalIgnoreCase) -and
+           $candidate.Length -lt $child.Length
+}
+
+function Test-IsUnsafeCleanTarget([string]$target) {
+    $srcTauri = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($repoRoot, 'src-tauri'))
+    if ($target -eq $repoRoot) { return $true }
+    if ($target -eq $env:USERPROFILE) { return $true }
+    if ($target -eq $srcTauri) { return $true }
+    if (Test-IsAncestorOf $target $repoRoot) { return $true }
+    if (Test-IsAncestorOf $target $env:USERPROFILE) { return $true }
+    $pathRoot = [System.IO.Path]::GetPathRoot($target)
+    if ($target.TrimEnd('\') -eq $pathRoot.TrimEnd('\')) { return $true }
+    return $false
+}
+
+# --- Загрузка конфигурации ----------------------------------------------------
+
+$configFilePath = if ($ConfigFile) {
+    $resolved = $ConfigFile
+    if (-not [System.IO.Path]::IsPathRooted($resolved)) {
+        $resolved = [System.IO.Path]::Combine($repoRoot, $resolved)
+    }
+    [System.IO.Path]::GetFullPath($resolved)
+} else {
+    [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($repoRoot, 'scripts', 'build.local.psd1'))
+}
+
+$configData = $null
+$configLoaded = $false
+
+if (Test-Path $configFilePath -PathType Leaf) {
+    $configData = Import-PowerShellDataFile $configFilePath
+    $configLoaded = $true
+
+    if ($null -eq $configData) {
+        $configData = @{}
+    }
+
+    foreach ($key in $configData.Keys) {
+        if ($key -ne 'CargoTargetDir' -and $key -ne 'RustBinDir') {
+            Write-Err "Unknown config key '$key' in $configFilePath. Allowed keys: CargoTargetDir, RustBinDir."
+            exit 1
+        }
+        $val = $configData[$key]
+        if ($null -ne $val -and $val -isnot [string]) {
+            Write-Err "Config key '$key' in $configFilePath must be a string or `$null, got $($val.GetType().Name)."
+            exit 1
+        }
+    }
+} elseif ($ConfigFile) {
+    Write-Err "Config file not found: $configFilePath (explicitly supplied via -ConfigFile)"
+    exit 1
+}
+
+# --- Разрешение CargoTargetDir -----------------------------------------------
+
+$defaultTarget = Join-Path $repoRoot 'src-tauri\target'
+$cargoTargetSource = 'default'
+
+if ($PSBoundParameters.ContainsKey('CargoTargetDir')) {
+    if ([string]::IsNullOrEmpty($CargoTargetDir)) {
+        Write-Err 'CargoTargetDir parameter is empty.'
+        exit 1
+    }
+    $targetDir = Resolve-Absolute (Expand-EnvRefs $CargoTargetDir)
+    $cargoTargetSource = 'parameter'
+} elseif (Test-Path 'Env:CARGO_TARGET_DIR') {
+    $envVal = $env:CARGO_TARGET_DIR
+    if ([string]::IsNullOrEmpty($envVal)) {
+        Write-Err 'CARGO_TARGET_DIR environment variable is empty.'
+        exit 1
+    }
+    $targetDir = Resolve-Absolute (Expand-EnvRefs $envVal)
+    $cargoTargetSource = 'environment'
+} elseif ($configData -and $configData.ContainsKey('CargoTargetDir') -and $null -ne $configData['CargoTargetDir']) {
+    $cfgVal = $configData['CargoTargetDir']
+    if ([string]::IsNullOrEmpty($cfgVal)) {
+        Write-Err 'CargoTargetDir in config file is empty.'
+        exit 1
+    }
+    $targetDir = Resolve-Absolute (Expand-EnvRefs $cfgVal)
+    $cargoTargetSource = 'config file'
+} else {
+    $targetDir = Resolve-Absolute $defaultTarget
+    $cargoTargetSource = 'default'
+}
+
+$env:CARGO_TARGET_DIR = $targetDir
+
+# --- Разрешение RustBinDir ---------------------------------------------------
+
+$rustBinDir = $null
+
+if ($PSBoundParameters.ContainsKey('RustBinDir')) {
+    if ([string]::IsNullOrEmpty($RustBinDir)) {
+        Write-Err 'RustBinDir parameter is empty.'
+        exit 1
+    }
+    $rustBinDir = Resolve-Absolute (Expand-EnvRefs $RustBinDir)
+} elseif (Test-Path 'Env:TTSBARD_RUST_BIN_DIR') {
+    $envVal = $env:TTSBARD_RUST_BIN_DIR
+    if ([string]::IsNullOrEmpty($envVal)) {
+        Write-Err 'TTSBARD_RUST_BIN_DIR environment variable is empty.'
+        exit 1
+    }
+    $rustBinDir = Resolve-Absolute (Expand-EnvRefs $envVal)
+} elseif ($configData -and $configData.ContainsKey('RustBinDir') -and $null -ne $configData['RustBinDir']) {
+    $cfgVal = $configData['RustBinDir']
+    if ([string]::IsNullOrEmpty($cfgVal)) {
+        Write-Err 'RustBinDir in config file is empty.'
+        exit 1
+    }
+    $rustBinDir = Resolve-Absolute (Expand-EnvRefs $cfgVal)
+}
+
+if ($rustBinDir) {
+    if (-not (Test-Path $rustBinDir -PathType Container)) {
+        Write-Err "RustBinDir does not exist or is not a directory: $rustBinDir"
+        exit 1
+    }
+    $currentPath = $env:PATH
+    $pathSeparator = ';'
+    $entries = $currentPath -split $pathSeparator
+    $found = $false
+    foreach ($e in $entries) {
+        if ($e.TrimEnd('\') -eq $rustBinDir.TrimEnd('\')) {
+            $found = $true
+            break
+        }
+    }
+    if (-not $found) {
+        $env:PATH = "$rustBinDir;$currentPath"
+    }
+}
+
+# --- Информация о конфигурации -----------------------------------------------
+
 $modeLabel = $Mode
 if ($Clean) { $modeLabel = "$Mode (+clean)" }
 Write-Step "TTSBard build — mode: $modeLabel"
 Write-Step "Repo: $repoRoot"
+if ($configLoaded) { Write-Step "Config file: $configFilePath" }
+Write-Step "Cargo target: $targetDir"
+if ($rustBinDir) { Write-Step "Rust bin: $rustBinDir" }
 
 # --- Проверка окружения ------------------------------------------------------
 Write-Step "Checking toolchain..."
@@ -73,18 +249,50 @@ Write-Step "Checking libclang for bindgen..."
 . "$PSScriptRoot\libclang-bootstrap.ps1"
 $null = Initialize-LibClangPath
 
-# --- Опциональная очистка ----------------------------------------------------
-$targetDir = Join-Path $repoRoot 'src-tauri\target'
+# --- Вспомогательные константы -----------------------------------------------
+$defaultCanonical = [System.IO.Path]::GetFullPath((Join-Path $repoRoot 'src-tauri\target'))
+$isExternalTarget = ($targetDir.TrimEnd('\') -ne $defaultCanonical.TrimEnd('\'))
 $distDir   = Join-Path $repoRoot 'dist'
 $espeakDstDir = Join-Path $repoRoot 'src-tauri\resources\espeak-ng-data'
 
+# --- Опциональная очистка ----------------------------------------------------
+
 if ($Clean) {
+    if (Test-IsUnsafeCleanTarget $targetDir) {
+        Write-Err "Refusing -Clean: target dir ($targetDir) is a filesystem root, a protected location (repository, user profile, or src-tauri), or an ancestor of such a location. Set a project-specific target directory instead."
+        exit 1
+    }
+
+    if ($isExternalTarget -and (Test-Path $targetDir)) {
+        $markerFile = Join-Path $targetDir '.ttsbard-build-target'
+        if (-not (Test-Path $markerFile -PathType Leaf)) {
+            Write-Err "Refusing -Clean: external Cargo target ($targetDir) is missing the marker file '.ttsbard-build-target'. Run a non-clean build first, or create the marker manually if this target was previously initialized for this project."
+            exit 1
+        }
+    }
+
     Write-Step "Cleaning build artifacts..."
     foreach ($d in @($targetDir, $distDir, $espeakDstDir)) {
         if (Test-Path $d) {
             Remove-Item -Recurse -Force $d
             Write-Ok "removed $d"
         }
+    }
+
+    if ($isExternalTarget) {
+        New-Item -ItemType Directory -Force $targetDir | Out-Null
+        $markerFile = Join-Path $targetDir '.ttsbard-build-target'
+        New-Item -ItemType File -Force $markerFile | Out-Null
+    }
+}
+
+if ($isExternalTarget) {
+    if (-not (Test-Path $targetDir)) {
+        New-Item -ItemType Directory -Force $targetDir | Out-Null
+    }
+    $markerFile = Join-Path $targetDir '.ttsbard-build-target'
+    if (-not (Test-Path $markerFile -PathType Leaf)) {
+        New-Item -ItemType File -Force $markerFile | Out-Null
     }
 }
 
@@ -115,7 +323,7 @@ function Find-RegistrySource {
 
 function Find-CompiledOutput {
     $targetProfile = if ($Mode -eq 'debug') { 'debug' } else { 'release' }
-    $candidate = Get-ChildItem -Path "$repoRoot\src-tauri\target\$targetProfile\build\espeak-rs-sys-*\out\share\espeak-ng-data" -Directory -ErrorAction SilentlyContinue |
+    $candidate = Get-ChildItem -Path "$targetDir\$targetProfile\build\espeak-rs-sys-*\out\share\espeak-ng-data" -Directory -ErrorAction SilentlyContinue |
         Sort-Object -Property LastWriteTime -Descending |
         Select-Object -First 1
     if ($candidate) { return $candidate.FullName }
@@ -237,7 +445,7 @@ Write-Ok ("build done in {0:mm\:ss}" -f $elapsed)
 Write-Step "Artifacts:"
 
 $targetProfile = if ($Mode -eq 'debug') { 'debug' } else { 'release' }
-$exePath = Join-Path $repoRoot "src-tauri\target\$targetProfile\ttsbard.exe"
+$exePath = Join-Path $targetDir "$targetProfile\ttsbard.exe"
 if (Test-Path $exePath) {
     $sizeMb = [math]::Round((Get-Item $exePath).Length / 1MB, 1)
     Write-Ok "EXE  : $exePath ($sizeMb MB)"
@@ -246,7 +454,7 @@ if (Test-Path $exePath) {
 }
 
 if ($Mode -eq 'release') {
-    $bundleDir = Join-Path $repoRoot 'src-tauri\target\release\bundle'
+    $bundleDir = Join-Path $targetDir 'release\bundle'
     if (Test-Path $bundleDir) {
         $installers = Get-ChildItem -Recurse -Path $bundleDir -Include '*.exe','*.msi' -ErrorAction SilentlyContinue
         if ($installers) {
