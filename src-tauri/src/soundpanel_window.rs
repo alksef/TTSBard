@@ -2,8 +2,19 @@ use crate::config::WindowsManager;
 use crate::soundpanel::SoundPanelState;
 use crate::state::{ActiveWindow, AppState};
 use parking_lot::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tracing::{debug, error, info, warn};
+
+/// Задержка отложенного автокрытия SoundPanel по потере фокуса.
+///
+/// Фокус переходит на главное окно раньше, чем вебвью обрабатывает клик по
+/// кнопке SoundPanel. Эта задержка даёт явному переключению (клику по кнопке)
+/// возможность отменить отложенное скрытие, поэтому панель скрывается
+/// точечно, а не скрывается и тут же показывается снова. При этом задержка
+/// короткая, чтобы обычное автокрытие при клике мимо панели не ощущалось.
+const BLUR_HIDE_DELAY: Duration = Duration::from_millis(150);
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct WindowVisibility {
@@ -365,7 +376,129 @@ pub fn close_soundpanel_window(app_handle: &AppHandle) -> Result<(), String> {
     )
 }
 
+/// Инкремент поколения: любой ранее запланированный отложенный callback
+/// становится устаревшим.
+fn bump_blur_hide_generation(counter: &AtomicU64) {
+    counter.fetch_add(1, Ordering::SeqCst);
+}
+
+/// Отменить отложенное скрытие SoundPanel по потере фокуса.
+///
+/// Инкрементирует поколение: любой ранее запланированный отложенный callback
+/// становится устаревшим и при срабатывании ничего не скрывает.
+pub fn cancel_soundpanel_blur_hide(app_state: &AppState) {
+    bump_blur_hide_generation(&app_state.soundpanel_blur_hide_generation);
+}
+
+/// Захватить поколение для нового отложенного скрытия.
+///
+/// `fetch_add` возвращает предыдущее значение, поэтому к результату прибавляется
+/// единица: захваченное поколение должно совпасть с новым текущим значением
+/// счётчика, иначе только что запланированный callback сразу стал бы
+/// устаревшим. Оборачивающее сложение согласовано с оборачиванием `fetch_add`.
+fn schedule_blur_hide_generation(counter: &AtomicU64) -> u64 {
+    counter.fetch_add(1, Ordering::SeqCst).wrapping_add(1)
+}
+
+/// Запланировать отложенное скрытие SoundPanel по потере фокуса.
+///
+/// Не скрывает синхронно: при клике по кнопке SoundPanel в главном окне фокус
+/// теряется раньше, чем вебвью обработает клик и вызовет переключение панели,
+/// поэтому синхронное скрытие заставляло переключение видеть уже скрытую
+/// панель и показывать её снова. Вместо этого планируется задача, которая
+/// перед скрытием проверит, что скрытие всё ещё актуально.
+pub fn schedule_soundpanel_blur_hide(app_handle: &AppHandle, app_state: &AppState) {
+    let generation = schedule_blur_hide_generation(&app_state.soundpanel_blur_hide_generation);
+    let app_handle = app_handle.clone();
+    let app_state = app_state.clone();
+    let runtime = app_state.runtime.clone();
+    runtime.spawn(async move {
+        tokio::time::sleep(BLUR_HIDE_DELAY).await;
+        execute_soundpanel_blur_hide(app_handle, app_state, generation);
+    });
+}
+
+/// Чистое ядро решения «скрыть ли отложенно».
+///
+/// Отложенный callback скрывает панель только если поколение всё ещё актуально
+/// (не было отмены/повторного планирования), панель всё ещё видима, не вернула
+/// фокус, и условия автокрытия всё ещё выполнены.
+fn should_fire_deferred_blur_hide(
+    current_generation: u64,
+    captured_generation: u64,
+    is_visible: bool,
+    is_focused: bool,
+    hide_on_blur: bool,
+    stay_visible: bool,
+) -> bool {
+    current_generation == captured_generation
+        && is_visible
+        && !is_focused
+        && crate::should_hide_soundpanel_on_blur(hide_on_blur, stay_visible)
+}
+
+/// Выполнить отложенное скрытие, только если оно всё ещё актуально.
+fn execute_soundpanel_blur_hide(app_handle: AppHandle, app_state: AppState, generation: u64) {
+    let current_generation = app_state
+        .soundpanel_blur_hide_generation
+        .load(Ordering::SeqCst);
+    if current_generation != generation {
+        debug!(
+            current_generation,
+            generation, "Skipping stale SoundPanel blur-hide"
+        );
+        return;
+    }
+
+    let Some(window) = app_handle.get_webview_window("soundpanel") else {
+        debug!("Skipping SoundPanel blur-hide: window gone");
+        return;
+    };
+    let visible = window.is_visible().unwrap_or(false);
+    if !visible {
+        debug!("Skipping SoundPanel blur-hide: panel already hidden");
+        return;
+    }
+    let focused = window.is_focused().unwrap_or(false);
+    if focused {
+        debug!("Skipping SoundPanel blur-hide: panel regained focus");
+        return;
+    }
+
+    let win_mgr = app_handle.state::<WindowsManager>();
+    let sp_state = app_handle.state::<SoundPanelState>();
+    let hide_on_blur = win_mgr.get_soundpanel_hide_on_blur();
+    let stay_visible = sp_state.get_stay_visible();
+
+    if !should_fire_deferred_blur_hide(
+        current_generation,
+        generation,
+        visible,
+        focused,
+        hide_on_blur,
+        stay_visible,
+    ) {
+        debug!(
+            hide_on_blur,
+            stay_visible, "Skipping SoundPanel blur-hide: conditions changed"
+        );
+        return;
+    }
+
+    info!(
+        window_type = "soundpanel",
+        generation, "SoundPanel deferred blur-hide firing"
+    );
+    let _ = hide_soundpanel_window(&app_handle, &app_state);
+}
+
 pub fn toggle_soundpanel_window(app_handle: &AppHandle) -> Result<bool, String> {
+    // Явное переключение побеждает отложенное автокрытие: отменяем его до
+    // проверки видимости, чтобы всё ещё видимая панель была скрыта точечно,
+    // а не показана снова после скрытия.
+    let app_state = app_handle.state::<AppState>();
+    cancel_soundpanel_blur_hide(&app_state);
+
     let window = app_handle
         .get_webview_window("soundpanel")
         .ok_or_else(|| "soundpanel window not found".to_string())?;
@@ -374,7 +507,6 @@ pub fn toggle_soundpanel_window(app_handle: &AppHandle) -> Result<bool, String> 
         .map_err(|e| format!("Failed to check soundpanel visibility: {}", e))?;
 
     if visible {
-        let app_state = app_handle.state::<AppState>();
         hide_soundpanel_window(app_handle, &app_state)
             .map_err(|e| format!("Failed to hide soundpanel: {}", e))?;
         Ok(false)
@@ -392,7 +524,7 @@ pub fn toggle_soundpanel_window(app_handle: &AppHandle) -> Result<bool, String> 
 mod tests {
     use super::*;
     use std::cell::RefCell;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -559,5 +691,91 @@ mod tests {
         );
         assert!(result.is_err());
         assert_eq!(order.into_inner(), vec!["hide"]);
+    }
+
+    // ── should_fire_deferred_blur_hide ──
+    //
+    // NOTE: эти тесты проверяют чистое решение об отложенном скрытии. Они не
+    // моделируют порядок событий фокуса Windows (фокус теряется до обработки
+    // клика) — это проверяется вручную на Windows.
+
+    #[test]
+    fn deferred_hide_fires_when_all_conditions_hold() {
+        assert!(should_fire_deferred_blur_hide(
+            5, 5, true, false, true, false
+        ));
+    }
+
+    #[test]
+    fn stale_generation_suppresses_deferred_hide() {
+        assert!(!should_fire_deferred_blur_hide(
+            6, 5, true, false, true, false
+        ));
+    }
+
+    #[test]
+    fn hidden_panel_suppresses_deferred_hide() {
+        assert!(!should_fire_deferred_blur_hide(
+            5, 5, false, false, true, false
+        ));
+    }
+
+    #[test]
+    fn refocused_panel_suppresses_deferred_hide() {
+        assert!(!should_fire_deferred_blur_hide(
+            5, 5, true, true, true, false
+        ));
+    }
+
+    #[test]
+    fn stay_visible_suppresses_deferred_hide() {
+        assert!(!should_fire_deferred_blur_hide(
+            5, 5, true, false, true, true
+        ));
+    }
+
+    #[test]
+    fn hide_on_blur_disabled_suppresses_deferred_hide() {
+        assert!(!should_fire_deferred_blur_hide(
+            5, 5, true, false, false, false
+        ));
+    }
+
+    // ── cancel_soundpanel_blur_hide / schedule_blur_hide_generation ──
+
+    #[test]
+    fn scheduling_captures_generation_equal_to_stored_current_value() {
+        let counter = Arc::new(AtomicU64::new(0));
+        let captured = schedule_blur_hide_generation(&counter);
+        assert_eq!(captured, counter.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn subsequent_cancel_makes_scheduled_generation_stale() {
+        let counter = Arc::new(AtomicU64::new(0));
+        let captured = schedule_blur_hide_generation(&counter);
+        bump_blur_hide_generation(&counter);
+        assert_ne!(captured, counter.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn cancel_bumps_generation_making_scheduled_callback_stale() {
+        let state = AppState::new();
+        let before = state.soundpanel_blur_hide_generation.load(Ordering::SeqCst);
+        cancel_soundpanel_blur_hide(&state);
+        let after = state.soundpanel_blur_hide_generation.load(Ordering::SeqCst);
+        assert_eq!(after, before + 1);
+    }
+
+    #[test]
+    fn repeated_cancel_keeps_bumping_generation() {
+        let state = AppState::new();
+        cancel_soundpanel_blur_hide(&state);
+        cancel_soundpanel_blur_hide(&state);
+        cancel_soundpanel_blur_hide(&state);
+        assert_eq!(
+            state.soundpanel_blur_hide_generation.load(Ordering::SeqCst),
+            3
+        );
     }
 }

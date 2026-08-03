@@ -690,17 +690,25 @@ pub fn run() {
             #[cfg(windows)]
             if window.label() == "soundpanel" {
                 if let tauri::WindowEvent::Focused(focused) = event {
-                    if !*focused {
+                    if *focused {
+                        // Возврат фокуса отменяет отложенное автокрытие.
+                        let app_state = window.app_handle().state::<AppState>();
+                        soundpanel_window::cancel_soundpanel_blur_hide(&app_state);
+                        info!("Soundpanel gained focus - cancelled pending blur-hide");
+                    } else {
                         let app_handle = window.app_handle();
                         let win_mgr = app_handle.state::<WindowsManager>();
                         let soundpanel_state = app_handle.state::<soundpanel::SoundPanelState>();
                         let hide_on_blur = win_mgr.get_soundpanel_hide_on_blur();
                         let stay_visible = soundpanel_state.get_stay_visible();
                         if should_hide_soundpanel_on_blur(hide_on_blur, stay_visible) {
-                            info!("Soundpanel lost focus - hiding via hide_on_blur");
+                            info!(
+                                "Soundpanel lost focus - scheduling deferred hide via hide_on_blur"
+                            );
                             let app_state = app_handle.state::<AppState>();
-                            let _ =
-                                soundpanel_window::hide_soundpanel_window(app_handle, &app_state);
+                            soundpanel_window::schedule_soundpanel_blur_hide(
+                                app_handle, &app_state,
+                            );
                         } else if stay_visible {
                             info!("Soundpanel lost focus - stay_visible bypass");
                         } else {

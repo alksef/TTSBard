@@ -139,6 +139,13 @@ pub struct AppState {
     /// потоки не перезаписывают друг друга.
     pub soundpanel_previous_foreground_hwnd: Arc<Mutex<Option<isize>>>,
 
+    /// Поколение отложенного скрытия SoundPanel по потере фокуса.
+    ///
+    /// Инкрементируется при каждом планировании/отмене отложенного скрытия.
+    /// Отложенный callback сравнивает своё захваченное поколение с текущим и
+    /// скрывает панель только если оно осталось актуальным.
+    pub soundpanel_blur_hide_generation: Arc<AtomicU64>,
+
     /// Async mutex serialising concurrent provider selection operations.
     /// Selected by concrete provider ID.
     pub selection_mutex: Arc<tokio::sync::Mutex<()>>,
@@ -190,6 +197,7 @@ impl AppState {
             shutdown: CancellationToken::new(),
             previous_foreground_hwnd: Arc::new(Mutex::new(None)),
             soundpanel_previous_foreground_hwnd: Arc::new(Mutex::new(None)),
+            soundpanel_blur_hide_generation: Arc::new(AtomicU64::new(0)),
             selection_mutex: Arc::new(tokio::sync::Mutex::new(())),
             pending_notifications: Arc::new(Mutex::new(Vec::new())),
         }

@@ -484,7 +484,7 @@ onUnmounted(() => {
 
 .titlebar-btn.floating-window:disabled {
   opacity: 0.5;
-  cursor: not-allowed;
+  cursor: default;
 }
 
 /* Wrapper holding the sidebar and main content side-by-side */
