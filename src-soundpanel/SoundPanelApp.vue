@@ -282,13 +282,6 @@ onMounted(async () => {
         </div>
       </div>
       <div class="buttons">
-        <button
-          @click="toggleClickthrough"
-          :class="{ active: clickthroughEnabled }"
-          title="Click-through"
-        >
-          {{ clickthroughEnabled ? '👆' : '🖱️' }}
-        </button>
         <button @click="closeWindow" title="Close">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M18 6L6 18M6 6l12 12"/>
