@@ -513,7 +513,6 @@ pub struct PlaybackSnapshot {
 pub struct PlaybackManager {
     cmd_tx: mpsc::Sender<Cmd>,
     state: Arc<RwLock<Shared>>,
-    pub audio_config: Arc<RwLock<AudioOutputsConfig>>,
     app_handle: AppHandle,
 }
 
@@ -521,7 +520,6 @@ impl PlaybackManager {
     pub fn new(
         app_handle: AppHandle,
         internal_ev: mpsc::Sender<crate::events::AppEvent>,
-        initial_audio: AudioOutputsConfig,
         cached_devices: Option<Arc<RwLock<HashMap<String, cpal::Device>>>>,
     ) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel();
@@ -531,10 +529,8 @@ impl PlaybackManager {
             queue: VecDeque::new(),
             audio_cache: VecDeque::with_capacity(AUDIO_CACHE_SIZE),
         }));
-        let audio_config = Arc::new(RwLock::new(initial_audio));
 
         let th_state = Arc::clone(&state);
-        let th_audio = Arc::clone(&audio_config);
         let th_devices = cached_devices.clone();
         let th_cmd_tx = cmd_tx.clone();
         let th_app = app_handle.clone();
@@ -546,7 +542,6 @@ impl PlaybackManager {
                 th_app,
                 internal_ev,
                 th_state,
-                th_audio,
                 th_devices,
             );
         });
@@ -554,7 +549,6 @@ impl PlaybackManager {
         PlaybackManager {
             cmd_tx,
             state,
-            audio_config,
             app_handle,
         }
     }
@@ -565,7 +559,6 @@ impl PlaybackManager {
         app: AppHandle,
         internal_ev: mpsc::Sender<crate::events::AppEvent>,
         state: Arc<RwLock<Shared>>,
-        _audio_config: Arc<RwLock<AudioOutputsConfig>>, // held; no longer read directly — phrases carry their own outputs
         cached_devices: Option<Arc<RwLock<HashMap<String, cpal::Device>>>>,
     ) {
         let mut sink_spk: Option<Sink> = None;
@@ -778,14 +771,6 @@ impl PlaybackManager {
         info!("Playback thread ended");
     }
 
-    /// Добавить фразу в очередь, используя fallback-конфигурацию manager.
-    /// Этот путь применяется при повторе ранее синтезированной фразы.
-    /// Возвращает `true` если фраза принята, `false` если очередь полна.
-    pub fn enqueue(&self, id: String, text: String, audio: AudioPcm) -> bool {
-        let cfg = self.audio_config.read().clone();
-        self.enqueue_inner(id, text, audio, cfg.speaker, cfg.mic)
-    }
-
     /// Добавить фразу с явным per-phrase output config. Выходные устройства
     /// фиксируются в QueuedPhrase и воспроизводятся потоком без доступа к глобальному
     /// `audio_config` во время playback.
@@ -861,7 +846,12 @@ impl PlaybackManager {
     }
 
     pub fn replay_from_cache(&self, id: &str) -> Result<(), String> {
-        let audio_cfg = self.audio_config.read().clone();
+        // Этот метод больше не используется, так как все повторы теперь через команду history
+        // Но оставим для совместимости с возможными внешними вызовами
+        let audio_cfg = AudioOutputsConfig {
+            speaker: None,
+            mic: None,
+        };
         let mut s = self.state.write();
 
         let cached = s
@@ -2085,7 +2075,8 @@ mod tests {
             .find(|c| c.id == "future_replay")
             .unwrap();
         assert_eq!(
-            entry.timestamp, 10000000000000_i64,
+            entry.timestamp,
+            10000000000000_i64,
             "timestamp must be strictly greater than previous"
         );
     }

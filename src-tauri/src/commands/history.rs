@@ -101,8 +101,24 @@ pub fn replay_phrase_from_cache(
         .as_ref()
         .ok_or_else(|| "Playback manager not initialized".to_string())?;
 
+    // Получаем текущие настройки из кэша
+    let settings = state.settings_cache.read().clone();
+    
+    // Вычисляем live-настройки вывода
+    let (speaker_config, mic_config) = crate::commands::tts_pipeline::compute_output_configs(
+        &settings.audio,
+        &settings.audio_effects,
+    );
+
     let replay_id = format!("hist_{}", entry.cache_key);
-    let enqueued = pb.enqueue(replay_id.clone(), entry.text.clone(), pcm);
+    let enqueued = pb.enqueue_with_outputs(
+        replay_id.clone(), 
+        entry.text.clone(), 
+        pcm, 
+        speaker_config, 
+        mic_config
+    );
+    
     if !enqueued {
         return Err("Playback queue full".to_string());
     }

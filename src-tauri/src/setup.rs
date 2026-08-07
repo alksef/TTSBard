@@ -80,30 +80,9 @@ pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std:
 
     // Initialize PlaybackManager
     let app_handle_pb = app.handle().clone();
-    let initial_speaker = if settings.audio.speaker_enabled {
-        Some(crate::audio::OutputConfig {
-            device_id: settings.audio.speaker_device.clone(),
-            volume: settings.audio.speaker_volume as f32 / 100.0,
-        })
-    } else {
-        None
-    };
-    let initial_mic =
-        settings
-            .audio
-            .virtual_mic_device
-            .clone()
-            .map(|dev_id| crate::audio::OutputConfig {
-                device_id: Some(dev_id),
-                volume: settings.audio.virtual_mic_volume as f32 / 100.0,
-            });
     let pb_manager = Arc::new(crate::playback::PlaybackManager::new(
         app_handle_pb,
         event_tx.clone(),
-        crate::playback::AudioOutputsConfig {
-            speaker: initial_speaker,
-            mic: initial_mic,
-        },
         Some(app_state.inner().cached_devices.clone()),
     ));
     *app_state.inner().playback_manager.lock() = Some(pb_manager.clone());
