@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
+import { open, confirm } from '@tauri-apps/plugin-dialog'
 import { createAsyncCleanupScope } from '../src/utils/asyncCleanup'
 import { registerSoundPanelAppListeners, installSoundPanelKeydown } from '../src/playback/listeners'
 
@@ -40,6 +41,17 @@ const bindings = ref<Binding[]>([])
 const activeSetId = ref<string>('')
 const activeSetName = ref<string>('')
 const sets = ref<SoundSet[]>([])
+
+const mode = ref<'runtime' | 'config'>('runtime')
+
+const showConfigDialog = ref(false)
+const configKey = ref('')
+const configDescription = ref('')
+const configFilePath = ref('')
+
+function toggleMode() {
+  mode.value = mode.value === 'runtime' ? 'config' : 'runtime'
+}
 
 const overlayStyle = computed(() => {
   const base = hexToRgba(bgColor.value, opacity.value / 100)
@@ -121,6 +133,37 @@ async function onSelectSet(id: string) {
   ;(document.activeElement as HTMLElement | null)?.blur()
 }
 
+async function onAddSet() {
+  const name = window.prompt('Имя нового слоя')
+  if (!name || !name.trim()) return
+  try {
+    const created = await invoke<SoundSet>('sp_add_set', { name: name.trim() })
+    await loadSets()
+    activeSetId.value = created.id
+    ;(document.activeElement as HTMLElement | null)?.blur()
+  } catch (e) {
+    console.error('[SoundPanel] Failed to add set:', e)
+  }
+}
+
+async function onRemoveSet() {
+  if (sets.value.length <= 1) return
+  const set = sets.value.find(s => s.id === activeSetId.value)
+  const name = set ? set.name : ''
+  const confirmedResult = await confirm(`Удалить слой "${name}"? Аудиофайлы останутся.`, {
+    title: 'Удалить слой',
+    kind: 'warning'
+  })
+  if (!confirmedResult) return
+  try {
+    await invoke('sp_remove_set', { id: activeSetId.value })
+    await loadSets()
+    ;(document.activeElement as HTMLElement | null)?.blur()
+  } catch (e) {
+    console.error('[SoundPanel] Failed to remove set:', e)
+  }
+}
+
 function showNoBinding(key: string) {
   noBindingMessage.value = `Клавиша ${key} не привязана`
 
@@ -174,6 +217,48 @@ function playBinding(key: string) {
   ;(document.activeElement as HTMLElement | null)?.blur()
 }
 
+function openConfigDialog(key: string) {
+  configKey.value = key
+  configDescription.value = ''
+  configFilePath.value = ''
+  showConfigDialog.value = true
+}
+
+async function pickFile() {
+  try {
+    const result = await open({
+      title: 'Выберите аудиофайл',
+      multiple: false,
+      filters: [
+        {
+          name: 'Аудиофайлы',
+          extensions: ['mp3', 'wav', 'ogg', 'flac']
+        }
+      ]
+    })
+    if (result) {
+      configFilePath.value = typeof result === 'string' ? result : String(result)
+    }
+  } catch (e) {
+    console.error('[SoundPanel] Failed to pick file:', e)
+  }
+}
+
+async function saveConfigBinding() {
+  if (!configKey.value || !configDescription.value || !configFilePath.value) return
+  try {
+    await invoke('sp_add_binding', {
+      key: configKey.value,
+      description: configDescription.value.trim(),
+      filePath: configFilePath.value
+    })
+    showConfigDialog.value = false
+    ;(document.activeElement as HTMLElement | null)?.blur()
+  } catch (e) {
+    console.error('[SoundPanel] Failed to save binding:', e)
+  }
+}
+
 function moveFocus(direction: string) {
   const items = Array.from(document.querySelectorAll('.binding-item'))
   if (items.length === 0) return
@@ -220,7 +305,16 @@ function moveFocus(direction: string) {
 }
 
 async function onKeydown(e: KeyboardEvent) {
+  if (e.ctrlKey === true && !e.shiftKey && !e.altKey && !e.metaKey && e.code === 'KeyB') {
+    e.preventDefault()
+    toggleMode()
+    return
+  }
   if (e.key === 'Escape') {
+    if (showConfigDialog.value) {
+      showConfigDialog.value = false
+      return
+    }
     escapeWindow()
     return
   }
@@ -246,6 +340,11 @@ async function onKeydown(e: KeyboardEvent) {
   }
   const key = codeToLetter(e.code)
   if (!key) return
+  if (mode.value === 'config') {
+    e.preventDefault()
+    openConfigDialog(key)
+    return
+  }
   const b = bindings.value.find(x => x.key === key)
   if (b) {
     e.preventDefault()
@@ -330,6 +429,12 @@ onMounted(async () => {
   <div class="overlay" :class="{ 'light-background': isLightBackground }" :style="overlayStyle">
     <div class="title-bar" data-tauri-drag-region>
       <div class="title-left">
+        <button
+          class="mode-toggle"
+          :class="{ 'mode-config': mode === 'config' }"
+          @click="toggleMode"
+          :title="mode === 'runtime' ? 'runtime (Ctrl+B — настройки)' : 'config (Ctrl+B — воспроизведение)'"
+        >{{ mode === 'runtime' ? '▶' : '⚙' }}</button>
         <span class="title">SoundPanel</span>
         <span
           v-if="stayVisible"
@@ -344,6 +449,19 @@ onMounted(async () => {
             @click="cycleSet('prev')"
             title="Предыдущий слой (PageUp)"
           >&#9664;</button>
+          <template v-if="mode === 'config'">
+            <button
+              class="set-arrow"
+              @click="onAddSet"
+              title="Добавить слой"
+            >+</button>
+            <button
+              v-if="sets.length > 1"
+              class="set-arrow"
+              @click="onRemoveSet"
+              title="Удалить слой"
+            >&#215;</button>
+          </template>
           <select
             class="set-select"
             :value="activeSetId"
@@ -384,7 +502,7 @@ onMounted(async () => {
               class="binding-item"
               :title="`${binding.key} — ${binding.description}`"
               :aria-label="`${binding.key}: ${binding.description}`"
-              @click="playBinding(binding.key)"
+              @click="mode === 'config' ? openConfigDialog(binding.key) : playBinding(binding.key)"
             >
               <kbd class="binding-key">{{ binding.key }}</kbd>
               <span class="binding-desc">{{ binding.description }}</span>
@@ -399,6 +517,30 @@ onMounted(async () => {
           </div>
         </div>
 
+      </div>
+    </div>
+
+    <div v-if="showConfigDialog" class="config-dialog-overlay">
+      <div class="config-dialog">
+        <div class="config-dialog-title">Настройка: {{ configKey }}</div>
+        <input
+          v-model="configDescription"
+          type="text"
+          class="config-input"
+          placeholder="Описание"
+        />
+        <div class="config-file-row">
+          <span class="config-file-path">{{ configFilePath || 'Файл не выбран' }}</span>
+          <button class="config-browse" @click="pickFile">Обзор…</button>
+        </div>
+        <div class="config-actions">
+          <button
+            class="config-save"
+            :disabled="!configDescription || !configFilePath"
+            @click="saveConfigBinding"
+          >Сохранить</button>
+          <button class="config-cancel" @click="showConfigDialog = false">Отмена</button>
+        </div>
       </div>
     </div>
   </div>
@@ -537,6 +679,33 @@ body {
   background: rgba(255, 255, 255, 0.1);
   border-color: var(--panel-text);
   color: var(--panel-text);
+}
+
+.mode-toggle {
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  color: var(--panel-muted);
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  padding: 0;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  -webkit-app-region: no-drag;
+}
+
+.mode-toggle:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--panel-text);
+  color: var(--panel-text);
+}
+
+.mode-toggle.mode-config {
+  background: rgba(100, 160, 255, 0.3);
 }
 
 .set-select {
@@ -705,4 +874,96 @@ button.active {
   25% { transform: translateX(-5px); }
   75% { transform: translateX(5px); }
 }
+
+.config-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  -webkit-app-region: no-drag;
+}
+
+.config-dialog {
+  background: #2a2a2a;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 1rem;
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  color: var(--panel-text);
+}
+
+.config-dialog-title {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.config-input {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  color: var(--panel-text);
+  padding: 0.4rem 0.5rem;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+}
+
+.config-input:focus {
+  border-color: var(--panel-text);
+}
+
+.config-file-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.config-file-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--panel-muted);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  padding: 0.4rem 0.5rem;
+}
+
+.config-browse {
+  flex-shrink: 0;
+  width: auto;
+  padding: 0.35rem 0.7rem;
+  font-size: 12px;
+}
+
+.config-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.config-actions button {
+  width: auto;
+  padding: 0.35rem 0.9rem;
+  font-size: 12px;
+}
+
+.config-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.config-save {
+  background: rgba(100, 200, 100, 0.3);
+}
+
 </style>
