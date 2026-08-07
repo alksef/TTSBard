@@ -41,6 +41,7 @@ related_tasks: []
 | Item | Статус | Следующий шаг |
 |---|---|---|
 | [ROADMAP-063 — Фактическое runtime-состояние WebView-сервера](./active/063-webview-runtime-server-status.md) | `planned` | Runtime status, readiness signal и наблюдение server task |
+| [ROADMAP-065 — Саундпанель: раскладка клавиатуры, разделение runtime/config](./active/065-soundpanel-keyboard-layout-runtime-config.md) | `exploring` | Фокус-менеджмент, слои по PageUp/PageDown, режимы runtime/config по Ctrl+B, сетка раскладки |
 
 ## Завершённые направления
 
