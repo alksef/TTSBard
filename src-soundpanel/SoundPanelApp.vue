@@ -115,6 +115,12 @@ async function cycleSet(direction: 'next' | 'prev') {
   await invoke('sp_set_active_set', { id: newId })
 }
 
+async function onSelectSet(id: string) {
+  if (id === activeSetId.value) return
+  await invoke('sp_set_active_set', { id })
+  ;(document.activeElement as HTMLElement | null)?.blur()
+}
+
 function showNoBinding(key: string) {
   noBindingMessage.value = `Клавиша ${key} не привязана`
 
@@ -131,6 +137,7 @@ function showNoBinding(key: string) {
 async function closeWindow() {
   try {
     await invoke('close_soundpanel_window')
+    ;(document.activeElement as HTMLElement | null)?.blur()
   } catch (e) {
     console.error('Failed to close window:', e)
   }
@@ -164,11 +171,74 @@ function playBinding(key: string) {
   invoke('sp_play_binding', { key }).catch(e => {
     console.error('[SoundPanel] Failed to play binding:', e)
   })
+  ;(document.activeElement as HTMLElement | null)?.blur()
 }
 
-function onKeydown(e: KeyboardEvent) {
+function moveFocus(direction: string) {
+  const items = Array.from(document.querySelectorAll('.binding-item'))
+  if (items.length === 0) return
+
+  const current = document.activeElement
+  const currentIdx = items.indexOf(current)
+
+  const grid = document.querySelector<HTMLElement>('.bindings-grid')
+  const columns = grid
+    ? getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/).filter(Boolean).length
+    : 1
+  const total = items.length
+
+  let nextIdx: number
+  if (currentIdx === -1) {
+    switch (direction) {
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        nextIdx = total - 1
+        break
+      default:
+        nextIdx = 0
+    }
+  } else {
+    switch (direction) {
+      case 'ArrowRight':
+        nextIdx = (currentIdx + 1) % total
+        break
+      case 'ArrowLeft':
+        nextIdx = (currentIdx - 1 + total) % total
+        break
+      case 'ArrowDown':
+        nextIdx = (currentIdx + columns) % total
+        break
+      case 'ArrowUp':
+        nextIdx = (currentIdx - columns + total) % total
+        break
+      default:
+        return
+    }
+  }
+
+  ;(items[nextIdx] as HTMLElement).focus()
+}
+
+async function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     escapeWindow()
+    return
+  }
+  if (e.key === 'PageUp' || e.key === 'PageDown') {
+    if (e.ctrlKey || e.shiftKey || e.altKey || e.metaKey) {
+      return
+    }
+    e.preventDefault()
+    await cycleSet(e.key === 'PageDown' ? 'next' : 'prev')
+    ;(document.activeElement as HTMLElement | null)?.blur()
+    return
+  }
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    if (e.ctrlKey || e.shiftKey || e.altKey || e.metaKey) {
+      return
+    }
+    e.preventDefault()
+    moveFocus(e.key)
     return
   }
   if (e.ctrlKey || e.shiftKey || e.altKey || e.metaKey) {
@@ -251,6 +321,8 @@ onMounted(async () => {
   } catch (e) {
     console.error('Failed to register soundpanel listeners:', e)
   }
+
+  ;(document.activeElement as HTMLElement | null)?.blur()
 })
 </script>
 
@@ -270,14 +342,21 @@ onMounted(async () => {
             v-if="sets.length > 1"
             class="set-arrow"
             @click="cycleSet('prev')"
-            title="Предыдущий набор"
+            title="Предыдущий слой (PageUp)"
           >&#9664;</button>
-          <span class="set-name">{{ activeSetName || 'SoundPanel' }}</span>
+          <select
+            class="set-select"
+            :value="activeSetId"
+            @change="onSelectSet(($event.target as HTMLSelectElement).value)"
+            title="Слой (PageUp / PageDown)"
+          >
+            <option v-for="s in sets" :key="s.id" :value="s.id">{{ s.name }}</option>
+          </select>
           <button
             v-if="sets.length > 1"
             class="set-arrow"
             @click="cycleSet('next')"
-            title="Следующий набор"
+            title="Следующий слой (PageDown)"
           >&#9654;</button>
         </div>
       </div>
@@ -458,6 +537,28 @@ body {
   background: rgba(255, 255, 255, 0.1);
   border-color: var(--panel-text);
   color: var(--panel-text);
+}
+
+.set-select {
+  background: transparent;
+  color: var(--panel-text);
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 2px 6px;
+  max-width: 140px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.set-select:focus {
+  outline: none;
+}
+
+.set-select option {
+  background: #2a2a2a;
+  color: #fff;
 }
 
 .buttons {
