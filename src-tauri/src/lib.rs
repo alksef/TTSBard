@@ -82,9 +82,9 @@ use soundpanel::{
     sp_add_binding, sp_add_set, sp_escape_soundpanel, sp_get_active_set, sp_get_bindings,
     sp_get_floating_appearance, sp_get_sets, sp_get_stay_visible,
     sp_is_floating_clickthrough_enabled, sp_is_supported_format, sp_play_binding,
-    sp_remove_binding, sp_remove_set, sp_rename_set, sp_set_active_set, sp_set_floating_bg_color,
-    sp_set_floating_clickthrough, sp_set_floating_opacity, sp_set_hide_on_blur,
-    sp_set_stay_visible, sp_test_sound,
+    sp_remove_binding, sp_remove_set, sp_rename_set, sp_set_active_set, sp_set_config_mode,
+    sp_set_floating_bg_color, sp_set_floating_clickthrough, sp_set_floating_opacity,
+    sp_set_hide_on_blur, sp_set_stay_visible, sp_test_sound,
 };
 use state::AppState;
 use std::path::PathBuf;
@@ -102,9 +102,10 @@ fn greet(name: &str) -> String {
 
 /// Determines whether the SoundPanel should hide on focus loss.
 ///
-/// Hides only when `hide_on_blur` is enabled AND `stay_visible` is disabled.
-fn should_hide_soundpanel_on_blur(hide_on_blur: bool, stay_visible: bool) -> bool {
-    hide_on_blur && !stay_visible
+/// Hides only when `hide_on_blur` is enabled AND both `stay_visible` and
+/// `config_mode` are disabled.
+fn should_hide_soundpanel_on_blur(hide_on_blur: bool, stay_visible: bool, config_mode: bool) -> bool {
+    hide_on_blur && !stay_visible && !config_mode
 }
 
 #[cfg(test)]
@@ -113,22 +114,27 @@ mod should_hide_tests {
 
     #[test]
     fn hide_on_blur_ordinary() {
-        assert!(should_hide_soundpanel_on_blur(true, false));
+        assert!(should_hide_soundpanel_on_blur(true, false, false));
     }
 
     #[test]
     fn no_hide_when_hide_on_blur_disabled() {
-        assert!(!should_hide_soundpanel_on_blur(false, false));
+        assert!(!should_hide_soundpanel_on_blur(false, false, false));
     }
 
     #[test]
     fn stay_visible_bypasses_hide_on_blur() {
-        assert!(!should_hide_soundpanel_on_blur(true, true));
+        assert!(!should_hide_soundpanel_on_blur(true, true, false));
     }
 
     #[test]
     fn stay_visible_without_hide_on_blur_still_no_hide() {
-        assert!(!should_hide_soundpanel_on_blur(false, true));
+        assert!(!should_hide_soundpanel_on_blur(false, true, false));
+    }
+
+    #[test]
+    fn config_mode_suppresses_hide_on_blur() {
+        assert!(!should_hide_soundpanel_on_blur(true, false, true));
     }
 }
 
@@ -397,6 +403,7 @@ pub fn run() {
             sp_get_stay_visible,
             sp_set_stay_visible,
             sp_set_hide_on_blur,
+            sp_set_config_mode,
             sp_play_binding,
             sp_escape_soundpanel,
             sp_get_sets,
@@ -701,7 +708,8 @@ pub fn run() {
                         let soundpanel_state = app_handle.state::<soundpanel::SoundPanelState>();
                         let hide_on_blur = win_mgr.get_soundpanel_hide_on_blur();
                         let stay_visible = soundpanel_state.get_stay_visible();
-                        if should_hide_soundpanel_on_blur(hide_on_blur, stay_visible) {
+                        let config_mode = soundpanel_state.get_config_mode();
+                        if should_hide_soundpanel_on_blur(hide_on_blur, stay_visible, config_mode) {
                             info!(
                                 "Soundpanel lost focus - scheduling deferred hide via hide_on_blur"
                             );

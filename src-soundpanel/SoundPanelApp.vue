@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { open, confirm } from '@tauri-apps/plugin-dialog'
@@ -62,6 +62,12 @@ const configFilePath = ref('')
 function toggleMode() {
   mode.value = mode.value === 'runtime' ? 'config' : 'runtime'
 }
+
+watch(mode, (newMode) => {
+  invoke('sp_set_config_mode', { enabled: newMode === 'config' }).catch(e => {
+    console.error('[SoundPanel] Failed to set config_mode:', e)
+  })
+}, { immediate: true })
 
 const overlayStyle = computed(() => {
   const base = hexToRgba(bgColor.value, opacity.value / 100)
@@ -371,17 +377,20 @@ function moveFocus(direction: string) {
 }
 
 async function onKeydown(e: KeyboardEvent) {
-  if (e.ctrlKey === true && !e.shiftKey && !e.altKey && !e.metaKey && e.code === 'KeyB') {
-    e.preventDefault()
-    toggleMode()
-    return
-  }
   if (e.key === 'Escape') {
     if (showConfigDialog.value) {
       showConfigDialog.value = false
       return
     }
     escapeWindow()
+    return
+  }
+  if (showConfigDialog.value) {
+    return
+  }
+  if (e.ctrlKey === true && !e.shiftKey && !e.altKey && !e.metaKey && e.code === 'KeyB') {
+    e.preventDefault()
+    toggleMode()
     return
   }
   if (e.key === 'PageUp' || e.key === 'PageDown') {
@@ -394,9 +403,6 @@ async function onKeydown(e: KeyboardEvent) {
     return
   }
   if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-    if (showConfigDialog.value) {
-      return
-    }
     if (e.ctrlKey || e.shiftKey || e.altKey || e.metaKey) {
       return
     }
@@ -498,12 +504,6 @@ onMounted(async () => {
   <div class="overlay" :class="{ 'light-background': isLightBackground }" :style="overlayStyle">
     <div class="title-bar" data-tauri-drag-region>
       <div class="title-left">
-        <button
-          class="mode-toggle"
-          :class="{ 'mode-config': mode === 'config' }"
-          @click="toggleMode"
-          :title="mode === 'runtime' ? 'runtime (Ctrl+B — настройки)' : 'config (Ctrl+B — воспроизведение)'"
-        >{{ mode === 'runtime' ? '▶' : '⚙' }}</button>
         <span class="title">SoundPanel</span>
         <span
           v-if="stayVisible"
@@ -511,43 +511,55 @@ onMounted(async () => {
           title="Панель остаётся видимой после выбора звука"
           aria-label="Панель закреплена: автоматическое скрытие при потере фокуса приостановлено"
         >панель закреплена</span>
-        <div v-if="sets.length > 0" class="set-selector">
+      </div>
+      <div v-if="sets.length > 0" class="set-selector">
+        <button
+          v-if="sets.length > 1"
+          class="set-arrow"
+          @click="cycleSet('prev')"
+          title="Предыдущий слой (PageUp)"
+        >&#9664;</button>
+        <select
+          class="set-select"
+          :value="activeSetId"
+          @change="onSelectSet(($event.target as HTMLSelectElement).value)"
+          title="Слой (PageUp / PageDown)"
+        >
+          <option v-for="s in sets" :key="s.id" :value="s.id">{{ s.name }}</option>
+        </select>
+        <button
+          v-if="sets.length > 1"
+          class="set-arrow"
+          @click="cycleSet('next')"
+          title="Следующий слой (PageDown)"
+        >&#9654;</button>
+        <template v-if="mode === 'config'">
+          <button
+            class="set-arrow"
+            @click="onAddSet"
+            title="Добавить слой"
+          >+</button>
           <button
             v-if="sets.length > 1"
             class="set-arrow"
-            @click="cycleSet('prev')"
-            title="Предыдущий слой (PageUp)"
-          >&#9664;</button>
-          <template v-if="mode === 'config'">
-            <button
-              class="set-arrow"
-              @click="onAddSet"
-              title="Добавить слой"
-            >+</button>
-            <button
-              v-if="sets.length > 1"
-              class="set-arrow"
-              @click="onRemoveSet"
-              title="Удалить слой"
-            >&#215;</button>
-          </template>
-          <select
-            class="set-select"
-            :value="activeSetId"
-            @change="onSelectSet(($event.target as HTMLSelectElement).value)"
-            title="Слой (PageUp / PageDown)"
-          >
-            <option v-for="s in sets" :key="s.id" :value="s.id">{{ s.name }}</option>
-          </select>
-          <button
-            v-if="sets.length > 1"
-            class="set-arrow"
-            @click="cycleSet('next')"
-            title="Следующий слой (PageDown)"
-          >&#9654;</button>
-        </div>
+            @click="onRemoveSet"
+            title="Удалить слой"
+          >&#215;</button>
+        </template>
       </div>
       <div class="buttons">
+        <button
+          class="mode-toggle"
+          :class="{ 'mode-config': mode === 'config' }"
+          @click="toggleMode"
+          :title="mode === 'runtime' ? 'runtime (Ctrl+B — настройки)' : 'config (Ctrl+B — воспроизведение)'"
+          :aria-label="mode === 'runtime' ? 'runtime (Ctrl+B — настройки)' : 'config (Ctrl+B — воспроизведение)'"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.28z"/>
+            <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+          </svg>
+        </button>
         <button @click="closeWindow" title="Close">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M18 6L6 18M6 6l12 12"/>
@@ -562,7 +574,7 @@ onMounted(async () => {
       </div>
 
       <div v-else class="content-inner">
-        <div v-if="bindings.length > 0" class="bindings-list">
+        <div v-if="bindings.length > 0 || mode === 'config'" class="bindings-list">
           <div class="keyboard">
             <div v-for="row in KEYBOARD_ROWS" :key="row[0]" class="kb-row">
               <button
@@ -585,7 +597,7 @@ onMounted(async () => {
         <div v-else class="hint-message">
           <div>Нет привязок звуков</div>
           <div class="hint-sub">
-            Добавьте звуки на вкладке "Звуковая панель"
+            Переключитесь в режим настроек (Ctrl+B) и нажмите клавишу, чтобы добавить звук
           </div>
         </div>
 
@@ -681,6 +693,7 @@ body {
   padding: 0 10px;
   user-select: none;
   -webkit-app-region: drag;
+  position: relative;
 }
 
 .title-left {
@@ -720,6 +733,9 @@ body {
   align-items: center;
   gap: 4px;
   -webkit-app-region: no-drag;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
 }
 
 .set-name {
@@ -757,8 +773,8 @@ body {
   background: transparent;
   border: 1px solid var(--panel-border);
   color: var(--panel-muted);
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   border-radius: 3px;
   cursor: pointer;
   display: flex;
@@ -781,7 +797,7 @@ body {
 }
 
 .set-select {
-  background: transparent;
+  background: color-mix(in srgb, var(--panel-text) 8%, transparent);
   color: var(--panel-text);
   border: 1px solid var(--panel-border);
   border-radius: 3px;
@@ -792,6 +808,8 @@ body {
   cursor: pointer;
   -webkit-app-region: no-drag;
 }
+
+.set-select:hover { border-color: var(--panel-text); }
 
 .set-select:focus {
   outline: none;
@@ -893,7 +911,7 @@ button.active {
   height: 56px;
   padding: 4px 2px;
   background: rgba(255, 255, 255, 0.05);
-  border: 1px solid transparent;
+  border: 1px solid var(--panel-border);
   border-radius: 6px;
   transition: background 0.15s, border-color 0.15s;
   cursor: pointer;
@@ -970,15 +988,18 @@ button.active {
 }
 
 .config-dialog {
+  --dlg-text: #ffffff;
+  --dlg-muted: rgba(255, 255, 255, 0.7);
+  --dlg-border: rgba(255, 255, 255, 0.2);
   background: #2a2a2a;
-  border: 1px solid var(--panel-border);
+  border: 1px solid var(--dlg-border);
   border-radius: 8px;
   padding: 1rem;
   width: 320px;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  color: var(--panel-text);
+  color: var(--dlg-text);
 }
 
 .config-dialog-title {
@@ -988,9 +1009,9 @@ button.active {
 
 .config-input {
   background: rgba(255, 255, 255, 0.08);
-  border: 1px solid var(--panel-border);
+  border: 1px solid var(--dlg-border);
   border-radius: 4px;
-  color: var(--panel-text);
+  color: var(--dlg-text);
   padding: 0.4rem 0.5rem;
   font-size: 12px;
   font-family: inherit;
@@ -998,7 +1019,7 @@ button.active {
 }
 
 .config-input:focus {
-  border-color: var(--panel-text);
+  border-color: var(--dlg-text);
 }
 
 .config-file-row {
@@ -1014,9 +1035,9 @@ button.active {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 11px;
-  color: var(--panel-muted);
+  color: var(--dlg-muted);
   background: rgba(255, 255, 255, 0.08);
-  border: 1px solid var(--panel-border);
+  border: 1px solid var(--dlg-border);
   border-radius: 4px;
   padding: 0.4rem 0.5rem;
 }

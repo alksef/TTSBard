@@ -430,11 +430,12 @@ fn should_fire_deferred_blur_hide(
     is_focused: bool,
     hide_on_blur: bool,
     stay_visible: bool,
+    config_mode: bool,
 ) -> bool {
     current_generation == captured_generation
         && is_visible
         && !is_focused
-        && crate::should_hide_soundpanel_on_blur(hide_on_blur, stay_visible)
+        && crate::should_hide_soundpanel_on_blur(hide_on_blur, stay_visible, config_mode)
 }
 
 /// Выполнить отложенное скрытие, только если оно всё ещё актуально.
@@ -469,6 +470,7 @@ fn execute_soundpanel_blur_hide(app_handle: AppHandle, app_state: AppState, gene
     let sp_state = app_handle.state::<SoundPanelState>();
     let hide_on_blur = win_mgr.get_soundpanel_hide_on_blur();
     let stay_visible = sp_state.get_stay_visible();
+    let config_mode = sp_state.get_config_mode();
 
     if !should_fire_deferred_blur_hide(
         current_generation,
@@ -477,6 +479,7 @@ fn execute_soundpanel_blur_hide(app_handle: AppHandle, app_state: AppState, gene
         focused,
         hide_on_blur,
         stay_visible,
+        config_mode,
     ) {
         debug!(
             hide_on_blur,
@@ -702,43 +705,48 @@ mod tests {
     #[test]
     fn deferred_hide_fires_when_all_conditions_hold() {
         assert!(should_fire_deferred_blur_hide(
-            5, 5, true, false, true, false
+            5, 5, true, false, true, false, false
         ));
     }
 
     #[test]
     fn stale_generation_suppresses_deferred_hide() {
         assert!(!should_fire_deferred_blur_hide(
-            6, 5, true, false, true, false
+            6, 5, true, false, true, false, false
         ));
     }
 
     #[test]
     fn hidden_panel_suppresses_deferred_hide() {
         assert!(!should_fire_deferred_blur_hide(
-            5, 5, false, false, true, false
+            5, 5, false, false, true, false, false
         ));
     }
 
     #[test]
     fn refocused_panel_suppresses_deferred_hide() {
         assert!(!should_fire_deferred_blur_hide(
-            5, 5, true, true, true, false
+            5, 5, true, true, true, false, false
         ));
     }
 
     #[test]
     fn stay_visible_suppresses_deferred_hide() {
         assert!(!should_fire_deferred_blur_hide(
-            5, 5, true, false, true, true
+            5, 5, true, false, true, true, false
         ));
     }
 
     #[test]
     fn hide_on_blur_disabled_suppresses_deferred_hide() {
         assert!(!should_fire_deferred_blur_hide(
-            5, 5, true, false, false, false
+            5, 5, true, false, false, false, false
         ));
+    }
+
+    #[test]
+    fn config_mode_suppresses_deferred_hide() {
+        assert!(!should_fire_deferred_blur_hide(5, 5, true, false, true, false, true));
     }
 
     // ── cancel_soundpanel_blur_hide / schedule_blur_hide_generation ──

@@ -95,6 +95,11 @@ pub struct SoundPanelState {
     /// dragged by its title bar.
     pub stay_visible: Arc<Mutex<bool>>,
 
+    /// Transient runtime flag: while config mode is active, blur-based hiding
+    /// is suppressed (e.g. opening the native file picker must not hide the
+    /// panel). Never persisted.
+    pub config_mode: Arc<Mutex<bool>>,
+
     /// Активные воспроизведения звука (thread handles)
     active_playbacks: Arc<Mutex<Vec<JoinHandle<()>>>>,
 }
@@ -116,6 +121,7 @@ impl SoundPanelState {
             floating_clickthrough: Arc::new(Mutex::new(false)),
             intercept: Arc::new(Mutex::new(intercept)),
             stay_visible: Arc::new(Mutex::new(false)),
+            config_mode: Arc::new(Mutex::new(false)),
             active_playbacks: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -403,6 +409,20 @@ impl SoundPanelState {
             *val = enabled;
         } else {
             error!(target = "soundpanel::state", "Failed to lock stay_visible");
+        }
+    }
+
+    /// Проверить, активен ли config-режим
+    pub fn get_config_mode(&self) -> bool {
+        self.config_mode.lock().map(|v| *v).unwrap_or(false)
+    }
+
+    /// Установить config-режим (транзитный флаг, не сохраняется на диск)
+    pub fn set_config_mode(&self, enabled: bool) {
+        if let Ok(mut val) = self.config_mode.lock() {
+            *val = enabled;
+        } else {
+            error!(target = "soundpanel::state", "Failed to lock config_mode");
         }
     }
 

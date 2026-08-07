@@ -233,6 +233,17 @@ pub fn sp_set_hide_on_blur(
     Ok(())
 }
 
+/// Установить транзитный флаг config-режима (не сохраняется на диск).
+///
+/// Пока активен config-режим, blur-скрытие панели подавляется (например,
+/// открытие native file picker не должно скрывать панель).
+#[tauri::command]
+pub fn sp_set_config_mode(enabled: bool, state: State<'_, SoundPanelState>) -> Result<(), String> {
+    info!(enabled, "Setting config_mode");
+    state.set_config_mode(enabled);
+    Ok(())
+}
+
 /// Обработка Escape: следует той же политике видимости, что и активация
 /// звука, но без воспроизведения.
 ///
