@@ -41,8 +41,8 @@ pub fn sp_add_binding(
 
     let key_char = key.to_uppercase().chars().next().ok_or("Key is empty")?;
 
-    if !key_char.is_ascii_alphabetic() || !key_char.is_ascii_uppercase() {
-        return Err("Key must be A-Z".to_string());
+    if !(key_char.is_ascii_uppercase() || key_char.is_ascii_digit()) {
+        return Err("Key must be A–Z or 0–9".to_string());
     }
 
     if let Some(existing) = state.get_binding(key_char) {
@@ -274,8 +274,8 @@ pub fn sp_escape_soundpanel(
 #[tauri::command]
 pub fn sp_play_binding(key: String, app_handle: AppHandle) -> Result<(), String> {
     let key_char = key.chars().next().ok_or("Key is empty")?;
-    if !key_char.is_ascii_uppercase() {
-        return Err("Key must be A-Z".to_string());
+    if !(key_char.is_ascii_uppercase() || key_char.is_ascii_digit()) {
+        return Err("Key must be A–Z or 0–9".to_string());
     }
     let state = app_handle.state::<SoundPanelState>();
     let binding = state

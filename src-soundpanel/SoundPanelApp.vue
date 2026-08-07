@@ -44,6 +44,16 @@ const sets = ref<SoundSet[]>([])
 
 const mode = ref<'runtime' | 'config'>('runtime')
 
+const KEYBOARD_ROWS: string[][] = [
+  ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
+  ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
+  ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'],
+  ['Z', 'X', 'C', 'V', 'B', 'N', 'M'],
+]
+
+const focusedKey = ref('')
+const keyRefs = new Map<string, HTMLElement>()
+
 const showConfigDialog = ref(false)
 const configKey = ref('')
 const configDescription = ref('')
@@ -194,6 +204,40 @@ async function escapeWindow() {
   }
 }
 
+function isBound(key: string): boolean {
+  return bindings.value.some(b => b.key === key)
+}
+
+function bindingDesc(key: string): string {
+  const b = bindings.value.find(x => x.key === key)
+  return b ? b.description : ''
+}
+
+function bindingTitle(key: string): string {
+  const b = bindings.value.find(x => x.key === key)
+  return b ? `${key} — ${b.description}` : `${key} (свободно)`
+}
+
+function onKeyActivate(key: string) {
+  if (mode.value === 'config') {
+    openConfigDialog(key)
+  } else {
+    if (isBound(key)) {
+      playBinding(key)
+    } else {
+      showNoBinding(key)
+    }
+  }
+}
+
+function setKeyRef(key: string, el: HTMLElement | null) {
+  if (el) {
+    keyRefs.set(key, el)
+  } else {
+    keyRefs.delete(key)
+  }
+}
+
 async function toggleClickthrough() {
   try {
     clickthroughEnabled.value = await invoke<boolean>('sp_set_floating_clickthrough', { enabled: !clickthroughEnabled.value })
@@ -202,10 +246,14 @@ async function toggleClickthrough() {
   }
 }
 
-function codeToLetter(code: string): string | null {
+function codeToKey(code: string): string | null {
   if (code.length === 4 && code.startsWith('Key')) {
     const letter = code[3].toUpperCase()
     if (letter >= 'A' && letter <= 'Z') return letter
+  }
+  if (code.startsWith('Digit') && code.length === 6) {
+    const digit = code[5]
+    if (digit >= '0' && digit <= '9') return digit
   }
   return null
 }
@@ -260,48 +308,66 @@ async function saveConfigBinding() {
 }
 
 function moveFocus(direction: string) {
-  const items = Array.from(document.querySelectorAll('.binding-item'))
-  if (items.length === 0) return
-
-  const current = document.activeElement
-  const currentIdx = items.indexOf(current)
-
-  const grid = document.querySelector<HTMLElement>('.bindings-grid')
-  const columns = grid
-    ? getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/).filter(Boolean).length
-    : 1
-  const total = items.length
-
-  let nextIdx: number
-  if (currentIdx === -1) {
-    switch (direction) {
-      case 'ArrowLeft':
-      case 'ArrowUp':
-        nextIdx = total - 1
-        break
-      default:
-        nextIdx = 0
-    }
-  } else {
-    switch (direction) {
-      case 'ArrowRight':
-        nextIdx = (currentIdx + 1) % total
-        break
-      case 'ArrowLeft':
-        nextIdx = (currentIdx - 1 + total) % total
-        break
-      case 'ArrowDown':
-        nextIdx = (currentIdx + columns) % total
-        break
-      case 'ArrowUp':
-        nextIdx = (currentIdx - columns + total) % total
-        break
-      default:
-        return
-    }
+  let currentKey = focusedKey.value
+  if (!currentKey) {
+    currentKey = KEYBOARD_ROWS[0][0]
   }
 
-  ;(items[nextIdx] as HTMLElement).focus()
+  let row = -1
+  let col = -1
+  for (let r = 0; r < KEYBOARD_ROWS.length; r++) {
+    const c = KEYBOARD_ROWS[r].indexOf(currentKey)
+    if (c !== -1) {
+      row = r
+      col = c
+      break
+    }
+  }
+  if (row === -1) {
+    focusedKey.value = KEYBOARD_ROWS[0][0]
+    keyRefs.get(KEYBOARD_ROWS[0][0])?.focus()
+    return
+  }
+
+  const numRows = KEYBOARD_ROWS.length
+
+  switch (direction) {
+    case 'ArrowRight': {
+      const currentRow = KEYBOARD_ROWS[row]
+      if (col + 1 < currentRow.length) {
+        col = col + 1
+      } else {
+        row = (row + 1) % numRows
+        col = 0
+      }
+      break
+    }
+    case 'ArrowLeft': {
+      if (col > 0) {
+        col = col - 1
+      } else {
+        row = (row - 1 + numRows) % numRows
+        col = KEYBOARD_ROWS[row].length - 1
+      }
+      break
+    }
+    case 'ArrowDown': {
+      row = (row + 1) % numRows
+      col = Math.min(col, KEYBOARD_ROWS[row].length - 1)
+      break
+    }
+    case 'ArrowUp': {
+      row = (row - 1 + numRows) % numRows
+      col = Math.min(col, KEYBOARD_ROWS[row].length - 1)
+      break
+    }
+    default:
+      return
+  }
+
+  const newKey = KEYBOARD_ROWS[row][col]
+  focusedKey.value = newKey
+  keyRefs.get(newKey)?.focus()
 }
 
 async function onKeydown(e: KeyboardEvent) {
@@ -328,6 +394,9 @@ async function onKeydown(e: KeyboardEvent) {
     return
   }
   if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    if (showConfigDialog.value) {
+      return
+    }
     if (e.ctrlKey || e.shiftKey || e.altKey || e.metaKey) {
       return
     }
@@ -338,7 +407,7 @@ async function onKeydown(e: KeyboardEvent) {
   if (e.ctrlKey || e.shiftKey || e.altKey || e.metaKey) {
     return
   }
-  const key = codeToLetter(e.code)
+  const key = codeToKey(e.code)
   if (!key) return
   if (mode.value === 'config') {
     e.preventDefault()
@@ -494,19 +563,22 @@ onMounted(async () => {
 
       <div v-else class="content-inner">
         <div v-if="bindings.length > 0" class="bindings-list">
-          <div class="bindings-grid">
-            <button
-              v-for="binding in bindings"
-              :key="binding.key"
-              type="button"
-              class="binding-item"
-              :title="`${binding.key} — ${binding.description}`"
-              :aria-label="`${binding.key}: ${binding.description}`"
-              @click="mode === 'config' ? openConfigDialog(binding.key) : playBinding(binding.key)"
-            >
-              <kbd class="binding-key">{{ binding.key }}</kbd>
-              <span class="binding-desc">{{ binding.description }}</span>
-            </button>
+          <div class="keyboard">
+            <div v-for="row in KEYBOARD_ROWS" :key="row[0]" class="kb-row">
+              <button
+                v-for="key in row"
+                :key="key"
+                type="button"
+                class="kb-key"
+                :class="{ bound: isBound(key), focused: focusedKey === key }"
+                :title="bindingTitle(key)"
+                :ref="(el: any) => setKeyRef(key, el as HTMLElement | null)"
+                @click="onKeyActivate(key)"
+              >
+                <span class="kb-cap">{{ key }}</span>
+                <span v-if="isBound(key)" class="kb-desc">{{ bindingDesc(key) }}</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -799,58 +871,69 @@ button.active {
   color: #aaa;
 }
 
-.bindings-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-  gap: 0.5rem;
-  max-width: 500px;
+.keyboard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.binding-item {
+.kb-row {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+}
+
+.kb-key {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  gap: 0.25rem;
-  padding: 0.5rem;
+  gap: 2px;
+  width: 56px;
+  height: 56px;
+  padding: 4px 2px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid transparent;
   border-radius: 6px;
-  transition: background 0.2s, border-color 0.2s;
+  transition: background 0.15s, border-color 0.15s;
   cursor: pointer;
   font-family: inherit;
   font-size: inherit;
   color: inherit;
-  width: 100%;
-  height: auto;
   outline: none;
 }
 
-.binding-item:hover {
+.kb-key:hover {
   background: rgba(255, 255, 255, 0.1);
 }
 
-.binding-item:focus-visible {
+.kb-key:focus-visible,
+.kb-key.focused {
   border-color: var(--panel-text);
   outline: 2px solid color-mix(in srgb, var(--panel-text) 40%, transparent);
   outline-offset: 1px;
 }
 
-.binding-key {
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
-  padding: 0.25rem 0.5rem;
+.kb-key.bound {
+  background: rgba(100, 200, 100, 0.15);
+  border-color: rgba(100, 200, 100, 0.4);
+}
+
+.kb-key.bound:hover {
+  background: rgba(100, 200, 100, 0.25);
+}
+
+.kb-cap {
   font-family: monospace;
   font-weight: bold;
   font-size: 1.1rem;
   color: var(--panel-text);
 }
 
-.binding-desc {
-  font-size: 0.75rem;
+.kb-desc {
+  font-size: 0.65rem;
   color: var(--panel-muted);
-  max-width: 100px;
+  max-width: 52px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
