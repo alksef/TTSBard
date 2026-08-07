@@ -34,6 +34,7 @@ const stayVisible = ref(false)
 interface Binding {
   key: string
   description: string
+  filename: string
 }
 
 const bindings = ref<Binding[]>([])
@@ -73,6 +74,7 @@ const overlayStyle = computed(() => {
   const base = hexToRgba(bgColor.value, opacity.value / 100)
   return {
     backgroundColor: base,
+    '--panel-bg': bgColor.value,
   }
 })
 
@@ -95,7 +97,8 @@ async function loadBindings() {
     const loadedBindings = await invoke<SoundBinding[]>('sp_get_bindings')
     bindings.value = loadedBindings.map(b => ({
       key: b.key,
-      description: b.description
+      description: b.description,
+      filename: b.filename
     }))
     console.log('[SoundPanel] Loaded bindings:', bindings.value)
   } catch (e) {
@@ -272,9 +275,10 @@ function playBinding(key: string) {
 }
 
 function openConfigDialog(key: string) {
+  const existing = bindings.value.find(x => x.key === key)
   configKey.value = key
-  configDescription.value = ''
-  configFilePath.value = ''
+  configDescription.value = existing ? existing.description : ''
+  configFilePath.value = existing ? existing.filename : ''
   showConfigDialog.value = true
 }
 
@@ -301,11 +305,21 @@ async function pickFile() {
 async function saveConfigBinding() {
   if (!configKey.value || !configDescription.value || !configFilePath.value) return
   try {
-    await invoke('sp_add_binding', {
-      key: configKey.value,
-      description: configDescription.value.trim(),
-      filePath: configFilePath.value
-    })
+    const existing = bindings.value.find(x => x.key === configKey.value)
+    if (existing) {
+      const fileChanged = configFilePath.value !== existing.filename
+      await invoke('sp_update_binding', {
+        key: configKey.value,
+        description: configDescription.value.trim(),
+        filePath: fileChanged ? configFilePath.value : null
+      })
+    } else {
+      await invoke('sp_add_binding', {
+        key: configKey.value,
+        description: configDescription.value.trim(),
+        filePath: configFilePath.value
+      })
+    }
     showConfigDialog.value = false
     ;(document.activeElement as HTMLElement | null)?.blur()
   } catch (e) {
@@ -816,8 +830,8 @@ body {
 }
 
 .set-select option {
-  background: #2a2a2a;
-  color: #fff;
+  background: var(--panel-bg);
+  color: var(--panel-text);
 }
 
 .buttons {
@@ -988,10 +1002,10 @@ button.active {
 }
 
 .config-dialog {
-  --dlg-text: #ffffff;
-  --dlg-muted: rgba(255, 255, 255, 0.7);
-  --dlg-border: rgba(255, 255, 255, 0.2);
-  background: #2a2a2a;
+  --dlg-text: var(--panel-text);
+  --dlg-muted: var(--panel-muted);
+  --dlg-border: var(--panel-border);
+  background: var(--panel-bg);
   border: 1px solid var(--dlg-border);
   border-radius: 8px;
   padding: 1rem;

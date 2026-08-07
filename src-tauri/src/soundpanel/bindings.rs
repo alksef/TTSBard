@@ -71,6 +71,47 @@ pub fn sp_add_binding(
     Ok(binding)
 }
 
+/// Обновить привязку: описание и (опционально) заменить файл.
+///
+/// * `key` - Клавиша A–Z или 0–9
+/// * `description` - Новое описание звука
+/// * `file_path` - Путь к новому аудиофайлу; `None` — оставить текущий файл
+#[tauri::command]
+pub fn sp_update_binding(
+    key: String,
+    description: String,
+    file_path: Option<String>,
+    app_handle: AppHandle,
+    state: State<'_, SoundPanelState>,
+) -> Result<SoundBinding, String> {
+    info!(key, description, "Update binding");
+
+    let key_char = key.to_uppercase().chars().next().ok_or("Key is empty")?;
+
+    let mut binding = state
+        .get_binding(key_char)
+        .ok_or_else(|| format!("Key {} is not bound", key_char))?;
+
+    let appdata_path = state.appdata_path.lock().unwrap().clone();
+
+    if let Some(file_path) = file_path.filter(|p| !p.is_empty()) {
+        let new_filename = copy_sound_file(&file_path, &appdata_path)?;
+        let _ = delete_sound_file(&binding.filename, &appdata_path);
+        binding.filename = new_filename;
+        binding.original_path = Some(file_path);
+    }
+
+    binding.description = description;
+
+    state.add_binding(binding.clone());
+    save_sets(&state)?;
+
+    let _ = emit_soundpanel_bindings_changed(&app_handle);
+
+    info!("Binding updated successfully");
+    Ok(binding)
+}
+
 /// Удалить привязку по клавише из активного набора
 #[tauri::command]
 pub fn sp_remove_binding(
