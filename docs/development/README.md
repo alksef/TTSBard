@@ -109,6 +109,9 @@ Copy-Item scripts/build.local.example.psd1 scripts/build.local.psd1
 
 - [AI-assisted development workflow](./ai-workflow.md) — постановка локальных
   задач DeepSeek, запуск OpenCode и независимая проверка результата.
+- [AI-workflow для Qwen3-Coder (локальный)](./ai-workflow-qwen.md) — отличия
+  базового процесса для локального исполнителя: режим мышления вместо выбора
+  модели, тег и параметры, команда запуска.
 - [AI-ready: принципы](./ai-ready-principles.md) — норматив наблюдаемой стоимости
   безопасного малого изменения для агента без памяти о прошлых сессиях.
 - [Шаблон code review](./templates/code-review.md) и
