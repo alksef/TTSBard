@@ -173,6 +173,7 @@ const appStyle = computed(() => {
   return {
     background: `var(--app-gradient-line), var(--app-gradient-glow), rgba(${r}, ${g}, ${b}, ${opacity})`,
     '--main-window-rgb': `${r}, ${g}, ${b}`,
+    '--main-window-surface-opacity': `${opacity * 100}%`,
     '--main-window-opacity': `${opacity * 100}%`,
   }
 })
@@ -400,6 +401,17 @@ onUnmounted(() => {
 
 <style scoped>
 .app-container {
+  --color-bg: color-mix(in srgb, rgb(var(--rgb-bg)) var(--main-window-surface-opacity), transparent);
+  --color-bg-elevated: color-mix(in srgb, rgb(var(--rgb-bg-elevated)) var(--main-window-surface-opacity), transparent);
+  --color-bg-panel: color-mix(in srgb, rgba(var(--rgb-bg-elevated), 0.86) var(--main-window-surface-opacity), transparent);
+  --color-bg-panel-strong: color-mix(in srgb, rgba(var(--rgb-bg-elevated), 0.94) var(--main-window-surface-opacity), transparent);
+  --color-bg-field: color-mix(in srgb, rgba(var(--rgb-contrast), 0.05) var(--main-window-surface-opacity), transparent);
+  --color-bg-field-hover: color-mix(in srgb, rgba(var(--rgb-contrast), 0.08) var(--main-window-surface-opacity), transparent);
+  --input-bg-strong: color-mix(in srgb, rgba(var(--rgb-contrast), 0.16) var(--main-window-surface-opacity), transparent);
+  --select-bg: color-mix(in srgb, color-mix(in srgb, rgb(var(--rgb-bg-elevated)), black 10%) var(--main-window-surface-opacity), transparent);
+  --select-bg-hover: color-mix(in srgb, color-mix(in srgb, rgb(var(--rgb-bg-elevated)), black 5%) var(--main-window-surface-opacity), transparent);
+  --sidebar-bg-top: color-mix(in srgb, rgba(var(--rgb-bg-elevated), 0.98) var(--main-window-surface-opacity), transparent);
+  --sidebar-bg-bottom: color-mix(in srgb, rgba(var(--rgb-bg), 0.96) var(--main-window-surface-opacity), transparent);
   position: relative;
   display: flex;
   flex-direction: column;
@@ -411,6 +423,13 @@ onUnmounted(() => {
     var(--app-gradient-glow),
     var(--app-gradient-bg);
   transition: background 0.3s ease;
+}
+
+:global([data-theme='light'] .app-container) {
+  --input-bg-strong: color-mix(in srgb, rgb(var(--rgb-bg-elevated)) var(--main-window-surface-opacity), transparent);
+  --color-bg-field: color-mix(in srgb, rgba(var(--rgb-accent), 0.04) var(--main-window-surface-opacity), transparent);
+  --color-bg-field-hover: color-mix(in srgb, rgba(var(--rgb-accent), 0.08) var(--main-window-surface-opacity), transparent);
+  --color-bg-panel: color-mix(in srgb, rgba(var(--rgb-bg-elevated), 0.88) var(--main-window-surface-opacity), transparent);
 }
 
 .app-container.minimal-mode {

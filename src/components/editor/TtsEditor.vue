@@ -61,7 +61,7 @@ const ttsTheme = EditorView.theme({
   '&': {
     border: '1px solid var(--color-border-strong)',
     borderRadius: '0 0 18px 18px',
-    background: 'color-mix(in srgb, var(--input-bg-strong) var(--main-window-opacity), transparent)',
+    background: 'var(--input-bg-strong)',
     boxShadow: '0 2px 16px rgba(var(--rgb-black), 0.03)',
     minHeight: 'var(--editor-height, 340px)',
     transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
