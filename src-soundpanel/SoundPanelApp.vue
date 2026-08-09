@@ -64,6 +64,18 @@ function toggleMode() {
   mode.value = mode.value === 'runtime' ? 'config' : 'runtime'
 }
 
+async function toggleStayVisible() {
+  const previous = stayVisible.value
+  stayVisible.value = !stayVisible.value
+  try {
+    await invoke('sp_set_stay_visible', { enabled: stayVisible.value })
+    ;(document.activeElement as HTMLElement | null)?.blur()
+  } catch (e) {
+    stayVisible.value = previous
+    console.error('[SoundPanel] Failed to toggle stay_visible:', e)
+  }
+}
+
 watch(mode, (newMode) => {
   invoke('sp_set_config_mode', { enabled: newMode === 'config' }).catch(e => {
     console.error('[SoundPanel] Failed to set config_mode:', e)
@@ -574,7 +586,22 @@ onMounted(async () => {
             <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
           </svg>
         </button>
-        <button @click="closeWindow" title="Close">
+        <button
+          class="mode-toggle pin-toggle"
+          :class="{ 'panel-pinned': stayVisible }"
+          @click="toggleStayVisible"
+          :title="stayVisible ? 'Панель закреплена — не скрывается автоматически' : 'Панель не закреплена — скрывается после выбора, Escape или потери фокуса'"
+          :aria-label="stayVisible ? 'Панель закреплена — не скрывается автоматически' : 'Панель не закреплена — скрывается после выбора, Escape или потери фокуса'"
+        >
+          <svg v-if="stayVisible" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 17v5M5 17h14M15 4.5V2H9v2.5a2 2 0 01-.4 1.2L7 8h10l-1.6-2.3a2 2 0 01-.4-1.2zM6 8l-1 9h14l-1-9"/>
+          </svg>
+          <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 17v5M5 17h14M15 4.5V2H9v2.5a2 2 0 01-.4 1.2L7 8h10l-1.6-2.3a2 2 0 01-.4-1.2zM6 8l-1 9h14l-1-9"/>
+            <line x1="2" y1="2" x2="22" y2="22"/>
+          </svg>
+        </button>
+        <button @click="closeWindow" title="Закрыть (Esc)">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M18 6L6 18M6 6l12 12"/>
           </svg>
@@ -807,6 +834,10 @@ body {
 }
 
 .mode-toggle.mode-config {
+  background: rgba(100, 160, 255, 0.3);
+}
+
+.mode-toggle.panel-pinned {
   background: rgba(100, 160, 255, 0.3);
 }
 
