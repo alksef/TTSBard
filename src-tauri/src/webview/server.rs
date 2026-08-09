@@ -12,7 +12,7 @@ use axum::{
     routing::get,
     Router,
 };
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use serde::Deserialize;
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -328,12 +328,19 @@ async fn sse_handler(
 
     let rx = state.sse_tx.subscribe();
 
-    let stream = futures::stream::unfold(rx, move |mut rx| async move {
+    let events = futures::stream::unfold(rx, move |mut rx| async move {
         match rx.recv().await {
             Ok(sse_event) => Some((Ok(to_sse_event(&sse_event)), rx)),
             Err(_) => None,
         }
     });
+
+    // Emit an immediate comment so clients can distinguish a live SSE
+    // handshake from an idle stream that has not connected yet.
+    let stream = futures::stream::once(async {
+        Ok::<Event, Infallible>(Event::default().comment("connected"))
+    })
+    .chain(events);
 
     Ok(Sse::new(stream).keep_alive(
         axum::response::sse::KeepAlive::new().interval(std::time::Duration::from_secs(10)),
