@@ -582,6 +582,7 @@ const pauseIcon = () =>
   --bg: rgba(16, 19, 26, 0.94);
   --text: #f4f2ee;
   --text-muted: rgba(244, 242, 238, 0.42);
+  --title-text: rgba(244, 242, 238, 0.7);
   --accent: #1d8cff;
   --border: rgba(255, 255, 255, 0.08);
 }
@@ -631,11 +632,13 @@ body {
   min-height: 150px;
   width: 100%;
   height: 100%;
+  color: var(--text);
 }
 
 .playback-window.light-background {
   --text: #1f2937;
   --text-muted: rgba(31, 41, 55, 0.55);
+  --title-text: rgba(31, 41, 55, 0.7);
   --border: rgba(31, 41, 55, 0.14);
 }
 
@@ -649,8 +652,10 @@ body {
 }
 
 .title {
-  font-weight: 700;
-  font-size: 0.9rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--title-text);
 }
 
 .status-badge {

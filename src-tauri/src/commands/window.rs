@@ -175,14 +175,14 @@ pub async fn update_theme(
         Theme::Light => tauri::Theme::Light,
         Theme::Dark => tauri::Theme::Dark,
     };
-    for label in &["main", "playback-control"] {
+    for label in &["main", "playback-control", "soundpanel"] {
         if let Some(window) = app_handle.get_webview_window(label) {
             let _ = window.set_theme(Some(tauri_theme));
         }
     }
     info!(?tauri_theme, "Applied window theme");
 
-    super::emit_settings_changed(&app_handle);
+    emit_appearance_updates(&app_handle);
 
     info!(?theme, "Theme updated successfully");
     Ok(())

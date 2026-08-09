@@ -718,10 +718,10 @@ body {
 }
 
 .title {
-  font-size: 13px;
-  font-weight: 500;
-  opacity: 0.9;
-  color: var(--panel-text);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--panel-muted);
 }
 
 .persistent-mode-label {
