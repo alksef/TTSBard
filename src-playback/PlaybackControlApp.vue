@@ -625,7 +625,7 @@ body {
 .playback-window {
   background: var(--bg);
   border: 1px solid var(--border);
-  padding: 12px;
+  padding: 4px 12px 12px;
   display: flex;
   flex-direction: column;
   gap: 10px;
