@@ -335,12 +335,13 @@ async fn sse_handler(
         }
     });
 
-    // Emit an immediate comment so clients can distinguish a live SSE
-    // handshake from an idle stream that has not connected yet.
-    let stream = futures::stream::once(async {
-        Ok::<Event, Infallible>(Event::default().comment("connected"))
-    })
-    .chain(events);
+    // Emit an immediate data event so clients can distinguish a live SSE
+    // handshake from an idle stream that has not connected yet. A data event
+    // is used instead of a comment because some SSE clients reject empty
+    // comment frames as invalid events.
+    let stream =
+        futures::stream::once(async { Ok(Event::default().event("connected").data("{}")) })
+            .chain(events);
 
     Ok(Sse::new(stream).keep_alive(
         axum::response::sse::KeepAlive::new().interval(std::time::Duration::from_secs(10)),
