@@ -8,6 +8,7 @@ use crate::config::{
 use crate::events::AppEvent;
 use crate::soundpanel::intercept::InterceptSettings;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -100,6 +101,10 @@ pub struct SoundPanelState {
     /// panel). Never persisted.
     pub config_mode: Arc<Mutex<bool>>,
 
+    /// Transient focus flag used by the keyboard hook to let the active
+    /// SoundPanel handle F1-F12 itself.
+    window_focused: Arc<AtomicBool>,
+
     /// Активные воспроизведения звука (thread handles)
     active_playbacks: Arc<Mutex<Vec<JoinHandle<()>>>>,
 }
@@ -122,6 +127,7 @@ impl SoundPanelState {
             intercept: Arc::new(Mutex::new(intercept)),
             stay_visible: Arc::new(Mutex::new(false)),
             config_mode: Arc::new(Mutex::new(false)),
+            window_focused: Arc::new(AtomicBool::new(false)),
             active_playbacks: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -424,6 +430,14 @@ impl SoundPanelState {
         } else {
             error!(target = "soundpanel::state", "Failed to lock config_mode");
         }
+    }
+
+    pub fn is_window_focused(&self) -> bool {
+        self.window_focused.load(Ordering::Acquire)
+    }
+
+    pub fn set_window_focused(&self, focused: bool) {
+        self.window_focused.store(focused, Ordering::Release);
     }
 
     /// Получить настройки перехвата (clone)

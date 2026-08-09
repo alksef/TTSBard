@@ -24,6 +24,10 @@ static SP_HOOK_STATE: std::sync::OnceLock<Arc<SoundPanelState>> = std::sync::Onc
 #[cfg(target_os = "windows")]
 static APP_HANDLE: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
 
+fn should_bypass_intercept_for_soundpanel(window_focused: bool, vk_code: u32) -> bool {
+    window_focused && (0x70..=0x7B).contains(&vk_code)
+}
+
 /// Low-level keyboard hook procedure: pass-through + Intercept mode
 #[cfg(target_os = "windows")]
 unsafe extern "system" fn soundpanel_keyboard_proc(
@@ -38,6 +42,10 @@ unsafe extern "system" fn soundpanel_keyboard_proc(
         match w_param.0 as u32 {
             WM_KEYDOWN | WM_SYSKEYDOWN => {
                 if let Some(state) = SP_HOOK_STATE.get() {
+                    if should_bypass_intercept_for_soundpanel(state.is_window_focused(), vk_code) {
+                        return CallNextHookEx(HHOOK::default(), n_code, w_param, l_param);
+                    }
+
                     let intercept = state.get_intercept();
                     if !intercept.enabled {
                         return CallNextHookEx(HHOOK::default(), n_code, w_param, l_param);
@@ -67,6 +75,20 @@ unsafe extern "system" fn soundpanel_keyboard_proc(
     }
 
     CallNextHookEx(HHOOK::default(), n_code, w_param, l_param)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_bypass_intercept_for_soundpanel;
+
+    #[test]
+    fn active_soundpanel_bypasses_intercept_only_for_f1_through_f12() {
+        assert!(should_bypass_intercept_for_soundpanel(true, 0x70));
+        assert!(should_bypass_intercept_for_soundpanel(true, 0x7B));
+        assert!(!should_bypass_intercept_for_soundpanel(true, 0x6F));
+        assert!(!should_bypass_intercept_for_soundpanel(true, 0x7C));
+        assert!(!should_bypass_intercept_for_soundpanel(false, 0x70));
+    }
 }
 
 #[cfg(target_os = "windows")]

@@ -697,6 +697,9 @@ pub fn run() {
             #[cfg(windows)]
             if window.label() == "soundpanel" {
                 if let tauri::WindowEvent::Focused(focused) = event {
+                    let soundpanel_state =
+                        window.app_handle().state::<soundpanel::SoundPanelState>();
+                    soundpanel_state.set_window_focused(*focused);
                     if *focused {
                         // Возврат фокуса отменяет отложенное автокрытие.
                         let app_state = window.app_handle().state::<AppState>();
@@ -705,7 +708,6 @@ pub fn run() {
                     } else {
                         let app_handle = window.app_handle();
                         let win_mgr = app_handle.state::<WindowsManager>();
-                        let soundpanel_state = app_handle.state::<soundpanel::SoundPanelState>();
                         let hide_on_blur = win_mgr.get_soundpanel_hide_on_blur();
                         let stay_visible = soundpanel_state.get_stay_visible();
                         let config_mode = soundpanel_state.get_config_mode();

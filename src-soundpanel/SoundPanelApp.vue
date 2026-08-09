@@ -42,6 +42,8 @@ const bindings = ref<Binding[]>([])
 const activeSetId = ref<string>('')
 const activeSetName = ref<string>('')
 const sets = ref<SoundSet[]>([])
+const showSetMenu = ref(false)
+const setDropdownRef = ref<HTMLElement | null>(null)
 
 const mode = ref<'runtime' | 'config'>('runtime')
 
@@ -153,6 +155,7 @@ function getPrevSetIdx(): number {
 
 async function cycleSet(direction: 'next' | 'prev') {
   if (sets.value.length <= 1) return
+  showSetMenu.value = false
   const idx = direction === 'next' ? getNextSetIdx() : getPrevSetIdx()
   const newId = sets.value[idx].id
   await invoke('sp_set_active_set', { id: newId })
@@ -162,6 +165,18 @@ async function onSelectSet(id: string) {
   if (id === activeSetId.value) return
   await invoke('sp_set_active_set', { id })
   ;(document.activeElement as HTMLElement | null)?.blur()
+}
+
+async function selectSetFromMenu(id: string) {
+  showSetMenu.value = false
+  await onSelectSet(id)
+}
+
+function onSetDropdownFocusOut(event: FocusEvent) {
+  const nextTarget = event.relatedTarget as Node | null
+  if (!nextTarget || !setDropdownRef.value?.contains(nextTarget)) {
+    showSetMenu.value = false
+  }
 }
 
 async function onAddSet() {
@@ -404,6 +419,10 @@ function moveFocus(direction: string) {
 
 async function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
+    if (showSetMenu.value) {
+      showSetMenu.value = false
+      return
+    }
     if (showConfigDialog.value) {
       showConfigDialog.value = false
       return
@@ -413,6 +432,17 @@ async function onKeydown(e: KeyboardEvent) {
   }
   if (showConfigDialog.value) {
     return
+  }
+  if (!e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
+    const functionKey = /^F([1-9]|1[0-2])$/.exec(e.key)
+    if (functionKey) {
+      e.preventDefault()
+      const targetSet = sets.value[Number(functionKey[1]) - 1]
+      if (targetSet && targetSet.id !== activeSetId.value) {
+        await onSelectSet(targetSet.id)
+      }
+      return
+    }
   }
   if (e.ctrlKey === true && !e.shiftKey && !e.altKey && !e.metaKey && e.code === 'KeyB') {
     e.preventDefault()
@@ -545,14 +575,36 @@ onMounted(async () => {
           @click="cycleSet('prev')"
           title="Предыдущий слой (PageUp)"
         >&#9664;</button>
-        <select
-          class="set-select"
-          :value="activeSetId"
-          @change="onSelectSet(($event.target as HTMLSelectElement).value)"
-          title="Слой (PageUp / PageDown)"
+        <div
+          ref="setDropdownRef"
+          class="set-dropdown"
+          @focusout="onSetDropdownFocusOut"
         >
-          <option v-for="s in sets" :key="s.id" :value="s.id">{{ s.name }}</option>
-        </select>
+          <button
+            type="button"
+            class="set-select"
+            role="combobox"
+            aria-haspopup="listbox"
+            :aria-expanded="showSetMenu"
+            :title="`${activeSetName} (F1–F12 / PageUp / PageDown)`"
+            @click="showSetMenu = !showSetMenu"
+          >
+            <span class="set-select-label">{{ activeSetName }}</span>
+          </button>
+          <div v-if="showSetMenu" class="set-menu" role="listbox" aria-label="Слои SoundPanel">
+            <button
+              v-for="s in sets"
+              :key="s.id"
+              type="button"
+              class="set-option"
+              :class="{ selected: s.id === activeSetId }"
+              role="option"
+              :aria-selected="s.id === activeSetId"
+              :title="s.name"
+              @click="selectSetFromMenu(s.id)"
+            >{{ s.name }}</button>
+          </div>
+        </div>
         <button
           v-if="sets.length > 1"
           class="set-arrow"
@@ -842,16 +894,35 @@ body {
 }
 
 .set-select {
-  background: transparent;
+  background-color: transparent;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 8px) calc(50% - 1px),
+    calc(100% - 5px) calc(50% - 1px);
+  background-repeat: no-repeat;
+  background-size: 3px 3px;
   color: var(--panel-text);
   border: 1px solid var(--panel-border);
   border-radius: 3px;
   font-size: 12px;
   font-weight: 500;
-  padding: 2px 6px;
-  max-width: 140px;
+  padding: 2px 16px 2px 6px;
+  width: 140px;
+  height: 22px;
+  justify-content: flex-start;
+  text-align: left;
   cursor: pointer;
   -webkit-app-region: no-drag;
+}
+
+.set-select-label {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .set-select:hover { border-color: var(--panel-text); }
@@ -860,9 +931,53 @@ body {
   outline: none;
 }
 
-.set-select option {
-  background: transparent;
+.set-dropdown {
+  position: relative;
+  width: 140px;
+  -webkit-app-region: no-drag;
+}
+
+.set-menu {
+  position: absolute;
+  top: calc(100% + 3px);
+  left: 0;
+  z-index: 50;
+  width: 100%;
+  max-height: 156px;
+  overflow-y: auto;
+  padding: 3px;
+  background: color-mix(in srgb, var(--panel-bg) 58%, transparent);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(8px);
+}
+
+.set-option {
+  width: 100%;
+  height: 24px;
+  padding: 2px 6px;
+  justify-content: flex-start;
+  overflow: hidden;
+  border-color: transparent;
+  border-radius: 3px;
   color: var(--panel-text);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.set-option:hover,
+.set-option:focus-visible {
+  background: color-mix(in srgb, var(--panel-text) 12%, transparent);
+  border-color: var(--panel-border);
+  outline: none;
+}
+
+.set-option.selected {
+  background: rgba(100, 160, 255, 0.28);
 }
 
 .buttons {
