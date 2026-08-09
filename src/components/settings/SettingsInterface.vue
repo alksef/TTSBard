@@ -16,30 +16,34 @@ function showError(message: string) {
   emit('show-message', message);
 }
 
+function opacityToTransparency(opacity: number): number {
+  return Math.min(90, Math.max(0, 100 - opacity));
+}
+
+function transparencyToOpacity(transparency: number): number {
+  return Math.min(100, Math.max(10, 100 - transparency));
+}
+
 // ==================== Local state ====================
 
 // Main window
 const mainCustomBackground = ref(false);
 const mainBgColor = ref('#10131a');
-const mainOpacity = ref(100);
-const mainCustomOpacity = ref(false);
+const mainTransparency = ref(0);
 const mainOpacityCompactOnly = ref(false);
 
 // Sound panel
 const spSource = ref<'main' | 'own'>('own');
 const spBgColor = ref('#2a2a2a');
-const spOpacity = ref(90);
-const spHideOnBlur = ref(true);
+const spTransparency = ref(0);
 
 // Playback control
 const pbSource = ref<'main' | 'own'>('own');
 const pbBgColor = ref('#10131a');
-const pbOpacity = ref(94);
+const pbTransparency = ref(0);
 
-const spOwnDisabled = computed(() => spSource.value === 'main');
-const pbOwnDisabled = computed(() => pbSource.value === 'main');
-const mainOpacityDisabled = computed(() => !mainCustomOpacity.value);
-const mainCompactOnlyDisabled = computed(() => !mainCustomOpacity.value);
+const spColorDisabled = computed(() => spSource.value === 'main');
+const pbColorDisabled = computed(() => pbSource.value === 'main');
 
 // ==================== Theme ====================
 
@@ -72,22 +76,11 @@ async function saveMainBgColor() {
   }
 }
 
-async function saveMainOpacity() {
+async function saveMainTransparency() {
   try {
-    await invoke('set_main_opacity', { value: mainOpacity.value });
+    await invoke('set_main_opacity', { value: transparencyToOpacity(mainTransparency.value) });
   } catch (e) {
     showError('Ошибка сохранения прозрачности: ' + (e as Error).message);
-  }
-}
-
-async function toggleMainCustomOpacity() {
-  const newValue = !mainCustomOpacity.value;
-  mainCustomOpacity.value = newValue;
-  try {
-    await invoke('set_main_custom_opacity', { value: newValue });
-  } catch (e) {
-    mainCustomOpacity.value = !newValue;
-    showError('Ошибка сохранения настройки: ' + (e as Error).message);
   }
 }
 
@@ -123,22 +116,11 @@ async function saveSpBgColor() {
   }
 }
 
-async function saveSpOpacity() {
+async function saveSpTransparency() {
   try {
-    await invoke('sp_set_floating_opacity', { value: spOpacity.value });
+    await invoke('sp_set_floating_opacity', { value: transparencyToOpacity(spTransparency.value) });
   } catch (e) {
     showError('Ошибка сохранения прозрачности: ' + (e as Error).message);
-  }
-}
-
-async function toggleSpHideOnBlur() {
-  const newValue = !spHideOnBlur.value;
-  spHideOnBlur.value = newValue;
-  try {
-    await invoke('sp_set_hide_on_blur', { enabled: newValue });
-  } catch (e) {
-    spHideOnBlur.value = !newValue;
-    showError('Ошибка сохранения настройки: ' + (e as Error).message);
   }
 }
 
@@ -163,9 +145,9 @@ async function savePbBgColor() {
   }
 }
 
-async function savePbOpacity() {
+async function savePbTransparency() {
   try {
-    await invoke('pc_set_opacity', { value: pbOpacity.value });
+    await invoke('pc_set_opacity', { value: transparencyToOpacity(pbTransparency.value) });
   } catch (e) {
     showError('Ошибка сохранения прозрачности: ' + (e as Error).message);
   }
@@ -179,18 +161,17 @@ watch(
     if (!settings) return;
     mainCustomBackground.value = settings.main.custom_background;
     mainBgColor.value = settings.main.bg_color;
-    mainOpacity.value = settings.main.opacity;
-    mainCustomOpacity.value = settings.main.custom_opacity;
+    mainTransparency.value = settings.main.custom_opacity
+      ? opacityToTransparency(settings.main.opacity)
+      : 0;
     mainOpacityCompactOnly.value = settings.main.opacity_compact_only;
 
     spSource.value = settings.soundpanel.appearance_source === 'main' ? 'main' : 'own';
     spBgColor.value = settings.soundpanel.bg_color;
-    spOpacity.value = settings.soundpanel.opacity;
-    spHideOnBlur.value = settings.soundpanel.hide_on_blur;
-
+    spTransparency.value = opacityToTransparency(settings.soundpanel.opacity);
     pbSource.value = settings.playback.appearance_source === 'main' ? 'main' : 'own';
     pbBgColor.value = settings.playback.bg_color;
-    pbOpacity.value = settings.playback.opacity;
+    pbTransparency.value = opacityToTransparency(settings.playback.opacity);
   },
   { immediate: true, deep: true }
 );
@@ -242,18 +223,6 @@ watch(
         <span class="setting-hint">Если выключено, используется цвет активной темы</span>
       </div>
 
-      <div class="setting-row" style="margin-bottom: 0.75rem">
-        <label class="setting-label checkbox-label">
-          <input
-            :checked="mainCustomOpacity"
-            type="checkbox"
-            class="checkbox-input"
-            @change="toggleMainCustomOpacity"
-          />
-          <span>Использовать свою прозрачность</span>
-        </label>
-      </div>
-
       <div class="appearance-grid" style="margin-bottom: 0.5rem">
         <div class="appearance-column">
           <label class="setting-label">Цвет</label>
@@ -282,27 +251,25 @@ watch(
           <label class="setting-label">Прозрачность</label>
           <div class="appearance-controls">
             <input
-              v-model.number="mainOpacity"
+              v-model.number="mainTransparency"
               type="range"
-              min="10"
-              max="100"
+              min="0"
+              max="90"
               step="5"
               class="slider-input inline-slider"
-              :disabled="mainOpacityDisabled"
-              @change="saveMainOpacity"
+              @change="saveMainTransparency"
             />
-            <span class="opacity-value">{{ mainOpacity }}%</span>
+            <span class="opacity-value">{{ mainTransparency }}%</span>
           </div>
         </div>
       </div>
 
-      <div class="setting-row indent-row" :class="{ 'row-disabled': mainCompactOnlyDisabled }">
+      <div class="setting-row indent-row">
         <label class="setting-label checkbox-label">
           <input
             :checked="mainOpacityCompactOnly"
             type="checkbox"
             class="checkbox-input"
-            :disabled="mainCompactOnlyDisabled"
             @change="toggleMainOpacityCompactOnly"
           />
           <span>Применять прозрачность только в компактном режиме</span>
@@ -336,7 +303,7 @@ watch(
               v-model="spBgColor"
               type="color"
               class="color-input"
-              :disabled="spOwnDisabled"
+              :disabled="spColorDisabled"
               @change="saveSpBgColor"
             />
             <input
@@ -345,7 +312,7 @@ watch(
               placeholder="#2a2a2a"
               class="text-input color-text"
               maxlength="7"
-              :disabled="spOwnDisabled"
+              :disabled="spColorDisabled"
               @blur="saveSpBgColor"
               @keyup.enter="saveSpBgColor"
             />
@@ -356,31 +323,19 @@ watch(
           <label class="setting-label">Прозрачность</label>
           <div class="appearance-controls">
             <input
-              v-model.number="spOpacity"
+              v-model.number="spTransparency"
               type="range"
-              min="10"
-              max="100"
+              min="0"
+              max="90"
               step="5"
               class="slider-input inline-slider"
-              :disabled="spOwnDisabled"
-              @change="saveSpOpacity"
+              @change="saveSpTransparency"
             />
-            <span class="opacity-value">{{ spOpacity }}%</span>
+            <span class="opacity-value">{{ spTransparency }}%</span>
           </div>
         </div>
       </div>
 
-      <div class="setting-row" style="margin-top: 0.75rem">
-        <label class="setting-label checkbox-label">
-          <input
-            :checked="spHideOnBlur"
-            type="checkbox"
-            class="checkbox-input"
-            @change="toggleSpHideOnBlur"
-          />
-          <span>Скрывать при потере фокуса</span>
-        </label>
-      </div>
     </section>
 
     <!-- Playback control -->
@@ -408,7 +363,7 @@ watch(
               v-model="pbBgColor"
               type="color"
               class="color-input"
-              :disabled="pbOwnDisabled"
+              :disabled="pbColorDisabled"
               @change="savePbBgColor"
             />
             <input
@@ -417,7 +372,7 @@ watch(
               placeholder="#10131a"
               class="text-input color-text"
               maxlength="7"
-              :disabled="pbOwnDisabled"
+              :disabled="pbColorDisabled"
               @blur="savePbBgColor"
               @keyup.enter="savePbBgColor"
             />
@@ -428,16 +383,15 @@ watch(
           <label class="setting-label">Прозрачность</label>
           <div class="appearance-controls">
             <input
-              v-model.number="pbOpacity"
+              v-model.number="pbTransparency"
               type="range"
-              min="10"
-              max="100"
+              min="0"
+              max="90"
               step="5"
               class="slider-input inline-slider"
-              :disabled="pbOwnDisabled"
-              @change="savePbOpacity"
+              @change="savePbTransparency"
             />
-            <span class="opacity-value">{{ pbOpacity }}%</span>
+            <span class="opacity-value">{{ pbTransparency }}%</span>
           </div>
         </div>
       </div>
@@ -524,6 +478,10 @@ watch(
   flex-wrap: wrap;
 }
 
+.appearance-column:last-child .appearance-controls {
+  padding-top: 12px;
+}
+
 .color-input {
   width: 50px;
   height: 36px;
@@ -552,6 +510,10 @@ watch(
   font-size: 1rem;
   background: var(--color-bg-field);
   color: var(--color-text-primary);
+}
+
+.text-input.color-text {
+  font-size: 14px;
 }
 
 .text-input:disabled {

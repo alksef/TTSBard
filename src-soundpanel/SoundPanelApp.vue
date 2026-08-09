@@ -811,7 +811,7 @@ body {
 }
 
 .set-select {
-  background: color-mix(in srgb, var(--panel-text) 8%, transparent);
+  background: transparent;
   color: var(--panel-text);
   border: 1px solid var(--panel-border);
   border-radius: 3px;
@@ -830,7 +830,7 @@ body {
 }
 
 .set-select option {
-  background: var(--panel-bg);
+  background: transparent;
   color: var(--panel-text);
 }
 

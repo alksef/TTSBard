@@ -202,7 +202,15 @@ pub fn load_appearance(
     let opacity = windows_manager.get_soundpanel_opacity();
     let bg_color = windows_manager.get_soundpanel_bg_color();
     let clickthrough = windows_manager.get_soundpanel_clickthrough();
-    let stay_visible = windows_manager.get_soundpanel_stay_visible();
+    let stored_stay_visible = windows_manager.get_soundpanel_stay_visible();
+    let hide_on_blur = windows_manager.get_soundpanel_hide_on_blur();
+    let stay_visible = normalize_pin_state(stored_stay_visible, hide_on_blur);
+
+    if stored_stay_visible != stay_visible || hide_on_blur == stay_visible {
+        windows_manager
+            .set_soundpanel_stay_visible(stay_visible)
+            .map_err(|e| format!("Failed to migrate SoundPanel pin state: {}", e))?;
+    }
 
     info!(
         opacity,
@@ -221,10 +229,22 @@ pub fn load_appearance(
     })
 }
 
+fn normalize_pin_state(stay_visible: bool, hide_on_blur: bool) -> bool {
+    stay_visible || !hide_on_blur
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::soundpanel::state::SoundSet;
+
+    #[test]
+    fn pin_state_preserves_legacy_hide_on_blur_opt_out() {
+        assert!(normalize_pin_state(false, false));
+        assert!(normalize_pin_state(true, true));
+        assert!(normalize_pin_state(true, false));
+        assert!(!normalize_pin_state(false, true));
+    }
 
     #[test]
     fn test_migration_old_vec_to_sound_sets() {

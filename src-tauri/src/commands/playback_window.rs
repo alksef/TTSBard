@@ -10,17 +10,19 @@ use tracing::info;
 
 /// Get playback window appearance (opacity, bg_color)
 ///
-/// If `appearance_source == "main"`, the appearance is inherited from the main
+/// If `appearance_source == "main"`, the color is inherited from the main
 /// window settings (resolving the active theme when no custom color is set).
+/// Opacity always uses the playback window's own saved setting.
 #[tauri::command]
 pub fn pc_get_appearance(
     windows_manager: State<'_, WindowsManager>,
     settings_manager: State<'_, SettingsManager>,
 ) -> Result<(u8, String), String> {
-    if windows_manager.get_playback_appearance_source() == "main" {
-        return Ok(resolve_main_appearance(&windows_manager, &settings_manager));
-    }
     let opacity = windows_manager.get_playback_opacity();
+    if windows_manager.get_playback_appearance_source() == "main" {
+        let (_, color) = resolve_main_appearance(&windows_manager, &settings_manager);
+        return Ok((opacity, color));
+    }
     let color = windows_manager.get_playback_bg_color();
     Ok((opacity, color))
 }

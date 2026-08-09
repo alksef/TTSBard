@@ -162,18 +162,20 @@ pub fn sp_is_supported_format(filename: String) -> Result<bool, String> {
 
 /// Получить настройки внешнего вида floating окна звуковой панели
 ///
-/// Если `appearance_source == "main"`, оформление наследуется от главного окна
+/// Если `appearance_source == "main"`, цвет наследуется от главного окна
 /// (с учётом активной темы, когда собственный цвет главного окна выключен).
+/// Прозрачность всегда берётся из собственной настройки SoundPanel.
 #[tauri::command]
 pub fn sp_get_floating_appearance(
     state: State<'_, SoundPanelState>,
     windows_manager: State<'_, WindowsManager>,
     settings_manager: State<'_, SettingsManager>,
 ) -> Result<(u8, String), String> {
-    if windows_manager.get_soundpanel_appearance_source() == "main" {
-        return Ok(resolve_main_appearance(&windows_manager, &settings_manager));
-    }
     let opacity = state.get_floating_opacity();
+    if windows_manager.get_soundpanel_appearance_source() == "main" {
+        let (_, color) = resolve_main_appearance(&windows_manager, &settings_manager);
+        return Ok((opacity, color));
+    }
     let color = state.get_floating_bg_color();
     Ok((opacity, color))
 }
@@ -258,19 +260,6 @@ pub fn sp_set_stay_visible(
         .map_err(|e| format!("Failed to save settings: {}", e))?;
     state.set_stay_visible(enabled);
     let _ = update_soundpanel_appearance(&app_handle);
-    Ok(())
-}
-
-/// Установить, скрывать ли панель при потере фокуса
-#[tauri::command]
-pub fn sp_set_hide_on_blur(
-    enabled: bool,
-    windows_manager: State<'_, WindowsManager>,
-) -> Result<(), String> {
-    info!(enabled, "Setting hide_on_blur");
-    windows_manager
-        .set_soundpanel_hide_on_blur(enabled)
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
     Ok(())
 }
 

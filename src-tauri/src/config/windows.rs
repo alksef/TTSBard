@@ -377,10 +377,11 @@ impl WindowsManager {
         })
     }
 
-    /// Set main window opacity
+    /// Set main window opacity and enable custom opacity.
     pub fn set_main_opacity(&self, opacity: u8) -> Result<()> {
         self.update(|s| {
             s.main.opacity = validate_opacity(opacity);
+            s.main.custom_opacity = true;
         })
     }
 
@@ -481,19 +482,13 @@ impl WindowsManager {
     pub fn set_soundpanel_stay_visible(&self, stay_visible: bool) -> Result<()> {
         self.update(|s| {
             s.soundpanel.stay_visible = stay_visible;
+            s.soundpanel.hide_on_blur = !stay_visible;
         })
     }
 
     /// Get soundpanel stay_visible
     pub fn get_soundpanel_stay_visible(&self) -> bool {
         self.cache.read().soundpanel.stay_visible
-    }
-
-    /// Set soundpanel hide_on_blur
-    pub fn set_soundpanel_hide_on_blur(&self, hide_on_blur: bool) -> Result<()> {
-        self.update(|s| {
-            s.soundpanel.hide_on_blur = hide_on_blur;
-        })
     }
 
     /// Get soundpanel hide_on_blur
@@ -592,6 +587,41 @@ impl WindowsManager {
 mod tests {
     use super::*;
 
+    #[test]
+    fn soundpanel_pin_updates_visibility_flags_together() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let config_dir = std::env::temp_dir().join(format!(
+            "ttsbard-windows-pin-test-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let defaults = WindowsSettings::default();
+        std::fs::write(
+            config_dir.join("windows.json"),
+            serde_json::to_string_pretty(&defaults).unwrap(),
+        )
+        .unwrap();
+        let manager = WindowsManager {
+            config_dir: config_dir.clone(),
+            cache: Arc::new(RwLock::new(defaults)),
+        };
+
+        manager.set_soundpanel_stay_visible(true).unwrap();
+        assert!(manager.get_soundpanel_stay_visible());
+        assert!(!manager.get_soundpanel_hide_on_blur());
+
+        manager.set_soundpanel_stay_visible(false).unwrap();
+        assert!(!manager.get_soundpanel_stay_visible());
+        assert!(manager.get_soundpanel_hide_on_blur());
+
+        let _ = std::fs::remove_dir_all(&config_dir);
+    }
+
     /// Regression: two concurrent setter calls on different fields must both
     /// survive without either update being lost.
     #[test]
@@ -647,6 +677,7 @@ mod tests {
         let settings: WindowsSettings = serde_json::from_str(&content).unwrap();
 
         assert_eq!(settings.main.opacity, 42);
+        assert!(settings.main.custom_opacity);
         assert_eq!(settings.soundpanel.x, Some(100));
         assert_eq!(settings.soundpanel.y, Some(200));
 
