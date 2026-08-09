@@ -115,6 +115,30 @@ Typing state также раздаётся отдельным consumers WebView 
 Контракты браузерного клиента описаны в [WebView](../integrations/webview.md) и
 [SSE](../integrations/sse.md).
 
+### SoundPanel
+
+SoundPanel — отдельное Tauri/WebView-окно, а не панель главного frontend:
+
+- `src-soundpanel/SoundPanelApp.vue` владеет QWERTY-сеткой, локальным keydown,
+  режимами runtime/config и UI слоёв;
+- `soundpanel/bindings.rs` предоставляет IPC для слоёв, назначений, запуска
+  звука, Escape, appearance и закрепления;
+- `SoundPanelState` хранит runtime-наборы, active layer, runtime-копию
+  persisted `stay_visible`, config-mode и transient focused flag;
+- `soundpanel_window.rs` владеет показом, скрытием, возвратом foreground HWND и
+  отложенным blur-hide;
+- low-level hook в `soundpanel/hook.rs` обслуживает глобальный Intercept. Когда
+  SoundPanel в фокусе, F1–F12 пропускаются в DOM для локального выбора слоя;
+  вне активной панели Intercept сохраняет обычное глобальное поведение.
+
+Слои и назначения сохраняются в `soundpanel_bindings.json`. Геометрия,
+appearance и закрепление находятся в `windows.json`. Пользовательский pin —
+единый source of truth: `stay_visible=true` означает, что blur, Escape и запуск
+звука не скрывают окно; legacy `hide_on_blur` нормализуется как обратный флаг.
+
+Пользовательский контракт описан в [руководстве по SoundPanel](../user/soundpanel.md),
+а эволюция сетки и режимов — в [ROADMAP-065](../roadmap/active/065-soundpanel-keyboard-layout-runtime-config.md).
+
 ### Запуск и завершение
 
 `setup.rs` восстанавливает настройки, создаёт каналы и запускает workers.
