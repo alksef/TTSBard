@@ -490,6 +490,10 @@ onUnmounted(() => {
   color: var(--color-text-primary);
 }
 
+.titlebar-btn.close {
+  color: color-mix(in srgb, var(--color-text-secondary) 75%, transparent);
+}
+
 .titlebar-btn.close:hover {
   background: var(--status-disconnected, #e5484d);
   color: var(--color-text-white, #fff);

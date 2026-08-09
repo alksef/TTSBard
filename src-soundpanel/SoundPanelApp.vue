@@ -653,9 +653,10 @@ onMounted(async () => {
             <line x1="2" y1="2" x2="22" y2="22"/>
           </svg>
         </button>
-        <button @click="closeWindow" title="Закрыть (Esc)">
+        <button class="close-btn" @click="closeWindow" title="Закрыть (Esc)" aria-label="Закрыть">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M18 6L6 18M6 6l12 12"/>
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
           </svg>
         </button>
       </div>
@@ -1004,6 +1005,21 @@ button {
 button:hover {
   background: rgba(255, 255, 255, 0.1);
   border-color: var(--panel-text);
+}
+
+.close-btn {
+  width: 30px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  color: var(--panel-muted);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.close-btn:hover {
+  background: #e5484d;
+  border-color: transparent;
+  color: #fff;
 }
 
 button:active {

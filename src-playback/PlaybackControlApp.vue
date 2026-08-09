@@ -407,7 +407,12 @@ const pauseIcon = () =>
       <span class="status-badge" :class="playbackStatus.toLowerCase()">
         {{ playbackStatus }}
       </span>
-      <button class="close-btn" @click="closeWindow" title="Закрыть" aria-label="Закрыть">✕</button>
+      <button class="close-btn" @click="closeWindow" title="Закрыть" aria-label="Закрыть">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+      </button>
     </div>
 
     <div class="current-section">
@@ -686,24 +691,23 @@ body {
 }
 
 .close-btn {
-  width: 24px;
-  height: 24px;
+  width: 30px;
+  height: 26px;
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: var(--text-muted);
-  font-size: 0.9rem;
+  color: var(--title-text);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s;
+  transition: background 0.15s ease, color 0.15s ease;
   flex-shrink: 0;
 }
 
 .close-btn:hover {
-  background: rgba(255, 111, 105, 0.2);
-  color: #ff6f69;
+  background: #e5484d;
+  color: #fff;
 }
 
 .current-section {
