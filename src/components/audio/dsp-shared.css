@@ -1,14 +1,28 @@
-.dsp-subsection {
-  margin-bottom: 12px;
-  padding: 10px 14px;
+.dsp-subsection .section-header {
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  gap: 8px;
 }
 
-.dsp-subsection:last-child {
+.dsp-subsection .section-title {
+  font-size: 1rem;
+}
+
+.dsp-subsection .setting-row {
+  margin-bottom: 5px;
+  gap: 8px;
+}
+
+.dsp-subsection .setting-row:last-child {
   margin-bottom: 0;
 }
 
+.dsp-subsection .volume-control {
+  gap: 8px;
+}
+
 .dsp-band-block {
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .dsp-band-block:last-child {
@@ -16,17 +30,17 @@
 }
 
 .dsp-band-block .setting-row:last-child {
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 
 .limiter-hint {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-size: 12px;
   color: var(--color-text-muted);
-  margin-top: 8px;
-  padding: 6px 10px;
+  margin-top: 4px;
+  padding: 4px 8px;
   background: var(--info-bg-weak);
   border: 1px solid var(--info-border);
   border-radius: 6px;
@@ -57,8 +71,9 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: var(--color-surface-dim, rgba(255,255,255,0.15));
-  transition: 0.3s;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  transition: 0.25s;
   border-radius: 24px;
 }
 
@@ -67,37 +82,19 @@
   content: "";
   height: 18px;
   width: 18px;
-  left: 3px;
-  bottom: 3px;
-  background-color: white;
-  transition: 0.3s;
+  left: 2px;
+  bottom: 2px;
+  background: var(--color-text-secondary);
+  transition: 0.25s;
   border-radius: 50%;
 }
 
 input:checked + .toggle-slider {
   background: var(--color-accent);
+  border-color: var(--color-accent);
 }
 
 input:checked + .toggle-slider:before {
   transform: translateX(20px);
-}
-
-.collapse-btn {
-  flex-shrink: 0;
-  padding: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--color-border);
-  background: var(--color-bg-field);
-  color: var(--color-text-secondary);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.collapse-btn:hover {
-  background: var(--color-bg-field-hover);
-  border-color: var(--color-border-strong);
-  color: var(--color-text-primary);
+  background: var(--color-text-white);
 }

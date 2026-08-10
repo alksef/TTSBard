@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, nextTick } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import { Loader, Play, AudioLines, Sliders, Upload, Square, FileAudio, ShieldCheck, X, FolderOpen, TriangleAlert, ChevronDown, ChevronUp } from 'lucide-vue-next';
 import { useAudioSettings, useAudioEffectsSettings, useDspSettings } from '../../composables/useAppSettings';
 import DspSettings from './DspSettings.vue';
+import EffectsSettings from './EffectsSettings.vue';
+import AudioPreviewBar from './AudioPreviewBar.vue';
 
 const audioSettingsFromComposable = useAudioSettings();
 const audioEffectsFromComposable = useAudioEffectsSettings();
@@ -92,10 +93,39 @@ function createClearDsp() {
 const draftDsp = ref(createNaturalDsp());
 const savedDsp = ref(createNaturalDsp());
 const dspDirty = ref(false);
-const effectsCollapsed = ref(false);
-const dspMainCollapsed = ref(false);
-const dspCollapsed = ref({ eq: false, compressor: false, limiter: false });
+const activeSection = ref<'effects' | 'dsp'>('effects');
 const dspPreset = ref<'natural' | 'clear' | 'custom'>('natural');
+
+const emit = defineEmits<{
+  (e: 'dirty-change', dirty: boolean): void;
+}>();
+
+watch(() => isDirty.value || dspDirty.value, (val) => {
+  emit('dirty-change', val);
+}, { immediate: true });
+
+const secondaryTabs = ['effects', 'dsp'] as const;
+
+function handleSecondaryTabKey(e: KeyboardEvent) {
+  const idx = secondaryTabs.indexOf(activeSection.value);
+  let next: number;
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+    next = idx <= 0 ? secondaryTabs.length - 1 : idx - 1;
+  } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+    next = idx >= secondaryTabs.length - 1 ? 0 : idx + 1;
+  } else if (e.key === 'Home') {
+    next = 0;
+  } else if (e.key === 'End') {
+    next = secondaryTabs.length - 1;
+  } else {
+    return;
+  }
+  e.preventDefault();
+  activeSection.value = secondaryTabs[next];
+  nextTick(() => {
+    document.getElementById(`tab-${secondaryTabs[next]}`)?.focus();
+  });
+}
 
 function bodiesEqual<T extends Record<string, unknown>>(a: T, b: T): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
@@ -162,10 +192,6 @@ function cancelAll() {
   saveStatus.value = 'idle';
   saveError.value = '';
   dspPreset.value = detectDspPreset();
-}
-
-function toggleDspCollapse(section: 'eq' | 'compressor' | 'limiter') {
-  dspCollapsed.value[section] = !dspCollapsed.value[section];
 }
 
 const selectedFile = ref<{ path: string; name: string; size: number } | null>(null);
@@ -335,263 +361,89 @@ watch(dspSettingsFromComposable, (newDsp) => {
 
 <template>
   <div class="unified-tab">
-    <!-- Shared preview panel (fixed above scroll) -->
-    <div class="preview-panel-fixed">
-      <div class="setting-section">
-        <div class="section-header">
-          <FileAudio class="section-icon" :size="20" />
-          <span class="section-title">Проверка эффектов</span>
-          <span v-if="isPreviewPlaying" class="playback-status-inline">
-            <Loader :size="14" class="spinner" /> Воспроизведение...
-          </span>
-        </div>
+    <AudioPreviewBar
+      :selectedFile="selectedFile"
+      :fileFormat="fileFormat"
+      :isPreviewPlaying="isPreviewPlaying"
+      :previewError="previewError"
+      @pick-file="pickFile"
+      @replace-file="replaceFile"
+      @clear-file="clearFile"
+      @play-preview="playPreview"
+      @stop-preview="stopPreview"
+    />
 
-        <div class="preview-hint">
-          Режим «Все эффекты» использует текущие настройки эффектов и DSP, даже если они ещё не сохранены.
-        </div>
-
-        <div v-if="!selectedFile" class="preview-empty">
-          <button @click="pickFile" class="action-btn">
-            <Upload :size="16" /> Выбрать аудиофайл
-          </button>
-        </div>
-
-        <div v-else class="preview-active">
-          <div class="file-info">
-            <span class="file-name">{{ selectedFile.name }}</span>
-            <span class="file-format">{{ fileFormat }}</span>
-            <button
-              @click="replaceFile"
-              class="file-action-btn"
-              title="Заменить файл"
-              aria-label="Заменить файл"
-            >
-              <FolderOpen :size="14" />
-            </button>
-            <button
-              @click="clearFile"
-              class="file-action-btn"
-              title="Очистить выбранный файл"
-              aria-label="Очистить выбранный файл"
-            >
-              <X :size="14" />
-            </button>
-          </div>
-
-          <div class="preview-controls">
-            <button
-              @click="playPreview('original')"
-              :disabled="isPreviewPlaying"
-              class="play-btn"
-              title="Оригинал без эффектов и DSP"
-              aria-label="Воспроизвести оригинал"
-            >
-              <Play :size="16" /> Оригинал
-            </button>
-            <button
-              @click="playPreview('effects')"
-              :disabled="isPreviewPlaying"
-              class="play-btn"
-              title="Со всеми эффектами и DSP"
-              aria-label="Воспроизвести со всеми эффектами"
-            >
-              <AudioLines :size="16" /> Все эффекты
-            </button>
-            <button
-              @click="stopPreview"
-              :disabled="!isPreviewPlaying"
-              class="play-btn stop-btn"
-              title="Остановить воспроизведение"
-              aria-label="Остановить воспроизведение"
-            >
-              <Square :size="16" /> Стоп
-            </button>
-          </div>
-
-          <div v-if="previewError" class="preview-status error">{{ previewError }}</div>
-          <div v-else-if="isDirty || dspDirty" class="preview-status dirty-indicator">
-            <TriangleAlert :size="12" /> Превью с несохранёнными изменениями
-    </div>
-    </div>
-    </div>
-  </div>
-
-    <div v-if="isDirty || dspDirty" class="draft-warning" role="status">
-      <TriangleAlert :size="18" />
-      <span>Есть несохранённые изменения.</span>
+    <div class="secondary-tab-row">
+      <div class="secondary-tabs" role="tablist" aria-label="Вторичные вкладки">
+        <button
+          id="tab-effects"
+          role="tab"
+          :aria-selected="activeSection === 'effects'"
+          :tabindex="activeSection === 'effects' ? 0 : -1"
+          aria-controls="panel-effects"
+          :class="{ active: activeSection === 'effects' }"
+          @click="activeSection = 'effects'"
+          @keydown="handleSecondaryTabKey"
+        >
+          Эффекты
+        </button>
+        <button
+          id="tab-dsp"
+          role="tab"
+          :aria-selected="activeSection === 'dsp'"
+          :tabindex="activeSection === 'dsp' ? 0 : -1"
+          aria-controls="panel-dsp"
+          :class="{ active: activeSection === 'dsp' }"
+          @click="activeSection = 'dsp'"
+          @keydown="handleSecondaryTabKey"
+        >
+          DSP
+        </button>
+      </div>
+      <div v-if="isDirty || dspDirty" class="dirty-chip" role="status" aria-label="Изменения не сохранены">
+        <span class="dirty-chip-marker" aria-hidden="true">*</span>
+        <span>Изменения не сохранены</span>
+      </div>
     </div>
 
     <div class="effects-scroll">
-
-    <!-- Boundary cleanup section -->
-    <div class="setting-section">
-      <div class="section-header">
-        <ShieldCheck class="section-icon" :size="20" />
-        <span class="section-title">Обработка границ фраз</span>
-        <label class="toggle-switch">
-          <input
-            type="checkbox"
-            v-model="draftEffects.boundary_cleanup_enabled"
-            @change="markDirty"
-          />
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-      <div class="model-hint">Исправление резких начал и концов фраз</div>
-    </div>
-
-    <!-- Voice effects section (collapsible) -->
-    <div class="setting-section">
-      <div class="section-header">
-        <Sliders class="section-icon" :size="20" />
-        <span class="section-title">Преобразование голоса</span>
-        <label class="toggle-switch">
-          <input
-            type="checkbox"
-            v-model="draftEffects.enabled"
-            @change="markDirty"
-          />
-          <span class="toggle-slider"></span>
-        </label>
-        <button
-          @click="effectsCollapsed = !effectsCollapsed"
-          class="collapse-btn"
-          :title="effectsCollapsed ? 'Развернуть эффекты голоса' : 'Свернуть эффекты голоса'"
-          :aria-label="effectsCollapsed ? 'Развернуть эффекты голоса' : 'Свернуть эффекты голоса'"
-        >
-          <ChevronDown v-if="effectsCollapsed" :size="16" />
-          <ChevronUp v-else :size="16" />
-        </button>
+      <div
+        v-if="activeSection === 'effects'"
+        id="panel-effects"
+        role="tabpanel"
+        aria-labelledby="tab-effects"
+      >
+        <EffectsSettings
+          :draftEffects="draftEffects"
+          :tempoLabel="tempoLabel"
+          @mark-dirty="markDirty"
+          @set-effect-value="setEffectValue"
+          @set-enhance-atten-db="setEnhanceAttenDb"
+        />
       </div>
 
-      <div v-show="!effectsCollapsed">
-
-      <div class="setting-row slider-row" :class="{ disabled: !draftEffects.enabled }">
-        <label>Высота</label>
-        <div class="slider-group">
-          <div class="volume-control">
-            <input type="range" min="-100" max="100" step="1" v-model.number="draftEffects.pitch" @input="markDirty" :disabled="!draftEffects.enabled" />
-            <span class="volume-value">{{ draftEffects.pitch }}%</span>
-          </div>
-          <div class="slider-marks">
-            <button type="button" class="mark-btn" :class="{ active: draftEffects.pitch === -100 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', -100)" style="left: 0%">−100</button>
-            <button type="button" class="mark-btn" :class="{ active: draftEffects.pitch === -75 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', -75)" style="left: 12.5%">−75</button>
-            <button type="button" class="mark-btn" :class="{ active: draftEffects.pitch === -50 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', -50)" style="left: 25%">−50</button>
-            <button type="button" class="mark-btn" :class="{ active: draftEffects.pitch === -25 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', -25)" style="left: 37.5%">−25</button>
-            <button type="button" class="mark-btn" :class="{ active: draftEffects.pitch === 0 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', 0)" style="left: 50%">0</button>
-            <button type="button" class="mark-btn" :class="{ active: draftEffects.pitch === 25 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', 25)" style="left: 62.5%">+25</button>
-            <button type="button" class="mark-btn" :class="{ active: draftEffects.pitch === 50 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', 50)" style="left: 75%">+50</button>
-            <button type="button" class="mark-btn" :class="{ active: draftEffects.pitch === 75 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', 75)" style="left: 87.5%">+75</button>
-            <button type="button" class="mark-btn" :class="{ active: draftEffects.pitch === 100 }" :disabled="!draftEffects.enabled" @click="setEffectValue('pitch', 100)" style="left: 100%">+100</button>
-          </div>
+      <div
+        v-if="activeSection === 'dsp'"
+        id="panel-dsp"
+        role="tabpanel"
+        aria-labelledby="tab-dsp"
+      >
+        <div class="dsp-settings-wrapper">
+          <DspSettings
+            :draftDsp="draftDsp"
+            :dspPreset="dspPreset"
+            @mark-dirty="markDspDirty"
+            @set-preset="setDspPreset"
+          />
         </div>
       </div>
-
-      <div class="setting-row slider-row" :class="{ disabled: !draftEffects.enabled }">
-        <label>Темп</label>
-        <div class="slider-group">
-          <div class="volume-control">
-            <input type="range" min="-100" max="100" step="1" v-model.number="draftEffects.speed" @input="markDirty" :disabled="!draftEffects.enabled" />
-            <span class="volume-value">{{ tempoLabel }}</span>
-          </div>
-          <div class="slider-marks tempo-marks">
-            <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === -100 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', -100)" style="left: 0%">0.75×</button>
-            <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === -40 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', -40)" style="left: 30%">0.90×</button>
-            <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === 0 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', 0)" style="left: 50%">1.00×</button>
-            <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === 50 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', 50)" style="left: 75%">1.25×</button>
-            <button type="button" class="mark-btn" :class="{ active: draftEffects.speed === 100 }" :disabled="!draftEffects.enabled" @click="setEffectValue('speed', 100)" style="left: 100%">1.50×</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="setting-row slider-row" :class="{ disabled: !draftEffects.enabled }">
-        <label>Громкость</label>
-        <div class="slider-group">
-          <div class="volume-control">
-            <input type="range" min="0" max="200" step="1" v-model.number="draftEffects.volume" @input="markDirty" :disabled="!draftEffects.enabled" />
-            <span class="volume-value">{{ draftEffects.volume }}%</span>
-          </div>
-          <div class="slider-marks">
-            <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 0 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 0)" style="left: 0%" aria-label="Без звука, 0%" title="Без звука, 0%">0</button>
-            <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 25 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 25)" style="left: 12.5%">25</button>
-            <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 50 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 50)" style="left: 25%">50</button>
-            <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 75 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 75)" style="left: 37.5%">75</button>
-            <button type="button" class="mark-btn mark-btn--default" :class="{ active: draftEffects.volume === 100 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 100)" style="left: 50%" aria-label="Нормальная громкость, 100%" title="Нормальная громкость, 100%">100</button>
-            <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 125 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 125)" style="left: 62.5%">125</button>
-            <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 150 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 150)" style="left: 75%">150</button>
-            <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 175 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 175)" style="left: 87.5%">175</button>
-            <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 200 }" :disabled="!draftEffects.enabled" @click="setEffectValue('volume', 200)" style="left: 100%">200</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="setting-row" :class="{ disabled: !draftEffects.enabled }">
-        <label class="setting-label">Сохранять тембр голоса</label>
-        <label class="toggle-switch">
-          <input
-            type="checkbox"
-            v-model="draftEffects.formant_preserved"
-            @change="markDirty"
-            :disabled="!draftEffects.enabled"
-          />
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-
-      </div>
-    </div>
-
-    <div class="setting-section">
-      <div class="section-header">
-        <ShieldCheck class="section-icon" :size="20" />
-        <span class="section-title">Очистка шума — DeepFilterNet</span>
-        <label class="toggle-switch">
-          <input
-            type="checkbox"
-            v-model="draftEffects.enhance_enabled"
-            @change="markDirty"
-          />
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-
-      <div class="setting-row slider-row" :class="{ disabled: !draftEffects.enhance_enabled }">
-        <label>Глубина очистки</label>
-        <div class="slider-group">
-          <div class="volume-control">
-            <input type="range" min="5" max="30" step="1" v-model.number="draftEffects.enhance_atten_db" @input="markDirty" :disabled="!draftEffects.enhance_enabled" />
-            <span class="volume-value">{{ draftEffects.enhance_atten_db }} dB</span>
-          </div>
-          <div class="slider-marks">
-            <button type="button" class="mark-btn" :class="{ active: draftEffects.enhance_atten_db === 5 }" :disabled="!draftEffects.enhance_enabled" @click="setEnhanceAttenDb(5)" style="left: 0%">5</button>
-            <button type="button" class="mark-btn mark-btn--default" :class="{ active: draftEffects.enhance_atten_db === 12 }" :disabled="!draftEffects.enhance_enabled" @click="setEnhanceAttenDb(12)" style="left: 28%" title="Значение по умолчанию, 12 dB" aria-label="Значение по умолчанию, 12 dB">12</button>
-            <button type="button" class="mark-btn" :class="{ active: draftEffects.enhance_atten_db === 20 }" :disabled="!draftEffects.enhance_enabled" @click="setEnhanceAttenDb(20)" style="left: 60%">20</button>
-            <button type="button" class="mark-btn" :class="{ active: draftEffects.enhance_atten_db === 30 }" :disabled="!draftEffects.enhance_enabled" @click="setEnhanceAttenDb(30)" style="left: 100%">30</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="model-hint">Чрезмерное подавление может вызвать артефакты речи</div>
-    </div>
-
-    <div class="dsp-settings-wrapper">
-      <DspSettings
-        :draftDsp="draftDsp"
-        :dspMainCollapsed="dspMainCollapsed"
-        :dspPreset="dspPreset"
-        :dspCollapsed="dspCollapsed"
-        @mark-dirty="markDspDirty"
-        @set-preset="setDspPreset"
-        @toggle-main="dspMainCollapsed = !dspMainCollapsed"
-        @toggle-section="toggleDspCollapse"
-      />
     </div>
 
     <div class="save-section">
       <div class="save-status-area">
-        <span v-if="saveStatus === 'saved'" class="save-status saved">Сохранено</span>
+        <span v-if="saveStatus === 'saving'" class="save-status">Сохранение…</span>
+        <span v-else-if="saveStatus === 'saved'" class="save-status saved">Сохранено</span>
         <span v-else-if="saveStatus === 'error'" class="save-status error">{{ saveError }}</span>
-        <span v-else-if="isDirty || dspDirty" class="save-status dirty">Изменения не сохранены</span>
       </div>
       <button @click="cancelAll" :disabled="(!isDirty && !dspDirty) || saveStatus === 'saving'" class="cancel-btn">
         Отменить
@@ -600,7 +452,6 @@ watch(dspSettingsFromComposable, (newDsp) => {
         <span v-if="saveStatus === 'saving'">Сохранение...</span>
         <span v-else>Сохранить</span>
       </button>
-    </div>
     </div>
   </div>
 </template>
@@ -614,8 +465,74 @@ watch(dspSettingsFromComposable, (newDsp) => {
   overflow: hidden;
 }
 
-.preview-panel-fixed {
-  flex: 0 0 auto;
+.secondary-tab-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+.secondary-tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.secondary-tabs button {
+  padding: 6px 14px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+
+.secondary-tabs button:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-field-hover);
+}
+
+.secondary-tabs button.active {
+  color: var(--color-text-primary);
+  background: var(--color-bg-field);
+  border-color: var(--color-border);
+}
+
+.secondary-tabs button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.dirty-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--warning-bg-weak);
+  border: 1px solid var(--warning-border);
+  border-radius: 20px;
+  color: var(--warning-text-bright);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.dirty-chip-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 18px;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  transform: translateY(1px);
 }
 
 .effects-scroll {
@@ -623,19 +540,13 @@ watch(dspSettingsFromComposable, (newDsp) => {
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-  margin-top: 1.5rem;
-  padding-bottom: 1.5rem;
+  margin-top: 8px;
   box-sizing: border-box;
 }
 
-.effects-scroll > .setting-section,
-.effects-scroll > .save-section {
+.effects-scroll > [role="tabpanel"] {
   width: 100%;
   box-sizing: border-box;
-  flex: 0 0 auto;
 }
 
 .dsp-settings-wrapper {
@@ -643,240 +554,29 @@ watch(dspSettingsFromComposable, (newDsp) => {
   box-sizing: border-box;
 }
 
-.dirty-indicator {
-  color: var(--color-text-muted);
-  align-items: center;
-  gap: 6px;
-}
-
-.preview-empty {
-  display: flex;
-  justify-content: center;
-  padding: 20px;
-}
-
-.action-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 20px;
-  background: var(--btn-accent-bg);
-  border: 1px solid var(--color-accent);
-  color: var(--color-text-primary);
-  border-radius: 10px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 600;
-  font-family: inherit;
-  transition: all 0.2s;
-}
-
-.action-btn:hover {
-  background: var(--color-bg-field-hover);
-  border-color: var(--color-border-strong);
-}
-
-.preview-active {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.file-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background: var(--color-bg-field);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  min-width: 0;
-}
-
-.file-name {
-  flex: 1;
-  font-size: 14px;
-  color: var(--color-text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.file-format {
-  font-size: 12px;
-  color: var(--color-text-muted);
-  background: var(--color-bg-field-hover);
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-family: var(--font-mono);
-}
-
-.file-action-btn {
-  flex-shrink: 0;
-  padding: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--color-border);
-  background: var(--color-bg-field);
-  color: var(--color-text-secondary);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.file-action-btn:hover {
-  background: var(--color-bg-field-hover);
-  border-color: var(--color-border-strong);
-  color: var(--color-text-primary);
-}
-
-.preview-controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.play-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  border: 1px solid var(--color-border-strong);
-  background: var(--color-bg-field);
-  color: var(--color-text-primary);
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 13px;
-  font-family: inherit;
-  transition: all 0.15s;
-}
-
-.play-btn:hover:not(:disabled) {
-  background: var(--color-bg-field-hover);
-  border-color: var(--color-border-strong);
-}
-
-.play-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.play-btn.stop-btn {
-  color: var(--color-danger);
-  border-color: var(--danger-border);
-}
-
-.play-btn.stop-btn:hover:not(:disabled) {
-  background: var(--danger-bg-weak);
-}
-
-.preview-status {
-  font-size: 13px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.preview-status.error {
-  color: var(--color-danger);
-}
-
-.playback-status-inline {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
-  flex-shrink: 0;
-  font-size: 13px;
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-}
-
-.draft-warning {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  background: var(--warning-bg-weak);
-  border: 1px solid var(--warning-border);
-  border-radius: 10px;
-  color: var(--warning-text-bright);
-  font-size: 13px;
-  line-height: 1.4;
-}
-
-.preview-hint {
-  font-size: 13px;
-  color: var(--color-text-muted);
-  margin-bottom: 12px;
-  line-height: 1.4;
-}
-
-.toggle-switch {
-  position: relative;
-  display: inline-block;
-  width: 44px;
-  height: 24px;
-}
-
-.setting-row .toggle-switch {
-  flex: 0 0 44px;
-  min-width: 44px;
-}
-
-.toggle-switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.toggle-slider {
-  position: absolute;
-  cursor: pointer;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: var(--color-surface-dim, rgba(255,255,255,0.15));
-  transition: 0.3s;
-  border-radius: 24px;
-}
-
-.toggle-slider:before {
-  position: absolute;
-  content: "";
-  height: 18px;
-  width: 18px;
-  left: 3px;
-  bottom: 3px;
-  background-color: white;
-  transition: 0.3s;
-  border-radius: 50%;
-}
-
-input:checked + .toggle-slider {
-  background: var(--color-accent);
-}
-
-input:checked + .toggle-slider:before {
-  transform: translateX(20px);
-}
-
 .save-section {
   display: flex;
   align-items: center;
   gap: 16px;
   justify-content: flex-end;
+  margin-top: auto;
+  padding-top: 8px;
+  flex-shrink: 0;
+  max-height: 64px;
+  box-sizing: border-box;
 }
 
 .save-status-area {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
 }
 
 .save-status {
   font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .save-status.saved {
@@ -885,10 +585,6 @@ input:checked + .toggle-slider:before {
 
 .save-status.error {
   color: var(--color-danger);
-}
-
-.save-status.dirty {
-  color: var(--color-text-muted);
 }
 
 .cancel-btn {
@@ -944,109 +640,14 @@ input:checked + .toggle-slider:before {
   cursor: not-allowed;
 }
 
-.model-hint {
-  font-size: 12px;
-  color: var(--color-text-muted);
-  margin-top: 8px;
-  padding: 6px 10px;
-  background: var(--warning-bg-weak);
-  border: 1px solid var(--warning-border);
-  border-radius: 6px;
-}
+@media (max-width: 500px) {
+  .save-section {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
 
-.slider-group {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.slider-marks {
-  position: relative;
-  height: 22px;
-  margin-top: 1px;
-  width: calc(100% - 57px);
-}
-
-.mark-btn {
-  position: absolute;
-  transform: translateX(-50%);
-  background: var(--color-bg-field);
-  border: 1px solid var(--color-border);
-  color: var(--color-text-muted);
-  font-size: 11px;
-  padding: 1px 5px;
-  border-radius: 4px;
-  cursor: pointer;
-  white-space: nowrap;
-  line-height: 1.3;
-  font-family: inherit;
-  transition: color 0.15s, border-color 0.15s;
-}
-
-.mark-btn:hover:not(:disabled) {
-  color: var(--color-text-primary);
-  border-color: var(--color-border-strong);
-}
-
-.mark-btn.active {
-  color: var(--color-accent);
-  border-color: var(--color-accent);
-  background: var(--color-accent-glow);
-}
-
-.mark-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.mark-btn--default {
-  font-weight: 700;
-}
-
-.slider-row label {
-  min-width: 90px;
-}
-
-.slider-row .volume-control {
-  gap: 6px;
-}
-
-.slider-row .slider-marks {
-  margin-left: 8px;
-  width: calc(100% - 67px);
-}
-
-.tempo-marks {
-  display: block;
-}
-
-.tempo-marks .mark-btn {
-  position: absolute;
-  transform: translateX(-50%);
-  min-width: 0;
-  padding-left: 2px;
-  padding-right: 2px;
-  font-size: 10px;
-}
-
-.collapse-btn {
-  flex-shrink: 0;
-  padding: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--color-border);
-  background: var(--color-bg-field);
-  color: var(--color-text-secondary);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.collapse-btn:hover {
-  background: var(--color-bg-field-hover);
-  border-color: var(--color-border-strong);
-  color: var(--color-text-primary);
+  .save-status-area {
+    flex: 0 0 100%;
+  }
 }
 </style>

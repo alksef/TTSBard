@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronDown, ChevronUp, Sliders } from 'lucide-vue-next';
+import { ref, nextTick } from 'vue';
 import EqSettings from './EqSettings.vue';
 import CompressorSettings from './CompressorSettings.vue';
 import LimiterSettings from './LimiterSettings.vue';
@@ -38,39 +38,60 @@ interface DspConfig {
   };
 }
 
-defineProps<{
+const props = defineProps<{
   draftDsp: DspConfig;
-  dspMainCollapsed: boolean;
   dspPreset: 'natural' | 'clear' | 'custom';
-  dspCollapsed: { eq: boolean; compressor: boolean; limiter: boolean };
 }>();
 
 const emit = defineEmits<{
   'mark-dirty': [];
   'set-preset': [preset: 'natural' | 'clear'];
-  'toggle-main': [];
-  'toggle-section': [section: 'eq' | 'compressor' | 'limiter'];
 }>();
+
+const dspTabs = ['eq', 'compressor', 'limiter'] as const;
+type DspTab = typeof dspTabs[number];
+const activeDspTab = ref<DspTab>('eq');
+
+const tabLabels: Record<DspTab, string> = {
+  eq: 'EQ',
+  compressor: 'Компрессор',
+  limiter: 'Лимитер',
+};
+
+function isBlockEnabled(tab: DspTab): boolean {
+  return props.draftDsp[tab].enabled;
+}
+
+function getTabAriaLabel(tab: DspTab): string {
+  const label = tabLabels[tab];
+  const status = isBlockEnabled(tab) ? 'включен' : 'выключен';
+  return `${label} (${status})`;
+}
+
+function handleDspTabKey(e: KeyboardEvent) {
+  const idx = dspTabs.indexOf(activeDspTab.value);
+  let next: number;
+  if (e.key === 'ArrowLeft') {
+    next = idx <= 0 ? dspTabs.length - 1 : idx - 1;
+  } else if (e.key === 'ArrowRight') {
+    next = idx >= dspTabs.length - 1 ? 0 : idx + 1;
+  } else if (e.key === 'Home') {
+    next = 0;
+  } else if (e.key === 'End') {
+    next = dspTabs.length - 1;
+  } else {
+    return;
+  }
+  e.preventDefault();
+  activeDspTab.value = dspTabs[next];
+  nextTick(() => {
+    document.getElementById(`dsp-tab-${dspTabs[next]}`)?.focus();
+  });
+}
 </script>
 
 <template>
   <div class="setting-section">
-    <div class="section-header">
-      <Sliders class="section-icon" :size="20" />
-      <span class="section-title">DSP-постобработка</span>
-      <button
-        @click="emit('toggle-main')"
-        class="collapse-btn"
-        :title="dspMainCollapsed ? 'Развернуть DSP-постобработку' : 'Свернуть DSP-постобработку'"
-        :aria-label="dspMainCollapsed ? 'Развернуть DSP-постобработку' : 'Свернуть DSP-постобработку'"
-      >
-        <ChevronDown v-if="dspMainCollapsed" :size="16" />
-        <ChevronUp v-else :size="16" />
-      </button>
-    </div>
-
-    <div v-show="!dspMainCollapsed">
-
     <div class="dsp-presets">
       <span class="dsp-presets-label">Режим:</span>
       <div class="toggle-buttons">
@@ -100,50 +121,112 @@ const emit = defineEmits<{
       </div>
     </div>
 
-    <EqSettings :eq="draftDsp.eq" :collapsed="dspCollapsed.eq" @mark-dirty="emit('mark-dirty')" @toggle="emit('toggle-section', 'eq')" />
-    <CompressorSettings :compressor="draftDsp.compressor" :collapsed="dspCollapsed.compressor" @mark-dirty="emit('mark-dirty')" @toggle="emit('toggle-section', 'compressor')" />
-    <LimiterSettings :limiter="draftDsp.limiter" :collapsed="dspCollapsed.limiter" @mark-dirty="emit('mark-dirty')" @toggle="emit('toggle-section', 'limiter')" />
+    <div class="dsp-tabs" role="tablist" aria-label="DSP-редакторы">
+      <button
+        v-for="tab in dspTabs"
+        :key="tab"
+        :id="`dsp-tab-${tab}`"
+        role="tab"
+        :aria-selected="activeDspTab === tab"
+        :tabindex="activeDspTab === tab ? 0 : -1"
+        :aria-controls="`dsp-panel-${tab}`"
+        :aria-label="getTabAriaLabel(tab)"
+        :class="{ active: activeDspTab === tab }"
+        @click="activeDspTab = tab"
+        @keydown="handleDspTabKey"
+      >
+        <span class="status-dot" :class="isBlockEnabled(tab) ? 'on' : 'off'" aria-hidden="true"></span>
+        {{ tabLabels[tab] }}
+      </button>
+    </div>
 
+    <div
+      :id="`dsp-panel-${activeDspTab}`"
+      role="tabpanel"
+      :aria-labelledby="`dsp-tab-${activeDspTab}`"
+    >
+      <EqSettings
+        v-if="activeDspTab === 'eq'"
+        :eq="draftDsp.eq"
+        @mark-dirty="emit('mark-dirty')"
+      />
+      <CompressorSettings
+        v-if="activeDspTab === 'compressor'"
+        :compressor="draftDsp.compressor"
+        @mark-dirty="emit('mark-dirty')"
+      />
+      <LimiterSettings
+        v-if="activeDspTab === 'limiter'"
+        :limiter="draftDsp.limiter"
+        @mark-dirty="emit('mark-dirty')"
+      />
     </div>
   </div>
 </template>
 
 <style scoped>
-.collapse-btn {
-  flex-shrink: 0;
-  padding: 4px;
+.setting-section {
+  padding: 10px 14px;
+}
+
+.dsp-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.dsp-tabs button {
+  padding: 6px 14px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  transition: all 0.15s;
   display: flex;
   align-items: center;
-  justify-content: center;
-  border: 1px solid var(--color-border);
-  background: var(--color-bg-field);
-  color: var(--color-text-secondary);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.15s;
+  gap: 6px;
 }
 
-.collapse-btn:hover {
-  background: var(--color-bg-field-hover);
-  border-color: var(--color-border-strong);
+.dsp-tabs button:hover {
   color: var(--color-text-primary);
+  background: var(--color-bg-field-hover);
 }
 
-.model-hint {
-  font-size: 12px;
-  color: var(--color-text-muted);
-  margin-top: 8px;
-  padding: 6px 10px;
-  background: var(--warning-bg-weak);
-  border: 1px solid var(--warning-border);
-  border-radius: 6px;
+.dsp-tabs button.active {
+  color: var(--color-text-primary);
+  background: var(--color-bg-field);
+  border-color: var(--color-border);
+}
+
+.dsp-tabs button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot.on {
+  background: var(--color-success);
+}
+
+.status-dot.off {
+  background: var(--color-text-muted);
 }
 
 .dsp-presets {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
   flex-wrap: wrap;
 }
 

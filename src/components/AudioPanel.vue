@@ -5,6 +5,11 @@ import AudioDevicesTab from './audio/AudioDevicesTab.vue';
 import AudioEffectsTab from './audio/AudioEffectsTab.vue';
 
 const activeTab = ref<'devices' | 'effects_dsp'>('devices');
+const effectsDirty = ref(false);
+
+function onEffectsDirty(dirty: boolean) {
+  effectsDirty.value = dirty;
+}
 </script>
 
 <template>
@@ -20,16 +25,21 @@ const activeTab = ref<'devices' | 'effects_dsp'>('devices');
         </button>
         <button
           :class="{ active: activeTab === 'effects_dsp' }"
+          :aria-label="effectsDirty ? 'Эффекты и DSP (есть несохранённые изменения)' : 'Эффекты и DSP'"
           @click="activeTab = 'effects_dsp'"
         >
           <Sliders :size="18" />
           <span>Эффекты и DSP</span>
+          <span v-if="effectsDirty" class="dirty-dot" aria-hidden="true">*</span>
         </button>
       </div>
 
       <AudioDevicesTab v-if="activeTab === 'devices'" />
 
-      <AudioEffectsTab v-if="activeTab === 'effects_dsp'" />
+      <AudioEffectsTab
+        v-show="activeTab === 'effects_dsp'"
+        @dirty-change="onEffectsDirty"
+      />
     </div>
   </div>
 </template>
@@ -252,6 +262,15 @@ const activeTab = ref<'devices' | 'effects_dsp'>('devices');
   color: var(--color-accent);
   background: var(--color-bg-field);
   border-bottom: 2px solid var(--color-accent);
+}
+
+.dirty-dot {
+  color: var(--warning-text-bright);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  margin-left: 2px;
+  flex-shrink: 0;
 }
 
 </style>

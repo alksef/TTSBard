@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { ChevronDown, ChevronUp } from 'lucide-vue-next';
 import './dsp-shared.css';
 
 defineProps<{
@@ -12,35 +11,24 @@ defineProps<{
     knee_db: number;
     makeup_db: number;
   };
-  collapsed: boolean;
 }>();
 
 const emit = defineEmits<{
   'mark-dirty': [];
-  toggle: [];
 }>();
 </script>
 
 <template>
-  <div class="setting-section dsp-subsection">
+  <div class="dsp-subsection">
     <div class="section-header">
       <span class="section-title">Компрессор</span>
       <label class="toggle-switch">
         <input type="checkbox" v-model="compressor.enabled" @change="emit('mark-dirty')" />
         <span class="toggle-slider"></span>
       </label>
-      <button
-        @click="emit('toggle')"
-        class="collapse-btn"
-        :title="collapsed ? 'Развернуть Компрессор' : 'Свернуть Компрессор'"
-        :aria-label="collapsed ? 'Развернуть Компрессор' : 'Свернуть Компрессор'"
-      >
-        <ChevronDown v-if="collapsed" :size="16" />
-        <ChevronUp v-else :size="16" />
-      </button>
     </div>
 
-    <div v-show="!collapsed">
+    <div>
       <div class="setting-row" :class="{ disabled: !compressor.enabled }">
         <label>Threshold</label>
         <div class="volume-control">

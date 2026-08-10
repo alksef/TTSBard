@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { ChevronDown, ChevronUp } from 'lucide-vue-next';
 import './dsp-shared.css';
 
 defineProps<{
@@ -13,35 +12,24 @@ defineProps<{
     high_shelf_hz: number;
     high_shelf_gain_db: number;
   };
-  collapsed: boolean;
 }>();
 
 const emit = defineEmits<{
   'mark-dirty': [];
-  toggle: [];
 }>();
 </script>
 
 <template>
-  <div class="setting-section dsp-subsection">
+  <div class="dsp-subsection">
     <div class="section-header">
       <span class="section-title">EQ</span>
       <label class="toggle-switch">
         <input type="checkbox" v-model="eq.enabled" @change="emit('mark-dirty')" />
         <span class="toggle-slider"></span>
       </label>
-      <button
-        @click="emit('toggle')"
-        class="collapse-btn"
-        :title="collapsed ? 'Развернуть EQ' : 'Свернуть EQ'"
-        :aria-label="collapsed ? 'Развернуть EQ' : 'Свернуть EQ'"
-      >
-        <ChevronDown v-if="collapsed" :size="16" />
-        <ChevronUp v-else :size="16" />
-      </button>
     </div>
 
-    <div v-show="!collapsed">
+    <div>
       <div class="setting-row" :class="{ disabled: !eq.enabled }">
         <label class="setting-label">Low Cut</label>
         <label class="toggle-switch">
