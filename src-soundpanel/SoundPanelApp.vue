@@ -993,7 +993,7 @@ body {
   max-height: 156px;
   overflow-y: auto;
   padding: 3px;
-  background: color-mix(in srgb, var(--panel-bg) 58%, transparent);
+  background: color-mix(in srgb, var(--panel-bg) 24%, transparent);
   border: 1px solid var(--panel-border);
   border-radius: 4px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
