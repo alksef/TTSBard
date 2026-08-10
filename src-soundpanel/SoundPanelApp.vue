@@ -62,6 +62,17 @@ const configKey = ref('')
 const configDescription = ref('')
 const configFilePath = ref('')
 
+const showAddSetDialog = ref(false)
+const newSetName = ref('')
+const addSetInput = ref<HTMLInputElement | null>(null)
+const isAddingSet = ref(false)
+
+watch(showAddSetDialog, (visible) => {
+  if (visible) {
+    setTimeout(() => addSetInput.value?.focus(), 0)
+  }
+})
+
 function toggleMode() {
   mode.value = mode.value === 'runtime' ? 'config' : 'runtime'
 }
@@ -180,15 +191,24 @@ function onSetDropdownFocusOut(event: FocusEvent) {
 }
 
 async function onAddSet() {
-  const name = window.prompt('Имя нового слоя')
-  if (!name || !name.trim()) return
+  newSetName.value = ''
+  showAddSetDialog.value = true
+}
+
+async function confirmAddSet() {
+  const name = newSetName.value.trim()
+  if (!name || isAddingSet.value) return
+  isAddingSet.value = true
   try {
-    const created = await invoke<SoundSet>('sp_add_set', { name: name.trim() })
+    const created = await invoke<SoundSet>('sp_add_set', { name })
     await loadSets()
     activeSetId.value = created.id
+    showAddSetDialog.value = false
     ;(document.activeElement as HTMLElement | null)?.blur()
   } catch (e) {
     console.error('[SoundPanel] Failed to add set:', e)
+  } finally {
+    isAddingSet.value = false
   }
 }
 
@@ -427,10 +447,14 @@ async function onKeydown(e: KeyboardEvent) {
       showConfigDialog.value = false
       return
     }
+    if (showAddSetDialog.value) {
+      showAddSetDialog.value = false
+      return
+    }
     escapeWindow()
     return
   }
-  if (showConfigDialog.value) {
+  if (showConfigDialog.value || showAddSetDialog.value) {
     return
   }
   if (!e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
@@ -695,6 +719,28 @@ onMounted(async () => {
           </div>
         </div>
 
+      </div>
+    </div>
+
+    <div v-if="showAddSetDialog" class="config-dialog-overlay">
+      <div class="config-dialog">
+        <div class="config-dialog-title">Новый слой</div>
+        <input
+          ref="addSetInput"
+          v-model="newSetName"
+          type="text"
+          class="config-input"
+          placeholder="Имя слоя"
+          @keydown.enter="confirmAddSet"
+        />
+        <div class="config-actions">
+          <button
+            class="config-save"
+            :disabled="!newSetName.trim() || isAddingSet"
+            @click="confirmAddSet"
+          >{{ isAddingSet ? 'Добавление…' : 'Добавить' }}</button>
+          <button class="config-cancel" @click="showAddSetDialog = false">Отмена</button>
+        </div>
       </div>
     </div>
 
@@ -1174,7 +1220,7 @@ button.active {
   width: 320px;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.5rem;
   color: var(--dlg-text);
 }
 
@@ -1184,6 +1230,8 @@ button.active {
 }
 
 .config-input {
+  appearance: none;
+  -webkit-appearance: none;
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid var(--dlg-border);
   border-radius: 4px;
