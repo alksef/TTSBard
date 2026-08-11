@@ -25,6 +25,10 @@ dist-ssr
 
 # Rust / Tauri
 src-tauri/target
+/target/
+
+# Generated packaging resources
+src-tauri/resources/espeak-ng-data/
 
 # Local per-developer build configuration
 scripts/build.local.psd1
@@ -43,6 +47,10 @@ test_theme.rs
 *.bak
 opencode.json
 .codex/
+
+# One-off local migration scripts
+/scripts/fix-vtube-composable.ps1
+/scripts/update-vtube-panel.ps1
 
 images
 .work/images
