@@ -256,6 +256,43 @@
         "ctrl"
       ],
       "key": "F"
+    },
+    "editor": {
+      "edit_word": {
+        "modifiers": [
+          "ctrl"
+        ],
+        "key": "E"
+      },
+      "submit_continue": {
+        "modifiers": [
+          "ctrl"
+        ],
+        "key": "Enter"
+      },
+      "next_spelling_error": {
+        "modifiers": [],
+        "key": "F7"
+      },
+      "previous_spelling_error": {
+        "modifiers": [
+          "shift"
+        ],
+        "key": "F7"
+      },
+      "next_tab": {
+        "modifiers": [
+          "ctrl"
+        ],
+        "key": "Tab"
+      },
+      "previous_tab": {
+        "modifiers": [
+          "ctrl",
+          "shift"
+        ],
+        "key": "Tab"
+      }
     }
   },
   "vtube_studio": {

@@ -22,6 +22,90 @@ pub struct Hotkey {
     pub key: String,
 }
 
+/// Editor-scoped hotkeys (never registered as global Windows shortcuts)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EditorHotkeySettings {
+    pub edit_word: Hotkey,
+    pub submit_continue: Hotkey,
+    pub next_spelling_error: Hotkey,
+    pub previous_spelling_error: Hotkey,
+    pub next_tab: Hotkey,
+    pub previous_tab: Hotkey,
+}
+
+impl Default for EditorHotkeySettings {
+    fn default() -> Self {
+        Self {
+            edit_word: Hotkey::default_edit_word(),
+            submit_continue: Hotkey::default_submit_continue(),
+            next_spelling_error: Hotkey::default_next_spelling_error(),
+            previous_spelling_error: Hotkey::default_previous_spelling_error(),
+            next_tab: Hotkey::default_next_tab(),
+            previous_tab: Hotkey::default_previous_tab(),
+        }
+    }
+}
+
+/// Closed list of valid editor action IDs
+pub const EDITOR_ACTION_IDS: &[&str] = &[
+    "edit_word",
+    "submit_continue",
+    "next_spelling_error",
+    "previous_spelling_error",
+    "next_tab",
+    "previous_tab",
+];
+
+impl EditorHotkeySettings {
+    pub fn is_valid_action_id(id: &str) -> bool {
+        EDITOR_ACTION_IDS.contains(&id)
+    }
+
+    pub fn get_by_id(&self, id: &str) -> Option<&Hotkey> {
+        match id {
+            "edit_word" => Some(&self.edit_word),
+            "submit_continue" => Some(&self.submit_continue),
+            "next_spelling_error" => Some(&self.next_spelling_error),
+            "previous_spelling_error" => Some(&self.previous_spelling_error),
+            "next_tab" => Some(&self.next_tab),
+            "previous_tab" => Some(&self.previous_tab),
+            _ => None,
+        }
+    }
+
+    pub fn get_mut_by_id(&mut self, id: &str) -> Option<&mut Hotkey> {
+        match id {
+            "edit_word" => Some(&mut self.edit_word),
+            "submit_continue" => Some(&mut self.submit_continue),
+            "next_spelling_error" => Some(&mut self.next_spelling_error),
+            "previous_spelling_error" => Some(&mut self.previous_spelling_error),
+            "next_tab" => Some(&mut self.next_tab),
+            "previous_tab" => Some(&mut self.previous_tab),
+            _ => None,
+        }
+    }
+
+    /// Find a duplicate binding among editor actions, returning the conflicting action name
+    pub fn find_duplicate(&self, skip_id: &str, binding: &Hotkey) -> Option<&'static str> {
+        if binding.key.is_empty() {
+            return None;
+        }
+        for &action_id in EDITOR_ACTION_IDS {
+            if action_id == skip_id {
+                continue;
+            }
+            if let Some(existing) = self.get_by_id(action_id) {
+                if existing == binding {
+                    return Some(action_id);
+                }
+            }
+        }
+        None
+    }
+
+}
+
 /// All configurable hotkeys
 ///
 /// `#[serde(default)]` на каждом поле позволяет читать старые `settings.json`,
@@ -38,6 +122,8 @@ pub struct HotkeySettings {
     pub playback_repeat: Hotkey,
     pub playback_control_window: Hotkey,
     pub return_previous_window: Hotkey,
+    #[serde(default)]
+    pub editor: EditorHotkeySettings,
 }
 
 impl Default for HotkeySettings {
@@ -50,6 +136,7 @@ impl Default for HotkeySettings {
             playback_repeat: Hotkey::default_playback_repeat(),
             playback_control_window: Hotkey::default_playback_control_window(),
             return_previous_window: Hotkey::default_return_previous_window(),
+            editor: EditorHotkeySettings::default(),
         }
     }
 }
@@ -109,6 +196,74 @@ impl Hotkey {
             modifiers: vec![HotkeyModifier::Ctrl, HotkeyModifier::Shift],
             key: "F7".to_string(),
         }
+    }
+
+    /// Create a hotkey with Ctrl+E (edit word default)
+    pub fn default_edit_word() -> Self {
+        Self {
+            modifiers: vec![HotkeyModifier::Ctrl],
+            key: "E".to_string(),
+        }
+    }
+
+    /// Create a hotkey with Ctrl+Enter (submit/continue default)
+    pub fn default_submit_continue() -> Self {
+        Self {
+            modifiers: vec![HotkeyModifier::Ctrl],
+            key: "Enter".to_string(),
+        }
+    }
+
+    /// Create a hotkey with F7 (next spelling error default)
+    pub fn default_next_spelling_error() -> Self {
+        Self {
+            modifiers: vec![],
+            key: "F7".to_string(),
+        }
+    }
+
+    /// Create a hotkey with Shift+F7 (previous spelling error default)
+    pub fn default_previous_spelling_error() -> Self {
+        Self {
+            modifiers: vec![HotkeyModifier::Shift],
+            key: "F7".to_string(),
+        }
+    }
+
+    /// Create a hotkey with Ctrl+Tab (next tab default)
+    pub fn default_next_tab() -> Self {
+        Self {
+            modifiers: vec![HotkeyModifier::Ctrl],
+            key: "Tab".to_string(),
+        }
+    }
+
+    /// Create a hotkey with Ctrl+Shift+Tab (previous tab default)
+    pub fn default_previous_tab() -> Self {
+        Self {
+            modifiers: vec![HotkeyModifier::Ctrl, HotkeyModifier::Shift],
+            key: "Tab".to_string(),
+        }
+    }
+
+    /// Returns true if the key is empty (disabled binding)
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.key.is_empty()
+    }
+
+    /// Check if this binding conflicts with any global hotkey
+    pub fn conflicts_with_global(&self, global: &HotkeySettings) -> bool {
+        if self.key.is_empty() {
+            return false;
+        }
+        global.main_window == *self
+            || global.sound_panel == *self
+            || global.playback_pause == *self
+            || global.playback_stop == *self
+            || global.playback_repeat == *self
+            || global.playback_control_window == *self
+            || global.return_previous_window == *self
     }
 
     /// Convert to tauri_plugin_global_shortcut::Shortcut
@@ -209,6 +364,9 @@ fn parse_key_code(key: &str) -> Result<Code, String> {
         "9" => Ok(Code::Digit9),
         // Space
         "SPACE" => Ok(Code::Space),
+        // Enter / Tab
+        "ENTER" => Ok(Code::Enter),
+        "TAB" => Ok(Code::Tab),
         _ => Err(format!("Invalid key: {}", key)),
     }
 }
@@ -224,7 +382,6 @@ mod tests {
             key: "F3".to_string(),
         };
         let shortcut = hotkey.to_shortcut().unwrap();
-        // We can't directly inspect the Shortcut, but we can verify it doesn't error
         assert!(shortcut.to_string().contains("F3"));
     }
 
@@ -234,6 +391,8 @@ mod tests {
         assert!(matches!(parse_key_code("A"), Ok(Code::KeyA)));
         assert!(matches!(parse_key_code("0"), Ok(Code::Digit0)));
         assert!(matches!(parse_key_code("Space"), Ok(Code::Space)));
+        assert!(matches!(parse_key_code("Enter"), Ok(Code::Enter)));
+        assert!(matches!(parse_key_code("Tab"), Ok(Code::Tab)));
         assert!(parse_key_code("INVALID").is_err());
     }
 
@@ -263,6 +422,178 @@ mod tests {
         assert_eq!(sound.modifiers.len(), 2);
     }
 
+    // ==================== Editor hotkey default tests ====================
+
+    #[test]
+    fn test_default_edit_word() {
+        let hk = Hotkey::default_edit_word();
+        assert_eq!(hk.key, "E");
+        assert_eq!(hk.modifiers.len(), 1);
+        assert_eq!(hk.modifiers[0], HotkeyModifier::Ctrl);
+        assert_eq!(hk.format_display(), "Ctrl+E");
+    }
+
+    #[test]
+    fn test_default_submit_continue() {
+        let hk = Hotkey::default_submit_continue();
+        assert_eq!(hk.key, "Enter");
+        assert_eq!(hk.modifiers.len(), 1);
+        assert_eq!(hk.modifiers[0], HotkeyModifier::Ctrl);
+    }
+
+    #[test]
+    fn test_default_next_spelling_error() {
+        let hk = Hotkey::default_next_spelling_error();
+        assert_eq!(hk.key, "F7");
+        assert!(hk.modifiers.is_empty());
+    }
+
+    #[test]
+    fn test_default_previous_spelling_error() {
+        let hk = Hotkey::default_previous_spelling_error();
+        assert_eq!(hk.key, "F7");
+        assert_eq!(hk.modifiers.len(), 1);
+        assert_eq!(hk.modifiers[0], HotkeyModifier::Shift);
+    }
+
+    #[test]
+    fn test_default_next_tab() {
+        let hk = Hotkey::default_next_tab();
+        assert_eq!(hk.key, "Tab");
+        assert_eq!(hk.modifiers.len(), 1);
+        assert_eq!(hk.modifiers[0], HotkeyModifier::Ctrl);
+    }
+
+    #[test]
+    fn test_default_previous_tab() {
+        let hk = Hotkey::default_previous_tab();
+        assert_eq!(hk.key, "Tab");
+        assert_eq!(hk.modifiers.len(), 2);
+        assert_eq!(hk.modifiers[0], HotkeyModifier::Ctrl);
+        assert_eq!(hk.modifiers[1], HotkeyModifier::Shift);
+    }
+
+    #[test]
+    fn test_hotkey_is_empty() {
+        let empty = Hotkey {
+            modifiers: vec![],
+            key: String::new(),
+        };
+        assert!(empty.is_empty());
+        let not_empty = Hotkey {
+            modifiers: vec![],
+            key: "F7".to_string(),
+        };
+        assert!(!not_empty.is_empty());
+    }
+
+    // ==================== EditorHotkeySettings tests ====================
+
+    #[test]
+    fn editor_hotkey_defaults_are_set() {
+        let s = EditorHotkeySettings::default();
+        assert_eq!(s.edit_word.key, "E");
+        assert_eq!(s.submit_continue.key, "Enter");
+        assert_eq!(s.next_spelling_error.key, "F7");
+        assert_eq!(s.previous_spelling_error.key, "F7");
+        assert_eq!(s.next_tab.key, "Tab");
+        assert_eq!(s.previous_tab.key, "Tab");
+    }
+
+    #[test]
+    fn is_valid_action_id_accepts_all_six() {
+        for &id in EDITOR_ACTION_IDS {
+            assert!(EditorHotkeySettings::is_valid_action_id(id), "{} should be valid", id);
+        }
+        assert!(!EditorHotkeySettings::is_valid_action_id("bogus"));
+        assert!(!EditorHotkeySettings::is_valid_action_id("main_window"));
+    }
+
+    #[test]
+    fn get_by_id_returns_correct_field() {
+        let s = EditorHotkeySettings::default();
+        assert_eq!(s.get_by_id("edit_word").unwrap().key, "E");
+        assert_eq!(s.get_by_id("submit_continue").unwrap().key, "Enter");
+        assert!(s.get_by_id("bogus").is_none());
+    }
+
+    #[test]
+    fn get_mut_by_id_modifies_field() {
+        let mut s = EditorHotkeySettings::default();
+        {
+            let field = s.get_mut_by_id("edit_word").unwrap();
+            field.key = "F9".to_string();
+        }
+        assert_eq!(s.edit_word.key, "F9");
+    }
+
+    #[test]
+    fn find_duplicate_detects_same_binding() {
+        let mut s = EditorHotkeySettings::default();
+        // Make next_tab identical to edit_word
+        s.edit_word = Hotkey {
+            modifiers: vec![HotkeyModifier::Ctrl],
+            key: "E".to_string(),
+        };
+        s.next_tab = Hotkey {
+            modifiers: vec![HotkeyModifier::Ctrl],
+            key: "E".to_string(),
+        };
+        let conflict = s.find_duplicate("edit_word", &s.edit_word.clone());
+        assert!(conflict.is_some());
+    }
+
+    #[test]
+    fn find_duplicate_skips_self() {
+        let s = EditorHotkeySettings::default();
+        let binding = Hotkey {
+            modifiers: vec![HotkeyModifier::Ctrl],
+            key: "E".to_string(),
+        };
+        let conflict = s.find_duplicate("edit_word", &binding);
+        assert!(conflict.is_none());
+    }
+
+    #[test]
+    fn find_duplicate_empty_binding_is_ignored() {
+        let s = EditorHotkeySettings::default();
+        let empty = Hotkey {
+            modifiers: vec![],
+            key: String::new(),
+        };
+        assert!(s.find_duplicate("edit_word", &empty).is_none());
+    }
+
+    #[test]
+    fn conflicts_with_global_detects_overlap() {
+        let editor_binding = Hotkey {
+            modifiers: vec![HotkeyModifier::Ctrl, HotkeyModifier::Shift],
+            key: "F3".to_string(),
+        };
+        let global = HotkeySettings::default();
+        assert!(editor_binding.conflicts_with_global(&global));
+    }
+
+    #[test]
+    fn conflicts_with_global_empty_binding_is_ok() {
+        let empty = Hotkey {
+            modifiers: vec![],
+            key: String::new(),
+        };
+        let global = HotkeySettings::default();
+        assert!(!empty.conflicts_with_global(&global));
+    }
+
+    #[test]
+    fn conflicts_with_global_unique_binding_is_ok() {
+        let unique = Hotkey {
+            modifiers: vec![HotkeyModifier::Ctrl],
+            key: "F12".to_string(),
+        };
+        let global = HotkeySettings::default();
+        assert!(!unique.conflicts_with_global(&global));
+    }
+
     /// Регрессия на "Failed to parse settings: missing field `playback_pause`":
     /// старый settings.json (до plan 74) содержит только main_window и sound_panel.
     /// Десериализация должна проходить, а недостающие playback-поля — заполняться
@@ -274,20 +605,33 @@ mod tests {
             "sound_panel": { "modifiers": ["ctrl", "alt"], "key": "P" }
         }"#;
         let settings: HotkeySettings = serde_json::from_str(old_json).unwrap();
-        // Сохранённые значения не должны затираться.
         assert_eq!(settings.main_window.key, "F3");
         assert_eq!(settings.sound_panel.key, "P");
-        // Недостающие playback-поля берутся из Default.
         assert_eq!(settings.playback_pause.key, "F4");
         assert_eq!(settings.playback_stop.key, "F5");
         assert_eq!(settings.playback_repeat.key, "F6");
-        // Недостающее поле return_previous_window берётся из Default.
         assert_eq!(settings.return_previous_window.key, "F");
         assert_eq!(settings.return_previous_window.modifiers.len(), 1);
         assert_eq!(
             settings.return_previous_window.modifiers[0],
             HotkeyModifier::Ctrl
         );
+    }
+
+    /// Старый settings.json без "editor" группы: editor поля должны заполняться defaults.
+    #[test]
+    fn test_hotkey_settings_backwards_compatible_without_editor_field() {
+        let old_json = r#"{
+            "main_window": { "modifiers": ["ctrl", "shift"], "key": "F3" },
+            "sound_panel": { "modifiers": ["ctrl", "alt"], "key": "P" }
+        }"#;
+        let settings: HotkeySettings = serde_json::from_str(old_json).unwrap();
+        assert_eq!(settings.editor.edit_word.key, "E");
+        assert_eq!(settings.editor.submit_continue.key, "Enter");
+        assert_eq!(settings.editor.next_spelling_error.key, "F7");
+        assert_eq!(settings.editor.previous_spelling_error.key, "F7");
+        assert_eq!(settings.editor.next_tab.key, "Tab");
+        assert_eq!(settings.editor.previous_tab.key, "Tab");
     }
 
     #[test]
@@ -297,5 +641,25 @@ mod tests {
         assert_eq!(hotkey.modifiers.len(), 1);
         assert_eq!(hotkey.modifiers[0], HotkeyModifier::Ctrl);
         assert_eq!(hotkey.format_display(), "Ctrl+F");
+    }
+
+    /// Round-trip: HotkeySettings with editor group must serialize + deserialize.
+    #[test]
+    fn hotkey_settings_with_editor_round_trip() {
+        let original = HotkeySettings {
+            editor: EditorHotkeySettings {
+                edit_word: Hotkey {
+                    modifiers: vec![HotkeyModifier::Ctrl, HotkeyModifier::Alt],
+                    key: "W".to_string(),
+                },
+                ..EditorHotkeySettings::default()
+            },
+            ..HotkeySettings::default()
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let back: HotkeySettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.editor.edit_word.key, "W");
+        assert_eq!(back.editor.edit_word.modifiers.len(), 2);
+        assert_eq!(back.editor.submit_continue.key, "Enter");
     }
 }

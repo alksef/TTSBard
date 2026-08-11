@@ -13,14 +13,16 @@ import {
   type Completion,
 } from '@codemirror/autocomplete'
 import { invoke } from '@tauri-apps/api/core'
+import { forEachDiagnostic } from '@codemirror/lint'
 import type { Suggestion } from '../../composables/useInputHistory'
 import type { PhraseSuggestion } from '../../composables/useTextCompletion'
-import { useEditorSettings } from '../../composables/useAppSettings'
+import { useEditorSettings, useHotkeysSettings } from '../../composables/useAppSettings'
 import { createSpellLinter } from './spellLinter'
+import { SPELLCHECK_SOURCE } from './spellLinter'
 import { useSpellcheck } from '../../composables/useSpellcheck'
 import { useSpellContextMenu } from './spellContextMenu'
 import { debounceAsync } from '../../utils/debounce'
-import { shouldEnterSubmit, shouldEscapeSubmit } from './keymapArbitration'
+import { matchesEditorHotkey, shouldEnterSubmit, shouldEscapeSubmit } from './keymapArbitration'
 import SpellContextMenu from './SpellContextMenu.vue'
 
 const props = withDefaults(
@@ -43,6 +45,7 @@ const emit = defineEmits<{
   'update:modelValue': [value: string]
   'user-edit': []
   enter: []
+  'submit-continue': []
   esc: []
 }>()
 
@@ -51,6 +54,7 @@ const view = shallowRef<EditorView | null>(null)
 const ExternalUpdate = Annotation.define<boolean>()
 
 const editorSettings = useEditorSettings()
+const hotkeySettings = useHotkeysSettings()
 const { checkWords, enabled, available } = useSpellcheck()
 const spellLinter = createSpellLinter(checkWords, () => enabled.value)
 const { menuState, closeMenu, isMenuOpen, openFromEvent, openAtCursor, applySuggestion } =
@@ -361,6 +365,54 @@ function createKeymap() {
   return [baseBindings, escapeBinding]
 }
 
+function moveToSpellIssue(targetView: EditorView, direction: 1 | -1): boolean {
+  const issues: Array<{ from: number; to: number }> = []
+  forEachDiagnostic(targetView.state, (diagnostic, from, to) => {
+    if (diagnostic.source === SPELLCHECK_SOURCE) issues.push({ from, to })
+  })
+  if (issues.length === 0) return false
+
+  issues.sort((a, b) => a.from - b.from)
+  const cursor = targetView.state.selection.main.head
+  const index = direction > 0
+    ? issues.findIndex((issue) => issue.from > cursor)
+    : [...issues].reverse().findIndex((issue) => issue.to < cursor)
+  const target = index === -1
+    ? (direction > 0 ? issues[0] : issues[issues.length - 1])
+    : (direction > 0 ? issues[index] : issues[issues.length - 1 - index])
+
+  targetView.dispatch({
+    selection: { anchor: target.from, head: target.to },
+    effects: EditorView.scrollIntoView(target.from, { y: 'center' }),
+  })
+  targetView.focus()
+  return true
+}
+
+function handleEditorHotkey(event: KeyboardEvent, targetView: EditorView): boolean {
+  if (!targetView.hasFocus) return false
+  const bindings = hotkeySettings.value?.editor
+  if (!bindings) return false
+
+  let handled = false
+  if (matchesEditorHotkey(bindings.submit_continue, event)) {
+    emit('submit-continue')
+    handled = true
+  } else if (matchesEditorHotkey(bindings.edit_word, event)) {
+    handled = openAtCursor()
+  } else if (matchesEditorHotkey(bindings.next_spelling_error, event)) {
+    handled = moveToSpellIssue(targetView, 1)
+  } else if (matchesEditorHotkey(bindings.previous_spelling_error, event)) {
+    handled = moveToSpellIssue(targetView, -1)
+  }
+
+  if (handled) {
+    event.preventDefault()
+    event.stopPropagation()
+  }
+  return handled
+}
+
 function createState() {
   return EditorState.create({
     doc: props.modelValue,
@@ -369,6 +421,9 @@ function createState() {
       spellLinter,
       EditorView.lineWrapping,
       EditorState.readOnly.of(false),
+      EditorView.domEventHandlers({
+        keydown: (event, targetView) => handleEditorHotkey(event, targetView),
+      }),
       ...createKeymap(),
       autocompletion({
         override: [hybridSource, presetSource],

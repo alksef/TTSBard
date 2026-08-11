@@ -8,7 +8,7 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: mockInvoke,
 }))
 
-import { useEditorTabs } from './useEditorTabs'
+import { cycleTabId, useEditorTabs } from './useEditorTabs'
 
 let uuidCounter = 0
 
@@ -128,6 +128,29 @@ describe('useEditorTabs', () => {
       const before = activeId.value
       select('nonexistent')
       expect(activeId.value).toBe(before)
+    })
+  })
+
+  describe('cyclic navigation', () => {
+    it('moves forward and backward with wrap-around', () => {
+      const { create, next, previous, activeId } = useEditorTabs()
+      create()
+      expect(next()).toBe(true)
+      expect(activeId.value).toBe('uuid-0')
+      expect(previous()).toBe(true)
+      expect(activeId.value).toBe('uuid-1')
+    })
+
+    it('keeps the only tab active', () => {
+      const { activeId, next, previous } = useEditorTabs()
+      expect(next()).toBe(true)
+      expect(previous()).toBe(true)
+      expect(activeId.value).toBe('uuid-0')
+    })
+
+    it('handles an absent active id through the pure helper', () => {
+      expect(cycleTabId(backendTabs.tabs, 'missing', 1)).toBe('uuid-1')
+      expect(cycleTabId([], 'missing', 1)).toBeNull()
     })
   })
 

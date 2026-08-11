@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { save } from '@tauri-apps/plugin-dialog'
-import { useEditorSettings, useAppSettings, useTtsSettings, useAiSettings } from '../composables/useAppSettings'
+import { useEditorSettings, useAppSettings, useTtsSettings, useAiSettings, useHotkeysSettings } from '../composables/useAppSettings'
 import { SETTINGS_CHANGED_EVENT, type QuickEditorMode } from '../types/settings'
 import { useErrorHandler } from '../composables/useErrorHandler'
 import { debugLog, debugError } from '../utils/debug'
@@ -17,11 +17,12 @@ import { useEditorTabs } from '../composables/useEditorTabs'
 import EditorTabs from './editor/EditorTabs.vue'
 import StatusMessage from './shared/StatusMessage.vue'
 import { useTypingBurst, type TypingConsumer } from '../composables/useTypingBurst'
-import { acceptClear } from './inputAcceptance'
+import { acceptClear, appliesQuickEditorPolicy, type SubmitIntent } from './inputAcceptance'
 import { submitSpeech } from '../ipc/speech'
+import { matchesEditorHotkey } from './editor/keymapArbitration'
 
 const { showError } = useErrorHandler()
-const { tabs, activeId, active, create: createTab, close: closeTab, select: selectTab, rename: renameTab, init: initTabs, flushSave: flushTabsSave } = useEditorTabs()
+const { tabs, activeId, active, create: createTab, close: closeTab, select: selectTab, next: nextTab, previous: previousTab, rename: renameTab, init: initTabs, flushSave: flushTabsSave } = useEditorTabs()
 
 const text = computed<string>({
   get: () => active.value.text,
@@ -55,6 +56,7 @@ const isMinimalMode = inject<Ref<boolean>>('isMinimalMode', ref(false))
 const editorSettings = useEditorSettings()
 const aiSettings = useAiSettings()
 const ttsSettings = useTtsSettings()
+const hotkeySettings = useHotkeysSettings()
 
 const appSettingsContext = useAppSettings()
 
@@ -342,7 +344,7 @@ watch(() => appSettingsContext.settings.value?.windows?.main, (main) => {
   }
 }, { immediate: true })
 
-async function handleEnter() {
+async function handleSubmit(intent: SubmitIntent) {
   const currentText = text.value
   const senderTabId = activeId.value
   const mode = editorSettings.value?.quick ?? 'disabled'
@@ -355,17 +357,22 @@ async function handleEnter() {
 
   try {
     await submitSpeech(currentText)
-    recordHistory(currentText)
+    await recordHistory(currentText)
     tabs.value = acceptClear(tabs.value, senderTabId, currentText)
 
-    if (mode === 'collapse') {
-      await hideMainWindow()
-    } else if (mode === 'return_focus') {
-      try {
-        await invoke('return_to_previous_window')
-      } catch (e) {
-        debugError('[InputPanel] Failed to return focus:', e)
+    if (appliesQuickEditorPolicy(intent)) {
+      if (mode === 'collapse') {
+        await hideMainWindow()
+      } else if (mode === 'return_focus') {
+        try {
+          await invoke('return_to_previous_window')
+        } catch (e) {
+          debugError('[InputPanel] Failed to return focus:', e)
+        }
       }
+    } else {
+      await nextTick()
+      focusEditor()
     }
   } catch (e) {
     debugError('[InputPanel] Failed to speak:', e)
@@ -373,6 +380,14 @@ async function handleEnter() {
   } finally {
     isSpeakingInFlight.value = false
   }
+}
+
+async function handleEnter() {
+  await handleSubmit('quick')
+}
+
+async function handleSubmitContinue() {
+  await handleSubmit('continue')
 }
 
 async function handleEsc() {
@@ -464,6 +479,24 @@ function focusEditor() {
   editorRef.value?.focus()
 }
 
+async function handleEditorScopeKeydown(event: KeyboardEvent) {
+  if (event.target instanceof HTMLInputElement) return
+  const bindings = hotkeySettings.value?.editor
+  if (!bindings) return
+
+  const switched = matchesEditorHotkey(bindings.next_tab, event)
+    ? nextTab()
+    : matchesEditorHotkey(bindings.previous_tab, event)
+      ? previousTab()
+      : false
+  if (!switched) return
+
+  event.preventDefault()
+  event.stopPropagation()
+  await nextTick()
+  focusEditor()
+}
+
 defineExpose({ focusEditor })
 </script>
 
@@ -475,7 +508,7 @@ defineExpose({ focusEditor })
       @dismiss="saveStatusMessage = ''"
     />
     <div class="input-group">
-      <div class="textarea-wrapper" :class="{ 'minimal-wrapper': isMinimalMode }">
+      <div class="textarea-wrapper" :class="{ 'minimal-wrapper': isMinimalMode }" @keydown.capture="handleEditorScopeKeydown">
         <EditorTabs
           :tabs="tabs"
           :active-id="activeId"
@@ -493,6 +526,7 @@ defineExpose({ focusEditor })
           :editor-height-px="editorHeightPx"
           @user-edit="typingBurst.edit()"
           @enter="handleEnter"
+          @submit-continue="handleSubmitContinue"
           @esc="handleEsc"
         />
         <div

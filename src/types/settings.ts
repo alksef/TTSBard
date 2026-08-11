@@ -17,6 +17,15 @@ export interface HotkeyDto {
   key: string
 }
 
+export interface EditorHotkeySettingsDto {
+  edit_word: HotkeyDto
+  submit_continue: HotkeyDto
+  next_spelling_error: HotkeyDto
+  previous_spelling_error: HotkeyDto
+  next_tab: HotkeyDto
+  previous_tab: HotkeyDto
+}
+
 export interface HotkeySettingsDto {
   main_window: HotkeyDto
   sound_panel: HotkeyDto
@@ -25,6 +34,7 @@ export interface HotkeySettingsDto {
   playback_repeat: HotkeyDto
   playback_control_window: HotkeyDto
   return_previous_window: HotkeyDto
+  editor: EditorHotkeySettingsDto
 }
 
 // ============================================================================

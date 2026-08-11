@@ -46,14 +46,16 @@ related_tasks: []
 
 ### Редактор и история
 
+- [ROADMAP-068 — локальные горячие клавиши редактора](./completed/068-editor-scoped-hotkeys-and-submit-flow.md)
+
 - [ROADMAP-001 — CodeMirror](./completed/001-monaco-vs-codemirror-editor-research.md)
 - [ROADMAP-002 — локальная история и autocomplete](./completed/002-local-history-autocomplete.md)
 - [ROADMAP-003 — гибридное text completion](./completed/003-text-completion-without-ai.md)
 - [ROADMAP-005 — phrase history](./completed/005-phrase-history.md)
 - [ROADMAP-006 — editor tabs](./completed/006-editor-tabs-multiple-texts.md)
-- [ROADMAP-067 — контекстное исправление орфографии](./completed/067-editor-spellcheck-context-menu.md)
 - [ROADMAP-007 — editor menu](./completed/007-editor-menu-ai-history-spellcheck.md)
 - [ROADMAP-008 — offline spellcheck](./completed/008-offline-spellcheck-hunspell-codemirror.md)
+- [ROADMAP-067 — контекстное исправление орфографии](./completed/067-editor-spellcheck-context-menu.md)
 - [ROADMAP-012 — persistence вкладок](./completed/012-editor-tabs-persistence.md)
 - [ROADMAP-027 — layout, history и export](./completed/027-text-editor-layout-history-and-export.md)
 - [ROADMAP-033 — phrase audio cache](./completed/033-phrase-history-audio-cache.md)

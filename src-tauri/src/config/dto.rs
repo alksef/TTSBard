@@ -14,8 +14,8 @@ use crate::config::windows::{
     WindowsSettings,
 };
 use crate::config::{
-    AppSettings as ConfigAppSettings, AudioSettings, Hotkey, HotkeyModifier, HotkeySettings,
-    LoggingSettings, TwitchSettings,
+    AppSettings as ConfigAppSettings, AudioSettings, EditorHotkeySettings, Hotkey, HotkeyModifier,
+    HotkeySettings, LoggingSettings, TwitchSettings,
 };
 use crate::soundpanel::SoundBinding;
 use crate::tts::TtsProviderType;
@@ -1141,6 +1141,43 @@ impl From<HotkeyDto> for Hotkey {
     }
 }
 
+/// Editor hotkey settings DTO
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EditorHotkeySettingsDto {
+    pub edit_word: HotkeyDto,
+    pub submit_continue: HotkeyDto,
+    pub next_spelling_error: HotkeyDto,
+    pub previous_spelling_error: HotkeyDto,
+    pub next_tab: HotkeyDto,
+    pub previous_tab: HotkeyDto,
+}
+
+impl From<EditorHotkeySettings> for EditorHotkeySettingsDto {
+    fn from(h: EditorHotkeySettings) -> Self {
+        Self {
+            edit_word: h.edit_word.into(),
+            submit_continue: h.submit_continue.into(),
+            next_spelling_error: h.next_spelling_error.into(),
+            previous_spelling_error: h.previous_spelling_error.into(),
+            next_tab: h.next_tab.into(),
+            previous_tab: h.previous_tab.into(),
+        }
+    }
+}
+
+impl From<EditorHotkeySettingsDto> for EditorHotkeySettings {
+    fn from(dto: EditorHotkeySettingsDto) -> Self {
+        Self {
+            edit_word: dto.edit_word.into(),
+            submit_continue: dto.submit_continue.into(),
+            next_spelling_error: dto.next_spelling_error.into(),
+            previous_spelling_error: dto.previous_spelling_error.into(),
+            next_tab: dto.next_tab.into(),
+            previous_tab: dto.previous_tab.into(),
+        }
+    }
+}
+
 /// Hotkey settings DTO
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HotkeySettingsDto {
@@ -1151,6 +1188,7 @@ pub struct HotkeySettingsDto {
     pub playback_repeat: HotkeyDto,
     pub playback_control_window: HotkeyDto,
     pub return_previous_window: HotkeyDto,
+    pub editor: EditorHotkeySettingsDto,
 }
 
 impl From<HotkeySettings> for HotkeySettingsDto {
@@ -1163,6 +1201,7 @@ impl From<HotkeySettings> for HotkeySettingsDto {
             playback_repeat: h.playback_repeat.into(),
             playback_control_window: h.playback_control_window.into(),
             return_previous_window: h.return_previous_window.into(),
+            editor: h.editor.into(),
         }
     }
 }
@@ -1177,6 +1216,7 @@ impl From<HotkeySettingsDto> for HotkeySettings {
             playback_repeat: dto.playback_repeat.into(),
             playback_control_window: dto.playback_control_window.into(),
             return_previous_window: dto.return_previous_window.into(),
+            editor: dto.editor.into(),
         }
     }
 }
@@ -1588,6 +1628,32 @@ mod tests {
                 modifiers: vec![HotkeyModifierDto::Ctrl],
                 key: "F".into(),
             },
+            editor: EditorHotkeySettingsDto {
+                edit_word: HotkeyDto {
+                    modifiers: vec![HotkeyModifierDto::Ctrl],
+                    key: "E".into(),
+                },
+                submit_continue: HotkeyDto {
+                    modifiers: vec![HotkeyModifierDto::Ctrl],
+                    key: "Enter".into(),
+                },
+                next_spelling_error: HotkeyDto {
+                    modifiers: vec![],
+                    key: "F7".into(),
+                },
+                previous_spelling_error: HotkeyDto {
+                    modifiers: vec![HotkeyModifierDto::Shift],
+                    key: "F7".into(),
+                },
+                next_tab: HotkeyDto {
+                    modifiers: vec![HotkeyModifierDto::Ctrl],
+                    key: "Tab".into(),
+                },
+                previous_tab: HotkeyDto {
+                    modifiers: vec![HotkeyModifierDto::Ctrl, HotkeyModifierDto::Shift],
+                    key: "Tab".into(),
+                },
+            },
         };
 
         let vtube_studio = VTubeStudioSettingsDto {
@@ -1858,6 +1924,32 @@ mod tests {
             return_previous_window: HotkeyDto {
                 modifiers: vec![],
                 key: String::new(),
+            },
+            editor: EditorHotkeySettingsDto {
+                edit_word: HotkeyDto {
+                    modifiers: vec![],
+                    key: String::new(),
+                },
+                submit_continue: HotkeyDto {
+                    modifiers: vec![],
+                    key: String::new(),
+                },
+                next_spelling_error: HotkeyDto {
+                    modifiers: vec![],
+                    key: String::new(),
+                },
+                previous_spelling_error: HotkeyDto {
+                    modifiers: vec![],
+                    key: String::new(),
+                },
+                next_tab: HotkeyDto {
+                    modifiers: vec![],
+                    key: String::new(),
+                },
+                previous_tab: HotkeyDto {
+                    modifiers: vec![],
+                    key: String::new(),
+                },
             },
         };
 

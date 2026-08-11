@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { acceptClear } from './inputAcceptance'
+import { acceptClear, appliesQuickEditorPolicy } from './inputAcceptance'
 import type { EditorTab } from '../composables/useEditorTabs'
 
 function makeTab(id: string, text: string): EditorTab {
@@ -41,5 +41,15 @@ describe('acceptClear', () => {
     expect(result[0].text).toBe('hello')
     expect(result[1].text).toBe('')
     expect(result[2].text).toBe('foo')
+  })
+})
+
+describe('appliesQuickEditorPolicy', () => {
+  it('keeps quick-editor behavior for ordinary Enter', () => {
+    expect(appliesQuickEditorPolicy('quick')).toBe(true)
+  })
+
+  it('keeps the window open for Ctrl+Enter continue', () => {
+    expect(appliesQuickEditorPolicy('continue')).toBe(false)
   })
 })

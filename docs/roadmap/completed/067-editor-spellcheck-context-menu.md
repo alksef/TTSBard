@@ -144,4 +144,4 @@ hover-tooltip lint extension: пользователь должен попаст
 
 - [ROADMAP-008 — offline spellcheck](./008-offline-spellcheck-hunspell-codemirror.md)
 - [ROADMAP-048 — Enter/Escape и autocomplete](./048-editor-autocomplete-enter-escape.md)
-- [ROADMAP-068 — локальные горячие клавиши редактора](../active/068-editor-scoped-hotkeys-and-submit-flow.md)
+- [ROADMAP-068 — локальные горячие клавиши редактора](./068-editor-scoped-hotkeys-and-submit-flow.md)

@@ -907,6 +907,18 @@ pub fn normalize_typing_idle_timeout_ms(ms: u32) -> u32 {
     ms.clamp(TYPING_IDLE_TIMEOUT_MIN_MS, TYPING_IDLE_TIMEOUT_MAX_MS)
 }
 
+fn editor_action_label(action_id: &str) -> &str {
+    match action_id {
+        "edit_word" => "редактирования слова",
+        "submit_continue" => "отправки/продолжения",
+        "next_spelling_error" => "следующей ошибки",
+        "previous_spelling_error" => "предыдущей ошибки",
+        "next_tab" => "следующей вкладки",
+        "previous_tab" => "предыдущей вкладки",
+        _ => action_id,
+    }
+}
+
 impl Default for EditorSettings {
     fn default() -> Self {
         Self {
@@ -1970,6 +1982,71 @@ impl SettingsManager {
             _ => return Err(anyhow::anyhow!("Invalid hotkey name: {}", name)),
         }
         self.save(&settings)
+    }
+
+    /// Set an editor-scoped hotkey.
+    ///
+    /// Validates action id, checks for duplicates within the editor group and
+    /// conflicts with global/main-window-local bindings. Saves settings and emits
+    /// `settings-changed` but does NOT call `reregister_hotkeys` (editor hotkeys
+    /// are never registered as global shortcuts).
+    ///
+    /// Empty binding is allowed and means disabled.
+    pub fn set_editor_hotkey(
+        &self,
+        action_id: &str,
+        hotkey: &super::hotkeys::Hotkey,
+    ) -> Result<()> {
+        use super::hotkeys::EditorHotkeySettings;
+        if !EditorHotkeySettings::is_valid_action_id(action_id) {
+            return Err(anyhow::anyhow!("Invalid editor action: {}", action_id));
+        }
+
+        let mut settings = self.load()?;
+
+        // Check for duplicate within editor group
+        if let Some(conflict) = settings.hotkeys.editor.find_duplicate(action_id, hotkey) {
+            let label = editor_action_label(conflict);
+            return Err(anyhow::anyhow!(
+                "Этот хоткей уже используется для {}",
+                label
+            ));
+        }
+
+        // Check for conflicts with global / main-window-local bindings
+        if hotkey.conflicts_with_global(&settings.hotkeys) {
+            return Err(anyhow::anyhow!(
+                "Этот хоткей конфликтует с назначенным глобальным хоткеем"
+            ));
+        }
+
+        let field = settings
+            .hotkeys
+            .editor
+            .get_mut_by_id(action_id)
+            .ok_or_else(|| anyhow::anyhow!("Invalid editor action: {}", action_id))?;
+        *field = hotkey.clone();
+
+        self.save(&settings)
+    }
+
+    /// Reset an editor-scoped hotkey to its canonical default.
+    pub fn reset_editor_hotkey(&self, action_id: &str) -> Result<super::hotkeys::Hotkey> {
+        use super::hotkeys::Hotkey;
+        if !super::hotkeys::EditorHotkeySettings::is_valid_action_id(action_id) {
+            return Err(anyhow::anyhow!("Invalid editor action: {}", action_id));
+        }
+        let default = match action_id {
+            "edit_word" => Hotkey::default_edit_word(),
+            "submit_continue" => Hotkey::default_submit_continue(),
+            "next_spelling_error" => Hotkey::default_next_spelling_error(),
+            "previous_spelling_error" => Hotkey::default_previous_spelling_error(),
+            "next_tab" => Hotkey::default_next_tab(),
+            "previous_tab" => Hotkey::default_previous_tab(),
+            _ => return Err(anyhow::anyhow!("Invalid editor action: {}", action_id)),
+        };
+        self.set_editor_hotkey(action_id, &default)?;
+        Ok(default)
     }
 
     /// Reset a hotkey to its default value

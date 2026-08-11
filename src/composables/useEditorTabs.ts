@@ -7,6 +7,17 @@ export interface EditorTab {
   text: string
 }
 
+export function cycleTabId(
+  tabs: EditorTab[],
+  activeId: string,
+  direction: 1 | -1,
+): string | null {
+  if (tabs.length === 0) return null
+  const currentIndex = tabs.findIndex(tab => tab.id === activeId)
+  const index = currentIndex === -1 ? 0 : currentIndex
+  return tabs[(index + direction + tabs.length) % tabs.length].id
+}
+
 function genId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return crypto.randomUUID()
@@ -71,6 +82,20 @@ export function useEditorTabs() {
     if (tabs.value.some(t => t.id === id)) activeId.value = id
   }
 
+  function next(): boolean {
+    const id = cycleTabId(tabs.value, activeId.value, 1)
+    if (!id) return false
+    activeId.value = id
+    return true
+  }
+
+  function previous(): boolean {
+    const id = cycleTabId(tabs.value, activeId.value, -1)
+    if (!id) return false
+    activeId.value = id
+    return true
+  }
+
   function rename(id: string, title: string) {
     const t = tabs.value.find(t => t.id === id)
     if (t) t.title = title
@@ -121,5 +146,5 @@ export function useEditorTabs() {
   watch(tabs, scheduleSave, { deep: true })
   watch(activeId, scheduleSave)
 
-  return { tabs, activeId, active, create, close, select, rename, init, flushSave }
+  return { tabs, activeId, active, create, close, select, next, previous, rename, init, flushSave }
 }

@@ -1,5 +1,21 @@
 import { describe, it, expect } from 'vitest'
-import { shouldEnterSubmit, shouldEscapeSubmit } from './keymapArbitration'
+import {
+  hotkeyCode,
+  matchesEditorHotkey,
+  shouldEnterSubmit,
+  shouldEscapeSubmit,
+} from './keymapArbitration'
+import type { HotkeyDto } from '../../types/settings'
+
+function event(init: Partial<KeyboardEvent> & Pick<KeyboardEvent, 'code'>) {
+  return {
+    code: init.code,
+    ctrlKey: init.ctrlKey ?? false,
+    shiftKey: init.shiftKey ?? false,
+    altKey: init.altKey ?? false,
+    metaKey: init.metaKey ?? false,
+  }
+}
 
 describe('shouldEnterSubmit', () => {
   it('returns true when autocomplete is closed (null status)', () => {
@@ -70,5 +86,33 @@ describe('shouldEscapeSubmit', () => {
 
   it('returns true when autocomplete is pending with nonsensical index', () => {
     expect(shouldEscapeSubmit('pending', 0)).toBe(true)
+  })
+})
+
+describe('editor hotkey matching', () => {
+  const ctrlE: HotkeyDto = { modifiers: ['ctrl'], key: 'E' }
+
+  it('uses physical code, independent of keyboard layout', () => {
+    expect(matchesEditorHotkey(ctrlE, event({ code: 'KeyE', ctrlKey: true }))).toBe(true)
+  })
+
+  it('requires an exact modifier set', () => {
+    expect(matchesEditorHotkey(ctrlE, event({ code: 'KeyE' }))).toBe(false)
+    expect(matchesEditorHotkey(ctrlE, event({ code: 'KeyE', ctrlKey: true, shiftKey: true }))).toBe(false)
+  })
+
+  it('distinguishes F7 from Shift+F7', () => {
+    expect(matchesEditorHotkey({ modifiers: [], key: 'F7' }, event({ code: 'F7' }))).toBe(true)
+    expect(matchesEditorHotkey({ modifiers: [], key: 'F7' }, event({ code: 'F7', shiftKey: true }))).toBe(false)
+    expect(matchesEditorHotkey({ modifiers: ['shift'], key: 'F7' }, event({ code: 'F7', shiftKey: true }))).toBe(true)
+  })
+
+  it('does not match disabled bindings', () => {
+    expect(matchesEditorHotkey({ modifiers: [], key: '' }, event({ code: 'KeyE' }))).toBe(false)
+  })
+
+  it('maps Enter and Tab to their physical codes', () => {
+    expect(hotkeyCode('ENTER')).toBe('Enter')
+    expect(hotkeyCode('TAB')).toBe('Tab')
   })
 })
