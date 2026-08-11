@@ -57,8 +57,18 @@ const editorSettings = useEditorSettings()
 const hotkeySettings = useHotkeysSettings()
 const { checkWords, enabled, available } = useSpellcheck()
 const spellLinter = createSpellLinter(checkWords, () => enabled.value)
-const { menuState, closeMenu, isMenuOpen, openFromEvent, openAtCursor, applySuggestion } =
-  useSpellContextMenu(view, enabled)
+const {
+  menuState,
+  selectedSuggestionIndex,
+  closeMenu,
+  isMenuOpen,
+  openFromEvent,
+  openAtCursor,
+  applySuggestion,
+  selectSuggestion,
+  selectSuggestionAt,
+  applySelectedSuggestion,
+} = useSpellContextMenu(view, enabled)
 
 const rep = ref(props.replacements)
 const usr = ref(props.usernames)
@@ -413,6 +423,23 @@ function handleEditorHotkey(event: KeyboardEvent, targetView: EditorView): boole
   return handled
 }
 
+function handleSpellMenuKeydown(event: KeyboardEvent): boolean {
+  if (!isMenuOpen()) return false
+
+  const direction = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : null
+  if (direction !== null) {
+    if (!selectSuggestion(direction)) return false
+  } else if (event.key === 'Enter') {
+    if (!applySelectedSuggestion()) return false
+  } else {
+    return false
+  }
+
+  event.preventDefault()
+  event.stopPropagation()
+  return true
+}
+
 function createState() {
   return EditorState.create({
     doc: props.modelValue,
@@ -422,7 +449,8 @@ function createState() {
       EditorView.lineWrapping,
       EditorState.readOnly.of(false),
       EditorView.domEventHandlers({
-        keydown: (event, targetView) => handleEditorHotkey(event, targetView),
+        keydown: (event, targetView) =>
+          handleSpellMenuKeydown(event) || handleEditorHotkey(event, targetView),
       }),
       ...createKeymap(),
       autocompletion({
@@ -475,8 +503,6 @@ function onDocMouseDown(e: MouseEvent) {
   if (!isMenuOpen()) return
   const menuEl = document.querySelector('.spell-context-menu')
   if (menuEl && !menuEl.contains(e.target as Node)) {
-    const v = view.value
-    if (v && v.dom.contains(e.target as Node)) return
     closeMenu()
   }
 }
@@ -521,9 +547,11 @@ defineExpose({ focus, openSpellMenu })
     :word="menuState.word"
     :message="menuState.message"
     :suggestions="menuState.suggestions"
+    :selected-suggestion-index="selectedSuggestionIndex"
     :x="menuState.x"
     :y="menuState.y"
     @apply="applySuggestion"
+    @select="selectSuggestionAt"
     @close="closeMenu"
   />
   <div v-if="enabled && !available" class="spell-unavailable">словарь недоступен</div>

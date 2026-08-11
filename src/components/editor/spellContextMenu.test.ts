@@ -234,23 +234,25 @@ describe('useSpellContextMenu', () => {
       expect(result).toBe(false)
     })
 
-    it('updates position on subsequent calls', () => {
+    it('anchors the menu below the misspelled word', () => {
       const { view, ctx } = setup()
       const event1 = { clientX: 50, clientY: 50, preventDefault: vi.fn(), stopPropagation: vi.fn() } as unknown as MouseEvent
       ;(view.posAtCoords as any).mockReturnValue(3)
+      ;(view.coordsAtPos as any).mockReturnValueOnce({ left: 32, bottom: 80 })
 
       mockForEachImpl = (_state, f) => {
         f(makeDiagnostic({ from: 0, to: 4 }), 0, 4)
       }
 
       ctx.openFromEvent(event1)
-      expect(ctx.menuState.value.x).toBe(50)
-      expect(ctx.menuState.value.y).toBe(50)
+      expect(ctx.menuState.value.x).toBe(32)
+      expect(ctx.menuState.value.y).toBe(84)
 
       const event2 = { clientX: 100, clientY: 200, preventDefault: vi.fn(), stopPropagation: vi.fn() } as unknown as MouseEvent
+      ;(view.coordsAtPos as any).mockReturnValueOnce({ left: 96, bottom: 160 })
       ctx.openFromEvent(event2)
-      expect(ctx.menuState.value.x).toBe(100)
-      expect(ctx.menuState.value.y).toBe(200)
+      expect(ctx.menuState.value.x).toBe(96)
+      expect(ctx.menuState.value.y).toBe(164)
     })
 
     it('works with diagnostics that have no actions', () => {
@@ -335,6 +337,7 @@ describe('useSpellContextMenu', () => {
       ctx.applySuggestion('world')
       expect(view.dispatch).toHaveBeenCalledWith({
         changes: { from: 0, to: 4, insert: 'world' },
+        selection: { anchor: 5 },
       })
       expect(ctx.menuState.value.visible).toBe(false)
     })
@@ -408,6 +411,53 @@ describe('useSpellContextMenu', () => {
       ctx.applySuggestion('world')
       expect(view.dispatch).toHaveBeenCalledWith({
         changes: { from: 0, to: 4, insert: 'world' },
+        selection: { anchor: 5 },
+      })
+    })
+  })
+
+  describe('keyboard suggestion selection', () => {
+    it('cycles through suggestions with arrow navigation', () => {
+      const { ctx } = setup()
+      ctx.menuState.value.suggestions = ['first', 'second']
+
+      expect(ctx.selectSuggestion(1)).toBe(true)
+      expect(ctx.selectedSuggestionIndex.value).toBe(0)
+      expect(ctx.selectSuggestion(1)).toBe(true)
+      expect(ctx.selectedSuggestionIndex.value).toBe(1)
+      expect(ctx.selectSuggestion(1)).toBe(true)
+      expect(ctx.selectedSuggestionIndex.value).toBe(0)
+      expect(ctx.selectSuggestion(-1)).toBe(true)
+      expect(ctx.selectedSuggestionIndex.value).toBe(1)
+    })
+
+    it('does not select a suggestion when none are available', () => {
+      const { ctx } = setup()
+      expect(ctx.selectSuggestion(1)).toBe(false)
+      expect(ctx.selectedSuggestionIndex.value).toBe(-1)
+    })
+
+    it('applies the selected suggestion', () => {
+      const { view, ctx } = setup('wrld')
+      ctx.menuState.value = {
+        visible: true,
+        word: 'wrld',
+        message: 'test',
+        suggestions: ['world'],
+        from: 0,
+        to: 4,
+        x: 50,
+        y: 50,
+      }
+      ctx.selectSuggestionAt(0)
+      mockForEachImpl = (_state, f) => {
+        f(makeDiagnostic({ from: 0, to: 4, actions: [{ name: 'world', apply: vi.fn() }] }), 0, 4)
+      }
+
+      expect(ctx.applySelectedSuggestion()).toBe(true)
+      expect(view.dispatch).toHaveBeenCalledWith({
+        changes: { from: 0, to: 4, insert: 'world' },
+        selection: { anchor: 5 },
       })
     })
   })

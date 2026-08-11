@@ -6,12 +6,14 @@ const props = defineProps<{
   word: string
   message: string
   suggestions: string[]
+  selectedSuggestionIndex: number
   x: number
   y: number
 }>()
 
 defineEmits<{
   apply: [suggestion: string]
+  select: [index: number]
   close: []
 }>()
 
@@ -58,8 +60,9 @@ const menuStyle = computed(() => ({
       role="menu"
       aria-label="Spelling suggestions"
     >
-      <div class="spell-context-menu__word" aria-live="polite">{{ word }}</div>
-      <div class="spell-context-menu__message">{{ message }}</div>
+      <div class="spell-context-menu__meta" aria-live="polite">
+        <strong>{{ word }}</strong><span>{{ message }}</span>
+      </div>
       <div
         v-if="suggestions.length > 0"
         class="spell-context-menu__actions"
@@ -67,12 +70,14 @@ const menuStyle = computed(() => ({
         aria-label="Suggestions"
       >
         <button
-          v-for="s in suggestions"
+          v-for="(s, index) in suggestions"
           :key="s"
           class="spell-context-menu__action"
+          :class="{ 'spell-context-menu__action--selected': selectedSuggestionIndex === index }"
           role="menuitem"
           :aria-label="`Replace with ${s}`"
           @mousedown.prevent
+          @mouseenter="$emit('select', index)"
           @click.stop="$emit('apply', s)"
         >
           {{ s }}
@@ -96,9 +101,9 @@ const menuStyle = computed(() => ({
   max-height: 80vh;
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border-strong);
-  border-radius: 12px;
-  box-shadow: var(--shadow-soft), 0 0 0 1px rgba(var(--rgb-black), 0.04);
-  padding: 10px 4px 8px 4px;
+  border-radius: 8px;
+  box-shadow: var(--shadow-soft);
+  padding: 4px 0;
   font-family: var(--font-mono);
   font-size: 0.88rem;
   animation: spell-menu-in 0.12s ease-out;
@@ -115,17 +120,10 @@ const menuStyle = computed(() => ({
   }
 }
 
-.spell-context-menu__word {
-  padding: 4px 12px 2px;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.spell-context-menu__message {
-  padding: 2px 12px 6px;
+.spell-context-menu__meta {
+  display: flex;
+  gap: 6px;
+  padding: 3px 10px 5px;
   font-size: 0.78rem;
   color: var(--color-text-muted);
   white-space: nowrap;
@@ -133,19 +131,31 @@ const menuStyle = computed(() => ({
   text-overflow: ellipsis;
 }
 
+.spell-context-menu__meta strong {
+  flex: 0 1 auto;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spell-context-menu__meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .spell-context-menu__actions {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 0 4px;
+  gap: 0;
+  padding: 0;
 }
 
 .spell-context-menu__action {
   display: block;
   width: 100%;
-  padding: 6px 10px;
+  padding: 4px 10px;
   border: none;
-  border-radius: 7px;
+  border-radius: 0;
   background: transparent;
   color: var(--color-text-primary);
   font-family: var(--font-mono);
@@ -159,6 +169,7 @@ const menuStyle = computed(() => ({
 }
 
 .spell-context-menu__action:hover,
+.spell-context-menu__action--selected,
 .spell-context-menu__action:focus-visible {
   background: var(--color-bg-field);
   outline: none;
@@ -169,7 +180,7 @@ const menuStyle = computed(() => ({
 }
 
 .spell-context-menu__no-suggestions {
-  padding: 6px 12px 2px;
+  padding: 4px 10px;
   font-size: 0.78rem;
   color: var(--color-text-muted);
 }

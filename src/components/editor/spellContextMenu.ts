@@ -75,9 +75,11 @@ export function useSpellContextMenu(
   enabled: Ref<boolean>,
 ) {
   const menuState = ref<SpellMenuState>({ ...INITIAL_MENU_STATE })
+  const selectedSuggestionIndex = ref(-1)
 
   function closeMenu() {
     menuState.value = { ...INITIAL_MENU_STATE }
+    selectedSuggestionIndex.value = -1
   }
 
   function isMenuOpen(): boolean {
@@ -95,6 +97,7 @@ export function useSpellContextMenu(
     if (!found) return false
 
     const doc = v.state.doc.sliceString(found.from, found.to)
+    const coords = v.coordsAtPos(found.from)
     menuState.value = {
       visible: true,
       word: doc,
@@ -102,9 +105,10 @@ export function useSpellContextMenu(
       suggestions: (found.d.actions ?? []).map((a) => a.name),
       from: found.from,
       to: found.to,
-      x: event.clientX,
-      y: event.clientY,
+      x: coords?.left ?? event.clientX,
+      y: (coords?.bottom ?? event.clientY) + 4,
     }
+    selectedSuggestionIndex.value = -1
     return true
   }
 
@@ -133,6 +137,29 @@ export function useSpellContextMenu(
       x: coords.left,
       y: coords.bottom + 4,
     }
+    selectedSuggestionIndex.value = -1
+    return true
+  }
+
+  function selectSuggestion(direction: 1 | -1): boolean {
+    const { suggestions } = menuState.value
+    if (suggestions.length === 0) return false
+
+    const nextIndex = selectedSuggestionIndex.value + direction
+    selectedSuggestionIndex.value = (nextIndex + suggestions.length) % suggestions.length
+    return true
+  }
+
+  function selectSuggestionAt(index: number) {
+    if (index >= 0 && index < menuState.value.suggestions.length) {
+      selectedSuggestionIndex.value = index
+    }
+  }
+
+  function applySelectedSuggestion(): boolean {
+    const suggestion = menuState.value.suggestions[selectedSuggestionIndex.value]
+    if (!suggestion) return false
+    applySuggestion(suggestion)
     return true
   }
 
@@ -164,6 +191,7 @@ export function useSpellContextMenu(
 
     v.dispatch({
       changes: { from: best.from, to: best.to, insert: suggestion },
+      selection: { anchor: best.from + suggestion.length },
     })
     closeMenu()
   }
@@ -174,10 +202,14 @@ export function useSpellContextMenu(
 
   return {
     menuState,
+    selectedSuggestionIndex,
     closeMenu,
     isMenuOpen,
     openFromEvent,
     openAtCursor,
     applySuggestion,
+    selectSuggestion,
+    selectSuggestionAt,
+    applySelectedSuggestion,
   }
 }
