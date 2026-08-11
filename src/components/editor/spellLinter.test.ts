@@ -10,7 +10,7 @@ vi.mock('@codemirror/lint', () => ({
   },
 }))
 
-import { createSpellLinter } from './spellLinter'
+import { createSpellLinter, SPELLCHECK_SOURCE } from './spellLinter'
 import type { SpellResult } from '../../types/spell'
 
 interface ViewMock {
@@ -137,21 +137,78 @@ describe('spellLinter', () => {
   })
 
   describe('duplicate occurrences', () => {
-    it('flags only the first occurrence when same word appears multiple times', async () => {
+    it('flags all occurrences when same word appears multiple times', async () => {
       const checkWords = vi.fn().mockResolvedValue([
         { word: 'test', correct: false, suggestions: ['rest', 'best'] },
+        { word: 'and', correct: true, suggestions: [] },
+        { word: 'test', correct: false, suggestions: ['rest', 'best'] },
+        { word: 'again', correct: true, suggestions: [] },
       ])
       createSpellLinter(checkWords, () => true)
       const { view } = makeView('test and test again')
       const result = await getLintSource()(view)
-      expect(result).toHaveLength(1)
-      // first "test" is at index 0
+      expect(result).toHaveLength(2)
       expect(result[0]).toMatchObject({ from: 0, to: 4 })
+      expect(result[1]).toMatchObject({ from: 9, to: 13 })
+    })
+
+    it('produces separate diagnostics for two identical typos', async () => {
+      const checkWords = vi.fn().mockResolvedValue([
+        { word: 'wrng', correct: false, suggestions: ['wrong'] },
+        { word: 'wrng', correct: false, suggestions: ['wrong'] },
+      ])
+      createSpellLinter(checkWords, () => true)
+      const { view } = makeView('wrng wrng')
+      const result = await getLintSource()(view)
+      expect(result).toHaveLength(2)
+      expect(result[0]).toMatchObject({ from: 0, to: 4 })
+      expect(result[1]).toMatchObject({ from: 5, to: 9 })
+    })
+
+    it('handles mixed case duplicate occurrences', async () => {
+      const checkWords = vi.fn().mockResolvedValue([
+        { word: 'Hello', correct: false, suggestions: ['hello'] },
+        { word: 'hello', correct: false, suggestions: ['Hello'] },
+      ])
+      createSpellLinter(checkWords, () => true)
+      const { view } = makeView('Hello hello')
+      const result = await getLintSource()(view)
+      expect(result).toHaveLength(2)
+      expect(result[0]).toMatchObject({ from: 0, to: 5 })
+      expect(result[1]).toMatchObject({ from: 6, to: 11 })
+    })
+  })
+
+  describe('hyphenated words', () => {
+    it('produces diagnostic for hyphenated word', async () => {
+      const checkWords = vi.fn().mockResolvedValue([
+        { word: 'well-known', correct: false, suggestions: ['well known'] },
+      ])
+      createSpellLinter(checkWords, () => true)
+      const { view } = makeView('well-known')
+      const result = await getLintSource()(view)
+      expect(result).toHaveLength(1)
+      expect(result[0]).toMatchObject({ from: 0, to: 10 })
+    })
+  })
+
+  describe('multiple different errors', () => {
+    it('produces separate diagnostics for multiple different errors', async () => {
+      const checkWords = vi.fn().mockResolvedValue([
+        { word: 'wrng', correct: false, suggestions: ['wrong'] },
+        { word: 'misspelled', correct: false, suggestions: ['misspelled'] },
+      ])
+      createSpellLinter(checkWords, () => true)
+      const { view } = makeView('wrng misspelled')
+      const result = await getLintSource()(view)
+      expect(result).toHaveLength(2)
+      expect(result[0]).toMatchObject({ from: 0, to: 4 })
+      expect(result[1]).toMatchObject({ from: 5, to: 15 })
     })
   })
 
   describe('partial / unknown results', () => {
-    it('skips result words not found in document', async () => {
+    it('does not map results past end of token array', async () => {
       const checkWords = vi.fn().mockResolvedValue([
         { word: 'hello', correct: false, suggestions: ['hi'] },
         { word: 'nonexistent', correct: false, suggestions: ['real'] },
@@ -164,7 +221,6 @@ describe('spellLinter', () => {
     })
 
     it('skips result words with no index in token match', async () => {
-      // WORD_RE requires at least 2 chars, so single-letter words are not tokens
       const checkWords = vi.fn().mockResolvedValue([
         { word: 'a', correct: false, suggestions: ['b'] },
       ])
@@ -264,6 +320,26 @@ describe('spellLinter', () => {
         changes: { from: 2, to: 6, insert: 'wing' },
       })
     })
+
+    it('applying action to second occurrence only changes second word', async () => {
+      const checkWords = vi.fn().mockResolvedValue([
+        { word: 'wrng', correct: false, suggestions: ['wrong'] },
+        { word: 'wrng', correct: false, suggestions: ['wrong'] },
+      ])
+      createSpellLinter(checkWords, () => true)
+      const { view, dispatch } = makeView('wrng and wrng')
+
+      const result = await getLintSource()(view)
+      expect(result).toHaveLength(2)
+
+      const secondAction = result[1].actions![0]
+      secondAction.apply(view, result[1].from, result[1].to)
+
+      expect(dispatch).toHaveBeenCalledTimes(1)
+      expect(dispatch).toHaveBeenCalledWith({
+        changes: { from: 9, to: 13, insert: 'wrong' },
+      })
+    })
   })
 
   describe('rejected checkWords', () => {
@@ -282,6 +358,69 @@ describe('spellLinter', () => {
 
       expect(threw).toBe(false)
       expect(result).toEqual([])
+    })
+
+    it('returns no diagnostics when dict is unavailable', async () => {
+      const checkWords = vi.fn().mockRejectedValue(new Error('dictionary unavailable'))
+      createSpellLinter(checkWords, () => true)
+      const { view } = makeView('hello world')
+      const result = await getLintSource()(view)
+      expect(result).toEqual([])
+    })
+  })
+
+  describe('unavailable to recovery', () => {
+    it('clears stale diagnostics on unavailable then restores on recovery', async () => {
+      const checkWords = vi.fn()
+      createSpellLinter(checkWords, () => true)
+      const { view } = makeView('hello wrng')
+
+      checkWords.mockResolvedValueOnce([
+        { word: 'hello', correct: true, suggestions: [] },
+        { word: 'wrng', correct: false, suggestions: ['wrong'] },
+      ])
+      let result = await getLintSource()(view)
+      expect(result).toHaveLength(1)
+
+      checkWords.mockRejectedValueOnce(new Error('dictionary unavailable'))
+      result = await getLintSource()(view)
+      expect(result).toEqual([])
+
+      checkWords.mockResolvedValueOnce([
+        { word: 'hello', correct: true, suggestions: [] },
+        { word: 'wrng', correct: false, suggestions: ['wrong'] },
+      ])
+      result = await getLintSource()(view)
+      expect(result).toHaveLength(1)
+    })
+  })
+
+  describe('spellcheck source identity', () => {
+    it('marks diagnostics with spellcheck source', async () => {
+      const checkWords = vi.fn().mockResolvedValue([
+        { word: 'test', correct: false, suggestions: [] },
+      ])
+      createSpellLinter(checkWords, () => true)
+      const { view } = makeView('test')
+      const result = await getLintSource()(view)
+      expect(result).toHaveLength(1)
+      expect(result[0].source).toBe(SPELLCHECK_SOURCE)
+    })
+  })
+
+  describe('backend results order contract', () => {
+    it('matches results to tokens by index preserving order', async () => {
+      const checkWords = vi.fn().mockResolvedValue([
+        { word: 'c', correct: false, suggestions: [] },
+        { word: 'b', correct: true, suggestions: [] },
+        { word: 'a', correct: false, suggestions: [] },
+      ])
+      createSpellLinter(checkWords, () => true)
+      const { view } = makeView('c b a')
+      const result = await getLintSource()(view)
+      expect(result).toHaveLength(2)
+      expect(result[0]).toMatchObject({ from: 0, to: 1 })
+      expect(result[1]).toMatchObject({ from: 4, to: 5 })
     })
   })
 })

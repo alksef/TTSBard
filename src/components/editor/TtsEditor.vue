@@ -18,8 +18,10 @@ import type { PhraseSuggestion } from '../../composables/useTextCompletion'
 import { useEditorSettings } from '../../composables/useAppSettings'
 import { createSpellLinter } from './spellLinter'
 import { useSpellcheck } from '../../composables/useSpellcheck'
+import { useSpellContextMenu } from './spellContextMenu'
 import { debounceAsync } from '../../utils/debounce'
 import { shouldEnterSubmit, shouldEscapeSubmit } from './keymapArbitration'
+import SpellContextMenu from './SpellContextMenu.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -49,8 +51,10 @@ const view = shallowRef<EditorView | null>(null)
 const ExternalUpdate = Annotation.define<boolean>()
 
 const editorSettings = useEditorSettings()
-const { checkWords, enabled } = useSpellcheck()
+const { checkWords, enabled, available } = useSpellcheck()
 const spellLinter = createSpellLinter(checkWords, () => enabled.value)
+const { menuState, closeMenu, isMenuOpen, openFromEvent, openAtCursor, applySuggestion } =
+  useSpellContextMenu(view, enabled)
 
 const rep = ref(props.replacements)
 const usr = ref(props.usernames)
@@ -332,6 +336,11 @@ function createKeymap() {
       {
         key: 'Escape',
         run: (targetView) => {
+          if (isMenuOpen()) {
+            closeMenu()
+            return true
+          }
+
           const status = completionStatus(targetView.state)
           const selIndex = selectedCompletionIndex(targetView.state)
 
@@ -370,6 +379,7 @@ function createState() {
       }),
       EditorView.updateListener.of((update) => {
         if (!update.docChanged) return
+        closeMenu()
         const isExternal = update.transactions.some(tr => tr.annotation(ExternalUpdate) !== undefined)
         if (isExternal) return
         emit('update:modelValue', update.state.doc.toString())
@@ -390,9 +400,38 @@ onMounted(() => {
     parent: editorRef.value,
   })
   view.value.focus()
+
+  const v = view.value!
+
+  v.dom.addEventListener('contextmenu', (e: Event) => {
+    if (openFromEvent(e as MouseEvent)) {
+      e.preventDefault()
+    }
+  })
+
+  v.scrollDOM.addEventListener('scroll', () => {
+    closeMenu()
+  }, { passive: true })
+
+  document.addEventListener('mousedown', onDocMouseDown)
 })
 
+function onDocMouseDown(e: MouseEvent) {
+  if (!isMenuOpen()) return
+  const menuEl = document.querySelector('.spell-context-menu')
+  if (menuEl && !menuEl.contains(e.target as Node)) {
+    const v = view.value
+    if (v && v.dom.contains(e.target as Node)) return
+    closeMenu()
+  }
+}
+
+function openSpellMenu() {
+  openAtCursor()
+}
+
 onUnmounted(() => {
+  document.removeEventListener('mousedown', onDocMouseDown)
   view.value?.destroy()
   view.value = null
 })
@@ -409,15 +448,30 @@ watch(() => props.modelValue, (newVal) => {
   }
 })
 
+watch(available, (val) => {
+  if (!val) closeMenu()
+})
+
 function focus() {
   view.value?.focus()
 }
 
-defineExpose({ focus })
+defineExpose({ focus, openSpellMenu })
 </script>
 
 <template>
   <div ref="editorRef" class="tts-editor" :style="{ '--editor-height': editorHeightPx }" @click="view?.focus()" />
+  <SpellContextMenu
+    :visible="menuState.visible"
+    :word="menuState.word"
+    :message="menuState.message"
+    :suggestions="menuState.suggestions"
+    :x="menuState.x"
+    :y="menuState.y"
+    @apply="applySuggestion"
+    @close="closeMenu"
+  />
+  <div v-if="enabled && !available" class="spell-unavailable">словарь недоступен</div>
 </template>
 
 <style scoped>
@@ -433,5 +487,13 @@ defineExpose({ focus })
 
 .tts-editor :deep(.cm-editor .cm-scroller) {
   min-height: var(--editor-height, 340px);
+}
+
+.spell-unavailable {
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  opacity: 0.7;
 }
 </style>

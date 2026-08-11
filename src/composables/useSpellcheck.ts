@@ -1,4 +1,4 @@
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useEditorSettings } from './useAppSettings'
 import type { SpellResult } from '../types/spell'
@@ -15,10 +15,19 @@ export function useSpellcheck() {
 
   const enabled = computed(() => source.value !== 'off')
 
+  const available = ref(true)
+
   async function checkWords(words: string[]): Promise<SpellResult[]> {
     if (source.value === 'off' || words.length === 0) return []
-    return invoke<SpellResult[]>('spellcheck', { words })
+    try {
+      const result = await invoke<SpellResult[]>('spellcheck', { words })
+      available.value = true
+      return result
+    } catch {
+      available.value = false
+      return []
+    }
   }
 
-  return { source, enabled, checkWords }
+  return { source, enabled, available, checkWords }
 }

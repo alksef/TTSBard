@@ -5,6 +5,8 @@ import { debugError } from '../../utils/debug'
 
 const WORD_RE = /[a-zа-яё][a-zа-яё-]*/giu
 
+export const SPELLCHECK_SOURCE = 'spellcheck'
+
 export interface SpellCheckFn {
   (words: string[]): Promise<SpellResult[]>
 }
@@ -23,17 +25,33 @@ export function createSpellLinter(checkWords: SpellCheckFn, enabled: () => boole
       debugError('[spellLinter] checkWords failed:', e)
       return []
     }
+    const indexByWord = new Map<string, number[]>()
+    for (let i = 0; i < tokens.length; i++) {
+      const key = tokens[i][0].toLowerCase()
+      const list = indexByWord.get(key)
+      if (list) {
+        list.push(i)
+      } else {
+        indexByWord.set(key, [i])
+      }
+    }
+
     const diagnostics: Diagnostic[] = []
     for (const r of results) {
       if (r.correct) continue
-      const m = tokens.find(t => t[0].toLowerCase() === r.word.toLowerCase())
-      if (!m || m.index == null) continue
+      const key = r.word.toLowerCase()
+      const list = indexByWord.get(key)
+      if (!list || list.length === 0) continue
+      const tokenIdx = list.shift()!
+      const m = tokens[tokenIdx]
+      if (m.index == null) continue
       const from = m.index
       const to = from + m[0].length
       diagnostics.push({
         from,
         to,
         severity: 'warning',
+        source: SPELLCHECK_SOURCE,
         message: `«${m[0]}» — нет в словаре`,
         actions: r.suggestions.slice(0, 5).map(s => ({
           name: s,
@@ -43,5 +61,5 @@ export function createSpellLinter(checkWords: SpellCheckFn, enabled: () => boole
       })
     }
     return diagnostics
-  }, { delay: 400 })
+  }, { delay: 400, tooltipFilter: () => [] })
 }

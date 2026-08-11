@@ -9,5 +9,8 @@ pub fn spellcheck(
     words: Vec<String>,
     state: State<'_, SpellcheckState>,
 ) -> Result<Vec<SpellResult>, String> {
+    if !state.0.is_available() {
+        return Err("dictionary unavailable".into());
+    }
     Ok(state.0.check_words(&words))
 }

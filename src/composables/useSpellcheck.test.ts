@@ -115,4 +115,50 @@ describe('useSpellcheck', () => {
     expect(second.source.value).toBe('off')
     expect(second.enabled.value).toBe(false)
   })
+
+  describe('available state', () => {
+    it('starts as available', () => {
+      mockEditorSettings.value = createSettings({ spellcheck_enabled: true, spellcheck_source: 'offline' })
+      const { available } = useSpellcheck()
+      expect(available.value).toBe(true)
+    })
+
+    it('sets available to false when invoke fails', async () => {
+      mockEditorSettings.value = createSettings({ spellcheck_enabled: true, spellcheck_source: 'offline' })
+      mockInvoke.mockRejectedValue(new Error('dictionary unavailable'))
+      const { checkWords, available } = useSpellcheck()
+      await checkWords(['test'])
+      expect(available.value).toBe(false)
+    })
+
+    it('returns empty array when invoke fails', async () => {
+      mockEditorSettings.value = createSettings({ spellcheck_enabled: true, spellcheck_source: 'offline' })
+      mockInvoke.mockRejectedValue(new Error('dictionary unavailable'))
+      const { checkWords } = useSpellcheck()
+      const result = await checkWords(['test'])
+      expect(result).toEqual([])
+    })
+
+    it('sets available back to true on next successful check', async () => {
+      mockEditorSettings.value = createSettings({ spellcheck_enabled: true, spellcheck_source: 'offline' })
+      const { checkWords, available } = useSpellcheck()
+
+      mockInvoke.mockRejectedValueOnce(new Error('dictionary unavailable'))
+      await checkWords(['test'])
+      expect(available.value).toBe(false)
+
+      mockInvoke.mockResolvedValueOnce([{ word: 'test', correct: true, suggestions: [] }])
+      await checkWords(['test'])
+      expect(available.value).toBe(true)
+    })
+
+    it('does not call invoke when disabled even when unavailable', async () => {
+      mockEditorSettings.value = createSettings({ spellcheck_enabled: false })
+      const { checkWords, available } = useSpellcheck()
+      available.value = false
+      const result = await checkWords(['test'])
+      expect(result).toEqual([])
+      expect(mockInvoke).not.toHaveBeenCalled()
+    })
+  })
 })
