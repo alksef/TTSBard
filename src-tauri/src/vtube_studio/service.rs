@@ -1211,7 +1211,8 @@ impl VTubeStudioService {
                 }
 
                 let session = self.read_session();
-                let (resolved, status) = self.do_item_refresh_with_desired(&file_name, session).await;
+                let (resolved, status) =
+                    self.do_item_refresh_with_desired(&file_name, session).await;
                 if self.read_session() == session {
                     let mut inner = self.inner.lock().await;
                     inner.resolved_item = resolved;
@@ -1492,7 +1493,8 @@ impl VTubeStudioService {
 
                 match timeout(REQUEST_TIMEOUT, rx).await {
                     Ok(Ok(Ok(value))) => {
-                        let parsed = serde_json::from_value::<messages::APIStateResponseData>(value);
+                        let parsed =
+                            serde_json::from_value::<messages::APIStateResponseData>(value);
                         match parsed {
                             Ok(data) => {
                                 if let Err(e) = validate_api_state(&data) {
@@ -1957,10 +1959,9 @@ fn route_text(text: String, pending: &mut HashMap<String, Pending>) {
             RecvResult::Skip => {
                 // requestID совпал, но messageType не тот — protocol violation.
                 debug!(messageType = %msg_type, %req_id, expected_msg_type = %p.expected_msg_type, "VTS recv unexpected message type");
-                let _ = p.reply.send(Err(format!(
-                    "Unexpected WebSocket message: {}",
-                    msg_type
-                )));
+                let _ = p
+                    .reply
+                    .send(Err(format!("Unexpected WebSocket message: {}", msg_type)));
             }
         }
     } else {
@@ -2157,9 +2158,11 @@ async fn ensure_event_parameter(
 ) -> Result<(), String> {
     let name = parameter_name.to_string();
     let _value = svc
-        .actor_request("ParameterCreationResponse", |id| {
-            VtsRequest::parameter_creation_request(id, &name)
-        }, REQUEST_TIMEOUT)
+        .actor_request(
+            "ParameterCreationResponse",
+            |id| VtsRequest::parameter_creation_request(id, &name),
+            REQUEST_TIMEOUT,
+        )
         .await
         .map_err(|e| format!("Create parameter failed: {}", e))?;
 
@@ -2173,9 +2176,11 @@ async fn delete_event_parameter(
 ) -> Result<(), String> {
     let name = parameter_name.to_string();
     let _value = svc
-        .actor_request("ParameterDeletionResponse", |id| {
-            VtsRequest::parameter_deletion_request(id, &name)
-        }, REQUEST_TIMEOUT)
+        .actor_request(
+            "ParameterDeletionResponse",
+            |id| VtsRequest::parameter_deletion_request(id, &name),
+            REQUEST_TIMEOUT,
+        )
         .await
         .map_err(|e| format!("Delete parameter failed: {}", e))?;
 
@@ -2190,9 +2195,11 @@ async fn inject_typing(
 ) -> Result<(), String> {
     let name = parameter_name.to_string();
     let _value = svc
-        .actor_request("InjectParameterDataResponse", |id| {
-            VtsRequest::inject_parameter_request(id, &name, value)
-        }, REQUEST_TIMEOUT)
+        .actor_request(
+            "InjectParameterDataResponse",
+            |id| VtsRequest::inject_parameter_request(id, &name, value),
+            REQUEST_TIMEOUT,
+        )
         .await
         .map_err(|e| format!("Inject parameter failed: {}", e))?;
 
@@ -2203,9 +2210,11 @@ async fn inject_typing(
 async fn trigger_hotkey(svc: &VTubeStudioService, hotkey_id: &str) -> Result<(), String> {
     let id_param = hotkey_id.to_string();
     let _value = svc
-        .actor_request("HotkeyTriggerResponse", |id| {
-            VtsRequest::hotkey_trigger_request(id, &id_param)
-        }, REQUEST_TIMEOUT)
+        .actor_request(
+            "HotkeyTriggerResponse",
+            |id| VtsRequest::hotkey_trigger_request(id, &id_param),
+            REQUEST_TIMEOUT,
+        )
         .await
         .map_err(|e| format!("Hotkey trigger failed: {}", e))?;
 
@@ -2218,7 +2227,11 @@ async fn fetch_scene_instances(
     file_name: Option<&str>,
 ) -> Result<Vec<ItemInstanceInfo>, String> {
     let value = svc
-        .actor_request("ItemListResponse", |id| VtsRequest::item_list_request(id, file_name), REQUEST_TIMEOUT)
+        .actor_request(
+            "ItemListResponse",
+            |id| VtsRequest::item_list_request(id, file_name),
+            REQUEST_TIMEOUT,
+        )
         .await?;
 
     let data: ItemListResponseData =
@@ -2250,7 +2263,13 @@ async fn animate_item(
         .actor_request(
             "ItemAnimationControlResponse",
             |id| {
-                VtsRequest::item_animation_control_request(id, &instance_id, opacity, frame, play_state)
+                VtsRequest::item_animation_control_request(
+                    id,
+                    &instance_id,
+                    opacity,
+                    frame,
+                    play_state,
+                )
             },
             ITEM_ACTION_TIMEOUT,
         )

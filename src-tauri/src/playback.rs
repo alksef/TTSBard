@@ -536,14 +536,7 @@ impl PlaybackManager {
         let th_app = app_handle.clone();
 
         thread::spawn(move || {
-            Self::thread_loop(
-                cmd_rx,
-                th_cmd_tx,
-                th_app,
-                internal_ev,
-                th_state,
-                th_devices,
-            );
+            Self::thread_loop(cmd_rx, th_cmd_tx, th_app, internal_ev, th_state, th_devices);
         });
 
         PlaybackManager {
@@ -2075,8 +2068,7 @@ mod tests {
             .find(|c| c.id == "future_replay")
             .unwrap();
         assert_eq!(
-            entry.timestamp,
-            10000000000000_i64,
+            entry.timestamp, 10000000000000_i64,
             "timestamp must be strictly greater than previous"
         );
     }

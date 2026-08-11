@@ -104,7 +104,11 @@ fn greet(name: &str) -> String {
 ///
 /// Hides only when `hide_on_blur` is enabled AND both `stay_visible` and
 /// `config_mode` are disabled.
-fn should_hide_soundpanel_on_blur(hide_on_blur: bool, stay_visible: bool, config_mode: bool) -> bool {
+fn should_hide_soundpanel_on_blur(
+    hide_on_blur: bool,
+    stay_visible: bool,
+    config_mode: bool,
+) -> bool {
     hide_on_blur && !stay_visible && !config_mode
 }
 

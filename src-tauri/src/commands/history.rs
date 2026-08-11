@@ -103,7 +103,7 @@ pub fn replay_phrase_from_cache(
 
     // Получаем текущие настройки из кэша
     let settings = state.settings_cache.read().clone();
-    
+
     // Вычисляем live-настройки вывода
     let (speaker_config, mic_config) = crate::commands::tts_pipeline::compute_output_configs(
         &settings.audio,
@@ -112,13 +112,13 @@ pub fn replay_phrase_from_cache(
 
     let replay_id = format!("hist_{}", entry.cache_key);
     let enqueued = pb.enqueue_with_outputs(
-        replay_id.clone(), 
-        entry.text.clone(), 
-        pcm, 
-        speaker_config, 
-        mic_config
+        replay_id.clone(),
+        entry.text.clone(),
+        pcm,
+        speaker_config,
+        mic_config,
     );
-    
+
     if !enqueued {
         return Err("Playback queue full".to_string());
     }

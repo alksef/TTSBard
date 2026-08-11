@@ -746,7 +746,9 @@ mod tests {
 
     #[test]
     fn config_mode_suppresses_deferred_hide() {
-        assert!(!should_fire_deferred_blur_hide(5, 5, true, false, true, false, true));
+        assert!(!should_fire_deferred_blur_hide(
+            5, 5, true, false, true, false, true
+        ));
     }
 
     // ── cancel_soundpanel_blur_hide / schedule_blur_hide_generation ──
