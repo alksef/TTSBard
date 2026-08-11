@@ -137,7 +137,7 @@ appearance и закрепление находятся в `windows.json`. По�
 звука не скрывают окно; legacy `hide_on_blur` нормализуется как обратный флаг.
 
 Пользовательский контракт описан в [руководстве по SoundPanel](../user/soundpanel.md),
-а эволюция сетки и режимов — в [ROADMAP-065](../roadmap/active/065-soundpanel-keyboard-layout-runtime-config.md).
+а эволюция сетки и режимов — в [ROADMAP-065](../roadmap/completed/065-soundpanel-keyboard-layout-runtime-config.md).
 
 ### Запуск и завершение
 

@@ -41,7 +41,6 @@ related_tasks: []
 | Item | Статус | Следующий шаг |
 |---|---|---|
 | [ROADMAP-063 — Фактическое runtime-состояние WebView-сервера](./active/063-webview-runtime-server-status.md) | `planned` | Runtime status, readiness signal и наблюдение server task |
-| [ROADMAP-065 — Саундпанель: раскладка клавиатуры, разделение runtime/config](./active/065-soundpanel-keyboard-layout-runtime-config.md) | `in_progress` | Визуальная проверка custom dropdown слоёв в dark/light; P1–P3 реализованы |
 
 ## Завершённые направления
 
@@ -75,6 +74,7 @@ related_tasks: []
 - [ROADMAP-037 — Hotkeys и возврат фокуса](./completed/037-application-hotkeys-and-previous-window-focus.md)
 - [ROADMAP-051 — вызов плавающих окон мышью](./completed/051-mouse-access-to-floating-windows.md)
 - [ROADMAP-064 — интерактивный постоянный режим SoundPanel](./completed/064-interactive-persistent-soundpanel.md)
+- [ROADMAP-065 — Саундпанель: раскладка клавиатуры, разделение runtime/config](./completed/065-soundpanel-keyboard-layout-runtime-config.md)
 
 ### Audio и playback pipeline
 
@@ -88,6 +88,7 @@ related_tasks: []
 - [ROADMAP-031 — Resemble Enhance research](./completed/031-resemble-enhance-research.md)
 - [ROADMAP-032 — audio boundaries и presets](./completed/032-audio-boundaries-and-dsp-presets.md)
 - [ROADMAP-035 — AudioPanel decomposition](./completed/035-audio-panel-subpanels.md)
+- [ROADMAP-066 — Переработка UI эффектов и DSP](./completed/066-audio-effects-dsp-ui-redesign.md)
 - [ROADMAP-047 — очередь задач озвучивания](./completed/047-speech-job-queue.md)
 - [ROADMAP-050 — Единый список управления воспроизведением](./completed/050-unified-playback-activity-list.md)
 
