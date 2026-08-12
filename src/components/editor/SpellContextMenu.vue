@@ -3,8 +3,6 @@ import { computed, ref, watch, nextTick } from 'vue'
 
 const props = defineProps<{
   visible: boolean
-  word: string
-  message: string
   suggestions: string[]
   selectedSuggestionIndex: number
   x: number
@@ -60,9 +58,6 @@ const menuStyle = computed(() => ({
       role="menu"
       aria-label="Spelling suggestions"
     >
-      <div class="spell-context-menu__meta" aria-live="polite">
-        <strong>{{ word }}</strong><span>{{ message }}</span>
-      </div>
       <div
         v-if="suggestions.length > 0"
         class="spell-context-menu__actions"
@@ -118,29 +113,6 @@ const menuStyle = computed(() => ({
     opacity: 1;
     transform: scale(1);
   }
-}
-
-.spell-context-menu__meta {
-  display: flex;
-  gap: 6px;
-  padding: 3px 10px 5px;
-  font-size: 0.78rem;
-  color: var(--color-text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.spell-context-menu__meta strong {
-  flex: 0 1 auto;
-  color: var(--color-text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.spell-context-menu__meta span {
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .spell-context-menu__actions {

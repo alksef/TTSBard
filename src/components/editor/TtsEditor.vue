@@ -544,8 +544,6 @@ defineExpose({ focus, openSpellMenu })
   <div ref="editorRef" class="tts-editor" :style="{ '--editor-height': editorHeightPx }" @click="view?.focus()" />
   <SpellContextMenu
     :visible="menuState.visible"
-    :word="menuState.word"
-    :message="menuState.message"
     :suggestions="menuState.suggestions"
     :selected-suggestion-index="selectedSuggestionIndex"
     :x="menuState.x"
