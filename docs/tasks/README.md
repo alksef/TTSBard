@@ -12,7 +12,6 @@ decision или профильной документации. Каталог н
 работ и не заменяет issue tracker.
 
 ## Текущие задачи
-
 - [TASK-119 — third-party notices для release bundle](./119-third-party-license-notices.md) —
   `planned`, автоматизировать лицензионный реестр и проверку bundled resources.
 - [TASK-117 — декомпозиция AppState](./117-appstate-decomposition.md) —

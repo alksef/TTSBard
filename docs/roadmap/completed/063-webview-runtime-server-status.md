@@ -1,8 +1,8 @@
 ---
 id: ROADMAP-063
-status: planned
+status: completed
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-08-13
 related_tasks: []
 ---
 
@@ -129,6 +129,14 @@ P0 и P1 выполняются одним backend-срезом с тестов�
 - объединение runtime-status Twitch, VTube Studio и WebView в общий enum;
 - сохранение transient runtime error в пользовательский config;
 - автоматический UPnP recovery вне lifecycle активной server generation.
+
+## Outcome
+
+Реализован runtime owner status `Stopped` / `Starting` / `Running` / `Error`,
+который не сохраняется в `WebViewSettings`. `Running` следует только за
+successful listener bind; snapshot command и typed Tauri event синхронизируют
+UI без подмены desired `enabled`. Ошибка bind остаётся видимой и позволяет
+исправить address/port, а test-send доступен только в `Running`.
 
 ## Связанные материалы
 

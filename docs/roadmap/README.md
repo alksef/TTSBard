@@ -40,9 +40,8 @@ related_tasks: []
 
 | Item | Статус | Следующий шаг |
 |---|---|---|
-| [ROADMAP-063 — Фактическое runtime-состояние WebView-сервера](./active/063-webview-runtime-server-status.md) | `planned` | Runtime status, readiness signal и наблюдение server task |
 =======
-| [ROADMAP-070 — маршрутизация и очередь SoundPanel](./active/070-soundpanel-audio-routing-and-queue.md) | planned | Реализовать независимый FIFO-worker SoundPanel поверх общих настроек аудиовыходов. |
+| [ROADMAP-070 — маршрутизация и очередь SoundPanel](./active/070-soundpanel-audio-routing-and-queue.md) | planned | Решить, нужен ли пользователю компактный индикатор очереди SoundPanel. |
 
 ## Завершённые направления
 
@@ -127,6 +126,11 @@ related_tasks: []
 - [ROADMAP-060 — Корректный lifecycle параметра печати VTube Studio](./completed/060-vtube-studio-parameter-input-lifecycle.md)
 - [ROADMAP-061 — Настройка действия и замена custom INPUT VTube Studio](./completed/061-vtube-studio-action-configuration-and-parameter-replacement.md)
 - [ROADMAP-062 — Достоверное runtime-состояние соединения VTube Studio](./completed/062-vtube-studio-runtime-connection-truth.md)
+- [ROADMAP-063 — Фактическое runtime-состояние WebView-сервера](./completed/063-webview-runtime-server-status.md)
+
+### Remediation и устойчивость
+
+- [ROADMAP-069 — Устранение дефектов полного review 0.21.0](./completed/069-full-review-correctness-remediation.md)
 
 ## Отклонённые направления
 

@@ -76,6 +76,8 @@ Telegram.
 - persisted settings проходят через `config/`, а не записываются компонентами
   напрямую;
 - новые async-задачи используют общий runtime и общий shutdown token;
+- `coordinate_shutdown` — единственная идемпотентная точка выхода: sidebar,
+  tray и OS exit проходят через неё до остановки сервисов;
 - mutex/RwLock guard нельзя удерживать во время сетевого запроса, аудиооперации
   или другого длительного `await`;
 - UI не считается источником истины для состояния фонового сервиса.
@@ -124,7 +126,8 @@ SoundPanel — отдельное Tauri/WebView-окно, а не панель �
 - `soundpanel/bindings.rs` предоставляет IPC для слоёв, назначений, запуска
   звука, Escape, appearance и закрепления;
 - `SoundPanelState` хранит runtime-наборы, active layer, runtime-копию
-  persisted `stay_visible`, config-mode и transient focused flag;
+  persisted `stay_visible`, config-mode, transient focused flag и bounded
+  runtime-only FIFO-очередь звуков;
 - `soundpanel_window.rs` владеет показом, скрытием, возвратом foreground HWND и
   отложенным blur-hide;
 - low-level hook в `soundpanel/hook.rs` обслуживает глобальный Intercept. Когда
@@ -136,6 +139,14 @@ appearance и закрепление находятся в `windows.json`. По�
 единый source of truth: `stay_visible=true` означает, что blur, Escape и запуск
 звука не скрывают окно; legacy `hide_on_blur` нормализуется как обратный флаг.
 
+Очередь SoundPanel запускается в `setup::init_app` и останавливается общим
+shutdown token. Каждый её элемент несёт snapshot `AudioSettings`: звук
+отправляется в включённые динамики и настроенный виртуальный микрофон через
+общий resolver устройств. Один worker завершает текущий звук на всех доступных
+выходах до начала следующего. Этот путь намеренно независим от `SpeechQueue`
+и `PlaybackManager`, поэтому эффекты панели не накладываются друг на друга,
+но не перебивают и не задерживают TTS.
+
 Пользовательский контракт описан в [руководстве по SoundPanel](../user/soundpanel.md),
 а эволюция сетки и режимов — в [ROADMAP-065](../roadmap/completed/065-soundpanel-keyboard-layout-runtime-config.md).
 
@@ -144,12 +155,33 @@ appearance и закрепление находятся в `windows.json`. По�
 `setup.rs` восстанавливает настройки, создаёт каналы и запускает workers.
 Синхронный main event loop работает в выделенном потоке, async-интеграции — на
 общем Tokio runtime. При завершении cancellation token должен остановить
-фоновые сервисы до уничтожения runtime и окон.
+фоновые сервисы до уничтожения runtime и окон. Все пользовательские и системные
+пути выхода сходятся в `commands::coordinate_shutdown`; повторный запрос
+безопасно игнорируется после начала shutdown.
+
+### Persistence и blocking boundaries
+
+Изменение persisted state строит candidate, записывает его через общий
+Windows-safe atomic replace и публикует cache/runtime только после успешной
+записи. Составные изменения (SoundPanel binding и Fish Audio connection form)
+сохраняются одной owner-level transaction. Файловые операции, cache/decode/DSP
+и другие синхронные тяжёлые этапы speech pipeline запускаются через явную
+blocking isolation, а не на общем async executor.
+
+### Runtime status WebView
+
+`WebViewSettings.enabled` — persisted desired state, а не признак занятого TCP
+listener. `WebViewService` владеет runtime snapshot `Stopped`, `Starting`,
+`Running` или `Error`; `Running` публикуется только после успешного bind.
+Frontend сначала подписывается на `webview-server-status-changed`, затем читает
+`get_webview_server_status`, поэтому не теряет переход между snapshot и listen.
+Контролы отправки теста и запущенного сервера доступны только в `Running`.
 
 ## Concurrency
 
 - `std::sync::mpsc` связывает producers с главным обработчиком `AppEvent`.
-- SoundPanel использует отдельный worker для чувствительного к задержкам ввода.
+- SoundPanel использует отдельный FIFO-worker для воспроизведения звуков;
+  он не является частью очереди речи.
 - Tokio tasks обслуживают сеть и другие async-интеграции.
 - `Arc<Mutex<_>>`, `Arc<RwLock<_>>` и atomics применяются только для общего
   runtime state; предпочтительнее методы владельца, чем прямой доступ к полям.
@@ -160,7 +192,9 @@ appearance и закрепление находятся в `windows.json`. По�
 
 - Секреты нельзя включать в логи, ошибки frontend или документы репозитория.
 - Внешние URL и пользовательские пути валидируются на границе команды/service.
-- WebView server применяет собственные правила bind address, token и CORS; см.
+- WebView server применяет собственные правила bind address и token; отдельный
+  CORS layer не установлен, а встроенный template использует same-origin пути;
+  см.
   [модель безопасности WebView](../integrations/webview.md#security-model).
 - Windows hooks активируются только в требуемом режиме и освобождаются при
   shutdown.

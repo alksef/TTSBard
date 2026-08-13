@@ -50,6 +50,11 @@ For external access, you must generate an access token in the **WebView Source â
 
 ## SSE Endpoint
 
+The built-in WebView template connects to `/sse` on its own origin. The server
+does not install CORS middleware or emit `Access-Control-Allow-Origin`; a
+cross-origin overlay needs a same-origin proxy or an explicitly configured
+proxy CORS policy.
+
 ### URL
 
 ```

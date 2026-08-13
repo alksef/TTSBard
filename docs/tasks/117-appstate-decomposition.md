@@ -13,14 +13,14 @@ runtime-функций
 Эта задача касается **`AppState`** — composition container'а, который держит
 `Arc<Mutex<_>>`/`Arc<RwLock<_>>` нескольких доменов (AI, TTS, input, playback).
 Это **отдельный слой** от инкапсуляции integration-сервисов (Telegram, WebView,
-Twitch, VTube Studio), которые живут **не в `AppState`**, а в собственных
-`State<...>` и управляются через
+Twitch, VTube Studio), которыми `AppState` владеет как composition handle, а
+внутреннее mutable state принадлежит самим service/managed owner API через
 [ROADMAP-059](../roadmap/completed/059-integration-state-ownership-and-settings-atomicity.md).
 
 | Слой | Что | Где ведётся |
 |---|---|---|
 | **AppState decomposition** (эта задача) | `Arc<Mutex<_>>` доменов внутри `AppState` | TASK-117 |
-| **Integration service encapsulation** | Telegram/WebView/Twitch/VTube public locks | ROADMAP-059 |
+| **Integration service encapsulation** | Telegram/WebView/Twitch/VTube owner API и internal locks | ROADMAP-059 |
 
 ## Контекст
 

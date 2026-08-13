@@ -34,7 +34,7 @@ The WebView Server provides real-time text display via HTTP with Server-Sent Eve
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| **Enabled** | Server on/off status | `false` |
+| **Enabled** | Desired state: сервер должен быть запущен | `false` |
 | **Start on boot** | Auto-start when app launches | `false` |
 | **Bind address** | Network interface (0.0.0.0 = all, 127.0.0.1 = local only) | `0.0.0.0` |
 | **Port** | TCP port for the server | `10100` |
@@ -45,6 +45,14 @@ The WebView Server provides real-time text display via HTTP with Server-Sent Eve
 |---------|-------------|---------|
 | **Access Token** | Token for external access (UUID v4) | None |
 | **UPnP** | Automatic port forwarding on router | `false` |
+
+### Runtime status
+
+Панель отдельно показывает фактический listener status: `Starting`, `Running`,
+`Stopped` или `Error`. Только `Running` означает, что TCP port успешно привязан;
+`Enabled` может оставаться включённым после ошибки bind, чтобы настройки можно
+было исправить и сохранить. `get_webview_server_status()` возвращает snapshot,
+а `webview-server-status-changed` сообщает переходы.
 
 ## API Endpoints
 
@@ -103,6 +111,13 @@ Sent when the editor typing state changes. Named events do not fire `onmessage`,
 so old templates remain compatible.
 
 ## Security Model
+
+### Origin policy
+
+Сервер не добавляет CORS headers и не имеет общего CORS middleware. Встроенные
+страницы и SSE используют same-origin relative paths (`/auth`, `/sse`). Внешний
+overlay должен размещаться на том же origin либо использовать reverse proxy,
+который явно задаёт нужную CORS policy.
 
 ### Access Control by IP Range
 
@@ -288,6 +303,7 @@ The WebView server exposes the following Tauri commands:
 ### Server Management
 
 - `get_webview_settings()` - Get all server settings
+- `get_webview_server_status()` - Get actual runtime listener status
 - `get_webview_enabled()` - Get server enabled status
 - `get_webview_start_on_boot()` - Get auto-start on boot status
 - `get_webview_port()` - Get server port
