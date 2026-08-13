@@ -29,49 +29,66 @@ const error = ref<string | null>(null);
 const hasSearched = ref(false);
 const imageUrls = ref<Map<string, string | undefined>>(new Map());
 const imageLoadingStates = ref<Record<string, boolean>>({});
+let requestGeneration = 0;
 
 const hasMore = computed(() => models.value.length < total.value);
 
-async function loadImages() {
-  for (const model of models.value) {
+async function loadImages(generation: number, fetchedModels: VoiceModel[]) {
+  for (const model of fetchedModels) {
+    if (generation !== requestGeneration) return;
     if (model.cover_image && !imageUrls.value.has(model.id)) {
-      imageLoadingStates.value[model.id] = true;
+      imageLoadingStates.value = { ...imageLoadingStates.value, [model.id]: true };
       try {
         const url = await fetchFishImage(model.cover_image);
-        imageUrls.value.set(model.id, url);
+        if (generation === requestGeneration) {
+          imageUrls.value = new Map(imageUrls.value).set(model.id, url);
+        }
       } catch {
-        imageUrls.value.set(model.id, undefined);
+        if (generation === requestGeneration) {
+          imageUrls.value = new Map(imageUrls.value).set(model.id, undefined);
+        }
       } finally {
-        imageLoadingStates.value[model.id] = false;
+        if (generation === requestGeneration) {
+          imageLoadingStates.value = { ...imageLoadingStates.value, [model.id]: false };
+        }
       }
     }
   }
 }
 
 onMounted(() => {
-  imageUrls.value.clear();
+  imageUrls.value = new Map();
 });
 
 async function fetchModels(page: number = 1) {
+  const generation = ++requestGeneration;
   if (!props.apiKey) {
-    error.value = 'API ключ не установлен';
+    if (generation === requestGeneration) {
+      error.value = 'API ключ не установлен';
+      loading.value = false;
+    }
     return;
   }
 
   loading.value = true;
   error.value = null;
+  const title = searchQuery.value || null;
 
   try {
     const result = await invoke<[number, VoiceModel[]]>('fetch_fish_audio_models', {
       pageSize,
       pageNumber: page,
-      title: searchQuery.value || null,
+      title,
       language: null
     });
     const [fetchedTotal, fetchedModels] = result;
 
+    if (generation !== requestGeneration) return;
+
     if (page === 1) {
       models.value = fetchedModels;
+      imageUrls.value = new Map();
+      imageLoadingStates.value = {};
     } else {
       models.value.push(...fetchedModels);
     }
@@ -81,12 +98,13 @@ async function fetchModels(page: number = 1) {
     hasSearched.value = true;
 
     // Load images in background
-    loadImages();
+    void loadImages(generation, fetchedModels);
   } catch (e) {
+    if (generation !== requestGeneration) return;
     error.value = e as string;
     debugError('Failed to fetch models:', e);
   } finally {
-    loading.value = false;
+    if (generation === requestGeneration) loading.value = false;
   }
 }
 
@@ -114,10 +132,10 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
 
 <template>
   <div class="modal-overlay" @click.self="handleClose">
-    <div class="modal-content">
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="fish-model-picker-title">
       <div class="modal-header">
-        <h2>Добавить голос</h2>
-        <button @click="handleClose" class="close-button">&times;</button>
+        <h2 id="fish-model-picker-title">Добавить голос</h2>
+        <button type="button" @click="handleClose" class="close-button" aria-label="Закрыть выбор голоса">&times;</button>
       </div>
 
       <div class="modal-body">
@@ -131,7 +149,7 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
             class="search-input"
             @keyup.enter="handleSearch"
           />
-          <button @click="handleSearch" class="search-button">Поиск</button>
+          <button type="button" @click="handleSearch" class="search-button">Поиск</button>
         </div>
 
         <!-- Models list -->
@@ -153,11 +171,13 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
         </div>
 
         <div v-else class="models-list">
-          <div
+          <button
             v-for="model in models"
             :key="model.id"
+            type="button"
             @click="selectModel(model)"
             class="model-item"
+            :aria-label="`Выбрать голос ${model.title}`"
           >
             <div v-if="getModelImageUrl(model)" class="model-cover">
               <img :src="getModelImageUrl(model)" :alt="model.title" />
@@ -183,7 +203,7 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
                 </span>
               </div>
             </div>
-          </div>
+          </button>
 
           <!-- Load more -->
           <div v-if="hasMore && !loading" class="load-more-container">
@@ -354,6 +374,9 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
 }
 
 .model-item {
+  width: 100%;
+  text-align: left;
+  color: inherit;
   display: flex;
   gap: 1rem;
   padding: 1rem;

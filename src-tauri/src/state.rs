@@ -10,7 +10,7 @@ use crate::tts::{
 };
 use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -130,6 +130,9 @@ pub struct AppState {
     /// Токен отмены для всех фоновых серверов
     pub shutdown: CancellationToken,
 
+    /// Флаг однократного запуска graceful shutdown (первый вызов выигрывает)
+    pub shutdown_started: Arc<AtomicBool>,
+
     /// Сохранённый HWND внешнего окна, бывшего на переднем плане перед активацией TTSBard
     pub previous_foreground_hwnd: Arc<Mutex<Option<isize>>>,
 
@@ -195,6 +198,7 @@ impl AppState {
             settings_cache: Arc::new(RwLock::new(Default::default())),
             soundpanel_hook: Arc::new(Mutex::new(None)),
             shutdown: CancellationToken::new(),
+            shutdown_started: Arc::new(AtomicBool::new(false)),
             previous_foreground_hwnd: Arc::new(Mutex::new(None)),
             soundpanel_previous_foreground_hwnd: Arc::new(Mutex::new(None)),
             soundpanel_blur_hide_generation: Arc::new(AtomicU64::new(0)),
@@ -246,6 +250,10 @@ impl AppState {
     pub fn set_hotkey_recording(&self, recording: bool) {
         self.hotkey_recording_in_progress
             .store(recording, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn begin_shutdown(&self) -> bool {
+        !self.shutdown_started.swap(true, Ordering::SeqCst)
     }
 
     #[allow(dead_code)]
@@ -380,6 +388,21 @@ impl AppState {
 
     pub fn set_fish_audio_api_key(&self, key: Option<String>) {
         self.tts_config.write().fish_api_key = key;
+    }
+
+    /// Publish a Fish form submission as a single runtime configuration update.
+    pub fn set_fish_audio_connection_settings(
+        &self,
+        key: String,
+        format: String,
+        temperature: f32,
+        sample_rate: u32,
+    ) {
+        let mut config = self.tts_config.write();
+        config.fish_api_key = Some(key);
+        config.fish_format = format;
+        config.fish_temperature = temperature;
+        config.fish_sample_rate = sample_rate;
     }
 
     pub fn set_fish_audio_reference_id(&self, reference_id: String) {
@@ -954,5 +977,12 @@ mod tests {
 
         assert_eq!(state.take_notifications(), vec!["message"]);
         assert!(state.take_notifications().is_empty());
+    }
+
+    #[test]
+    fn begin_shutdown_returns_true_only_once() {
+        let state = AppState::new();
+        assert!(state.begin_shutdown());
+        assert!(!state.begin_shutdown());
     }
 }

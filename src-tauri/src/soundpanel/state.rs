@@ -3,15 +3,17 @@
 //! Управление состоянием звуковой панели: привязки клавиш, флаг перехвата.
 
 use crate::config::{
-    DEFAULT_FLOATING_BG_COLOR, DEFAULT_FLOATING_OPACITY, MAX_FLOATING_OPACITY, MIN_FLOATING_OPACITY,
+    AudioSettings, DEFAULT_FLOATING_BG_COLOR, DEFAULT_FLOATING_OPACITY, MAX_FLOATING_OPACITY,
+    MIN_FLOATING_OPACITY,
 };
 use crate::events::AppEvent;
 use crate::soundpanel::intercept::InterceptSettings;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
+use std::time::Duration;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
 use uuid::Uuid;
 
@@ -66,6 +68,107 @@ impl SoundSets {
             .position(|s| s.id == self.active_set_id)
             .unwrap_or_default()
     }
+
+    /// Добавить/заменить привязку в активном наборе (мутация клона)
+    pub fn add_active_binding(&mut self, binding: SoundBinding) {
+        let idx = self.find_active_index();
+        if let Some(active) = self.sets.get_mut(idx) {
+            active.bindings.retain(|b| b.key != binding.key);
+            active.bindings.push(binding);
+        }
+    }
+
+    /// Удалить привязку из активного набора (мутация клона)
+    pub fn remove_active_binding(&mut self, key: char) {
+        let idx = self.find_active_index();
+        if let Some(active) = self.sets.get_mut(idx) {
+            active.bindings.retain(|b| b.key != key);
+        }
+    }
+
+    /// Ссылается ли хотя бы один набор на указанный аудиофайл
+    pub fn references_filename(&self, filename: &str) -> bool {
+        self.sets
+            .iter()
+            .any(|s| s.bindings.iter().any(|b| b.filename == filename))
+    }
+}
+
+/// Максимальное число элементов в очереди воспроизведения SoundPanel.
+const SOUND_QUEUE_CAPACITY: usize = 16;
+
+/// Интервал ожидания worker-а между проверками `CancellationToken`.
+const SOUND_QUEUE_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+/// Элемент очереди SoundPanel: путь к аудиофайлу и неизменяемый снимок настроек.
+#[derive(Debug, Clone)]
+struct QueueItem {
+    path: String,
+    audio_settings: AudioSettings,
+}
+
+/// Bounded FIFO-очередь воспроизведения SoundPanel (sender-сторона).
+///
+/// Очередь runtime-only: без persistence, UI списка и ручного управления.
+/// Переполнение или отсутствие worker-а отклоняют новый элемент с ошибкой.
+#[derive(Clone)]
+struct SoundQueue {
+    tx: SyncSender<QueueItem>,
+}
+
+impl SoundQueue {
+    fn new() -> (Self, Receiver<QueueItem>) {
+        let (tx, rx) = std::sync::mpsc::sync_channel(SOUND_QUEUE_CAPACITY);
+        (Self { tx }, rx)
+    }
+
+    fn try_enqueue(&self, item: QueueItem) -> Result<(), String> {
+        match self.tx.try_send(item) {
+            Ok(()) => Ok(()),
+            Err(TrySendError::Full(_)) => Err("SoundPanel queue is full".to_string()),
+            Err(TrySendError::Disconnected(_)) => {
+                Err("SoundPanel worker is not running".to_string())
+            }
+        }
+    }
+}
+
+/// Worker очереди SoundPanel: FIFO-воспроизведение через `play_audio_file`.
+///
+/// Синхронно воспроизводит один элемент и только затем берёт следующий.
+/// Завершается при отмене `shutdown`, не начиная новый элемент после отмены.
+fn run_queue_worker(receiver: Receiver<QueueItem>, shutdown: CancellationToken) {
+    run_queue_worker_with(receiver, shutdown, |item| {
+        super::audio::play_audio_file(&item.path, &item.audio_settings);
+    });
+}
+
+/// Testable-ядро worker-а: FIFO-потребление с injectable-функцией воспроизведения.
+fn run_queue_worker_with<F>(receiver: Receiver<QueueItem>, shutdown: CancellationToken, mut play: F)
+where
+    F: FnMut(QueueItem),
+{
+    loop {
+        if shutdown.is_cancelled() {
+            info!(target = "soundpanel::queue", "Queue worker exiting on shutdown");
+            return;
+        }
+
+        match receiver.recv_timeout(SOUND_QUEUE_POLL_INTERVAL) {
+            Ok(item) => {
+                if shutdown.is_cancelled() {
+                    info!(target = "soundpanel::queue", "Queue worker exiting before next item");
+                    return;
+                }
+                play(item);
+            }
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => {
+                info!(target = "soundpanel::queue", "Queue channel disconnected; worker exiting");
+                return;
+            }
+        }
+    }
 }
 
 /// Состояние звуковой панели
@@ -105,8 +208,11 @@ pub struct SoundPanelState {
     /// SoundPanel handle F1-F12 itself.
     window_focused: Arc<AtomicBool>,
 
-    /// Активные воспроизведения звука (thread handles)
-    active_playbacks: Arc<Mutex<Vec<JoinHandle<()>>>>,
+    /// Очередь воспроизведения SoundPanel (sender-сторона).
+    queue: SoundQueue,
+
+    /// Приёмник очереди, изымается ровно один раз при запуске worker-а.
+    queue_receiver: Arc<Mutex<Option<Receiver<QueueItem>>>>,
 }
 
 fn gen_set_id() -> String {
@@ -117,6 +223,7 @@ impl SoundPanelState {
     /// Создать новое состояние звуковой панели
     pub fn new(appdata_path: String) -> Self {
         let intercept = crate::soundpanel::intercept::load(&appdata_path);
+        let (queue, queue_receiver) = SoundQueue::new();
         Self {
             sets: Arc::new(Mutex::new(SoundSets::default())),
             event_sender: Arc::new(Mutex::new(None)),
@@ -128,7 +235,8 @@ impl SoundPanelState {
             stay_visible: Arc::new(Mutex::new(false)),
             config_mode: Arc::new(Mutex::new(false)),
             window_focused: Arc::new(AtomicBool::new(false)),
-            active_playbacks: Arc::new(Mutex::new(Vec::new())),
+            queue,
+            queue_receiver: Arc::new(Mutex::new(Some(queue_receiver))),
         }
     }
 
@@ -138,31 +246,6 @@ impl SoundPanelState {
             sets.find_active()
                 .and_then(|active| active.bindings.iter().find(|b| b.key == key).cloned())
         })
-    }
-
-    /// Добавить привязку в активный набор
-    pub fn add_binding(&self, binding: SoundBinding) {
-        if let Ok(mut sets) = self.sets.lock() {
-            let idx = sets.find_active_index();
-            if let Some(active) = sets.sets.get_mut(idx) {
-                active.bindings.retain(|b| b.key != binding.key);
-                active.bindings.push(binding);
-            }
-        } else {
-            error!(target = "soundpanel::state", "Failed to lock sets");
-        }
-    }
-
-    /// Удалить привязку из активного набора
-    pub fn remove_binding(&self, key: char) {
-        if let Ok(mut sets) = self.sets.lock() {
-            let idx = sets.find_active_index();
-            if let Some(active) = sets.sets.get_mut(idx) {
-                active.bindings.retain(|b| b.key != key);
-            }
-        } else {
-            error!(target = "soundpanel::state", "Failed to lock sets");
-        }
     }
 
     /// Получить все привязки активного набора (отсортированные)
@@ -252,8 +335,25 @@ impl SoundPanelState {
         Ok(())
     }
 
-    /// Целиком заменить наборы (для загрузки из хранилища)
-    pub fn replace_sets(&self, new_sets: SoundSets) {
+    /// Построить кандидатный снимок наборов с добавленной/заменённой привязкой
+    /// в активном наборе. Не изменяет runtime-состояние.
+    pub fn candidate_add_binding(&self, binding: &SoundBinding) -> SoundSets {
+        let mut sets = self.get_sets();
+        sets.add_active_binding(binding.clone());
+        sets
+    }
+
+    /// Построить кандидатный снимок наборов без привязки в активном наборе.
+    /// Не изменяет runtime-состояние.
+    pub fn candidate_remove_binding(&self, key: char) -> SoundSets {
+        let mut sets = self.get_sets();
+        sets.remove_active_binding(key);
+        sets
+    }
+
+    /// Опубликовать кандидатный снимок в runtime-состояние. Вызывается только
+    /// после успешного долговечного сохранения.
+    pub fn publish_sets(&self, new_sets: SoundSets) {
         if let Ok(mut sets) = self.sets.lock() {
             *sets = new_sets;
         } else {
@@ -261,21 +361,51 @@ impl SoundPanelState {
         }
     }
 
-    /// Воспроизвести звук по привязке
-    pub fn play_sound(&self, binding: &SoundBinding) {
-        let appdata_path = self.appdata_path.lock().unwrap().clone();
+    /// Воспроизвести звук по привязке: строит путь и ставит элемент в очередь.
+    ///
+    /// Не создаёт поток на каждый звук и не блокирует вызов. Возвращает ошибку
+    /// при переполнении очереди или недоступном worker-е.
+    pub fn play_sound(&self, binding: &SoundBinding, audio_settings: AudioSettings) -> Result<(), String> {
+        let appdata_path = self
+            .appdata_path
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?
+            .clone();
         let sound_path = format!("{}\\soundpanel\\{}", appdata_path, binding.filename);
 
-        info!(target = "soundpanel", key = %binding.key, path = ?sound_path, "Playing sound");
+        info!(target = "soundpanel", key = %binding.key, path = ?sound_path, "Enqueueing sound");
 
-        let handle = std::thread::spawn(move || {
-            super::audio::play_audio_file(&sound_path);
+        self.enqueue_sound(sound_path, audio_settings)
+    }
+
+    /// Поставить аудиофайл в очередь воспроизведения SoundPanel.
+    pub fn enqueue_sound(&self, path: String, audio_settings: AudioSettings) -> Result<(), String> {
+        self.queue.try_enqueue(QueueItem {
+            path,
+            audio_settings,
+        })
+    }
+
+    /// Запустить единственного worker-а очереди воспроизведения SoundPanel.
+    ///
+    /// Worker забирает элементы FIFO и синхронно воспроизводит каждый через
+    /// `soundpanel::audio::play_audio_file`, не создавая поток на каждый звук.
+    /// Завершается при отмене переданного `CancellationToken`. Вызывается ровно
+    /// один раз из `setup::init_app`.
+    pub fn start_queue_worker(&self, shutdown: CancellationToken) -> Result<(), String> {
+        let receiver = self
+            .queue_receiver
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?
+            .take()
+            .ok_or_else(|| "SoundPanel queue worker already started".to_string())?;
+
+        std::thread::spawn(move || {
+            run_queue_worker(receiver, shutdown);
         });
 
-        if let Ok(mut playbacks) = self.active_playbacks.lock() {
-            playbacks.push(handle);
-            playbacks.retain(|h| !h.is_finished());
-        }
+        info!(target = "soundpanel::queue", "SoundPanel queue worker started");
+        Ok(())
     }
 
     /// Установить отправитель событий
@@ -585,6 +715,43 @@ mod tests {
     }
 
     #[test]
+    fn references_filename_protects_file_used_in_other_set() {
+        let mut sets = SoundSets {
+            active_set_id: "set1".into(),
+            sets: vec![
+                SoundSet {
+                    id: "set1".into(),
+                    name: "First".into(),
+                    bindings: vec![SoundBinding {
+                        key: 'A',
+                        description: "removed".into(),
+                        filename: "shared.mp3".into(),
+                        original_path: None,
+                    }],
+                },
+                SoundSet {
+                    id: "set2".into(),
+                    name: "Second".into(),
+                    bindings: vec![SoundBinding {
+                        key: 'B',
+                        description: "other".into(),
+                        filename: "shared.mp3".into(),
+                        original_path: None,
+                    }],
+                },
+            ],
+        };
+
+        sets.remove_active_binding('A');
+
+        assert!(
+            sets.references_filename("shared.mp3"),
+            "filename still referenced by another set must be protected"
+        );
+        assert!(!sets.references_filename("unused.mp3"));
+    }
+
+    #[test]
     fn test_find_active_index_empty_active_set_id_returns_zero() {
         let sets = SoundSets {
             active_set_id: String::new(),
@@ -684,5 +851,83 @@ mod tests {
         let result = state.clear_intercept_binding("NUMPAD1".into());
         assert!(result.is_err());
         assert_eq!(state.get_intercept().bindings.len(), 1);
+    }
+
+    // ── SoundPanel playback queue ────────────────────────────────────────
+
+    fn queue_item(path: &str) -> QueueItem {
+        QueueItem {
+            path: path.to_string(),
+            audio_settings: AudioSettings::default(),
+        }
+    }
+
+    #[test]
+    fn queue_worker_processes_items_fifo() {
+        let (queue, rx) = SoundQueue::new();
+        let token = CancellationToken::new();
+        let played = Arc::new(Mutex::new(Vec::new()));
+        let played_clone = Arc::clone(&played);
+
+        let handle = std::thread::spawn(move || {
+            run_queue_worker_with(rx, token, |item| {
+                played_clone.lock().unwrap().push(item.path);
+            });
+        });
+
+        queue.try_enqueue(queue_item("a")).unwrap();
+        queue.try_enqueue(queue_item("b")).unwrap();
+        queue.try_enqueue(queue_item("c")).unwrap();
+        drop(queue);
+
+        handle.join().unwrap();
+
+        assert_eq!(*played.lock().unwrap(), vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn bounded_queue_rejects_when_full() {
+        let (queue, rx) = SoundQueue::new();
+
+        for i in 0..SOUND_QUEUE_CAPACITY {
+            queue.try_enqueue(queue_item(&format!("{i}"))).unwrap();
+        }
+
+        assert!(queue.try_enqueue(queue_item("overflow")).is_err());
+
+        drop(rx);
+        assert!(queue.try_enqueue(queue_item("disconnected")).is_err());
+    }
+
+    #[test]
+    fn queue_worker_stops_at_shutdown_before_next_item() {
+        let (queue, rx) = SoundQueue::new();
+        let token = CancellationToken::new();
+        let worker_token = token.clone();
+        let played = Arc::new(Mutex::new(Vec::new()));
+        let played_clone = Arc::clone(&played);
+
+        let (started_tx, started_rx) = mpsc::channel::<()>();
+
+        let handle = std::thread::spawn(move || {
+            run_queue_worker_with(rx, worker_token, move |item| {
+                played_clone.lock().unwrap().push(item.path);
+                let _ = started_tx.send(());
+                std::thread::sleep(Duration::from_millis(50));
+            });
+        });
+
+        queue.try_enqueue(queue_item("a")).unwrap();
+        queue.try_enqueue(queue_item("b")).unwrap();
+
+        started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("first item must start playing");
+
+        token.cancel();
+
+        handle.join().unwrap();
+
+        assert_eq!(*played.lock().unwrap(), vec!["a"]);
     }
 }

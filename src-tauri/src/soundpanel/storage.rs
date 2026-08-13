@@ -6,12 +6,13 @@
 //! NOTE: Appearance settings are now stored in windows.json (via WindowsManager)
 //! The old soundpanel_appearance.json file is no longer used.
 
-use crate::config::WindowsManager;
+use crate::config::{config_write_lock, replace_file_atomically, WindowsManager};
 use crate::soundpanel::state::{SoundBinding, SoundPanelState, SoundSets};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
+use uuid::Uuid;
 
 const BINDINGS_FILE: &str = "soundpanel_bindings.json";
 
@@ -90,39 +91,93 @@ pub fn load_bindings(state: &SoundPanelState) -> Result<Vec<SoundBinding>, Strin
         "Loaded bindings"
     );
 
-    state.replace_sets(sets);
+    state.publish_sets(sets);
 
     Ok(bindings)
 }
 
-/// Сохранить наборы в JSON файл
+/// Сохранить текущее runtime-состояние наборов атомарно.
+///
+/// Тонкая обёртка над [`persist_sets`] для set-команд, которым не нужен
+/// staged-аудио или кандидатный снимок: снимает текущие наборы из состояния
+/// и сохраняет их в JSON.
 pub fn save_sets(state: &SoundPanelState) -> Result<(), String> {
+    let appdata_path = state
+        .appdata_path
+        .lock()
+        .map_err(|e| format!("Lock error: {}", e))?
+        .clone();
     let sets = state.get_sets();
+    persist_sets(&appdata_path, &sets)
+}
 
-    let appdata_path = state.appdata_path.lock().unwrap().clone();
-    let file_path = PathBuf::from(&appdata_path).join(BINDINGS_FILE);
+/// Сохранить кандидатный снимок наборов в JSON файл атомарно.
+///
+/// Использует общий примитив атомарной замены из config. Не изменяет и не
+/// публикует runtime-состояние — вызывающий код отвечает за публикацию после
+/// успешного сохранения.
+pub fn persist_sets(appdata_path: &str, sets: &SoundSets) -> Result<(), String> {
+    let file_path = PathBuf::from(appdata_path).join(BINDINGS_FILE);
 
-    info!(set_count = sets.sets.len(), active_set_id = %sets.active_set_id, ?file_path, "Saving sets");
+    info!(set_count = sets.sets.len(), active_set_id = %sets.active_set_id, ?file_path, "Persisting sets");
 
-    let json = serde_json::to_string_pretty(&sets)
+    let json = serde_json::to_string_pretty(sets)
         .map_err(|e| format!("Failed to serialize sets: {}", e))?;
 
-    fs::write(&file_path, json).map_err(|e| format!("Failed to write bindings file: {}", e))?;
+    let _guard = config_write_lock().lock();
+    replace_file_atomically(&file_path, json.as_bytes())
+        .map_err(|e| format!("Failed to persist bindings file: {}", e))?;
 
-    info!("Sets saved successfully");
+    info!("Sets persisted successfully");
     Ok(())
 }
 
-/// Сохранить привязки в JSON файл (alias для save_sets, обратная совместимость)
-#[allow(dead_code)]
-pub fn save_bindings(state: &SoundPanelState) -> Result<(), String> {
-    save_sets(state)
+/// Аудиофайл, скопированный в уникальный staging-файл в папке soundpanel.
+///
+/// Файл не становится доступным привязкам до вызова [`StagedAudio::commit`];
+/// при отказе вызывается [`StagedAudio::cleanup`].
+pub struct StagedAudio {
+    staging_path: PathBuf,
+    final_path: PathBuf,
 }
 
-/// Скопировать аудиофайл в папку soundpanel
+impl StagedAudio {
+    /// Финальное имя файла, которое будет записано в кандидатный снимок.
+    pub fn final_filename(&self) -> String {
+        self.final_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    /// Продвинуть staging-файл в финальное имя.
+    ///
+    /// Должно вызываться только после успешного сохранения кандидатного
+    /// снимка. При ошибке staging-файл удаляется, а ошибка возвращается.
+    pub fn commit(self) -> Result<(), String> {
+        let StagedAudio {
+            staging_path,
+            final_path,
+        } = self;
+        if let Err(e) = fs::rename(&staging_path, &final_path) {
+            let _ = fs::remove_file(&staging_path);
+            return Err(format!("Failed to promote staged audio: {}", e));
+        }
+        debug!(?final_path, "Promoted staged audio");
+        Ok(())
+    }
+
+    /// Удалить staging-файл после отказа (best-effort).
+    pub fn cleanup(self) {
+        let _ = fs::remove_file(&self.staging_path);
+    }
+}
+
+/// Скопировать аудио в уникальный staging-файл в папке soundpanel.
 ///
-/// Возвращает имя скопированного файла
-pub fn copy_sound_file(source_path: &str, appdata_path: &str) -> Result<String, String> {
+/// Возвращает [`StagedAudio`] с финальным именем для кандидатного снимка.
+pub fn stage_sound_file(source_path: &str, appdata_path: &str) -> Result<StagedAudio, String> {
     let soundpanel_dir = PathBuf::from(appdata_path).join("soundpanel");
 
     if !soundpanel_dir.exists() {
@@ -137,19 +192,34 @@ pub fn copy_sound_file(source_path: &str, appdata_path: &str) -> Result<String, 
         .and_then(|n| n.to_str())
         .ok_or("Invalid filename")?;
 
-    let dest_path = generate_unique_path(&soundpanel_dir, filename);
+    let final_path = generate_unique_path(&soundpanel_dir, filename);
+    let staging_path = generate_staging_path(&soundpanel_dir, &final_path);
 
-    fs::copy(&source, &dest_path).map_err(|e| format!("Failed to copy sound file: {}", e))?;
+    fs::copy(&source, &staging_path).map_err(|e| format!("Failed to copy sound file: {}", e))?;
 
-    let final_filename = dest_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap()
-        .to_string();
+    debug!(source_path, ?staging_path, ?final_path, "Staged sound file");
 
-    debug!(source_path, final_filename, "Copied sound file");
+    Ok(StagedAudio {
+        staging_path,
+        final_path,
+    })
+}
 
-    Ok(final_filename)
+/// Сгенерировать уникальный путь для staging-файла, сохраняя расширение.
+fn generate_staging_path(dir: &Path, final_path: &Path) -> PathBuf {
+    let ext = final_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| format!(".{}", s))
+        .unwrap_or_default();
+
+    loop {
+        let name = format!(".staging.{}{}", Uuid::new_v4(), ext);
+        let path = dir.join(&name);
+        if !path.exists() {
+            return path;
+        }
+    }
 }
 
 /// Удалить файл звука из папки soundpanel
@@ -237,6 +307,139 @@ fn normalize_pin_state(stay_visible: bool, hide_on_blur: bool) -> bool {
 mod tests {
     use super::*;
     use crate::soundpanel::state::SoundSet;
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-soundpanel-{}-{}-{}",
+            label,
+            std::process::id(),
+            stamp
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn cleanup(dir: &Path) {
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    fn staging_files(dir: &Path) -> Vec<PathBuf> {
+        fs::read_dir(dir)
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .map(|e| e.path())
+                    .filter(|p| {
+                        p.file_name()
+                            .and_then(|n| n.to_str())
+                            .is_some_and(|n| n.starts_with(".staging."))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn staged_audio_copies_then_promotes_to_final_path() {
+        let dir = temp_dir("stage-promote");
+        let appdata = dir.to_string_lossy().to_string();
+        let source = dir.join("source.mp3");
+        fs::write(&source, b"audio-bytes").unwrap();
+
+        let staged = stage_sound_file(&source.to_string_lossy(), &appdata).unwrap();
+        let final_name = staged.final_filename();
+        assert!(!final_name.is_empty());
+
+        let soundpanel = dir.join("soundpanel");
+        assert_eq!(staging_files(&soundpanel).len(), 1);
+        assert!(
+            !soundpanel.join(&final_name).exists(),
+            "final file must not exist before commit"
+        );
+
+        staged.commit().unwrap();
+
+        assert!(soundpanel.join(&final_name).is_file());
+        assert_eq!(fs::read(soundpanel.join(&final_name)).unwrap(), b"audio-bytes");
+        assert!(
+            staging_files(&soundpanel).is_empty(),
+            "no staging file should remain after promotion"
+        );
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn staged_audio_cleanup_removes_staging_file() {
+        let dir = temp_dir("stage-cleanup");
+        let appdata = dir.to_string_lossy().to_string();
+        let source = dir.join("source.wav");
+        fs::write(&source, b"bytes").unwrap();
+
+        let staged = stage_sound_file(&source.to_string_lossy(), &appdata).unwrap();
+        let soundpanel = dir.join("soundpanel");
+        assert_eq!(staging_files(&soundpanel).len(), 1);
+
+        staged.cleanup();
+
+        assert!(
+            staging_files(&soundpanel).is_empty(),
+            "no staging file should remain after cleanup"
+        );
+
+        cleanup(&dir);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn persistence_failure_cleanup_preserves_existing_bindings() {
+        let dir = temp_dir("persist-fail");
+        let appdata = dir.to_string_lossy().to_string();
+
+        let bindings_path = dir.join(BINDINGS_FILE);
+        let original = "{\"active_set_id\":\"set1\",\"sets\":[]}";
+        fs::write(&bindings_path, original).unwrap();
+
+        let source = dir.join("source.mp3");
+        fs::write(&source, b"bytes").unwrap();
+        let staged = stage_sound_file(&source.to_string_lossy(), &appdata).unwrap();
+        let soundpanel = dir.join("soundpanel");
+        assert_eq!(staging_files(&soundpanel).len(), 1);
+
+        // Hold the target open without FILE_SHARE_DELETE so ReplaceFileW fails
+        // while the existing bindings file remains intact on disk.
+        let lock = {
+            use std::os::windows::fs::OpenOptionsExt;
+            std::fs::OpenOptions::new()
+                .read(true)
+                .share_mode(0x1)
+                .open(&bindings_path)
+                .unwrap()
+        };
+
+        let candidate = SoundSets::default();
+        assert!(persist_sets(&appdata, &candidate).is_err());
+
+        drop(lock);
+        staged.cleanup();
+        assert!(
+            staging_files(&soundpanel).is_empty(),
+            "no staging file should remain after cleanup"
+        );
+
+        assert_eq!(
+            fs::read_to_string(&bindings_path).unwrap(),
+            original,
+            "existing bindings target must remain readable after persistence failure"
+        );
+
+        cleanup(&dir);
+    }
 
     #[test]
     fn pin_state_preserves_legacy_hide_on_blur_opt_out() {

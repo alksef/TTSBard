@@ -7,6 +7,7 @@ const {
   errorMessage,
   testMessage,
   displayUrl,
+  serverStatus,
   externalDisplay,
   hasToken,
   isPortValid,
@@ -44,10 +45,10 @@ const {
       <div class="section-header server-header">
         <h2>Сервер</h2>
         <div class="server-status">
-          <span class="status-indicator" :class="{ running: settings.enabled }">
-            {{ settings.enabled ? 'Запущен' : 'Остановлен' }}
+          <span class="status-indicator" :class="{ running: serverStatus.state === 'running' }">
+            {{ serverStatus.state === 'running' ? 'Запущен' : serverStatus.state === 'starting' ? 'Запускается' : serverStatus.state === 'error' ? 'Ошибка' : 'Остановлен' }}
           </span>
-          <template v-if="settings.enabled">
+          <template v-if="serverStatus.state === 'running' || serverStatus.state === 'starting'">
             <button @click="restartServer" class="status-button restart" title="Перезапустить">
               <RotateCw :size="14" />
             </button>
@@ -76,7 +77,7 @@ const {
       <div class="setting-row" style="margin-bottom: 8px;">
         <label>Адрес:</label>
         <div class="address-inputs">
-          <select v-model="settings.bind_address" class="address-bind" :disabled="settings.enabled">
+          <select v-model="settings.bind_address" class="address-bind" :disabled="serverStatus.state === 'running' || serverStatus.state === 'starting'">
             <option value="0.0.0.0">0.0.0.0 (all interfaces)</option>
             <option value="127.0.0.1">127.0.0.1 (local only)</option>
           </select>
@@ -87,10 +88,10 @@ const {
             max="65535"
             class="address-port"
             :class="{ 'input-error': !isPortValid }"
-            :disabled="settings.enabled"
+            :disabled="serverStatus.state === 'running' || serverStatus.state === 'starting'"
             placeholder="10100"
           />
-          <button @click="saveServerSettings" class="save-button-inline" :disabled="settings.enabled">Сохранить</button>
+          <button @click="saveServerSettings" class="save-button-inline" :disabled="serverStatus.state === 'running' || serverStatus.state === 'starting'">Сохранить</button>
         </div>
         <span v-if="!isPortValid" class="error-text">Порт должен быть от 1024 до 65535</span>
       </div>
@@ -131,7 +132,7 @@ const {
           class="test-input"
           @keyup.enter="sendTest"
         />
-        <button @click="sendTest" class="test-button" :disabled="!settings.enabled || !testMessage">
+        <button @click="sendTest" class="test-button" :disabled="serverStatus.state !== 'running' || !testMessage">
           Отправить
         </button>
       </div>

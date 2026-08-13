@@ -98,6 +98,7 @@ const pendingActions = ref<Set<string>>(new Set())
 const actionError = ref('')
 const rowErrors = ref<Record<string, string>>({})
 let fetchGeneration = 0
+let speechQueueGeneration = 0
 
 function formatError(e: unknown): string {
   if (e instanceof Error) return e.message
@@ -121,14 +122,21 @@ async function fetchActivity() {
 }
 
 async function fetchSpeechQueue() {
+  const generation = ++speechQueueGeneration
   try {
-    speechQueue.value = await invoke<SpeechQueueStateDto>('get_speech_queue_state')
+    const queue = await invoke<SpeechQueueStateDto>('get_speech_queue_state')
+    if (generation === speechQueueGeneration) {
+      speechQueue.value = queue
+    }
   } catch {
     // silent
   }
 }
 
 function applySpeechQueuePayload(payload: unknown) {
+  // Events are newer than an in-flight snapshot.  Invalidate that snapshot
+  // before applying the event payload or fetching a replacement snapshot.
+  speechQueueGeneration += 1
   if (isSpeechQueueStateDto(payload)) {
     speechQueue.value = payload
     fetchActivity()

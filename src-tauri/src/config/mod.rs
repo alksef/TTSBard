@@ -25,5 +25,6 @@ pub use settings::{
     SettingsManager, SpellSource, Theme, TwitchSettings, VTubeStudioSettings,
     VTubeStudioTypingAction, VTubeStudioTypingMode,
 };
+pub use persistence::{config_write_lock, replace_file_atomically};
 pub use validation::{is_valid_hex_color, validate_port};
 pub use windows::{WindowsManager, WindowsSettings};

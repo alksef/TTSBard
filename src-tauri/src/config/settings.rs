@@ -1501,6 +1501,24 @@ impl SettingsManager {
         self.update_field("/tts/fish/api_key", &api_key)
     }
 
+    /// Persist the fields edited together in the Fish Audio form as one
+    /// settings transaction. The cache is updated only after the durable write.
+    pub fn set_fish_audio_connection_settings(
+        &self,
+        api_key: String,
+        format: String,
+        temperature: f32,
+        sample_rate: u32,
+    ) -> Result<()> {
+        self.update_settings_atomically(move |settings| {
+            let fish = &mut settings.tts.fish;
+            fish.api_key = Some(api_key);
+            fish.format = format;
+            fish.temperature = temperature;
+            fish.sample_rate = sample_rate;
+        })
+    }
+
     pub fn get_fish_audio_api_key(&self) -> Option<String> {
         self.cache.read().tts.fish.api_key.clone()
     }

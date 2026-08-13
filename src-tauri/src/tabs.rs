@@ -1,55 +1,13 @@
-use parking_lot::{Mutex, RwLock};
+use anyhow::{Context, Result};
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::PathBuf;
+
+use crate::config::{config_write_lock, replace_file_atomically};
 
 const MAX_TABS: usize = 50;
 const MAX_TAB_TEXT_LEN: usize = 100_000;
-
-static TABS_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-fn tabs_write_lock() -> &'static Mutex<()> {
-    TABS_WRITE_LOCK.get_or_init(|| Mutex::new(()))
-}
-
-fn write_json_atomically(path: &Path, content: &str) -> std::io::Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "No parent dir"))?;
-
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| std::io::Error::other(e.to_string()))?
-        .as_nanos();
-    let tmp_path = parent.join(format!(
-        ".{}.{}.tmp",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("tabs.json"),
-        stamp
-    ));
-
-    {
-        let mut file = fs::File::create(&tmp_path)?;
-        file.write_all(content.as_bytes())?;
-        file.sync_all()?;
-    }
-
-    if let Err(rename_error) = fs::rename(&tmp_path, path) {
-        let _ = fs::remove_file(path);
-        fs::rename(&tmp_path, path).map_err(|e| {
-            std::io::Error::other(format!(
-                "Replace failed: {} (original: {})",
-                e, rename_error
-            ))
-        })?;
-    }
-
-    Ok(())
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct EditorTab {
@@ -91,7 +49,8 @@ impl TabManager {
         self.data.read().clone()
     }
 
-    pub fn save_all(&self, mut data: TabsData) {
+    pub fn save_all(&self, mut data: TabsData) -> Result<()> {
+        let _write_lock = config_write_lock().lock();
         if data.tabs.len() > MAX_TABS {
             data.tabs.truncate(MAX_TABS);
         }
@@ -103,14 +62,13 @@ impl TabManager {
         if !data.active_id.is_empty() && !data.tabs.iter().any(|t| t.id == data.active_id) {
             data.active_id = data.tabs.first().map(|t| t.id.clone()).unwrap_or_default();
         }
-        let mut guard = self.data.write();
-        *guard = data.clone();
-        drop(guard);
 
-        let _lock = tabs_write_lock().lock();
-        if let Ok(content) = serde_json::to_string_pretty(&data) {
-            let _ = write_json_atomically(&self.path, &content);
-        }
+        let content = serde_json::to_string_pretty(&data).context("Failed to serialize tabs")?;
+        replace_file_atomically(&self.path, content.as_bytes())
+            .with_context(|| format!("Failed to persist tabs to {:?}", self.path))?;
+
+        *self.data.write() = data;
+        Ok(())
     }
 }
 
@@ -167,7 +125,7 @@ mod tests {
                 },
             ],
         };
-        mgr.save_all(data);
+        mgr.save_all(data).unwrap();
 
         // A fresh manager reading the same file must hydrate the saved data.
         let mgr2 = TabManager::new(path.clone());
@@ -192,7 +150,8 @@ mod tests {
         mgr.save_all(TabsData {
             active_id: "id-0".into(),
             tabs,
-        });
+        })
+        .unwrap();
         let loaded = mgr.load_all();
         assert_eq!(loaded.tabs.len(), MAX_TABS);
         let _ = fs::remove_file(&path);
@@ -209,7 +168,8 @@ mod tests {
                 title: "T".into(),
                 text: huge,
             }],
-        });
+        })
+        .unwrap();
         let loaded = mgr.load_all();
         assert_eq!(loaded.tabs[0].text.len(), MAX_TAB_TEXT_LEN);
         let _ = fs::remove_file(&path);
@@ -232,7 +192,8 @@ mod tests {
                     text: String::new(),
                 },
             ],
-        });
+        })
+        .unwrap();
         let loaded = mgr.load_all();
         assert_eq!(
             loaded.active_id, "a",
@@ -258,7 +219,7 @@ mod tests {
                         text: format!("Text content {}", i),
                     }],
                 };
-                mgr_clone.save_all(data);
+                mgr_clone.save_all(data).unwrap();
             }));
         }
 
@@ -274,5 +235,48 @@ mod tests {
         assert_eq!(loaded.tabs.len(), 1);
 
         let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn save_all_keeps_published_state_on_persistence_failure() {
+        let (mgr, path) = manager_in_tmp();
+
+        let first = TabsData {
+            active_id: "a".into(),
+            tabs: vec![EditorTab {
+                id: "a".into(),
+                title: "A".into(),
+                text: "first".into(),
+            }],
+        };
+        mgr.save_all(first).unwrap();
+
+        // Break persistence: replace the parent directory with a regular file so
+        // the temporary file can no longer be created.
+        let parent = path.parent().unwrap().to_path_buf();
+        fs::remove_dir_all(&parent).unwrap();
+        fs::write(&parent, "not a directory").unwrap();
+
+        let second = TabsData {
+            active_id: "b".into(),
+            tabs: vec![EditorTab {
+                id: "b".into(),
+                title: "B".into(),
+                text: "second".into(),
+            }],
+        };
+        let result = mgr.save_all(second);
+        assert!(
+            result.is_err(),
+            "save_all must fail when persistence is broken"
+        );
+
+        let published = mgr.load_all();
+        assert_eq!(published.active_id, "a");
+        assert_eq!(published.tabs.len(), 1);
+        assert_eq!(published.tabs[0].id, "a");
+        assert_eq!(published.tabs[0].text, "first");
+
+        let _ = fs::remove_file(&parent);
     }
 }

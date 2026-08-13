@@ -474,6 +474,7 @@ pub fn run() {
             commands::telegram::telegram_select_voice,
             // WebView commands
             commands::webview::get_webview_settings,
+            commands::webview::get_webview_server_status,
             commands::webview::save_webview_settings,
             commands::webview::get_local_ip,
             commands::webview::get_webview_enabled,
@@ -561,6 +562,7 @@ pub fn run() {
             // Fish Audio commands
             commands::get_fish_audio_api_key,
             commands::set_fish_audio_api_key,
+            commands::save_fish_audio_connection_settings,
             commands::get_fish_audio_reference_id,
             commands::set_fish_audio_reference_id,
             commands::get_fish_audio_voices,
@@ -740,9 +742,20 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            if let tauri::RunEvent::ExitRequested { .. } = event {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
                 crate::playback_window::save_playback_position(app_handle);
                 crate::soundpanel_window::save_soundpanel_position(app_handle);
+                if app_handle
+                    .state::<AppState>()
+                    .shutdown_started
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                {
+                    return;
+                }
+                api.prevent_exit();
+                tauri::async_runtime::spawn(crate::commands::coordinate_shutdown(
+                    app_handle.clone(),
+                ));
             }
         });
 }

@@ -326,4 +326,96 @@ describe('useEditorTabs', () => {
       expect(tabs.value).toHaveLength(1)
     })
   })
+
+  describe('serialized save queue', () => {
+    function deferred() {
+      let resolve!: () => void
+      let reject!: (e: unknown) => void
+      const promise = new Promise<void>((res, rej) => { resolve = res; reject = rej })
+      return { promise, resolve, reject }
+    }
+
+    it('never initiates a second save while one is in flight', async () => {
+      const d1 = deferred()
+      const d2 = deferred()
+      mockInvoke
+        .mockImplementationOnce(() => d1.promise)
+        .mockImplementationOnce(() => d2.promise)
+
+      const { create, flushSave } = useEditorTabs()
+      create()
+      const first = flushSave()
+      create()
+      const second = flushSave()
+
+      expect(mockInvoke).toHaveBeenCalledTimes(1)
+
+      d1.resolve()
+      await vi.waitFor(() => expect(mockInvoke).toHaveBeenCalledTimes(2))
+
+      d2.resolve()
+      await first
+      await second
+      expect(mockInvoke).toHaveBeenCalledTimes(2)
+    })
+
+    it('keeps only the newest pending snapshot after an older in-flight snapshot', async () => {
+      const d1 = deferred()
+      mockInvoke.mockImplementationOnce(() => d1.promise)
+
+      const { create, flushSave } = useEditorTabs()
+      create() // uuid-1 active
+      const first = flushSave() // snapshot with 2 tabs
+      expect(mockInvoke).toHaveBeenCalledTimes(1)
+
+      create() // uuid-2 active
+      void flushSave() // pending with 3 tabs
+      create() // uuid-3 active
+      const last = flushSave() // overwrites pending with 4 tabs
+
+      d1.resolve()
+      await vi.waitFor(() => expect(mockInvoke).toHaveBeenCalledTimes(2))
+
+      const secondCall = mockInvoke.mock.calls[1]
+      expect(secondCall[0]).toBe('save_tabs')
+      const data = secondCall[1].data
+      expect(data.tabs).toHaveLength(4)
+      expect(data.active_id).toBe('uuid-3')
+
+      await first
+      await last
+    })
+
+    it('flushSave waits for the full drain of in-flight and pending saves', async () => {
+      const d1 = deferred()
+      const d2 = deferred()
+      mockInvoke
+        .mockImplementationOnce(() => d1.promise)
+        .mockImplementationOnce(() => d2.promise)
+
+      const { create, flushSave } = useEditorTabs()
+      create()
+      const first = flushSave() // save #1 (d1)
+      create()
+      const second = flushSave() // pending (d2)
+
+      let secondResolved = false
+      void second.then(() => { secondResolved = true })
+
+      expect(mockInvoke).toHaveBeenCalledTimes(1)
+
+      d1.resolve()
+      await vi.waitFor(() => expect(mockInvoke).toHaveBeenCalledTimes(2))
+
+      await Promise.resolve()
+      expect(secondResolved).toBe(false)
+
+      d2.resolve()
+      await second
+      expect(secondResolved).toBe(true)
+
+      await first
+      expect(mockInvoke).toHaveBeenCalledTimes(2)
+    })
+  })
 })

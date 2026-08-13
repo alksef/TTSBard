@@ -200,6 +200,15 @@ pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std:
         }
     }
 
+    // Start the single SoundPanel FIFO playback worker. It owns all SoundPanel
+    // playback and stops cleanly when the shared shutdown token is cancelled.
+    {
+        let sp_worker_shutdown = app_state.inner().shutdown.clone();
+        if let Err(error) = soundpanel_state.start_queue_worker(sp_worker_shutdown) {
+            error!(error = %error, "Failed to start SoundPanel queue worker");
+        }
+    }
+
     // Initialize TTS provider
     init_tts_provider(&app_state, &telegram_state, settings.clone());
 
@@ -579,7 +588,9 @@ fn init_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             "quit" => {
-                tray.app_handle().exit(0);
+                tauri::async_runtime::spawn(crate::commands::coordinate_shutdown(
+                    tray.app_handle().clone(),
+                ));
             }
             _ => {}
         })
@@ -949,15 +960,18 @@ async fn speech_worker(
 
                 {
                     if let Some(hm) = editor.history_manager.lock().as_ref() {
-                        if prepared.cache_saved || prepared.cache_hit {
+                        let record_result = if prepared.cache_saved || prepared.cache_hit {
                             hm.record_phrase_with_meta(
                                 &processed_text,
                                 &prepared.provider_name,
                                 &prepared.voice_name,
                                 &prepared.cache_key,
-                            );
+                            )
                         } else {
-                            hm.record_phrase(&processed_text);
+                            hm.record_phrase(&processed_text)
+                        };
+                        if let Err(error) = record_result {
+                            warn!(error = %error, "Failed to persist phrase history");
                         }
                     }
                 }

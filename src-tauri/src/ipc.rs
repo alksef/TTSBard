@@ -127,17 +127,24 @@ mod tests {
     #[test]
     fn speech_contract_error_fixture_is_current() {
         let fixture = speech_error_fixture();
-        let current = serde_json::to_string_pretty(&fixture).expect("serialize");
+        let current = serde_json::to_value(&fixture).expect("serialize");
         let fixture_path = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../scripts/contract-fixtures/speech/speech-errors.json"
         );
-        let on_disk = std::fs::read_to_string(fixture_path).unwrap_or_else(|_| {
+        let on_disk_raw = std::fs::read_to_string(fixture_path).unwrap_or_else(|_| {
             panic!(
                 "Fixture 'speech-errors.json' missing — regenerate with \
                  `cargo test speech_contract_fixtures_regenerate -- --ignored`"
             )
         });
+        let on_disk =
+            serde_json::from_str::<serde_json::Value>(&on_disk_raw).unwrap_or_else(|err| {
+                panic!(
+                    "Fixture 'speech-errors.json' is not valid JSON: {err} — regenerate with \
+                 `cargo test speech_contract_fixtures_regenerate -- --ignored`"
+                )
+            });
         assert_eq!(
             current, on_disk,
             "Fixture 'speech-errors.json' is stale — regenerate with \

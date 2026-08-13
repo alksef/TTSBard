@@ -4,17 +4,18 @@
 
 use crate::commands::window::resolve_main_appearance;
 use crate::config::{is_valid_hex_color, SettingsManager, WindowsManager};
-use crate::soundpanel::audio::play_audio_file;
 use crate::soundpanel::intercept::InterceptSettings;
 use crate::soundpanel::state::{SoundBinding, SoundPanelState, SoundSet, SoundSets};
-use crate::soundpanel::storage::{copy_sound_file, delete_sound_file, save_sets};
+use crate::soundpanel::storage::{
+    delete_sound_file, persist_sets, save_sets, stage_sound_file,
+};
 use crate::soundpanel_window::{
     emit_soundpanel_bindings_changed, hide_soundpanel_window, restore_soundpanel_foreground,
     restore_soundpanel_foreground_retaining_target, update_soundpanel_appearance,
 };
 use crate::state::AppState;
 use tauri::{AppHandle, Emitter, Manager, State};
-use tracing::{debug, info};
+use tracing::{debug, error, info, warn};
 
 /// Получить все привязки звуковой панели (активный набор)
 #[tauri::command]
@@ -53,7 +54,10 @@ pub fn sp_add_binding(
     }
 
     let appdata_path = state.appdata_path.lock().unwrap().clone();
-    let filename = copy_sound_file(&file_path, &appdata_path)?;
+    let original_snapshot = state.get_sets();
+
+    let staged = stage_sound_file(&file_path, &appdata_path)?;
+    let filename = staged.final_filename();
 
     let binding = SoundBinding {
         key: key_char,
@@ -62,8 +66,23 @@ pub fn sp_add_binding(
         original_path: Some(file_path),
     };
 
-    state.add_binding(binding.clone());
-    save_sets(&state)?;
+    let candidate = state.candidate_add_binding(&binding);
+
+    if let Err(error) = persist_sets(&appdata_path, &candidate) {
+        staged.cleanup();
+        warn!(%error, "Persist failed on add; cleaning staged audio");
+        return Err("Failed to save binding".to_string());
+    }
+
+    if let Err(error) = staged.commit() {
+        error!(%error, "Staged audio promotion failed; persisting original snapshot as compensation");
+        if let Err(compensation_error) = persist_sets(&appdata_path, &original_snapshot) {
+            error!(%compensation_error, "Compensation persist failed; bindings file left with candidate snapshot");
+        }
+        return Err("Failed to save sound file".to_string());
+    }
+
+    state.publish_sets(candidate);
 
     let _ = emit_soundpanel_bindings_changed(&app_handle);
 
@@ -88,28 +107,60 @@ pub fn sp_update_binding(
 
     let key_char = key.to_uppercase().chars().next().ok_or("Key is empty")?;
 
-    let mut binding = state
+    let binding = state
         .get_binding(key_char)
         .ok_or_else(|| format!("Key {} is not bound", key_char))?;
 
     let appdata_path = state.appdata_path.lock().unwrap().clone();
+    let original_snapshot = state.get_sets();
 
-    if let Some(file_path) = file_path.filter(|p| !p.is_empty()) {
-        let new_filename = copy_sound_file(&file_path, &appdata_path)?;
-        let _ = delete_sound_file(&binding.filename, &appdata_path);
-        binding.filename = new_filename;
-        binding.original_path = Some(file_path);
+    let mut updated = binding.clone();
+    updated.description = description;
+
+    let staged = match file_path.filter(|p| !p.is_empty()) {
+        Some(file_path) => {
+            let staged = stage_sound_file(&file_path, &appdata_path)?;
+            updated.filename = staged.final_filename();
+            updated.original_path = Some(file_path);
+            Some(staged)
+        }
+        None => None,
+    };
+
+    let candidate = state.candidate_add_binding(&updated);
+
+    if let Err(error) = persist_sets(&appdata_path, &candidate) {
+        if let Some(staged) = staged {
+            staged.cleanup();
+        }
+        warn!(%error, "Persist failed on update; cleaning staged audio");
+        return Err("Failed to save binding".to_string());
     }
 
-    binding.description = description;
+    if let Some(staged) = staged {
+        if let Err(error) = staged.commit() {
+            error!(%error, "Staged audio promotion failed; persisting original snapshot as compensation");
+            if let Err(compensation_error) = persist_sets(&appdata_path, &original_snapshot) {
+                error!(%compensation_error, "Compensation persist failed; bindings file left with candidate snapshot");
+            }
+            return Err("Failed to save sound file".to_string());
+        }
+    }
 
-    state.add_binding(binding.clone());
-    save_sets(&state)?;
+    let should_delete_old = !candidate.references_filename(&binding.filename);
+
+    state.publish_sets(candidate);
+
+    if should_delete_old {
+        if let Err(error) = delete_sound_file(&binding.filename, &appdata_path) {
+            warn!(%error, "Failed to clean up old sound file");
+        }
+    }
 
     let _ = emit_soundpanel_bindings_changed(&app_handle);
 
     info!("Binding updated successfully");
-    Ok(binding)
+    Ok(updated)
 }
 
 /// Удалить привязку по клавише из активного набора
@@ -123,13 +174,31 @@ pub fn sp_remove_binding(
 
     let key_char = key.chars().next().ok_or("Key is empty")?;
 
-    if let Some(binding) = state.get_binding(key_char) {
-        let appdata_path = state.appdata_path.lock().unwrap().clone();
-        let _ = delete_sound_file(&binding.filename, &appdata_path);
+    let binding = state.get_binding(key_char);
+
+    let appdata_path = state.appdata_path.lock().unwrap().clone();
+
+    let candidate = state.candidate_remove_binding(key_char);
+
+    if let Err(error) = persist_sets(&appdata_path, &candidate) {
+        warn!(%error, "Persist failed on remove");
+        return Err("Failed to save binding".to_string());
     }
 
-    state.remove_binding(key_char);
-    save_sets(&state)?;
+    let should_delete_old = binding
+        .as_ref()
+        .map(|b| !candidate.references_filename(&b.filename))
+        .unwrap_or(false);
+
+    state.publish_sets(candidate);
+
+    if should_delete_old {
+        if let Some(binding) = binding {
+            if let Err(error) = delete_sound_file(&binding.filename, &appdata_path) {
+                warn!(%error, "Failed to clean up removed sound file");
+            }
+        }
+    }
 
     let _ = emit_soundpanel_bindings_changed(&app_handle);
 
@@ -139,17 +208,26 @@ pub fn sp_remove_binding(
 
 /// Тестировать воспроизведение звука
 ///
-/// Воспроизводит указанный файл без создания привязки
+/// Ставит указанный файл и снимок настроек в очередь SoundPanel без
+/// блокирующего воспроизведения в команде.
 #[tauri::command]
-pub fn sp_test_sound(file_path: String) -> Result<(), String> {
+pub fn sp_test_sound(
+    file_path: String,
+    settings_manager: State<'_, SettingsManager>,
+    state: State<'_, SoundPanelState>,
+) -> Result<(), String> {
     info!(file_path, "Test sound");
 
     if !std::path::Path::new(&file_path).exists() {
         return Err("File not found".to_string());
     }
 
-    play_audio_file(&file_path);
-    Ok(())
+    let audio_settings = settings_manager
+        .load()
+        .map_err(|e| format!("Failed to load settings: {}", e))?
+        .audio;
+
+    state.enqueue_sound(file_path, audio_settings)
 }
 
 /// Проверить, поддерживается ли формат файла
@@ -306,12 +384,13 @@ pub fn sp_escape_soundpanel(
 ///
 /// При выключенном `stay_visible` сначала синхронно скрывается окно, затем
 /// предпринимается попытка вернуть фокус сохранённому внешнему окну, и только
-/// после этого начинается воспроизведение. Ошибка скрытия останавливает
+/// после этого звук ставится в очередь SoundPanel. Ошибка скрытия останавливает
 /// выполнение; ошибка восстановления фокуса возвращается, но не подавляет
-/// воспроизведение.
+/// постановку в очередь; ошибка постановки в очередь (переполнение/worker)
+/// возвращается наружу.
 ///
 /// При включённом `stay_visible` панель остаётся видимой, фокус возвращается,
-/// и воспроизведение продолжается.
+/// и звук ставится в очередь.
 #[tauri::command]
 pub fn sp_play_binding(key: String, app_handle: AppHandle) -> Result<(), String> {
     let key_char = key.chars().next().ok_or("Key is empty")?;
@@ -324,6 +403,12 @@ pub fn sp_play_binding(key: String, app_handle: AppHandle) -> Result<(), String>
         .ok_or_else(|| format!("No binding for key {}", key_char))?;
     let stay_visible = state.get_stay_visible();
     info!(key = %key_char, description = binding.description, stay_visible, "Playing binding");
+
+    let settings_manager = app_handle.state::<SettingsManager>();
+    let audio_settings = settings_manager
+        .load()
+        .map_err(|e| format!("Failed to load settings: {}", e))?
+        .audio;
 
     let app_state = app_handle.state::<AppState>();
     play_binding_ordered(
@@ -339,16 +424,17 @@ pub fn sp_play_binding(key: String, app_handle: AppHandle) -> Result<(), String>
                 restore_soundpanel_foreground(&app_state)
             }
         },
-        || state.play_sound(&binding),
+        || state.play_sound(&binding, audio_settings),
     )
 }
 
-/// Единственный владелец последовательности «скрыть → восстановить фокус → воспроизвести».
+/// Единственный владелец последовательности «скрыть → восстановить фокус → поставить в очередь».
 ///
 /// При `stay_visible == true` скрытие пропускается. Восстановление фокуса
-/// всегда происходит до воспроизведения. Ошибка скрытия останавливает
+/// всегда происходит до постановки в очередь. Ошибка скрытия останавливает
 /// выполнение только в unchecked-режиме. Ошибка восстановления фокуса
-/// возвращается, но не подавляет воспроизведение в обоих режимах.
+/// возвращается, но не подавляет постановку в очередь в обоих режимах. Ошибка
+/// постановки в очередь имеет приоритет над ошибкой восстановления фокуса.
 fn play_binding_ordered<H, R, F>(
     stay_visible: bool,
     hide: H,
@@ -358,14 +444,17 @@ fn play_binding_ordered<H, R, F>(
 where
     H: FnOnce() -> Result<(), String>,
     R: FnOnce() -> Result<(), String>,
-    F: FnOnce(),
+    F: FnOnce() -> Result<(), String>,
 {
     if !stay_visible {
         hide()?;
     }
     let restore_result = restore();
-    play();
-    restore_result
+    let play_result = play();
+    match play_result {
+        Err(error) => Err(error),
+        Ok(()) => restore_result,
+    }
 }
 
 /// Выполнить оконную часть Escape без воспроизведения.
@@ -519,6 +608,7 @@ mod tests {
             },
             || {
                 order.borrow_mut().push("play");
+                Ok(())
             },
         );
         (result, order.into_inner())
@@ -559,6 +649,41 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("restore failed"));
         assert_eq!(order, vec!["restore", "play"]);
+    }
+
+    #[test]
+    fn unchecked_play_failure_is_reported_and_restore_still_runs() {
+        let order = RefCell::new(Vec::new());
+        let result = play_binding_ordered(
+            false,
+            || {
+                order.borrow_mut().push("hide");
+                Ok(())
+            },
+            || {
+                order.borrow_mut().push("restore");
+                Ok(())
+            },
+            || {
+                order.borrow_mut().push("play");
+                Err("queue full".to_string())
+            },
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("queue full"));
+        assert_eq!(order.into_inner(), vec!["hide", "restore", "play"]);
+    }
+
+    #[test]
+    fn play_error_takes_precedence_over_restore_error() {
+        let result = play_binding_ordered(
+            false,
+            || Ok(()),
+            || Err("restore failed".to_string()),
+            || Err("queue full".to_string()),
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("queue full"));
     }
 
     fn record_escape(

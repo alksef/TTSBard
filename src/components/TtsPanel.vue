@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { createAsyncCleanupScope } from '../utils/asyncCleanup';
 import { useTtsSettings, useAppSettings } from '../composables/useAppSettings';
-import type { TtsProviderType, TtsProviderInfoDto, VoiceModel } from '../types/settings';
+import type { FishAudioConnectionSettingsInput, TtsProviderType, TtsProviderInfoDto, VoiceModel } from '../types/settings';
 import { debugLog, debugError } from '../utils/debug';
 import { TELEGRAM_AUTH_KEY, type UseTelegramAuthReturn } from '../composables/useTelegramAuth';
 import TelegramAuthModal from './TelegramAuthModal.vue';
@@ -209,20 +209,23 @@ async function saveLocalTtsUrl(url: string) {
   }
 }
 
-async function saveFishAudioSettings(data: { apiKey: string; format: string; temperature: number; sampleRate: number }) {
+async function saveFishAudioSettings(data: FishAudioConnectionSettingsInput): Promise<void> {
   debugLog('[TTS] Saving Fish Audio settings...');
 
   if (!data.apiKey.trim()) {
     showError('API Key не может быть пустым');
-    return;
+    throw new Error('API Key не может быть пустым');
   }
 
   try {
-    // Save all settings
-    await invoke('set_fish_audio_api_key', { key: data.apiKey });
-    await invoke('set_fish_audio_format', { format: data.format });
-    await invoke('set_fish_audio_temperature', { temperature: data.temperature });
-    await invoke('set_fish_audio_sample_rate', { sampleRate: data.sampleRate });
+    await invoke('save_fish_audio_connection_settings', {
+      settings: {
+        apiKey: data.apiKey,
+        format: data.format,
+        temperature: data.temperature,
+        sampleRate: data.sampleRate,
+      },
+    });
 
     providers.value.fish.configured = true;
     await reloadSettings();
@@ -231,6 +234,7 @@ async function saveFishAudioSettings(data: { apiKey: string; format: string; tem
   } catch (error) {
     debugError('[TTS] Failed to save Fish Audio settings:', error);
     showError(error as string);
+    throw error;
   }
 }
 
@@ -622,7 +626,7 @@ function dismissStatus() {
         :use-proxy="fishAudioUseProxy"
         @select="setActiveProvider('fish')"
         @toggle="toggleProvider('fish')"
-        @save-all="saveFishAudioSettings"
+        :on-save-all="saveFishAudioSettings"
         @select-voice="selectFishAudioVoice"
         @add-voice="addFishAudioVoice"
         @remove-voice="removeFishAudioVoice"

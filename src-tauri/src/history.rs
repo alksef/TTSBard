@@ -6,10 +6,10 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::config::replace_file_atomically;
 
 const PHRASE_HISTORY_SIZE: usize = 200;
 
@@ -17,78 +17,6 @@ static HISTORY_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 fn history_write_lock() -> &'static Mutex<()> {
     HISTORY_WRITE_LOCK.get_or_init(|| Mutex::new(()))
-}
-
-fn write_json_atomically(path: &Path, content: &str) -> std::io::Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "No parent dir"))?;
-
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| std::io::Error::other(e.to_string()))?
-        .as_nanos();
-    let tmp_path = parent.join(format!(
-        ".{}.{}.tmp",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("history.json"),
-        stamp
-    ));
-
-    {
-        let mut file = fs::File::create(&tmp_path)?;
-        file.write_all(content.as_bytes())?;
-        file.sync_all()?;
-    }
-
-    if let Err(rename_error) = fs::rename(&tmp_path, path) {
-        let _ = fs::remove_file(path);
-        fs::rename(&tmp_path, path).map_err(|e| {
-            std::io::Error::other(format!(
-                "Replace failed: {} (original: {})",
-                e, rename_error
-            ))
-        })?;
-    }
-
-    Ok(())
-}
-
-fn write_binary_atomically(path: &Path, data: &[u8]) -> std::io::Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "No parent dir"))?;
-
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| std::io::Error::other(e.to_string()))?
-        .as_nanos();
-    let tmp_path = parent.join(format!(
-        ".{}.{}.tmp",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("audio"),
-        stamp
-    ));
-
-    {
-        let mut file = fs::File::create(&tmp_path)?;
-        file.write_all(data)?;
-        file.sync_all()?;
-    }
-
-    if let Err(rename_error) = fs::rename(&tmp_path, path) {
-        let _ = fs::remove_file(path);
-        fs::rename(&tmp_path, path).map_err(|e| {
-            std::io::Error::other(format!(
-                "Replace failed: {} (original: {})",
-                e, rename_error
-            ))
-        })?;
-    }
-
-    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,21 +84,33 @@ fn clean_token(token: &str) -> String {
         .to_lowercase()
 }
 
-fn save_history_sync(path: PathBuf, ngram_path: PathBuf, data: HistoryData, ngrams: NgramData) {
+fn save_history_sync(
+    path: &Path,
+    ngram_path: &Path,
+    data: &HistoryData,
+    ngrams: &NgramData,
+) -> Result<()> {
     let _lock = history_write_lock().lock();
-    if let Ok(content) = serde_json::to_string_pretty(&data) {
-        let _ = write_json_atomically(&path, &content);
-    }
-    if let Ok(content) = serde_json::to_string_pretty(&ngrams) {
-        let _ = write_json_atomically(&ngram_path, &content);
-    }
+
+    let content = serde_json::to_string_pretty(data).context("Failed to serialize history")?;
+    replace_file_atomically(path, content.as_bytes())
+        .with_context(|| format!("Failed to persist history to {:?}", path))?;
+
+    let content = serde_json::to_string_pretty(ngrams).context("Failed to serialize ngrams")?;
+    replace_file_atomically(ngram_path, content.as_bytes())
+        .with_context(|| format!("Failed to persist ngrams to {:?}", ngram_path))?;
+
+    Ok(())
 }
 
-fn save_phrases_sync(path: PathBuf, phrases: Vec<PhraseEntry>) {
+fn save_phrases_sync(path: &Path, phrases: &[PhraseEntry]) -> Result<()> {
     let _lock = history_write_lock().lock();
-    if let Ok(content) = serde_json::to_string_pretty(&phrases) {
-        let _ = write_json_atomically(&path, &content);
-    }
+
+    let content = serde_json::to_string_pretty(phrases).context("Failed to serialize phrases")?;
+    replace_file_atomically(path, content.as_bytes())
+        .with_context(|| format!("Failed to persist phrases to {:?}", path))?;
+
+    Ok(())
 }
 
 impl HistoryManager {
@@ -202,7 +142,7 @@ impl HistoryManager {
         }
     }
 
-    pub fn record_text(&self, text: &str) {
+    pub fn record_text(&self, text: &str) -> Result<()> {
         let tokens: Vec<String> = text
             .split_whitespace()
             .filter(|t| t.len() >= 2)
@@ -211,18 +151,21 @@ impl HistoryManager {
             .collect();
 
         if tokens.is_empty() {
-            return;
+            return Ok(());
         }
 
         let mut data = self.data.write();
         let mut ngrams = self.ngrams.write();
 
+        let mut data_candidate = data.clone();
+        let mut ngrams_candidate = ngrams.clone();
+
         for token in &tokens {
-            if let Some(entry) = data.entries.iter_mut().find(|e| e.word == *token) {
+            if let Some(entry) = data_candidate.entries.iter_mut().find(|e| e.word == *token) {
                 entry.count += 1;
                 entry.last_used = Utc::now().timestamp();
             } else {
-                data.entries.push(HistoryEntry {
+                data_candidate.entries.push(HistoryEntry {
                     word: token.clone(),
                     count: 1,
                     last_used: Utc::now().timestamp(),
@@ -231,7 +174,7 @@ impl HistoryManager {
         }
 
         for window in tokens.windows(2) {
-            *ngrams
+            *ngrams_candidate
                 .bigrams
                 .entry(window[0].clone())
                 .or_default()
@@ -241,7 +184,7 @@ impl HistoryManager {
 
         for window in tokens.windows(3) {
             let key = trigram_key(&window[0], &window[1]);
-            *ngrams
+            *ngrams_candidate
                 .trigrams
                 .entry(key)
                 .or_default()
@@ -249,13 +192,16 @@ impl HistoryManager {
                 .or_insert(0) += 1;
         }
 
-        let path = self.path.clone();
-        let ngram_path = self.ngram_path.clone();
-        let data_snapshot = data.clone();
-        let ngrams_snapshot = ngrams.clone();
-        drop(data);
-        drop(ngrams);
-        save_history_sync(path, ngram_path, data_snapshot, ngrams_snapshot);
+        save_history_sync(
+            &self.path,
+            &self.ngram_path,
+            &data_candidate,
+            &ngrams_candidate,
+        )?;
+
+        *data = data_candidate;
+        *ngrams = ngrams_candidate;
+        Ok(())
     }
 
     pub fn suggest(&self, query: &str, limit: usize) -> Vec<HistoryEntry> {
@@ -324,26 +270,24 @@ impl HistoryManager {
         suggestions
     }
 
-    pub fn clear(&self) {
+    pub fn clear(&self) -> Result<()> {
         let mut data = self.data.write();
         let mut ngrams = self.ngrams.write();
-        data.entries.clear();
-        *ngrams = NgramData::default();
 
-        let path = self.path.clone();
-        let ngram_path = self.ngram_path.clone();
-        let data_snapshot = data.clone();
-        let ngrams_snapshot = ngrams.clone();
-        drop(data);
-        drop(ngrams);
-        save_history_sync(path, ngram_path, data_snapshot, ngrams_snapshot);
+        let empty_history = HistoryData::default();
+        let empty_ngrams = NgramData::default();
+        save_history_sync(&self.path, &self.ngram_path, &empty_history, &empty_ngrams)?;
+
+        *data = empty_history;
+        *ngrams = empty_ngrams;
+        Ok(())
     }
 
     // Контракт нормализации фраз: храним text.trim(); дедупликация и поиск —
     // case-insensitive по подстроке (to_lowercase()). См. также get_phrases.
     // Не менять без обновления обоих методов — это сломает дедупликацию/поиск.
-    pub fn record_phrase(&self, text: &str) {
-        self.record_phrase_with_meta(text, "", "", "");
+    pub fn record_phrase(&self, text: &str) -> Result<()> {
+        self.record_phrase_with_meta(text, "", "", "")
     }
 
     pub fn record_phrase_with_meta(
@@ -352,24 +296,25 @@ impl HistoryManager {
         provider: &str,
         voice: &str,
         cache_key: &str,
-    ) {
+    ) -> Result<()> {
         let trimmed = text.trim();
         if trimmed.is_empty() {
-            return;
+            return Ok(());
         }
         let trimmed_lower = trimmed.to_lowercase();
         let now = Utc::now().timestamp();
 
         let mut phrases = self.phrases.write();
+        let mut candidate = phrases.clone();
 
         let found = if provider.is_empty() && voice.is_empty() {
-            phrases
+            candidate
                 .iter_mut()
                 .find(|e| e.text.trim().to_lowercase() == trimmed_lower)
         } else {
             let prov_lower = provider.to_lowercase();
             let voice_lower = voice.to_lowercase();
-            phrases.iter_mut().find(|e| {
+            candidate.iter_mut().find(|e| {
                 e.text.trim().to_lowercase() == trimmed_lower
                     && e.provider.to_lowercase() == prov_lower
                     && e.voice.to_lowercase() == voice_lower
@@ -386,7 +331,7 @@ impl HistoryManager {
                 existing.cache_key = cache_key.to_string();
             }
         } else {
-            phrases.push(PhraseEntry {
+            candidate.push(PhraseEntry {
                 id: uuid::Uuid::new_v4().to_string(),
                 text: trimmed.to_string(),
                 count: 1,
@@ -397,22 +342,23 @@ impl HistoryManager {
             });
         }
 
-        while phrases.len() > PHRASE_HISTORY_SIZE {
-            if let Some(oldest_pos) = phrases
+        while candidate.len() > PHRASE_HISTORY_SIZE {
+            if let Some(oldest_pos) = candidate
                 .iter()
                 .enumerate()
                 .min_by_key(|(_, e)| e.last_used)
                 .map(|(i, _)| i)
             {
-                phrases.remove(oldest_pos);
+                candidate.remove(oldest_pos);
             } else {
                 break;
             }
         }
 
-        let path = self.phrase_path.clone();
-        let snapshot = phrases.clone();
-        save_phrases_sync(path, snapshot);
+        save_phrases_sync(&self.phrase_path, &candidate)?;
+
+        *phrases = candidate;
+        Ok(())
     }
 
     pub fn get_phrases(&self, filter: Option<&str>, limit: usize) -> Vec<PhraseEntry> {
@@ -433,22 +379,25 @@ impl HistoryManager {
         results
     }
 
-    pub fn delete_phrase(&self, id: &str) {
+    pub fn delete_phrase(&self, id: &str) -> Result<()> {
         let mut phrases = self.phrases.write();
-        phrases.retain(|e| e.id != id);
+        let mut candidate = phrases.clone();
+        candidate.retain(|e| e.id != id);
 
-        let path = self.phrase_path.clone();
-        let snapshot = phrases.clone();
-        save_phrases_sync(path, snapshot);
+        save_phrases_sync(&self.phrase_path, &candidate)?;
+
+        *phrases = candidate;
+        Ok(())
     }
 
-    pub fn clear_phrases(&self) {
+    pub fn clear_phrases(&self) -> Result<()> {
         let mut phrases = self.phrases.write();
-        phrases.clear();
 
-        let path = self.phrase_path.clone();
-        let snapshot = phrases.clone();
-        save_phrases_sync(path, snapshot);
+        let empty: Vec<PhraseEntry> = Vec::new();
+        save_phrases_sync(&self.phrase_path, &empty)?;
+
+        *phrases = empty;
+        Ok(())
     }
 }
 
@@ -505,7 +454,7 @@ pub fn save_audio_cache(cache_key: &str, pcm: &crate::audio::AudioPcm) -> Result
     let wav_bytes = crate::audio::effects::encode_wav(&pcm.samples, pcm.sample_rate, pcm.channels)
         .map_err(|e| anyhow::anyhow!("Failed to encode cache WAV: {}", e))?;
     let path = get_cache_file_path(cache_key)?;
-    write_binary_atomically(&path, &wav_bytes).with_context(|| "Failed to write audio cache")?;
+    replace_file_atomically(&path, &wav_bytes).with_context(|| "Failed to write audio cache")?;
     Ok(())
 }
 
@@ -586,7 +535,7 @@ mod tests {
         for i in 0..20 {
             let mgr_clone = std::sync::Arc::clone(&mgr_arc);
             threads.push(std::thread::spawn(move || {
-                mgr_clone.record_phrase(&format!("test phrase {}", i));
+                mgr_clone.record_phrase(&format!("test phrase {}", i)).unwrap();
             }));
         }
 
@@ -671,9 +620,9 @@ mod tests {
     fn test_record_phrase_with_meta_dedup_different_providers() {
         let (mgr, p1, p2, p3) = manager_in_tmp();
 
-        mgr.record_phrase_with_meta("hello world", "openai", "alloy", "key-1");
-        mgr.record_phrase_with_meta("hello world", "silero", "voice-2", "key-2");
-        mgr.record_phrase_with_meta("hello world", "openai", "alloy", "key-1");
+        mgr.record_phrase_with_meta("hello world", "openai", "alloy", "key-1").unwrap();
+        mgr.record_phrase_with_meta("hello world", "silero", "voice-2", "key-2").unwrap();
+        mgr.record_phrase_with_meta("hello world", "openai", "alloy", "key-1").unwrap();
 
         let phrases = mgr.get_phrases(None, 100);
         assert_eq!(
@@ -699,8 +648,8 @@ mod tests {
     fn test_record_phrase_backward_compat_dedup() {
         let (mgr, p1, p2, p3) = manager_in_tmp();
 
-        mgr.record_phrase("test phrase");
-        mgr.record_phrase("test phrase");
+        mgr.record_phrase("test phrase").unwrap();
+        mgr.record_phrase("test phrase").unwrap();
 
         let phrases = mgr.get_phrases(None, 100);
         assert_eq!(phrases.len(), 1);
@@ -718,9 +667,9 @@ mod tests {
     fn test_record_phrase_with_meta_same_provider_voice_dedup() {
         let (mgr, p1, p2, p3) = manager_in_tmp();
 
-        mgr.record_phrase_with_meta("hello", "openai", "alloy", "k1");
-        mgr.record_phrase_with_meta("hello", "openai", "alloy", "k1");
-        mgr.record_phrase_with_meta("hello", "openai", "alloy", "k1");
+        mgr.record_phrase_with_meta("hello", "openai", "alloy", "k1").unwrap();
+        mgr.record_phrase_with_meta("hello", "openai", "alloy", "k1").unwrap();
+        mgr.record_phrase_with_meta("hello", "openai", "alloy", "k1").unwrap();
 
         let phrases = mgr.get_phrases(None, 100);
         assert_eq!(phrases.len(), 1);
@@ -780,8 +729,8 @@ mod tests {
     fn test_record_phrase_meta_updates_existing_no_meta_entry() {
         let (mgr, p1, p2, p3) = manager_in_tmp();
 
-        mgr.record_phrase("hello world");
-        mgr.record_phrase_with_meta("hello world", "openai", "alloy", "cache-x");
+        mgr.record_phrase("hello world").unwrap();
+        mgr.record_phrase_with_meta("hello world", "openai", "alloy", "cache-x").unwrap();
 
         let phrases = mgr.get_phrases(None, 100);
         assert_eq!(phrases.len(), 2);
@@ -796,5 +745,31 @@ mod tests {
         let _ = fs::remove_file(&p1);
         let _ = fs::remove_file(&p2);
         let _ = fs::remove_file(&p3);
+    }
+
+    #[test]
+    fn record_phrase_preserves_published_state_on_persistence_failure() {
+        let (mgr, _p1, _p2, p3) = manager_in_tmp();
+
+        mgr.record_phrase("kept phrase").unwrap();
+        assert_eq!(mgr.get_phrases(None, 100).len(), 1);
+
+        // Break persistence: replace the parent directory with a regular file so
+        // the phrases temporary file can no longer be created.
+        let parent = p3.parent().unwrap().to_path_buf();
+        fs::remove_dir_all(&parent).unwrap();
+        fs::write(&parent, "not a directory").unwrap();
+
+        let result = mgr.record_phrase("lost phrase");
+        assert!(
+            result.is_err(),
+            "record_phrase must fail when persistence is broken"
+        );
+
+        let phrases = mgr.get_phrases(None, 100);
+        assert_eq!(phrases.len(), 1);
+        assert_eq!(phrases[0].text, "kept phrase");
+
+        let _ = fs::remove_file(&parent);
     }
 }

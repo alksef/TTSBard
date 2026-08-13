@@ -7,6 +7,7 @@ use crate::events::AppEvent;
 use crate::setup::parse_webview_server_error;
 use crate::webview::WebViewServer;
 use crate::webview::WebViewSettings;
+use crate::webview::WebViewServerStatus;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio_util::sync::CancellationToken;
@@ -41,6 +42,11 @@ pub async fn run_webview_server(
         // We don't auto-start here to avoid conflicts with manual stop/start
 
         if enabled {
+            let Some(state) = app_handle.try_state::<crate::state::AppState>() else {
+                error!("WebView AppState unavailable");
+                return;
+            };
+            state.webview.set_status(&app_handle, WebViewServerStatus::Starting);
             info!("[WEBVIEW] ========================================");
             info!("[WEBVIEW] STARTING SERVER");
             info!("[WEBVIEW]   Address: {}:{}", bind_address, port);
@@ -52,9 +58,16 @@ pub async fn run_webview_server(
                     let error_msg = format!("Failed to create server: {}", e);
                     error!("[WEBVIEW] ❌ {}", error_msg);
                     let _ = app_handle.emit("webview-server-error", &error_msg);
-                    // Wait a bit before retrying
-                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                    continue;
+                    state.webview.set_status(
+                        &app_handle,
+                        WebViewServerStatus::Error { message: error_msg },
+                    );
+                    // Do not spin on a persistent configuration error. Wait for
+                    // an explicit restart after the user fixes the settings.
+                    tokio::select! {
+                        _ = shutdown.cancelled() => return,
+                        _ = webview_rx.recv() => continue,
+                    }
                 }
             };
 
@@ -62,10 +75,11 @@ pub async fn run_webview_server(
             let server_clone = server.clone();
             let app_handle_clone = app_handle.clone();
             let bind_address_clone = bind_address.clone();
-            let server_handle = tokio::spawn(async move {
+            let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+            let mut server_handle = tokio::spawn(async move {
                 info!("[WEBVIEW] Server task started, waiting for connections...");
 
-                if let Err(e) = server_clone.start().await {
+                if let Err(e) = server_clone.start(Some(ready_tx)).await {
                     // Extract error details for user-friendly message
                     let error_msg = format!("{}", e);
                     let (user_friendly_msg, log_context) =
@@ -88,6 +102,21 @@ pub async fn run_webview_server(
                 info!("[WEBVIEW] Server task stopped");
             });
 
+            match ready_rx.await {
+                Ok(Ok(())) => state.webview.set_status(&app_handle, WebViewServerStatus::Running),
+                Ok(Err(message)) => {
+                    state.webview.set_status(&app_handle, WebViewServerStatus::Error { message });
+                    let _ = server_handle.await;
+                    continue;
+                }
+                Err(_) => {
+                    state.webview.set_status(&app_handle, WebViewServerStatus::Error {
+                        message: "WebView server stopped before readiness".into(),
+                    });
+                    continue;
+                }
+            }
+
             // Handle events and broadcast text
             let mut server_running = true;
             while server_running {
@@ -109,14 +138,25 @@ pub async fn run_webview_server(
                     server.stop();
 
                     server_handle.abort();
+                    state.webview.set_status(&app_handle, WebViewServerStatus::Stopped);
                     server_running = false;
                 } else {
                     tokio::select! {
                         biased;
+                        result = &mut server_handle => {
+                            if let Err(join_error) = result {
+                                error!(%join_error, "WebView server task join failed");
+                            }
+                            state.webview.set_status(&app_handle, WebViewServerStatus::Error {
+                                message: "WebView server stopped unexpectedly".into(),
+                            });
+                            server_running = false;
+                        }
                         _ = shutdown.cancelled() => {
                             info!("[WEBVIEW] ⛔ Shutdown signal");
                             server.stop();
                             server_handle.abort();
+                            state.webview.set_status(&app_handle, WebViewServerStatus::Stopped);
                             return;
                         }
                         result = tokio::time::timeout(
@@ -134,6 +174,7 @@ pub async fn run_webview_server(
                                             server.stop();
 
                                             server_handle.abort();
+                                            state.webview.set_status(&app_handle, WebViewServerStatus::Stopped);
                                             info!("[WEBVIEW] Server shut down for quit");
                                             return;
                                         }
@@ -148,6 +189,7 @@ pub async fn run_webview_server(
                                             server.stop();
 
                                             server_handle.abort();
+                                            state.webview.set_status(&app_handle, WebViewServerStatus::Stopped);
                                             // Wait a bit for the server to fully shut down
                                             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                                             server_running = false;
@@ -190,6 +232,9 @@ pub async fn run_webview_server(
                 }
             }
         } else {
+            if let Some(state) = app_handle.try_state::<crate::state::AppState>() {
+                state.webview.set_status(&app_handle, WebViewServerStatus::Stopped);
+            }
             info!("[WEBVIEW] ========================================");
             info!("[WEBVIEW] SERVER DISABLED");
             info!("[WEBVIEW] Waiting for enable signal...");

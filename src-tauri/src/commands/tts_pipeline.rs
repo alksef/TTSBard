@@ -136,6 +136,63 @@ pub(crate) fn apply_audio_effects_pipeline_with_settings(
     Ok(pcm)
 }
 
+// ── Blocking stage isolation ──
+//
+// Filesystem cache read/decode, effects/DSP/boundary processing, and WAV cache
+// encode/write are CPU/IO-bound and must not run on the async worker thread.
+// Each stage runs inside `spawn_blocking` with owned inputs so the speech worker
+// keeps observing shutdown and other control futures while the stage executes.
+
+/// Map a `spawn_blocking` `JoinError` into the preparation error contract.
+fn join_error_to_speech_error(join_err: tokio::task::JoinError) -> String {
+    if join_err.is_panic() {
+        format!("Speech preparation background task panicked: {join_err}")
+    } else {
+        format!("Speech preparation background task was cancelled: {join_err}")
+    }
+}
+
+/// Run a fallible blocking stage off the async worker thread.
+///
+/// The inner error is already a `String` (the preparation error contract), and
+/// a `JoinError` (panic or runtime shutdown) is mapped to the same contract.
+async fn spawn_blocking_prepare<F, T>(f: F) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+    T: Send + 'static,
+{
+    match tokio::task::spawn_blocking(f).await {
+        Ok(inner) => inner,
+        Err(join_err) => Err(join_error_to_speech_error(join_err)),
+    }
+}
+
+async fn read_cache_blocking(cache_key: String) -> Result<AudioPcm, String> {
+    spawn_blocking_prepare(move || {
+        crate::history::read_audio_cache(&cache_key).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+async fn apply_effects_blocking(
+    audio_data: Vec<u8>,
+    audio_effects: AudioEffectsSettings,
+    dsp: DspSettings,
+) -> Result<AudioPcm, String> {
+    spawn_blocking_prepare(move || {
+        apply_audio_effects_pipeline_with_settings(audio_data, &audio_effects, &dsp)
+    })
+    .await
+}
+
+async fn save_cache_blocking(cache_key: String, audio: AudioPcm) -> bool {
+    spawn_blocking_prepare(move || {
+        crate::history::save_audio_cache(&cache_key, &audio).map_err(|e| e.to_string())
+    })
+    .await
+    .is_ok()
+}
+
 // ── Snapshot-driven preparation (pure, no side effects) ──
 
 pub async fn prepare_speech(
@@ -177,7 +234,7 @@ pub async fn prepare_speech(
     let cache_key =
         crate::history::build_cache_key(&text, &snapshot.provider, &snapshot.voice, effects_fp);
 
-    match crate::history::read_audio_cache(&cache_key) {
+    match read_cache_blocking(cache_key.clone()).await {
         Ok(pcm) => {
             return Ok(PreparedSpeech {
                 processed_text: text,
@@ -190,24 +247,24 @@ pub async fn prepare_speech(
             });
         }
         Err(e) => {
-            let err_str = e.to_string();
-            if !err_str.contains("CacheMiss") {
+            if !e.contains("CacheMiss") {
                 return Err(format!(
                     "Cache read error (corrupted/unreadable): {}",
-                    err_str
+                    e
                 ));
             }
         }
     }
 
     let audio_data = synthesize_with_provider(&snapshot.tts_provider, &text).await?;
-    let audio = apply_audio_effects_pipeline_with_settings(
+    let audio = apply_effects_blocking(
         audio_data,
-        &snapshot.audio_effects,
-        &snapshot.dsp,
-    )?;
+        snapshot.audio_effects.clone(),
+        snapshot.dsp.clone(),
+    )
+    .await?;
 
-    let cache_saved = crate::history::save_audio_cache(&cache_key, &audio).is_ok();
+    let cache_saved = save_cache_blocking(cache_key.clone(), audio.clone()).await;
 
     Ok(PreparedSpeech {
         processed_text: text,
@@ -328,7 +385,9 @@ pub async fn synthesize_and_export(state: &AppState, text: &str, path: &str) -> 
         .map_err(|e| format!("Failed to write audio file: {}", e))?;
 
     if let Some(hm) = state.editor.history_manager.lock().as_ref() {
-        hm.record_phrase(&text);
+        if let Err(error) = hm.record_phrase(&text) {
+            tracing::error!(error = %error, "Failed to persist exported phrase history");
+        }
     }
 
     Ok(())
@@ -644,5 +703,108 @@ mod tests {
         assert_ne!(key_alloy, key_echo);
         assert_ne!(key_alloy, key_fable);
         assert_ne!(key_echo, key_fable);
+    }
+
+    // ── Blocking boundary seam tests ──
+
+    /// A control future must keep running while a deliberately delayed blocking
+    /// stage is executing (the blocking stage runs off the async worker thread).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn control_future_runs_during_delayed_blocking_stage() {
+        use std::time::{Duration, Instant};
+
+        let blocking = spawn_blocking_prepare(move || -> Result<i32, String> {
+            std::thread::sleep(Duration::from_millis(200));
+            Ok(42)
+        });
+
+        // Control future: a short sleep that must complete while the blocking
+        // task is still running (200ms). If the blocking stage stalled the async
+        // worker, this sleep would take ~200ms, not ~50ms.
+        let start = Instant::now();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let control_elapsed = start.elapsed();
+        assert!(
+            control_elapsed < Duration::from_millis(150),
+            "control future was stalled by the blocking stage (took {:?})",
+            control_elapsed
+        );
+
+        let value = blocking.await.expect("blocking stage result");
+        assert_eq!(value, 42);
+    }
+
+    /// A panicking blocking stage surfaces as a preparation error (JoinError).
+    #[tokio::test]
+    async fn blocking_stage_panic_maps_to_speech_error() {
+        let result: Result<i32, String> = spawn_blocking_prepare(move || -> Result<i32, String> {
+            panic!("intentional panic in blocking stage");
+        })
+        .await;
+
+        let err = result.expect_err("panicking blocking stage must surface an error");
+        assert!(err.contains("panicked"), "unexpected error: {err}");
+    }
+
+    /// Cancellation must win over a delayed blocking stage without waiting for it,
+    /// mirroring the speech worker's shutdown observation during preparation.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancellation_wins_over_delayed_blocking_stage() {
+        use std::sync::mpsc;
+        use std::time::{Duration, Instant};
+
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let (started_tx, started_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+
+        let blocking = tokio::spawn(async move {
+            spawn_blocking_prepare(move || -> Result<(), String> {
+                started_tx.send(()).ok();
+                // Simulate a long blocking stage until the test releases it.
+                let _ = release_rx.recv();
+                Ok(())
+            })
+            .await
+        });
+
+        tokio::task::spawn_blocking(move || started_rx.recv())
+            .await
+            .expect("start observer must not panic")
+            .expect("blocking stage should start");
+
+        let cancel_task = {
+            let cancel = cancel.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                cancel.cancel();
+            })
+        };
+
+        let start = Instant::now();
+        let outcome = tokio::select! {
+            result = blocking => Some(result),
+            _ = cancel.cancelled() => None,
+        };
+
+        assert!(outcome.is_none(), "cancellation should win over the blocking stage");
+        assert!(
+            start.elapsed() < Duration::from_millis(100),
+            "cancellation should not wait for the blocking stage (took {:?})",
+            start.elapsed()
+        );
+
+        // Release the detached blocking task so it can finish cleanly.
+        release_tx.send(()).ok();
+        cancel_task.await.expect("cancel task");
+    }
+
+    /// Inner cache-miss errors surface through the blocking seam, not a JoinError.
+    #[tokio::test]
+    async fn cache_read_blocking_surfaces_cache_miss() {
+        let missing = uuid::Uuid::new_v4().to_string();
+        let err = read_cache_blocking(missing)
+            .await
+            .expect_err("missing cache key must error");
+        assert!(err.contains("CacheMiss"), "unexpected error: {err}");
     }
 }

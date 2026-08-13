@@ -40,6 +40,7 @@ const cacheErrors = ref<Record<string, boolean>>({})
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 const listenerScope = createAsyncCleanupScope()
 let reloadDebounceTimer: ReturnType<typeof setTimeout> | null = null
+let loadGeneration = 0
 
 watch(filter, (val) => {
   if (debounceTimer) {
@@ -52,11 +53,15 @@ watch(filter, (val) => {
 })
 
 async function loadPhrases() {
+  const generation = ++loadGeneration
   try {
-    phrases.value = await list(filterDebounced.value || undefined, 100)
+    const entries = await list(filterDebounced.value || undefined, 100)
+    if (generation !== loadGeneration) return
+    phrases.value = entries
     loadError.value = ''
     cacheErrors.value = {}
   } catch (e) {
+    if (generation !== loadGeneration) return
     debugError('[PhraseHistory] Failed to load phrases:', e)
     loadError.value = 'Ошибка загрузки истории'
   }
@@ -147,6 +152,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  loadGeneration += 1
   if (debounceTimer) {
     clearTimeout(debounceTimer)
     debounceTimer = null

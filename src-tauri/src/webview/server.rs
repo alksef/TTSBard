@@ -149,7 +149,10 @@ impl WebViewServer {
         })
     }
 
-    pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn start(
+        &self,
+        readiness: Option<tokio::sync::oneshot::Sender<Result<(), String>>>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let settings = self.settings.read().await;
         let addr = if settings.bind_address.contains(':') && !settings.bind_address.starts_with('[')
         {
@@ -190,19 +193,27 @@ impl WebViewServer {
             .parse()
             .map_err(|e| format!("Invalid address {}: {}", addr, e))?;
 
-        let listener = tokio::net::TcpListener::bind(socket_addr)
-            .await
-            .map_err(|e| {
-                if e.kind() == std::io::ErrorKind::AddrInUse {
+        let listener = match tokio::net::TcpListener::bind(socket_addr).await {
+            Ok(listener) => listener,
+            Err(e) => {
+                let message = if e.kind() == std::io::ErrorKind::AddrInUse {
                     format!("Address {} is already in use.", addr)
                 } else if e.kind() == std::io::ErrorKind::PermissionDenied {
                     format!("Permission denied to bind to {}.", addr)
                 } else {
                     format!("Failed to bind to {}: {}", addr, e)
+                };
+                if let Some(readiness) = readiness {
+                    let _ = readiness.send(Err(message.clone()));
                 }
-            })?;
+                return Err(message.into());
+            }
+        };
 
         tracing::info!(addr = %addr, "WebView server started");
+        if let Some(readiness) = readiness {
+            let _ = readiness.send(Ok(()));
+        }
         axum::serve(
             listener,
             app.into_make_service_with_connect_info::<SocketAddr>(),

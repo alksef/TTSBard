@@ -8,57 +8,103 @@ use serde::Serialize;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 static JSON_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
+static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
 pub fn config_write_lock() -> &'static Mutex<()> {
     JSON_WRITE_LOCK.get_or_init(|| Mutex::new(()))
 }
 
-/// Write JSON content atomically to a file using temp-file + rename strategy.
-///
-/// Creates a temp file in the same directory as the target, writes + flushes,
-/// then renames it over the target. If rename fails, removes the target and retries.
-/// The caller is responsible for holding `config_write_lock()` to prevent concurrent
-/// writers of the same logical config.
-pub fn write_json_atomically(path: &Path, content: &str) -> Result<()> {
-    let parent = path.parent().context("Path must have a parent directory")?;
-
+fn make_temp_path(parent: &Path, path: &Path) -> Result<PathBuf> {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .context("System clock is before UNIX_EPOCH")?
         .as_nanos();
-    let tmp_path = parent.join(format!(
-        ".{}.{}.tmp",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("config.json"),
-        stamp
-    ));
+    let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    let base = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("file");
+    Ok(parent.join(format!(".{}.{}.{}.tmp", base, stamp, seq)))
+}
 
-    {
-        let mut file = fs::File::create(&tmp_path)
-            .with_context(|| format!("Failed to create temp file at {:?}", tmp_path))?;
-        file.write_all(content.as_bytes())
-            .with_context(|| format!("Failed to write temp file at {:?}", tmp_path))?;
-        file.sync_all()
-            .with_context(|| format!("Failed to flush temp file at {:?}", tmp_path))?;
-    }
+/// Atomically replace the file at `path` with `bytes`.
+///
+/// Writes the bytes to a same-directory temporary file, flushes it, then renames
+/// the temporary file over the destination in a single step. The existing
+/// destination is never deleted before replacement; if the rename fails, the
+/// temporary file is removed and the destination is left untouched.
+pub fn replace_file_atomically(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = path.parent().context("Path must have a parent directory")?;
+    let tmp_path = make_temp_path(parent, path)?;
 
-    if let Err(rename_error) = fs::rename(&tmp_path, path) {
-        let _ = fs::remove_file(path);
-        fs::rename(&tmp_path, path).with_context(|| {
+    let write_result = (|| -> Result<()> {
+        {
+            let mut file = fs::File::create(&tmp_path)
+                .with_context(|| format!("Failed to create temp file at {:?}", tmp_path))?;
+            file.write_all(bytes)
+                .with_context(|| format!("Failed to write temp file at {:?}", tmp_path))?;
+            file.sync_all()
+                .with_context(|| format!("Failed to flush temp file at {:?}", tmp_path))?;
+        }
+
+        replace_temp_file(&tmp_path, path).with_context(|| {
             format!(
-                "Failed to replace file {:?} with temp file {:?}: {}",
-                path, tmp_path, rename_error
+                "Failed to replace file {:?} with temp file {:?}",
+                path, tmp_path
             )
         })?;
+        Ok(())
+    })();
+
+    if write_result.is_err() {
+        let _ = fs::remove_file(&tmp_path);
     }
 
-    Ok(())
+    write_result
+}
+
+#[cfg(windows)]
+fn replace_temp_file(tmp_path: &Path, path: &Path) -> std::io::Result<()> {
+    if !path.exists() {
+        return fs::rename(tmp_path, path);
+    }
+
+    use windows::core::{HSTRING, PCWSTR};
+    use windows::Win32::Storage::FileSystem::{ReplaceFileW, REPLACE_FILE_FLAGS};
+
+    let target = HSTRING::from(path.as_os_str().to_string_lossy().as_ref());
+    let replacement = HSTRING::from(tmp_path.as_os_str().to_string_lossy().as_ref());
+    unsafe {
+        ReplaceFileW(
+            &target,
+            &replacement,
+            PCWSTR::null(),
+            REPLACE_FILE_FLAGS(0),
+            None,
+            None,
+        )
+    }
+    .map_err(|error| std::io::Error::other(error.to_string()))
+}
+
+#[cfg(not(windows))]
+fn replace_temp_file(tmp_path: &Path, path: &Path) -> std::io::Result<()> {
+    fs::rename(tmp_path, path)
+}
+
+/// Write JSON content atomically to a file via [`replace_file_atomically`].
+///
+/// The caller is responsible for holding `config_write_lock()` to prevent
+/// concurrent writers of the same logical config.
+pub fn write_json_atomically(path: &Path, content: &str) -> Result<()> {
+    replace_file_atomically(path, content.as_bytes())
 }
 
 /// Attempt to recover from a corrupted JSON config file.
@@ -205,6 +251,57 @@ mod tests {
             err_msg.contains("Failed to create temp file"),
             "expected error about temp file creation, got: {}",
             err_msg
+        );
+        cleanup(&dir);
+    }
+
+    // ---- replace_file_atomically ----
+
+    #[test]
+    fn replace_writes_supplied_bytes() {
+        let dir = tmp_dir("replace-bytes");
+        let path = dir.join("raw.bin");
+
+        replace_file_atomically(&path, b"payload bytes").unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), b"payload bytes");
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn replace_existing_file_preserves_new_content() {
+        let dir = tmp_dir("replace-existing");
+        let path = dir.join("raw.bin");
+        fs::write(&path, b"old bytes").unwrap();
+
+        replace_file_atomically(&path, b"new bytes").unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), b"new bytes");
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn replace_failure_leaves_existing_target_unchanged_and_no_tmp_file() {
+        let dir = tmp_dir("replace-fail");
+        // A directory cannot be replaced by a file, so the rename must fail while
+        // the destination (and everything else in `dir`) stays intact.
+        let target = dir.join("target");
+        fs::create_dir_all(&target).unwrap();
+
+        let result = replace_file_atomically(&target, b"new bytes");
+
+        assert!(result.is_err(), "replacement over a directory must fail");
+        assert!(target.is_dir(), "target directory must remain unchanged");
+
+        let tmp_files: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_str().is_some_and(|n| n.ends_with(".tmp")))
+            .collect();
+        assert!(
+            tmp_files.is_empty(),
+            "expected no .tmp files after failed replacement, found {:?}",
+            tmp_files
         );
         cleanup(&dir);
     }

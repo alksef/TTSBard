@@ -5,7 +5,7 @@ import { confirm } from '@tauri-apps/plugin-dialog';
 import ProviderCard from '../shared/ProviderCard.vue';
 import InputWithToggle from '../shared/InputWithToggle.vue';
 import FishAudioModelPicker from './FishAudioModelPicker.vue';
-import type { VoiceModel } from '../../types/settings';
+import type { FishAudioConnectionSettingsInput, VoiceModel } from '../../types/settings';
 
 interface Props {
   active?: boolean;
@@ -17,12 +17,12 @@ interface Props {
   temperature?: number;
   sampleRate?: number;
   useProxy?: boolean;
+  onSaveAll?: (data: FishAudioConnectionSettingsInput) => Promise<void>;
 }
 
 interface Emits {
   (e: 'select'): void;
   (e: 'toggle'): void;
-  (e: 'save-all', data: { apiKey: string; format: string; temperature: number; sampleRate: number }): void;
   (e: 'select-voice', voiceId: string): void;
   (e: 'add-voice', model: VoiceModel): void;
   (e: 'remove-voice', voiceId: string): void;
@@ -96,7 +96,7 @@ async function handleSaveAll() {
 
   isSaving.value = true;
   try {
-    emit('save-all', {
+    await props.onSaveAll?.({
       apiKey: localApiKey.value,
       format: localFormat.value,
       temperature: localTemperature.value,

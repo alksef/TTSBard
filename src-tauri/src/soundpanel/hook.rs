@@ -5,7 +5,7 @@
 //! Intercept (NumPad/F-keys) обрабатывается здесь.
 
 use crate::soundpanel::state::SoundPanelState;
-use std::sync::mpsc;
+use std::sync::mpsc::{self, SyncSender, TrySendError};
 use std::sync::Arc;
 use tauri::AppHandle;
 use tracing::{debug, error, info};
@@ -20,12 +20,34 @@ use windows::{
 #[cfg(target_os = "windows")]
 static SP_HOOK_STATE: std::sync::OnceLock<Arc<SoundPanelState>> = std::sync::OnceLock::new();
 
-/// Safe storage for AppHandle (needed to call run_action from proc)
+/// Bounded dispatcher sender used by the hook callback. The callback only
+/// snapshots an action and performs non-blocking `try_send`.
 #[cfg(target_os = "windows")]
-static APP_HANDLE: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
+static ACTION_DISPATCHER: std::sync::OnceLock<SyncSender<DispatchCommand>> = std::sync::OnceLock::new();
+
+#[cfg(target_os = "windows")]
+const ACTION_DISPATCH_CAPACITY: usize = 32;
+
+#[cfg(target_os = "windows")]
+enum DispatchCommand {
+    Action(String),
+    Stop,
+}
 
 fn should_bypass_intercept_for_soundpanel(window_focused: bool, vk_code: u32) -> bool {
     window_focused && (0x70..=0x7B).contains(&vk_code)
+}
+
+#[cfg(target_os = "windows")]
+fn enqueue_intercept_action(action: String) -> bool {
+    let Some(sender) = ACTION_DISPATCHER.get() else {
+        return false;
+    };
+    match sender.try_send(DispatchCommand::Action(action)) {
+        Ok(()) => true,
+        Err(TrySendError::Full(_)) => false,
+        Err(TrySendError::Disconnected(_)) => false,
+    }
 }
 
 /// Low-level keyboard hook procedure: pass-through + Intercept mode
@@ -54,14 +76,8 @@ unsafe extern "system" fn soundpanel_keyboard_proc(
                     if let Some(key_name) = crate::soundpanel::intercept::vk_to_name(vk_code) {
                         if let Some(binding) = intercept.bindings.iter().find(|b| b.key == key_name)
                         {
-                            if let Some(app_handle) = APP_HANDLE.get() {
-                                debug!(
-                                    vk_code,
-                                    key = key_name,
-                                    action = binding.action,
-                                    "Intercept: running action"
-                                );
-                                crate::hotkeys::run_action(app_handle, &binding.action);
+                            if enqueue_intercept_action(binding.action.clone()) {
+                                debug!(vk_code, key = key_name, action = binding.action, "Intercept: queued action");
                                 return LRESULT(1);
                             }
                         }
@@ -95,6 +111,7 @@ mod tests {
 struct HookManagerInner {
     thread_id: u32,
     join_handle: std::thread::JoinHandle<()>,
+    dispatcher_join_handle: std::thread::JoinHandle<()>,
 }
 
 /// Manager for the soundpanel keyboard hook lifecycle.
@@ -152,6 +169,14 @@ impl HookManager {
                 Ok(_) => info!("Keyboard hook thread joined successfully"),
                 Err(e) => error!("Hook thread panicked: {:?}", e),
             }
+
+            if let Some(sender) = ACTION_DISPATCHER.get() {
+                let _ = sender.send(DispatchCommand::Stop);
+            }
+            match inner.dispatcher_join_handle.join() {
+                Ok(_) => info!("Intercept action dispatcher joined successfully"),
+                Err(e) => error!("Intercept action dispatcher panicked: {:?}", e),
+            }
         }
     }
 
@@ -170,6 +195,19 @@ pub fn initialize_soundpanel_hook(state: SoundPanelState, app_handle: AppHandle)
 
     #[cfg(target_os = "windows")]
     {
+        let (dispatch_tx, dispatch_rx) = mpsc::sync_channel(ACTION_DISPATCH_CAPACITY);
+        if ACTION_DISPATCHER.set(dispatch_tx).is_err() {
+            error!("Intercept action dispatcher was already initialized");
+        }
+        let dispatcher_join_handle = std::thread::spawn(move || {
+            while let Ok(command) = dispatch_rx.recv() {
+                match command {
+                    DispatchCommand::Action(action) => crate::hotkeys::run_action(&app_handle, &action),
+                    DispatchCommand::Stop => break,
+                }
+            }
+        });
+
         let (tx, rx) = mpsc::channel::<u32>();
 
         let join_handle = std::thread::spawn(move || unsafe {
@@ -194,12 +232,6 @@ pub fn initialize_soundpanel_hook(state: SoundPanelState, app_handle: AppHandle)
                 return;
             }
             debug!("SP_HOOK_STATE set safely");
-
-            if APP_HANDLE.set(app_handle).is_err() {
-                error!("APP_HANDLE already initialized");
-                return;
-            }
-            debug!("APP_HANDLE set safely");
 
             let module_handle = match GetModuleHandleW(PCWSTR::null()) {
                 Ok(h) => h,
@@ -266,6 +298,7 @@ pub fn initialize_soundpanel_hook(state: SoundPanelState, app_handle: AppHandle)
             inner: Some(HookManagerInner {
                 thread_id,
                 join_handle,
+                dispatcher_join_handle,
             }),
         }
     }

@@ -16,6 +16,12 @@ export interface WebViewSettings {
   upnp_enabled: boolean
 }
 
+export type WebViewServerStatus =
+  | { state: 'stopped' }
+  | { state: 'starting' }
+  | { state: 'running' }
+  | { state: 'error'; message: string }
+
 export function useWebView() {
   const webviewSettingsFromComposable = useWebViewSettings()
 
@@ -33,6 +39,7 @@ export function useWebView() {
   const errorMessage = ref<string | null>(null)
   const testMessage = ref('')
   const displayUrl = ref('')
+  const serverStatus = ref<WebViewServerStatus>({ state: 'stopped' })
 
   let errorTimeout: number | null = null
   const listenerScope = createAsyncCleanupScope()
@@ -92,21 +99,18 @@ export function useWebView() {
     debugLog('[WebView] Starting server...')
     settings.value.enabled = true
     await save()
-    showError('Сервер успешно запущен')
   }
 
   async function stopServer() {
     debugLog('[WebView] Stopping server...')
     settings.value.enabled = false
     await save()
-    showError('Сервер остановлен')
   }
 
   async function restartServer() {
     debugLog('[WebView] Restarting server...')
     await stopServer()
     await startServer()
-    showError('Сервер перезапущен')
   }
 
   async function saveStartOnBoot() {
@@ -215,7 +219,7 @@ export function useWebView() {
   }
 
   async function sendTest() {
-    if (!testMessage.value.trim()) return
+    if (!testMessage.value.trim() || serverStatus.value.state !== 'running') return
     try {
       await invoke('send_test_message', { text: testMessage.value })
       showError('Сообщение отправлено!')
@@ -236,6 +240,19 @@ export function useWebView() {
   onMounted(async () => {
     await loadToken()
     updateDisplayUrl()
+    await listenerScope.track(
+      listen<WebViewServerStatus>('webview-server-status-changed', (event) => {
+        serverStatus.value = event.payload
+        if (event.payload.state === 'error') showError(event.payload.message)
+      }),
+    )
+    try {
+      // Listener first, then snapshot: either ordering observes the latest
+      // transition without a read/listen gap.
+      serverStatus.value = await invoke<WebViewServerStatus>('get_webview_server_status')
+    } catch (e) {
+      debugError('[WebView] Failed to load runtime status:', e)
+    }
     await listenerScope.track(
       listen<string>('webview-server-error', (event) => {
         showError(event.payload)
@@ -270,6 +287,7 @@ export function useWebView() {
     errorMessage,
     testMessage,
     displayUrl,
+    serverStatus,
     externalUrl,
     externalDisplay,
     hasToken,

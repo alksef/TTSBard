@@ -4,6 +4,8 @@ use tauri::State;
 
 pub struct HistoryState(pub Arc<HistoryManager>);
 
+const HISTORY_PERSIST_FAILED: &str = "history.persist_failed";
+
 #[tauri::command]
 pub fn get_history_suggestions(
     query: String,
@@ -27,15 +29,19 @@ pub fn get_phrase_completion(
 }
 
 #[tauri::command]
-pub fn record_history(text: String, history_state: State<'_, HistoryState>) {
-    let manager = &history_state.0;
-    manager.record_text(&text);
+pub fn record_history(text: String, history_state: State<'_, HistoryState>) -> Result<(), String> {
+    history_state.0.record_text(&text).map_err(|e| {
+        tracing::error!("Failed to persist input history: {:#}", e);
+        HISTORY_PERSIST_FAILED.to_string()
+    })
 }
 
 #[tauri::command]
-pub fn clear_history(history_state: State<'_, HistoryState>) {
-    let manager = &history_state.0;
-    manager.clear();
+pub fn clear_history(history_state: State<'_, HistoryState>) -> Result<(), String> {
+    history_state.0.clear().map_err(|e| {
+        tracing::error!("Failed to persist input history clear: {:#}", e);
+        HISTORY_PERSIST_FAILED.to_string()
+    })
 }
 
 #[tauri::command]
@@ -57,16 +63,18 @@ pub fn delete_phrase_history(
     if id.trim().is_empty() {
         return Err("Phrase id cannot be empty".to_string());
     }
-    let manager = &history_state.0;
-    manager.delete_phrase(&id);
-    Ok(())
+    history_state.0.delete_phrase(&id).map_err(|e| {
+        tracing::error!("Failed to persist phrase deletion: {:#}", e);
+        HISTORY_PERSIST_FAILED.to_string()
+    })
 }
 
 #[tauri::command]
 pub fn clear_phrase_history(history_state: State<'_, HistoryState>) -> Result<(), String> {
-    let manager = &history_state.0;
-    manager.clear_phrases();
-    Ok(())
+    history_state.0.clear_phrases().map_err(|e| {
+        tracing::error!("Failed to persist phrase clear: {:#}", e);
+        HISTORY_PERSIST_FAILED.to_string()
+    })
 }
 
 #[tauri::command]

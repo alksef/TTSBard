@@ -5,7 +5,7 @@ use crate::config::{
 use crate::state::AppState;
 use crate::tts::TtsProvider;
 use tauri::{AppHandle, Emitter, Manager, State};
-use tracing::info;
+use tracing::{error, info};
 
 pub mod ai;
 pub mod history;
@@ -55,6 +55,26 @@ where
 #[tauri::command]
 pub async fn quit_app(app_handle: AppHandle) -> Result<(), String> {
     info!("Quit requested - initiating graceful shutdown");
+    coordinate_shutdown(app_handle).await;
+    Ok(())
+}
+
+/// Coordinate a single graceful shutdown across all quit entry points.
+///
+/// Persists the main window position, stops the keyboard hook, cancels the
+/// shutdown token, notifies the WebView and emits `app-exit` before exiting.
+/// Only the first call wins; subsequent calls are ignored via `begin_shutdown`.
+pub async fn coordinate_shutdown(app_handle: AppHandle) {
+    let Some(state) = app_handle.try_state::<AppState>() else {
+        error!("coordinate_shutdown: AppState not available, exiting immediately");
+        app_handle.exit(0);
+        return;
+    };
+
+    if !state.begin_shutdown() {
+        info!("Shutdown already in progress - ignoring duplicate request");
+        return;
+    }
 
     if let Some(windows_manager) = app_handle.try_state::<WindowsManager>() {
         if let Some(main_window) = app_handle.get_webview_window("main") {
@@ -69,25 +89,21 @@ pub async fn quit_app(app_handle: AppHandle) -> Result<(), String> {
         }
     }
 
-    if let Some(state) = app_handle.try_state::<AppState>() {
-        {
-            let mut hook_guard = state.soundpanel_hook.lock();
-            if let Some(ref mut hook_manager) = *hook_guard {
-                hook_manager.stop();
-            }
-            *hook_guard = None;
+    {
+        let mut hook_guard = state.soundpanel_hook.lock();
+        if let Some(ref mut hook_manager) = *hook_guard {
+            hook_manager.stop();
         }
-
-        state.shutdown.cancel();
-        info!("Shutdown token cancelled — all servers notified");
-        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
-
-        state.webview.send_event(crate::events::AppEvent::Quit);
+        *hook_guard = None;
     }
+
+    state.shutdown.cancel();
+    info!("Shutdown token cancelled — all servers notified");
+
+    state.webview.send_event(crate::events::AppEvent::Quit);
 
     let _ = app_handle.emit("app-exit", ());
     app_handle.exit(0);
-    Ok(())
 }
 
 /// Synthesize text and export raw audio bytes to a file (no effects, no playback)

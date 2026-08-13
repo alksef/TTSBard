@@ -7,6 +7,11 @@ export interface EditorTab {
   text: string
 }
 
+interface TabsSnapshot {
+  active_id: string
+  tabs: EditorTab[]
+}
+
 export function cycleTabId(
   tabs: EditorTab[],
   activeId: string,
@@ -118,21 +123,60 @@ export function useEditorTabs() {
   }
 
   let saveTimer: ReturnType<typeof setTimeout> | null = null
+  let inFlight: Promise<void> | null = null
+  let pendingSnapshot: TabsSnapshot | null = null
+  let idleWaiters: Array<() => void> = []
+
+  function captureSnapshot(): TabsSnapshot {
+    return {
+      active_id: activeId.value,
+      tabs: tabs.value.map(t => ({ id: t.id, title: t.title, text: t.text })),
+    }
+  }
 
   function scheduleSave() {
     if (!isHydrated.value) return
     if (saveTimer) clearTimeout(saveTimer)
-    saveTimer = setTimeout(doSave, 500)
+    saveTimer = setTimeout(() => {
+      saveTimer = null
+      enqueueSnapshot(captureSnapshot())
+    }, 500)
   }
 
-  async function doSave() {
+  function enqueueSnapshot(snapshot: TabsSnapshot): Promise<void> {
+    pendingSnapshot = snapshot
+    pump()
+    return waitForIdle()
+  }
+
+  function pump() {
+    if (inFlight) return
+    const next = pendingSnapshot
+    if (!next) return
+    pendingSnapshot = null
+    inFlight = runSave(next)
+  }
+
+  async function runSave(snapshot: TabsSnapshot): Promise<void> {
     try {
-      await invoke('save_tabs', {
-        data: { active_id: activeId.value, tabs: tabs.value },
-      })
+      await invoke('save_tabs', { data: snapshot })
     } catch {
       // graceful
+    } finally {
+      inFlight = null
+      if (pendingSnapshot) {
+        pump()
+      } else {
+        const waiters = idleWaiters
+        idleWaiters = []
+        waiters.forEach(resolve => resolve())
+      }
     }
+  }
+
+  function waitForIdle(): Promise<void> {
+    if (!inFlight && !pendingSnapshot) return Promise.resolve()
+    return new Promise(resolve => { idleWaiters.push(resolve) })
   }
 
   async function flushSave() {
@@ -140,7 +184,7 @@ export function useEditorTabs() {
       clearTimeout(saveTimer)
       saveTimer = null
     }
-    await doSave()
+    await enqueueSnapshot(captureSnapshot())
   }
 
   watch(tabs, scheduleSave, { deep: true })

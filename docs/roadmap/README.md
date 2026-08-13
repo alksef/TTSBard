@@ -41,6 +41,8 @@ related_tasks: []
 | Item | Статус | Следующий шаг |
 |---|---|---|
 | [ROADMAP-063 — Фактическое runtime-состояние WebView-сервера](./active/063-webview-runtime-server-status.md) | `planned` | Runtime status, readiness signal и наблюдение server task |
+=======
+| [ROADMAP-070 — маршрутизация и очередь SoundPanel](./active/070-soundpanel-audio-routing-and-queue.md) | planned | Реализовать независимый FIFO-worker SoundPanel поверх общих настроек аудиовыходов. |
 
 ## Завершённые направления
 

@@ -17,7 +17,7 @@ import { useEditorTabs } from '../composables/useEditorTabs'
 import EditorTabs from './editor/EditorTabs.vue'
 import StatusMessage from './shared/StatusMessage.vue'
 import { useTypingBurst, type TypingConsumer } from '../composables/useTypingBurst'
-import { acceptClear, appliesQuickEditorPolicy, type SubmitIntent } from './inputAcceptance'
+import { acceptClear, appliesQuickEditorPolicy, applyAiResponse, type SubmitIntent } from './inputAcceptance'
 import { submitSpeech } from '../ipc/speech'
 import { matchesEditorHotkey } from './editor/keymapArbitration'
 
@@ -46,6 +46,9 @@ async function onSelect(id: string) {
 const isCorrecting = ref(false)
 const isCompleting = ref(false)
 const isCheckingGrammar = ref(false)
+let correctionIntent = 0
+let completionIntent = 0
+let grammarIntent = 0
 const isSpeakingInFlight = ref(false)
 const showHistory = ref(false)
 const saveStatusMessage = ref('')
@@ -233,43 +236,54 @@ async function recordHistory(textToRecord: string) {
 
 async function correctText() {
   if (!text.value.trim()) return
+  const senderTabId = activeId.value
+  const sourceText = text.value
+  const token = ++correctionIntent
   isCorrecting.value = true
   try {
-    const corrected = await invoke<string>('correct_text', { text: text.value })
-    text.value = corrected
+    const corrected = await invoke<string>('correct_text', { text: sourceText })
+    tabs.value = applyAiResponse(tabs.value, senderTabId, sourceText, activeId.value, corrected)
   } catch (e) {
     debugError('[InputPanel] Correction failed:', e)
   } finally {
-    isCorrecting.value = false
+    if (token === correctionIntent) isCorrecting.value = false
   }
 }
 
 async function completeText() {
   if (!text.value.trim()) return
+  const senderTabId = activeId.value
+  const sourceText = text.value
+  const token = ++completionIntent
   isCompleting.value = true
   try {
-    const addition = await invoke<string>('get_ai_completion', { context: text.value })
-    if (addition) text.value = `${text.value} ${addition}`.trim()
+    const addition = await invoke<string>('get_ai_completion', { context: sourceText })
+    if (!addition) return
+    const composed = `${sourceText} ${addition}`.trim()
+    tabs.value = applyAiResponse(tabs.value, senderTabId, sourceText, activeId.value, composed)
   } catch (e) {
     debugError('[InputPanel] AI completion failed:', e)
     showError('Не удалось дописать текст')
   } finally {
-    isCompleting.value = false
+    if (token === completionIntent) isCompleting.value = false
   }
 }
 
 async function checkGrammar() {
   if (!text.value.trim()) return
+  const senderTabId = activeId.value
+  const sourceText = text.value
+  const token = ++grammarIntent
   isCheckingGrammar.value = true
   try {
-    const corrected = await invoke<string>('ai_check_grammar', { text: text.value })
-    text.value = corrected
+    const corrected = await invoke<string>('ai_check_grammar', { text: sourceText })
+    tabs.value = applyAiResponse(tabs.value, senderTabId, sourceText, activeId.value, corrected)
     debugLog('[InputPanel] Grammar check done')
   } catch (e) {
     debugError('[InputPanel] Grammar check failed:', e)
     showError('Не удалось проверить грамматику')
   } finally {
-    isCheckingGrammar.value = false
+    if (token === grammarIntent) isCheckingGrammar.value = false
   }
 }
 

@@ -26,6 +26,14 @@ pub async fn get_webview_settings(state: State<'_, AppState>) -> Result<WebViewS
     })
 }
 
+/// Runtime listener state, separate from persisted `WebViewSettings.enabled`.
+#[tauri::command]
+pub fn get_webview_server_status(
+    state: State<'_, AppState>,
+) -> crate::webview::WebViewServerStatus {
+    state.webview.status()
+}
+
 /// Get individual webview setting fields to avoid full cloning
 #[tauri::command]
 pub async fn get_webview_enabled(state: State<'_, AppState>) -> Result<bool, String> {

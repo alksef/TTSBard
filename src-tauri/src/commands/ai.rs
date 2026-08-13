@@ -11,6 +11,16 @@ use std::sync::Arc;
 use tauri::{AppHandle, State};
 use tracing::{debug, error, info, warn};
 
+/// The fields submitted by the Fish Audio connection form.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FishAudioConnectionSettingsInput {
+    pub api_key: String,
+    pub format: String,
+    pub temperature: f32,
+    pub sample_rate: u32,
+}
+
 /// Set AI provider
 #[tauri::command]
 pub async fn set_ai_provider(
@@ -792,6 +802,52 @@ pub async fn set_fish_audio_api_key(
     }
     super::emit_settings_changed(&app_handle);
 
+    Ok(())
+}
+
+/// Atomically validate, persist, and publish the Fish Audio connection form.
+#[tauri::command]
+pub async fn save_fish_audio_connection_settings(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    settings_manager: State<'_, SettingsManager>,
+    settings: FishAudioConnectionSettingsInput,
+) -> Result<(), String> {
+    let FishAudioConnectionSettingsInput {
+        api_key,
+        format,
+        temperature,
+        sample_rate,
+    } = settings;
+
+    if api_key.trim().is_empty() {
+        return Err("API Key не может быть пустым".into());
+    }
+    if !matches!(format.as_str(), "mp3" | "wav" | "pcm" | "opus") {
+        return Err("Unsupported Fish Audio format".into());
+    }
+    if !(0.0..=1.0).contains(&temperature) {
+        return Err("Temperature must be between 0.0 and 1.0".into());
+    }
+    if !matches!(sample_rate, 8000 | 16000 | 24000 | 32000 | 44100 | 48000) {
+        return Err("Unsupported Fish Audio sample rate".into());
+    }
+
+    let saved_key = api_key.clone();
+    let saved_format = format.clone();
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_fish_audio_connection_settings(api_key, format, temperature, sample_rate)
+    })
+    .await?;
+
+    state.set_fish_audio_connection_settings(
+        saved_key.clone(),
+        saved_format,
+        temperature,
+        sample_rate,
+    );
+    state.init_fish_audio_tts(saved_key);
+    super::emit_settings_changed(&app_handle);
     Ok(())
 }
 

@@ -84,6 +84,14 @@ export interface FishAudioSettingsDto {
   use_proxy: boolean
 }
 
+/** Atomic payload for `save_fish_audio_connection_settings`. */
+export interface FishAudioConnectionSettingsInput {
+  apiKey: string
+  format: string
+  temperature: number
+  sampleRate: number
+}
+
 export interface TelegramTtsSettingsDto {
   api_id: number | null
   proxy_mode: string

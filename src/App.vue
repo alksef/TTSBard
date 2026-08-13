@@ -7,7 +7,6 @@ import { Music, MonitorPlay } from 'lucide-vue-next'
 import Sidebar from './components/Sidebar.vue'
 import InputPanel from './components/InputPanel.vue'
 import TtsPanel from './components/TtsPanel.vue'
-import PlaybackTab from './components/PlaybackTab.vue'
 import AudioPanel from './components/AudioPanel.vue'
 import PreprocessorPanel from './components/PreprocessorPanel.vue'
 import WebViewPanel from './components/WebViewPanel.vue'
@@ -24,7 +23,7 @@ import { debugLog, debugError } from './utils/debug'
 import { createAsyncCleanupScope } from './utils/asyncCleanup'
 import { useErrorHandler } from './composables/useErrorHandler'
 
-type Panel = 'input' | 'tts' | 'playback' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'vtube-studio' | 'settings' | 'hotkeys' | 'intercept'
+type Panel = 'input' | 'tts' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'vtube-studio' | 'settings' | 'hotkeys' | 'intercept'
 
 const currentPanel = ref<Panel>('input')
 
@@ -378,7 +377,6 @@ onUnmounted(() => {
         <main class="main-content" :class="{ 'minimal-content': isMinimalMode }">
           <InputPanel ref="inputPanelRef" v-show="currentPanel === 'input'" />
           <TtsPanel v-show="currentPanel === 'tts'" />
-          <PlaybackTab v-show="currentPanel === 'playback'" />
           <AudioPanel v-show="currentPanel === 'audio'" />
           <PreprocessorPanel v-show="currentPanel === 'preprocessor'" />
           <WebViewPanel v-show="currentPanel === 'webview'" />

@@ -5,6 +5,7 @@ pub mod templates;
 pub mod upnp;
 
 pub use server::WebViewServer;
+pub use service::WebViewServerStatus;
 
 use serde::{Deserialize, Serialize};
 

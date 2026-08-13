@@ -2519,7 +2519,7 @@ mod tests {
     #[test]
     fn speech_contract_event_fixture_populated_is_current() {
         let dto = build_populated_speech_queue_state_dto();
-        let current = serde_json::to_string_pretty(&dto).expect("serialize");
+        let current = serde_json::to_value(&dto).expect("serialize");
         let fixture_path = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../scripts/contract-fixtures/speech/speech-queue-populated.json"
@@ -2530,8 +2530,9 @@ mod tests {
                  `cargo test speech_contract_fixtures_regenerate -- --ignored`"
             );
         });
+        let fixture: serde_json::Value = serde_json::from_str(&on_disk).expect("parse fixture");
         assert_eq!(
-            current, on_disk,
+            current, fixture,
             "Fixture 'speech-queue-populated.json' is stale — regenerate with \
              `cargo test speech_contract_fixtures_regenerate -- --ignored`",
         );
@@ -2540,7 +2541,7 @@ mod tests {
     #[test]
     fn speech_contract_event_fixture_empty_is_current() {
         let dto = build_empty_speech_queue_state_dto();
-        let current = serde_json::to_string_pretty(&dto).expect("serialize");
+        let current = serde_json::to_value(&dto).expect("serialize");
         let fixture_path = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../scripts/contract-fixtures/speech/speech-queue-empty.json"
@@ -2551,8 +2552,9 @@ mod tests {
                  `cargo test speech_contract_fixtures_regenerate -- --ignored`"
             )
         });
+        let fixture: serde_json::Value = serde_json::from_str(&on_disk).expect("parse fixture");
         assert_eq!(
-            current, on_disk,
+            current, fixture,
             "Fixture 'speech-queue-empty.json' is stale — regenerate with \
              `cargo test speech_contract_fixtures_regenerate -- --ignored`"
         );

@@ -6,15 +6,21 @@ export type { PhraseEntry }
 
 export function usePhraseHistory() {
   const isLoading = ref(false)
+  let listGeneration = 0
 
   async function list(filter?: string, limit: number = 100): Promise<PhraseEntry[]> {
+    const generation = ++listGeneration
     isLoading.value = true
     try {
       // Пробрасываем ошибку вызывающему: пустой результат от бэкенда ([])
       // должен отличаться от сбоя IPC, чтобы UI мог показать «Ошибка загрузки».
       return await invoke<PhraseEntry[]>('get_phrase_history', { filter, limit })
     } finally {
-      isLoading.value = false
+      // A newer request owns the visible loading state.  An older completion
+      // must not make the current request look finished.
+      if (generation === listGeneration) {
+        isLoading.value = false
+      }
     }
   }
 
