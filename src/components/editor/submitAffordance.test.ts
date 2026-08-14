@@ -1,0 +1,75 @@
+import { describe, it, expect } from 'vitest'
+import {
+  enterOutcomeLabel,
+  enterOutcomeLabelCompact,
+  submitActionState,
+} from './submitAffordance'
+import type { QuickEditorMode } from '../../types/settings'
+
+const modes: QuickEditorMode[] = ['disabled', 'collapse', 'return_focus']
+
+describe('enterOutcomeLabel', () => {
+  it('labels disabled mode', () => {
+    expect(enterOutcomeLabel('disabled')).toBe('остаться')
+  })
+
+  it('labels collapse mode', () => {
+    expect(enterOutcomeLabel('collapse')).toBe('скрыть окно')
+  })
+
+  it('labels return_focus mode', () => {
+    expect(enterOutcomeLabel('return_focus')).toBe('вернуть фокус')
+  })
+
+  it('covers every QuickEditorMode', () => {
+    for (const mode of modes) {
+      expect(typeof enterOutcomeLabel(mode)).toBe('string')
+    }
+  })
+})
+
+describe('enterOutcomeLabelCompact', () => {
+  it('labels disabled mode', () => {
+    expect(enterOutcomeLabelCompact('disabled')).toBe('остаться')
+  })
+
+  it('labels collapse mode', () => {
+    expect(enterOutcomeLabelCompact('collapse')).toBe('скрыть')
+  })
+
+  it('labels return_focus mode', () => {
+    expect(enterOutcomeLabelCompact('return_focus')).toBe('вернуть фокус')
+  })
+
+  it('covers every QuickEditorMode', () => {
+    for (const mode of modes) {
+      expect(typeof enterOutcomeLabelCompact(mode)).toBe('string')
+    }
+  })
+})
+
+describe('submitActionState', () => {
+  it('is idle when nothing happened', () => {
+    expect(submitActionState(false, 'none')).toBe('idle')
+  })
+
+  it('reports accepted outcome', () => {
+    expect(submitActionState(false, 'accepted')).toBe('accepted')
+  })
+
+  it('reports error outcome', () => {
+    expect(submitActionState(false, 'error')).toBe('error')
+  })
+
+  it('prioritizes submitting over a previous accepted outcome', () => {
+    expect(submitActionState(true, 'accepted')).toBe('submitting')
+  })
+
+  it('prioritizes submitting over a previous error outcome', () => {
+    expect(submitActionState(true, 'error')).toBe('submitting')
+  })
+
+  it('prioritizes submitting over no previous outcome', () => {
+    expect(submitActionState(true, 'none')).toBe('submitting')
+  })
+})

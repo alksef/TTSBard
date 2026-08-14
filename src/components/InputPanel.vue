@@ -20,6 +20,8 @@ import { useTypingBurst, type TypingConsumer } from '../composables/useTypingBur
 import { acceptClear, appliesQuickEditorPolicy, applyAiResponse, type SubmitIntent } from './inputAcceptance'
 import { submitSpeech } from '../ipc/speech'
 import { matchesEditorHotkey } from './editor/keymapArbitration'
+import { Volume2, Clock } from 'lucide-vue-next'
+import { enterOutcomeLabel, submitActionState } from './editor/submitAffordance'
 
 const { showError } = useErrorHandler()
 const { tabs, activeId, active, create: createTab, close: closeTab, select: selectTab, next: nextTab, previous: previousTab, rename: renameTab, init: initTabs, flushSave: flushTabsSave } = useEditorTabs()
@@ -64,6 +66,64 @@ const hotkeySettings = useHotkeysSettings()
 const appSettingsContext = useAppSettings()
 
 const quickEditorMode = computed<QuickEditorMode>(() => editorSettings.value?.quick ?? 'disabled')
+
+const lastSubmitOutcome = ref<'none' | 'accepted' | 'error'>('none')
+let submitOutcomeTimer: ReturnType<typeof setTimeout> | null = null
+
+const submitState = computed(() => submitActionState(isSpeakingInFlight.value, lastSubmitOutcome.value))
+
+function clearSubmitOutcomeTimer() {
+  if (submitOutcomeTimer) {
+    clearTimeout(submitOutcomeTimer)
+    submitOutcomeTimer = null
+  }
+}
+
+function scheduleOutcomeReset() {
+  clearSubmitOutcomeTimer()
+  submitOutcomeTimer = setTimeout(() => {
+    lastSubmitOutcome.value = 'none'
+    submitOutcomeTimer = null
+  }, 1500)
+}
+
+function formatHotkeyDisplay(hotkey: { modifiers: string[]; key: string } | undefined): string {
+  if (!hotkey || !hotkey.key) return ''
+  const modMap: Record<string, string> = { ctrl: 'Ctrl', shift: 'Shift', alt: 'Alt', super: 'Win' }
+  const mods = hotkey.modifiers.map(m => modMap[m] ?? m)
+  return mods.length > 0 ? `${mods.join('+')}+${hotkey.key}` : hotkey.key
+}
+
+const submitContinueBinding = computed(() => formatHotkeyDisplay(hotkeySettings.value?.editor?.submit_continue))
+
+const hotkeyHintText = computed(() => {
+  const outcome = enterOutcomeLabel(quickEditorMode.value)
+  const binding = submitContinueBinding.value
+  const second = binding ? `  ·  ${binding} → отправить и продолжить` : ''
+  return `Enter → ${outcome}${second}`
+})
+
+const speakLabel = computed(() => {
+  switch (submitState.value) {
+    case 'submitting':
+      return 'Отправляется…'
+    case 'accepted':
+      return 'Принято'
+    default:
+      return 'Озвучить'
+  }
+})
+
+const speakTitle = computed(() => {
+  return submitState.value === 'submitting' ? 'Отправляется… (Enter)' : 'Озвучить (Enter)'
+})
+
+const speakAriaLabel = computed(() => {
+  const outcome = enterOutcomeLabel(quickEditorMode.value)
+  const binding = submitContinueBinding.value
+  const second = binding ? `, ${binding} — отправить и продолжить` : ''
+  return `Озвучить текст. Enter — ${outcome}${second}`
+})
 
 const aiEditorEnabled = computed(() => editorSettings.value?.ai ?? false)
 
@@ -213,6 +273,7 @@ vueOnUnmounted(async () => {
   await flushTabsSave()
   listenerScope.dispose()
   if (compactSaveTimer) clearTimeout(compactSaveTimer)
+  clearSubmitOutcomeTimer()
   compactModeState.flushPendingCompactSave = null
   window.removeEventListener('preprocessor-data-changed', onPreprocessorChanged)
   typingBurst.dispose()
@@ -358,6 +419,14 @@ watch(() => appSettingsContext.settings.value?.windows?.main, (main) => {
   }
 }, { immediate: true })
 
+watch(() => text.value, () => {
+  lastSubmitOutcome.value = 'none'
+})
+
+watch(activeId, () => {
+  lastSubmitOutcome.value = 'none'
+})
+
 async function handleSubmit(intent: SubmitIntent) {
   const currentText = text.value
   const senderTabId = activeId.value
@@ -366,6 +435,7 @@ async function handleSubmit(intent: SubmitIntent) {
   if (!currentText.trim()) return
   if (isSpeakingInFlight.value) return
 
+  clearSubmitOutcomeTimer()
   typingBurst.stop()
   isSpeakingInFlight.value = true
 
@@ -388,9 +458,17 @@ async function handleSubmit(intent: SubmitIntent) {
       await nextTick()
       focusEditor()
     }
+
+    await nextTick()
+    const senderTab = tabs.value.find(t => t.id === senderTabId)
+    if (activeId.value === senderTabId && senderTab?.text === '') {
+      lastSubmitOutcome.value = 'accepted'
+      scheduleOutcomeReset()
+    }
   } catch (e) {
     debugError('[InputPanel] Failed to speak:', e)
     showError(e instanceof Error ? e.message : String(e))
+    lastSubmitOutcome.value = 'error'
   } finally {
     isSpeakingInFlight.value = false
   }
@@ -553,33 +631,24 @@ defineExpose({ focusEditor })
       </div>
 
       <div class="editor-action-bar" :class="{ 'compact-action-bar': isMinimalMode }">
-        <template v-if="!isMinimalMode">
-          <EditorMenu
-            :is-ai-enabled="isAiButtonEnabled"
-            :has-text="!!text.trim()"
-            @correct="correctText"
-            @complete="completeText"
-            @grammar="checkGrammar"
-            @save-audio="saveAudio"
-          />
-          <button
-            class="action-btn speak-btn"
-            :disabled="!text.trim()"
-            @click="handleEnter"
-            title="Enter"
-            aria-label="Озвучить текст (Enter)"
-          >
-            Озвучить
-          </button>
-        </template>
+        <EditorMenu
+          :is-ai-enabled="isAiButtonEnabled"
+          :has-text="!!text.trim()"
+          :compact="isMinimalMode"
+          @correct="correctText"
+          @complete="completeText"
+          @grammar="checkGrammar"
+          @save-audio="saveAudio"
+        />
         <button
           class="action-btn history-btn"
           :class="{ active: showHistory }"
           @click="toggleHistory"
           title="История фраз"
-          aria-label="Показать историю фраз"
+          :aria-label="showHistory ? 'Скрыть историю фраз' : 'Показать историю фраз'"
         >
-          История фраз
+          <Clock v-if="isMinimalMode" :size="14" />
+          <template v-else>История фраз</template>
         </button>
         <button
           v-if="!isMinimalMode"
@@ -589,9 +658,23 @@ defineExpose({ focusEditor })
           @click="correctText"
           title="Корректировать текст с помощью AI"
           aria-label="AI корректировка текста"
-          >
-            AI
-          </button>
+        >
+          AI
+        </button>
+        <div class="action-bar-spacer" />
+        <div v-if="!isMinimalMode" class="action-bar-hint">{{ hotkeyHintText }}</div>
+        <button
+          class="action-btn speak-btn"
+          :class="{ 'icon-only': isMinimalMode }"
+          :disabled="!text.trim() || submitState === 'submitting'"
+          :aria-busy="submitState === 'submitting'"
+          :title="speakTitle"
+          :aria-label="speakAriaLabel"
+          @click="handleEnter"
+        >
+          <Volume2 :size="14" />
+          <span v-if="!isMinimalMode">{{ speakLabel }}</span>
+        </button>
       </div>
 
       <PhraseHistoryList
@@ -601,9 +684,6 @@ defineExpose({ focusEditor })
         @append="appendPhrase"
         @replace="replacePhrase"
       />
-      <div v-if="quickEditorMode !== 'disabled'" class="quick-editor-hint">
-        Режим быстрого редактора
-      </div>
       <div v-if="aiEditorEnabled" class="ai-editor-hint">
         AI
       </div>
@@ -668,6 +748,7 @@ defineExpose({ focusEditor })
 
 .editor-action-bar.compact-action-bar {
   padding: 0.25rem 0;
+  gap: 0.25rem;
 }
 
 .action-btn {
@@ -709,20 +790,46 @@ defineExpose({ focusEditor })
 
 .speak-btn {
   font-weight: 500;
+  flex-shrink: 0;
+  background: var(--color-accent);
+  color: var(--color-text-on-accent, #ffffff);
+  border-color: var(--color-accent);
+}
+
+.speak-btn:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.speak-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.speak-btn.icon-only {
+  padding: 0.3rem 0.55rem;
+}
+
+.action-bar-spacer {
+  flex: 1;
+  min-width: 0;
+}
+
+.action-bar-hint {
+  color: var(--color-text-secondary);
+  opacity: 0.9;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  margin-right: 0.5rem;
+  text-align: right;
 }
 
 @media (max-width: 960px) {
   .input-panel {
     padding-bottom: 1.5rem;
   }
-}
-
-.quick-editor-hint {
-  margin-top: 0.5rem;
-  font-size: 0.8rem;
-  color: var(--color-text-secondary);
-  opacity: 0.7;
-  text-align: center;
 }
 
 .ai-editor-hint {
