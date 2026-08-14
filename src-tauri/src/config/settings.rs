@@ -953,12 +953,18 @@ pub struct EditorSettings {
     pub editor_height: u32,
     #[serde(default = "default_typing_idle_timeout_ms")]
     pub typing_idle_timeout_ms: u32,
+    #[serde(default = "default_true")]
+    pub typing_enabled: bool,
     #[serde(default)]
     pub default_route: EditorRoute,
 }
 
 fn default_editor_height() -> u32 {
     340
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_typing_idle_timeout_ms() -> u32 {
@@ -994,6 +1000,7 @@ impl Default for EditorSettings {
             spellcheck_source: SpellSource::Offline,
             editor_height: 340,
             typing_idle_timeout_ms: 800,
+            typing_enabled: true,
             default_route: EditorRoute::Everywhere,
         }
     }
@@ -1882,6 +1889,16 @@ impl SettingsManager {
     /// Get VTS typing idle timeout (ms)
     pub fn get_editor_typing_idle_timeout_ms(&self) -> u32 {
         self.cache.read().editor.typing_idle_timeout_ms
+    }
+
+    /// Set editor typing enabled state
+    pub fn set_editor_typing_enabled(&self, enabled: bool) -> Result<()> {
+        self.update_field("/editor/typing_enabled", &enabled)
+    }
+
+    /// Get editor typing enabled state
+    pub fn get_editor_typing_enabled(&self) -> bool {
+        self.cache.read().editor.typing_enabled
     }
 
     /// Set default editor route
@@ -2916,6 +2933,21 @@ mod tests {
         let s = EditorSettings::default();
         let json = serde_json::to_string(&s).unwrap();
         assert!(json.contains("typing_idle_timeout_ms"), "json: {}", json);
+    }
+
+    /// EditorSettings default has typing_enabled == true.
+    #[test]
+    fn editor_settings_default_typing_enabled_is_true() {
+        assert!(EditorSettings::default().typing_enabled);
+    }
+
+    /// Backward-compat: EditorSettings without typing_enabled field defaults to true.
+    #[test]
+    fn editor_settings_deserializes_without_typing_enabled() {
+        let json = r#"{"quick":false,"ai":false,"ai_completion":false,"spellcheck_enabled":true,"spellcheck_source":"offline","editor_height":340,"typing_idle_timeout_ms":800}"#;
+        let settings: EditorSettings =
+            serde_json::from_str(json).expect("must deserialize without typing_enabled");
+        assert!(settings.typing_enabled);
     }
 
     /// normalize_typing_idle_timeout_ms: default value 800 passes through.

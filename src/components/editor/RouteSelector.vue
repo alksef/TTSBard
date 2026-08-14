@@ -13,6 +13,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   select: [route: EditorRoute]
+  'set-default': [route: EditorRoute]
 }>()
 
 const open = ref(false)
@@ -97,12 +98,21 @@ function onKeydown(event: KeyboardEvent) {
     event.preventDefault()
     const opt = options.value[activeIndex.value]
     if (opt && !opt.disabled) selectOption(opt.id)
+  } else if (event.key === 'd' || event.key === 'D') {
+    event.preventDefault()
+    const opt = options.value[activeIndex.value]
+    if (opt && !opt.disabled) emit('set-default', opt.id)
   }
 }
 
 function onOptionClick(id: EditorRoute, disabled: boolean) {
   if (disabled) return
   selectOption(id)
+}
+
+function onStarClick(id: EditorRoute, disabled: boolean) {
+  if (disabled) return
+  emit('set-default', id)
 }
 
 function onDocumentClick(event: MouseEvent) {
@@ -163,16 +173,21 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
         @click="onOptionClick(opt.id, opt.disabled)"
         @mousemove="activeIndex = opt.index"
       >
+        <button
+          type="button"
+          class="option-star"
+          :class="{ 'is-default': opt.isDefault }"
+          :disabled="opt.disabled"
+          :title="opt.isDefault ? 'по умолчанию' : 'сделать по умолчанию'"
+          :aria-label="opt.isDefault ? 'Маршрут по умолчанию' : 'Сделать маршрутом по умолчанию'"
+          tabindex="-1"
+          @click.stop="onStarClick(opt.id, opt.disabled)"
+        >
+          <Star :size="12" :fill="opt.isDefault ? 'currentColor' : 'none'" />
+        </button>
         <span class="option-label">{{ opt.meta.label }}</span>
         <span class="option-shortcut">{{ opt.meta.shortcut }}</span>
         <span class="option-desc">{{ opt.meta.description }}</span>
-        <Star
-          v-if="opt.isDefault"
-          :size="12"
-          class="default-star"
-          fill="currentColor"
-          aria-hidden="true"
-        />
       </li>
     </ul>
   </div>
@@ -297,13 +312,29 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
   color: currentColor;
 }
 
-.default-star {
+.option-star {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.option-star:disabled {
+  cursor: not-allowed;
+}
+
+.option-star.is-default {
   color: var(--color-accent);
 }
 
-.route-option:hover .default-star,
-.route-option.keyboard-active .default-star {
+.route-option:hover .option-star,
+.route-option.keyboard-active .option-star {
   color: currentColor;
 }
 </style>

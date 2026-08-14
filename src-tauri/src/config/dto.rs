@@ -853,6 +853,7 @@ pub struct EditorSettingsDto {
     pub spellcheck_source: SpellSourceDto,
     pub editor_height: u32,
     pub typing_idle_timeout_ms: u32,
+    pub typing_enabled: bool,
     pub default_route: String,
 }
 
@@ -1361,6 +1362,7 @@ impl AppSettingsDto {
                 },
                 editor_height: params.config.editor.editor_height,
                 typing_idle_timeout_ms: params.config.editor.typing_idle_timeout_ms,
+                typing_enabled: params.config.editor.typing_enabled,
                 default_route: params.config.editor.default_route.as_str().to_string(),
             },
             logging: params.config.logging.clone(),
@@ -1550,6 +1552,7 @@ mod tests {
             spellcheck_source: SpellSourceDto::Online,
             editor_height: 300,
             typing_idle_timeout_ms: 800,
+            typing_enabled: true,
             default_route: "no_twitch".into(),
         };
 
@@ -1859,6 +1862,7 @@ mod tests {
             spellcheck_source: SpellSourceDto::Offline,
             editor_height: 200,
             typing_idle_timeout_ms: 500,
+            typing_enabled: false,
             default_route: "everywhere".into(),
         };
 

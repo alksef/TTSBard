@@ -21,12 +21,12 @@ import { acceptClear, appliesQuickEditorPolicy, applyAiResponse, type SubmitInte
 import { submitSpeech } from '../ipc/speech'
 import { deliverTwitchMessage } from '../ipc/twitchDelivery'
 import { matchesEditorHotkey } from './editor/keymapArbitration'
-import { Volume2, Clock, Star, Send } from 'lucide-vue-next'
+import { Volume2, Clock, Keyboard, Send } from 'lucide-vue-next'
 import { enterOutcomeLabel, submitActionState } from './editor/submitAffordance'
 import RouteSelector from './editor/RouteSelector.vue'
-import { decodeRoutePrefix, ROUTE_META } from './editor/routeDecode'
+import { decodeRoutePrefix } from './editor/routeDecode'
 import type { EditorRoute } from './editor/routeDecode'
-import { effectiveRoute, applyRouteToText } from './editor/routeResolution'
+import { effectiveRoute, applyRouteToText, routeSubmit } from './editor/routeResolution'
 import { useTwitchRuntimeStatus } from '../composables/useTwitchRuntimeStatus'
 
 const { showError } = useErrorHandler()
@@ -121,23 +121,15 @@ const currentRoute = computed<EditorRoute>(() =>
 
 const isTwitchOnly = computed(() => currentRoute.value === 'twitch_only')
 
-const isCurrentDefault = computed(() => currentRoute.value === defaultRouteFromSettings.value)
-
-const defaultStarTitle = computed(() =>
-  isCurrentDefault.value
-    ? 'Маршрут по умолчанию'
-    : `Сделать маршрутом по умолчанию: ${ROUTE_META[currentRoute.value].label}`,
-)
-
 function handleRouteSelect(route: EditorRoute) {
   text.value = applyRouteToText(text.value, activeDecoded.value, route)
   const tab = tabs.value.find(t => t.id === activeId.value)
   if (tab) tab.route = route
 }
 
-async function handleSaveDefault() {
+async function handleSaveDefault(route: EditorRoute) {
   try {
-    await invoke('set_editor_default_route', { route: currentRoute.value })
+    await invoke('set_editor_default_route', { route })
   } catch (e) {
     debugError('[InputPanel] Failed to save default route:', e)
   }
@@ -220,6 +212,39 @@ const typingBurst = useTypingBurst(
     } satisfies TypingConsumer,
   ],
 )
+
+const typingEnabledOverride = ref<boolean | null>(null)
+
+const typingEnabled = computed(() => typingEnabledOverride.value ?? editorSettings.value?.typing_enabled ?? true)
+
+const typingToggleTitle = computed(() =>
+  `Передавать набор текста (WebView, VTube Studio) — ${typingEnabled.value ? 'включено' : 'выключено'}`,
+)
+
+watch(() => editorSettings.value?.typing_enabled, (val) => {
+  if (val !== undefined) {
+    typingEnabledOverride.value = val
+  }
+})
+
+function onUserEdit() {
+  if (typingEnabled.value) {
+    typingBurst.edit()
+  }
+}
+
+function toggleTypingEnabled() {
+  const prev = typingEnabled.value
+  const next = !prev
+  typingEnabledOverride.value = next
+  if (!next) {
+    typingBurst.stop()
+  }
+  invoke('set_editor_typing_enabled', { enabled: next }).catch((e) => {
+    typingEnabledOverride.value = prev
+    console.error('[InputPanel] Failed to save typing enabled:', e)
+  })
+}
 
 async function reloadPreprocessorData() {
   try {
@@ -483,14 +508,15 @@ async function handleSubmit(intent: SubmitIntent) {
 
   const submittedDecoded = decodeRoutePrefix(currentText)
   const tabRouteAtSubmit = active.value.route
+  const submitRouting = routeSubmit(submittedDecoded, tabRouteAtSubmit, defaultRouteFromSettings.value)
 
   try {
-    if (submittedDecoded.route === 'twitch_only') {
-      await deliverTwitchMessage(submittedDecoded.text)
+    if (submitRouting.twitchOnly) {
+      await deliverTwitchMessage(submitRouting.outgoingText)
     } else {
-      await submitSpeech(currentText)
+      await submitSpeech(submitRouting.outgoingText)
     }
-    await recordHistory(currentText)
+    await recordHistory(submittedDecoded.text)
     tabs.value = acceptClear(tabs.value, senderTabId, currentText)
 
     if (appliesQuickEditorPolicy(intent)) {
@@ -668,7 +694,7 @@ defineExpose({ focusEditor })
           :replacements="replacementsRecord"
           :usernames="usernamesRecord"
           :editor-height-px="editorHeightPx"
-          @user-edit="typingBurst.edit()"
+          @user-edit="onUserEdit"
           @enter="handleEnter"
           @submit-continue="handleSubmitContinue"
           @esc="handleEsc"
@@ -719,15 +745,18 @@ defineExpose({ focusEditor })
           :twitch-connected="twitchConnected"
           :compact="isMinimalMode"
           @select="handleRouteSelect"
+          @set-default="handleSaveDefault"
         />
         <button
-          class="action-btn default-route-btn"
-          :disabled="isCurrentDefault"
-          :title="defaultStarTitle"
-          :aria-label="defaultStarTitle"
-          @click="handleSaveDefault"
+          type="button"
+          class="action-btn typing-toggle-btn"
+          :class="{ active: typingEnabled }"
+          :aria-pressed="typingEnabled"
+          :aria-label="typingToggleTitle"
+          :title="typingToggleTitle"
+          @click="toggleTypingEnabled"
         >
-          <Star :size="14" :fill="isCurrentDefault ? 'currentColor' : 'none'" />
+          <Keyboard :size="14" />
         </button>
         <div class="action-bar-spacer" />
         <div v-if="!isMinimalMode" class="action-bar-hint">{{ hotkeyHintText }}</div>
@@ -878,9 +907,32 @@ defineExpose({ focusEditor })
   padding: 0.3rem 0.55rem;
 }
 
-.default-route-btn {
+.typing-toggle-btn {
+  position: relative;
   flex-shrink: 0;
   padding: 0.3rem 0.55rem;
+}
+
+.typing-toggle-btn.active {
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-strong);
+}
+
+.typing-toggle-btn:not(.active) {
+  opacity: 0.45;
+}
+
+.typing-toggle-btn:not(.active)::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 70%;
+  height: 1.5px;
+  background: currentColor;
+  border-radius: 1px;
+  transform: translate(-50%, -50%) rotate(-45deg);
 }
 
 .action-bar-spacer {

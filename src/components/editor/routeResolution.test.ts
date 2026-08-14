@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { decodeRoutePrefix } from './routeDecode'
 import type { DecodedRoute, EditorRoute } from './routeDecode'
-import { applyRouteToText, effectiveRoute, prefixForRoute, routeForNewTab } from './routeResolution'
+import { applyRouteToText, effectiveRoute, prefixForRoute, routeForNewTab, routeSubmit } from './routeResolution'
 
 const ALL_ROUTES: EditorRoute[] = ['everywhere', 'no_twitch', 'voice_only', 'twitch_only']
 
@@ -91,5 +91,50 @@ describe('routeForNewTab', () => {
     for (const route of ALL_ROUTES) {
       expect(routeForNewTab(route)).toBe(route)
     }
+  })
+})
+
+describe('routeSubmit', () => {
+  it('routes a clean text to twitch delivery when default is twitch_only', () => {
+    const r = routeSubmit(decodeRoutePrefix('Привет'), undefined, 'twitch_only')
+    expect(r.twitchOnly).toBe(true)
+    expect(r.effective).toBe('twitch_only')
+    expect(r.outgoingText).toBe('Привет')
+  })
+
+  it('prefixes clean text with ! when tab route is no_twitch', () => {
+    const r = routeSubmit(decodeRoutePrefix('Привет'), 'no_twitch', 'everywhere')
+    expect(r.twitchOnly).toBe(false)
+    expect(r.effective).toBe('no_twitch')
+    expect(r.outgoingText).toBe('! Привет')
+  })
+
+  it('delivers via twitch when an explicit !t prefix is present, ignoring tab/default', () => {
+    const r = routeSubmit(decodeRoutePrefix('!t Привет'), 'no_twitch', 'everywhere')
+    expect(r.twitchOnly).toBe(true)
+    expect(r.effective).toBe('twitch_only')
+    expect(r.outgoingText).toBe('Привет')
+  })
+
+  it('keeps an everywhere text unprefixed', () => {
+    const r = routeSubmit(decodeRoutePrefix('Привет'), 'everywhere', 'everywhere')
+    expect(r.twitchOnly).toBe(false)
+    expect(r.effective).toBe('everywhere')
+    expect(r.outgoingText).toBe('Привет')
+  })
+
+  it('prefixes clean text with !! when default is voice_only', () => {
+    const r = routeSubmit(decodeRoutePrefix('Привет'), undefined, 'voice_only')
+    expect(r.twitchOnly).toBe(false)
+    expect(r.effective).toBe('voice_only')
+    expect(r.outgoingText).toBe('!! Привет')
+  })
+
+  it('never mutates the editor text: decoded.text stays clean', () => {
+    const decoded = decodeRoutePrefix('!! Привет')
+    routeSubmit(decoded, undefined, 'everywhere')
+    expect(decoded.text).toBe('Привет')
+    routeSubmit(decoded, 'no_twitch', 'everywhere')
+    expect(decoded.text).toBe('Привет')
   })
 })

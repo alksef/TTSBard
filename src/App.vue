@@ -17,6 +17,7 @@ import InterceptPanel from './components/InterceptPanel.vue'
 import VTubeStudioPanel from './components/VTubeStudioPanel.vue'
 import ErrorToasts from './components/ErrorToasts.vue'
 import MinimalModeButton from './components/MinimalModeButton.vue'
+import IntegrationStatusCluster from './components/titlebar/IntegrationStatusCluster.vue'
 import { useTelegramAuth, TELEGRAM_AUTH_KEY } from './composables/useTelegramAuth'
 import { provideAppSettings } from './composables/useAppSettings'
 import { debugLog, debugError } from './utils/debug'
@@ -329,6 +330,7 @@ onUnmounted(() => {
         <span class="titlebar-text" data-tauri-drag-region>TTSBard</span>
       </div>
       <div class="titlebar-controls">
+        <IntegrationStatusCluster class="integration-gap" />
         <button
           class="titlebar-btn floating-window"
           :class="{ active: soundpanelVisible }"
@@ -467,6 +469,10 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 0.25rem;
+}
+
+.integration-gap {
+  margin-left: 2.5rem;
 }
 
 .titlebar-btn {

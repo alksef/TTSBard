@@ -340,6 +340,7 @@ export interface EditorSettingsDto {
   spellcheck_source: 'online' | 'offline'
   editor_height: number
   typing_idle_timeout_ms: number
+  typing_enabled: boolean
   default_route: EditorRoute
 }
 

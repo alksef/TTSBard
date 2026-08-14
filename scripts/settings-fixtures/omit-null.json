@@ -163,6 +163,7 @@
     "spellcheck_source": "offline",
     "editor_height": 200,
     "typing_idle_timeout_ms": 500,
+    "typing_enabled": false,
     "default_route": "everywhere"
   },
   "logging": {

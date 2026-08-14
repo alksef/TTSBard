@@ -350,6 +350,22 @@ pub fn get_editor_typing_idle_timeout_ms(settings_manager: State<'_, SettingsMan
     settings_manager.get_editor_typing_idle_timeout_ms()
 }
 
+/// Set editor typing enabled state
+#[tauri::command]
+pub async fn set_editor_typing_enabled(
+    enabled: bool,
+    app_handle: AppHandle,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<bool, String> {
+    persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_editor_typing_enabled(enabled)
+    })
+    .await?;
+
+    emit_settings_changed(&app_handle);
+    Ok(enabled)
+}
+
 /// Set default editor route
 #[tauri::command]
 pub async fn set_editor_default_route(

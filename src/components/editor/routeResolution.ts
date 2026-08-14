@@ -40,3 +40,27 @@ export function applyRouteToText(text: string, decoded: DecodedRoute, route: Edi
 export function routeForNewTab(defaultRoute: EditorRoute): EditorRoute {
   return defaultRoute
 }
+
+export interface SubmitRouting {
+  /** Эффективный маршрут доставки (совпадает с показанным в RouteSelector). */
+  effective: EditorRoute
+  /** true, если доставка идёт через deliverTwitchMessage. */
+  twitchOnly: boolean
+  /** Текст для исходящей команды: без префикса для twitch_only, с префиксом маршрута иначе. */
+  outgoingText: string
+}
+
+/** Routing-решение на submit: decode + tab route + default → доставка и текст для backend. */
+export function routeSubmit(
+  decoded: DecodedRoute,
+  tabRoute: EditorRoute | undefined,
+  defaultRoute: EditorRoute,
+): SubmitRouting {
+  const effective = effectiveRoute(decoded, tabRoute, defaultRoute)
+  if (effective === 'twitch_only') {
+    return { effective, twitchOnly: true, outgoingText: decoded.text }
+  }
+  const outgoingText =
+    effective === 'everywhere' ? decoded.text : `${prefixForRoute(effective)} ${decoded.text}`
+  return { effective, twitchOnly: false, outgoingText }
+}
