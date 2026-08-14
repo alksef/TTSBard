@@ -1,6 +1,6 @@
 ---
 id: ROADMAP-074
-status: planned
+status: in_progress
 created: 2026-08-14
 updated: 2026-08-15
 related_tasks: []
@@ -183,4 +183,4 @@ accessible label дают полную формулировку, наприме�
 - [ROADMAP-044 — VTube Studio connection lifecycle](../completed/044-vtube-studio-connection-lifecycle-ui.md)
 - [ROADMAP-062 — VTube Studio runtime truth](../completed/062-vtube-studio-runtime-connection-truth.md)
 - [ROADMAP-063 — WebView runtime status](../completed/063-webview-runtime-server-status.md)
-- [ROADMAP-073 — маршрут фразы и delivery outcomes](./073-readable-message-routing-and-delivery-outcomes.md)
+- [ROADMAP-073 — маршрут фразы и delivery outcomes](../completed/073-readable-message-routing-and-delivery-outcomes.md)

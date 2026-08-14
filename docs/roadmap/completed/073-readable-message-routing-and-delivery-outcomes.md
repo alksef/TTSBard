@@ -1,6 +1,6 @@
 ---
 id: ROADMAP-073
-status: in_progress
+status: completed
 created: 2026-08-14
 updated: 2026-08-15
 related_tasks: []
@@ -257,6 +257,41 @@ fire-and-forget путь.
 ## Связанные материалы
 
 - [Руководство: управление отправкой](../../user/guide.md#управление-отправкой)
-- [ROADMAP-047 — очередь задач озвучивания](../completed/047-speech-job-queue.md)
-- [ROADMAP-055 — request-local routing flags](../completed/055-quality-and-ai-ready-architecture.md)
+- [ROADMAP-047 — очередь задач озвучивания](047-speech-job-queue.md)
+- [ROADMAP-055 — request-local routing flags](055-quality-and-ai-ready-architecture.md)
 - [DECISION-019 — integration settings Arc contract](../../decisions/019-integration-settings-arc-contract.md)
+
+## Outcome
+
+- **P3 (ядро)**: boundary-safe `!t` в `parse_prefix` (`!thanks`/`!t2go`/
+  `!tвеличие` сохраняют legacy-семантику `!`); `submit_speech` отклоняет
+  twitch-only текст структурной ошибкой `speech.twitch_only_route`; новая
+  команда `deliver_twitch_message` доставляет сообщение напрямую в
+  Connected-клиент (Arc-share `TwitchClient` через `TwitchService.client`,
+  публикация/очистка в акторе) и возвращает фактический результат write.
+  Семантика успеха зафиксирована в этом документе выше: delivered =
+  успешный синхронный PRIVMSG write при Connected; серверного ack нет.
+- **P0/P1**: pure-зеркала правил — `routeDecode.ts` (decode + метаданные) и
+  `routeResolution.ts` (приоритет префикс > tab.route > default, переписывание
+  ведущего префикса при выборе в selector). Selector в action bar: 4 маршрута,
+  список с shortcut'ами и star-маркером default, listbox-семантика, keyboard
+  nav, «Только Twitch» disabled без подключения. Persisted
+  `editor.default_route` (+ команда), per-tab `route` в tabs storage (opaque,
+  backward-compatible). Primary action меняет подпись/иконку на «Отправить в
+  Twitch» для twitch-only. После принятой отправки route sender-вкладки
+  сбрасывается к default (guard: не трогаем route, изменённый во время await).
+- **P2**: persisted `editor.typing_enabled` (default true), toggle «Передавать
+  набор» (checkbox full / icon compact), gate публикаций burst, терминальный
+  `false` обоим consumers при выключении во время набора; `useTypingBurst` не
+  изменён.
+- **P4 (частично)**: коррелированный outcome есть для twitch-only доставки —
+  команда возвращает delivered/ошибку синхронно, UI показывает «Отправляется…/
+  Принято» и сохраняет текст+маршрут для retry при ошибке. Per-consumer
+  outcomes составного маршрута (Twitch/WebView в speech pipeline) НЕ
+  реализованы: fire-and-forget `TwitchEvent::SendMessage` и SSE broadcast
+  остались без наблюдаемого результата — требует отдельной работы над
+  событийным pipeline.
+- Проверено: `cargo test` (1306 passed), `npm test` (580), `npm run build`,
+  `check:settings`, `check:ipc`. Ручная проверка реальной Twitch-отправки и
+  ручной осмотр compact-режима не выполнялись. Руководство пользователя
+  обновлено (`!t`, селектор маршрута, «Передавать набор»).

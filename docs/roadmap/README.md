@@ -42,13 +42,13 @@ related_tasks: []
 |---|---|---|
 =======
 | [ROADMAP-070 — маршрутизация и очередь SoundPanel](./active/070-soundpanel-audio-routing-and-queue.md) | planned | Решить, нужен ли пользователю компактный индикатор очереди SoundPanel. |
-| [ROADMAP-073 — маршрут фразы и delivery outcomes](./active/073-readable-message-routing-and-delivery-outcomes.md) | exploring | Зафиксировать семантику подтверждённой Twitch-доставки; route/default/reset и отдельная Twitch-only command уже выбраны. |
-| [ROADMAP-074 — статусы интеграций в titlebar](./active/074-ambient-integration-status.md) | planned | Реализовать truthful gray/green/red mapping и отдельный правый status cluster перед SoundPanel/Playback. |
+| [ROADMAP-074 — статусы интеграций в titlebar](./active/074-ambient-integration-status.md) | in_progress | Реализовать truthful gray/green/red mapping и отдельный правый status cluster перед SoundPanel/Playback. |
 
 ## Завершённые направления
 
 ### Редактор и история
 
+- [ROADMAP-073 — маршрут фразы и результат доставки](./completed/073-readable-message-routing-and-delivery-outcomes.md)
 - [ROADMAP-071 — отправка редактора и читаемый быстрый режим](./completed/071-editor-submit-and-quick-mode-affordance.md)
 
 - [ROADMAP-068 — локальные горячие клавиши редактора](./completed/068-editor-scoped-hotkeys-and-submit-flow.md)
