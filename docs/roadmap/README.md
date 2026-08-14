@@ -42,10 +42,14 @@ related_tasks: []
 |---|---|---|
 =======
 | [ROADMAP-070 — маршрутизация и очередь SoundPanel](./active/070-soundpanel-audio-routing-and-queue.md) | planned | Решить, нужен ли пользователю компактный индикатор очереди SoundPanel. |
+| [ROADMAP-073 — маршрут фразы и delivery outcomes](./active/073-readable-message-routing-and-delivery-outcomes.md) | exploring | Зафиксировать семантику подтверждённой Twitch-доставки; route/default/reset и отдельная Twitch-only command уже выбраны. |
+| [ROADMAP-074 — статусы интеграций в titlebar](./active/074-ambient-integration-status.md) | planned | Реализовать truthful gray/green/red mapping и отдельный правый status cluster перед SoundPanel/Playback. |
 
 ## Завершённые направления
 
 ### Редактор и история
+
+- [ROADMAP-071 — отправка редактора и читаемый быстрый режим](./completed/071-editor-submit-and-quick-mode-affordance.md)
 
 - [ROADMAP-068 — локальные горячие клавиши редактора](./completed/068-editor-scoped-hotkeys-and-submit-flow.md)
 
@@ -68,6 +72,7 @@ related_tasks: []
 
 ### Окна, ввод и sound panel
 
+- [ROADMAP-072 — удаление legacy-панели Playback](./completed/072-remove-legacy-playback-panel.md)
 - [ROADMAP-004 — playback control](./completed/004-playback-control-floating-window.md)
 - [ROADMAP-009 — playback window architecture](./completed/009-playback-window-architecture-analysis.md)
 - [ROADMAP-010 — playback window settings](./completed/010-playback-window-settings-analysis.md)
