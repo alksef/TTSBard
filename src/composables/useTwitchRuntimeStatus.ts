@@ -56,7 +56,7 @@ function init() {
   }).catch(e => debugError('[useTwitchRuntimeStatus] Failed to subscribe:', e))
 }
 
-export function useTwitchRuntimeStatus(): { isConnected: Ref<boolean> } {
+export function useTwitchRuntimeStatus(): { status: Ref<TwitchStatus>; isConnected: Ref<boolean> } {
   init()
-  return { isConnected }
+  return { status, isConnected }
 }

@@ -750,6 +750,11 @@ pub async fn get_vtube_studio_status(
 }
 
 #[tauri::command]
+pub fn get_vtube_studio_authenticated(state: State<'_, AppState>) -> bool {
+    state.vtube_studio.is_live_authenticated_connection()
+}
+
+#[tauri::command]
 pub async fn test_vtube_studio_typing(
     timeout_ms: u64,
     repeat_count: u64,
@@ -1373,6 +1378,14 @@ mod tests {
         svc.set_desired_running(true);
         svc.mark_authenticated(true);
         assert!(!svc.is_live_authenticated_connection());
+    }
+
+    #[test]
+    fn get_vtube_studio_authenticated_command_name_matches_registered_function() {
+        assert_eq!(
+            "get_vtube_studio_authenticated",
+            stringify!(get_vtube_studio_authenticated)
+        );
     }
 
     #[test]
