@@ -37,6 +37,7 @@ fn sanitize_irc_text(text: &str) -> String {
 }
 
 /// Twitch IRC клиент
+#[derive(Clone)]
 pub struct TwitchClient {
     settings: TwitchSettings,
     status: Arc<Mutex<TwitchStatus>>,

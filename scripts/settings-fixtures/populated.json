@@ -175,7 +175,8 @@
     "spellcheck_enabled": true,
     "spellcheck_source": "online",
     "editor_height": 300,
-    "typing_idle_timeout_ms": 800
+    "typing_idle_timeout_ms": 800,
+    "default_route": "no_twitch"
   },
   "logging": {
     "enabled": true,

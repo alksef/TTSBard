@@ -15,6 +15,10 @@
     {
       "code": "speech.queue_rejected",
       "retryable": false
+    },
+    {
+      "code": "speech.twitch_only_route",
+      "retryable": false
     }
   ],
   "envelope": {

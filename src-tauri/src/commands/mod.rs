@@ -1,6 +1,6 @@
 use crate::config::{
-    normalize_typing_idle_timeout_ms, AppSettingsDto, QuickEditorMode, SettingsManager,
-    SpellSource, TtsProviderInfoDto, WindowsManager,
+    normalize_typing_idle_timeout_ms, AppSettingsDto, EditorRoute, QuickEditorMode,
+    SettingsManager, SpellSource, TtsProviderInfoDto, WindowsManager,
 };
 use crate::state::AppState;
 use crate::tts::TtsProvider;
@@ -348,6 +348,23 @@ pub async fn set_editor_typing_idle_timeout_ms(
 #[tauri::command]
 pub fn get_editor_typing_idle_timeout_ms(settings_manager: State<'_, SettingsManager>) -> u32 {
     settings_manager.get_editor_typing_idle_timeout_ms()
+}
+
+/// Set default editor route
+#[tauri::command]
+pub async fn set_editor_default_route(
+    route: EditorRoute,
+    app_handle: AppHandle,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<EditorRoute, String> {
+    persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_editor_default_route(route)
+    })
+    .await?;
+
+    emit_settings_changed(&app_handle);
+
+    Ok(route)
 }
 
 /// Prepare (warm up) a registered TTS provider by ID.

@@ -11,6 +11,18 @@ pub mod speech {
         pub const EMPTY_TEXT: &str = "speech.empty_text";
         pub const QUEUE_FULL: &str = "speech.queue_full";
         pub const QUEUE_REJECTED: &str = "speech.queue_rejected";
+        pub const TWITCH_ONLY_ROUTE: &str = "speech.twitch_only_route";
+    }
+}
+
+/// Stable IPC names for the Twitch-only delivery vertical slice.
+pub mod twitch_delivery {
+    pub const DELIVER_COMMAND: &str = "deliver_twitch_message";
+
+    pub mod error_code {
+        pub const EMPTY_TEXT: &str = "twitch.empty_text";
+        pub const UNAVAILABLE: &str = "twitch.unavailable";
+        pub const SEND_FAILED: &str = "twitch.send_failed";
     }
 }
 
@@ -38,6 +50,10 @@ pub const SPEECH_SUBMIT_ERRORS: &[SpeechErrorDef] = &[
         code: speech::error_code::QUEUE_REJECTED,
         retryable: false,
     },
+    SpeechErrorDef {
+        code: speech::error_code::TWITCH_ONLY_ROUTE,
+        retryable: false,
+    },
 ];
 
 pub fn speech_error_code_to_retryable(code: &str) -> bool {
@@ -45,6 +61,36 @@ pub fn speech_error_code_to_retryable(code: &str) -> bool {
         .iter()
         .find(|d| d.code == code)
         .unwrap_or_else(|| panic!("unknown submit_speech error code: {code}"))
+        .retryable
+}
+
+/// Exhaustive production declaration: every `deliver_twitch_message` error code and its retryability.
+#[derive(Debug, Clone, Serialize)]
+pub struct TwitchDeliveryErrorDef {
+    pub code: &'static str,
+    pub retryable: bool,
+}
+
+pub const TWITCH_DELIVERY_ERRORS: &[TwitchDeliveryErrorDef] = &[
+    TwitchDeliveryErrorDef {
+        code: twitch_delivery::error_code::EMPTY_TEXT,
+        retryable: false,
+    },
+    TwitchDeliveryErrorDef {
+        code: twitch_delivery::error_code::UNAVAILABLE,
+        retryable: true,
+    },
+    TwitchDeliveryErrorDef {
+        code: twitch_delivery::error_code::SEND_FAILED,
+        retryable: true,
+    },
+];
+
+pub fn twitch_delivery_error_code_to_retryable(code: &str) -> bool {
+    TWITCH_DELIVERY_ERRORS
+        .iter()
+        .find(|d| d.code == code)
+        .unwrap_or_else(|| panic!("unknown deliver_twitch_message error code: {code}"))
         .retryable
 }
 
@@ -83,7 +129,10 @@ struct SpeechErrorFixture {
 
 #[cfg(test)]
 mod tests {
-    use super::{speech::error_code, CommandError, SpeechErrorFixture, SPEECH_SUBMIT_ERRORS};
+    use super::{
+        speech::error_code, twitch_delivery, CommandError, SpeechErrorFixture,
+        SPEECH_SUBMIT_ERRORS, TWITCH_DELIVERY_ERRORS,
+    };
 
     fn speech_error_fixture() -> SpeechErrorFixture {
         SpeechErrorFixture {
@@ -119,8 +168,8 @@ mod tests {
         assert_eq!(codes.len(), sorted.len(), "duplicate error codes");
         assert_eq!(
             codes.len(),
-            4,
-            "expected exactly 4 submit_speech error codes"
+            5,
+            "expected exactly 5 submit_speech error codes"
         );
     }
 
@@ -165,6 +214,7 @@ mod tests {
         assert!(!def(error_code::EMPTY_TEXT).retryable);
         assert!(def(error_code::QUEUE_FULL).retryable);
         assert!(!def(error_code::QUEUE_REJECTED).retryable);
+        assert!(!def(error_code::TWITCH_ONLY_ROUTE).retryable);
     }
 
     #[test]
@@ -179,6 +229,48 @@ mod tests {
     #[should_panic(expected = "unknown submit_speech error code")]
     fn speech_contract_lookup_rejects_unknown_code() {
         super::speech_error_code_to_retryable("nonexistent.code");
+    }
+
+    #[test]
+    fn twitch_delivery_error_defs_are_exhaustive_and_unique() {
+        let codes: Vec<&str> = TWITCH_DELIVERY_ERRORS.iter().map(|d| d.code).collect();
+        let mut sorted = codes.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(codes.len(), sorted.len(), "duplicate error codes");
+        assert_eq!(
+            codes.len(),
+            3,
+            "expected exactly 3 deliver_twitch_message error codes"
+        );
+    }
+
+    #[test]
+    fn twitch_delivery_retryability_is_consistent_with_constants() {
+        let def = |code: &str| -> &super::TwitchDeliveryErrorDef {
+            TWITCH_DELIVERY_ERRORS
+                .iter()
+                .find(|d| d.code == code)
+                .unwrap()
+        };
+
+        assert!(!def(twitch_delivery::error_code::EMPTY_TEXT).retryable);
+        assert!(def(twitch_delivery::error_code::UNAVAILABLE).retryable);
+        assert!(def(twitch_delivery::error_code::SEND_FAILED).retryable);
+    }
+
+    #[test]
+    fn twitch_delivery_lookup_finds_all_known_codes() {
+        for def in TWITCH_DELIVERY_ERRORS {
+            let found = super::twitch_delivery_error_code_to_retryable(def.code);
+            assert_eq!(found, def.retryable);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "unknown deliver_twitch_message error code")]
+    fn twitch_delivery_lookup_rejects_unknown_code() {
+        super::twitch_delivery_error_code_to_retryable("nonexistent.code");
     }
 
     /// Regenerates all speech contract fixture files. Excluded from standard test runs.

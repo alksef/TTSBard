@@ -872,6 +872,69 @@ impl<'de> Deserialize<'de> for QuickEditorMode {
     }
 }
 
+/// Route of the current phrase: where a submitted phrase is delivered.
+///
+/// Serialized as snake_case strings. Deserialization maps any unknown value to
+/// `Everywhere` (the default), so old or corrupted settings load gracefully.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum EditorRoute {
+    #[default]
+    Everywhere,
+    NoTwitch,
+    VoiceOnly,
+    TwitchOnly,
+}
+
+impl EditorRoute {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            EditorRoute::Everywhere => "everywhere",
+            EditorRoute::NoTwitch => "no_twitch",
+            EditorRoute::VoiceOnly => "voice_only",
+            EditorRoute::TwitchOnly => "twitch_only",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "everywhere" => Some(EditorRoute::Everywhere),
+            "no_twitch" => Some(EditorRoute::NoTwitch),
+            "voice_only" => Some(EditorRoute::VoiceOnly),
+            "twitch_only" => Some(EditorRoute::TwitchOnly),
+            _ => None,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for EditorRoute {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct EditorRouteVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for EditorRouteVisitor {
+            type Value = EditorRoute;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str(
+                    "a route string ('everywhere', 'no_twitch', 'voice_only', 'twitch_only')",
+                )
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(EditorRoute::from_str(v).unwrap_or(EditorRoute::Everywhere))
+            }
+        }
+
+        deserializer.deserialize_str(EditorRouteVisitor)
+    }
+}
+
 /// Editor settings for quick and AI editor modes
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
@@ -890,6 +953,8 @@ pub struct EditorSettings {
     pub editor_height: u32,
     #[serde(default = "default_typing_idle_timeout_ms")]
     pub typing_idle_timeout_ms: u32,
+    #[serde(default)]
+    pub default_route: EditorRoute,
 }
 
 fn default_editor_height() -> u32 {
@@ -929,6 +994,7 @@ impl Default for EditorSettings {
             spellcheck_source: SpellSource::Offline,
             editor_height: 340,
             typing_idle_timeout_ms: 800,
+            default_route: EditorRoute::Everywhere,
         }
     }
 }
@@ -1816,6 +1882,16 @@ impl SettingsManager {
     /// Get VTS typing idle timeout (ms)
     pub fn get_editor_typing_idle_timeout_ms(&self) -> u32 {
         self.cache.read().editor.typing_idle_timeout_ms
+    }
+
+    /// Set default editor route
+    pub fn set_editor_default_route(&self, route: EditorRoute) -> Result<()> {
+        self.update_field("/editor/default_route", &route)
+    }
+
+    /// Get default editor route
+    pub fn get_editor_default_route(&self) -> EditorRoute {
+        self.cache.read().editor.default_route
     }
 
     // ========== AI Settings ==========
@@ -2895,6 +2971,79 @@ mod tests {
         let settings: AppSettings = serde_json::from_str(old_json)
             .expect("old AppSettings without typing_idle_timeout_ms must deserialize");
         assert_eq!(settings.editor.typing_idle_timeout_ms, 800);
+    }
+
+    // ==================== EditorRoute tests ====================
+
+    /// EditorRoute: unknown value normalizes to Everywhere.
+    #[test]
+    fn editor_route_deserializes_unknown_to_everywhere() {
+        let route: EditorRoute =
+            serde_json::from_str(r#""bogus""#).expect("unknown route must deserialize");
+        assert_eq!(route, EditorRoute::Everywhere);
+        let route2: EditorRoute =
+            serde_json::from_str(r#""some_future_value""#).expect("unknown route must deserialize");
+        assert_eq!(route2, EditorRoute::Everywhere);
+    }
+
+    /// EditorRoute: all variants round-trip through snake_case strings.
+    #[test]
+    fn editor_route_round_trip() {
+        for route in [
+            EditorRoute::Everywhere,
+            EditorRoute::NoTwitch,
+            EditorRoute::VoiceOnly,
+            EditorRoute::TwitchOnly,
+        ] {
+            let json = serde_json::to_string(&route).unwrap();
+            let back: EditorRoute = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, route, "round-trip failed for {}", json);
+        }
+    }
+
+    /// EditorRoute: default is Everywhere.
+    #[test]
+    fn editor_route_default_is_everywhere() {
+        assert_eq!(EditorRoute::default(), EditorRoute::Everywhere);
+    }
+
+    /// EditorRoute: as_str / from_str helpers round-trip and reject unknowns.
+    #[test]
+    fn editor_route_str_helpers() {
+        for route in [
+            EditorRoute::Everywhere,
+            EditorRoute::NoTwitch,
+            EditorRoute::VoiceOnly,
+            EditorRoute::TwitchOnly,
+        ] {
+            let s = route.as_str();
+            let parsed = EditorRoute::from_str(s).expect("from_str round-trip");
+            assert_eq!(parsed, route);
+        }
+        assert!(EditorRoute::from_str("bogus").is_none());
+    }
+
+    /// EditorSettings: missing default_route defaults to Everywhere.
+    #[test]
+    fn editor_settings_deserializes_without_default_route() {
+        let json = r#"{"quick":false,"ai":false,"ai_completion":false,"spellcheck_enabled":true,"spellcheck_source":"offline","editor_height":340}"#;
+        let settings: EditorSettings =
+            serde_json::from_str(json).expect("must deserialize without default_route");
+        assert_eq!(settings.default_route, EditorRoute::Everywhere);
+    }
+
+    /// EditorSettings: default_route round-trip.
+    #[test]
+    fn editor_settings_default_route_round_trip() {
+        let original = EditorSettings {
+            default_route: EditorRoute::TwitchOnly,
+            ..EditorSettings::default()
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let back: EditorSettings =
+            serde_json::from_str(&json).expect("round-trip deserialization");
+        assert_eq!(back.default_route, EditorRoute::TwitchOnly);
+        assert!(json.contains(r#""default_route":"twitch_only""#));
     }
 
     /// Backward-compat: old settings.json without `vtube_studio` field must deserialize.

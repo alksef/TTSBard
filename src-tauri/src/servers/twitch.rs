@@ -44,6 +44,7 @@ pub async fn run_twitch_client(
                 if let Some(client) = twitch_client.take() {
                     client.stop().await;
                 }
+                *app_state.twitch.client.write().await = None;
                 return;
             }
             _ = status_check_interval.tick() => {
@@ -90,6 +91,7 @@ pub async fn run_twitch_client(
                                     info!("Stopping previous client...");
                                     client.stop().await;
                                 }
+                                *app_state.twitch.client.write().await = None;
 
                                 last_status = TwitchConnectionStatus::Disconnected;
                                 update_status(last_status.clone());
@@ -101,9 +103,15 @@ pub async fn run_twitch_client(
                                         update_status(last_status.clone());
 
                                         let client = TwitchClient::new(settings_clone.into());
-                                        match client.start().await {
-                                            Ok(_) => {
+                                        // Convert the boxed error up front: `Box<dyn StdError>`
+                                        // is not `Send`, and the match temporary would otherwise
+                                        // live across the `client` publish await below.
+                                        let start_result =
+                                            client.start().await.map_err(|e| e.to_string());
+                                        match start_result {
+                                            Ok(()) => {
                                                 info!("Client started, waiting for connection");
+                                                *app_state.twitch.client.write().await = Some(client.clone());
                                                 twitch_client = Some(client);
                                             }
                                             Err(e) => {
@@ -124,6 +132,7 @@ pub async fn run_twitch_client(
                                 if let Some(client) = twitch_client.take() {
                                     client.stop().await;
                                 }
+                                *app_state.twitch.client.write().await = None;
                                 last_status = TwitchConnectionStatus::Disconnected;
                                 update_status(last_status.clone());
                             }

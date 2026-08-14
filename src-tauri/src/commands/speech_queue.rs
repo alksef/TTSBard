@@ -125,6 +125,15 @@ pub fn submit_speech(
     queue: State<'_, SpeechQueueState>,
     text: String,
 ) -> Result<AcceptedJob, CommandError> {
+    let prefix = crate::preprocessor::parse_prefix(&text);
+    if prefix.twitch_only {
+        return Err(CommandError::new(
+            speech_contract::error_code::TWITCH_ONLY_ROUTE,
+            "Twitch-only route must use deliver_twitch_message".to_string(),
+            ipc::speech_error_code_to_retryable(speech_contract::error_code::TWITCH_ONLY_ROUTE),
+        ));
+    }
+
     let snapshot = build_snapshot(&state, &text).map_err(|error| {
         CommandError::new(
             speech_contract::error_code::SNAPSHOT_UNAVAILABLE,

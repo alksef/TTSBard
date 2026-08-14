@@ -58,7 +58,7 @@ function mockSettings(): AppSettingsDto {
     logging: { enabled: true, level: 'info', module_levels: {} },
     preprocessor: { enabled: false, replacements_count: 0 },
     soundpanel_bindings: [],
-    editor: { quick: 'disabled', ai: false, ai_completion: false, spellcheck_enabled: false, spellcheck_source: 'online', editor_height: 200, typing_idle_timeout_ms: 800 },
+    editor: { quick: 'disabled', ai: false, ai_completion: false, spellcheck_enabled: false, spellcheck_source: 'online', editor_height: 200, typing_idle_timeout_ms: 800, default_route: 'everywhere' },
     ai: {
       provider: 'openai',
       openai: { api_key: null, use_proxy: false, model: 'gpt-4o-mini' },

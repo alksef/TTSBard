@@ -1,10 +1,13 @@
 import { ref, computed, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { ROUTE_ORDER } from '../components/editor/routeDecode'
+import type { EditorRoute } from '../components/editor/routeDecode'
 
 export interface EditorTab {
   id: string
   title: string
   text: string
+  route?: EditorRoute
 }
 
 interface TabsSnapshot {
@@ -106,12 +109,20 @@ export function useEditorTabs() {
     if (t) t.title = title
   }
 
+  const VALID_ROUTES = new Set<string>(ROUTE_ORDER)
+
+  function sanitizeRoute(route: unknown): EditorRoute | undefined {
+    return typeof route === 'string' && VALID_ROUTES.has(route)
+      ? (route as EditorRoute)
+      : undefined
+  }
+
   async function init() {
     if (isHydrated.value) return
     try {
       const data = await invoke<{ active_id: string; tabs: EditorTab[] }>('get_tabs')
       if (data.tabs && data.tabs.length > 0) {
-        tabs.value = data.tabs
+        tabs.value = data.tabs.map(t => ({ ...t, route: sanitizeRoute(t.route) }))
         const activeExists = data.tabs.some(t => t.id === data.active_id)
         activeId.value = activeExists ? data.active_id : data.tabs[0].id
       }
@@ -130,7 +141,7 @@ export function useEditorTabs() {
   function captureSnapshot(): TabsSnapshot {
     return {
       active_id: activeId.value,
-      tabs: tabs.value.map(t => ({ id: t.id, title: t.title, text: t.text })),
+      tabs: tabs.value.map(t => ({ id: t.id, title: t.title, text: t.text, route: t.route })),
     }
   }
 

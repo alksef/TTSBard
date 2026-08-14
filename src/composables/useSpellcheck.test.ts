@@ -31,6 +31,7 @@ function createSettings(overrides?: Partial<AppSettingsDto['editor']>): AppSetti
     spellcheck_source: 'online',
     editor_height: 200,
     typing_idle_timeout_ms: 800,
+    default_route: 'everywhere',
     ...overrides,
   }
 }

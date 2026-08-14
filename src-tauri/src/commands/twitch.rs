@@ -1,5 +1,8 @@
 use crate::config::{SettingsManager, TwitchSettings};
+use crate::events::TwitchConnectionStatus;
+use crate::ipc::{self, twitch_delivery, CommandError};
 use crate::state::AppState;
+use serde::Serialize;
 use tauri::{Manager, State};
 
 /// Получить текущие настройки Twitch (включая токен)
@@ -142,4 +145,74 @@ pub async fn restart_twitch(state: State<'_, AppState>) -> Result<String, String
     tracing::info!("Restart command received");
     state.send_twitch_event(crate::events::TwitchEvent::Restart);
     Ok("Перезапуск Twitch...".to_string())
+}
+
+/// Successful Twitch-only delivery result.
+#[derive(Debug, Clone, Serialize)]
+pub struct DeliveredTwitchMessage {
+    pub status: &'static str,
+}
+
+/// Deliver a pre-processed message directly to the connected Twitch client.
+///
+/// This is the tracked Twitch-only route: it does not create a speech job,
+/// does not write to phrase history and does not trigger WebView.
+#[tauri::command]
+pub async fn deliver_twitch_message(
+    state: State<'_, AppState>,
+    text: String,
+) -> Result<DeliveredTwitchMessage, CommandError> {
+    if text.trim().is_empty() {
+        return Err(CommandError::new(
+            twitch_delivery::error_code::EMPTY_TEXT,
+            "Twitch message must not be empty".to_string(),
+            ipc::twitch_delivery_error_code_to_retryable(twitch_delivery::error_code::EMPTY_TEXT),
+        ));
+    }
+
+    let settings_enabled = {
+        let settings = state.twitch.settings.read().await;
+        settings.enabled
+    };
+    let is_connected = matches!(
+        state.twitch.connection_status.lock().clone(),
+        TwitchConnectionStatus::Connected
+    );
+    let client = {
+        let guard = state.twitch.client.read().await;
+        guard.clone()
+    };
+
+    if !settings_enabled || !is_connected || client.is_none() {
+        return Err(CommandError::new(
+            twitch_delivery::error_code::UNAVAILABLE,
+            "Twitch is not connected".to_string(),
+            ipc::twitch_delivery_error_code_to_retryable(twitch_delivery::error_code::UNAVAILABLE),
+        ));
+    }
+
+    let client = client.expect("client presence checked above");
+    match client.send_message(&text).await {
+        Ok(()) => Ok(DeliveredTwitchMessage { status: "delivered" }),
+        Err(e) => Err(CommandError::new(
+            twitch_delivery::error_code::SEND_FAILED,
+            e.to_string(),
+            ipc::twitch_delivery_error_code_to_retryable(
+                twitch_delivery::error_code::SEND_FAILED,
+            ),
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deliver_command_name_matches_registered_function() {
+        assert_eq!(
+            twitch_delivery::DELIVER_COMMAND,
+            stringify!(deliver_twitch_message)
+        );
+    }
 }

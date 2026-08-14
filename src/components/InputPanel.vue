@@ -19,9 +19,15 @@ import StatusMessage from './shared/StatusMessage.vue'
 import { useTypingBurst, type TypingConsumer } from '../composables/useTypingBurst'
 import { acceptClear, appliesQuickEditorPolicy, applyAiResponse, type SubmitIntent } from './inputAcceptance'
 import { submitSpeech } from '../ipc/speech'
+import { deliverTwitchMessage } from '../ipc/twitchDelivery'
 import { matchesEditorHotkey } from './editor/keymapArbitration'
-import { Volume2, Clock } from 'lucide-vue-next'
+import { Volume2, Clock, Star, Send } from 'lucide-vue-next'
 import { enterOutcomeLabel, submitActionState } from './editor/submitAffordance'
+import RouteSelector from './editor/RouteSelector.vue'
+import { decodeRoutePrefix, ROUTE_META } from './editor/routeDecode'
+import type { EditorRoute } from './editor/routeDecode'
+import { effectiveRoute, applyRouteToText } from './editor/routeResolution'
+import { useTwitchRuntimeStatus } from '../composables/useTwitchRuntimeStatus'
 
 const { showError } = useErrorHandler()
 const { tabs, activeId, active, create: createTab, close: closeTab, select: selectTab, next: nextTab, previous: previousTab, rename: renameTab, init: initTabs, flushSave: flushTabsSave } = useEditorTabs()
@@ -103,6 +109,40 @@ const hotkeyHintText = computed(() => {
   return `Enter → ${outcome}${second}`
 })
 
+const { isConnected: twitchConnected } = useTwitchRuntimeStatus()
+
+const defaultRouteFromSettings = computed<EditorRoute>(() => editorSettings.value?.default_route ?? 'everywhere')
+
+const activeDecoded = computed(() => decodeRoutePrefix(text.value))
+
+const currentRoute = computed<EditorRoute>(() =>
+  effectiveRoute(activeDecoded.value, active.value.route, defaultRouteFromSettings.value),
+)
+
+const isTwitchOnly = computed(() => currentRoute.value === 'twitch_only')
+
+const isCurrentDefault = computed(() => currentRoute.value === defaultRouteFromSettings.value)
+
+const defaultStarTitle = computed(() =>
+  isCurrentDefault.value
+    ? 'Маршрут по умолчанию'
+    : `Сделать маршрутом по умолчанию: ${ROUTE_META[currentRoute.value].label}`,
+)
+
+function handleRouteSelect(route: EditorRoute) {
+  text.value = applyRouteToText(text.value, activeDecoded.value, route)
+  const tab = tabs.value.find(t => t.id === activeId.value)
+  if (tab) tab.route = route
+}
+
+async function handleSaveDefault() {
+  try {
+    await invoke('set_editor_default_route', { route: currentRoute.value })
+  } catch (e) {
+    debugError('[InputPanel] Failed to save default route:', e)
+  }
+}
+
 const speakLabel = computed(() => {
   switch (submitState.value) {
     case 'submitting':
@@ -110,19 +150,21 @@ const speakLabel = computed(() => {
     case 'accepted':
       return 'Принято'
     default:
-      return 'Озвучить'
+      return isTwitchOnly.value ? 'Отправить в Twitch' : 'Озвучить'
   }
 })
 
 const speakTitle = computed(() => {
-  return submitState.value === 'submitting' ? 'Отправляется… (Enter)' : 'Озвучить (Enter)'
+  const action = isTwitchOnly.value ? 'Отправить в Twitch' : 'Озвучить'
+  return submitState.value === 'submitting' ? 'Отправляется… (Enter)' : `${action} (Enter)`
 })
 
 const speakAriaLabel = computed(() => {
   const outcome = enterOutcomeLabel(quickEditorMode.value)
   const binding = submitContinueBinding.value
   const second = binding ? `, ${binding} — отправить и продолжить` : ''
-  return `Озвучить текст. Enter — ${outcome}${second}`
+  const action = isTwitchOnly.value ? 'Отправить текст в Twitch' : 'Озвучить текст'
+  return `${action}. Enter — ${outcome}${second}`
 })
 
 const aiEditorEnabled = computed(() => editorSettings.value?.ai ?? false)
@@ -439,8 +481,15 @@ async function handleSubmit(intent: SubmitIntent) {
   typingBurst.stop()
   isSpeakingInFlight.value = true
 
+  const submittedDecoded = decodeRoutePrefix(currentText)
+  const tabRouteAtSubmit = active.value.route
+
   try {
-    await submitSpeech(currentText)
+    if (submittedDecoded.route === 'twitch_only') {
+      await deliverTwitchMessage(submittedDecoded.text)
+    } else {
+      await submitSpeech(currentText)
+    }
     await recordHistory(currentText)
     tabs.value = acceptClear(tabs.value, senderTabId, currentText)
 
@@ -464,6 +513,9 @@ async function handleSubmit(intent: SubmitIntent) {
     if (activeId.value === senderTabId && senderTab?.text === '') {
       lastSubmitOutcome.value = 'accepted'
       scheduleOutcomeReset()
+      if (senderTab.route === tabRouteAtSubmit) {
+        senderTab.route = undefined
+      }
     }
   } catch (e) {
     debugError('[InputPanel] Failed to speak:', e)
@@ -661,6 +713,22 @@ defineExpose({ focusEditor })
         >
           AI
         </button>
+        <RouteSelector
+          :route="currentRoute"
+          :default-route="defaultRouteFromSettings"
+          :twitch-connected="twitchConnected"
+          :compact="isMinimalMode"
+          @select="handleRouteSelect"
+        />
+        <button
+          class="action-btn default-route-btn"
+          :disabled="isCurrentDefault"
+          :title="defaultStarTitle"
+          :aria-label="defaultStarTitle"
+          @click="handleSaveDefault"
+        >
+          <Star :size="14" :fill="isCurrentDefault ? 'currentColor' : 'none'" />
+        </button>
         <div class="action-bar-spacer" />
         <div v-if="!isMinimalMode" class="action-bar-hint">{{ hotkeyHintText }}</div>
         <button
@@ -672,7 +740,8 @@ defineExpose({ focusEditor })
           :aria-label="speakAriaLabel"
           @click="handleEnter"
         >
-          <Volume2 :size="14" />
+          <Send v-if="isTwitchOnly" :size="14" />
+          <Volume2 v-else :size="14" />
           <span v-if="!isMinimalMode">{{ speakLabel }}</span>
         </button>
       </div>
@@ -806,6 +875,11 @@ defineExpose({ focusEditor })
 }
 
 .speak-btn.icon-only {
+  padding: 0.3rem 0.55rem;
+}
+
+.default-route-btn {
+  flex-shrink: 0;
   padding: 0.3rem 0.55rem;
 }
 

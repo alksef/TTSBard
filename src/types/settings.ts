@@ -5,6 +5,7 @@
  */
 
 import type { SoundBinding } from '../types'
+import type { EditorRoute } from '../components/editor/routeDecode'
 
 // ============================================================================
 // Hotkey Settings Types
@@ -339,6 +340,7 @@ export interface EditorSettingsDto {
   spellcheck_source: 'online' | 'offline'
   editor_height: number
   typing_idle_timeout_ms: number
+  default_route: EditorRoute
 }
 
 // ============================================================================

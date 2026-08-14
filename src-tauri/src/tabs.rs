@@ -17,6 +17,9 @@ pub struct EditorTab {
     pub title: String,
     #[serde(default)]
     pub text: String,
+    /// Current route of the tab (opaque string; the frontend validates it).
+    #[serde(default)]
+    pub route: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -117,11 +120,13 @@ mod tests {
                     id: "id-1".into(),
                     title: "Текст 1".into(),
                     text: "привет".into(),
+                    route: None,
                 },
                 EditorTab {
                     id: "id-2".into(),
                     title: "Текст 2".into(),
                     text: "мир".into(),
+                    route: None,
                 },
             ],
         };
@@ -145,6 +150,7 @@ mod tests {
                 id: format!("id-{i}"),
                 title: format!("T{i}"),
                 text: String::new(),
+                route: None,
             })
             .collect();
         mgr.save_all(TabsData {
@@ -167,6 +173,7 @@ mod tests {
                 id: "id-1".into(),
                 title: "T".into(),
                 text: huge,
+                route: None,
             }],
         })
         .unwrap();
@@ -185,11 +192,13 @@ mod tests {
                     id: "a".into(),
                     title: "A".into(),
                     text: String::new(),
+                    route: None,
                 },
                 EditorTab {
                     id: "b".into(),
                     title: "B".into(),
                     text: String::new(),
+                    route: None,
                 },
             ],
         })
@@ -217,6 +226,7 @@ mod tests {
                         id: format!("id-{}", i),
                         title: format!("Tab {}", i),
                         text: format!("Text content {}", i),
+                        route: None,
                     }],
                 };
                 mgr_clone.save_all(data).unwrap();
@@ -247,6 +257,7 @@ mod tests {
                 id: "a".into(),
                 title: "A".into(),
                 text: "first".into(),
+                route: None,
             }],
         };
         mgr.save_all(first).unwrap();
@@ -263,6 +274,7 @@ mod tests {
                 id: "b".into(),
                 title: "B".into(),
                 text: "second".into(),
+                route: None,
             }],
         };
         let result = mgr.save_all(second);
@@ -278,5 +290,34 @@ mod tests {
         assert_eq!(published.tabs[0].text, "first");
 
         let _ = fs::remove_file(&parent);
+    }
+
+    #[test]
+    fn editor_tab_deserializes_without_route() {
+        let json = r#"{"id":"a","title":"A","text":"hello"}"#;
+        let tab: EditorTab = serde_json::from_str(json).expect("must deserialize without route");
+        assert_eq!(tab.route, None);
+    }
+
+    #[test]
+    fn editor_tab_route_round_trip() {
+        let (mgr, path) = manager_in_tmp();
+        let data = TabsData {
+            active_id: "id-1".into(),
+            tabs: vec![EditorTab {
+                id: "id-1".into(),
+                title: "Текст".into(),
+                text: "привет".into(),
+                route: Some("twitch_only".into()),
+            }],
+        };
+        mgr.save_all(data).unwrap();
+
+        let mgr2 = TabManager::new(path.clone());
+        let loaded = mgr2.load_all();
+        assert_eq!(loaded.tabs.len(), 1);
+        assert_eq!(loaded.tabs[0].route.as_deref(), Some("twitch_only"));
+
+        let _ = fs::remove_file(&path);
     }
 }
