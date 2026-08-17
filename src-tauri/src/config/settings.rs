@@ -1896,19 +1896,9 @@ impl SettingsManager {
         self.update_field("/editor/typing_enabled", &enabled)
     }
 
-    /// Get editor typing enabled state
-    pub fn get_editor_typing_enabled(&self) -> bool {
-        self.cache.read().editor.typing_enabled
-    }
-
     /// Set default editor route
     pub fn set_editor_default_route(&self, route: EditorRoute) -> Result<()> {
         self.update_field("/editor/default_route", &route)
-    }
-
-    /// Get default editor route
-    pub fn get_editor_default_route(&self) -> EditorRoute {
-        self.cache.read().editor.default_route
     }
 
     // ========== AI Settings ==========

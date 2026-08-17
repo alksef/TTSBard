@@ -1,8 +1,8 @@
 ---
 id: ROADMAP-070
-status: planned
+status: completed
 created: 2026-08-14
-updated: 2026-08-14
+updated: 2026-08-17
 related_tasks: []
 ---
 
@@ -144,3 +144,19 @@ PlaybackManager не затронуты.
   sound bindings.
 - TTS queue и PlaybackManager не меняют свой контракт и не получают
   SoundPanel-элементы.
+
+## Outcome
+
+2026-08-17. P1 (общая маршрутизация speaker+virtual-mic) и P2 (runtime-only
+bounded FIFO-очередь, изолированная от TTS SpeechQueue) завершены 2026-08-14
+и находятся в master.
+
+P3: пользователь решил, что runtime-индикатор очереди в SoundPanel пока не
+нужен — очередь на 16 элементов с отклонением при переполнении достаточна без
+визуализации. Если индикатор станет нужен, это новый roadmap-item, а не
+переоткрытие 070.
+
+Не выполнено: финальная ручная проверка одновременного TTS + SoundPanel на
+драйверах пользователя (см. риски); автотестами не покрывается.
+
+Stop/skip не реализованы намеренно и остаются вне scope.

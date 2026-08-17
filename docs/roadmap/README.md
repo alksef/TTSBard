@@ -40,8 +40,7 @@ related_tasks: []
 
 | Item | Статус | Следующий шаг |
 |---|---|---|
-=======
-| [ROADMAP-070 — маршрутизация и очередь SoundPanel](./active/070-soundpanel-audio-routing-and-queue.md) | planned | Решить, нужен ли пользователю компактный индикатор очереди SoundPanel. |
+| [ROADMAP-075 — полировка action bar и titlebar](./active/075-editor-action-bar-and-titlebar-polish.md) | planned | Мелкие UI-правки: иконка typing toggle, звезда дефолта в списке, консистентные иконки VTS, мигание WebView, отступы и кнопка «Озвучить». |
 
 ## Завершённые направления
 
@@ -72,6 +71,7 @@ related_tasks: []
 
 ### Окна, ввод и sound panel
 
+- [ROADMAP-070 — маршрутизация и очередь SoundPanel](./completed/070-soundpanel-audio-routing-and-queue.md)
 - [ROADMAP-072 — удаление legacy-панели Playback](./completed/072-remove-legacy-playback-panel.md)
 - [ROADMAP-004 — playback control](./completed/004-playback-control-floating-window.md)
 - [ROADMAP-009 — playback window architecture](./completed/009-playback-window-architecture-analysis.md)
