@@ -1,6 +1,6 @@
 ---
 id: ROADMAP-076
-status: in_progress
+status: completed
 created: 2026-08-17
 updated: 2026-08-17
 related_tasks: []
@@ -70,6 +70,33 @@ default_route, перехват клавиш, мигание статусов), 
 - history не блокирует читателей на fsync;
 - история фраз без служебных префиксов;
 - npm test/build, cargo check/test, check-docs зелёные.
+
+## Outcome
+
+2026-08-17. Все 10 пунктов закрыты за один прогон (076a `e54a416`,
+076b `1b50259`, 076c `75cbcc2`; задачи выполнял DeepSeek deepseek-v4-flash,
+ревью и проверки — Claude).
+
+- пп. 1, 10: `routeSubmit` — маршрут доставки совпадает с RouteSelector
+  (prefix × tab × default), история без префикса.
+- пп. 2, 8: фабрика `createRuntimeStatusSource` (await listen → snapshot,
+  event-wins guard), конвертеры в одном `utils/rustStatus.ts`.
+- п. 3: sendTest перечитывает статус с retry.
+- п. 4: `lastSaveError` + toast на сбой `save_tabs`.
+- п. 5: supervisor backoff 2s, прерываемый shutdown.
+- п. 6: intercept-клавиша глотается всегда, диспетчер пересоздаваемый.
+- п. 7: grace 300ms перед exit(0).
+- п. 9: локи не держатся через fsync, полные клоны убраны; phrases —
+  version-rollback, record_text — publish-immediately (задокументировано).
+
+Проверки: npm test 614, cargo test 1314, build, check:ipc (с двумя
+allowlist-записями для параметризованной фабрики), check-docs — зелёные.
+Компиляционный фикс от ревьюера: std::Mutex::lock() Result-handling в hook.rs
+(DeepSeek не компилировал).
+
+Остаточные замечания (см. review-076c): version-счётчик не видит
+конкурирующий record_text в rollback clear_history (только failure-путь);
+refreshAuthenticated на каждый apply — оставлено осознанно.
 
 ## Не входит
 

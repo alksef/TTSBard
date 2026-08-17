@@ -40,9 +40,13 @@ related_tasks: []
 
 | Item | Статус | Следующий шаг |
 |---|---|---|
-| [ROADMAP-075 — полировка action bar и titlebar](./active/075-editor-action-bar-and-titlebar-polish.md) | planned | Мелкие UI-правки: иконка typing toggle, звезда дефолта в списке, консистентные иконки VTS, мигание WebView, отступы и кнопка «Озвучить». |
+| [ROADMAP-075 — полировка action bar и titlebar](./active/075-editor-action-bar-and-titlebar-polish.md) | in_progress | Остались пп. 4 (мигание WebView), 6 (кнопка «Озвучить»), 7 (иконки маршрута); пп. 1, 2, 3, 5 закрыты в 075a. |
 
 ## Завершённые направления
+
+### Надёжность и ревью
+
+- [ROADMAP-076 — remediation по release-review v0.21.0..HEAD](./completed/076-release-review-remediation.md)
 
 ### Редактор и история
 
