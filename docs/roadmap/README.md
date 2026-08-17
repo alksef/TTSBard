@@ -42,12 +42,12 @@ related_tasks: []
 |---|---|---|
 =======
 | [ROADMAP-070 — маршрутизация и очередь SoundPanel](./active/070-soundpanel-audio-routing-and-queue.md) | planned | Решить, нужен ли пользователю компактный индикатор очереди SoundPanel. |
-| [ROADMAP-074 — статусы интеграций в titlebar](./active/074-ambient-integration-status.md) | in_progress | Реализовать truthful gray/green/red mapping и отдельный правый status cluster перед SoundPanel/Playback. |
 
 ## Завершённые направления
 
 ### Редактор и история
 
+- [ROADMAP-074 — статусы интеграций в titlebar](./completed/074-ambient-integration-status.md)
 - [ROADMAP-073 — маршрут фразы и результат доставки](./completed/073-readable-message-routing-and-delivery-outcomes.md)
 - [ROADMAP-071 — отправка редактора и читаемый быстрый режим](./completed/071-editor-submit-and-quick-mode-affordance.md)
 

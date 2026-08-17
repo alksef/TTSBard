@@ -1,8 +1,8 @@
 ---
 id: ROADMAP-074
-status: in_progress
+status: completed
 created: 2026-08-14
-updated: 2026-08-15
+updated: 2026-08-17
 related_tasks: []
 ---
 
@@ -177,6 +177,33 @@ accessible label дают полную формулировку, наприме�
 - счётчик очереди и playback status;
 - управление подключениями непосредственно из titlebar;
 - общий backend enum, стирающий различия lifecycle интеграций.
+
+## Outcome
+
+2026-08-17. Реализовано полностью:
+
+- **P0**: pure-маппинг `desired × runtime → gray/green/red`
+  (`src/components/titlebar/integrationStatus.ts`), переиспользованы
+  существующие snapshot commands и typed events; добавлена единственная новая
+  команда `get_vtube_studio_authenticated` (connected+authenticated как
+  граница готовности VTS). Тест на «ручной Stop после Error даёт gray» покрыт
+  маппингом (`!desired → gray`).
+- **P1**: `IntegrationStatusCluster.vue` — три постоянных слота
+  (Globe/Twitch/PersonStanding), tone-классы, connecting-pulse с
+  `prefers-reduced-motion`, `role="img"` + aria-label/title, без
+  click-обработчиков; в `App.vue` перед SoundPanel с увеличенным
+  `margin-left`.
+- Composables: `useWebViewRuntimeStatus`, `useVtsRuntimeStatus`
+  (subscribe-before-snapshot), `useTwitchRuntimeStatus` расширен экспортом
+  полного `status`.
+
+Проверено независимо (review-074b-2026-08-17): cargo check/test (308), npm
+test (604), build, check:ipc, check-docs — зелёные. Не делалось: ручная
+визуальная проверка compact width/themes/scaling (P2.4) — код использует те
+же иконки без labels и CSS-переменные темы.
+
+Отложено как несущественное: race в `refreshAuthenticated` при быстрых
+серийных status-событиях VTS (см. review, замечание 1).
 
 ## Связанные материалы
 
