@@ -1,6 +1,19 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { Copy, RotateCw, Play, Square, AlertTriangle, Globe } from 'lucide-vue-next'
 import { useWebView } from '../composables/useWebView'
+
+// Toast kind by keyword sniffing, case-insensitive so «Не удалось…» matches
+// the lowercase «не удалось» keyword (the old inline check was case-sensitive
+// and styled real errors as neutral).
+const messageBoxClass = computed(() => {
+  const m = (errorMessage.value ?? '').toLowerCase()
+  if (['failed', 'error', 'ошибка', 'не удалось'].some(k => m.includes(k))) return 'error'
+  if (['запущен', 'перезапущен', 'сохранен', 'successful', 'saved', 'отправлено', 'обновлены', 'токен скопирован', 'upnp включён', 'перезапускается'].some(k => m.includes(k))) return 'success'
+  if (['тест', 'testing', 'остан', 'url скопирован', 'upnp выключен'].some(k => m.includes(k))) return 'info'
+  if (['f5', 'obs', 'перезапустите сервер'].some(k => m.includes(k))) return 'warning'
+  return ''
+})
 
 const {
   settings,
@@ -32,12 +45,7 @@ const {
 <template>
   <div class="webview-panel">
     <!-- Error/Info Message Display -->
-    <div v-if="errorMessage" class="message-box" :class="{
-      error: errorMessage.includes('Failed') || errorMessage.includes('Error') || errorMessage.includes('ошибка') || errorMessage.includes('Ошибка') || errorMessage.includes('не удалось'),
-      success: errorMessage.includes('запущен') || errorMessage.includes('перезапущен') || errorMessage.includes('сохранен') || errorMessage.includes('successful') || errorMessage.includes('Saved') || errorMessage.includes('отправлено') || errorMessage.includes('обновлены') || errorMessage.includes('Токен скопирован') || errorMessage.includes('UPnP включён') || errorMessage.includes('перезапускается'),
-      info: errorMessage.includes('Тест') || errorMessage.includes('Testing') || errorMessage.includes('остан') || errorMessage.includes('URL скопирован') || errorMessage.includes('UPnP выключен'),
-      warning: errorMessage.includes('F5') || errorMessage.includes('OBS') || errorMessage.includes('Перезапустите сервер')
-    }">
+    <div v-if="errorMessage" class="message-box" :class="messageBoxClass">
       {{ errorMessage }}
     </div>
 

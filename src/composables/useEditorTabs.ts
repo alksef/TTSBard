@@ -2,6 +2,7 @@ import { ref, computed, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { ROUTE_ORDER } from '../components/editor/routeDecode'
 import type { EditorRoute } from '../components/editor/routeDecode'
+import { useErrorHandler } from './useErrorHandler'
 
 export interface EditorTab {
   id: string
@@ -37,6 +38,8 @@ export function useEditorTabs() {
   const tabs = ref<EditorTab[]>([{ id: genId(), title: 'Текст 1', text: '' }])
   const activeId = ref<string>(tabs.value[0].id)
   const isHydrated = ref(false)
+  const lastSaveError = ref<string | null>(null)
+  const { showError } = useErrorHandler()
 
   const active = computed<EditorTab>({
     get: () => {
@@ -171,8 +174,11 @@ export function useEditorTabs() {
   async function runSave(snapshot: TabsSnapshot): Promise<void> {
     try {
       await invoke('save_tabs', { data: snapshot })
-    } catch {
-      // graceful
+      lastSaveError.value = null
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      lastSaveError.value = message
+      showError('Не удалось сохранить вкладки: ' + message)
     } finally {
       inFlight = null
       if (pendingSnapshot) {
@@ -201,5 +207,5 @@ export function useEditorTabs() {
   watch(tabs, scheduleSave, { deep: true })
   watch(activeId, scheduleSave)
 
-  return { tabs, activeId, active, create, close, select, next, previous, rename, init, flushSave }
+  return { tabs, activeId, active, create, close, select, next, previous, rename, init, flushSave, lastSaveError }
 }

@@ -1,62 +1,18 @@
-import { ref, type Ref } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
+import { computed, type Ref } from 'vue'
 import type { TwitchStatus } from './useTwitch'
-import { debugError } from '../utils/debug'
+import { createRuntimeStatusSource } from './runtimeStatusSource'
+import { convertTwitchStatusFromRust } from '../utils/rustStatus'
 
-interface RustEnumDisconnected {
-  Disconnected?: null
-}
+const source = createRuntimeStatusSource<TwitchStatus>({
+  command: 'get_twitch_status',
+  event: 'twitch-status-changed',
+  convert: convertTwitchStatusFromRust,
+  initial: 'Disconnected',
+})
 
-interface RustEnumConnecting {
-  Connecting?: null
-}
-
-interface RustEnumConnected {
-  Connected?: null
-}
-
-interface RustEnumError {
-  Error?: string | null
-}
-
-type RustTwitchStatus = RustEnumDisconnected | RustEnumConnecting | RustEnumConnected | RustEnumError | string
-
-function convertStatusFromRust(status: RustTwitchStatus): TwitchStatus {
-  if (typeof status === 'string') {
-    const valid: TwitchStatus[] = ['Disconnected', 'Connecting', 'Connected', 'Error']
-    return valid.includes(status as TwitchStatus) ? (status as TwitchStatus) : 'Disconnected'
-  }
-  if (status === null || typeof status !== 'object') return 'Disconnected'
-  if ('Connected' in status) return 'Connected'
-  if ('Connecting' in status) return 'Connecting'
-  if ('Error' in status) return 'Error'
-  return 'Disconnected'
-}
-
-const status = ref<TwitchStatus>('Disconnected')
-const isConnected = ref(false)
-let initialized = false
-
-function apply(next: TwitchStatus) {
-  status.value = next
-  isConnected.value = next === 'Connected'
-}
-
-function init() {
-  if (initialized) return
-  initialized = true
-
-  invoke<RustTwitchStatus>('get_twitch_status')
-    .then(s => apply(convertStatusFromRust(s)))
-    .catch(e => debugError('[useTwitchRuntimeStatus] Failed to load status:', e))
-
-  listen<unknown>('twitch-status-changed', event => {
-    apply(convertStatusFromRust(event.payload as RustTwitchStatus))
-  }).catch(e => debugError('[useTwitchRuntimeStatus] Failed to subscribe:', e))
-}
+const isConnected = computed(() => source.state.value === 'Connected')
 
 export function useTwitchRuntimeStatus(): { status: Ref<TwitchStatus>; isConnected: Ref<boolean> } {
-  init()
-  return { status, isConnected }
+  void source.ensureInit()
+  return { status: source.state, isConnected }
 }

@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 use crate::config::replace_file_atomically;
@@ -76,6 +77,11 @@ pub struct HistoryManager {
     data: RwLock<HistoryData>,
     ngrams: RwLock<NgramData>,
     phrases: RwLock<Vec<PhraseEntry>>,
+    /// Monotonic counters bumped on each in-place mutation. Used to make
+    /// rollback after a failed persist conditional: the snapshot is restored
+    /// only when no concurrent writer has built on top of our mutation.
+    history_version: AtomicU64,
+    phrase_version: AtomicU64,
 }
 
 fn clean_token(token: &str) -> String {
@@ -84,29 +90,42 @@ fn clean_token(token: &str) -> String {
         .to_lowercase()
 }
 
-fn save_history_sync(
+/// Serialize and persist the *current* history/ngram state while holding only
+/// the global history write lock (never the manager's RwLock guards), so
+/// readers are not blocked by fsync.
+///
+/// Serialization reads the freshest published state while the global lock is
+/// held, which keeps the final file contents equal to the final in-memory
+/// state even when several writers race: a later writer always writes a
+/// superset of what an earlier writer saw.
+fn persist_history_current(
     path: &Path,
     ngram_path: &Path,
-    data: &HistoryData,
-    ngrams: &NgramData,
+    data: &RwLock<HistoryData>,
+    ngrams: &RwLock<NgramData>,
 ) -> Result<()> {
     let _lock = history_write_lock().lock();
 
-    let content = serde_json::to_string_pretty(data).context("Failed to serialize history")?;
+    let content =
+        serde_json::to_string_pretty(&*data.read()).context("Failed to serialize history")?;
     replace_file_atomically(path, content.as_bytes())
         .with_context(|| format!("Failed to persist history to {:?}", path))?;
 
-    let content = serde_json::to_string_pretty(ngrams).context("Failed to serialize ngrams")?;
+    let content =
+        serde_json::to_string_pretty(&*ngrams.read()).context("Failed to serialize ngrams")?;
     replace_file_atomically(ngram_path, content.as_bytes())
         .with_context(|| format!("Failed to persist ngrams to {:?}", ngram_path))?;
 
     Ok(())
 }
 
-fn save_phrases_sync(path: &Path, phrases: &[PhraseEntry]) -> Result<()> {
+/// Serialize and persist the *current* phrases state under the global history
+/// write lock only (see [`persist_history_current`] for the rationale).
+fn persist_phrases_current(path: &Path, phrases: &RwLock<Vec<PhraseEntry>>) -> Result<()> {
     let _lock = history_write_lock().lock();
 
-    let content = serde_json::to_string_pretty(phrases).context("Failed to serialize phrases")?;
+    let content =
+        serde_json::to_string_pretty(&*phrases.read()).context("Failed to serialize phrases")?;
     replace_file_atomically(path, content.as_bytes())
         .with_context(|| format!("Failed to persist phrases to {:?}", path))?;
 
@@ -139,6 +158,8 @@ impl HistoryManager {
             data: RwLock::new(data),
             ngrams: RwLock::new(ngrams),
             phrases: RwLock::new(phrases),
+            history_version: AtomicU64::new(0),
+            phrase_version: AtomicU64::new(0),
         }
     }
 
@@ -154,18 +175,17 @@ impl HistoryManager {
             return Ok(());
         }
 
+        // Mutate in place under the write locks — no full dataset clones — and
+        // release the locks BEFORE the file writes (see persist_history_current).
         let mut data = self.data.write();
         let mut ngrams = self.ngrams.write();
 
-        let mut data_candidate = data.clone();
-        let mut ngrams_candidate = ngrams.clone();
-
         for token in &tokens {
-            if let Some(entry) = data_candidate.entries.iter_mut().find(|e| e.word == *token) {
+            if let Some(entry) = data.entries.iter_mut().find(|e| e.word == *token) {
                 entry.count += 1;
                 entry.last_used = Utc::now().timestamp();
             } else {
-                data_candidate.entries.push(HistoryEntry {
+                data.entries.push(HistoryEntry {
                     word: token.clone(),
                     count: 1,
                     last_used: Utc::now().timestamp(),
@@ -174,7 +194,7 @@ impl HistoryManager {
         }
 
         for window in tokens.windows(2) {
-            *ngrams_candidate
+            *ngrams
                 .bigrams
                 .entry(window[0].clone())
                 .or_default()
@@ -184,7 +204,7 @@ impl HistoryManager {
 
         for window in tokens.windows(3) {
             let key = trigram_key(&window[0], &window[1]);
-            *ngrams_candidate
+            *ngrams
                 .trigrams
                 .entry(key)
                 .or_default()
@@ -192,16 +212,15 @@ impl HistoryManager {
                 .or_insert(0) += 1;
         }
 
-        save_history_sync(
-            &self.path,
-            &self.ngram_path,
-            &data_candidate,
-            &ngrams_candidate,
-        )?;
+        drop(ngrams);
+        drop(data);
 
-        *data = data_candidate;
-        *ngrams = ngrams_candidate;
-        Ok(())
+        // Publish-immediately semantics: the mutation is already visible to
+        // readers. A write failure still returns Err but leaves the in-memory
+        // state internally consistent (it simply stays ahead of the file).
+        // This deliberately avoids cloning the full data/ngrams datasets just
+        // to roll back; no existing test requires persist-before-publish here.
+        persist_history_current(&self.path, &self.ngram_path, &self.data, &self.ngrams)
     }
 
     pub fn suggest(&self, query: &str, limit: usize) -> Vec<HistoryEntry> {
@@ -274,12 +293,30 @@ impl HistoryManager {
         let mut data = self.data.write();
         let mut ngrams = self.ngrams.write();
 
-        let empty_history = HistoryData::default();
-        let empty_ngrams = NgramData::default();
-        save_history_sync(&self.path, &self.ngram_path, &empty_history, &empty_ngrams)?;
+        // Rare user-triggered operation: snapshot for rollback is acceptable
+        // here so a failed write leaves the in-memory history untouched.
+        let data_snapshot = data.clone();
+        let ngrams_snapshot = ngrams.clone();
 
-        *data = empty_history;
-        *ngrams = empty_ngrams;
+        *data = HistoryData::default();
+        *ngrams = NgramData::default();
+
+        let my_version = self.history_version.fetch_add(1, Ordering::SeqCst) + 1;
+
+        drop(ngrams);
+        drop(data);
+
+        if let Err(e) =
+            persist_history_current(&self.path, &self.ngram_path, &self.data, &self.ngrams)
+        {
+            let mut data = self.data.write();
+            let mut ngrams = self.ngrams.write();
+            if self.history_version.load(Ordering::SeqCst) == my_version {
+                *data = data_snapshot;
+                *ngrams = ngrams_snapshot;
+            }
+            return Err(e);
+        }
         Ok(())
     }
 
@@ -305,16 +342,19 @@ impl HistoryManager {
         let now = Utc::now().timestamp();
 
         let mut phrases = self.phrases.write();
-        let mut candidate = phrases.clone();
+        // Phrase history is bounded (PHRASE_HISTORY_SIZE), so a snapshot clone
+        // for rollback is cheap and keeps persist-before-publish semantics: a
+        // failed write must not expose the unpersisted entry.
+        let snapshot = phrases.clone();
 
         let found = if provider.is_empty() && voice.is_empty() {
-            candidate
+            phrases
                 .iter_mut()
                 .find(|e| e.text.trim().to_lowercase() == trimmed_lower)
         } else {
             let prov_lower = provider.to_lowercase();
             let voice_lower = voice.to_lowercase();
-            candidate.iter_mut().find(|e| {
+            phrases.iter_mut().find(|e| {
                 e.text.trim().to_lowercase() == trimmed_lower
                     && e.provider.to_lowercase() == prov_lower
                     && e.voice.to_lowercase() == voice_lower
@@ -331,7 +371,7 @@ impl HistoryManager {
                 existing.cache_key = cache_key.to_string();
             }
         } else {
-            candidate.push(PhraseEntry {
+            phrases.push(PhraseEntry {
                 id: uuid::Uuid::new_v4().to_string(),
                 text: trimmed.to_string(),
                 count: 1,
@@ -342,22 +382,34 @@ impl HistoryManager {
             });
         }
 
-        while candidate.len() > PHRASE_HISTORY_SIZE {
-            if let Some(oldest_pos) = candidate
+        while phrases.len() > PHRASE_HISTORY_SIZE {
+            if let Some(oldest_pos) = phrases
                 .iter()
                 .enumerate()
                 .min_by_key(|(_, e)| e.last_used)
                 .map(|(i, _)| i)
             {
-                candidate.remove(oldest_pos);
+                phrases.remove(oldest_pos);
             } else {
                 break;
             }
         }
 
-        save_phrases_sync(&self.phrase_path, &candidate)?;
+        let my_version = self.phrase_version.fetch_add(1, Ordering::SeqCst) + 1;
 
-        *phrases = candidate;
+        drop(phrases);
+
+        if let Err(e) = persist_phrases_current(&self.phrase_path, &self.phrases) {
+            // Roll back the in-memory change so a failed write never exposes
+            // the unpersisted entry. Only restore when no concurrent writer has
+            // built on top of our mutation (detected via the version counter);
+            // otherwise the newer state is left intact and stays consistent.
+            let mut phrases = self.phrases.write();
+            if self.phrase_version.load(Ordering::SeqCst) == my_version {
+                *phrases = snapshot;
+            }
+            return Err(e);
+        }
         Ok(())
     }
 
@@ -381,22 +433,37 @@ impl HistoryManager {
 
     pub fn delete_phrase(&self, id: &str) -> Result<()> {
         let mut phrases = self.phrases.write();
-        let mut candidate = phrases.clone();
-        candidate.retain(|e| e.id != id);
+        let snapshot = phrases.clone();
+        phrases.retain(|e| e.id != id);
 
-        save_phrases_sync(&self.phrase_path, &candidate)?;
+        let my_version = self.phrase_version.fetch_add(1, Ordering::SeqCst) + 1;
+        drop(phrases);
 
-        *phrases = candidate;
+        if let Err(e) = persist_phrases_current(&self.phrase_path, &self.phrases) {
+            let mut phrases = self.phrases.write();
+            if self.phrase_version.load(Ordering::SeqCst) == my_version {
+                *phrases = snapshot;
+            }
+            return Err(e);
+        }
         Ok(())
     }
 
     pub fn clear_phrases(&self) -> Result<()> {
         let mut phrases = self.phrases.write();
+        let snapshot = phrases.clone();
+        phrases.clear();
 
-        let empty: Vec<PhraseEntry> = Vec::new();
-        save_phrases_sync(&self.phrase_path, &empty)?;
+        let my_version = self.phrase_version.fetch_add(1, Ordering::SeqCst) + 1;
+        drop(phrases);
 
-        *phrases = empty;
+        if let Err(e) = persist_phrases_current(&self.phrase_path, &self.phrases) {
+            let mut phrases = self.phrases.write();
+            if self.phrase_version.load(Ordering::SeqCst) == my_version {
+                *phrases = snapshot;
+            }
+            return Err(e);
+        }
         Ok(())
     }
 }
@@ -769,6 +836,38 @@ mod tests {
         let phrases = mgr.get_phrases(None, 100);
         assert_eq!(phrases.len(), 1);
         assert_eq!(phrases[0].text, "kept phrase");
+
+        let _ = fs::remove_file(&parent);
+    }
+
+    #[test]
+    fn record_text_returns_err_and_keeps_memory_consistent_on_persistence_failure() {
+        let (mgr, p1, _p2, _p3) = manager_in_tmp();
+
+        mgr.record_text("kept token").unwrap();
+
+        // Break persistence: replace the parent directory with a regular file so
+        // the history temporary file can no longer be created.
+        let parent = p1.parent().unwrap().to_path_buf();
+        fs::remove_dir_all(&parent).unwrap();
+        fs::write(&parent, "not a directory").unwrap();
+
+        let result = mgr.record_text("another token");
+        assert!(
+            result.is_err(),
+            "record_text must fail when persistence is broken"
+        );
+
+        // Publish-immediately semantics (documented in record_text): the write
+        // failure returns Err but the in-memory state stays internally
+        // consistent — queries keep working and retain the recorded tokens.
+        let suggestions = mgr.suggest("another", 10);
+        assert!(
+            suggestions.iter().any(|e| e.word == "another"),
+            "in-memory history must remain queryable after a failed write"
+        );
+        let suggestions = mgr.suggest("kept", 10);
+        assert!(suggestions.iter().any(|e| e.word == "kept"));
 
         let _ = fs::remove_file(&parent);
     }

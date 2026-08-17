@@ -69,6 +69,25 @@ describe('useWebViewRuntimeStatus', () => {
     expect(errorMessage.value).toBe('boom')
   })
 
+  it('keeps event state when the event arrives before the snapshot resolves', async () => {
+    let resolveSnapshot!: (value: unknown) => void
+    mocks.mockInvoke.mockImplementation(() => new Promise((resolve) => { resolveSnapshot = resolve }))
+
+    const { useWebViewRuntimeStatus } = await loadModule()
+    const { state, errorMessage } = useWebViewRuntimeStatus()
+
+    await vi.waitFor(() => expect(mocks.mockInvoke).toHaveBeenCalledTimes(1))
+
+    const callback = mocks.listenCallbacks.get('webview-server-status-changed')
+    expect(callback).toBeDefined()
+    callback?.({ payload: { state: 'running' } })
+
+    resolveSnapshot({ state: 'stopped' })
+
+    await vi.waitFor(() => expect(state.value).toBe('running'))
+    expect(errorMessage.value).toBeNull()
+  })
+
   it('registers a single listener across multiple calls', async () => {
     const { useWebViewRuntimeStatus } = await loadModule()
     useWebViewRuntimeStatus()

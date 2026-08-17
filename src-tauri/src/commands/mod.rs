@@ -103,6 +103,13 @@ pub async fn coordinate_shutdown(app_handle: AppHandle) {
     state.webview.send_event(crate::events::AppEvent::Quit);
 
     let _ = app_handle.emit("app-exit", ());
+
+    // Short grace period so background tasks (WebView/Twitch servers, playback,
+    // history flushes) observe the cancellation and release resources before
+    // the process exits. 300ms is enough for in-flight cancellation without
+    // making shutdown feel sluggish (it was 600ms previously).
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
     app_handle.exit(0);
 }
 

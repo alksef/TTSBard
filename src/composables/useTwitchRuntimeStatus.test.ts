@@ -59,6 +59,25 @@ describe('useTwitchRuntimeStatus', () => {
     expect(isConnected.value).toBe(true)
   })
 
+  it('keeps event state when the event arrives before the snapshot resolves', async () => {
+    let resolveSnapshot!: (value: unknown) => void
+    mocks.mockInvoke.mockImplementation(() => new Promise((resolve) => { resolveSnapshot = resolve }))
+
+    const { useTwitchRuntimeStatus } = await loadModule()
+    const { isConnected, status } = useTwitchRuntimeStatus()
+
+    await vi.waitFor(() => expect(mocks.mockInvoke).toHaveBeenCalledTimes(1))
+
+    const callback = mocks.listenCallbacks.get('twitch-status-changed')
+    expect(callback).toBeDefined()
+    callback?.({ payload: { Connected: null } })
+
+    resolveSnapshot({ Disconnected: null })
+
+    await vi.waitFor(() => expect(status.value).toBe('Connected'))
+    expect(isConnected.value).toBe(true)
+  })
+
   it('registers a single listener across multiple calls', async () => {
     mocks.mockInvoke.mockResolvedValue({ Disconnected: null })
 

@@ -9,9 +9,66 @@ use crate::webview::WebViewServer;
 use crate::webview::WebViewSettings;
 use crate::webview::WebViewServerStatus;
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
+
+/// Delay between WebView server respawn attempts after a startup error.
+///
+/// Prevents a tight CPU-spinning respawn loop when the server cannot bind,
+/// e.g. an invalid `bind_address` (see `webview/server.rs`). Chosen within
+/// 1–3s: short enough to recover quickly after a transient failure, long
+/// enough to avoid a busy loop.
+const SERVER_RESPAWN_BACKOFF: Duration = Duration::from_secs(2);
+
+/// How many consecutive startup failures (readiness never reached) are
+/// tolerated before the supervisor gives up and waits for an explicit user
+/// action (start/restart/settings change). Without this cap, a persistent
+/// failure such as a busy port makes the status flap Starting↔Error forever,
+/// which the WebView settings UI renders as a blinking panel.
+const MAX_START_ATTEMPTS: u32 = 3;
+
+/// Wait for the respawn backoff, bailing out early if shutdown was requested.
+/// Returns `true` when the supervisor loop should keep running, `false` when
+/// it must exit.
+async fn respawn_backoff(shutdown: &CancellationToken, delay: Duration) -> bool {
+    tokio::select! {
+        _ = shutdown.cancelled() => false,
+        _ = tokio::time::sleep(delay) => true,
+    }
+}
+
+/// Decide what the supervisor does after a startup failure.
+///
+/// While under [`MAX_START_ATTEMPTS`] consecutive failures: back off, then
+/// allow a respawn (transient failures still recover automatically). At the
+/// cap: stop retrying — the status stays `Error` (no flapping) — and wait
+/// for either shutdown or an explicit wake-up event (user start/restart or
+/// a settings change arriving via `webview_rx`), which resets the counter.
+/// Returns `true` to continue the supervision loop, `false` to exit.
+async fn respawn_or_give_up(
+    shutdown: &CancellationToken,
+    start_attempts: &mut u32,
+    webview_rx: &mut tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
+) -> bool {
+    *start_attempts += 1;
+    if *start_attempts < MAX_START_ATTEMPTS {
+        return respawn_backoff(shutdown, SERVER_RESPAWN_BACKOFF).await;
+    }
+
+    warn!(
+        attempts = *start_attempts,
+        "WebView server failed to start repeatedly; giving up until an explicit restart"
+    );
+    tokio::select! {
+        _ = shutdown.cancelled() => false,
+        _ = webview_rx.recv() => {
+            *start_attempts = 0;
+            true
+        }
+    }
+}
 
 /// Run WebView server in async context
 /// This function is called from a dedicated thread with tokio runtime
@@ -21,6 +78,10 @@ pub async fn run_webview_server(
     mut webview_rx: tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
     shutdown: CancellationToken,
 ) {
+    // Consecutive startup failures (readiness never reached). Reset on a
+    // successful start or after an explicit wake-up event following a give-up.
+    let mut start_attempts: u32 = 0;
+
     {
         let settings = webview_settings.read().await;
         if settings.start_on_boot && !settings.enabled {
@@ -103,16 +164,25 @@ pub async fn run_webview_server(
             });
 
             match ready_rx.await {
-                Ok(Ok(())) => state.webview.set_status(&app_handle, WebViewServerStatus::Running),
+                Ok(Ok(())) => {
+                    start_attempts = 0;
+                    state.webview.set_status(&app_handle, WebViewServerStatus::Running);
+                }
                 Ok(Err(message)) => {
                     state.webview.set_status(&app_handle, WebViewServerStatus::Error { message });
                     let _ = server_handle.await;
+                    if !respawn_or_give_up(&shutdown, &mut start_attempts, &mut webview_rx).await {
+                        return;
+                    }
                     continue;
                 }
                 Err(_) => {
                     state.webview.set_status(&app_handle, WebViewServerStatus::Error {
                         message: "WebView server stopped before readiness".into(),
                     });
+                    if !respawn_or_give_up(&shutdown, &mut start_attempts, &mut webview_rx).await {
+                        return;
+                    }
                     continue;
                 }
             }
@@ -288,5 +358,39 @@ pub async fn run_webview_server(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn respawn_backoff_constant_is_within_1_to_3_seconds() {
+        // The backoff must be a bounded delay (1–3s): large enough to stop a
+        // CPU-spinning respawn loop on persistent startup errors, small enough
+        // to recover quickly after a transient failure.
+        let ms = SERVER_RESPAWN_BACKOFF.as_millis();
+        assert!((1000..=3000).contains(&ms), "backoff out of bounds: {ms}ms");
+    }
+
+    #[tokio::test]
+    async fn respawn_backoff_waits_before_retry() {
+        let shutdown = CancellationToken::new();
+        let start = Instant::now();
+        let keep_running = respawn_backoff(&shutdown, Duration::from_millis(20)).await;
+        assert!(keep_running, "backoff must allow the loop to continue");
+        assert!(start.elapsed() >= Duration::from_millis(20));
+    }
+
+    #[tokio::test]
+    async fn respawn_backoff_exits_early_on_shutdown() {
+        let shutdown = CancellationToken::new();
+        shutdown.cancel();
+        let start = Instant::now();
+        let keep_running = respawn_backoff(&shutdown, Duration::from_secs(3600)).await;
+        assert!(!keep_running, "shutdown must abort the backoff wait");
+        assert!(start.elapsed() < Duration::from_secs(1));
     }
 }

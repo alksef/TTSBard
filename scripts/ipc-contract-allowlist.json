@@ -5,6 +5,18 @@
       "file": "src-tauri/src/setup.rs",
       "expression": "event_name",
       "reason": "The value is produced by AppEvent::to_tauri_event(); those event names are extracted into the inventory."
+    },
+    {
+      "kind": "frontend_invoke",
+      "file": "src/composables/runtimeStatusSource.ts",
+      "expression": "opts.command",
+      "reason": "Shared runtime-status source factory; every caller passes a literal command name (get_twitch_status / get_vtube_studio_status / get_webview_server_status) that is extracted into the inventory at the call sites via the composable wrappers."
+    },
+    {
+      "kind": "frontend_listen",
+      "file": "src/composables/runtimeStatusSource.ts",
+      "expression": "opts.event",
+      "reason": "Shared runtime-status source factory; every caller passes a literal event name (twitch-status-changed / vtube-studio-status-changed / webview-server-status-changed) that is extracted into the inventory at the call sites via the composable wrappers."
     }
   ]
 }

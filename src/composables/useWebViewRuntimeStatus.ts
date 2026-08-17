@@ -1,41 +1,26 @@
-import { ref, type Ref } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
-import { debugError } from '../utils/debug'
+import { computed, type Ref } from 'vue'
+import { createRuntimeStatusSource } from './runtimeStatusSource'
+import { convertWebViewStatusFromRust } from '../utils/rustStatus'
+import type { RustWebViewStatus, WebViewRuntimeState } from '../utils/rustStatus'
 
-export type WebViewRuntimeState = 'stopped' | 'starting' | 'running' | 'error'
+export type { WebViewRuntimeState } from '../utils/rustStatus'
 
-interface RustWebViewStatus {
-  state: WebViewRuntimeState
-  message?: string
-}
+const source = createRuntimeStatusSource<RustWebViewStatus>({
+  command: 'get_webview_server_status',
+  event: 'webview-server-status-changed',
+  convert: convertWebViewStatusFromRust,
+  initial: { state: 'stopped' },
+})
 
-const state = ref<WebViewRuntimeState>('stopped')
-const errorMessage = ref<string | null>(null)
-let initialized = false
-
-function apply(status: RustWebViewStatus) {
-  state.value = status.state
-  errorMessage.value = status.state === 'error' ? (status.message ?? null) : null
-}
-
-function init() {
-  if (initialized) return
-  initialized = true
-
-  listen<RustWebViewStatus>('webview-server-status-changed', (event) => {
-    apply(event.payload)
-  }).catch((e) => debugError('[useWebViewRuntimeStatus] Failed to subscribe:', e))
-
-  invoke<RustWebViewStatus>('get_webview_server_status')
-    .then((s) => apply(s))
-    .catch((e) => debugError('[useWebViewRuntimeStatus] Failed to load status:', e))
-}
+const state = computed(() => source.state.value.state)
+const errorMessage = computed(() =>
+  source.state.value.state === 'error' ? (source.state.value.message ?? null) : null,
+)
 
 export function useWebViewRuntimeStatus(): {
   state: Ref<WebViewRuntimeState>
   errorMessage: Ref<string | null>
 } {
-  init()
+  void source.ensureInit()
   return { state, errorMessage }
 }

@@ -73,7 +73,11 @@ export function useWebView() {
   })
 
   function showError(message: string) {
-    errorMessage.value = message
+    // Defensive normalization: the backend emits this event both directly
+    // (plain string) and via the AppEvent broadcast (externally tagged enum
+    // object {"WebViewServerError": "..."}). A non-string here used to crash
+    // the panel render (errorMessage.includes is not a function).
+    errorMessage.value = typeof message === 'string' ? message : String(message)
     if (errorTimeout !== null) {
       clearTimeout(errorTimeout)
     }
@@ -218,8 +222,26 @@ export function useWebView() {
     }
   }
 
+  async function refreshServerStatus(): Promise<void> {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        serverStatus.value = await invoke<WebViewServerStatus>('get_webview_server_status')
+        return
+      } catch (e) {
+        debugError('[WebView] Failed to refresh server status:', e)
+        if (attempt === 0) {
+          await new Promise(resolve => setTimeout(resolve, 500))
+        }
+      }
+    }
+  }
+
   async function sendTest() {
-    if (!testMessage.value.trim() || serverStatus.value.state !== 'running') return
+    if (!testMessage.value.trim()) return
+    if (serverStatus.value.state !== 'running') {
+      await refreshServerStatus()
+    }
+    if (serverStatus.value.state !== 'running') return
     try {
       await invoke('send_test_message', { text: testMessage.value })
       showError('Сообщение отправлено!')
@@ -254,8 +276,15 @@ export function useWebView() {
       debugError('[WebView] Failed to load runtime status:', e)
     }
     await listenerScope.track(
-      listen<string>('webview-server-error', (event) => {
-        showError(event.payload)
+      listen<unknown>('webview-server-error', (event) => {
+        // Two emitters share this event name: the direct emit sends a plain
+        // string, the AppEvent broadcast sends {"WebViewServerError": "..."}.
+        const payload = event.payload
+        if (typeof payload === 'string') {
+          showError(payload)
+        } else if (payload && typeof payload === 'object' && 'WebViewServerError' in payload) {
+          showError(String((payload as { WebViewServerError: unknown }).WebViewServerError))
+        }
       }),
     )
   })

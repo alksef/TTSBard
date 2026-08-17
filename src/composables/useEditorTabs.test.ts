@@ -325,6 +325,39 @@ describe('useEditorTabs', () => {
       await expect(init()).resolves.toBeUndefined()
       expect(tabs.value).toHaveLength(1)
     })
+
+    it('surfaces the save error via lastSaveError', async () => {
+      mockInvoke
+        .mockResolvedValueOnce(backendTabs)
+        .mockRejectedValueOnce(new Error('save failed'))
+
+      const { init, create, flushSave, lastSaveError } = useEditorTabs()
+      await init()
+      mockInvoke.mockClear()
+
+      create()
+      await flushSave()
+      expect(lastSaveError.value).toBe('save failed')
+    })
+
+    it('clears lastSaveError after a successful save', async () => {
+      mockInvoke
+        .mockResolvedValueOnce(backendTabs)
+        .mockRejectedValueOnce(new Error('save failed'))
+        .mockResolvedValueOnce(undefined)
+
+      const { init, create, flushSave, lastSaveError } = useEditorTabs()
+      await init()
+      mockInvoke.mockClear()
+
+      create()
+      await flushSave()
+      expect(lastSaveError.value).toBe('save failed')
+
+      create()
+      await flushSave()
+      expect(lastSaveError.value).toBeNull()
+    })
   })
 
   describe('serialized save queue', () => {
