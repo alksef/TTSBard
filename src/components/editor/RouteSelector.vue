@@ -141,16 +141,13 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
       @click.stop="toggleDropdown"
       @keydown="onKeydown"
     >
-      <template v-if="compact">
-        <component
-          v-for="dest in currentMeta.destinations"
-          :key="dest"
-          :is="destinationIcons[dest]"
-          :size="14"
-          class="dest-icon"
-        />
-      </template>
-      <span v-else class="route-label">{{ currentMeta.label }}</span>
+      <component
+        v-for="dest in currentMeta.destinations"
+        :key="dest"
+        :is="destinationIcons[dest]"
+        :size="14"
+        class="dest-icon"
+      />
       <ChevronDown :size="14" class="chevron" :class="{ 'chevron-open': open }" />
     </button>
 

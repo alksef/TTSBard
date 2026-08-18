@@ -21,7 +21,7 @@ import { acceptClear, appliesQuickEditorPolicy, applyAiResponse, type SubmitInte
 import { submitSpeech } from '../ipc/speech'
 import { deliverTwitchMessage } from '../ipc/twitchDelivery'
 import { matchesEditorHotkey } from './editor/keymapArbitration'
-import { Volume2, Clock, Keyboard, Send } from 'lucide-vue-next'
+import { Volume2, Clock, Keyboard, Twitch, ArrowDownToLine, Undo2 } from 'lucide-vue-next'
 import { enterOutcomeLabel, submitActionState } from './editor/submitAffordance'
 import RouteSelector from './editor/RouteSelector.vue'
 import { decodeRoutePrefix } from './editor/routeDecode'
@@ -102,13 +102,6 @@ function formatHotkeyDisplay(hotkey: { modifiers: string[]; key: string } | unde
 
 const submitContinueBinding = computed(() => formatHotkeyDisplay(hotkeySettings.value?.editor?.submit_continue))
 
-const hotkeyHintText = computed(() => {
-  const outcome = enterOutcomeLabel(quickEditorMode.value)
-  const binding = submitContinueBinding.value
-  const second = binding ? `  ·  ${binding} → отправить и продолжить` : ''
-  return `Enter → ${outcome}${second}`
-})
-
 const { isConnected: twitchConnected } = useTwitchRuntimeStatus()
 
 const defaultRouteFromSettings = computed<EditorRoute>(() => editorSettings.value?.default_route ?? 'everywhere')
@@ -142,13 +135,35 @@ const speakLabel = computed(() => {
     case 'accepted':
       return 'Принято'
     default:
-      return isTwitchOnly.value ? 'Отправить в Twitch' : 'Озвучить'
+      return isTwitchOnly.value ? 'Отправить' : 'Озвучить'
   }
 })
 
 const speakTitle = computed(() => {
-  const action = isTwitchOnly.value ? 'Отправить в Twitch' : 'Озвучить'
-  return submitState.value === 'submitting' ? 'Отправляется… (Enter)' : `${action} (Enter)`
+  if (submitState.value === 'submitting') return 'Отправляется… (Enter)'
+  // Twitch-only: the button label stays short; the hover tooltip carries the
+  // full semantics of the route.
+  if (isTwitchOnly.value) return 'Отправить текст в Twitch, без озвучки (Enter)'
+  return 'Озвучить (Enter)'
+})
+
+// Quick-editor mode indicator next to the speak button: reflects what happens
+// to the window after Enter. Hidden entirely for the disabled mode.
+const quickModeIndicator = computed(() => {
+  switch (quickEditorMode.value) {
+    case 'collapse':
+      return {
+        icon: ArrowDownToLine,
+        title: 'Быстрый редактор: после отправки окно скроется (Enter)',
+      }
+    case 'return_focus':
+      return {
+        icon: Undo2,
+        title: 'Быстрый редактор: после отправки фокус вернётся в предыдущее окно (Enter)',
+      }
+    default:
+      return null
+  }
 })
 
 const speakAriaLabel = computed(() => {
@@ -759,7 +774,15 @@ defineExpose({ focusEditor })
           <Keyboard :size="14" />
         </button>
         <div class="action-bar-spacer" />
-        <div v-if="!isMinimalMode" class="action-bar-hint">{{ hotkeyHintText }}</div>
+        <span
+          v-if="quickModeIndicator"
+          class="quick-mode-indicator"
+          role="img"
+          :title="quickModeIndicator.title"
+          :aria-label="quickModeIndicator.title"
+        >
+          <component :is="quickModeIndicator.icon" :size="13" />
+        </span>
         <button
           class="action-btn speak-btn"
           :class="{ 'icon-only': isMinimalMode }"
@@ -769,7 +792,7 @@ defineExpose({ focusEditor })
           :aria-label="speakAriaLabel"
           @click="handleEnter"
         >
-          <Send v-if="isTwitchOnly" :size="14" />
+          <Twitch v-if="isTwitchOnly" :size="14" />
           <Volume2 v-else :size="14" />
           <span v-if="!isMinimalMode">{{ speakLabel }}</span>
         </button>
@@ -913,6 +936,14 @@ defineExpose({ focusEditor })
   padding: 0.3rem 0.55rem;
 }
 
+/* Neutral hover: the typing toggle is a state indicator, not an action —
+   no accent fill on hover (overrides .action-btn:hover). */
+.typing-toggle-btn:hover:not(:disabled) {
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-strong);
+}
+
 .typing-toggle-btn.active {
   background: var(--color-bg-elevated);
   color: var(--color-text-primary);
@@ -940,16 +971,16 @@ defineExpose({ focusEditor })
   min-width: 0;
 }
 
-.action-bar-hint {
+/* Ambient indicator of the quick-editor mode (collapse / return focus);
+   hidden entirely when the mode is disabled. Not a control. */
+.quick-mode-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
   color: var(--color-text-secondary);
-  opacity: 0.9;
-  font-size: 0.75rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-  margin-right: 0.5rem;
-  text-align: right;
+  opacity: 0.8;
+  margin-right: 0.35rem;
 }
 
 @media (max-width: 960px) {

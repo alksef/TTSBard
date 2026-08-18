@@ -99,7 +99,7 @@ const ttsTheme = EditorView.theme({
     overflow: 'auto',
   },
   '.cm-content': {
-    padding: '1.35rem 1.45rem',
+    padding: '0.5rem 0.5rem',
     minHeight: '100%',
     caretColor: 'var(--color-text-primary)',
     fontFamily: 'var(--font-mono)',
@@ -123,7 +123,9 @@ const ttsTheme = EditorView.theme({
     color: 'var(--color-text-muted)',
     fontSize: 'clamp(1.1rem, 2vw, 1.35rem)',
     fontFamily: 'var(--font-mono)',
-    padding: '1.35rem 1.45rem',
+    // Rendered inside .cm-content, which already carries the editor padding —
+    // an extra padding here doubles the inset of the placeholder text.
+    padding: '0',
   },
   '.cm-activeLine': {
     background: 'transparent',

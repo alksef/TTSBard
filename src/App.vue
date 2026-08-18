@@ -472,7 +472,7 @@ onUnmounted(() => {
 }
 
 .integration-gap {
-  margin-left: 1.25rem;
+  margin-right: 0.5rem;
 }
 
 .titlebar-btn {
