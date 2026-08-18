@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, watch, shallowRef } from 'vue'
 import { EditorView, keymap } from '@codemirror/view'
 import { EditorState, Annotation, Prec } from '@codemirror/state'
-import { defaultKeymap, historyKeymap } from '@codemirror/commands'
+import { defaultKeymap, historyKeymap, history, redo, isolateHistory } from '@codemirror/commands'
 import {
   autocompletion,
   closeCompletion,
@@ -343,6 +343,7 @@ function createKeymap() {
         return false
       },
     },
+    { key: 'Mod-Shift-z', run: redo, preventDefault: true },
     ...defaultKeymap,
     ...historyKeymap,
   ])
@@ -454,6 +455,7 @@ function createState() {
         keydown: (event, targetView) =>
           handleSpellMenuKeydown(event) || handleEditorHotkey(event, targetView),
       }),
+      history(),
       ...createKeymap(),
       autocompletion({
         override: [hybridSource, presetSource],
@@ -526,7 +528,7 @@ watch(() => props.modelValue, (newVal) => {
   if (newVal !== currentDoc) {
     v.dispatch({
       changes: { from: 0, to: currentDoc.length, insert: newVal },
-      annotations: ExternalUpdate.of(true),
+      annotations: [ExternalUpdate.of(true), isolateHistory.of('full')],
     })
   }
 })

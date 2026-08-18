@@ -87,6 +87,10 @@ function mockSettings(): AppSettingsDto {
         previous_spelling_error: { modifiers: [], key: '' },
         next_tab: { modifiers: [], key: '' },
         previous_tab: { modifiers: [], key: '' },
+        cycle_route: { modifiers: [], key: '' },
+        toggle_typing: { modifiers: [], key: '' },
+        cycle_quick_mode: { modifiers: [], key: '' },
+        toggle_history: { modifiers: [], key: '' },
       },
     },
     vtube_studio: {

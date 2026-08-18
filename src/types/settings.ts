@@ -25,6 +25,10 @@ export interface EditorHotkeySettingsDto {
   previous_spelling_error: HotkeyDto
   next_tab: HotkeyDto
   previous_tab: HotkeyDto
+  cycle_route: HotkeyDto
+  toggle_typing: HotkeyDto
+  cycle_quick_mode: HotkeyDto
+  toggle_history: HotkeyDto
 }
 
 export interface HotkeySettingsDto {

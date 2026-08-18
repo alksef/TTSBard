@@ -22,9 +22,9 @@ import { submitSpeech } from '../ipc/speech'
 import { deliverTwitchMessage } from '../ipc/twitchDelivery'
 import { matchesEditorHotkey } from './editor/keymapArbitration'
 import { Volume2, Clock, Keyboard, Twitch, ArrowDownToLine, Undo2 } from 'lucide-vue-next'
-import { enterOutcomeLabel, submitActionState } from './editor/submitAffordance'
+import { enterOutcomeLabel, nextQuickMode, submitActionState } from './editor/submitAffordance'
 import RouteSelector from './editor/RouteSelector.vue'
-import { decodeRoutePrefix } from './editor/routeDecode'
+import { decodeRoutePrefix, ROUTE_ORDER } from './editor/routeDecode'
 import type { EditorRoute } from './editor/routeDecode'
 import { effectiveRoute, applyRouteToText, routeSubmit } from './editor/routeResolution'
 import { useTwitchRuntimeStatus } from '../composables/useTwitchRuntimeStatus'
@@ -71,7 +71,17 @@ const hotkeySettings = useHotkeysSettings()
 
 const appSettingsContext = useAppSettings()
 
-const quickEditorMode = computed<QuickEditorMode>(() => editorSettings.value?.quick ?? 'disabled')
+const quickEditorModeOverride = ref<QuickEditorMode | null>(null)
+
+const quickEditorMode = computed<QuickEditorMode>(() =>
+  quickEditorModeOverride.value ?? editorSettings.value?.quick ?? 'disabled',
+)
+
+watch(() => editorSettings.value?.quick, (val) => {
+  if (val !== undefined) {
+    quickEditorModeOverride.value = val
+  }
+})
 
 const lastSubmitOutcome = ref<'none' | 'accepted' | 'error'>('none')
 let submitOutcomeTimer: ReturnType<typeof setTimeout> | null = null
@@ -126,6 +136,19 @@ async function handleSaveDefault(route: EditorRoute) {
   } catch (e) {
     debugError('[InputPanel] Failed to save default route:', e)
   }
+}
+
+function nextRouteFrom(current: EditorRoute, twitchConnected: boolean): EditorRoute | null {
+  const allowed = ROUTE_ORDER.filter(route => route !== 'twitch_only' || twitchConnected)
+  const idx = allowed.indexOf(current)
+  if (idx === -1 || allowed.length <= 1) return null
+  return allowed[(idx + 1) % allowed.length]
+}
+
+function cycleRoute() {
+  const next = nextRouteFrom(currentRoute.value, twitchConnected.value)
+  if (next === null) return
+  handleRouteSelect(next)
 }
 
 const speakLabel = computed(() => {
@@ -259,6 +282,19 @@ function toggleTypingEnabled() {
     typingEnabledOverride.value = prev
     console.error('[InputPanel] Failed to save typing enabled:', e)
   })
+}
+
+async function cycleQuickMode() {
+  const prev = quickEditorMode.value
+  const next = nextQuickMode(prev)
+  if (next === prev) return
+  quickEditorModeOverride.value = next
+  try {
+    await invoke('set_editor_quick', { value: next })
+  } catch (e) {
+    quickEditorModeOverride.value = prev
+    console.error('[InputPanel] Failed to save quick editor mode:', e)
+  }
 }
 
 async function reloadPreprocessorData() {
@@ -674,12 +710,37 @@ async function handleEditorScopeKeydown(event: KeyboardEvent) {
     : matchesEditorHotkey(bindings.previous_tab, event)
       ? previousTab()
       : false
-  if (!switched) return
+  if (switched) {
+    event.preventDefault()
+    event.stopPropagation()
+    await nextTick()
+    focusEditor()
+    return
+  }
 
-  event.preventDefault()
-  event.stopPropagation()
-  await nextTick()
-  focusEditor()
+  if (matchesEditorHotkey(bindings.cycle_route, event)) {
+    event.preventDefault()
+    event.stopPropagation()
+    cycleRoute()
+    return
+  }
+  if (matchesEditorHotkey(bindings.toggle_typing, event)) {
+    event.preventDefault()
+    event.stopPropagation()
+    toggleTypingEnabled()
+    return
+  }
+  if (matchesEditorHotkey(bindings.cycle_quick_mode, event)) {
+    event.preventDefault()
+    event.stopPropagation()
+    await cycleQuickMode()
+    return
+  }
+  if (matchesEditorHotkey(bindings.toggle_history, event)) {
+    event.preventDefault()
+    event.stopPropagation()
+    toggleHistory()
+  }
 }
 
 defineExpose({ focusEditor })
@@ -903,6 +964,14 @@ defineExpose({ focusEditor })
   background: var(--color-accent);
   color: var(--color-text-on-accent, #ffffff);
   border-color: var(--color-accent);
+}
+
+/* The history toggle is a state indicator, not an action: no accent fill
+   while open (overrides .action-btn.active). */
+.action-btn.history-btn.active {
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-strong);
 }
 
 .ai-btn.loading {

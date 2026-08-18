@@ -294,6 +294,30 @@
           "shift"
         ],
         "key": "Tab"
+      },
+      "cycle_route": {
+        "modifiers": [
+          "ctrl"
+        ],
+        "key": "R"
+      },
+      "toggle_typing": {
+        "modifiers": [
+          "ctrl"
+        ],
+        "key": "T"
+      },
+      "cycle_quick_mode": {
+        "modifiers": [
+          "ctrl"
+        ],
+        "key": "W"
+      },
+      "toggle_history": {
+        "modifiers": [
+          "ctrl"
+        ],
+        "key": "H"
       }
     }
   },

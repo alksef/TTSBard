@@ -1152,6 +1152,10 @@ pub struct EditorHotkeySettingsDto {
     pub previous_spelling_error: HotkeyDto,
     pub next_tab: HotkeyDto,
     pub previous_tab: HotkeyDto,
+    pub cycle_route: HotkeyDto,
+    pub toggle_typing: HotkeyDto,
+    pub cycle_quick_mode: HotkeyDto,
+    pub toggle_history: HotkeyDto,
 }
 
 impl From<EditorHotkeySettings> for EditorHotkeySettingsDto {
@@ -1163,6 +1167,10 @@ impl From<EditorHotkeySettings> for EditorHotkeySettingsDto {
             previous_spelling_error: h.previous_spelling_error.into(),
             next_tab: h.next_tab.into(),
             previous_tab: h.previous_tab.into(),
+            cycle_route: h.cycle_route.into(),
+            toggle_typing: h.toggle_typing.into(),
+            cycle_quick_mode: h.cycle_quick_mode.into(),
+            toggle_history: h.toggle_history.into(),
         }
     }
 }
@@ -1176,6 +1184,10 @@ impl From<EditorHotkeySettingsDto> for EditorHotkeySettings {
             previous_spelling_error: dto.previous_spelling_error.into(),
             next_tab: dto.next_tab.into(),
             previous_tab: dto.previous_tab.into(),
+            cycle_route: dto.cycle_route.into(),
+            toggle_typing: dto.toggle_typing.into(),
+            cycle_quick_mode: dto.cycle_quick_mode.into(),
+            toggle_history: dto.toggle_history.into(),
         }
     }
 }
@@ -1659,6 +1671,22 @@ mod tests {
                     modifiers: vec![HotkeyModifierDto::Ctrl, HotkeyModifierDto::Shift],
                     key: "Tab".into(),
                 },
+                cycle_route: HotkeyDto {
+                    modifiers: vec![HotkeyModifierDto::Ctrl],
+                    key: "R".into(),
+                },
+                toggle_typing: HotkeyDto {
+                    modifiers: vec![HotkeyModifierDto::Ctrl],
+                    key: "T".into(),
+                },
+                cycle_quick_mode: HotkeyDto {
+                    modifiers: vec![HotkeyModifierDto::Ctrl],
+                    key: "W".into(),
+                },
+                toggle_history: HotkeyDto {
+                    modifiers: vec![HotkeyModifierDto::Ctrl],
+                    key: "H".into(),
+                },
             },
         };
 
@@ -1955,6 +1983,22 @@ mod tests {
                     key: String::new(),
                 },
                 previous_tab: HotkeyDto {
+                    modifiers: vec![],
+                    key: String::new(),
+                },
+                cycle_route: HotkeyDto {
+                    modifiers: vec![],
+                    key: String::new(),
+                },
+                toggle_typing: HotkeyDto {
+                    modifiers: vec![],
+                    key: String::new(),
+                },
+                cycle_quick_mode: HotkeyDto {
+                    modifiers: vec![],
+                    key: String::new(),
+                },
+                toggle_history: HotkeyDto {
                     modifiers: vec![],
                     key: String::new(),
                 },

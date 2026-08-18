@@ -111,6 +111,14 @@ describe('editor hotkey matching', () => {
     expect(matchesEditorHotkey({ modifiers: [], key: '' }, event({ code: 'KeyE' }))).toBe(false)
   })
 
+  it('matches Ctrl+R for cycle_route default', () => {
+    const ctrlR: HotkeyDto = { modifiers: ['ctrl'], key: 'R' }
+    expect(matchesEditorHotkey(ctrlR, event({ code: 'KeyR', ctrlKey: true }))).toBe(true)
+    expect(matchesEditorHotkey(ctrlR, event({ code: 'KeyR' }))).toBe(false)
+    expect(matchesEditorHotkey(ctrlR, event({ code: 'KeyR', ctrlKey: true, shiftKey: true }))).toBe(false)
+    expect(matchesEditorHotkey(ctrlR, event({ code: 'KeyR', ctrlKey: true, altKey: true }))).toBe(false)
+  })
+
   it('maps Enter and Tab to their physical codes', () => {
     expect(hotkeyCode('ENTER')).toBe('Enter')
     expect(hotkeyCode('TAB')).toBe('Tab')

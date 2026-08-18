@@ -32,6 +32,10 @@ pub struct EditorHotkeySettings {
     pub previous_spelling_error: Hotkey,
     pub next_tab: Hotkey,
     pub previous_tab: Hotkey,
+    pub cycle_route: Hotkey,
+    pub toggle_typing: Hotkey,
+    pub cycle_quick_mode: Hotkey,
+    pub toggle_history: Hotkey,
 }
 
 impl Default for EditorHotkeySettings {
@@ -43,6 +47,10 @@ impl Default for EditorHotkeySettings {
             previous_spelling_error: Hotkey::default_previous_spelling_error(),
             next_tab: Hotkey::default_next_tab(),
             previous_tab: Hotkey::default_previous_tab(),
+            cycle_route: Hotkey::default_cycle_route(),
+            toggle_typing: Hotkey::default_toggle_typing(),
+            cycle_quick_mode: Hotkey::default_cycle_quick_mode(),
+            toggle_history: Hotkey::default_toggle_history(),
         }
     }
 }
@@ -55,6 +63,10 @@ pub const EDITOR_ACTION_IDS: &[&str] = &[
     "previous_spelling_error",
     "next_tab",
     "previous_tab",
+    "cycle_route",
+    "toggle_typing",
+    "cycle_quick_mode",
+    "toggle_history",
 ];
 
 impl EditorHotkeySettings {
@@ -70,6 +82,10 @@ impl EditorHotkeySettings {
             "previous_spelling_error" => Some(&self.previous_spelling_error),
             "next_tab" => Some(&self.next_tab),
             "previous_tab" => Some(&self.previous_tab),
+            "cycle_route" => Some(&self.cycle_route),
+            "toggle_typing" => Some(&self.toggle_typing),
+            "cycle_quick_mode" => Some(&self.cycle_quick_mode),
+            "toggle_history" => Some(&self.toggle_history),
             _ => None,
         }
     }
@@ -82,6 +98,10 @@ impl EditorHotkeySettings {
             "previous_spelling_error" => Some(&mut self.previous_spelling_error),
             "next_tab" => Some(&mut self.next_tab),
             "previous_tab" => Some(&mut self.previous_tab),
+            "cycle_route" => Some(&mut self.cycle_route),
+            "toggle_typing" => Some(&mut self.toggle_typing),
+            "cycle_quick_mode" => Some(&mut self.cycle_quick_mode),
+            "toggle_history" => Some(&mut self.toggle_history),
             _ => None,
         }
     }
@@ -243,6 +263,38 @@ impl Hotkey {
         Self {
             modifiers: vec![HotkeyModifier::Ctrl, HotkeyModifier::Shift],
             key: "Tab".to_string(),
+        }
+    }
+
+    /// Create a hotkey with Ctrl+R (cycle route default)
+    pub fn default_cycle_route() -> Self {
+        Self {
+            modifiers: vec![HotkeyModifier::Ctrl],
+            key: "R".to_string(),
+        }
+    }
+
+    /// Create a hotkey with Ctrl+T (toggle typing default)
+    pub fn default_toggle_typing() -> Self {
+        Self {
+            modifiers: vec![HotkeyModifier::Ctrl],
+            key: "T".to_string(),
+        }
+    }
+
+    /// Create a hotkey with Ctrl+W (cycle quick editor mode default)
+    pub fn default_cycle_quick_mode() -> Self {
+        Self {
+            modifiers: vec![HotkeyModifier::Ctrl],
+            key: "W".to_string(),
+        }
+    }
+
+    /// Create a hotkey with Ctrl+H (toggle history default)
+    pub fn default_toggle_history() -> Self {
+        Self {
+            modifiers: vec![HotkeyModifier::Ctrl],
+            key: "H".to_string(),
         }
     }
 
@@ -474,6 +526,42 @@ mod tests {
     }
 
     #[test]
+    fn test_default_cycle_route() {
+        let hk = Hotkey::default_cycle_route();
+        assert_eq!(hk.key, "R");
+        assert_eq!(hk.modifiers.len(), 1);
+        assert_eq!(hk.modifiers[0], HotkeyModifier::Ctrl);
+        assert_eq!(hk.format_display(), "Ctrl+R");
+    }
+
+    #[test]
+    fn test_default_toggle_typing() {
+        let hk = Hotkey::default_toggle_typing();
+        assert_eq!(hk.key, "T");
+        assert_eq!(hk.modifiers.len(), 1);
+        assert_eq!(hk.modifiers[0], HotkeyModifier::Ctrl);
+        assert_eq!(hk.format_display(), "Ctrl+T");
+    }
+
+    #[test]
+    fn test_default_cycle_quick_mode() {
+        let hk = Hotkey::default_cycle_quick_mode();
+        assert_eq!(hk.key, "W");
+        assert_eq!(hk.modifiers.len(), 1);
+        assert_eq!(hk.modifiers[0], HotkeyModifier::Ctrl);
+        assert_eq!(hk.format_display(), "Ctrl+W");
+    }
+
+    #[test]
+    fn test_default_toggle_history() {
+        let hk = Hotkey::default_toggle_history();
+        assert_eq!(hk.key, "H");
+        assert_eq!(hk.modifiers.len(), 1);
+        assert_eq!(hk.modifiers[0], HotkeyModifier::Ctrl);
+        assert_eq!(hk.format_display(), "Ctrl+H");
+    }
+
+    #[test]
     fn test_hotkey_is_empty() {
         let empty = Hotkey {
             modifiers: vec![],
@@ -498,10 +586,14 @@ mod tests {
         assert_eq!(s.previous_spelling_error.key, "F7");
         assert_eq!(s.next_tab.key, "Tab");
         assert_eq!(s.previous_tab.key, "Tab");
+        assert_eq!(s.cycle_route.key, "R");
+        assert_eq!(s.toggle_typing.key, "T");
+        assert_eq!(s.cycle_quick_mode.key, "W");
+        assert_eq!(s.toggle_history.key, "H");
     }
 
     #[test]
-    fn is_valid_action_id_accepts_all_six() {
+    fn is_valid_action_id_accepts_all_editor_ids() {
         for &id in EDITOR_ACTION_IDS {
             assert!(EditorHotkeySettings::is_valid_action_id(id), "{} should be valid", id);
         }
@@ -514,6 +606,10 @@ mod tests {
         let s = EditorHotkeySettings::default();
         assert_eq!(s.get_by_id("edit_word").unwrap().key, "E");
         assert_eq!(s.get_by_id("submit_continue").unwrap().key, "Enter");
+        assert_eq!(s.get_by_id("cycle_route").unwrap().key, "R");
+        assert_eq!(s.get_by_id("toggle_typing").unwrap().key, "T");
+        assert_eq!(s.get_by_id("cycle_quick_mode").unwrap().key, "W");
+        assert_eq!(s.get_by_id("toggle_history").unwrap().key, "H");
         assert!(s.get_by_id("bogus").is_none());
     }
 
@@ -552,6 +648,21 @@ mod tests {
         };
         let conflict = s.find_duplicate("edit_word", &binding);
         assert!(conflict.is_none());
+    }
+
+    #[test]
+    fn find_duplicate_detects_new_action_bindings() {
+        let mut s = EditorHotkeySettings::default();
+        s.cycle_route = Hotkey {
+            modifiers: vec![HotkeyModifier::Ctrl],
+            key: "R".to_string(),
+        };
+        s.toggle_typing = Hotkey {
+            modifiers: vec![HotkeyModifier::Ctrl],
+            key: "R".to_string(),
+        };
+        let conflict = s.find_duplicate("cycle_route", &s.cycle_route.clone());
+        assert_eq!(conflict, Some("toggle_typing"));
     }
 
     #[test]
@@ -632,6 +743,10 @@ mod tests {
         assert_eq!(settings.editor.previous_spelling_error.key, "F7");
         assert_eq!(settings.editor.next_tab.key, "Tab");
         assert_eq!(settings.editor.previous_tab.key, "Tab");
+        assert_eq!(settings.editor.cycle_route.key, "R");
+        assert_eq!(settings.editor.toggle_typing.key, "T");
+        assert_eq!(settings.editor.cycle_quick_mode.key, "W");
+        assert_eq!(settings.editor.toggle_history.key, "H");
     }
 
     #[test]

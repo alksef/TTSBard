@@ -986,6 +986,10 @@ fn editor_action_label(action_id: &str) -> &str {
         "previous_spelling_error" => "предыдущей ошибки",
         "next_tab" => "следующей вкладки",
         "previous_tab" => "предыдущей вкладки",
+        "cycle_route" => "смены маршрута",
+        "toggle_typing" => "переключения передачи набора текста",
+        "cycle_quick_mode" => "смены режима быстрого редактора",
+        "toggle_history" => "показа/скрытия истории",
         _ => action_id,
     }
 }
@@ -2144,6 +2148,10 @@ impl SettingsManager {
             "previous_spelling_error" => Hotkey::default_previous_spelling_error(),
             "next_tab" => Hotkey::default_next_tab(),
             "previous_tab" => Hotkey::default_previous_tab(),
+            "cycle_route" => Hotkey::default_cycle_route(),
+            "toggle_typing" => Hotkey::default_toggle_typing(),
+            "cycle_quick_mode" => Hotkey::default_cycle_quick_mode(),
+            "toggle_history" => Hotkey::default_toggle_history(),
             _ => return Err(anyhow::anyhow!("Invalid editor action: {}", action_id)),
         };
         self.set_editor_hotkey(action_id, &default)?;

@@ -2,11 +2,33 @@ import { describe, it, expect } from 'vitest'
 import {
   enterOutcomeLabel,
   enterOutcomeLabelCompact,
+  nextQuickMode,
   submitActionState,
 } from './submitAffordance'
 import type { QuickEditorMode } from '../../types/settings'
 
 const modes: QuickEditorMode[] = ['disabled', 'collapse', 'return_focus']
+
+describe('nextQuickMode', () => {
+  it('cycles disabled → collapse → return_focus → disabled', () => {
+    expect(nextQuickMode('disabled')).toBe('collapse')
+    expect(nextQuickMode('collapse')).toBe('return_focus')
+    expect(nextQuickMode('return_focus')).toBe('disabled')
+  })
+
+  it('returns a mode after every step of the full cycle', () => {
+    let mode: QuickEditorMode = 'disabled'
+    const seen = new Set<QuickEditorMode>()
+    for (let i = 0; i < modes.length; i++) {
+      seen.add(mode)
+      mode = nextQuickMode(mode)
+    }
+    expect(seen.size).toBe(modes.length)
+    for (const m of modes) {
+      expect(seen.has(m)).toBe(true)
+    }
+  })
+})
 
 describe('enterOutcomeLabel', () => {
   it('labels disabled mode', () => {

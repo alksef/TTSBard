@@ -1,5 +1,17 @@
 import type { QuickEditorMode } from '../../types/settings'
 
+const QUICK_MODE_CYCLE: readonly QuickEditorMode[] = [
+  'disabled',
+  'collapse',
+  'return_focus',
+]
+
+/** Next quick editor mode in the cycle `disabled → collapse → return_focus → disabled`. */
+export function nextQuickMode(mode: QuickEditorMode): QuickEditorMode {
+  const idx = QUICK_MODE_CYCLE.indexOf(mode)
+  return QUICK_MODE_CYCLE[(idx + 1) % QUICK_MODE_CYCLE.length]
+}
+
 export function enterOutcomeLabel(mode: QuickEditorMode): string {
   switch (mode) {
     case 'disabled':
