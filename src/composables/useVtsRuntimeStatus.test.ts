@@ -33,28 +33,33 @@ describe('useVtsRuntimeStatus', () => {
     mocks.listenCallbacks.clear()
     mocks.mockInvoke.mockImplementation((cmd: string) => {
       if (cmd === 'get_vtube_studio_authenticated') return Promise.resolve(true)
+      if (cmd === 'get_vtube_studio_desired_running') return Promise.resolve(true)
       return Promise.resolve('Connected')
     })
   })
 
-  it('derives state and authenticated from init', async () => {
+  it('derives state and connection flags from init', async () => {
     const { useVtsRuntimeStatus } = await loadModule()
-    const { state, authenticated } = useVtsRuntimeStatus()
+    const { state, authenticated, desiredRunning } = useVtsRuntimeStatus()
 
     await vi.waitFor(() => expect(state.value).toBe('Connected'))
     await vi.waitFor(() => expect(authenticated.value).toBe(true))
+    await vi.waitFor(() => expect(desiredRunning.value).toBe(true))
     expect(mocks.mockInvoke).toHaveBeenCalledWith('get_vtube_studio_status')
     expect(mocks.mockInvoke).toHaveBeenCalledWith('get_vtube_studio_authenticated')
+    expect(mocks.mockInvoke).toHaveBeenCalledWith('get_vtube_studio_desired_running')
   })
 
-  it('refreshes authenticated on every status event', async () => {
+  it('refreshes connection flags on every status event', async () => {
     const { useVtsRuntimeStatus } = await loadModule()
-    const { state, authenticated } = useVtsRuntimeStatus()
+    const { state, authenticated, desiredRunning } = useVtsRuntimeStatus()
 
     await vi.waitFor(() => expect(authenticated.value).toBe(true))
+    await vi.waitFor(() => expect(desiredRunning.value).toBe(true))
 
     mocks.mockInvoke.mockImplementation((cmd: string) => {
       if (cmd === 'get_vtube_studio_authenticated') return Promise.resolve(false)
+      if (cmd === 'get_vtube_studio_desired_running') return Promise.resolve(false)
       return Promise.resolve('Disconnected')
     })
 
@@ -64,6 +69,7 @@ describe('useVtsRuntimeStatus', () => {
 
     expect(state.value).toBe('Disconnected')
     await vi.waitFor(() => expect(authenticated.value).toBe(false))
+    await vi.waitFor(() => expect(desiredRunning.value).toBe(false))
   })
 
   it('registers a single listener across multiple calls', async () => {

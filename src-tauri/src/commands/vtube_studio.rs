@@ -755,6 +755,11 @@ pub fn get_vtube_studio_authenticated(state: State<'_, AppState>) -> bool {
 }
 
 #[tauri::command]
+pub fn get_vtube_studio_desired_running(state: State<'_, AppState>) -> bool {
+    state.vtube_studio.is_desired_running()
+}
+
+#[tauri::command]
 pub async fn test_vtube_studio_typing(
     timeout_ms: u64,
     repeat_count: u64,

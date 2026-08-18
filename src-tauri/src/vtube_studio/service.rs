@@ -806,8 +806,10 @@ impl VTubeStudioService {
         let mut ws = match ws_result {
             Ok(ws) => ws,
             Err(e) => {
+                // desired_running сохраняем: terminal Error при живом desired
+                // должен дать красный статус в titlebar (ROADMAP-074); сброс
+                // происходит только при явном disconnect().
                 self.is_authenticated.store(false, Ordering::SeqCst);
-                self.set_desired_running(false);
                 self.set_connection_status(VTubeStudioConnectionStatus::Error);
                 return Err(e);
             }
@@ -818,7 +820,6 @@ impl VTubeStudioService {
             Ok(token) => token,
             Err(e) => {
                 self.is_authenticated.store(false, Ordering::SeqCst);
-                self.set_desired_running(false);
                 self.set_connection_status(VTubeStudioConnectionStatus::Error);
                 return Err(e);
             }
@@ -829,7 +830,6 @@ impl VTubeStudioService {
                 Ok(fresh_ws) => fresh_ws,
                 Err(e) => {
                     self.is_authenticated.store(false, Ordering::SeqCst);
-                    self.set_desired_running(false);
                     self.set_connection_status(VTubeStudioConnectionStatus::Error);
                     return Err(e);
                 }
@@ -942,6 +942,7 @@ impl VTubeStudioService {
                 Err(e) => {
                     debug!(error = %e, "VTS connect for typing=true failed");
                     self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                    self.emit_status();
                     return Err(e);
                 }
             };
@@ -952,6 +953,7 @@ impl VTubeStudioService {
                     debug!(error = %e, "VTS auth for typing=true failed, discarding broken socket");
                     self.is_authenticated.store(false, Ordering::SeqCst);
                     self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                    self.emit_status();
                     return Err(e);
                 }
             }
@@ -960,6 +962,7 @@ impl VTubeStudioService {
             self.is_authenticated.store(true, Ordering::SeqCst);
             self.start_heartbeat_locked(&mut inner);
             self.set_connection_status(VTubeStudioConnectionStatus::Connected);
+            self.emit_status();
         }
 
         {

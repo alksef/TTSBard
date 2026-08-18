@@ -522,6 +522,7 @@ pub fn run() {
             commands::vtube_studio::restart_vtube_studio,
             commands::vtube_studio::get_vtube_studio_status,
             commands::vtube_studio::get_vtube_studio_authenticated,
+            commands::vtube_studio::get_vtube_studio_desired_running,
             // Logging commands
             get_logging_settings,
             save_logging_settings,

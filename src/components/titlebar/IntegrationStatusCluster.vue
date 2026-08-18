@@ -25,7 +25,7 @@ import {
 
 const { state: webviewState, errorMessage: webviewErrorMessage } = useWebViewRuntimeStatus()
 const { status: twitchStatus } = useTwitchRuntimeStatus()
-const { state: vtsState, authenticated: vtsAuthenticated } = useVtsRuntimeStatus()
+const { state: vtsState, authenticated: vtsAuthenticated, desiredRunning: vtsDesiredRunning } = useVtsRuntimeStatus()
 
 const webviewSettings = useWebViewSettings()
 const twitchSettings = useTwitchSettings()
@@ -48,7 +48,9 @@ const vtsRuntime = computed<VtsRuntime>(() => {
 
 const webviewDesired = computed<WebViewDesired>(() => ({ enabled: webviewSettings.value?.enabled ?? false }))
 const twitchDesired = computed<TwitchDesired>(() => ({ enabled: twitchSettings.value?.enabled ?? false }))
-const vtsDesired = computed<VtsDesired>(() => ({ shouldRun: vtsSettings.value?.enabled ?? false }))
+const vtsDesired = computed<VtsDesired>(() => ({
+  shouldRun: (vtsSettings.value?.enabled ?? false) || vtsDesiredRunning.value,
+}))
 
 interface StatusSlot {
   service: 'webview' | 'twitch' | 'vts'
