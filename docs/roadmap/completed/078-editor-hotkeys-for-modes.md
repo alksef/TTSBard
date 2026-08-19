@@ -1,6 +1,6 @@
 ---
 id: ROADMAP-078
-status: in_progress
+status: completed
 created: 2026-08-19
 updated: 2026-08-19
 related_tasks: []
@@ -52,12 +52,24 @@ matchesEditorHotkey, set_editor_hotkey с duplicate-проверкой, HotkeysP
 
 ## Критерии завершения
 
-- все четыре действия работают с клавиатуры при фокусе в редакторе;
-- биндинги переназначаются, конфликты детектируются;
-- в minimal mode работают так же;
-- npm test / build, cargo test зелёные.
+- [x] все четыре действия работают с клавиатуры при фокусе в редакторе;
+- [x] биндинги переназначаются, конфликты детектируются;
+- [x] в minimal mode работают так же;
+- [x] npm test / build, cargo test зелёные.
 
 ## Не входит
 
 - глобальные (не editor-scoped) хоткеи;
 - изменение существующих дефолтов submit/edit_word/орфографии/вкладок.
+
+## Outcome
+
+Реализовано в `10f2f34` (2026-08-19), ручная проверка пользователя пройдена.
+
+- Четыре editor-хоткея: `cycle_route` (Ctrl+R), `toggle_typing` (Ctrl+T),
+  `cycle_quick_mode` (Ctrl+W), `toggle_history` (Ctrl+H) — backend-конфиг
+  с defaults и labels, арбитраж в `handleEditorScopeKeydown` до чистого
+  Enter, строки в HotkeysPanel с duplicate-проверкой.
+- Повторно использованы существующие функции панели; quick-mode
+  персистится через `set_editor_quick` и отражается индикатором у кнопки
+  отправки.

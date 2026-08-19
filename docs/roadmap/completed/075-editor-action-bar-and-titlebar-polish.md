@@ -1,8 +1,8 @@
 ---
 id: ROADMAP-075
-status: planned
+status: completed
 created: 2026-08-17
-updated: 2026-08-17
+updated: 2026-08-19
 related_tasks: []
 ---
 
@@ -139,3 +139,17 @@ compact width: окно кнопок не должно переноситься 
 
 - [ROADMAP-073 — маршрут фразы и результат доставки](../completed/073-readable-message-routing-and-delivery-outcomes.md)
 - [ROADMAP-074 — статусы интеграций в titlebar](../completed/074-ambient-integration-status.md)
+
+## Outcome
+
+Закрыт 2026-08-19 по ручной проверке пользователя.
+
+- пп. 1, 2, 3, 5 — 075a (`c274e5c`, до squash-истории); п. 7 — `bf06485`
+  (destinations-иконки в обоих режимах).
+- п. 4 (мигание WebView): причина — snapshot-race статус-композаблов,
+  закрыта в ROADMAP-076 (`1b50259`); наблюдением подтверждено — мигания нет.
+- п. 6 («Озвучить»): twitch-only вариант — короткий лейбл «Отправить» +
+  иконка Twitch (`bf06485`); accent-доминантность основного состояния
+  признана приемлемой по ручной пробе, переработка не требуется.
+- Сверх спеки (`bf06485`): индикатор быстрого редактора у кнопки отправки,
+  нейтральный hover typing-toggle, фикс двойного inset у placeholder.

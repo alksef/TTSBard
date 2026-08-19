@@ -38,9 +38,7 @@ related_tasks: []
 
 ## Активные направления
 
-| Item | Статус | Следующий шаг |
-|---|---|---|
-| [ROADMAP-075 — полировка action bar и titlebar](./active/075-editor-action-bar-and-titlebar-polish.md) | in_progress | Остались пп. 4 (мигание WebView), 6 (кнопка «Озвучить»), 7 (иконки маршрута); пп. 1, 2, 3, 5 закрыты в 075a. |
+Активных направлений нет.
 
 ## Завершённые направления
 
@@ -51,6 +49,8 @@ related_tasks: []
 ### Редактор и история
 
 - [ROADMAP-080 — сохранение текста редактора после отправки](./completed/080-keep-text-after-submit.md)
+- [ROADMAP-078 — горячие клавиши режимов редактора](./completed/078-editor-hotkeys-for-modes.md)
+- [ROADMAP-075 — полировка action bar и titlebar](./completed/075-editor-action-bar-and-titlebar-polish.md)
 - [ROADMAP-074 — статусы интеграций в titlebar](./completed/074-ambient-integration-status.md)
 - [ROADMAP-073 — маршрут фразы и результат доставки](./completed/073-readable-message-routing-and-delivery-outcomes.md)
 - [ROADMAP-071 — отправка редактора и читаемый быстрый режим](./completed/071-editor-submit-and-quick-mode-affordance.md)
@@ -128,6 +128,7 @@ related_tasks: []
 
 ### VTube Studio и WebView
 
+- [ROADMAP-079 — затухание ошибки ручного подключения VTS](./completed/079-vts-manual-connect-error-decay.md)
 - [ROADMAP-042 — VTube Studio typing UI](./completed/042-vtube-studio-typing-ui.md)
 - [ROADMAP-043 — WebView typing events](./completed/043-webview-editor-typing-events.md)
 - [ROADMAP-044 — VTube Studio connection lifecycle](./completed/044-vtube-studio-connection-lifecycle-ui.md)
