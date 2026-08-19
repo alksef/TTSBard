@@ -458,19 +458,19 @@ h2 {
 }
 
 .status-button.stop {
-  background: var(--danger-bg-weak);
+  background: linear-gradient(135deg, var(--danger-gradient-start) 0%, var(--danger-gradient-end) 100%);
 }
 
-.status-button.stop:hover {
-  background: var(--danger-bg-hover);
+.status-button.stop:hover:not(.disabled) {
+  filter: brightness(1.06);
 }
 
 .status-button.refresh {
-  background: var(--btn-accent-bg);
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
 }
 
-.status-button.refresh:hover {
-  background: var(--btn-accent-bg-hover);
+.status-button.refresh:hover:not(.disabled) {
+  filter: brightness(1.06);
 }
 
 .status-button.disabled {
