@@ -309,6 +309,28 @@ pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std:
 
     // Show main window after backend is fully initialized
     if let Some(main_window) = app.get_webview_window("main") {
+        if settings.start_compact {
+            // Start directly in compact mode: enforce compact bounds and resize
+            // to the saved compact dimensions before the window becomes visible
+            // (no animation/guards needed since the window is still hidden).
+            let width = windows.main.compact_width;
+            let height = windows.main.compact_height;
+            let min_size = tauri::Size::Physical(tauri::PhysicalSize {
+                width: 300,
+                height: 300,
+            });
+            let max_size = tauri::Size::Physical(tauri::PhysicalSize {
+                width: 500,
+                height: 500,
+            });
+            let _ = main_window.set_min_size(Some(min_size));
+            let _ = main_window.set_max_size(Some(max_size));
+            let _ = main_window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+                width,
+                height,
+            }));
+            info!(width, height, "Main window started in compact mode");
+        }
         let _ = main_window.show();
         info!("Main window shown");
     }

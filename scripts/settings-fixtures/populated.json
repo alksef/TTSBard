@@ -166,7 +166,8 @@
   "general": {
     "hotkey_enabled": true,
     "theme": "dark",
-    "show_playback_on_start": false
+    "show_playback_on_start": false,
+    "start_compact": false
   },
   "editor": {
     "quick": "collapse",

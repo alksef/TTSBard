@@ -1173,6 +1173,9 @@ pub struct AppSettings {
     /// Показывать окно управления воспроизведением при запуске
     #[serde(default)]
     pub show_playback_on_start: bool,
+    /// Запускать главное окно сразу в компактном режиме
+    #[serde(default)]
+    pub start_compact: bool,
 }
 
 impl Default for AppSettings {
@@ -1192,6 +1195,7 @@ impl Default for AppSettings {
             hotkeys: HotkeySettings::default(),
             vtube_studio: VTubeStudioSettings::default(),
             show_playback_on_start: false,
+            start_compact: false,
         }
     }
 }
@@ -2201,6 +2205,11 @@ impl SettingsManager {
     /// Set show playback control window on start
     pub fn set_show_playback_on_start(&self, value: bool) -> Result<()> {
         self.update_field("/show_playback_on_start", &value)
+    }
+
+    /// Set start in compact mode
+    pub fn set_start_compact(&self, value: bool) -> Result<()> {
+        self.update_field("/start_compact", &value)
     }
 
     // ========== VTube Studio Settings ==========

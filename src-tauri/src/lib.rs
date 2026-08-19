@@ -73,6 +73,7 @@ use commands::{
     set_main_compact_dims, set_main_custom_background, set_main_custom_opacity, set_main_opacity,
     set_main_opacity_compact_only, set_openai_api_key, set_openai_voice,
     set_playback_appearance_source, set_show_playback_on_start, set_soundpanel_appearance_source,
+    set_start_compact,
     set_speaker_device, set_speaker_enabled, set_speaker_volume, set_tts_provider,
     set_virtual_mic_device, set_virtual_mic_volume, speak_text_raw_export, stop_preview,
     test_audio_device, toggle_playback_control_window, toggle_soundpanel_window,
@@ -608,6 +609,7 @@ pub fn run() {
             get_visibility_snapshot,
             set_show_playback_on_start,
             get_show_playback_on_start,
+            set_start_compact,
             // Window appearance commands
             get_main_appearance,
             set_main_custom_background,

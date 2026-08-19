@@ -299,6 +299,21 @@ pub fn get_show_playback_on_start(settings_manager: State<'_, SettingsManager>) 
     settings_manager.get_show_playback_on_start()
 }
 
+/// Set start in compact mode
+#[tauri::command]
+pub async fn set_start_compact(
+    value: bool,
+    app_handle: AppHandle,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<(), String> {
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_start_compact(value)
+    })
+    .await?;
+    super::emit_settings_changed(&app_handle);
+    Ok(())
+}
+
 /// Get all hotkey settings
 #[tauri::command]
 pub async fn get_hotkey_settings(
@@ -347,7 +362,7 @@ pub async fn set_hotkey(
             "окна управления воспроизведением",
         ),
         ("return_previous_window", "возврата в предыдущее окно"),
-        ("toggle_minimal_mode", "переключения минимального режима"),
+        ("toggle_minimal_mode", "переключения компактного режима"),
     ];
     for other_name in &all_global_names {
         if *other_name == name.as_str() {

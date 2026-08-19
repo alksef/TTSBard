@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { Minimize2, Maximize2 } from 'lucide-vue-next'
-import { useWindowsSettings } from '../composables/useAppSettings'
+import { useGeneralSettings, useWindowsSettings } from '../composables/useAppSettings'
 import { compactModeState, initCompactDims } from '../composables/compactModeState'
 import { debugError } from '../utils/debug'
 
@@ -10,6 +10,7 @@ const isMinimalMode = ref(false)
 const isAnimating = ref(false)
 
 const windowsSettings = useWindowsSettings()
+const generalSettings = useGeneralSettings()
 
 const emit = defineEmits<{
   minimalModeChanged: [isMinimal: boolean]
@@ -26,6 +27,24 @@ initCompactDims(
 const compactWidth = computed(() => compactModeState.width)
 
 const compactHeight = computed(() => compactModeState.height)
+
+// When the app was started in compact mode (the backend already resized the
+// window before showing it), adopt the compact UI state once settings load
+// without invoking a backend resize. The one-shot guard keeps later settings
+// reloads (e.g. toggling the setting) from re-entering compact mode.
+let startCompactApplied = false
+watch(
+  generalSettings,
+  (settings) => {
+    if (startCompactApplied || !settings) return
+    startCompactApplied = true
+    if (settings.start_compact) {
+      isMinimalMode.value = true
+      emit('minimalModeChanged', true)
+    }
+  },
+  { immediate: true },
+)
 
 async function toggleMinimalMode() {
   if (isAnimating.value) return
@@ -66,7 +85,7 @@ async function toggleMinimalMode() {
     class="minimal-mode-toggle"
     :class="{ 'is-minimal': isMinimalMode, 'is-animating': isAnimating }"
     @click="toggleMinimalMode"
-    :title="isMinimalMode ? 'Восстановить' : 'Минимальный режим'"
+    :title="isMinimalMode ? 'Восстановить' : 'Компактный режим'"
   >
     <Minimize2 v-if="!isMinimalMode" :size="18" />
     <Maximize2 v-else :size="18" />

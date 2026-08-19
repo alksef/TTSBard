@@ -153,7 +153,8 @@
   },
   "general": {
     "hotkey_enabled": false,
-    "show_playback_on_start": false
+    "show_playback_on_start": false,
+    "start_compact": false
   },
   "editor": {
     "quick": "disabled",

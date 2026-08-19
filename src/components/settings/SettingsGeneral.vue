@@ -5,6 +5,7 @@ import { AlertTriangle } from 'lucide-vue-next';
 import { useGeneralSettings, useWindowsSettings, useLoggingSettings } from '../../composables/useAppSettings';
 
 const showPlaybackOnStart = ref(false);
+const startCompact = ref(false);
 
 // Get settings from composables
 const generalSettings = useGeneralSettings();
@@ -77,6 +78,17 @@ async function onLoggingLevelChange(event: Event) {
   }
 }
 
+async function toggleStartCompact() {
+  try {
+    const newValue = !startCompact.value;
+    startCompact.value = newValue;
+    await invoke('set_start_compact', { value: newValue });
+  } catch (e) {
+    startCompact.value = !startCompact.value;
+    showError('Ошибка сохранения настройки: ' + (e as Error).message);
+  }
+}
+
 async function toggleShowPlaybackOnStart() {
   try {
     const newValue = !showPlaybackOnStart.value;
@@ -92,6 +104,7 @@ async function toggleShowPlaybackOnStart() {
 watch(generalSettings, (newSettings) => {
   if (!newSettings) return;
   showPlaybackOnStart.value = newSettings.show_playback_on_start ?? false;
+  startCompact.value = newSettings.start_compact ?? false;
 }, { immediate: true });
 
 watch(windowsSettings, (newSettings) => {
@@ -107,6 +120,22 @@ watch(loggingSettings, (newSettings) => {
 
 <template>
   <div class="settings-general">
+    <!-- Start in compact mode -->
+    <section class="settings-section">
+      <div class="setting-row">
+        <label class="setting-label checkbox-label">
+          <input
+            :checked="startCompact"
+            @change="toggleStartCompact"
+            type="checkbox"
+            class="checkbox-input"
+          />
+          <span>Запускать в компактном режиме</span>
+        </label>
+        <span class="setting-hint">При запуске окно открывается уменьшенным — только редактор</span>
+      </div>
+    </section>
+
     <!-- Exclude from Capture -->
     <section class="settings-section">
       <div class="setting-row">

@@ -790,6 +790,7 @@ pub struct GeneralSettingsDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
     pub show_playback_on_start: bool,
+    pub start_compact: bool,
 }
 
 impl GeneralSettingsDto {
@@ -801,6 +802,7 @@ impl GeneralSettingsDto {
                 crate::config::settings::Theme::Light => "light".to_string(),
             }),
             show_playback_on_start: config.show_playback_on_start,
+            start_compact: config.start_compact,
         }
     }
 }
@@ -1565,6 +1567,7 @@ mod tests {
             hotkey_enabled: true,
             theme: Some("dark".into()),
             show_playback_on_start: false,
+            start_compact: false,
         };
 
         let editor = EditorSettingsDto {
@@ -1904,6 +1907,7 @@ mod tests {
             hotkey_enabled: false,
             theme: None,
             show_playback_on_start: false,
+            start_compact: false,
         };
 
         let editor = EditorSettingsDto {

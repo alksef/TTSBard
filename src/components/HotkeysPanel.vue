@@ -469,7 +469,7 @@ onUnmounted(async () => {
       <!-- Minimal Mode Toggle Hotkey (main-window-local, like return focus) -->
       <div class="hotkey-row">
         <div class="hotkey-label">
-          <span>Минимальный режим окна</span>
+          <span>Компактный режим</span>
         </div>
         <div class="hotkey-actions">
           <span v-if="hotkeys && !recordingFor" class="hotkey-value">

@@ -58,7 +58,7 @@ function mockSettings(): AppSettingsDto {
       compressor: { enabled: false, threshold_db: -20, ratio: 4, attack_ms: 5, release_ms: 50, knee_db: 6, makeup_db: 0 },
       limiter: { enabled: false, ceiling_db: -1, release_ms: 50 },
     },
-    general: { hotkey_enabled: true, theme: 'dark', show_playback_on_start: false },
+    general: { hotkey_enabled: true, theme: 'dark', show_playback_on_start: false, start_compact: false },
     logging: { enabled: true, level: 'info', module_levels: {} },
     preprocessor: { enabled: false, replacements_count: 0 },
     soundpanel_bindings: [],

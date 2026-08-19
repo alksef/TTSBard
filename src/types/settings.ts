@@ -322,6 +322,7 @@ export interface GeneralSettingsDto {
   hotkey_enabled: boolean
   theme?: Theme
   show_playback_on_start: boolean
+  start_compact: boolean
 }
 
 // ============================================================================
