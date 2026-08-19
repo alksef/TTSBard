@@ -50,3 +50,37 @@ export function submitActionState(
       return 'idle'
   }
 }
+
+/**
+ * Submit intent that affects what happens to the editor text and window.
+ *
+ * - `quick`: plain Enter / the «Озвучить» button.
+ * - `continue`: Ctrl+Enter (submit_continue) — submit and stay in the editor.
+ * - `keep_text`: Alt+Enter (submit_keep_text) — one-shot inversion of the
+ *   keep-text setting, quick policy applied as configured.
+ * - `keep_focus`: Ctrl+Alt+Enter (submit_keep_focus) — submit, keep the text
+ *   and stay in the editor (quick policy not applied).
+ */
+export type SubmitKeepIntent = 'quick' | 'continue' | 'keep_text' | 'keep_focus'
+
+export type SubmitKeepDecision = {
+  keepText: boolean
+  applyQuickPolicy: boolean
+}
+
+export function resolveKeepText(
+  setting: boolean,
+  intent: SubmitKeepIntent,
+): SubmitKeepDecision {
+  switch (intent) {
+    case 'keep_focus':
+      return { keepText: true, applyQuickPolicy: false }
+    case 'keep_text':
+      return { keepText: !setting, applyQuickPolicy: true }
+    case 'continue':
+      return { keepText: setting, applyQuickPolicy: false }
+    case 'quick':
+      return { keepText: setting, applyQuickPolicy: true }
+  }
+}
+

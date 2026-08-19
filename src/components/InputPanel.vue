@@ -17,12 +17,13 @@ import { useEditorTabs } from '../composables/useEditorTabs'
 import EditorTabs from './editor/EditorTabs.vue'
 import StatusMessage from './shared/StatusMessage.vue'
 import { useTypingBurst, type TypingConsumer } from '../composables/useTypingBurst'
-import { acceptClear, appliesQuickEditorPolicy, applyAiResponse, type SubmitIntent } from './inputAcceptance'
+import { acceptClear, applyAiResponse } from './inputAcceptance'
 import { submitSpeech } from '../ipc/speech'
 import { deliverTwitchMessage } from '../ipc/twitchDelivery'
 import { matchesEditorHotkey } from './editor/keymapArbitration'
 import { Volume2, Clock, Keyboard, Twitch, ArrowDownToLine, Undo2 } from 'lucide-vue-next'
-import { enterOutcomeLabel, nextQuickMode, submitActionState } from './editor/submitAffordance'
+import { enterOutcomeLabel, nextQuickMode, submitActionState, resolveKeepText } from './editor/submitAffordance'
+import type { SubmitKeepIntent } from './editor/submitAffordance'
 import RouteSelector from './editor/RouteSelector.vue'
 import { decodeRoutePrefix, ROUTE_ORDER } from './editor/routeDecode'
 import type { EditorRoute } from './editor/routeDecode'
@@ -545,7 +546,7 @@ watch(activeId, () => {
   lastSubmitOutcome.value = 'none'
 })
 
-async function handleSubmit(intent: SubmitIntent) {
+async function handleSubmit(intent: SubmitKeepIntent) {
   const currentText = text.value
   const senderTabId = activeId.value
   const mode = editorSettings.value?.quick ?? 'disabled'
@@ -556,6 +557,8 @@ async function handleSubmit(intent: SubmitIntent) {
   clearSubmitOutcomeTimer()
   typingBurst.stop()
   isSpeakingInFlight.value = true
+
+  const decision = resolveKeepText(editorSettings.value?.keep_text_after_send ?? false, intent)
 
   const submittedDecoded = decodeRoutePrefix(currentText)
   const tabRouteAtSubmit = active.value.route
@@ -568,9 +571,12 @@ async function handleSubmit(intent: SubmitIntent) {
       await submitSpeech(submitRouting.outgoingText)
     }
     await recordHistory(submittedDecoded.text)
-    tabs.value = acceptClear(tabs.value, senderTabId, currentText)
 
-    if (appliesQuickEditorPolicy(intent)) {
+    if (!decision.keepText) {
+      tabs.value = acceptClear(tabs.value, senderTabId, currentText)
+    }
+
+    if (decision.applyQuickPolicy) {
       if (mode === 'collapse') {
         await hideMainWindow()
       } else if (mode === 'return_focus') {
@@ -587,10 +593,12 @@ async function handleSubmit(intent: SubmitIntent) {
 
     await nextTick()
     const senderTab = tabs.value.find(t => t.id === senderTabId)
-    if (activeId.value === senderTabId && senderTab?.text === '') {
-      lastSubmitOutcome.value = 'accepted'
-      scheduleOutcomeReset()
-      if (senderTab.route === tabRouteAtSubmit) {
+    if (activeId.value === senderTabId) {
+      if (senderTab?.text === '') {
+        lastSubmitOutcome.value = 'accepted'
+        scheduleOutcomeReset()
+      }
+      if (senderTab && senderTab.route === tabRouteAtSubmit) {
         senderTab.route = undefined
       }
     }
@@ -704,6 +712,19 @@ async function handleEditorScopeKeydown(event: KeyboardEvent) {
   if (event.target instanceof HTMLInputElement) return
   const bindings = hotkeySettings.value?.editor
   if (!bindings) return
+
+  if (matchesEditorHotkey(bindings.submit_keep_focus, event)) {
+    event.preventDefault()
+    event.stopPropagation()
+    await handleSubmit('keep_focus')
+    return
+  }
+  if (matchesEditorHotkey(bindings.submit_keep_text, event)) {
+    event.preventDefault()
+    event.stopPropagation()
+    await handleSubmit('keep_text')
+    return
+  }
 
   const switched = matchesEditorHotkey(bindings.next_tab, event)
     ? nextTab()

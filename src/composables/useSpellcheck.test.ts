@@ -33,6 +33,7 @@ function createSettings(overrides?: Partial<AppSettingsDto['editor']>): AppSetti
     typing_idle_timeout_ms: 800,
     typing_enabled: true,
     default_route: 'everywhere',
+    keep_text_after_send: false,
     ...overrides,
   }
 }

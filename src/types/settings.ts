@@ -21,6 +21,8 @@ export interface HotkeyDto {
 export interface EditorHotkeySettingsDto {
   edit_word: HotkeyDto
   submit_continue: HotkeyDto
+  submit_keep_text: HotkeyDto
+  submit_keep_focus: HotkeyDto
   next_spelling_error: HotkeyDto
   previous_spelling_error: HotkeyDto
   next_tab: HotkeyDto
@@ -346,6 +348,7 @@ export interface EditorSettingsDto {
   typing_idle_timeout_ms: number
   typing_enabled: boolean
   default_route: EditorRoute
+  keep_text_after_send: boolean
 }
 
 // ============================================================================

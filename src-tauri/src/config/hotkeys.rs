@@ -28,6 +28,8 @@ pub struct Hotkey {
 pub struct EditorHotkeySettings {
     pub edit_word: Hotkey,
     pub submit_continue: Hotkey,
+    pub submit_keep_text: Hotkey,
+    pub submit_keep_focus: Hotkey,
     pub next_spelling_error: Hotkey,
     pub previous_spelling_error: Hotkey,
     pub next_tab: Hotkey,
@@ -43,6 +45,8 @@ impl Default for EditorHotkeySettings {
         Self {
             edit_word: Hotkey::default_edit_word(),
             submit_continue: Hotkey::default_submit_continue(),
+            submit_keep_text: Hotkey::default_submit_keep_text(),
+            submit_keep_focus: Hotkey::default_submit_keep_focus(),
             next_spelling_error: Hotkey::default_next_spelling_error(),
             previous_spelling_error: Hotkey::default_previous_spelling_error(),
             next_tab: Hotkey::default_next_tab(),
@@ -59,6 +63,8 @@ impl Default for EditorHotkeySettings {
 pub const EDITOR_ACTION_IDS: &[&str] = &[
     "edit_word",
     "submit_continue",
+    "submit_keep_text",
+    "submit_keep_focus",
     "next_spelling_error",
     "previous_spelling_error",
     "next_tab",
@@ -78,6 +84,8 @@ impl EditorHotkeySettings {
         match id {
             "edit_word" => Some(&self.edit_word),
             "submit_continue" => Some(&self.submit_continue),
+            "submit_keep_text" => Some(&self.submit_keep_text),
+            "submit_keep_focus" => Some(&self.submit_keep_focus),
             "next_spelling_error" => Some(&self.next_spelling_error),
             "previous_spelling_error" => Some(&self.previous_spelling_error),
             "next_tab" => Some(&self.next_tab),
@@ -94,6 +102,8 @@ impl EditorHotkeySettings {
         match id {
             "edit_word" => Some(&mut self.edit_word),
             "submit_continue" => Some(&mut self.submit_continue),
+            "submit_keep_text" => Some(&mut self.submit_keep_text),
+            "submit_keep_focus" => Some(&mut self.submit_keep_focus),
             "next_spelling_error" => Some(&mut self.next_spelling_error),
             "previous_spelling_error" => Some(&mut self.previous_spelling_error),
             "next_tab" => Some(&mut self.next_tab),
@@ -230,6 +240,22 @@ impl Hotkey {
     pub fn default_submit_continue() -> Self {
         Self {
             modifiers: vec![HotkeyModifier::Ctrl],
+            key: "Enter".to_string(),
+        }
+    }
+
+    /// Create a hotkey with Alt+Enter (submit and keep text default)
+    pub fn default_submit_keep_text() -> Self {
+        Self {
+            modifiers: vec![HotkeyModifier::Alt],
+            key: "Enter".to_string(),
+        }
+    }
+
+    /// Create a hotkey with Ctrl+Alt+Enter (submit, keep text and focus default)
+    pub fn default_submit_keep_focus() -> Self {
+        Self {
+            modifiers: vec![HotkeyModifier::Ctrl, HotkeyModifier::Alt],
             key: "Enter".to_string(),
         }
     }
@@ -494,6 +520,25 @@ mod tests {
     }
 
     #[test]
+    fn test_default_submit_keep_text() {
+        let hk = Hotkey::default_submit_keep_text();
+        assert_eq!(hk.key, "Enter");
+        assert_eq!(hk.modifiers.len(), 1);
+        assert_eq!(hk.modifiers[0], HotkeyModifier::Alt);
+        assert_eq!(hk.format_display(), "Alt+Enter");
+    }
+
+    #[test]
+    fn test_default_submit_keep_focus() {
+        let hk = Hotkey::default_submit_keep_focus();
+        assert_eq!(hk.key, "Enter");
+        assert_eq!(hk.modifiers.len(), 2);
+        assert_eq!(hk.modifiers[0], HotkeyModifier::Ctrl);
+        assert_eq!(hk.modifiers[1], HotkeyModifier::Alt);
+        assert_eq!(hk.format_display(), "Ctrl+Alt+Enter");
+    }
+
+    #[test]
     fn test_default_next_spelling_error() {
         let hk = Hotkey::default_next_spelling_error();
         assert_eq!(hk.key, "F7");
@@ -582,6 +627,8 @@ mod tests {
         let s = EditorHotkeySettings::default();
         assert_eq!(s.edit_word.key, "E");
         assert_eq!(s.submit_continue.key, "Enter");
+        assert_eq!(s.submit_keep_text.key, "Enter");
+        assert_eq!(s.submit_keep_focus.key, "Enter");
         assert_eq!(s.next_spelling_error.key, "F7");
         assert_eq!(s.previous_spelling_error.key, "F7");
         assert_eq!(s.next_tab.key, "Tab");
@@ -606,6 +653,8 @@ mod tests {
         let s = EditorHotkeySettings::default();
         assert_eq!(s.get_by_id("edit_word").unwrap().key, "E");
         assert_eq!(s.get_by_id("submit_continue").unwrap().key, "Enter");
+        assert_eq!(s.get_by_id("submit_keep_text").unwrap().key, "Enter");
+        assert_eq!(s.get_by_id("submit_keep_focus").unwrap().key, "Enter");
         assert_eq!(s.get_by_id("cycle_route").unwrap().key, "R");
         assert_eq!(s.get_by_id("toggle_typing").unwrap().key, "T");
         assert_eq!(s.get_by_id("cycle_quick_mode").unwrap().key, "W");
@@ -739,6 +788,8 @@ mod tests {
         let settings: HotkeySettings = serde_json::from_str(old_json).unwrap();
         assert_eq!(settings.editor.edit_word.key, "E");
         assert_eq!(settings.editor.submit_continue.key, "Enter");
+        assert_eq!(settings.editor.submit_keep_text.key, "Enter");
+        assert_eq!(settings.editor.submit_keep_focus.key, "Enter");
         assert_eq!(settings.editor.next_spelling_error.key, "F7");
         assert_eq!(settings.editor.previous_spelling_error.key, "F7");
         assert_eq!(settings.editor.next_tab.key, "Tab");

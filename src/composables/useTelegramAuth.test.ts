@@ -58,7 +58,7 @@ function mockSettings(): AppSettingsDto {
     logging: { enabled: true, level: 'info', module_levels: {} },
     preprocessor: { enabled: false, replacements_count: 0 },
     soundpanel_bindings: [],
-    editor: { quick: 'disabled', ai: false, ai_completion: false, spellcheck_enabled: false, spellcheck_source: 'online', editor_height: 200, typing_idle_timeout_ms: 800, typing_enabled: true, default_route: 'everywhere' },
+    editor: { quick: 'disabled', ai: false, ai_completion: false, spellcheck_enabled: false, spellcheck_source: 'online', editor_height: 200, typing_idle_timeout_ms: 800, typing_enabled: true, default_route: 'everywhere', keep_text_after_send: false },
     ai: {
       provider: 'openai',
       openai: { api_key: null, use_proxy: false, model: 'gpt-4o-mini' },
@@ -79,6 +79,8 @@ function mockSettings(): AppSettingsDto {
       editor: {
         edit_word: { modifiers: [], key: '' },
         submit_continue: { modifiers: [], key: '' },
+        submit_keep_text: { modifiers: [], key: '' },
+        submit_keep_focus: { modifiers: [], key: '' },
         next_spelling_error: { modifiers: [], key: '' },
         previous_spelling_error: { modifiers: [], key: '' },
         next_tab: { modifiers: [], key: '' },

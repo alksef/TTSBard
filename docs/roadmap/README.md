@@ -41,6 +41,7 @@ related_tasks: []
 | Item | Статус | Следующий шаг |
 |---|---|---|
 | [ROADMAP-075 — полировка action bar и titlebar](./active/075-editor-action-bar-and-titlebar-polish.md) | in_progress | Остались пп. 4 (мигание WebView), 6 (кнопка «Озвучить»), 7 (иконки маршрута); пп. 1, 2, 3, 5 закрыты в 075a. |
+| [ROADMAP-080 — сохранение текста редактора после отправки](./active/080-keep-text-after-submit.md) | planned | Реализация: настройка + Alt+Enter / Ctrl+Alt+Enter. |
 
 ## Завершённые направления
 

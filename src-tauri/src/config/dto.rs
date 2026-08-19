@@ -855,6 +855,7 @@ pub struct EditorSettingsDto {
     pub typing_idle_timeout_ms: u32,
     pub typing_enabled: bool,
     pub default_route: String,
+    pub keep_text_after_send: bool,
 }
 
 /// Spell check source DTO
@@ -1148,6 +1149,8 @@ impl From<HotkeyDto> for Hotkey {
 pub struct EditorHotkeySettingsDto {
     pub edit_word: HotkeyDto,
     pub submit_continue: HotkeyDto,
+    pub submit_keep_text: HotkeyDto,
+    pub submit_keep_focus: HotkeyDto,
     pub next_spelling_error: HotkeyDto,
     pub previous_spelling_error: HotkeyDto,
     pub next_tab: HotkeyDto,
@@ -1163,6 +1166,8 @@ impl From<EditorHotkeySettings> for EditorHotkeySettingsDto {
         Self {
             edit_word: h.edit_word.into(),
             submit_continue: h.submit_continue.into(),
+            submit_keep_text: h.submit_keep_text.into(),
+            submit_keep_focus: h.submit_keep_focus.into(),
             next_spelling_error: h.next_spelling_error.into(),
             previous_spelling_error: h.previous_spelling_error.into(),
             next_tab: h.next_tab.into(),
@@ -1180,6 +1185,8 @@ impl From<EditorHotkeySettingsDto> for EditorHotkeySettings {
         Self {
             edit_word: dto.edit_word.into(),
             submit_continue: dto.submit_continue.into(),
+            submit_keep_text: dto.submit_keep_text.into(),
+            submit_keep_focus: dto.submit_keep_focus.into(),
             next_spelling_error: dto.next_spelling_error.into(),
             previous_spelling_error: dto.previous_spelling_error.into(),
             next_tab: dto.next_tab.into(),
@@ -1376,6 +1383,7 @@ impl AppSettingsDto {
                 typing_idle_timeout_ms: params.config.editor.typing_idle_timeout_ms,
                 typing_enabled: params.config.editor.typing_enabled,
                 default_route: params.config.editor.default_route.as_str().to_string(),
+                keep_text_after_send: params.config.editor.keep_text_after_send,
             },
             logging: params.config.logging.clone(),
             preprocessor: PreprocessorSettingsDto::from_preprocessor(params.preprocessor),
@@ -1566,6 +1574,7 @@ mod tests {
             typing_idle_timeout_ms: 800,
             typing_enabled: true,
             default_route: "no_twitch".into(),
+            keep_text_after_send: true,
         };
 
         let logging = LoggingSettingsDto {
@@ -1653,6 +1662,14 @@ mod tests {
                 },
                 submit_continue: HotkeyDto {
                     modifiers: vec![HotkeyModifierDto::Ctrl],
+                    key: "Enter".into(),
+                },
+                submit_keep_text: HotkeyDto {
+                    modifiers: vec![HotkeyModifierDto::Alt],
+                    key: "Enter".into(),
+                },
+                submit_keep_focus: HotkeyDto {
+                    modifiers: vec![HotkeyModifierDto::Ctrl, HotkeyModifierDto::Alt],
                     key: "Enter".into(),
                 },
                 next_spelling_error: HotkeyDto {
@@ -1892,6 +1909,7 @@ mod tests {
             typing_idle_timeout_ms: 500,
             typing_enabled: false,
             default_route: "everywhere".into(),
+            keep_text_after_send: false,
         };
 
         let logging = LoggingSettingsDto {
@@ -1967,6 +1985,14 @@ mod tests {
                     key: String::new(),
                 },
                 submit_continue: HotkeyDto {
+                    modifiers: vec![],
+                    key: String::new(),
+                },
+                submit_keep_text: HotkeyDto {
+                    modifiers: vec![],
+                    key: String::new(),
+                },
+                submit_keep_focus: HotkeyDto {
                     modifiers: vec![],
                     key: String::new(),
                 },

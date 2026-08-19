@@ -177,7 +177,8 @@
     "editor_height": 300,
     "typing_idle_timeout_ms": 800,
     "typing_enabled": true,
-    "default_route": "no_twitch"
+    "default_route": "no_twitch",
+    "keep_text_after_send": true
   },
   "logging": {
     "enabled": true,
@@ -269,6 +270,19 @@
       "submit_continue": {
         "modifiers": [
           "ctrl"
+        ],
+        "key": "Enter"
+      },
+      "submit_keep_text": {
+        "modifiers": [
+          "alt"
+        ],
+        "key": "Enter"
+      },
+      "submit_keep_focus": {
+        "modifiers": [
+          "ctrl",
+          "alt"
         ],
         "key": "Enter"
       },

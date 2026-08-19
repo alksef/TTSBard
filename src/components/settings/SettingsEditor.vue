@@ -15,6 +15,8 @@ const quickEditorMode = computed<QuickEditorMode>(() => editorSettings.value?.qu
 
 const spellcheckEnabled = computed(() => editorSettings.value?.spellcheck_enabled ?? true)
 
+const keepTextAfterSend = computed(() => editorSettings.value?.keep_text_after_send ?? false)
+
 const typingTimeoutInput = ref(editorSettings.value?.typing_idle_timeout_ms ?? 800)
 
 watch(() => editorSettings.value?.typing_idle_timeout_ms, (newVal) => {
@@ -72,6 +74,17 @@ async function toggleSpellcheck() {
   }
 }
 
+async function toggleKeepText() {
+  try {
+    const newValue = !(editorSettings.value?.keep_text_after_send ?? false)
+    await invoke('set_editor_keep_text', { enabled: newValue })
+    emit('show-message', 'Настройка сохранена')
+  } catch (e) {
+    const errorMessage = e instanceof Error ? e.message : String(e)
+    emit('show-message', 'Ошибка переключения сохранения текста: ' + errorMessage)
+  }
+}
+
 watch(editorSettings, (newSettings) => {
   if (!newSettings) return;
 }, { immediate: true });
@@ -97,6 +110,20 @@ watch(editorSettings, (newSettings) => {
         </label>
         <span v-if="opt.value === 'return_focus'" class="setting-hint">
           Работает только если окно было вызвано по горячей клавише
+        </span>
+      </div>
+      <div class="setting-row">
+        <label class="setting-label checkbox-label">
+          <input
+            :checked="keepTextAfterSend"
+            type="checkbox"
+            class="checkbox-input"
+            @change="toggleKeepText"
+          />
+          <span>Не очищать текст после отправки</span>
+        </label>
+        <span class="setting-hint">
+          Отправленный текст остаётся в редакторе для правки или повторной отправки (Alt+Enter инвертирует разово)
         </span>
       </div>
     </section>

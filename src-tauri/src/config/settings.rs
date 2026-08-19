@@ -957,6 +957,8 @@ pub struct EditorSettings {
     pub typing_enabled: bool,
     #[serde(default)]
     pub default_route: EditorRoute,
+    #[serde(default)]
+    pub keep_text_after_send: bool,
 }
 
 fn default_editor_height() -> u32 {
@@ -982,6 +984,8 @@ fn editor_action_label(action_id: &str) -> &str {
     match action_id {
         "edit_word" => "редактирования слова",
         "submit_continue" => "отправки/продолжения",
+        "submit_keep_text" => "отправки с сохранением текста",
+        "submit_keep_focus" => "отправки с сохранением текста и без смены фокуса",
         "next_spelling_error" => "следующей ошибки",
         "previous_spelling_error" => "предыдущей ошибки",
         "next_tab" => "следующей вкладки",
@@ -1006,6 +1010,7 @@ impl Default for EditorSettings {
             typing_idle_timeout_ms: 800,
             typing_enabled: true,
             default_route: EditorRoute::Everywhere,
+            keep_text_after_send: false,
         }
     }
 }
@@ -1900,6 +1905,11 @@ impl SettingsManager {
         self.update_field("/editor/typing_enabled", &enabled)
     }
 
+    /// Set keep-text-after-send state
+    pub fn set_editor_keep_text(&self, enabled: bool) -> Result<()> {
+        self.update_field("/editor/keep_text_after_send", &enabled)
+    }
+
     /// Set default editor route
     pub fn set_editor_default_route(&self, route: EditorRoute) -> Result<()> {
         self.update_field("/editor/default_route", &route)
@@ -2144,6 +2154,8 @@ impl SettingsManager {
         let default = match action_id {
             "edit_word" => Hotkey::default_edit_word(),
             "submit_continue" => Hotkey::default_submit_continue(),
+            "submit_keep_text" => Hotkey::default_submit_keep_text(),
+            "submit_keep_focus" => Hotkey::default_submit_keep_focus(),
             "next_spelling_error" => Hotkey::default_next_spelling_error(),
             "previous_spelling_error" => Hotkey::default_previous_spelling_error(),
             "next_tab" => Hotkey::default_next_tab(),
@@ -2946,6 +2958,35 @@ mod tests {
         let settings: EditorSettings =
             serde_json::from_str(json).expect("must deserialize without typing_enabled");
         assert!(settings.typing_enabled);
+    }
+
+    /// EditorSettings default has keep_text_after_send == false.
+    #[test]
+    fn editor_settings_default_keep_text_is_false() {
+        assert!(!EditorSettings::default().keep_text_after_send);
+    }
+
+    /// Backward-compat: EditorSettings without keep_text_after_send field defaults to false.
+    #[test]
+    fn editor_settings_deserializes_without_keep_text() {
+        let json = r#"{"quick":false,"ai":false,"ai_completion":false,"spellcheck_enabled":true,"spellcheck_source":"offline","editor_height":340,"typing_idle_timeout_ms":800,"typing_enabled":true}"#;
+        let settings: EditorSettings =
+            serde_json::from_str(json).expect("must deserialize without keep_text_after_send");
+        assert!(!settings.keep_text_after_send);
+    }
+
+    /// EditorSettings: keep_text_after_send round-trip.
+    #[test]
+    fn editor_settings_keep_text_round_trip() {
+        let original = EditorSettings {
+            keep_text_after_send: true,
+            ..EditorSettings::default()
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let back: EditorSettings =
+            serde_json::from_str(&json).expect("round-trip deserialization");
+        assert!(back.keep_text_after_send);
+        assert!(json.contains(r#""keep_text_after_send":true"#));
     }
 
     /// normalize_typing_idle_timeout_ms: default value 800 passes through.

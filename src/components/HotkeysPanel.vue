@@ -12,7 +12,7 @@ const hotkeys = computed(() => settings.value?.hotkeys)
 
 type HotkeyName = 'main_window' | 'sound_panel' | 'playback_control_window' | 'return_previous_window'
 
-const EDITOR_HOTKEY_NAMES = ['edit_word', 'submit_continue', 'next_spelling_error', 'previous_spelling_error', 'next_tab', 'previous_tab', 'cycle_route', 'toggle_typing', 'cycle_quick_mode', 'toggle_history'] as const
+const EDITOR_HOTKEY_NAMES = ['edit_word', 'submit_continue', 'submit_keep_text', 'submit_keep_focus', 'next_spelling_error', 'previous_spelling_error', 'next_tab', 'previous_tab', 'cycle_route', 'toggle_typing', 'cycle_quick_mode', 'toggle_history'] as const
 type EditorHotkeyName = (typeof EDITOR_HOTKEY_NAMES)[number]
 
 function isEditorHotkeyName(name: string): name is EditorHotkeyName {
@@ -611,6 +611,102 @@ onUnmounted(async () => {
 
           <button
             @click="resetEditorToDefault('submit_continue')"
+            class="reset-btn"
+            title="Сбросить к умолчанию"
+            aria-label="Сбросить к умолчанию"
+          >
+            <RotateCcw :size="14" />
+          </button>
+        </div>
+      </div>
+
+      <div class="hotkey-row">
+        <div class="hotkey-label">
+          <span>Отправить с сохранением текста</span>
+        </div>
+        <div class="hotkey-actions">
+          <span v-if="hotkeys && !recordingFor" class="hotkey-value">
+            {{ formatHotkey(hotkeys.editor.submit_keep_text) }}
+          </span>
+          <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+
+          <!-- Recording state -->
+          <div v-if="recordingFor === 'submit_keep_text' && currentRecording" class="hotkey-value recording">
+            {{ formatCurrentRecording() }}
+          </div>
+
+          <button
+            @click="startEditorRecording('submit_keep_text')"
+            :disabled="recordingFor !== null || isLoading"
+            class="record-btn"
+            :class="{ recording: recordingFor === 'submit_keep_text' }"
+            title="Записать клавишу"
+            aria-label="Записать клавишу"
+          >
+            <Keyboard :size="14" />
+            {{ recordingFor === 'submit_keep_text' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+          </button>
+
+          <button
+            v-if="recordingFor === 'submit_keep_text'"
+            @click="cancelRecording"
+            class="cancel-btn"
+            title="Отмена (Esc)"
+            aria-label="Отмена записи"
+          >
+            ✕
+          </button>
+
+          <button
+            @click="resetEditorToDefault('submit_keep_text')"
+            class="reset-btn"
+            title="Сбросить к умолчанию"
+            aria-label="Сбросить к умолчанию"
+          >
+            <RotateCcw :size="14" />
+          </button>
+        </div>
+      </div>
+
+      <div class="hotkey-row">
+        <div class="hotkey-label">
+          <span>Отправить с сохранением текста и без смены фокуса</span>
+        </div>
+        <div class="hotkey-actions">
+          <span v-if="hotkeys && !recordingFor" class="hotkey-value">
+            {{ formatHotkey(hotkeys.editor.submit_keep_focus) }}
+          </span>
+          <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+
+          <!-- Recording state -->
+          <div v-if="recordingFor === 'submit_keep_focus' && currentRecording" class="hotkey-value recording">
+            {{ formatCurrentRecording() }}
+          </div>
+
+          <button
+            @click="startEditorRecording('submit_keep_focus')"
+            :disabled="recordingFor !== null || isLoading"
+            class="record-btn"
+            :class="{ recording: recordingFor === 'submit_keep_focus' }"
+            title="Записать клавишу"
+            aria-label="Записать клавишу"
+          >
+            <Keyboard :size="14" />
+            {{ recordingFor === 'submit_keep_focus' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+          </button>
+
+          <button
+            v-if="recordingFor === 'submit_keep_focus'"
+            @click="cancelRecording"
+            class="cancel-btn"
+            title="Отмена (Esc)"
+            aria-label="Отмена записи"
+          >
+            ✕
+          </button>
+
+          <button
+            @click="resetEditorToDefault('submit_keep_focus')"
             class="reset-btn"
             title="Сбросить к умолчанию"
             aria-label="Сбросить к умолчанию"

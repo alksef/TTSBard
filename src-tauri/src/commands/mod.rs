@@ -373,6 +373,22 @@ pub async fn set_editor_typing_enabled(
     Ok(enabled)
 }
 
+/// Set keep-text-after-send state
+#[tauri::command]
+pub async fn set_editor_keep_text(
+    enabled: bool,
+    app_handle: AppHandle,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<bool, String> {
+    persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_editor_keep_text(enabled)
+    })
+    .await?;
+
+    emit_settings_changed(&app_handle);
+    Ok(enabled)
+}
+
 /// Set default editor route
 #[tauri::command]
 pub async fn set_editor_default_route(

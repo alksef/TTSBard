@@ -3,8 +3,10 @@ import {
   enterOutcomeLabel,
   enterOutcomeLabelCompact,
   nextQuickMode,
+  resolveKeepText,
   submitActionState,
 } from './submitAffordance'
+import type { SubmitKeepIntent } from './submitAffordance'
 import type { QuickEditorMode } from '../../types/settings'
 
 const modes: QuickEditorMode[] = ['disabled', 'collapse', 'return_focus']
@@ -93,5 +95,39 @@ describe('submitActionState', () => {
 
   it('prioritizes submitting over no previous outcome', () => {
     expect(submitActionState(true, 'none')).toBe('submitting')
+  })
+})
+
+describe('resolveKeepText', () => {
+  const intents: SubmitKeepIntent[] = ['quick', 'continue', 'keep_text', 'keep_focus']
+
+  it('covers the full intent × setting matrix', () => {
+    for (const setting of [false, true]) {
+      for (const intent of intents) {
+        const d = resolveKeepText(setting, intent)
+        expect(typeof d.keepText).toBe('boolean')
+        expect(typeof d.applyQuickPolicy).toBe('boolean')
+      }
+    }
+  })
+
+  it('quick applies the quick policy and clears per setting', () => {
+    expect(resolveKeepText(false, 'quick')).toEqual({ keepText: false, applyQuickPolicy: true })
+    expect(resolveKeepText(true, 'quick')).toEqual({ keepText: true, applyQuickPolicy: true })
+  })
+
+  it('continue stays in the editor and clears per setting', () => {
+    expect(resolveKeepText(false, 'continue')).toEqual({ keepText: false, applyQuickPolicy: false })
+    expect(resolveKeepText(true, 'continue')).toEqual({ keepText: true, applyQuickPolicy: false })
+  })
+
+  it('keep_text inverts the setting and applies the quick policy', () => {
+    expect(resolveKeepText(false, 'keep_text')).toEqual({ keepText: true, applyQuickPolicy: true })
+    expect(resolveKeepText(true, 'keep_text')).toEqual({ keepText: false, applyQuickPolicy: true })
+  })
+
+  it('keep_focus always keeps text and never applies the quick policy', () => {
+    expect(resolveKeepText(false, 'keep_focus')).toEqual({ keepText: true, applyQuickPolicy: false })
+    expect(resolveKeepText(true, 'keep_focus')).toEqual({ keepText: true, applyQuickPolicy: false })
   })
 })

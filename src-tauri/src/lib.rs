@@ -66,7 +66,8 @@ use commands::{
     set_audio_effects_formant_preserved, set_audio_effects_pitch, set_audio_effects_speed,
     set_audio_effects_volume, set_editor_default_route, set_editor_height, set_editor_hotkey,
     set_editor_quick, set_editor_spellcheck_enabled, set_editor_spellcheck_source,
-    set_editor_typing_enabled, set_editor_typing_idle_timeout_ms, set_global_exclude_from_capture,
+    set_editor_typing_enabled, set_editor_typing_idle_timeout_ms, set_editor_keep_text,
+    set_global_exclude_from_capture,
     set_hotkey,
     set_hotkey_enabled, set_hotkey_recording, set_local_tts_url, set_main_bg_color,
     set_main_compact_dims, set_main_custom_background, set_main_custom_opacity, set_main_opacity,
@@ -382,6 +383,7 @@ pub fn run() {
             set_editor_typing_idle_timeout_ms,
             get_editor_typing_idle_timeout_ms,
             set_editor_typing_enabled,
+            set_editor_keep_text,
             // History commands
             commands::history::get_history_suggestions,
             commands::history::record_history,

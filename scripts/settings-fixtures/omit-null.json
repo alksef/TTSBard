@@ -164,7 +164,8 @@
     "editor_height": 200,
     "typing_idle_timeout_ms": 500,
     "typing_enabled": false,
-    "default_route": "everywhere"
+    "default_route": "everywhere",
+    "keep_text_after_send": false
   },
   "logging": {
     "enabled": false,
@@ -244,6 +245,14 @@
         "key": ""
       },
       "submit_continue": {
+        "modifiers": [],
+        "key": ""
+      },
+      "submit_keep_text": {
+        "modifiers": [],
+        "key": ""
+      },
+      "submit_keep_focus": {
         "modifiers": [],
         "key": ""
       },

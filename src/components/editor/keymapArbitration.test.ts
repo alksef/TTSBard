@@ -123,4 +123,35 @@ describe('editor hotkey matching', () => {
     expect(hotkeyCode('ENTER')).toBe('Enter')
     expect(hotkeyCode('TAB')).toBe('Tab')
   })
+
+  it('prioritizes submit bindings by modifier set (keep_focus > keep_text > submit_continue)', () => {
+    const submitContinue: HotkeyDto = { modifiers: ['ctrl'], key: 'Enter' }
+    const submitKeepText: HotkeyDto = { modifiers: ['alt'], key: 'Enter' }
+    const submitKeepFocus: HotkeyDto = { modifiers: ['ctrl', 'alt'], key: 'Enter' }
+
+    const ctrlEnter = event({ code: 'Enter', ctrlKey: true })
+    const altEnter = event({ code: 'Enter', altKey: true })
+    const ctrlAltEnter = event({ code: 'Enter', ctrlKey: true, altKey: true })
+    const plainEnter = event({ code: 'Enter' })
+
+    // Ctrl+Enter → submit_continue only.
+    expect(matchesEditorHotkey(submitContinue, ctrlEnter)).toBe(true)
+    expect(matchesEditorHotkey(submitKeepText, ctrlEnter)).toBe(false)
+    expect(matchesEditorHotkey(submitKeepFocus, ctrlEnter)).toBe(false)
+
+    // Alt+Enter → submit_keep_text only.
+    expect(matchesEditorHotkey(submitKeepText, altEnter)).toBe(true)
+    expect(matchesEditorHotkey(submitContinue, altEnter)).toBe(false)
+    expect(matchesEditorHotkey(submitKeepFocus, altEnter)).toBe(false)
+
+    // Ctrl+Alt+Enter → submit_keep_focus only.
+    expect(matchesEditorHotkey(submitKeepFocus, ctrlAltEnter)).toBe(true)
+    expect(matchesEditorHotkey(submitKeepText, ctrlAltEnter)).toBe(false)
+    expect(matchesEditorHotkey(submitContinue, ctrlAltEnter)).toBe(false)
+
+    // Plain Enter matches none of the modifier bindings.
+    expect(matchesEditorHotkey(submitContinue, plainEnter)).toBe(false)
+    expect(matchesEditorHotkey(submitKeepText, plainEnter)).toBe(false)
+    expect(matchesEditorHotkey(submitKeepFocus, plainEnter)).toBe(false)
+  })
 })
