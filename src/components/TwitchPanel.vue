@@ -231,11 +231,13 @@ h2 {
 }
 
 .status-button.stop {
-  background: linear-gradient(135deg, var(--danger-gradient-start) 0%, var(--danger-gradient-end) 100%);
+  background: transparent;
+  color: color-mix(in srgb, var(--color-text-secondary) 75%, transparent);
 }
 
 .status-button.stop:hover:not(.disabled) {
-  filter: brightness(1.06);
+  background: var(--status-disconnected, #e5484d);
+  color: var(--color-text-white);
 }
 
 .status-button.refresh {
