@@ -361,12 +361,12 @@ h2 {
 }
 
 .status-button.stop {
-  background: transparent;
-  color: color-mix(in srgb, var(--color-text-secondary) 75%, transparent);
+  background: var(--btn-neutral-bg);
+  color: var(--color-danger);
 }
 
 .status-button.stop:hover:not(.disabled) {
-  background: var(--status-disconnected, #e5484d);
+  background: var(--status-disconnected);
   color: var(--color-text-white);
 }
 

@@ -478,13 +478,18 @@ pub fn set_main_bounds(app_handle: AppHandle) -> Result<(), String> {
     }
 }
 
-/// Remove compact bounds so the normal 800x630 window can be restored
+/// Leave compact bounds and restore the full-mode layout floor.
+///
+/// The compact max bound is dropped, but a full-mode minimum (logical
+/// 640x480, DPI-independent) replaces the compact minimum so the layout
+/// cannot be shrunk until it breaks.
 #[tauri::command]
 pub fn remove_main_bounds(app_handle: AppHandle) -> Result<(), String> {
     if let Some(window) = app_handle.get_webview_window("main") {
+        let min_size = tauri::Size::Logical(tauri::LogicalSize::new(640.0, 480.0));
         window
-            .set_min_size(Option::<tauri::Size>::None)
-            .map_err(|e| format!("Failed to remove min size: {}", e))?;
+            .set_min_size(Some(min_size))
+            .map_err(|e| format!("Failed to set min size: {}", e))?;
         window
             .set_max_size(Option::<tauri::Size>::None)
             .map_err(|e| format!("Failed to remove max size: {}", e))?;
