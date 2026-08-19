@@ -357,9 +357,6 @@ const {
       <p class="help-text">
         <strong>Тест действия</strong> запускает сохранённое действие в активной сессии для проверки.
       </p>
-      <a href="https://github.com/DenchiSoft/VTubeStudio/wiki/Plugins" target="_blank" rel="noopener noreferrer" class="help-link">
-        https://github.com/DenchiSoft/VTubeStudio/wiki/Plugins
-      </a>
     </section>
   </div>
 </template>
@@ -823,16 +820,6 @@ select.text-input {
   margin: 0.5rem 0;
   color: var(--color-text-secondary);
   font-size: 14px;
-}
-
-.help-link {
-  color: var(--color-info);
-  text-decoration: none;
-  font-weight: 500;
-}
-
-.help-link:hover {
-  text-decoration: underline;
 }
 
 .help-text code {
