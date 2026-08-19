@@ -32,6 +32,8 @@ const inputPanelRef = ref<InstanceType<typeof InputPanel> | null>(null)
 
 const isMinimalMode = ref(false)
 
+const minimalModeButtonRef = ref<InstanceType<typeof MinimalModeButton> | null>(null)
+
 function handleMinimalModeChange(minimal: boolean) {
   isMinimalMode.value = minimal
   if (minimal) {
@@ -261,6 +263,23 @@ function handleReturnFocusKeydown(event: KeyboardEvent) {
   }
 }
 
+// Main-window-local hotkey (default Ctrl+M): toggle compact/normal mode.
+// Handled on the frontend like return_previous_window — no global registration.
+function handleToggleMinimalKeydown(event: KeyboardEvent) {
+  const hotkey = appSettings.settings.value?.hotkeys?.toggle_minimal_mode
+  if (!hotkey || !hotkey.key) return
+
+  const expectedCode = keyToCode(hotkey.key)
+  if (event.code === expectedCode && modifiersMatch(event, hotkey.modifiers)) {
+    const target = event.target as HTMLElement | null
+    if (target?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName ?? '')) {
+      return
+    }
+    event.preventDefault()
+    minimalModeButtonRef.value?.toggleMinimalMode()
+  }
+}
+
 // Initialize Telegram session on app start
 onMounted(async () => {
   debugLog('[App] 🚀 App mounted')
@@ -274,6 +293,7 @@ onMounted(async () => {
   })
 
   document.addEventListener('keydown', handleReturnFocusKeydown)
+  document.addEventListener('keydown', handleToggleMinimalKeydown)
 
   void listenerScope.track(
     getCurrentWindow().onFocusChanged(async ({ payload: focused }) => {
@@ -321,6 +341,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   document.removeEventListener('keydown', handleReturnFocusKeydown)
+  document.removeEventListener('keydown', handleToggleMinimalKeydown)
   listenerScope.dispose()
 })
 </script>
@@ -394,7 +415,7 @@ onUnmounted(() => {
       </div>
 
       <!-- Minimal mode toggle button -->
-      <MinimalModeButton @minimal-mode-changed="handleMinimalModeChange" />
+      <MinimalModeButton ref="minimalModeButtonRef" @minimal-mode-changed="handleMinimalModeChange" />
 
       <!-- Global error toasts -->
       <ErrorToasts />

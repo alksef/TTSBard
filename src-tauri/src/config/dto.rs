@@ -1209,6 +1209,7 @@ pub struct HotkeySettingsDto {
     pub playback_repeat: HotkeyDto,
     pub playback_control_window: HotkeyDto,
     pub return_previous_window: HotkeyDto,
+    pub toggle_minimal_mode: HotkeyDto,
     pub editor: EditorHotkeySettingsDto,
 }
 
@@ -1222,6 +1223,7 @@ impl From<HotkeySettings> for HotkeySettingsDto {
             playback_repeat: h.playback_repeat.into(),
             playback_control_window: h.playback_control_window.into(),
             return_previous_window: h.return_previous_window.into(),
+            toggle_minimal_mode: h.toggle_minimal_mode.into(),
             editor: h.editor.into(),
         }
     }
@@ -1237,6 +1239,7 @@ impl From<HotkeySettingsDto> for HotkeySettings {
             playback_repeat: dto.playback_repeat.into(),
             playback_control_window: dto.playback_control_window.into(),
             return_previous_window: dto.return_previous_window.into(),
+            toggle_minimal_mode: dto.toggle_minimal_mode.into(),
             editor: dto.editor.into(),
         }
     }
@@ -1655,6 +1658,10 @@ mod tests {
                 modifiers: vec![HotkeyModifierDto::Ctrl],
                 key: "F".into(),
             },
+            toggle_minimal_mode: HotkeyDto {
+                modifiers: vec![HotkeyModifierDto::Ctrl],
+                key: "F".into(),
+            },
             editor: EditorHotkeySettingsDto {
                 edit_word: HotkeyDto {
                     modifiers: vec![HotkeyModifierDto::Ctrl],
@@ -1976,6 +1983,10 @@ mod tests {
                 key: String::new(),
             },
             return_previous_window: HotkeyDto {
+                modifiers: vec![],
+                key: String::new(),
+            },
+            toggle_minimal_mode: HotkeyDto {
                 modifiers: vec![],
                 key: String::new(),
             },

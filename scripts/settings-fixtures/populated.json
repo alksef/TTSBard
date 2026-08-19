@@ -260,6 +260,12 @@
       ],
       "key": "F"
     },
+    "toggle_minimal_mode": {
+      "modifiers": [
+        "ctrl"
+      ],
+      "key": "F"
+    },
     "editor": {
       "edit_word": {
         "modifiers": [

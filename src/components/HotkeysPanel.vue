@@ -10,7 +10,7 @@ const { settings, isLoading, reload } = useAppSettings()
 
 const hotkeys = computed(() => settings.value?.hotkeys)
 
-type HotkeyName = 'main_window' | 'sound_panel' | 'playback_control_window' | 'return_previous_window'
+type HotkeyName = 'main_window' | 'sound_panel' | 'playback_control_window' | 'return_previous_window' | 'toggle_minimal_mode'
 
 const EDITOR_HOTKEY_NAMES = ['edit_word', 'submit_continue', 'submit_keep_text', 'submit_keep_focus', 'next_spelling_error', 'previous_spelling_error', 'next_tab', 'previous_tab', 'cycle_route', 'toggle_typing', 'cycle_quick_mode', 'toggle_history'] as const
 type EditorHotkeyName = (typeof EDITOR_HOTKEY_NAMES)[number]
@@ -123,6 +123,7 @@ function handleKeyDown(e: KeyboardEvent) {
   if (e.metaKey) modifiers.push('super')
 
   const usesPhysicalCode = recordingFor.value === 'return_previous_window'
+    || recordingFor.value === 'toggle_minimal_mode'
     || isEditorHotkeyName(recordingFor.value)
 
   // Get the main key — use code for return_previous_window (physical key)
@@ -153,6 +154,7 @@ function handleKeyUp(e: KeyboardEvent) {
   if (!recordingFor.value || !currentRecording.value) return
 
   const usesPhysicalCode = recordingFor.value === 'return_previous_window'
+    || recordingFor.value === 'toggle_minimal_mode'
     || isEditorHotkeyName(recordingFor.value)
 
   // Get the key being released — use code for return_previous_window
@@ -322,7 +324,7 @@ onUnmounted(async () => {
       <div class="hotkey-row">
         <div class="hotkey-label">
           <AppWindow :size="16" />
-          <span>Главное окно</span>
+          <span>Основное окно</span>
         </div>
         <div class="hotkey-actions">
           <span v-if="hotkeys && !recordingFor" class="hotkey-value">
@@ -461,7 +463,51 @@ onUnmounted(async () => {
     <div class="setting-section" style="margin-top: 1rem;">
       <div class="section-header">
         <AppWindow :size="18" class="section-icon" />
-        <span class="section-title">Главное окно</span>
+        <span class="section-title">Основное окно</span>
+      </div>
+
+      <!-- Minimal Mode Toggle Hotkey (main-window-local, like return focus) -->
+      <div class="hotkey-row">
+        <div class="hotkey-label">
+          <span>Минимальный режим окна</span>
+        </div>
+        <div class="hotkey-actions">
+          <span v-if="hotkeys && !recordingFor" class="hotkey-value">
+            {{ formatHotkey(hotkeys.toggle_minimal_mode) }}
+          </span>
+          <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+
+          <div v-if="recordingFor === 'toggle_minimal_mode' && currentRecording" class="hotkey-value recording">
+            {{ formatCurrentRecording() }}
+          </div>
+
+          <button
+            @click="startRecording('toggle_minimal_mode')"
+            :disabled="recordingFor !== null || isLoading"
+            class="record-btn"
+            :class="{ recording: recordingFor === 'toggle_minimal_mode' }"
+          >
+            <Keyboard :size="14" />
+            {{ recordingFor === 'toggle_minimal_mode' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+          </button>
+
+          <button
+            v-if="recordingFor === 'toggle_minimal_mode'"
+            @click="cancelRecording"
+            class="cancel-btn"
+            title="Отмена (Esc)"
+          >
+            ✕
+          </button>
+
+          <button
+            @click="resetToDefault('toggle_minimal_mode')"
+            class="reset-btn"
+            title="Сбросить к умолчанию"
+          >
+            <RotateCcw :size="14" />
+          </button>
+        </div>
       </div>
 
       <div class="hotkey-row">

@@ -85,10 +85,54 @@ pub fn return_to_previous_window(
 #[tauri::command]
 pub async fn resize_main_window(
     app_handle: AppHandle,
-    width: u32,
+    width: Option<u32>,
     height: u32,
 ) -> Result<(), String> {
     if let Some(window) = app_handle.get_webview_window("main") {
+        if width.is_none() {
+            // Height-only resize. `set_size` maps to `set_inner_size`, which on a
+            // frameless shadowed window ADDS the invisible WS_THICKFRAME borders
+            // to the requested size — so feeding it a width read back from
+            // `outer_size()` grows the window sideways on every call. Keep the
+            // current OUTER width untouched via SetWindowPos instead.
+            #[cfg(windows)]
+            {
+                use windows::Win32::Foundation::{HWND, RECT};
+                use windows::Win32::UI::WindowsAndMessaging::{
+                    GetWindowRect, SetWindowPos, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER,
+                };
+                let hwnd = window.hwnd().map_err(|e| e.to_string())?;
+                unsafe {
+                    let mut rc = RECT::default();
+                    GetWindowRect(HWND(hwnd.0 as _), &mut rc)
+                        .map_err(|e| format!("GetWindowRect failed: {}", e))?;
+                    let current_width = rc.right - rc.left;
+                    SetWindowPos(
+                        HWND(hwnd.0 as _),
+                        None,
+                        0,
+                        0,
+                        current_width,
+                        height as i32,
+                        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+                    )
+                    .map_err(|e| format!("SetWindowPos failed: {}", e))?;
+                }
+                return Ok(());
+            }
+            #[cfg(not(windows))]
+            {
+                let w = window.outer_size().map_err(|e| e.to_string())?.width;
+                window
+                    .set_size(tauri::Size::Physical(tauri::PhysicalSize {
+                        width: w,
+                        height,
+                    }))
+                    .map_err(|e| format!("Failed to resize: {}", e))?;
+                return Ok(());
+            }
+        }
+        let width = width.unwrap_or(0);
         window
             .set_size(tauri::Size::Physical(tauri::PhysicalSize { width, height }))
             .map_err(|e| format!("Failed to resize: {}", e))?;
@@ -290,8 +334,9 @@ pub async fn set_hotkey(
         "playback_repeat",
         "playback_control_window",
         "return_previous_window",
+        "toggle_minimal_mode",
     ];
-    let conflict_labels: [(&str, &str); 7] = [
+    let conflict_labels: [(&str, &str); 8] = [
         ("main_window", "главного окна"),
         ("sound_panel", "звуковой панели"),
         ("playback_pause", "паузы воспроизведения"),
@@ -302,6 +347,7 @@ pub async fn set_hotkey(
             "окна управления воспроизведением",
         ),
         ("return_previous_window", "возврата в предыдущее окно"),
+        ("toggle_minimal_mode", "переключения минимального режима"),
     ];
     for other_name in &all_global_names {
         if *other_name == name.as_str() {
@@ -315,6 +361,7 @@ pub async fn set_hotkey(
             "playback_repeat" => &settings.hotkeys.playback_repeat,
             "playback_control_window" => &settings.hotkeys.playback_control_window,
             "return_previous_window" => &settings.hotkeys.return_previous_window,
+            "toggle_minimal_mode" => &settings.hotkeys.toggle_minimal_mode,
             _ => continue,
         };
         if hotkey == *other_hotkey {
@@ -486,7 +533,7 @@ pub fn set_main_bounds(app_handle: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn remove_main_bounds(app_handle: AppHandle) -> Result<(), String> {
     if let Some(window) = app_handle.get_webview_window("main") {
-        let min_size = tauri::Size::Logical(tauri::LogicalSize::new(640.0, 480.0));
+        let min_size = tauri::Size::Logical(tauri::LogicalSize::new(755.0, 540.0));
         window
             .set_min_size(Some(min_size))
             .map_err(|e| format!("Failed to set min size: {}", e))?;

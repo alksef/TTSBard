@@ -41,6 +41,7 @@ export interface HotkeySettingsDto {
   playback_repeat: HotkeyDto
   playback_control_window: HotkeyDto
   return_previous_window: HotkeyDto
+  toggle_minimal_mode: HotkeyDto
   editor: EditorHotkeySettingsDto
 }
 

@@ -239,6 +239,10 @@
       "modifiers": [],
       "key": ""
     },
+    "toggle_minimal_mode": {
+      "modifiers": [],
+      "key": ""
+    },
     "editor": {
       "edit_word": {
         "modifiers": [],

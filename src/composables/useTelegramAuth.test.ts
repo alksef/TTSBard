@@ -76,6 +76,7 @@ function mockSettings(): AppSettingsDto {
       playback_repeat: { modifiers: [], key: '' },
       playback_control_window: { modifiers: [], key: '' },
       return_previous_window: { modifiers: [], key: '' },
+      toggle_minimal_mode: { modifiers: [], key: '' },
       editor: {
         edit_word: { modifiers: [], key: '' },
         submit_continue: { modifiers: [], key: '' },

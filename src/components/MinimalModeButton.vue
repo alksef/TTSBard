@@ -15,12 +15,16 @@ const emit = defineEmits<{
   minimalModeChanged: [isMinimal: boolean]
 }>()
 
+// App.vue drives this from the local toggle_minimal_mode hotkey
+defineExpose({ toggleMinimalMode })
+
 initCompactDims(
   windowsSettings.value?.main?.compact_width ?? 450,
   windowsSettings.value?.main?.compact_height ?? 400,
 )
 
 const compactWidth = computed(() => compactModeState.width)
+
 const compactHeight = computed(() => compactModeState.height)
 
 async function toggleMinimalMode() {

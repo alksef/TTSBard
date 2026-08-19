@@ -2094,6 +2094,7 @@ impl SettingsManager {
             "playback_repeat" => settings.hotkeys.playback_repeat = hotkey.clone(),
             "playback_control_window" => settings.hotkeys.playback_control_window = hotkey.clone(),
             "return_previous_window" => settings.hotkeys.return_previous_window = hotkey.clone(),
+            "toggle_minimal_mode" => settings.hotkeys.toggle_minimal_mode = hotkey.clone(),
             _ => return Err(anyhow::anyhow!("Invalid hotkey name: {}", name)),
         }
         self.save(&settings)
@@ -2183,6 +2184,7 @@ impl SettingsManager {
             "playback_repeat" => super::hotkeys::Hotkey::default_playback_repeat(),
             "playback_control_window" => super::hotkeys::Hotkey::default_playback_control_window(),
             "return_previous_window" => super::hotkeys::Hotkey::default_return_previous_window(),
+            "toggle_minimal_mode" => super::hotkeys::Hotkey::default_toggle_minimal_mode(),
             _ => return Err(anyhow::anyhow!("Invalid hotkey name: {}", name)),
         };
         self.set_hotkey(name, &default)?;

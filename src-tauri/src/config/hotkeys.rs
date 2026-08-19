@@ -152,6 +152,7 @@ pub struct HotkeySettings {
     pub playback_repeat: Hotkey,
     pub playback_control_window: Hotkey,
     pub return_previous_window: Hotkey,
+    pub toggle_minimal_mode: Hotkey,
     #[serde(default)]
     pub editor: EditorHotkeySettings,
 }
@@ -166,6 +167,7 @@ impl Default for HotkeySettings {
             playback_repeat: Hotkey::default_playback_repeat(),
             playback_control_window: Hotkey::default_playback_control_window(),
             return_previous_window: Hotkey::default_return_previous_window(),
+            toggle_minimal_mode: Hotkey::default_toggle_minimal_mode(),
             editor: EditorHotkeySettings::default(),
         }
     }
@@ -225,6 +227,14 @@ impl Hotkey {
         Self {
             modifiers: vec![HotkeyModifier::Ctrl, HotkeyModifier::Shift],
             key: "F7".to_string(),
+        }
+    }
+
+    /// Create a hotkey with Ctrl+M (minimal/normal mode toggle default)
+    pub fn default_toggle_minimal_mode() -> Self {
+        Self {
+            modifiers: vec![HotkeyModifier::Ctrl],
+            key: "M".to_string(),
         }
     }
 
@@ -342,6 +352,7 @@ impl Hotkey {
             || global.playback_repeat == *self
             || global.playback_control_window == *self
             || global.return_previous_window == *self
+            || global.toggle_minimal_mode == *self
     }
 
     /// Convert to tauri_plugin_global_shortcut::Shortcut
