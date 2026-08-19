@@ -356,12 +356,12 @@ h2 {
 }
 
 .test-message-button {
-  background: var(--btn-accent-bg);
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
   color: var(--color-text-white);
 }
 
-.test-message-button:hover {
-  background: var(--btn-accent-bg-hover);
+.test-message-button:hover:not(.disabled) {
+  filter: brightness(1.06);
 }
 
 .test-message-button.disabled {

@@ -31,20 +31,26 @@ pub async fn save_twitch_settings(
         return Err(format!("Validation failed: {}", e));
     }
 
-    // Проверка изменений
-    let old_settings = state.twitch.settings.read().await;
-    let enabled_changed = old_settings.enabled != settings.enabled;
-    let credentials_changed = old_settings.username != settings.username
-        || old_settings.token != settings.token
-        || old_settings.channel != settings.channel;
-    drop(old_settings);
-
     // Транзакционный подход: сначала сохраняем в файл, потом в память
     // Это предотвращает рассинхронизацию, если другой поток прочитает настройки между операциями
     // Получаем SettingsManager один раз
     let settings_manager = app_handle
         .try_state::<SettingsManager>()
         .ok_or_else(|| "SettingsManager not available".to_string())?;
+
+    // Проверка изменений по persisted-конфигу, а не по runtime-состоянию:
+    // команды connect/disconnect мутируют только runtime `enabled`, и сравнение
+    // с ним давало ложный Restart при сохранении без изменений.
+    let old_settings = settings_manager
+        .inner()
+        .load()
+        .map_err(|e| format!("Failed to load settings: {}", e))?
+        .twitch;
+    let enabled_changed = old_settings.enabled != settings.enabled;
+    let credentials_changed = old_settings.username != settings.username
+        || old_settings.token != settings.token
+        || old_settings.channel != settings.channel;
+
     let persisted_settings = settings.clone();
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_twitch_settings(&persisted_settings)
