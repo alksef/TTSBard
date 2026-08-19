@@ -302,13 +302,14 @@ label {
   filter: brightness(1.06);
 }
 
+/* Result block styled like the input fields above (option 3): quiet theme
+   field background, regular text color. */
 .test-output {
-  background: var(--output-bg-dark);
-  border: 1px solid var(--color-border);
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
-  color: var(--color-success);
+  color: var(--color-text-primary);
   padding: 10px;
-  font-family: var(--font-mono);
   font-size: 13px;
   min-height: 40px;
 }
