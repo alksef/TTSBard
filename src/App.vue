@@ -59,6 +59,9 @@ provide(TELEGRAM_AUTH_KEY, telegramAuth)
 
 function setPanel(panel: Panel) {
   currentPanel.value = panel
+  if (panel === 'input') {
+    nextTick(() => inputPanelRef.value?.focusEditor())
+  }
 }
 
 // Custom titlebar window controls
