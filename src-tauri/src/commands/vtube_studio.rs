@@ -4,7 +4,7 @@ use crate::config::{
 };
 use crate::events::VTubeStudioConnectionStatus;
 use crate::state::AppState;
-use crate::vtube_studio::{SceneItemRecord, VTubeStudioItemStatus};
+use crate::vtube_studio::{ConnectOrigin, SceneItemRecord, VTubeStudioItemStatus};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tracing::{debug, info, warn};
 
@@ -651,7 +651,7 @@ pub async fn connect_vtube_studio(
 
     let result = state
         .vtube_studio
-        .connect(port, stored_token.as_deref())
+        .connect(port, stored_token.as_deref(), ConnectOrigin::Manual)
         .await;
 
     match result {
@@ -713,7 +713,7 @@ pub async fn restart_vtube_studio(
 
     let result = state
         .vtube_studio
-        .connect(port, stored_token.as_deref())
+        .connect(port, stored_token.as_deref(), ConnectOrigin::Manual)
         .await;
 
     match result {

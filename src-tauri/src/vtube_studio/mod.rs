@@ -3,5 +3,5 @@ mod service;
 
 #[cfg(test)]
 pub(crate) use service::is_semantic_vts_error;
-pub(crate) use service::{DeleteOutcome, EnsureOutcome, SkipReason};
+pub(crate) use service::{ConnectOrigin, DeleteOutcome, EnsureOutcome, SkipReason};
 pub use service::{SceneItemRecord, VTubeStudioItemStatus, VTubeStudioService};

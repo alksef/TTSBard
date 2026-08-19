@@ -28,6 +28,7 @@ use crate::soundpanel::SoundPanelState;
 use crate::speech_queue::JobStatus;
 use crate::state::AppState;
 use crate::tts::TtsProviderType;
+use crate::vtube_studio::ConnectOrigin;
 use std::sync::Arc;
 
 /// Initialize the application (called from Tauri's setup callback)
@@ -700,7 +701,7 @@ fn init_vtube_studio(app_state: &AppState, app_handle: AppHandle) {
 
         let result = app_state_clone
             .vtube_studio
-            .connect(port, stored_token.as_deref())
+            .connect(port, stored_token.as_deref(), ConnectOrigin::Autostart)
             .await;
 
         let status = app_state_clone.vtube_studio.get_connection_status();

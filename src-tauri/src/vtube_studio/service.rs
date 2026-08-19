@@ -35,6 +35,8 @@ const SEND_TIMEOUT: Duration = Duration::from_secs(5);
 const ACTOR_SWEEP_INTERVAL: Duration = Duration::from_secs(5);
 /// Ёмкость канала исходящих запросов к connection-actor.
 const ACTOR_CHANNEL_CAPACITY: usize = 64;
+/// Таймаут затухания ошибки ручного подключения VTS в titlebar (ROADMAP-079).
+const ERROR_DECAY_DELAY: Duration = Duration::from_secs(60);
 
 type WsStream = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>;
 
@@ -350,6 +352,16 @@ pub(crate) enum DeleteOutcome {
     NotFound,
 }
 
+/// Происхождение попытки подключения VTube Studio: ручная (кнопки Connect/Restart
+/// в панели) или автостарт на boot. Определяет, вооружается ли decay-таймер при
+/// ошибке: ручная ошибка затухает в серый через `ERROR_DECAY_DELAY`, автостарт —
+/// красный бессрочно.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectOrigin {
+    Manual,
+    Autostart,
+}
+
 pub struct VTubeStudioService {
     pub settings: Arc<tokio::sync::RwLock<VTubeStudioSettings>>,
     inner: Arc<tokio::sync::Mutex<InnerState>>,
@@ -359,6 +371,12 @@ pub struct VTubeStudioService {
     item_status: Arc<parking_lot::Mutex<VTubeStudioItemStatus>>,
     item_transition: ItemTransitionState,
     session: AtomicU64,
+    /// Generation decay-таймера ошибки ручного подключения. Инкремент в начале
+    /// `connect()`/`disconnect()` и при вооружении таймера гасит устаревшие таймеры.
+    error_decay_generation: Arc<AtomicU64>,
+    /// Задержка decay-таймера; переопределяется только в тестах через
+    /// `set_error_decay_delay`.
+    error_decay_delay: parking_lot::Mutex<Duration>,
     /// Tauri AppHandle для эмиттинга статуса из connection-actor.
     /// Лениво подключается через `attach_app_handle` из `setup::init_vtube_studio`,
     /// т.к. сервис конструируется до появления AppHandle.
@@ -387,6 +405,8 @@ impl VTubeStudioService {
             item_status: Arc::new(parking_lot::Mutex::new(VTubeStudioItemStatus::Inactive)),
             item_transition: ItemTransitionState::new(),
             session: AtomicU64::new(0),
+            error_decay_generation: Arc::new(AtomicU64::new(0)),
+            error_decay_delay: parking_lot::Mutex::new(ERROR_DECAY_DELAY),
             app_handle: parking_lot::Mutex::new(None),
         }
     }
@@ -430,6 +450,45 @@ impl VTubeStudioService {
 
     pub fn is_desired_running(&self) -> bool {
         self.desired_running.load(Ordering::SeqCst)
+    }
+
+    /// Вооружает decay-таймер ошибки ручного подключения: через `error_decay_delay`
+    /// сбрасывает `desired_running` (красный → серый) и эмитит статус, если за это
+    /// время не было новой попытки/disconnect и статус всё ещё `Error`.
+    fn arm_error_decay(&self) {
+        let gen = self.error_decay_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let delay = *self.error_decay_delay.lock();
+        let generation = Arc::clone(&self.error_decay_generation);
+        let desired_running = Arc::clone(&self.desired_running);
+        let connection_status = Arc::clone(&self.connection_status);
+        let app_handle = self.app_handle.lock().clone();
+
+        tokio::spawn(async move {
+            tokio::time::sleep(delay).await;
+
+            if generation.load(Ordering::SeqCst) != gen {
+                return;
+            }
+            if *connection_status.lock() != VTubeStudioConnectionStatus::Error {
+                return;
+            }
+            if !desired_running.load(Ordering::SeqCst) {
+                return;
+            }
+
+            desired_running.store(false, Ordering::SeqCst);
+            info!("VTS manual connect error decayed: desired_running reset");
+
+            if let Some(h) = app_handle {
+                let status = connection_status.lock().clone();
+                let _ = h.emit(VTS_STATUS_CHANGED_EVENT, &status);
+            }
+        });
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_error_decay_delay(&self, delay: Duration) {
+        *self.error_decay_delay.lock() = delay;
     }
 
     #[allow(dead_code)]
@@ -789,7 +848,10 @@ impl VTubeStudioService {
         &self,
         port: u16,
         stored_token: Option<&str>,
+        origin: ConnectOrigin,
     ) -> Result<Option<String>, String> {
+        // Новая попытка подключения гасит вооружённый decay-таймер прежней ошибки.
+        self.error_decay_generation.fetch_add(1, Ordering::SeqCst);
         self.set_desired_running(true);
         self.set_connection_status(VTubeStudioConnectionStatus::Connecting);
 
@@ -808,9 +870,13 @@ impl VTubeStudioService {
             Err(e) => {
                 // desired_running сохраняем: terminal Error при живом desired
                 // должен дать красный статус в titlebar (ROADMAP-074); сброс
-                // происходит только при явном disconnect().
+                // происходит только при явном disconnect() (или decay-таймере
+                // для ручной ошибки).
                 self.is_authenticated.store(false, Ordering::SeqCst);
                 self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                if origin == ConnectOrigin::Manual {
+                    self.arm_error_decay();
+                }
                 return Err(e);
             }
         };
@@ -821,6 +887,9 @@ impl VTubeStudioService {
             Err(e) => {
                 self.is_authenticated.store(false, Ordering::SeqCst);
                 self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                if origin == ConnectOrigin::Manual {
+                    self.arm_error_decay();
+                }
                 return Err(e);
             }
         };
@@ -831,6 +900,9 @@ impl VTubeStudioService {
                 Err(e) => {
                     self.is_authenticated.store(false, Ordering::SeqCst);
                     self.set_connection_status(VTubeStudioConnectionStatus::Error);
+                    if origin == ConnectOrigin::Manual {
+                        self.arm_error_decay();
+                    }
                     return Err(e);
                 }
             };
@@ -1336,6 +1408,9 @@ impl VTubeStudioService {
 
     pub async fn disconnect(&self) {
         let typing_action = { self.settings.read().await.typing_action.clone() };
+
+        // Явная остановка гасит вооружённый decay-таймер ошибки ручного подключения.
+        self.error_decay_generation.fetch_add(1, Ordering::SeqCst);
 
         // Собираем состояние под кратким локом, не держа его через await.
         let (typing_active, resolved_item, has_actor) = {
@@ -2994,22 +3069,73 @@ mod tests {
     }
 
     #[test]
-    fn connect_failure_clears_desired_running() {
+    fn connect_manual_failure_decays_desired_running() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap();
         let svc = VTubeStudioService::new();
+        svc.set_error_decay_delay(Duration::from_millis(50));
         let port = unused_local_port();
         rt.block_on(async {
-            let result = svc.connect(port, None).await;
+            let result = svc.connect(port, None, ConnectOrigin::Manual).await;
             assert!(result.is_err());
+            // Сразу после ручной ошибки desired_running жив — красный в titlebar.
+            assert!(svc.is_desired_running());
+            assert_eq!(
+                svc.get_connection_status(),
+                VTubeStudioConnectionStatus::Error
+            );
+            // После переопределённого decay-таймера — серый.
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            assert!(!svc.is_desired_running());
         });
-        assert!(!svc.is_desired_running());
-        assert_eq!(
-            svc.get_connection_status(),
-            VTubeStudioConnectionStatus::Error
-        );
+    }
+
+    #[test]
+    fn connect_autostart_failure_keeps_desired_running() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_error_decay_delay(Duration::from_millis(50));
+        let port = unused_local_port();
+        rt.block_on(async {
+            let result = svc.connect(port, None, ConnectOrigin::Autostart).await;
+            assert!(result.is_err());
+            assert!(svc.is_desired_running());
+            assert_eq!(
+                svc.get_connection_status(),
+                VTubeStudioConnectionStatus::Error
+            );
+            // Ошибка автостарта красная бессрочно: decay-таймер не вооружается.
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            assert!(svc.is_desired_running());
+        });
+    }
+
+    #[test]
+    fn disconnect_supersedes_armed_decay_timer() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let svc = VTubeStudioService::new();
+        svc.set_error_decay_delay(Duration::from_millis(50));
+        let port = unused_local_port();
+        rt.block_on(async {
+            let result = svc.connect(port, None, ConnectOrigin::Manual).await;
+            assert!(result.is_err());
+            assert!(svc.is_desired_running());
+
+            svc.disconnect().await;
+            assert!(!svc.is_desired_running());
+
+            // Вооружённый таймер гасится disconnect: desired остаётся false.
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            assert!(!svc.is_desired_running());
+        });
     }
 
     #[test]
@@ -3337,10 +3463,12 @@ mod tests {
         let svc = VTubeStudioService::new();
         let port = unused_local_port();
         rt.block_on(async {
-            let result = svc.connect(port, None).await;
+            let result = svc.connect(port, None, ConnectOrigin::Autostart).await;
             assert!(result.is_err());
         });
-        assert!(!svc.is_desired_running());
+        // Ошибка сохраняет desired_running (красный бессрочно), но не оставляет
+        // actor/authenticated — transport-only.
+        assert!(svc.is_desired_running());
         assert_eq!(
             svc.get_connection_status(),
             VTubeStudioConnectionStatus::Error
@@ -5513,7 +5641,7 @@ mod tests {
         });
 
         rt.block_on(async {
-            let result = svc.connect(port, None).await;
+            let result = svc.connect(port, None, ConnectOrigin::Autostart).await;
             assert!(result.is_err());
             let inner = svc.inner.lock().await;
             assert!(
