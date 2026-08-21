@@ -117,19 +117,27 @@ impl TelegramState {
     }
 }
 
+fn validate_telegram_init_api_id(api_id: Option<u32>) -> Result<u32, String> {
+    match api_id {
+        Some(api_id) if api_id > 0 => Ok(api_id),
+        _ => Err(
+            "Укажите Telegram API ID в настройках Telegram перед подключением Silero Bot."
+                .to_string(),
+        ),
+    }
+}
+
 /// Инициализация Telegram клиента
 #[tauri::command]
 pub async fn telegram_init(
     state: State<'_, TelegramState>,
     settings_manager: State<'_, SettingsManager>,
-    api_id: u32,
+    api_id: Option<u32>,
     api_hash: String,
     phone: String,
 ) -> Result<(), String> {
     // Валидация входных данных
-    if api_id == 0 {
-        return Err("API ID не может быть пустым".to_string());
-    }
+    let api_id = validate_telegram_init_api_id(api_id)?;
     if api_hash.trim().is_empty() {
         return Err("API Hash не может быть пустым".to_string());
     }
@@ -726,6 +734,21 @@ mod tests {
 
     fn rt() -> tokio::runtime::Runtime {
         tokio::runtime::Runtime::new().unwrap()
+    }
+
+    #[test]
+    fn telegram_init_reports_missing_api_id_clearly() {
+        let error = validate_telegram_init_api_id(None).expect_err("missing ID must fail");
+        assert_eq!(
+            error,
+            "Укажите Telegram API ID в настройках Telegram перед подключением Silero Bot."
+        );
+    }
+
+    #[test]
+    fn telegram_init_rejects_zero_api_id() {
+        assert!(validate_telegram_init_api_id(Some(0)).is_err());
+        assert_eq!(validate_telegram_init_api_id(Some(12345)), Ok(12345));
     }
 
     #[test]
