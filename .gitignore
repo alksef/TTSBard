@@ -52,6 +52,17 @@ opencode.json
 /scripts/fix-vtube-composable.ps1
 /scripts/update-vtube-panel.ps1
 
+# Local dev-machine scripts (not needed for build)
+/scripts/sync-push.sh
+/scripts/sync-pull.sh
+/scripts/sync-push-tar.sh
+/scripts/sync-pull-tar.sh
+/scripts/setup-ssh.sh
+/scripts/codegraph.ps1
+/scripts/codegraph-index.ps1
+/scripts/codegraph-mcp.ps1
+/scripts/vtube-ws-probe.py
+
 images
 .work/images
 promts/
