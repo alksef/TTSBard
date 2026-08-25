@@ -82,6 +82,48 @@ function Test-IsUnsafeCleanTarget([string]$target) {
     return $false
 }
 
+function Import-BuildConfig([string]$path) {
+    $importDataFile = Get-Command Import-PowerShellDataFile -ErrorAction SilentlyContinue
+    if ($null -ne $importDataFile) {
+        return Import-PowerShellDataFile -LiteralPath $path
+    }
+
+    # Windows PowerShell installations without Import-PowerShellDataFile occur
+    # in the wild. The local config deliberately supports only two string keys,
+    # so parse that tiny data format instead of evaluating a .psd1 as code.
+    $result = @{}
+    $lineNumber = 0
+    foreach ($line in Get-Content -LiteralPath $path) {
+        $lineNumber++
+        $trimmed = $line.Trim()
+        if ([string]::IsNullOrEmpty($trimmed) -or $trimmed.StartsWith('#') -or
+            $trimmed -eq '@{' -or $trimmed -eq '}') {
+            continue
+        }
+
+        $match = [regex]::Match(
+            $trimmed,
+            '^(CargoTargetDir|RustBinDir)\s*=\s*(?:''([^'']*)''|"([^"]*)"|\$null)\s*(?:#.*)?$'
+        )
+        if (-not $match.Success) {
+            throw "Unsupported build config syntax at ${path}:$lineNumber. Use CargoTargetDir or RustBinDir with a quoted string or `$null."
+        }
+
+        $key = $match.Groups[1].Value
+        if ($result.ContainsKey($key)) {
+            throw "Duplicate build config key '$key' at ${path}:$lineNumber."
+        }
+        $result[$key] = if ($trimmed -match '=\s*\$null') {
+            $null
+        } elseif ($match.Groups[2].Success) {
+            $match.Groups[2].Value
+        } else {
+            $match.Groups[3].Value
+        }
+    }
+    return $result
+}
+
 # --- Загрузка конфигурации ----------------------------------------------------
 
 $configFilePath = if ($ConfigFile) {
@@ -98,7 +140,7 @@ $configData = $null
 $configLoaded = $false
 
 if (Test-Path $configFilePath -PathType Leaf) {
-    $configData = Import-PowerShellDataFile $configFilePath
+    $configData = Import-BuildConfig $configFilePath
     $configLoaded = $true
 
     if ($null -eq $configData) {
