@@ -365,7 +365,10 @@ mod tests {
         staged.commit().unwrap();
 
         assert!(soundpanel.join(&final_name).is_file());
-        assert_eq!(fs::read(soundpanel.join(&final_name)).unwrap(), b"audio-bytes");
+        assert_eq!(
+            fs::read(soundpanel.join(&final_name)).unwrap(),
+            b"audio-bytes"
+        );
         assert!(
             staging_files(&soundpanel).is_empty(),
             "no staging file should remain after promotion"

@@ -150,21 +150,30 @@ where
 {
     loop {
         if shutdown.is_cancelled() {
-            info!(target = "soundpanel::queue", "Queue worker exiting on shutdown");
+            info!(
+                target = "soundpanel::queue",
+                "Queue worker exiting on shutdown"
+            );
             return;
         }
 
         match receiver.recv_timeout(SOUND_QUEUE_POLL_INTERVAL) {
             Ok(item) => {
                 if shutdown.is_cancelled() {
-                    info!(target = "soundpanel::queue", "Queue worker exiting before next item");
+                    info!(
+                        target = "soundpanel::queue",
+                        "Queue worker exiting before next item"
+                    );
                     return;
                 }
                 play(item);
             }
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => {
-                info!(target = "soundpanel::queue", "Queue channel disconnected; worker exiting");
+                info!(
+                    target = "soundpanel::queue",
+                    "Queue channel disconnected; worker exiting"
+                );
                 return;
             }
         }
@@ -365,7 +374,11 @@ impl SoundPanelState {
     ///
     /// Не создаёт поток на каждый звук и не блокирует вызов. Возвращает ошибку
     /// при переполнении очереди или недоступном worker-е.
-    pub fn play_sound(&self, binding: &SoundBinding, audio_settings: AudioSettings) -> Result<(), String> {
+    pub fn play_sound(
+        &self,
+        binding: &SoundBinding,
+        audio_settings: AudioSettings,
+    ) -> Result<(), String> {
         let appdata_path = self
             .appdata_path
             .lock()
@@ -404,7 +417,10 @@ impl SoundPanelState {
             run_queue_worker(receiver, shutdown);
         });
 
-        info!(target = "soundpanel::queue", "SoundPanel queue worker started");
+        info!(
+            target = "soundpanel::queue",
+            "SoundPanel queue worker started"
+        );
         Ok(())
     }
 

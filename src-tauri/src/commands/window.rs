@@ -1,4 +1,6 @@
-use crate::config::{EditorHotkeySettings, Hotkey, HotkeySettings, SettingsManager, Theme, WindowsManager};
+use crate::config::{
+    EditorHotkeySettings, Hotkey, HotkeySettings, SettingsManager, Theme, WindowsManager,
+};
 use crate::playback_window::update_playback_appearance;
 use crate::soundpanel_window::update_soundpanel_appearance;
 use crate::state::AppState;
@@ -925,9 +927,7 @@ mod tests {
         };
         mgr.set_editor_hotkey("edit_word", &binding).unwrap();
         // Same binding for another action should fail
-        let err = mgr
-            .set_editor_hotkey("next_tab", &binding)
-            .unwrap_err();
+        let err = mgr.set_editor_hotkey("next_tab", &binding).unwrap_err();
         assert!(err.to_string().contains("уже используется"));
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -943,9 +943,7 @@ mod tests {
             ],
             key: "F3".to_string(),
         };
-        let err = mgr
-            .set_editor_hotkey("edit_word", &binding)
-            .unwrap_err();
+        let err = mgr.set_editor_hotkey("edit_word", &binding).unwrap_err();
         assert!(err.to_string().contains("конфликтует"));
 
         let _ = std::fs::remove_dir_all(&dir);

@@ -31,12 +31,14 @@ pub(crate) fn build_output_configs(
         None
     };
 
-    let virtual_mic_config = audio_settings.virtual_mic_device.as_ref().map(|device_id| {
-        OutputConfig {
-            device_id: Some(device_id.clone()),
-            volume: audio_settings.virtual_mic_volume as f32 / 100.0,
-        }
-    });
+    let virtual_mic_config =
+        audio_settings
+            .virtual_mic_device
+            .as_ref()
+            .map(|device_id| OutputConfig {
+                device_id: Some(device_id.clone()),
+                volume: audio_settings.virtual_mic_volume as f32 / 100.0,
+            });
 
     (speaker_config, virtual_mic_config)
 }

@@ -199,13 +199,13 @@ pub async fn deliver_twitch_message(
 
     let client = client.expect("client presence checked above");
     match client.send_message(&text).await {
-        Ok(()) => Ok(DeliveredTwitchMessage { status: "delivered" }),
+        Ok(()) => Ok(DeliveredTwitchMessage {
+            status: "delivered",
+        }),
         Err(e) => Err(CommandError::new(
             twitch_delivery::error_code::SEND_FAILED,
             e.to_string(),
-            ipc::twitch_delivery_error_code_to_retryable(
-                twitch_delivery::error_code::SEND_FAILED,
-            ),
+            ipc::twitch_delivery_error_code_to_retryable(twitch_delivery::error_code::SEND_FAILED),
         )),
     }
 }

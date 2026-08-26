@@ -6,8 +6,8 @@
 use crate::events::AppEvent;
 use crate::setup::parse_webview_server_error;
 use crate::webview::WebViewServer;
-use crate::webview::WebViewSettings;
 use crate::webview::WebViewServerStatus;
+use crate::webview::WebViewSettings;
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
@@ -107,7 +107,9 @@ pub async fn run_webview_server(
                 error!("WebView AppState unavailable");
                 return;
             };
-            state.webview.set_status(&app_handle, WebViewServerStatus::Starting);
+            state
+                .webview
+                .set_status(&app_handle, WebViewServerStatus::Starting);
             info!("[WEBVIEW] ========================================");
             info!("[WEBVIEW] STARTING SERVER");
             info!("[WEBVIEW]   Address: {}:{}", bind_address, port);
@@ -166,10 +168,14 @@ pub async fn run_webview_server(
             match ready_rx.await {
                 Ok(Ok(())) => {
                     start_attempts = 0;
-                    state.webview.set_status(&app_handle, WebViewServerStatus::Running);
+                    state
+                        .webview
+                        .set_status(&app_handle, WebViewServerStatus::Running);
                 }
                 Ok(Err(message)) => {
-                    state.webview.set_status(&app_handle, WebViewServerStatus::Error { message });
+                    state
+                        .webview
+                        .set_status(&app_handle, WebViewServerStatus::Error { message });
                     let _ = server_handle.await;
                     if !respawn_or_give_up(&shutdown, &mut start_attempts, &mut webview_rx).await {
                         return;
@@ -177,9 +183,12 @@ pub async fn run_webview_server(
                     continue;
                 }
                 Err(_) => {
-                    state.webview.set_status(&app_handle, WebViewServerStatus::Error {
-                        message: "WebView server stopped before readiness".into(),
-                    });
+                    state.webview.set_status(
+                        &app_handle,
+                        WebViewServerStatus::Error {
+                            message: "WebView server stopped before readiness".into(),
+                        },
+                    );
                     if !respawn_or_give_up(&shutdown, &mut start_attempts, &mut webview_rx).await {
                         return;
                     }
@@ -208,7 +217,9 @@ pub async fn run_webview_server(
                     server.stop();
 
                     server_handle.abort();
-                    state.webview.set_status(&app_handle, WebViewServerStatus::Stopped);
+                    state
+                        .webview
+                        .set_status(&app_handle, WebViewServerStatus::Stopped);
                     server_running = false;
                 } else {
                     tokio::select! {
@@ -303,7 +314,9 @@ pub async fn run_webview_server(
             }
         } else {
             if let Some(state) = app_handle.try_state::<crate::state::AppState>() {
-                state.webview.set_status(&app_handle, WebViewServerStatus::Stopped);
+                state
+                    .webview
+                    .set_status(&app_handle, WebViewServerStatus::Stopped);
             }
             info!("[WEBVIEW] ========================================");
             info!("[WEBVIEW] SERVER DISABLED");

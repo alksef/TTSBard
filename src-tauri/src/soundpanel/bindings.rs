@@ -6,9 +6,7 @@ use crate::commands::window::resolve_main_appearance;
 use crate::config::{is_valid_hex_color, SettingsManager, WindowsManager};
 use crate::soundpanel::intercept::InterceptSettings;
 use crate::soundpanel::state::{SoundBinding, SoundPanelState, SoundSet, SoundSets};
-use crate::soundpanel::storage::{
-    delete_sound_file, persist_sets, save_sets, stage_sound_file,
-};
+use crate::soundpanel::storage::{delete_sound_file, persist_sets, save_sets, stage_sound_file};
 use crate::soundpanel_window::{
     emit_soundpanel_bindings_changed, hide_soundpanel_window, restore_soundpanel_foreground,
     restore_soundpanel_foreground_retaining_target, update_soundpanel_appearance,

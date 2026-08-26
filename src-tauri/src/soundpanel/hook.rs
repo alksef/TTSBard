@@ -29,8 +29,9 @@ static SP_HOOK_STATE: std::sync::OnceLock<Arc<SoundPanelState>> = std::sync::Onc
 /// sent and the dispatcher thread is joined). On a hypothetical re-init the
 /// channel must be recreated, which a OnceLock cannot express.
 #[cfg(target_os = "windows")]
-static ACTION_DISPATCHER: std::sync::OnceLock<std::sync::Mutex<Option<SyncSender<DispatchCommand>>>> =
-    std::sync::OnceLock::new();
+static ACTION_DISPATCHER: std::sync::OnceLock<
+    std::sync::Mutex<Option<SyncSender<DispatchCommand>>>,
+> = std::sync::OnceLock::new();
 
 #[cfg(target_os = "windows")]
 fn action_dispatcher() -> &'static std::sync::Mutex<Option<SyncSender<DispatchCommand>>> {
@@ -110,8 +111,7 @@ unsafe extern "system" fn soundpanel_keyboard_proc(
                         return CallNextHookEx(HHOOK::default(), n_code, w_param, l_param);
                     }
 
-                    if let Some((key_name, action)) =
-                        intercept_binding_for_key(&intercept, vk_code)
+                    if let Some((key_name, action)) = intercept_binding_for_key(&intercept, vk_code)
                     {
                         let action = action.to_string();
                         if enqueue_intercept_action(action.clone()) {
@@ -121,7 +121,12 @@ unsafe extern "system" fn soundpanel_keyboard_proc(
                             // cannot be dispatched: letting it through would
                             // leak the intercepted keystroke to the app under
                             // focus (dispatcher full/dead/not initialized).
-                            warn!(vk_code, key = key_name, action, "Intercept: action dropped, key swallowed anyway");
+                            warn!(
+                                vk_code,
+                                key = key_name,
+                                action,
+                                "Intercept: action dropped, key swallowed anyway"
+                            );
                         }
                         return LRESULT(1);
                     }
@@ -292,7 +297,9 @@ pub fn initialize_soundpanel_hook(state: SoundPanelState, app_handle: AppHandle)
         let dispatcher_join_handle = std::thread::spawn(move || {
             while let Ok(command) = dispatch_rx.recv() {
                 match command {
-                    DispatchCommand::Action(action) => crate::hotkeys::run_action(&app_handle, &action),
+                    DispatchCommand::Action(action) => {
+                        crate::hotkeys::run_action(&app_handle, &action)
+                    }
                     DispatchCommand::Stop => break,
                 }
             }

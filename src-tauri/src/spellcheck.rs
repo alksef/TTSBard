@@ -113,11 +113,17 @@ mod tests {
 
     fn dict_paths() -> (PathBuf, PathBuf) {
         let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        (base.join("resources/dict/ru.aff"), base.join("resources/dict/ru.dic"))
+        (
+            base.join("resources/dict/ru.aff"),
+            base.join("resources/dict/ru.dic"),
+        )
     }
 
     fn nonexistent_paths() -> (PathBuf, PathBuf) {
-        (PathBuf::from("/nonexistent/ru.aff"), PathBuf::from("/nonexistent/ru.dic"))
+        (
+            PathBuf::from("/nonexistent/ru.aff"),
+            PathBuf::from("/nonexistent/ru.dic"),
+        )
     }
 
     #[test]
@@ -148,7 +154,10 @@ mod tests {
         let mgr = SpellcheckManager::new(aff, dic);
         let words: Vec<String> = vec!["любой".into(), "текст".into()];
         let results = mgr.check_words(&words);
-        assert!(results.is_empty(), "must not return correct=true for all words");
+        assert!(
+            results.is_empty(),
+            "must not return correct=true for all words"
+        );
     }
 
     #[test]

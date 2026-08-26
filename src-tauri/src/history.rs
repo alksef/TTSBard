@@ -602,7 +602,9 @@ mod tests {
         for i in 0..20 {
             let mgr_clone = std::sync::Arc::clone(&mgr_arc);
             threads.push(std::thread::spawn(move || {
-                mgr_clone.record_phrase(&format!("test phrase {}", i)).unwrap();
+                mgr_clone
+                    .record_phrase(&format!("test phrase {}", i))
+                    .unwrap();
             }));
         }
 
@@ -687,9 +689,12 @@ mod tests {
     fn test_record_phrase_with_meta_dedup_different_providers() {
         let (mgr, p1, p2, p3) = manager_in_tmp();
 
-        mgr.record_phrase_with_meta("hello world", "openai", "alloy", "key-1").unwrap();
-        mgr.record_phrase_with_meta("hello world", "silero", "voice-2", "key-2").unwrap();
-        mgr.record_phrase_with_meta("hello world", "openai", "alloy", "key-1").unwrap();
+        mgr.record_phrase_with_meta("hello world", "openai", "alloy", "key-1")
+            .unwrap();
+        mgr.record_phrase_with_meta("hello world", "silero", "voice-2", "key-2")
+            .unwrap();
+        mgr.record_phrase_with_meta("hello world", "openai", "alloy", "key-1")
+            .unwrap();
 
         let phrases = mgr.get_phrases(None, 100);
         assert_eq!(
@@ -734,9 +739,12 @@ mod tests {
     fn test_record_phrase_with_meta_same_provider_voice_dedup() {
         let (mgr, p1, p2, p3) = manager_in_tmp();
 
-        mgr.record_phrase_with_meta("hello", "openai", "alloy", "k1").unwrap();
-        mgr.record_phrase_with_meta("hello", "openai", "alloy", "k1").unwrap();
-        mgr.record_phrase_with_meta("hello", "openai", "alloy", "k1").unwrap();
+        mgr.record_phrase_with_meta("hello", "openai", "alloy", "k1")
+            .unwrap();
+        mgr.record_phrase_with_meta("hello", "openai", "alloy", "k1")
+            .unwrap();
+        mgr.record_phrase_with_meta("hello", "openai", "alloy", "k1")
+            .unwrap();
 
         let phrases = mgr.get_phrases(None, 100);
         assert_eq!(phrases.len(), 1);
@@ -797,7 +805,8 @@ mod tests {
         let (mgr, p1, p2, p3) = manager_in_tmp();
 
         mgr.record_phrase("hello world").unwrap();
-        mgr.record_phrase_with_meta("hello world", "openai", "alloy", "cache-x").unwrap();
+        mgr.record_phrase_with_meta("hello world", "openai", "alloy", "cache-x")
+            .unwrap();
 
         let phrases = mgr.get_phrases(None, 100);
         assert_eq!(phrases.len(), 2);
