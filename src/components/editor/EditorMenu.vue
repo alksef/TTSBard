@@ -1,18 +1,28 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 
 const emit = defineEmits<{
   correct: []
   complete: []
   grammar: []
+  'accent-homographs': []
   'save-audio': []
 }>()
 
-defineProps<{
+const props = defineProps<{
   isAiEnabled: boolean
   hasText: boolean
   compact?: boolean
+  accenting?: boolean
+  accentReady?: boolean
+  accentHomographsBinding?: string
 }>()
+
+const accentHomographsTitle = computed(() =>
+  props.accentHomographsBinding
+    ? `Расставить ударения (${props.accentHomographsBinding})`
+    : 'Расставить ударения',
+)
 
 const open = ref(false)
 const firstItemRef = ref<HTMLButtonElement | null>(null)
@@ -91,6 +101,15 @@ function run(fn: () => void) { close(); fn() }
         @click="run(() => emit('grammar'))"
       >
         AI: грамматика
+      </button>
+      <button
+        class="menu-item"
+        :disabled="!hasText || accenting || !accentReady"
+        :title="accentHomographsTitle"
+        :aria-label="accentHomographsTitle"
+        @click="run(() => emit('accent-homographs'))"
+      >
+        Расставить ударения
       </button>
       <div class="menu-separator" />
       <button

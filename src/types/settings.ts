@@ -31,6 +31,7 @@ export interface EditorHotkeySettingsDto {
   toggle_typing: HotkeyDto
   cycle_quick_mode: HotkeyDto
   toggle_history: HotkeyDto
+  accent_homographs: HotkeyDto
 }
 
 export interface HotkeySettingsDto {
@@ -340,6 +341,31 @@ export interface PreprocessorSettingsDto {
 
 export type QuickEditorMode = 'disabled' | 'collapse' | 'return_focus'
 
+export interface ContextualRuAccentSettingsDto {
+  enabled: boolean
+  python_executable: string | null
+  model_dir: string | null
+  model: string
+}
+
+export interface HomographAccentorSettingsDto {
+  enabled: boolean
+  accentor_pack_id: string | null
+  load_on_start: boolean
+  contextual?: ContextualRuAccentSettingsDto
+}
+
+/** Diagnostic runtime status of a discovered RUAccent pack. */
+export type HomographAccentorPackStatus = 'not_loaded' | 'loading' | 'ready' | 'failed'
+
+/** DTO for a discovered local RUAccent pack (no filesystem paths). */
+export interface HomographAccentorPackDto {
+  id: string
+  display_name: string
+  runtime_version: string
+  runtime_status: HomographAccentorPackStatus
+}
+
 export interface EditorSettingsDto {
   quick: QuickEditorMode
   ai: boolean
@@ -351,6 +377,7 @@ export interface EditorSettingsDto {
   typing_enabled: boolean
   default_route: EditorRoute
   keep_text_after_send: boolean
+  homograph_accentor: HomographAccentorSettingsDto
 }
 
 // ============================================================================

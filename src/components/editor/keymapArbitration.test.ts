@@ -119,6 +119,13 @@ describe('editor hotkey matching', () => {
     expect(matchesEditorHotkey(ctrlR, event({ code: 'KeyR', ctrlKey: true, altKey: true }))).toBe(false)
   })
 
+  it('matches Ctrl+U for accent_homographs default', () => {
+    const ctrlU: HotkeyDto = { modifiers: ['ctrl'], key: 'U' }
+    expect(matchesEditorHotkey(ctrlU, event({ code: 'KeyU', ctrlKey: true }))).toBe(true)
+    expect(matchesEditorHotkey(ctrlU, event({ code: 'KeyU' }))).toBe(false)
+    expect(matchesEditorHotkey(ctrlU, event({ code: 'KeyU', ctrlKey: true, shiftKey: true }))).toBe(false)
+  })
+
   it('maps Enter and Tab to their physical codes', () => {
     expect(hotkeyCode('ENTER')).toBe('Enter')
     expect(hotkeyCode('TAB')).toBe('Tab')

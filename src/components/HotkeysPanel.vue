@@ -12,7 +12,7 @@ const hotkeys = computed(() => settings.value?.hotkeys)
 
 type HotkeyName = 'main_window' | 'sound_panel' | 'playback_control_window' | 'return_previous_window' | 'toggle_minimal_mode'
 
-const EDITOR_HOTKEY_NAMES = ['edit_word', 'submit_continue', 'submit_keep_text', 'submit_keep_focus', 'next_spelling_error', 'previous_spelling_error', 'next_tab', 'previous_tab', 'cycle_route', 'toggle_typing', 'cycle_quick_mode', 'toggle_history'] as const
+const EDITOR_HOTKEY_NAMES = ['edit_word', 'submit_continue', 'submit_keep_text', 'submit_keep_focus', 'next_spelling_error', 'previous_spelling_error', 'next_tab', 'previous_tab', 'cycle_route', 'toggle_typing', 'cycle_quick_mode', 'toggle_history', 'accent_homographs'] as const
 type EditorHotkeyName = (typeof EDITOR_HOTKEY_NAMES)[number]
 
 function isEditorHotkeyName(name: string): name is EditorHotkeyName {
@@ -1137,6 +1137,54 @@ onUnmounted(async () => {
 
           <button
             @click="resetEditorToDefault('toggle_history')"
+            class="reset-btn"
+            title="Сбросить к умолчанию"
+            aria-label="Сбросить к умолчанию"
+          >
+            <RotateCcw :size="14" />
+          </button>
+        </div>
+      </div>
+
+      <div class="hotkey-row">
+        <div class="hotkey-label">
+          <span>Расставить ударения</span>
+        </div>
+        <div class="hotkey-actions">
+          <span v-if="hotkeys && !recordingFor" class="hotkey-value">
+            {{ formatHotkey(hotkeys.editor.accent_homographs) }}
+          </span>
+          <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+
+          <!-- Recording state -->
+          <div v-if="recordingFor === 'accent_homographs' && currentRecording" class="hotkey-value recording">
+            {{ formatCurrentRecording() }}
+          </div>
+
+          <button
+            @click="startEditorRecording('accent_homographs')"
+            :disabled="recordingFor !== null || isLoading"
+            class="record-btn"
+            :class="{ recording: recordingFor === 'accent_homographs' }"
+            title="Записать клавишу"
+            aria-label="Записать клавишу"
+          >
+            <Keyboard :size="14" />
+            {{ recordingFor === 'accent_homographs' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+          </button>
+
+          <button
+            v-if="recordingFor === 'accent_homographs'"
+            @click="cancelRecording"
+            class="cancel-btn"
+            title="Отмена (Esc)"
+            aria-label="Отмена записи"
+          >
+            ✕
+          </button>
+
+          <button
+            @click="resetEditorToDefault('accent_homographs')"
             class="reset-btn"
             title="Сбросить к умолчанию"
             aria-label="Сбросить к умолчанию"

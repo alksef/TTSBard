@@ -29,6 +29,7 @@ import { decodeRoutePrefix, ROUTE_ORDER } from './editor/routeDecode'
 import type { EditorRoute } from './editor/routeDecode'
 import { effectiveRoute, applyRouteToText, routeSubmit } from './editor/routeResolution'
 import { useTwitchRuntimeStatus } from '../composables/useTwitchRuntimeStatus'
+import { useRuAccentRuntime } from '../composables/useRuAccentRuntime'
 
 const { showError } = useErrorHandler()
 const { tabs, activeId, active, create: createTab, close: closeTab, select: selectTab, next: nextTab, previous: previousTab, rename: renameTab, init: initTabs, flushSave: flushTabsSave } = useEditorTabs()
@@ -55,6 +56,7 @@ async function onSelect(id: string) {
 const isCorrecting = ref(false)
 const isCompleting = ref(false)
 const isCheckingGrammar = ref(false)
+const isAccenting = ref(false)
 let correctionIntent = 0
 let completionIntent = 0
 let grammarIntent = 0
@@ -112,6 +114,13 @@ function formatHotkeyDisplay(hotkey: { modifiers: string[]; key: string } | unde
 }
 
 const submitContinueBinding = computed(() => formatHotkeyDisplay(hotkeySettings.value?.editor?.submit_continue))
+
+const accentHomographsBinding = computed(() => formatHotkeyDisplay(hotkeySettings.value?.editor?.accent_homographs))
+
+const { statusFor: ruaccentStatusFor } = useRuAccentRuntime()
+const accentorPackId = computed(() => editorSettings.value?.homograph_accentor?.accentor_pack_id ?? null)
+const accentorRuntimeStatus = ruaccentStatusFor(accentorPackId)
+const accentorReady = computed(() => accentorRuntimeStatus.value === 'ready')
 
 const { isConnected: twitchConnected } = useTwitchRuntimeStatus()
 
@@ -472,6 +481,26 @@ async function checkGrammar() {
   }
 }
 
+async function previewHomographs() {
+  if (!text.value.trim()) return
+  if (isAccenting.value) return
+  if (!accentorReady.value) return
+  const senderTabId = activeId.value
+  const sourceText = text.value
+  isAccenting.value = true
+  try {
+    const marked = await invoke<string>('preview_contextual_ruaccent', { text: sourceText })
+    tabs.value = applyAiResponse(tabs.value, senderTabId, sourceText, activeId.value, marked)
+    await nextTick()
+    focusEditor()
+  } catch (e) {
+    debugError('[InputPanel] Homograph preview failed:', e)
+    showError(e as string)
+  } finally {
+    isAccenting.value = false
+  }
+}
+
 function getProviderExtension(): string {
   const provider = ttsSettings.value?.provider
   if (provider === 'fish') {
@@ -817,6 +846,13 @@ async function handleEditorScopeKeydown(event: KeyboardEvent) {
     return
   }
 
+  if (matchesEditorHotkey(bindings.accent_homographs, event)) {
+    event.preventDefault()
+    event.stopPropagation()
+    await previewHomographs()
+    return
+  }
+
   if (matchesEditorHotkey(bindings.cycle_route, event)) {
     event.preventDefault()
     event.stopPropagation()
@@ -895,9 +931,13 @@ defineExpose({ focusEditor })
           :is-ai-enabled="isAiButtonEnabled"
           :has-text="!!text.trim()"
           :compact="isMinimalMode"
+          :accenting="isAccenting"
+          :accent-ready="accentorReady"
+          :accent-homographs-binding="accentHomographsBinding"
           @correct="correctText"
           @complete="completeText"
           @grammar="checkGrammar"
+          @accent-homographs="previewHomographs"
           @save-audio="saveAudio"
         />
         <button

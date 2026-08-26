@@ -20,6 +20,7 @@ import MinimalModeButton from './components/MinimalModeButton.vue'
 import IntegrationStatusCluster from './components/titlebar/IntegrationStatusCluster.vue'
 import { useTelegramAuth, TELEGRAM_AUTH_KEY } from './composables/useTelegramAuth'
 import { provideAppSettings } from './composables/useAppSettings'
+import { useRuAccentRuntime } from './composables/useRuAccentRuntime'
 import { debugLog, debugError } from './utils/debug'
 import { createAsyncCleanupScope } from './utils/asyncCleanup'
 import { useErrorHandler } from './composables/useErrorHandler'
@@ -46,6 +47,7 @@ provide('isMinimalMode', isMinimalMode)
 // Create and provide app settings context
 const appSettings = provideAppSettings()
 const { showWarning } = useErrorHandler()
+const { dispose: disposeRuAccentRuntime } = useRuAccentRuntime()
 
 watch(
   () => appSettings.settings.value?.notifications,
@@ -343,6 +345,7 @@ onUnmounted(() => {
   document.removeEventListener('keydown', handleReturnFocusKeydown)
   document.removeEventListener('keydown', handleToggleMinimalKeydown)
   listenerScope.dispose()
+  disposeRuAccentRuntime()
 })
 </script>
 

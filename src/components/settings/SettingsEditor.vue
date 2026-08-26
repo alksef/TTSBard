@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, watch, ref, onUnmounted } from 'vue';
+import { computed, watch, ref, onMounted, onUnmounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import { Play, Loader2, Check, RefreshCw } from 'lucide-vue-next';
 import { useEditorSettings } from '../../composables/useAppSettings';
-import type { QuickEditorMode } from '../../types/settings';
+import { useRuAccentRuntime } from '../../composables/useRuAccentRuntime';
+import type { HomographAccentorPackDto, QuickEditorMode } from '../../types/settings';
 import { normalizeTypingTimeout } from '../../utils/validateTypingTimeout';
 
 const editorSettings = useEditorSettings();
@@ -82,6 +84,115 @@ async function toggleKeepText() {
   } catch (e) {
     const errorMessage = e instanceof Error ? e.message : String(e)
     emit('show-message', 'Ошибка переключения сохранения текста: ' + errorMessage)
+  }
+}
+
+const homographAccentor = computed(() => editorSettings.value?.homograph_accentor)
+const accentorEnabled = computed(() => homographAccentor.value?.enabled ?? false)
+const accentorLoadOnStart = computed(() => homographAccentor.value?.load_on_start ?? false)
+
+function formatAccentorPackLabel(pack: HomographAccentorPackDto): string {
+  return pack.display_name.trim()
+}
+
+const { statusFor, load: loadRuAccentModel, refreshPacks } = useRuAccentRuntime()
+
+const accentorPacks = ref<HomographAccentorPackDto[]>([])
+const selectedPackId = ref<string>('')
+
+function syncAccentorFromSettings() {
+  const persistedId = homographAccentor.value?.accentor_pack_id ?? ''
+  if (selectedPackId.value !== persistedId) {
+    selectedPackId.value = persistedId
+  }
+}
+
+watch(homographAccentor, () => syncAccentorFromSettings(), { immediate: true })
+
+const accentorRuntimeStatus = statusFor(selectedPackId)
+const accentorReady = computed(() => accentorRuntimeStatus.value === 'ready')
+
+const accentorStatusText = computed(() => {
+  switch (accentorRuntimeStatus.value) {
+    case 'not_loaded':
+      return 'Не загружена'
+    case 'loading':
+      return 'Загружается'
+    case 'ready':
+      return 'Готова'
+    case 'failed':
+      return 'Ошибка загрузки'
+    default:
+      return ''
+  }
+})
+
+const accentorLoadTitle = computed(() => {
+  switch (accentorRuntimeStatus.value) {
+    case 'loading':
+      return 'Модель RUAccent загружается'
+    case 'ready':
+      return 'Модель RUAccent загружена'
+    case 'failed':
+      return 'Повторить загрузку модели RUAccent'
+    default:
+      return 'Загрузить модель RUAccent'
+  }
+})
+
+async function loadAccentorPacks() {
+  try {
+    accentorPacks.value = await refreshPacks()
+  } catch (e) {
+    const errorMessage = e instanceof Error ? e.message : String(e)
+    emit('show-message', 'Ошибка загрузки моделей RUAccent: ' + errorMessage)
+  }
+}
+
+onMounted(async () => {
+  await loadAccentorPacks()
+  syncAccentorFromSettings()
+})
+
+async function saveAccentor(enabled: boolean, packId: string | null) {
+  try {
+    await invoke('set_editor_homograph_accentor', { enabled, accentorPackId: packId })
+    emit('show-message', 'Настройка сохранена')
+    await loadAccentorPacks()
+  } catch (e) {
+    const errorMessage = e instanceof Error ? e.message : String(e)
+    emit('show-message', 'Ошибка сохранения ударений: ' + errorMessage)
+    syncAccentorFromSettings()
+  }
+}
+
+async function toggleAccentor() {
+  const next = !accentorEnabled.value
+  let packId: string | null = selectedPackId.value || null
+  if (next && !packId && accentorPacks.value.length > 0) {
+    packId = accentorPacks.value[0].id
+    selectedPackId.value = packId
+  }
+  await saveAccentor(next, packId)
+}
+
+async function onPackSelect() {
+  await saveAccentor(accentorEnabled.value, selectedPackId.value || null)
+}
+
+async function loadSelectedModel() {
+  if (!selectedPackId.value) return
+  await loadRuAccentModel(selectedPackId.value)
+}
+
+async function toggleLoadOnStart() {
+  try {
+    const next = !(homographAccentor.value?.load_on_start ?? false)
+    await invoke('set_editor_homograph_accentor_load_on_start', { loadOnStart: next })
+    emit('show-message', 'Настройка сохранена')
+  } catch (e) {
+    const errorMessage = e instanceof Error ? e.message : String(e)
+    emit('show-message', 'Ошибка сохранения автозагрузки: ' + errorMessage)
   }
 }
 
@@ -165,6 +276,101 @@ watch(editorSettings, (newSettings) => {
           Начало набора передаётся сразу, задержка отсчитывается после последней пользовательской правки.
         </span>
       </div>
+    </section>
+
+    <section class="settings-section">
+      <div class="card-header">
+        <h3 class="card-title">Омографы и ударения</h3>
+        <p class="card-desc">
+          Локальная модель RUAccent расставляет ударения и выбирает вариант омографа по контексту. Работает с провайдерами Silero и Piper.
+        </p>
+      </div>
+
+      <div v-if="accentorPacks.length === 0" class="accentor-empty">
+        <div class="setting-row">
+          <label class="setting-label checkbox-label">
+            <input
+              type="checkbox"
+              class="checkbox-input"
+              disabled
+            />
+            <span>Автоматически расставлять ударения</span>
+          </label>
+        </div>
+        <div class="setting-hint accentor-empty" role="status" aria-live="polite">
+          Модели RUAccent не найдены. Поместите файлы моделей в:
+          <code>%APPDATA%\ttsbard\models\ruaccent</code>
+        </div>
+      </div>
+
+      <template v-else>
+        <div class="setting-row accentor-select-row">
+          <label class="setting-label" for="accentor-select">Модель RUAccent:</label>
+          <select
+            id="accentor-select"
+            v-model="selectedPackId"
+            class="accentor-select"
+            :disabled="accentorRuntimeStatus === 'loading'"
+            @change="onPackSelect"
+          >
+            <option value="" disabled>Выберите модель</option>
+            <option v-for="pack in accentorPacks" :key="pack.id" :value="pack.id">
+              {{ formatAccentorPackLabel(pack) }}
+            </option>
+          </select>
+          <button
+            type="button"
+            class="accentor-load-btn"
+            :disabled="!selectedPackId || accentorRuntimeStatus === 'loading' || accentorRuntimeStatus === 'ready'"
+            :title="accentorLoadTitle"
+            :aria-label="accentorLoadTitle"
+            @click="loadSelectedModel"
+          >
+            <Loader2 v-if="accentorRuntimeStatus === 'loading'" :size="16" class="accentor-spin" />
+            <Check v-else-if="accentorRuntimeStatus === 'ready'" :size="16" />
+            <RefreshCw v-else-if="accentorRuntimeStatus === 'failed'" :size="16" />
+            <Play v-else :size="16" />
+          </button>
+        </div>
+        <span
+          v-if="selectedPackId"
+          class="setting-hint accentor-status"
+          role="status"
+          aria-live="polite"
+        >
+          Статус: {{ accentorStatusText }}
+        </span>
+        <div class="setting-row accentor-load-on-start-row">
+          <label class="setting-label checkbox-label">
+            <input
+              :checked="accentorLoadOnStart"
+              :disabled="!selectedPackId || accentorRuntimeStatus === 'loading'"
+              type="checkbox"
+              class="checkbox-input"
+              @change="toggleLoadOnStart"
+            />
+            <span>Загружать при запуске</span>
+          </label>
+          <span class="setting-hint">
+            (может немного увеличить время запуска приложения)
+          </span>
+        </div>
+        <div class="setting-row accentor-enable-row">
+          <label class="setting-label checkbox-label">
+            <input
+              :checked="accentorEnabled"
+              :disabled="!accentorReady"
+              type="checkbox"
+              class="checkbox-input"
+              @change="toggleAccentor"
+            />
+            <span>Автоматически расставлять ударения</span>
+          </label>
+          <span class="setting-hint">
+            Применять к каждому сообщению перед синтезом; также разрешает омографы.
+          </span>
+        </div>
+      </template>
     </section>
   </div>
 </template>
@@ -258,11 +464,11 @@ watch(editorSettings, (newSettings) => {
   font-size: 0.85em;
 }
 
-.typing-row {
+.settings-editor .typing-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.5rem;
 }
 
 .typing-row label {
@@ -273,7 +479,7 @@ watch(editorSettings, (newSettings) => {
 }
 
 .typing-row .number-input {
-  width: 120px;
+  width: 88px;
   padding: 0.5rem;
   border: 1px solid var(--color-border-strong);
   border-radius: 10px;
@@ -292,4 +498,92 @@ watch(editorSettings, (newSettings) => {
   margin-left: 0 !important;
   width: 100%;
 }
+
+.accentor-empty {
+  margin-left: 0 !important;
+}
+
+.accentor-status {
+  margin-left: 0 !important;
+}
+
+.settings-editor .accentor-select-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.accentor-select-row label {
+  min-width: 110px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+}
+
+.accentor-select {
+  flex: 0 1 180px;
+  width: min(180px, 100%);
+  min-width: 0;
+  padding: 0.5rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 10px;
+  font-size: 14px;
+  background: var(--color-bg-field);
+  color: var(--color-text-primary);
+}
+
+.accentor-enable-row {
+  margin-top: 0.75rem;
+}
+
+.accentor-load-on-start-row {
+  margin-top: 0.25rem;
+}
+
+.accentor-load-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  padding: 0;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.accentor-load-btn:hover:not(:disabled) {
+  background: var(--color-accent);
+  color: var(--color-text-on-accent, #ffffff);
+  border-color: var(--color-accent);
+}
+
+.accentor-load-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.accentor-spin {
+  animation: accentor-spin 1s linear infinite;
+}
+
+@keyframes accentor-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.accentor-select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
+}
+
 </style>

@@ -38,6 +38,7 @@ pub struct EditorHotkeySettings {
     pub toggle_typing: Hotkey,
     pub cycle_quick_mode: Hotkey,
     pub toggle_history: Hotkey,
+    pub accent_homographs: Hotkey,
 }
 
 impl Default for EditorHotkeySettings {
@@ -55,6 +56,7 @@ impl Default for EditorHotkeySettings {
             toggle_typing: Hotkey::default_toggle_typing(),
             cycle_quick_mode: Hotkey::default_cycle_quick_mode(),
             toggle_history: Hotkey::default_toggle_history(),
+            accent_homographs: Hotkey::default_accent_homographs(),
         }
     }
 }
@@ -73,6 +75,7 @@ pub const EDITOR_ACTION_IDS: &[&str] = &[
     "toggle_typing",
     "cycle_quick_mode",
     "toggle_history",
+    "accent_homographs",
 ];
 
 impl EditorHotkeySettings {
@@ -94,6 +97,7 @@ impl EditorHotkeySettings {
             "toggle_typing" => Some(&self.toggle_typing),
             "cycle_quick_mode" => Some(&self.cycle_quick_mode),
             "toggle_history" => Some(&self.toggle_history),
+            "accent_homographs" => Some(&self.accent_homographs),
             _ => None,
         }
     }
@@ -112,6 +116,7 @@ impl EditorHotkeySettings {
             "toggle_typing" => Some(&mut self.toggle_typing),
             "cycle_quick_mode" => Some(&mut self.cycle_quick_mode),
             "toggle_history" => Some(&mut self.toggle_history),
+            "accent_homographs" => Some(&mut self.accent_homographs),
             _ => None,
         }
     }
@@ -133,7 +138,6 @@ impl EditorHotkeySettings {
         }
         None
     }
-
 }
 
 /// All configurable hotkeys
@@ -331,6 +335,14 @@ impl Hotkey {
         Self {
             modifiers: vec![HotkeyModifier::Ctrl],
             key: "H".to_string(),
+        }
+    }
+
+    /// Create a hotkey with Ctrl+U (accent homographs default)
+    pub fn default_accent_homographs() -> Self {
+        Self {
+            modifiers: vec![HotkeyModifier::Ctrl],
+            key: "U".to_string(),
         }
     }
 
@@ -618,6 +630,15 @@ mod tests {
     }
 
     #[test]
+    fn test_default_accent_homographs() {
+        let hk = Hotkey::default_accent_homographs();
+        assert_eq!(hk.key, "U");
+        assert_eq!(hk.modifiers.len(), 1);
+        assert_eq!(hk.modifiers[0], HotkeyModifier::Ctrl);
+        assert_eq!(hk.format_display(), "Ctrl+U");
+    }
+
+    #[test]
     fn test_hotkey_is_empty() {
         let empty = Hotkey {
             modifiers: vec![],
@@ -648,12 +669,17 @@ mod tests {
         assert_eq!(s.toggle_typing.key, "T");
         assert_eq!(s.cycle_quick_mode.key, "W");
         assert_eq!(s.toggle_history.key, "H");
+        assert_eq!(s.accent_homographs.key, "U");
     }
 
     #[test]
     fn is_valid_action_id_accepts_all_editor_ids() {
         for &id in EDITOR_ACTION_IDS {
-            assert!(EditorHotkeySettings::is_valid_action_id(id), "{} should be valid", id);
+            assert!(
+                EditorHotkeySettings::is_valid_action_id(id),
+                "{} should be valid",
+                id
+            );
         }
         assert!(!EditorHotkeySettings::is_valid_action_id("bogus"));
         assert!(!EditorHotkeySettings::is_valid_action_id("main_window"));
@@ -670,6 +696,7 @@ mod tests {
         assert_eq!(s.get_by_id("toggle_typing").unwrap().key, "T");
         assert_eq!(s.get_by_id("cycle_quick_mode").unwrap().key, "W");
         assert_eq!(s.get_by_id("toggle_history").unwrap().key, "H");
+        assert_eq!(s.get_by_id("accent_homographs").unwrap().key, "U");
         assert!(s.get_by_id("bogus").is_none());
     }
 
@@ -681,6 +708,12 @@ mod tests {
             field.key = "F9".to_string();
         }
         assert_eq!(s.edit_word.key, "F9");
+
+        {
+            let field = s.get_mut_by_id("accent_homographs").unwrap();
+            field.key = "F10".to_string();
+        }
+        assert_eq!(s.accent_homographs.key, "F10");
     }
 
     #[test]
@@ -733,6 +766,21 @@ mod tests {
             key: String::new(),
         };
         assert!(s.find_duplicate("edit_word", &empty).is_none());
+    }
+
+    #[test]
+    fn find_duplicate_detects_accent_homographs_conflict() {
+        let mut s = EditorHotkeySettings::default();
+        s.accent_homographs = Hotkey {
+            modifiers: vec![HotkeyModifier::Ctrl],
+            key: "U".to_string(),
+        };
+        s.toggle_history = Hotkey {
+            modifiers: vec![HotkeyModifier::Ctrl],
+            key: "U".to_string(),
+        };
+        let conflict = s.find_duplicate("accent_homographs", &s.accent_homographs.clone());
+        assert_eq!(conflict, Some("toggle_history"));
     }
 
     #[test]
@@ -809,6 +857,7 @@ mod tests {
         assert_eq!(settings.editor.toggle_typing.key, "T");
         assert_eq!(settings.editor.cycle_quick_mode.key, "W");
         assert_eq!(settings.editor.toggle_history.key, "H");
+        assert_eq!(settings.editor.accent_homographs.key, "U");
     }
 
     #[test]
