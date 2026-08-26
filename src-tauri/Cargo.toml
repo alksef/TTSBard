@@ -47,6 +47,7 @@ base64 = "0.22"
 hex = "0.4"
 urlencoding = "2.1"
 dirs = "5"
+flate2 = "1"
 rodio = { version = "0.19", features = ["symphonia-mp3", "symphonia-wav"] }
 cpal = "0.15"
 symphonia = { version = "0.5", features = ["mp3", "wav"] }
@@ -107,8 +108,11 @@ rand = "0.10"
 spellbook = "0.4"
 
 # Piper TTS embedded runtime: static ONNX Runtime + phonemization
-ort = "=2.0.0-rc.12"
-espeak-rs = "0.2.0"
+ort = "=2.0.0-rc.13"
+espeak-rs = { git = "https://github.com/alksef/piper-rs.git", rev = "346f10f6e8520b2ee21e4d0117c1ca0e38e5cd0f", package = "espeak-rs" }
+
+# Native RUAccent stress runtime (local sibling repository, see ROADMAP-082).
+ruaccent_rs = { git = "https://github.com/alksef/ruaccent-rs.git", tag = "v0.2.0" }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [

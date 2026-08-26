@@ -166,7 +166,12 @@
     "typing_idle_timeout_ms": 500,
     "typing_enabled": false,
     "default_route": "everywhere",
-    "keep_text_after_send": false
+    "keep_text_after_send": false,
+    "homograph_accentor": {
+      "enabled": false,
+      "accentor_pack_id": null,
+      "load_on_start": false
+    }
   },
   "logging": {
     "enabled": false,
@@ -290,6 +295,10 @@
         "key": ""
       },
       "toggle_history": {
+        "modifiers": [],
+        "key": ""
+      },
+      "accent_homographs": {
         "modifiers": [],
         "key": ""
       }

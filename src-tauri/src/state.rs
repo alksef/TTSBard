@@ -1,6 +1,8 @@
 use crate::ai::AiProvider;
 use crate::events::{AppEvent, TwitchEvent};
 use crate::secret_log;
+use crate::stress::packs::RuAccentPackDescriptor;
+use crate::stress::runtime::RuAccentRuntimeSlot;
 use crate::telegram::TelegramClient;
 use crate::tts::{
     fish::FishTts, local_http_server::LocalHttpServerTts, openai::OpenAiTts,
@@ -85,6 +87,20 @@ pub struct AppState {
 
     /// TTS провайдеры (registry)
     pub tts_registry: Arc<Mutex<TtsProviderRegistry>>,
+
+    /// Thread-safe snapshot of discovered local RUAccent packs.
+    ///
+    /// Produced purely from filesystem/metadata discovery: no ONNX session is
+    /// created and no model files are loaded here.
+    pub ruaccent_packs: Arc<RwLock<Vec<RuAccentPackDescriptor>>>,
+
+    /// Lazy native RUAccent runtime slots keyed by pack ID.
+    ///
+    /// Slots never create sessions or read model bytes. Refreshing discovery
+    /// replaces an obsolete slot and preserves the existing one only when a
+    /// same-ID descriptor still points at the same pack root and omograph
+    /// model.
+    pub ruaccent_runtime_slots: Arc<RwLock<HashMap<String, RuAccentRuntimeSlot>>>,
 
     /// Editor service (preprocessor, history, spellcheck)
     pub editor: Arc<crate::editor::EditorService>,
@@ -184,6 +200,8 @@ impl AppState {
             hotkey_enabled: Arc::new(Mutex::new(true)), // default true
             tts_config: Arc::new(RwLock::new(TtsConfig::default())),
             tts_registry: Arc::new(Mutex::new(TtsProviderRegistry::new())),
+            ruaccent_packs: Arc::new(RwLock::new(Vec::new())),
+            ruaccent_runtime_slots: Arc::new(RwLock::new(HashMap::new())),
             editor,
             active_window: Arc::new(Mutex::new(ActiveWindow::None)),
             twitch,
@@ -581,6 +599,67 @@ impl AppState {
         }
 
         info!(count = count, "Piper provider registration complete");
+    }
+
+    /// Snapshot the currently discovered RUAccent packs.
+    #[allow(dead_code)]
+    pub fn get_ruaccent_packs(&self) -> Vec<RuAccentPackDescriptor> {
+        self.ruaccent_packs.read().clone()
+    }
+
+    /// Get the lazy native runtime slot for a pack ID, if the pack exists with
+    /// a native-ready capability. Never loads models or creates sessions.
+    #[allow(dead_code)]
+    pub fn get_ruaccent_runtime_slot(&self, pack_id: &str) -> Option<RuAccentRuntimeSlot> {
+        self.ruaccent_runtime_slots.read().get(pack_id).cloned()
+    }
+
+    /// Snapshot every RUAccent runtime slot except one selected ID. The caller
+    /// can unload the returned slots on a blocking worker without holding the
+    /// registry lock or blocking an async command thread.
+    pub fn ruaccent_runtime_slots_except(&self, keep_id: Option<&str>) -> Vec<RuAccentRuntimeSlot> {
+        self.ruaccent_runtime_slots
+            .read()
+            .iter()
+            .filter(|(id, _)| Some(id.as_str()) != keep_id)
+            .map(|(_, slot)| slot.clone())
+            .collect()
+    }
+
+    /// Re-discover RUAccent packs across the given search roots and replace the
+    /// stored snapshot. Returns the number of packs found; does not load any
+    /// model or create an ONNX session.
+    ///
+    /// Runtime slots are reconciled with the new snapshot: slots for packs that
+    /// disappeared are dropped, a slot is preserved only when its same-ID
+    /// descriptor still points at the same pack root and omograph model, and a
+    /// fresh slot is created for new/changed packs.
+    pub fn refresh_ruaccent_packs(&self, search_roots: &[std::path::PathBuf]) -> usize {
+        let descriptors = crate::stress::packs::discover_ruaccent_packs(search_roots);
+        let count = descriptors.len();
+        *self.ruaccent_packs.write() = descriptors.clone();
+
+        let by_id: HashMap<&str, &RuAccentPackDescriptor> =
+            descriptors.iter().map(|d| (d.id.as_str(), d)).collect();
+
+        let mut slots = self.ruaccent_runtime_slots.write();
+        slots.retain(|id, slot| {
+            by_id
+                .get(id.as_str())
+                .map(|desc| {
+                    slot.descriptor().pack_root == desc.pack_root
+                        && slot.descriptor().omograph_model_id == desc.omograph_model_id
+                })
+                .unwrap_or(false)
+        });
+        for (id, desc) in &by_id {
+            if !slots.contains_key(*id) {
+                slots.insert((*id).to_string(), RuAccentRuntimeSlot::new((*desc).clone()));
+            }
+        }
+
+        info!(count = count, "RUAccent pack discovery complete");
+        count
     }
 
     /// Prepare, persist and publish one concrete provider selection.
@@ -984,5 +1063,162 @@ mod tests {
         let state = AppState::new();
         assert!(state.begin_shutdown());
         assert!(!state.begin_shutdown());
+    }
+
+    // ── RUAccent pack discovery snapshot tests ──
+
+    #[test]
+    fn ruaccent_snapshot_starts_empty() {
+        let state = AppState::new();
+        assert!(state.get_ruaccent_packs().is_empty());
+    }
+
+    #[test]
+    fn ruaccent_refresh_is_visible_through_getter() {
+        use crate::stress::packs::test_util as tu;
+
+        let state = AppState::new();
+        let root = tu::unique_test_root("visible");
+        tu::write_upstream_pack(&root, &["one"]);
+
+        let count = state.refresh_ruaccent_packs(&[root.clone()]);
+        assert_eq!(count, 1);
+
+        let snapshot = state.get_ruaccent_packs();
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].id, "ruaccent.upstream.one");
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn ruaccent_second_refresh_replaces_snapshot() {
+        use crate::stress::packs::test_util as tu;
+
+        let state = AppState::new();
+        let root = tu::unique_test_root("replace-a");
+        let root2 = tu::unique_test_root("replace-b");
+        tu::write_upstream_pack(&root, &["first"]);
+        tu::write_upstream_pack(&root2, &["second"]);
+
+        assert_eq!(state.refresh_ruaccent_packs(&[root.clone()]), 1);
+
+        let count = state.refresh_ruaccent_packs(&[root2.clone()]);
+        assert_eq!(count, 1);
+
+        let snapshot = state.get_ruaccent_packs();
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].id, "ruaccent.upstream.second");
+
+        std::fs::remove_dir_all(&root).ok();
+        std::fs::remove_dir_all(&root2).ok();
+    }
+
+    // ── RUAccent lazy runtime slot reconciliation tests ──
+
+    #[test]
+    fn ruaccent_slots_created_for_complete_packs() {
+        use crate::stress::packs::test_util as tu;
+        use crate::stress::runtime::RuAccentRuntimeStatus;
+
+        let state = AppState::new();
+        let root = tu::unique_test_root("slots-complete");
+
+        let pack = tu::write_upstream_pack(&root, &["tiny"]);
+
+        let count = state.refresh_ruaccent_packs(&[root.clone()]);
+        assert_eq!(count, 1);
+
+        let slots = state.ruaccent_runtime_slots.read().clone();
+        assert_eq!(slots.len(), 1);
+        assert!(slots.contains_key("ruaccent.upstream.tiny"));
+        assert_eq!(
+            slots["ruaccent.upstream.tiny"].status(),
+            RuAccentRuntimeStatus::NotLoaded
+        );
+        assert_eq!(slots["ruaccent.upstream.tiny"].descriptor().pack_root, pack);
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn ruaccent_refresh_preserves_slot_for_same_pack_root() {
+        use crate::stress::packs::test_util as tu;
+        use crate::stress::runtime::RuAccentRuntimeStatus;
+
+        let state = AppState::new();
+        let root = tu::unique_test_root("preserve");
+
+        tu::write_upstream_pack(&root, &["same"]);
+        assert_eq!(state.refresh_ruaccent_packs(&[root.clone()]), 1);
+
+        let slot = state
+            .get_ruaccent_runtime_slot("ruaccent.upstream.same")
+            .expect("slot exists");
+        slot.mark_ready();
+        assert_eq!(slot.status(), RuAccentRuntimeStatus::Ready);
+
+        // Same pack root and model: the live slot (and its status) is preserved.
+        assert_eq!(state.refresh_ruaccent_packs(&[root.clone()]), 1);
+        let slot = state
+            .get_ruaccent_runtime_slot("ruaccent.upstream.same")
+            .expect("slot preserved");
+        assert_eq!(slot.status(), RuAccentRuntimeStatus::Ready);
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn ruaccent_refresh_replaces_slot_when_pack_root_changes() {
+        use crate::stress::packs::test_util as tu;
+        use crate::stress::runtime::RuAccentRuntimeStatus;
+
+        let state = AppState::new();
+        let root_a = tu::unique_test_root("replace-a");
+        let root_b = tu::unique_test_root("replace-b");
+
+        let pack_a = tu::write_upstream_pack(&root_a, &["move"]);
+        assert_eq!(state.refresh_ruaccent_packs(&[root_a.clone()]), 1);
+        let slot = state
+            .get_ruaccent_runtime_slot("ruaccent.upstream.move")
+            .expect("slot");
+        slot.mark_ready();
+
+        let pack_b = tu::write_upstream_pack(&root_b, &["move"]);
+        assert_eq!(state.refresh_ruaccent_packs(&[root_b.clone()]), 1);
+
+        let slot = state
+            .get_ruaccent_runtime_slot("ruaccent.upstream.move")
+            .expect("slot replaced");
+        assert_ne!(slot.descriptor().pack_root, pack_a);
+        assert_eq!(slot.descriptor().pack_root, pack_b);
+        assert_eq!(slot.status(), RuAccentRuntimeStatus::NotLoaded);
+
+        std::fs::remove_dir_all(&root_a).ok();
+        std::fs::remove_dir_all(&root_b).ok();
+    }
+
+    #[test]
+    fn ruaccent_refresh_removes_slots_for_missing_packs() {
+        use crate::stress::packs::test_util as tu;
+
+        let state = AppState::new();
+        let root = tu::unique_test_root("remove");
+
+        tu::write_upstream_pack(&root, &["gone"]);
+        assert_eq!(state.refresh_ruaccent_packs(&[root.clone()]), 1);
+        assert!(state
+            .get_ruaccent_runtime_slot("ruaccent.upstream.gone")
+            .is_some());
+
+        let empty_root = tu::unique_test_root("empty");
+        assert_eq!(state.refresh_ruaccent_packs(&[empty_root.clone()]), 0);
+        assert!(state
+            .get_ruaccent_runtime_slot("ruaccent.upstream.gone")
+            .is_none());
+        assert!(state.get_ruaccent_packs().is_empty());
+
+        std::fs::remove_dir_all(&root).ok();
+        std::fs::remove_dir_all(&empty_root).ok();
     }
 }

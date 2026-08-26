@@ -935,6 +935,21 @@ impl<'de> Deserialize<'de> for EditorRoute {
     }
 }
 
+/// Настройки слоя омографов и ударений (RUAccent) перед синтезом.
+///
+/// Включение только сохраняет настройку; модель не загружается до явной команды
+/// загрузки либо опции загрузки при старте. `accentor_pack_id` — stable id
+/// найденного native pack.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default)]
+pub struct HomographAccentorSettings {
+    pub enabled: bool,
+    pub accentor_pack_id: Option<String>,
+    /// Загружать выбранную модель RUAccent при старте приложения.
+    #[serde(default)]
+    pub load_on_start: bool,
+}
+
 /// Editor settings for quick and AI editor modes
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
@@ -959,6 +974,8 @@ pub struct EditorSettings {
     pub default_route: EditorRoute,
     #[serde(default)]
     pub keep_text_after_send: bool,
+    #[serde(default)]
+    pub homograph_accentor: HomographAccentorSettings,
 }
 
 fn default_editor_height() -> u32 {
@@ -994,6 +1011,7 @@ fn editor_action_label(action_id: &str) -> &str {
         "toggle_typing" => "переключения передачи набора текста",
         "cycle_quick_mode" => "смены режима быстрого редактора",
         "toggle_history" => "показа/скрытия истории",
+        "accent_homographs" => "расстановки ударений",
         _ => action_id,
     }
 }
@@ -1011,6 +1029,7 @@ impl Default for EditorSettings {
             typing_enabled: true,
             default_route: EditorRoute::Everywhere,
             keep_text_after_send: false,
+            homograph_accentor: HomographAccentorSettings::default(),
         }
     }
 }
@@ -1919,6 +1938,29 @@ impl SettingsManager {
         self.update_field("/editor/default_route", &route)
     }
 
+    /// Set homograph/accentor (RUAccent) enabled state and selected pack id in
+    /// one atomic transaction. Validation of the pack id against discovered
+    /// packs is performed by the caller (commands layer).
+    pub fn set_editor_homograph_accentor(
+        &self,
+        enabled: bool,
+        accentor_pack_id: Option<String>,
+    ) -> Result<()> {
+        self.update_settings_atomically(move |settings| {
+            settings.editor.homograph_accentor.enabled = enabled;
+            settings.editor.homograph_accentor.accentor_pack_id = accentor_pack_id;
+        })
+    }
+
+    /// Set whether the selected RUAccent model loads on startup. Validation of
+    /// a selected model against discovered packs is performed by the caller
+    /// (commands layer).
+    pub fn set_editor_homograph_accentor_load_on_start(&self, load_on_start: bool) -> Result<()> {
+        self.update_settings_atomically(move |settings| {
+            settings.editor.homograph_accentor.load_on_start = load_on_start;
+        })
+    }
+
     // ========== AI Settings ==========
 
     /// Set AI provider
@@ -2169,6 +2211,7 @@ impl SettingsManager {
             "toggle_typing" => Hotkey::default_toggle_typing(),
             "cycle_quick_mode" => Hotkey::default_cycle_quick_mode(),
             "toggle_history" => Hotkey::default_toggle_history(),
+            "accent_homographs" => Hotkey::default_accent_homographs(),
             _ => return Err(anyhow::anyhow!("Invalid editor action: {}", action_id)),
         };
         self.set_editor_hotkey(action_id, &default)?;
@@ -2845,6 +2888,74 @@ mod tests {
         assert_eq!(settings.provider, TtsProviderType::OpenAi);
     }
 
+    // ==================== HomographAccentorSettings migration ====================
+
+    /// Backward-compat: an old settings.json that carried the Python sidecar
+    /// fields (`contextual`) must still deserialize. Unknown fields are ignored,
+    /// so removing `ContextualRuAccentSettings` never blocks startup.
+    #[test]
+    fn homograph_accentor_deserializes_without_sidecar_fields() {
+        let old_json = r#"{
+            "enabled": true,
+            "accentor_pack_id": "com.example.ruaccent",
+            "contextual": {
+                "enabled": true,
+                "python_executable": "C:/python/python.exe",
+                "model_dir": "C:/models/ruaccent",
+                "model": "tiny"
+            }
+        }"#;
+        let settings: HomographAccentorSettings = serde_json::from_str(old_json)
+            .expect("old HomographAccentorSettings with sidecar fields must deserialize");
+        assert!(settings.enabled);
+        assert_eq!(
+            settings.accentor_pack_id.as_deref(),
+            Some("com.example.ruaccent")
+        );
+    }
+
+    /// The new shape no longer serializes the removed Python sidecar fields.
+    #[test]
+    fn homograph_accentor_serializes_without_sidecar_fields() {
+        let settings = HomographAccentorSettings {
+            enabled: true,
+            accentor_pack_id: Some("com.example.ruaccent".to_string()),
+            load_on_start: false,
+        };
+        let json = serde_json::to_value(&settings).unwrap();
+        assert!(json.get("contextual").is_none());
+        assert!(json.get("python_executable").is_none());
+        assert!(json.get("model_dir").is_none());
+        assert!(json.get("model").is_none());
+        assert_eq!(
+            json.get("load_on_start"),
+            Some(&serde_json::Value::Bool(false))
+        );
+    }
+
+    /// `load_on_start` defaults to false when absent from the JSON.
+    #[test]
+    fn homograph_accentor_load_on_start_defaults_false() {
+        let settings: HomographAccentorSettings = serde_json::from_str(
+            r#"{ "enabled": true, "accentor_pack_id": "com.example.ruaccent" }"#,
+        )
+        .expect("must deserialize without load_on_start");
+        assert!(!settings.load_on_start);
+    }
+
+    /// `load_on_start` round-trips through serialization.
+    #[test]
+    fn homograph_accentor_load_on_start_round_trips() {
+        let settings = HomographAccentorSettings {
+            enabled: true,
+            accentor_pack_id: Some("com.example.ruaccent".to_string()),
+            load_on_start: true,
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        let parsed: HomographAccentorSettings = serde_json::from_str(&json).expect("round-trip");
+        assert!(parsed.load_on_start);
+    }
+
     // ==================== QuickEditorMode tests ====================
 
     /// Backward-compat: old settings.json with `quick: false` → Disabled.
@@ -2994,10 +3105,69 @@ mod tests {
             ..EditorSettings::default()
         };
         let json = serde_json::to_string(&original).unwrap();
-        let back: EditorSettings =
-            serde_json::from_str(&json).expect("round-trip deserialization");
+        let back: EditorSettings = serde_json::from_str(&json).expect("round-trip deserialization");
         assert!(back.keep_text_after_send);
         assert!(json.contains(r#""keep_text_after_send":true"#));
+    }
+
+    /// Backward-compat: EditorSettings without homograph_accentor field defaults
+    /// to disabled + no selected pack id.
+    #[test]
+    fn editor_settings_deserializes_without_homograph_accentor() {
+        let json = r#"{"quick":false,"ai":false,"ai_completion":false,"spellcheck_enabled":true,"spellcheck_source":"offline","editor_height":340}"#;
+        let settings: EditorSettings =
+            serde_json::from_str(json).expect("must deserialize without homograph_accentor");
+        assert!(!settings.homograph_accentor.enabled);
+        assert_eq!(settings.homograph_accentor.accentor_pack_id, None);
+    }
+
+    /// EditorSettings default has homograph_accentor disabled with no pack id.
+    #[test]
+    fn editor_settings_default_homograph_accentor_disabled() {
+        let s = EditorSettings::default();
+        assert!(!s.homograph_accentor.enabled);
+        assert!(s.homograph_accentor.accentor_pack_id.is_none());
+    }
+
+    /// set_editor_homograph_accentor persists both fields and keeps cache/disk in sync.
+    #[test]
+    fn set_editor_homograph_accentor_persists_and_round_trips() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let config_dir = std::env::temp_dir().join(format!(
+            "ttsbard-homograph-accentor-test-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&config_dir).unwrap();
+        let manager = SettingsManager::with_config_dir(config_dir.clone()).unwrap();
+
+        assert!(!manager.load().unwrap().editor.homograph_accentor.enabled);
+
+        manager
+            .set_editor_homograph_accentor(true, Some("com.example.ruaccent".to_string()))
+            .unwrap();
+        let after = manager.load().unwrap();
+        assert!(after.editor.homograph_accentor.enabled);
+        assert_eq!(
+            after.editor.homograph_accentor.accentor_pack_id.as_deref(),
+            Some("com.example.ruaccent")
+        );
+
+        // Disable but preserve the selected id for a later re-enable.
+        manager
+            .set_editor_homograph_accentor(false, Some("com.example.ruaccent".to_string()))
+            .unwrap();
+        let after = manager.load().unwrap();
+        assert!(!after.editor.homograph_accentor.enabled);
+        assert_eq!(
+            after.editor.homograph_accentor.accentor_pack_id.as_deref(),
+            Some("com.example.ruaccent")
+        );
+
+        let _ = std::fs::remove_dir_all(&config_dir);
     }
 
     /// normalize_typing_idle_timeout_ms: default value 800 passes through.
@@ -3122,10 +3292,61 @@ mod tests {
             ..EditorSettings::default()
         };
         let json = serde_json::to_string(&original).unwrap();
-        let back: EditorSettings =
-            serde_json::from_str(&json).expect("round-trip deserialization");
+        let back: EditorSettings = serde_json::from_str(&json).expect("round-trip deserialization");
         assert_eq!(back.default_route, EditorRoute::TwitchOnly);
         assert!(json.contains(r#""default_route":"twitch_only""#));
+    }
+
+    // ==================== Editor hotkey action labels ====================
+
+    /// Conflict/validation messages must describe the accent_homographs action
+    /// as «расстановки ударений».
+    #[test]
+    fn editor_action_label_accent_homographs() {
+        assert_eq!(
+            editor_action_label("accent_homographs"),
+            "расстановки ударений"
+        );
+        assert_eq!(editor_action_label("edit_word"), "редактирования слова");
+        assert_eq!(
+            editor_action_label("toggle_history"),
+            "показа/скрытия истории"
+        );
+    }
+
+    /// reset_editor_hotkey must return the canonical Ctrl+U default for
+    /// accent_homographs and persist it.
+    #[test]
+    fn reset_editor_hotkey_accent_homographs_returns_default() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-accent-hk-reset-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mgr = SettingsManager::with_config_dir(dir.clone()).unwrap();
+
+        let custom = crate::config::hotkeys::Hotkey {
+            modifiers: vec![],
+            key: "F11".to_string(),
+        };
+        mgr.set_editor_hotkey("accent_homographs", &custom).unwrap();
+
+        let default = mgr.reset_editor_hotkey("accent_homographs").unwrap();
+        assert_eq!(default.key, "U");
+        assert_eq!(
+            default.modifiers,
+            vec![crate::config::hotkeys::HotkeyModifier::Ctrl]
+        );
+
+        let settings = mgr.load().unwrap();
+        assert_eq!(settings.hotkeys.editor.accent_homographs.key, "U");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Backward-compat: old settings.json without `vtube_studio` field must deserialize.

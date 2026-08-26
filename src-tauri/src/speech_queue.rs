@@ -2,6 +2,7 @@ use crate::config::{
     AiSettings, AudioEffectsSettings, AudioSettings, DspSettings, NetworkSettings,
 };
 use crate::preprocessor::TextPreprocessor;
+use crate::stress::runtime::RuAccentRuntimeSlot;
 use crate::tts::TtsProvider;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -54,6 +55,7 @@ pub struct Snapshot {
     pub tts_provider: TtsProvider,
     pub preprocessor: Option<TextPreprocessor>,
     pub network_settings: NetworkSettings,
+    pub accentor_runtime: Option<RuAccentRuntimeSlot>,
 }
 
 // ── Job status ──
@@ -568,6 +570,7 @@ mod tests {
             ),
             preprocessor: None,
             network_settings: NetworkSettings::default(),
+            accentor_runtime: None,
         }
     }
 
@@ -2041,6 +2044,7 @@ mod tests {
             ),
             preprocessor: None,
             network_settings: NetworkSettings::default(),
+            accentor_runtime: None,
         };
         let mut q = SpeechQueue::new();
         q.submit("hello", snapshot).unwrap();
@@ -2479,6 +2483,7 @@ mod tests {
             ),
             preprocessor: None,
             network_settings: NetworkSettings::default(),
+            accentor_runtime: None,
         };
 
         let mut q = SpeechQueue::new();

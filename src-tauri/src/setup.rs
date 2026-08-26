@@ -216,6 +216,21 @@ pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std:
     // Register discovered Piper providers (no ONNX session created yet)
     app_state.register_piper_providers();
 
+    // Discover local RUAccent packs (no model/ONNX session loaded).
+    {
+        let mut ruaccent_roots: Vec<std::path::PathBuf> = Vec::new();
+        if let Some(config_dir) = dirs::config_dir() {
+            ruaccent_roots.push(config_dir.join("ttsbard"));
+        } else {
+            warn!("Config directory not found; skipping AppData root for RUAccent discovery");
+        }
+        match app.path().resource_dir() {
+            Ok(dir) => ruaccent_roots.push(dir),
+            Err(e) => warn!(error = %e, "resource_dir() failed for RUAccent discovery"),
+        }
+        app_state.refresh_ruaccent_packs(&ruaccent_roots);
+    }
+
     // Initialize espeak-ng data path for Piper phonemization
     {
         let resource_dir = match app.path().resource_dir() {
@@ -325,10 +340,8 @@ pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std:
             });
             let _ = main_window.set_min_size(Some(min_size));
             let _ = main_window.set_max_size(Some(max_size));
-            let _ = main_window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
-                width,
-                height,
-            }));
+            let _ =
+                main_window.set_size(tauri::Size::Physical(tauri::PhysicalSize { width, height }));
             info!(width, height, "Main window started in compact mode");
         }
         let _ = main_window.show();

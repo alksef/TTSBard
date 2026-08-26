@@ -845,6 +845,10 @@ pub type SoundBindingDto = SoundBinding;
 // Editor Settings DTO
 // ============================================================================
 
+/// Homograph/accentor (RUAccent) settings DTO
+/// (same as HomographAccentorSettings, already has Serialize/Deserialize)
+pub type HomographAccentorSettingsDto = crate::config::HomographAccentorSettings;
+
 /// Editor settings DTO
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditorSettingsDto {
@@ -858,6 +862,8 @@ pub struct EditorSettingsDto {
     pub typing_enabled: bool,
     pub default_route: String,
     pub keep_text_after_send: bool,
+    #[serde(default)]
+    pub homograph_accentor: HomographAccentorSettingsDto,
 }
 
 /// Spell check source DTO
@@ -1161,6 +1167,7 @@ pub struct EditorHotkeySettingsDto {
     pub toggle_typing: HotkeyDto,
     pub cycle_quick_mode: HotkeyDto,
     pub toggle_history: HotkeyDto,
+    pub accent_homographs: HotkeyDto,
 }
 
 impl From<EditorHotkeySettings> for EditorHotkeySettingsDto {
@@ -1178,6 +1185,7 @@ impl From<EditorHotkeySettings> for EditorHotkeySettingsDto {
             toggle_typing: h.toggle_typing.into(),
             cycle_quick_mode: h.cycle_quick_mode.into(),
             toggle_history: h.toggle_history.into(),
+            accent_homographs: h.accent_homographs.into(),
         }
     }
 }
@@ -1197,6 +1205,7 @@ impl From<EditorHotkeySettingsDto> for EditorHotkeySettings {
             toggle_typing: dto.toggle_typing.into(),
             cycle_quick_mode: dto.cycle_quick_mode.into(),
             toggle_history: dto.toggle_history.into(),
+            accent_homographs: dto.accent_homographs.into(),
         }
     }
 }
@@ -1389,6 +1398,7 @@ impl AppSettingsDto {
                 typing_enabled: params.config.editor.typing_enabled,
                 default_route: params.config.editor.default_route.as_str().to_string(),
                 keep_text_after_send: params.config.editor.keep_text_after_send,
+                homograph_accentor: params.config.editor.homograph_accentor.clone(),
             },
             logging: params.config.logging.clone(),
             preprocessor: PreprocessorSettingsDto::from_preprocessor(params.preprocessor),
@@ -1581,6 +1591,11 @@ mod tests {
             typing_enabled: true,
             default_route: "no_twitch".into(),
             keep_text_after_send: true,
+            homograph_accentor: HomographAccentorSettingsDto {
+                enabled: true,
+                accentor_pack_id: Some("com.example.ruaccent".into()),
+                load_on_start: true,
+            },
         };
 
         let logging = LoggingSettingsDto {
@@ -1713,6 +1728,10 @@ mod tests {
                 toggle_history: HotkeyDto {
                     modifiers: vec![HotkeyModifierDto::Ctrl],
                     key: "H".into(),
+                },
+                accent_homographs: HotkeyDto {
+                    modifiers: vec![HotkeyModifierDto::Ctrl],
+                    key: "U".into(),
                 },
             },
         };
@@ -1921,6 +1940,11 @@ mod tests {
             typing_enabled: false,
             default_route: "everywhere".into(),
             keep_text_after_send: false,
+            homograph_accentor: HomographAccentorSettingsDto {
+                enabled: false,
+                accentor_pack_id: None,
+                load_on_start: false,
+            },
         };
 
         let logging = LoggingSettingsDto {
@@ -2040,6 +2064,10 @@ mod tests {
                     key: String::new(),
                 },
                 toggle_history: HotkeyDto {
+                    modifiers: vec![],
+                    key: String::new(),
+                },
+                accent_homographs: HotkeyDto {
                     modifiers: vec![],
                     key: String::new(),
                 },

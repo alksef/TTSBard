@@ -101,6 +101,7 @@ pub(crate) fn build_snapshot(state: &AppState, text: &str) -> Result<Snapshot, S
 
     let preprocessor = state.editor.get_preprocessor();
     let network_settings = settings.tts.network.clone();
+    let accentor_runtime = crate::commands::tts_pipeline::selected_ruaccent_runtime_slot(state);
 
     Ok(Snapshot {
         provider,
@@ -115,6 +116,7 @@ pub(crate) fn build_snapshot(state: &AppState, text: &str) -> Result<Snapshot, S
         tts_provider,
         preprocessor,
         network_settings,
+        accentor_runtime,
     })
 }
 

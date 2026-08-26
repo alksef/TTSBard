@@ -3,6 +3,7 @@ use crate::config::{
     SettingsManager, SpellSource, TtsProviderInfoDto, WindowsManager,
 };
 use crate::state::AppState;
+use crate::stress::runtime::RuAccentRuntimeSlot;
 use crate::tts::TtsProvider;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tracing::{error, info};
@@ -452,4 +453,605 @@ pub async fn select_tts_provider_by_id(
         .await?;
     emit_settings_changed(&app_handle);
     Ok(())
+}
+
+/// DTO for a discovered local RUAccent pack without filesystem paths.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct HomographAccentorPackDto {
+    pub id: String,
+    pub display_name: String,
+    pub runtime_version: String,
+    /// Diagnostic runtime status: `"not_loaded"`, `"loading"`, `"ready"`,
+    /// `"failed"`. Never carries the failure message.
+    pub runtime_status: String,
+}
+
+/// Map a runtime slot status to the safe wire string; `Failed` loses its message.
+fn ruaccent_runtime_status_string(slot: &crate::stress::runtime::RuAccentRuntimeSlot) -> String {
+    slot.status().as_safe_str().to_string()
+}
+
+/// Snapshot the currently discovered local RUAccent packs.
+#[tauri::command]
+pub fn list_homograph_accentor_packs(state: State<'_, AppState>) -> Vec<HomographAccentorPackDto> {
+    state
+        .get_ruaccent_packs()
+        .into_iter()
+        .map(|d| HomographAccentorPackDto {
+            runtime_status: state
+                .get_ruaccent_runtime_slot(&d.id)
+                .as_ref()
+                .map(ruaccent_runtime_status_string)
+                .unwrap_or_else(|| "not_loaded".to_string()),
+            id: d.id,
+            display_name: d.display_name,
+            runtime_version: d.runtime_version,
+        })
+        .collect()
+}
+
+/// Validate a homograph/accentor selection against the currently discovered
+/// packs, returning the pack id to persist (or an error).
+///
+/// Rules:
+/// - `enabled` requires a non-empty pack id that is present in `discovered_ids`;
+/// - when disabled the pack id may be kept for a later enable, but an unknown id
+///   is still rejected.
+pub fn validate_homograph_accentor_selection(
+    enabled: bool,
+    accentor_pack_id: Option<String>,
+    discovered_ids: &[String],
+) -> Result<Option<String>, String> {
+    if enabled {
+        let id = accentor_pack_id
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| "Требуется выбрать модель RUAccent для включения".to_string())?;
+        if !discovered_ids.contains(&id) {
+            return Err(format!("Неизвестная модель RUAccent: {}", id));
+        }
+        return Ok(Some(id));
+    }
+
+    if let Some(id) = accentor_pack_id {
+        if !discovered_ids.contains(&id) {
+            return Err(format!("Неизвестная модель RUAccent: {}", id));
+        }
+        Ok(Some(id))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Enable/disable the homograph/accentor (RUAccent) layer and select a pack.
+///
+/// Enabling requires a pack id present among the currently discovered packs.
+/// Only saves the setting — the model is not loaded until future pipeline use.
+#[tauri::command]
+pub async fn set_editor_homograph_accentor(
+    enabled: bool,
+    accentor_pack_id: Option<String>,
+    state: State<'_, AppState>,
+    settings_manager: State<'_, SettingsManager>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    let discovered_ids: Vec<String> = state
+        .get_ruaccent_packs()
+        .into_iter()
+        .map(|d| d.id)
+        .collect();
+
+    let pack_id =
+        validate_homograph_accentor_selection(enabled, accentor_pack_id, &discovered_ids)?;
+
+    let pack_id_for_persist = pack_id.clone();
+    persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_editor_homograph_accentor(enabled, pack_id_for_persist)
+    })
+    .await?;
+
+    // Keep only the selected runtime resident; never load the newly selected
+    // model automatically.
+    unload_ruaccent_runtimes_except(state.inner(), pack_id.as_deref()).await?;
+
+    emit_settings_changed(&app_handle);
+
+    Ok(())
+}
+
+/// Validate a load-on-start enable request: a known selected model must exist.
+fn validate_homograph_accentor_load_on_start(
+    load_on_start: bool,
+    accentor_pack_id: Option<String>,
+    discovered_ids: &[String],
+) -> Result<(), String> {
+    if !load_on_start {
+        return Ok(());
+    }
+    let id = accentor_pack_id
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| "Требуется выбрать модель RUAccent для автозагрузки".to_string())?;
+    if !discovered_ids.contains(&id) {
+        return Err(format!("Неизвестная модель RUAccent: {id}"));
+    }
+    Ok(())
+}
+
+/// Persist the `load_on_start` flag for the selected RUAccent model.
+///
+/// Enabling requires a known selected model among the currently discovered
+/// packs. Only saves the setting — the model is loaded at next startup, not
+/// here.
+#[tauri::command]
+pub async fn set_editor_homograph_accentor_load_on_start(
+    load_on_start: bool,
+    state: State<'_, AppState>,
+    settings_manager: State<'_, SettingsManager>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    let (accentor_pack_id, discovered_ids) = {
+        let settings = state.settings_cache.read();
+        (
+            settings.editor.homograph_accentor.accentor_pack_id.clone(),
+            state
+                .get_ruaccent_packs()
+                .into_iter()
+                .map(|d| d.id)
+                .collect::<Vec<String>>(),
+        )
+    };
+
+    validate_homograph_accentor_load_on_start(load_on_start, accentor_pack_id, &discovered_ids)?;
+
+    persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_editor_homograph_accentor_load_on_start(load_on_start)
+    })
+    .await?;
+
+    emit_settings_changed(&app_handle);
+
+    Ok(())
+}
+
+/// Status-changed event name emitted when a RUAccent runtime starts loading or
+/// reaches a terminal state.
+pub const RUACCENT_RUNTIME_STATUS_CHANGED_EVENT: &str = "ruaccent-runtime-status-changed";
+/// Error event name emitted when a RUAccent runtime load fails.
+pub const RUACCENT_RUNTIME_ERROR_EVENT: &str = "ruaccent-runtime-error";
+
+/// Safe payload for `ruaccent-runtime-status-changed`: selected model ID and a
+/// safe status string only.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RuAccentRuntimeStatusPayload {
+    pub model_id: String,
+    pub status: String,
+}
+
+/// Safe payload for `ruaccent-runtime-error`: selected model ID and a short
+/// Russian user-facing message (no raw ONNX errors or paths).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RuAccentRuntimeErrorPayload {
+    pub model_id: String,
+    pub message: String,
+}
+
+/// Build the safe status-changed payload for a model ID and status string.
+fn ruaccent_status_payload(model_id: &str, status: &str) -> RuAccentRuntimeStatusPayload {
+    RuAccentRuntimeStatusPayload {
+        model_id: model_id.to_string(),
+        status: status.to_string(),
+    }
+}
+
+/// Short Russian user-facing message for a failed RUAccent load. Deliberately
+/// excludes raw ONNX errors and filesystem paths.
+fn ruaccent_load_error_message() -> String {
+    "Не удалось загрузить модель RUAccent. Проверьте целостность файлов модели.".to_string()
+}
+
+/// Short Russian user-facing message for an aborted RUAccent load task.
+fn ruaccent_load_aborted_message() -> String {
+    "Загрузка модели RUAccent была прервана.".to_string()
+}
+
+/// Release non-selected runtimes away from the async command thread. Dropping
+/// an ONNX session may wait for an in-flight inference that owns the slot lock.
+async fn unload_ruaccent_runtimes_except(
+    state: &AppState,
+    keep_id: Option<&str>,
+) -> Result<(), String> {
+    let slots = state.ruaccent_runtime_slots_except(keep_id);
+    tokio::task::spawn_blocking(move || {
+        for slot in slots {
+            slot.unload();
+        }
+    })
+    .await
+    .map_err(|_| "Не удалось выгрузить предыдущую модель RUAccent".to_string())
+}
+
+/// Run the explicit load/retry lifecycle for a RUAccent model, emitting the
+/// same status/error events as the startup loader.
+///
+/// Unloads other resident runtimes, runs the synchronous slot load inside
+/// `spawn_blocking`, and returns a safe error on failure. Used by both the
+/// manual load command and the startup loader.
+pub(crate) async fn load_ruaccent_runtime(
+    app_handle: &AppHandle,
+    state: &AppState,
+    model_id: String,
+) -> Result<(), String> {
+    let slot = state
+        .get_ruaccent_runtime_slot(&model_id)
+        .ok_or_else(|| format!("Неизвестная модель RUAccent: {model_id}"))?;
+
+    unload_ruaccent_runtimes_except(state, Some(&model_id)).await?;
+
+    if slot.is_ready() {
+        return Ok(());
+    }
+
+    let _ = app_handle.emit(
+        RUACCENT_RUNTIME_STATUS_CHANGED_EVENT,
+        ruaccent_status_payload(&model_id, "loading"),
+    );
+
+    let slot_for_load = slot.clone();
+    let load_result = match tokio::task::spawn_blocking(move || slot_for_load.load_or_retry()).await
+    {
+        Ok(result) => result,
+        Err(_) => {
+            let message = ruaccent_load_aborted_message();
+            slot.mark_failed(message.clone());
+            Err(message)
+        }
+    };
+
+    match load_result {
+        Ok(()) => {
+            let _ = app_handle.emit(
+                RUACCENT_RUNTIME_STATUS_CHANGED_EVENT,
+                ruaccent_status_payload(&model_id, "ready"),
+            );
+            Ok(())
+        }
+        Err(_) => {
+            let _ = app_handle.emit(
+                RUACCENT_RUNTIME_STATUS_CHANGED_EVENT,
+                ruaccent_status_payload(&model_id, "failed"),
+            );
+            let _ = app_handle.emit(
+                RUACCENT_RUNTIME_ERROR_EVENT,
+                RuAccentRuntimeErrorPayload {
+                    model_id: model_id.clone(),
+                    message: ruaccent_load_error_message(),
+                },
+            );
+            Err(ruaccent_load_error_message())
+        }
+    }
+}
+
+/// Load a selected RUAccent model by ID (explicit command).
+///
+/// Validates the ID against discovery, unloads other resident runtimes, runs
+/// the load inside `spawn_blocking`, and returns a safe error on failure.
+#[tauri::command]
+pub async fn load_homograph_accentor_model(
+    model_id: String,
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    let discovered_ids: Vec<String> = state
+        .get_ruaccent_packs()
+        .into_iter()
+        .map(|d| d.id)
+        .collect();
+    if !discovered_ids.contains(&model_id) {
+        return Err(format!("Неизвестная модель RUAccent: {model_id}"));
+    }
+
+    load_ruaccent_runtime(&app_handle, &state, model_id).await
+}
+
+/// Start the persisted RUAccent startup load after the frontend has registered
+/// its global status/error listeners. Calling this command is idempotent.
+#[tauri::command]
+pub async fn start_homograph_accentor_startup_load(
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    let accentor = state
+        .settings_cache
+        .read()
+        .editor
+        .homograph_accentor
+        .clone();
+    if !accentor.load_on_start {
+        return Ok(());
+    }
+
+    let model_id = match accentor.accentor_pack_id.filter(|id| !id.is_empty()) {
+        Some(model_id) => model_id,
+        None => {
+            let message = "Не выбрана модель RUAccent для автозагрузки".to_string();
+            let _ = app_handle.emit(
+                RUACCENT_RUNTIME_ERROR_EVENT,
+                RuAccentRuntimeErrorPayload {
+                    model_id: String::new(),
+                    message: message.clone(),
+                },
+            );
+            return Err(message);
+        }
+    };
+    if state.get_ruaccent_runtime_slot(&model_id).is_none() {
+        let message = "Выбранная модель RUAccent не найдена".to_string();
+        let _ = app_handle.emit(
+            RUACCENT_RUNTIME_ERROR_EVENT,
+            RuAccentRuntimeErrorPayload {
+                model_id,
+                message: message.clone(),
+            },
+        );
+        return Err(message);
+    }
+
+    load_ruaccent_runtime(&app_handle, &state, model_id).await
+}
+
+/// Reject empty or whitespace-only preview input with a short Russian error.
+fn validate_preview_text(text: &str) -> Result<(), String> {
+    if text.trim().is_empty() {
+        return Err("Текст пуст — нечего расставлять".to_string());
+    }
+    Ok(())
+}
+
+/// Render the native RUAccent preview for `text` in Silero `+` notation.
+///
+/// The runtime must already be ready. Inference and output-validation errors
+/// are propagated (the preview never fails open to unchanged text).
+fn native_preview_marked(runtime: &RuAccentRuntimeSlot, text: &str) -> Result<String, String> {
+    let stress = crate::commands::tts_pipeline::native_stress_strict(runtime, text)?;
+    Ok(crate::stress::adapters::ProviderStressAdapter::Silero.adapt(&stress))
+}
+
+/// Clear Russian error when no RUAccent model is selected.
+fn preview_no_model_error() -> String {
+    "Нет выбранной модели RUAccent. Выберите модель в настройках.".to_string()
+}
+
+/// Clear Russian error when the selected RUAccent model is not loaded.
+fn preview_not_loaded_error() -> String {
+    "Модель RUAccent не загружена. Загрузите модель в настройках.".to_string()
+}
+
+/// Resolve the ready preview runtime, distinguishing missing and not-loaded
+/// models with clear Russian errors.
+fn resolve_preview_runtime(
+    accentor_pack_id: Option<&str>,
+    slot: Option<RuAccentRuntimeSlot>,
+) -> Result<RuAccentRuntimeSlot, String> {
+    let pack_id = accentor_pack_id
+        .filter(|id| !id.is_empty())
+        .ok_or_else(preview_no_model_error)?;
+    let runtime = slot.ok_or_else(|| format!("Неизвестная модель RUAccent: {pack_id}"))?;
+    if !runtime.is_ready() {
+        return Err(preview_not_loaded_error());
+    }
+    Ok(runtime)
+}
+
+/// Preview the native RUAccent result in Silero `+` notation.
+///
+/// Explicit editor preview for testing: no speech is enqueued, nothing is
+/// persisted, and a selected, loaded native pack is required. A missing or
+/// not-loaded model and any inference/validation failure return a clear error;
+/// the preview never silently returns unchanged text as success.
+#[tauri::command]
+pub async fn preview_contextual_ruaccent(
+    text: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    validate_preview_text(&text)?;
+
+    let accentor_pack_id = state
+        .settings_cache
+        .read()
+        .editor
+        .homograph_accentor
+        .accentor_pack_id
+        .clone();
+    let slot = accentor_pack_id
+        .as_deref()
+        .and_then(|id| state.get_ruaccent_runtime_slot(id));
+    let runtime = resolve_preview_runtime(accentor_pack_id.as_deref(), slot)?;
+
+    tokio::task::spawn_blocking(move || native_preview_marked(&runtime, &text))
+        .await
+        .map_err(|e| format!("Предпросмотр RUAccent был прерван: {e}"))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ids() -> Vec<String> {
+        vec!["com.example.a".to_string(), "com.example.b".to_string()]
+    }
+
+    #[test]
+    fn enable_requires_known_pack_id() {
+        assert!(validate_homograph_accentor_selection(true, None, &ids()).is_err());
+        assert!(validate_homograph_accentor_selection(true, Some(String::new()), &ids()).is_err());
+        assert!(validate_homograph_accentor_selection(
+            true,
+            Some("com.example.unknown".to_string()),
+            &ids()
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn enable_accepts_known_pack_id() {
+        assert_eq!(
+            validate_homograph_accentor_selection(true, Some("com.example.a".to_string()), &ids()),
+            Ok(Some("com.example.a".to_string()))
+        );
+    }
+
+    #[test]
+    fn disable_keeps_selected_id_and_rejects_unknown() {
+        assert_eq!(
+            validate_homograph_accentor_selection(false, None, &ids()),
+            Ok(None)
+        );
+        assert_eq!(
+            validate_homograph_accentor_selection(false, Some("com.example.b".to_string()), &ids()),
+            Ok(Some("com.example.b".to_string()))
+        );
+        assert!(validate_homograph_accentor_selection(
+            false,
+            Some("com.example.unknown".to_string()),
+            &ids()
+        )
+        .is_err());
+    }
+
+    // ── preview_contextual_ruaccent input validation ──
+
+    #[test]
+    fn preview_rejects_empty_and_whitespace_text() {
+        assert!(validate_preview_text("").is_err());
+        assert!(validate_preview_text("   \n\t ").is_err());
+    }
+
+    #[test]
+    fn preview_accepts_non_empty_text() {
+        assert!(validate_preview_text("замок был на холме под замком").is_ok());
+    }
+
+    // ── native_preview_marked requires a loaded, ready pack ──
+
+    #[test]
+    fn preview_propagates_not_ready_error_instead_of_unchanged_text() {
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-preview-native-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let slot = non_loadable_native_slot(dir.clone());
+
+        let err =
+            native_preview_marked(&slot, "замок").expect_err("must not return unchanged text");
+        assert!(
+            !err.contains('/') && !err.contains('\\'),
+            "leaked path: {err}"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── preview runtime resolution ──
+
+    #[test]
+    fn preview_error_helpers_are_safe_and_actionable() {
+        assert!(preview_no_model_error().contains("Выберите модель в настройках"));
+        assert!(!preview_no_model_error().contains("включите"));
+        assert!(preview_not_loaded_error().contains("не загружена"));
+        assert!(preview_not_loaded_error().contains("Загрузите модель в настройках"));
+    }
+
+    #[test]
+    fn resolve_preview_runtime_distinguishes_missing_and_not_loaded() {
+        assert!(resolve_preview_runtime(None, None)
+            .unwrap_err()
+            .contains("Выберите модель"));
+        assert!(resolve_preview_runtime(Some(""), None)
+            .unwrap_err()
+            .contains("Выберите модель"));
+        assert!(resolve_preview_runtime(Some("com.example.unknown"), None)
+            .unwrap_err()
+            .contains("Неизвестная модель"));
+
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-preview-resolve-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let slot = non_loadable_native_slot(dir.clone());
+
+        assert!(
+            resolve_preview_runtime(Some("com.example.preview"), Some(slot.clone()))
+                .unwrap_err()
+                .contains("не загружена")
+        );
+
+        slot.mark_ready();
+        let ready = resolve_preview_runtime(Some("com.example.preview"), Some(slot)).unwrap();
+        assert!(ready.is_ready());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── load_on_start validation ──
+
+    #[test]
+    fn load_on_start_requires_known_selected_model() {
+        assert!(validate_homograph_accentor_load_on_start(true, None, &ids()).is_err());
+        assert!(
+            validate_homograph_accentor_load_on_start(true, Some(String::new()), &ids()).is_err()
+        );
+        assert!(validate_homograph_accentor_load_on_start(
+            true,
+            Some("com.example.unknown".to_string()),
+            &ids()
+        )
+        .is_err());
+        assert!(validate_homograph_accentor_load_on_start(
+            true,
+            Some("com.example.a".to_string()),
+            &ids()
+        )
+        .is_ok());
+        assert!(validate_homograph_accentor_load_on_start(false, None, &ids()).is_ok());
+    }
+
+    // ── safe event payload helpers ──
+
+    #[test]
+    fn ruaccent_status_payload_is_safe() {
+        let payload = ruaccent_status_payload("com.example.a", "loading");
+        assert_eq!(payload.model_id, "com.example.a");
+        assert_eq!(payload.status, "loading");
+    }
+
+    #[test]
+    fn ruaccent_load_error_message_is_short_and_safe() {
+        let message = ruaccent_load_error_message();
+        assert!(!message.contains('/') && !message.contains('\\'));
+        assert!(message.contains("RUAccent"));
+        assert!(message.chars().count() < 120);
+    }
+
+    fn non_loadable_native_slot(pack_root: std::path::PathBuf) -> RuAccentRuntimeSlot {
+        use crate::stress::packs::{RuAccentPackDescriptor, RuntimeCapability};
+        let descriptor = RuAccentPackDescriptor {
+            id: "com.example.preview".to_string(),
+            display_name: "Preview".to_string(),
+            runtime_version: "upstream".to_string(),
+            pack_root,
+            runtime_capability: RuntimeCapability::NativeTiny,
+            omograph_model_id: "preview-model".to_string(),
+        };
+        RuAccentRuntimeSlot::new(descriptor)
+    }
 }

@@ -6,6 +6,9 @@ use crate::config::{
 };
 use crate::speech_queue::Snapshot;
 use crate::state::AppState;
+use crate::stress::adapters::ProviderStressAdapter;
+use crate::stress::annotations::StructuredStress;
+use crate::stress::runtime::RuAccentRuntimeSlot;
 use crate::tts::TtsProvider;
 use tracing::{debug, error, info, warn};
 
@@ -81,6 +84,133 @@ pub(crate) async fn synthesize_with_provider(
     })?;
     debug!(bytes = audio_data.len(), "Audio synthesized");
     Ok(audio_data)
+}
+
+/// Map a TTS provider to its stress-marker adapter.
+///
+/// Silero consumes `+` markers; Piper/eSpeak consumes U+0301 after the
+/// stressed vowel; OpenAI/Fish/Local receive plain text.
+fn provider_to_stress_adapter(provider: &TtsProvider) -> ProviderStressAdapter {
+    match provider {
+        TtsProvider::Silero(_) => ProviderStressAdapter::Silero,
+        TtsProvider::Piper(_) => ProviderStressAdapter::Piper,
+        TtsProvider::OpenAi(_) | TtsProvider::Fish(_) | TtsProvider::Local(_) => {
+            ProviderStressAdapter::PlainText
+        }
+    }
+}
+
+/// Render structured stress for a provider into the text handed to synthesis.
+fn adapt_structured_stress(provider: &TtsProvider, stress: &StructuredStress) -> String {
+    provider_to_stress_adapter(provider).adapt(stress)
+}
+
+/// Build structured stress for a text, annotating stress positions via the
+/// native `ruaccent_rs` runtime when a slot is present.
+///
+/// Fail-open: native load/inference errors are logged with `warn!` and the
+/// original text is preserved, so synthesis never blocks on the accentor.
+fn structured_stress_for_text(
+    runtime: Option<&RuAccentRuntimeSlot>,
+    text: &str,
+) -> Result<StructuredStress, String> {
+    let empty = || {
+        StructuredStress::new(text.to_string(), vec![])
+            .map_err(|e| format!("Structured stress construction failed: {e}"))
+    };
+    match runtime {
+        Some(slot) => match slot.annotate(text) {
+            Ok(stress) => Ok(stress),
+            Err(e) => {
+                warn!("Native stress annotation failed, using original text: {e}");
+                empty()
+            }
+        },
+        None => empty(),
+    }
+}
+
+/// Build structured stress for a text through the single shared native stress
+/// pipeline used by both synthesis and preview.
+///
+/// The pipeline is:
+/// 1. parse manual Silero `+` markers into clean text;
+/// 2. run the selected native slot if present, otherwise retain the clean text;
+/// 3. merge the manual markers over the automatic annotations.
+///
+/// The result is provider-neutral: `+` is only re-introduced by the Silero /
+/// preview adapter at the rendering boundary.
+pub(crate) fn native_stress(
+    accentor_runtime: Option<&RuAccentRuntimeSlot>,
+    text: &str,
+) -> Result<StructuredStress, String> {
+    let manual = crate::stress::contextual::structured_stress_from_silero_marked(text)?;
+    let clean_text = manual.original.clone();
+    let automatic = structured_stress_for_text(accentor_runtime, &clean_text)?;
+    crate::stress::contextual::merge_manual_stress(manual, automatic)
+}
+
+/// Build structured stress through the native accentor, propagating inference
+/// and output-validation errors.
+///
+/// Unlike [`native_stress`], this never fails open: an inference error or an
+/// invalid accentor output is returned to the caller. Used by the manual
+/// preview path, which must not silently return unchanged text as success.
+pub(crate) fn native_stress_strict(
+    accentor_runtime: &RuAccentRuntimeSlot,
+    text: &str,
+) -> Result<StructuredStress, String> {
+    let manual = crate::stress::contextual::structured_stress_from_silero_marked(text)?;
+    let clean_text = manual.original.clone();
+    let automatic = accentor_runtime.annotate(&clean_text)?;
+    crate::stress::contextual::merge_manual_stress(manual, automatic)
+}
+
+/// Resolve the lazy native RUAccent runtime slot for the currently enabled
+/// editor homograph/accentor setting.
+///
+/// Returns `None` when the layer is disabled, the selected pack ID is missing
+/// or unknown, no runtime slot was created for the pack, or its runtime is not
+/// `Ready`. Never loads models, creates sessions, or alters text — pure slot
+/// selection only.
+#[allow(dead_code)]
+pub(crate) fn selected_ruaccent_runtime_slot(state: &AppState) -> Option<RuAccentRuntimeSlot> {
+    let accentor = state
+        .settings_cache
+        .read()
+        .editor
+        .homograph_accentor
+        .clone();
+    if !accentor.enabled {
+        return None;
+    }
+    let pack_id = accentor.accentor_pack_id?;
+    state
+        .get_ruaccent_runtime_slot(&pack_id)
+        .filter(|slot| slot.is_ready())
+}
+
+/// Resolve the lazy native RUAccent runtime slot for the editor preview path.
+///
+/// Unlike [`selected_ruaccent_runtime_slot`], this deliberately ignores the
+/// `enabled` flag: the preview is allowed to run whenever a native-ready pack
+/// is selected, even if automatic TTS preprocessing is disabled. It still
+/// returns `None` when the selected pack ID is missing or unknown, when no
+/// runtime slot was created for the pack, or when its runtime is not `Ready`.
+/// Never loads models, creates sessions, or alters text — pure slot selection
+/// only.
+#[allow(dead_code)]
+pub(crate) fn preview_ruaccent_runtime_slot(state: &AppState) -> Option<RuAccentRuntimeSlot> {
+    let accentor = state
+        .settings_cache
+        .read()
+        .editor
+        .homograph_accentor
+        .clone();
+    let pack_id = accentor.accentor_pack_id?;
+    state
+        .get_ruaccent_runtime_slot(&pack_id)
+        .filter(|slot| slot.is_ready())
 }
 
 pub(crate) fn apply_audio_effects_pipeline_with_settings(
@@ -193,6 +323,17 @@ async fn save_cache_blocking(cache_key: String, audio: AudioPcm) -> bool {
     .is_ok()
 }
 
+/// Run native RUAccent inference off the async worker thread, so the ONNX
+/// session never blocks the Tokio executor. The runtime mutex serialization is
+/// retained inside the slot, and a panicking blocking task is mapped to the
+/// preparation error contract.
+async fn native_stress_blocking(
+    accentor_runtime: Option<RuAccentRuntimeSlot>,
+    text: String,
+) -> Result<StructuredStress, String> {
+    spawn_blocking_prepare(move || native_stress(accentor_runtime.as_ref(), &text)).await
+}
+
 // ── Snapshot-driven preparation (pure, no side effects) ──
 
 pub async fn prepare_speech(
@@ -229,6 +370,9 @@ pub async fn prepare_speech(
         }
     };
 
+    let stress = native_stress_blocking(snapshot.accentor_runtime.clone(), text.clone()).await?;
+    let text = adapt_structured_stress(&snapshot.tts_provider, &stress);
+
     let effects_fp =
         crate::history::compute_effects_fingerprint(&snapshot.audio_effects, &snapshot.dsp);
     let cache_key =
@@ -248,10 +392,7 @@ pub async fn prepare_speech(
         }
         Err(e) => {
             if !e.contains("CacheMiss") {
-                return Err(format!(
-                    "Cache read error (corrupted/unreadable): {}",
-                    e
-                ));
+                return Err(format!("Cache read error (corrupted/unreadable): {}", e));
             }
         }
     }
@@ -318,10 +459,14 @@ pub async fn ai_correct_text(state: &AppState, text: &str, settings: &AppSetting
 pub async fn synthesize_audio(state: &AppState, text: &str) -> Result<Vec<u8>, String> {
     let provider = state.get_active_provider().ok_or_else(|| {
         error!("TTS provider not initialized");
-        "TTS provider не инициализирован. Выберите провайдер в настройках.".to_string()
+        "TTS provider не инициализирован. Выберите провайдера в настройках.".to_string()
     })?;
 
-    synthesize_with_provider(&provider, text).await
+    let stress =
+        native_stress_blocking(selected_ruaccent_runtime_slot(state), text.to_string()).await?;
+    let text = adapt_structured_stress(&provider, &stress);
+
+    synthesize_with_provider(&provider, &text).await
 }
 
 /// Build the per-phrase output configuration captured by the speech worker.
@@ -526,6 +671,7 @@ mod tests {
             ),
             preprocessor: None,
             network_settings: NetworkSettings::default(),
+            accentor_runtime: None,
         }
     }
 
@@ -664,6 +810,7 @@ mod tests {
             tts_provider: crate::tts::TtsProvider::OpenAi(alloy_tts),
             preprocessor: None,
             network_settings: NetworkSettings::default(),
+            accentor_runtime: None,
         };
 
         let mut echo_tts = crate::tts::openai::OpenAiTts::new("sk-test".into());
@@ -681,6 +828,7 @@ mod tests {
             tts_provider: crate::tts::TtsProvider::OpenAi(echo_tts),
             preprocessor: None,
             network_settings: NetworkSettings::default(),
+            accentor_runtime: None,
         };
 
         assert_ne!(snapshot_alloy.voice, snapshot_echo.voice);
@@ -786,7 +934,10 @@ mod tests {
             _ = cancel.cancelled() => None,
         };
 
-        assert!(outcome.is_none(), "cancellation should win over the blocking stage");
+        assert!(
+            outcome.is_none(),
+            "cancellation should win over the blocking stage"
+        );
         assert!(
             start.elapsed() < Duration::from_millis(100),
             "cancellation should not wait for the blocking stage (took {:?})",
@@ -806,5 +957,379 @@ mod tests {
             .await
             .expect_err("missing cache key must error");
         assert!(err.contains("CacheMiss"), "unexpected error: {err}");
+    }
+
+    // ── Stress adapter boundary tests ──
+
+    fn openai_provider() -> TtsProvider {
+        TtsProvider::OpenAi(crate::tts::openai::OpenAiTts::new("sk-test".into()))
+    }
+
+    fn silero_provider() -> TtsProvider {
+        TtsProvider::Silero(crate::tts::silero::SileroTts::new())
+    }
+
+    fn local_provider() -> TtsProvider {
+        TtsProvider::Local(crate::tts::local_http_server::LocalHttpServerTts::new())
+    }
+
+    fn fish_provider() -> TtsProvider {
+        TtsProvider::Fish(crate::tts::fish::FishTts::new("sk-test".into()))
+    }
+
+    fn piper_provider() -> TtsProvider {
+        TtsProvider::Piper(std::sync::Arc::new(
+            crate::tts::piper::runtime::LocalModelTts::new(
+                "/dummy/model.onnx",
+                "/dummy/model.onnx.json",
+            ),
+        ))
+    }
+
+    fn all_providers() -> Vec<TtsProvider> {
+        vec![
+            openai_provider(),
+            silero_provider(),
+            local_provider(),
+            fish_provider(),
+            piper_provider(),
+        ]
+    }
+
+    #[test]
+    fn stress_adapter_maps_each_provider_exactly() {
+        assert_eq!(
+            provider_to_stress_adapter(&openai_provider()),
+            ProviderStressAdapter::PlainText
+        );
+        assert_eq!(
+            provider_to_stress_adapter(&silero_provider()),
+            ProviderStressAdapter::Silero
+        );
+        assert_eq!(
+            provider_to_stress_adapter(&local_provider()),
+            ProviderStressAdapter::PlainText
+        );
+        assert_eq!(
+            provider_to_stress_adapter(&fish_provider()),
+            ProviderStressAdapter::PlainText
+        );
+        assert_eq!(
+            provider_to_stress_adapter(&piper_provider()),
+            ProviderStressAdapter::Piper
+        );
+    }
+
+    /// Empty annotations must pass validation and preserve the text for every
+    /// provider variant (no accentor runtime attached yet).
+    #[test]
+    fn empty_annotations_preserve_text_for_all_providers() {
+        let text = "привет мир".to_string();
+        for provider in all_providers() {
+            let stress = StructuredStress::new(text.clone(), vec![])
+                .expect("empty annotations must pass validation");
+            let adapted = adapt_structured_stress(&provider, &stress);
+            assert_eq!(adapted, text);
+        }
+    }
+
+    /// Silero adaptation inserts `+` before the stressed vowel through the helper.
+    #[test]
+    fn silero_helper_adapts_annotated_text() {
+        use crate::stress::annotations::StressAnnotation;
+        let stress = StructuredStress::new(
+            "привет".to_string(),
+            vec![StressAnnotation {
+                word_start: 0,
+                word_end: 12,
+                stressed_vowel: 8,
+            }],
+        )
+        .expect("valid annotation");
+        assert_eq!(
+            adapt_structured_stress(&silero_provider(), &stress),
+            "прив+ет"
+        );
+    }
+
+    // ── Native accentor integration tests ──
+
+    fn native_slot(pack_root: std::path::PathBuf) -> RuAccentRuntimeSlot {
+        use crate::stress::packs::{RuAccentPackDescriptor, RuntimeCapability};
+        let descriptor = RuAccentPackDescriptor {
+            id: "com.example.pipeline".to_string(),
+            display_name: "Pipeline".to_string(),
+            runtime_version: "upstream".to_string(),
+            pack_root,
+            runtime_capability: RuntimeCapability::NativeTiny,
+            omograph_model_id: "pipeline-model".to_string(),
+        };
+        RuAccentRuntimeSlot::new(descriptor)
+    }
+
+    fn empty_pack_root() -> std::path::PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-tts-pipeline-accentor-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// No accentor slot: the text passes through unchanged for every provider.
+    #[test]
+    fn accentor_none_preserves_text() {
+        let text = "привет мир".to_string();
+        let stress = structured_stress_for_text(None, &text).expect("empty stress builds");
+        assert!(stress.annotations.is_empty());
+        for provider in all_providers() {
+            assert_eq!(adapt_structured_stress(&provider, &stress), text);
+        }
+    }
+
+    /// A non-loadable native pack is fail-open: the error is swallowed and the
+    /// original text is synthesized unchanged.
+    #[test]
+    fn accentor_native_slot_error_is_fail_open() {
+        let dir = empty_pack_root();
+        let slot = native_slot(dir.clone());
+        let text = "привет".to_string();
+        let stress = structured_stress_for_text(Some(&slot), &text).expect("fail-open keeps text");
+        assert!(stress.annotations.is_empty());
+        assert_eq!(adapt_structured_stress(&silero_provider(), &stress), text);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── Shared native_stress pipeline tests ──
+
+    /// With no slot present the pipeline is fail-open: manual markers are
+    /// preserved and the rest of the text is retained unchanged.
+    #[test]
+    fn native_stress_absent_slot_preserves_manual_marks() {
+        let stress = native_stress(None, "зам+ок и м+ука").expect("manual-only stress builds");
+        assert_eq!(
+            adapt_structured_stress(&silero_provider(), &stress),
+            "зам+ок и м+ука"
+        );
+        assert_eq!(stress.original, "замок и мука");
+    }
+
+    /// Literal `+` that is not a Silero marker is never treated as stress.
+    #[test]
+    fn native_stress_keeps_literal_plus_without_slot() {
+        let stress = native_stress(None, "C++ и з+амок").expect("literal plus is fine");
+        assert_eq!(stress.original, "C++ и замок");
+        assert_eq!(
+            adapt_structured_stress(&silero_provider(), &stress),
+            "C++ и з+амок"
+        );
+    }
+
+    /// A non-loadable native pack is fail-open and still keeps manual markers
+    /// (automatic annotation degrades to empty rather than failing synthesis).
+    #[test]
+    fn native_stress_manual_marks_win_over_failed_automatic() {
+        let dir = empty_pack_root();
+        let slot = native_slot(dir.clone());
+        let stress = native_stress(Some(&slot), "зам+ок").expect("fail-open keeps manual marks");
+        assert_eq!(
+            adapt_structured_stress(&silero_provider(), &stress),
+            "зам+ок"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Preview and synthesis must render equivalent Silero output through the
+    /// same shared helper: both adapt the same `native_stress` result.
+    #[test]
+    fn native_stress_silero_output_matches_preview_rendering() {
+        let stress = native_stress(None, "зам+ок и м+ука").expect("stress builds");
+        let via_synthesis = adapt_structured_stress(&silero_provider(), &stress);
+        let via_preview = ProviderStressAdapter::Silero.adapt(&stress);
+        assert_eq!(via_synthesis, via_preview);
+        assert_eq!(via_preview, "зам+ок и м+ука");
+    }
+
+    /// The strict preview path propagates an inference error instead of failing
+    /// open with unchanged text.
+    #[test]
+    fn native_stress_strict_propagates_annotation_error() {
+        let dir = empty_pack_root();
+        let slot = native_slot(dir.clone());
+
+        let err = native_stress_strict(&slot, "замок").unwrap_err();
+        assert!(
+            !err.contains('/') && !err.contains('\\'),
+            "leaked path: {err}"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── RUAccent lazy slot selection tests ──
+
+    fn enable_homograph(state: &AppState, pack_id: Option<&str>) {
+        use crate::config::HomographAccentorSettings;
+        state.settings_cache.write().editor.homograph_accentor = HomographAccentorSettings {
+            enabled: true,
+            accentor_pack_id: pack_id.map(str::to_string),
+            ..Default::default()
+        };
+    }
+
+    fn select_homograph_disabled(state: &AppState, pack_id: Option<&str>) {
+        use crate::config::HomographAccentorSettings;
+        state.settings_cache.write().editor.homograph_accentor = HomographAccentorSettings {
+            enabled: false,
+            accentor_pack_id: pack_id.map(str::to_string),
+            ..Default::default()
+        };
+    }
+
+    #[test]
+    fn selected_slot_none_when_layer_disabled() {
+        let state = AppState::new();
+        assert!(selected_ruaccent_runtime_slot(&state).is_none());
+    }
+
+    #[test]
+    fn selected_slot_none_when_pack_id_missing() {
+        let state = AppState::new();
+        enable_homograph(&state, None);
+        assert!(selected_ruaccent_runtime_slot(&state).is_none());
+    }
+
+    #[test]
+    fn selected_slot_none_for_unknown_pack() {
+        let state = AppState::new();
+        enable_homograph(&state, Some("com.example.missing"));
+        assert!(selected_ruaccent_runtime_slot(&state).is_none());
+    }
+
+    #[test]
+    fn selected_slot_none_for_incomplete_pack() {
+        use crate::stress::packs::test_util as tu;
+
+        let state = AppState::new();
+        let root = tu::unique_test_root("incomplete-selected");
+        tu::write_incomplete_root(&root, &["legacy"]);
+        state.refresh_ruaccent_packs(&[root.clone()]);
+
+        enable_homograph(&state, Some("ruaccent.upstream.legacy"));
+        assert!(selected_ruaccent_runtime_slot(&state).is_none());
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn selected_slot_returns_slot_for_complete_pack() {
+        use crate::stress::packs::test_util as tu;
+        use crate::stress::runtime::RuAccentRuntimeStatus;
+
+        let state = AppState::new();
+        let root = tu::unique_test_root("complete-selected");
+        tu::write_upstream_pack(&root, &["tiny"]);
+        state.refresh_ruaccent_packs(&[root.clone()]);
+
+        enable_homograph(&state, Some("ruaccent.upstream.tiny"));
+        assert!(selected_ruaccent_runtime_slot(&state).is_none());
+
+        state
+            .get_ruaccent_runtime_slot("ruaccent.upstream.tiny")
+            .expect("slot exists")
+            .mark_ready();
+        let slot = selected_ruaccent_runtime_slot(&state).expect("complete pack slot selected");
+        assert_eq!(slot.descriptor().id, "ruaccent.upstream.tiny");
+        assert_eq!(slot.status(), RuAccentRuntimeStatus::Ready);
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn selected_slot_none_when_not_ready() {
+        use crate::stress::packs::test_util as tu;
+
+        let state = AppState::new();
+        let root = tu::unique_test_root("complete-selected-not-ready");
+        tu::write_upstream_pack(&root, &["tiny"]);
+        state.refresh_ruaccent_packs(&[root.clone()]);
+
+        enable_homograph(&state, Some("ruaccent.upstream.tiny"));
+        assert!(selected_ruaccent_runtime_slot(&state).is_none());
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    // ── Preview resolver (ignores `enabled`) tests ──
+
+    #[test]
+    fn preview_slot_returns_slot_when_selected_and_disabled() {
+        use crate::stress::packs::test_util as tu;
+
+        let state = AppState::new();
+        let root = tu::unique_test_root("complete-preview-disabled");
+        tu::write_upstream_pack(&root, &["tiny"]);
+        state.refresh_ruaccent_packs(&[root.clone()]);
+
+        select_homograph_disabled(&state, Some("ruaccent.upstream.tiny"));
+        assert!(preview_ruaccent_runtime_slot(&state).is_none());
+
+        state
+            .get_ruaccent_runtime_slot("ruaccent.upstream.tiny")
+            .expect("slot exists")
+            .mark_ready();
+        let slot = preview_ruaccent_runtime_slot(&state)
+            .expect("preview resolver must return a slot for a selected+disabled pack");
+        assert_eq!(slot.descriptor().id, "ruaccent.upstream.tiny");
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn automatic_slot_none_when_selected_and_disabled() {
+        use crate::stress::packs::test_util as tu;
+
+        let state = AppState::new();
+        let root = tu::unique_test_root("complete-auto-disabled");
+        tu::write_upstream_pack(&root, &["tiny"]);
+        state.refresh_ruaccent_packs(&[root.clone()]);
+
+        select_homograph_disabled(&state, Some("ruaccent.upstream.tiny"));
+        assert!(selected_ruaccent_runtime_slot(&state).is_none());
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn preview_slot_none_when_pack_id_missing() {
+        let state = AppState::new();
+        select_homograph_disabled(&state, None);
+        assert!(preview_ruaccent_runtime_slot(&state).is_none());
+    }
+
+    #[test]
+    fn preview_slot_none_for_unknown_pack() {
+        let state = AppState::new();
+        select_homograph_disabled(&state, Some("com.example.missing"));
+        assert!(preview_ruaccent_runtime_slot(&state).is_none());
+    }
+
+    #[test]
+    fn preview_slot_none_for_incomplete_pack() {
+        use crate::stress::packs::test_util as tu;
+
+        let state = AppState::new();
+        let root = tu::unique_test_root("incomplete-preview-disabled");
+        tu::write_incomplete_root(&root, &["legacy"]);
+        state.refresh_ruaccent_packs(&[root.clone()]);
+
+        select_homograph_disabled(&state, Some("ruaccent.upstream.legacy"));
+        assert!(preview_ruaccent_runtime_slot(&state).is_none());
+
+        std::fs::remove_dir_all(&root).ok();
     }
 }

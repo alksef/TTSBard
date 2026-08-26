@@ -179,7 +179,12 @@
     "typing_idle_timeout_ms": 800,
     "typing_enabled": true,
     "default_route": "no_twitch",
-    "keep_text_after_send": true
+    "keep_text_after_send": true,
+    "homograph_accentor": {
+      "enabled": true,
+      "accentor_pack_id": "com.example.ruaccent",
+      "load_on_start": true
+    }
   },
   "logging": {
     "enabled": true,
@@ -339,6 +344,12 @@
           "ctrl"
         ],
         "key": "H"
+      },
+      "accent_homographs": {
+        "modifiers": [
+          "ctrl"
+        ],
+        "key": "U"
       }
     }
   },
