@@ -1,7 +1,13 @@
+---
+id: ROADMAP-081
+status: completed
+created: 2026-08-20
+updated: 2026-08-20
+related_tasks: []
+---
+
 # ROADMAP-081 — Запуск сразу в компактном режиме
 
-Статус: completed
-Дата: 2026-08-20
 Приоритет: P2
 
 ## Контекст
@@ -44,7 +50,7 @@
 
 Нет.
 
-## Результат
+## Outcome
 
 Реализовано в `52eca26` (DeepSeek по task-флоу, проверено независимо:
 vue-tsc чисто, vitest 623/623, cargo 1326 passed; ручная проверка

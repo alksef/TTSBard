@@ -38,7 +38,7 @@ related_tasks: []
 
 ## Активные направления
 
-Активных направлений нет.
+На текущий момент активных roadmap items нет.
 
 ## Завершённые направления
 
@@ -108,6 +108,8 @@ related_tasks: []
 
 ### Архитектура, AI и документация
 
+- [ROADMAP-083 — модели RUAccent и UI загрузки](./completed/083-ruaccent-omograph-model-selection.md)
+- [ROADMAP-082 — нативный RUAccent runtime через ruaccent-rs](./completed/082-native-ruaccent-rs-runtime.md)
 - [ROADMAP-015 — AI feature map](./completed/015-ai-features-map-and-token-benchmark.md)
 - [ROADMAP-016 — project repositioning](./completed/016-project-repositioning.md)
 - [ROADMAP-017 — documentation и presentation](./completed/017-documentation-and-streamer-presentation.md)

@@ -2,7 +2,7 @@
 id: RESEARCH-13
 status: completed
 created: 2026-08-22
-related: ROADMAP-081, .work/silero-stress-research.md
+related: ROADMAP-082, ROADMAP-083, .work/silero-stress-research.md
 ---
 
 # RUAccent: benchmark, переносимость в Rust и поиск существующих порт-ов
@@ -35,7 +35,7 @@ PyTorch/TorchScript; tiny — ONNX, лучший скор на наборе; tur
 («под замком» — все дали «крепость»; «мука…муку» — все одним значением).
 Разрешение, по-видимому, идёт по лемме без учёта контекста повторов. Прямое
 подтверждение приоритета «явный выбор пользователя > override > модель»
-и необходимости слоя override-ов в ROADMAP-081.
+и необходимости слоя override-ов в ROADMAP-082.
 
 ## Переносимость обёртки в Rust без sidecar
 
@@ -64,14 +64,14 @@ ruaccent/silero-stress не существует**:
 - `silero-vad-rust` — порт Silero VAD, не accentor;
 - `floravox-g2p` (2026-08, Rust) — espeak-ng replacement для Piper-подобных
   движков, лексиконы англ., русского ударения не решает (отдельно интересен
-  для Piper-пути ROADMAP-081);
+  для Piper-пути ROADMAP-082);
 - вокруг ruaccent живое только Python: stressonnx (не решает омографы),
   ruphon (Python фонемизер, см. отдельную заметку), HTTP-microservice sidecar-ы.
 
 ## Итог
 
 **Есть смысл делать собственный нативный Rust-порт RUAccent `tiny`** (этап 2
-ROADMAP-081): ниша пустая, все блоки готовые (`ort`, `tokenizers`, `flate2`),
+ROADMAP-082): ниша пустая, все блоки готовые (`ort`, `tokenizers`, `flate2`),
 ~1–2 недели с golden-сверкой по Python-эталону. Первым кандидатом остаётся
 `tiny` (лучший скор + ONNX + 165 MiB); silero — быстрее, но требует R&D по
 HomoSolver (BERT-граф, не ONNX). Перед release — расширенный regression-набор
