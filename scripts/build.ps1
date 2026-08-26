@@ -388,7 +388,28 @@ function Invoke-BootstrapAndCompile {
         $regSrc = Find-RegistrySource
     }
     if (-not $regSrc) {
-        Write-Err "espeak-ng-data not found in Cargo registry after fetch."
+        # Recent Cargo versions can download crate archives without unpacking
+        # them into registry/src. Building the crate both unpacks it and
+        # produces the complete resource directory we ultimately need.
+        Write-WarnLine "Cargo registry source was not unpacked by cargo fetch; compiling espeak-rs-sys directly."
+        $cargoArgs = @('build', '-p', 'espeak-rs-sys')
+        if ($Mode -eq 'release') { $cargoArgs += '--release' }
+        Push-Location (Join-Path $repoRoot 'src-tauri')
+        try {
+            & 'cargo' $cargoArgs
+            if ($LASTEXITCODE -ne 0) { Write-Err "cargo build -p espeak-rs-sys failed"; exit 1 }
+        } finally { Pop-Location }
+
+        $compiled = Find-CompiledOutput
+        if (Test-ValidEspeakData $compiled) {
+            if (Test-Path $espeakDstDir) { Remove-Item -Recurse -Force $espeakDstDir }
+            Copy-Item -Recurse -Force $compiled $espeakDstDir
+            $fileCount = (Get-ChildItem -Recurse -File -Path $espeakDstDir | Measure-Object).Count
+            Write-Ok "installed compiled espeak-ng-data ($fileCount files) with en_dict"
+            return
+        }
+
+        Write-Err "espeak-ng-data not found in Cargo registry or compiled build output."
         exit 1
     }
     Write-Ok "registry source: $regSrc"
