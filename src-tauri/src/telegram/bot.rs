@@ -77,7 +77,7 @@ const GENERIC_REJECTION_TEXT: &str = "Silero отклонил запрос.";
 /// Classified kind of a correlated text rejection from the Silero synthesis bot.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum RejectionKind {
-    /// Bot replied with the known "превысит … лимит … озвучки" limit message.
+    /// Bot replied with the known "превысит/превышает … лимит … озвучки" limit message.
     LimitExceeded,
     /// Any other non-empty correlated text reply from the bot.
     Generic,
@@ -88,7 +88,7 @@ enum RejectionKind {
 /// Unicode-lowercased text.  Recognises two ordered layouts:
 ///
 /// 1. New: `лимит` → `озвучк` → `исчерпан`
-/// 2. Old: `превысит` → `лимит` → `озвучк`
+/// 2. Old: `превысит`/`превыша` → `лимит` → `озвучк`
 ///
 /// Uses the stem `озвучк` to cover `озвучки` and `озвучку`.
 /// Text/link material may appear between markers.
@@ -105,11 +105,12 @@ fn classify_rejection(text: &str) -> RejectionKind {
         }
     }
 
-    // Old pattern: превысит → лимит → озвучк
-    let after_превысит = lower
+    // Old pattern: (превысит | превыша) → лимит → озвучк
+    let after_превышение = lower
         .find("превысит")
-        .map(|p| &lower[p + "превысит".len()..]);
-    if let Some(rest) = after_превысит {
+        .map(|p| &lower[p + "превысит".len()..])
+        .or_else(|| lower.find("превыша").map(|p| &lower[p + "превыша".len()..]));
+    if let Some(rest) = after_превышение {
         if let Some(rest) = rest.find("лимит").map(|p| &rest[p + "лимит".len()..]) {
             if rest.find("озвучк").is_some() {
                 return RejectionKind::LimitExceeded;
@@ -2838,6 +2839,33 @@ mod tests {
         assert_eq!(
             classify_rejection("текст превысит лимит озвучку"),
             RejectionKind::LimitExceeded
+        );
+    }
+
+    // ── classify_rejection: old pattern with "превышает" ──────────────
+
+    #[test]
+    fn classify_old_limit_prevyshaet_exact_phrase() {
+        assert_eq!(
+            classify_rejection("Отправленный текст превышает лимит озвучки."),
+            RejectionKind::LimitExceeded
+        );
+    }
+
+    #[test]
+    fn classify_old_limit_prevyshaet_mixed_case() {
+        assert_eq!(
+            classify_rejection("Текст Превышает лимит Озвучки"),
+            RejectionKind::LimitExceeded
+        );
+    }
+
+    #[test]
+    fn classify_old_limit_prevyshaet_wrong_order() {
+        assert_eq!(
+            // "лимит" before "превышает" — wrong order
+            classify_rejection("лимит превышает озвучки"),
+            RejectionKind::Generic
         );
     }
 
