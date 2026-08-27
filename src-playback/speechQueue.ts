@@ -20,8 +20,6 @@ export interface JobDto {
 
 export interface SpeechQueueStateDto {
   jobs: JobDto[]
-  blocked: boolean
-  blocked_reason: string | null
 }
 
 export type PlaybackStatus = 'Idle' | 'Playing' | 'Paused' | 'Stopped'
@@ -89,9 +87,6 @@ export function isSpeechQueueStateDto(
   if (!payload || typeof payload !== 'object') return false
   const p = payload as Record<string, unknown>
   if (!Array.isArray(p.jobs)) return false
-  if (typeof p.blocked !== 'boolean') return false
-  if (p.blocked_reason !== null && typeof p.blocked_reason !== 'string')
-    return false
   return p.jobs.every(isJobDto)
 }
 

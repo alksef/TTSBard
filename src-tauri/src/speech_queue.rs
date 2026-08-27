@@ -180,8 +180,6 @@ impl From<&SpeechJob> for JobDto {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpeechQueueStateDto {
     pub jobs: Vec<JobDto>,
-    pub blocked: bool,
-    pub blocked_reason: Option<String>,
 }
 
 // ── SpeechQueue ──
@@ -237,36 +235,18 @@ impl SpeechQueue {
     }
 
     pub fn state(&self) -> SpeechQueueStateDto {
-        let blocked = self.jobs.iter().any(|j| j.status == JobStatus::Failed);
-
-        let blocked_reason = if blocked {
-            self.jobs
-                .iter()
-                .find(|j| j.status == JobStatus::Failed)
-                .map(|j| {
-                    format!(
-                        "Job {} failed: {}",
-                        j.job_id,
-                        j.error.as_deref().unwrap_or("unknown error")
-                    )
-                })
-        } else {
-            None
-        };
-
         SpeechQueueStateDto {
             jobs: self.jobs.iter().map(JobDto::from).collect(),
-            blocked,
-            blocked_reason,
         }
     }
 
     pub fn next_actionable(&self) -> Option<Uuid> {
         for job in &self.jobs {
             match job.status {
-                JobStatus::Failed | JobStatus::Generating => return None,
+                JobStatus::Generating => return None,
                 JobStatus::Queued => return Some(job.job_id),
-                JobStatus::Completed
+                JobStatus::Failed
+                | JobStatus::Completed
                 | JobStatus::Cancelled
                 | JobStatus::Ready
                 | JobStatus::Playing => continue,
@@ -676,15 +656,15 @@ mod tests {
     }
 
     #[test]
-    fn next_actionable_none_when_blocked_by_failure() {
+    fn next_actionable_skips_failed_and_selects_next_queued() {
         let mut q = SpeechQueue::new();
         let id1 = q.submit("first", snap()).unwrap();
-        let _id2 = q.submit("second", snap()).unwrap();
+        let id2 = q.submit("second", snap()).unwrap();
 
         q.start_generation(id1).unwrap();
         q.fail_generation(id1, "provider error".into()).unwrap();
 
-        assert_eq!(q.next_actionable(), None);
+        assert_eq!(q.next_actionable(), Some(id2));
     }
 
     #[test]
@@ -745,15 +725,18 @@ mod tests {
     }
 
     #[test]
-    fn claim_returns_none_when_blocked_by_failed_head() {
+    fn claim_returns_next_queued_after_failed_head() {
         let mut q = SpeechQueue::new();
         let id1 = q.submit("first", snap()).unwrap();
-        q.submit("second", snap()).unwrap();
+        let id2 = q.submit("second", snap()).unwrap();
 
         q.start_generation(id1).unwrap();
         q.fail_generation(id1, "err".into()).unwrap();
 
-        assert!(q.claim_next_generation().unwrap().is_none());
+        let item = q.claim_next_generation().unwrap().expect("should claim second");
+        assert_eq!(item.job_id, id2);
+        assert_eq!(item.original_text, "second");
+        assert_eq!(q.state().jobs[0].status, JobStatus::Failed);
     }
 
     #[test]
@@ -918,14 +901,14 @@ mod tests {
     }
 
     #[test]
-    fn start_generation_rejects_blocked_queue() {
+    fn start_generation_accepts_next_queued_after_failed_head() {
         let mut q = SpeechQueue::new();
         let id1 = q.submit("first", snap()).unwrap();
         let id2 = q.submit("second", snap()).unwrap();
         q.start_generation(id1).unwrap();
         q.fail_generation(id1, "error".into()).unwrap();
-        let err = q.start_generation(id2).unwrap_err();
-        assert!(text_err(&err).contains("not the next actionable job"));
+        q.start_generation(id2).unwrap();
+        assert_eq!(q.state().jobs[1].status, JobStatus::Generating);
     }
 
     #[test]
@@ -1015,17 +998,18 @@ mod tests {
     }
 
     #[test]
-    fn fail_generation_blocks_queue() {
+    fn fail_generation_preserves_failed_status_and_error() {
         let mut q = SpeechQueue::new();
         let id1 = q.submit("first", snap()).unwrap();
-        let _id2 = q.submit("second", snap()).unwrap();
+        let id2 = q.submit("second", snap()).unwrap();
 
         q.start_generation(id1).unwrap();
         q.fail_generation(id1, "provider down".into()).unwrap();
 
         let state = q.state();
-        assert!(state.blocked);
-        assert!(state.blocked_reason.unwrap().contains("provider down"));
+        assert_eq!(state.jobs[0].status, JobStatus::Failed);
+        assert_eq!(state.jobs[0].error.as_deref(), Some("provider down"));
+        assert_eq!(q.next_actionable(), Some(id2));
     }
 
     #[test]
@@ -1187,7 +1171,7 @@ mod tests {
     }
 
     #[test]
-    fn retry_preserves_fifo_position_and_unblocks() {
+    fn retry_preserves_fifo_position() {
         let mut q = SpeechQueue::new();
         let id1 = q.submit("first", snap()).unwrap();
         let id2 = q.submit("second", snap()).unwrap();
@@ -1195,12 +1179,9 @@ mod tests {
         q.start_generation(id1).unwrap();
         q.fail_generation(id1, "err".into()).unwrap();
 
-        assert!(q.state().blocked);
-
         q.retry_job(id1).unwrap();
 
         let state = q.state();
-        assert!(!state.blocked);
         assert_eq!(state.jobs[0].job_id, id1);
         assert_eq!(state.jobs[1].job_id, id2);
         assert_eq!(q.next_actionable(), Some(id1));
@@ -1263,7 +1244,7 @@ mod tests {
     }
 
     #[test]
-    fn cancel_failed_job_and_unblock() {
+    fn cancel_failed_job_then_next_queued_selected() {
         let mut q = SpeechQueue::new();
         let id1 = q.submit("first", snap()).unwrap();
         let id2 = q.submit("second", snap()).unwrap();
@@ -1271,16 +1252,14 @@ mod tests {
         q.start_generation(id1).unwrap();
         q.fail_generation(id1, "error".into()).unwrap();
 
-        assert!(q.state().blocked);
-
         q.cancel_job(id1).unwrap();
         let state = q.state();
-        assert!(!state.blocked);
+        assert_eq!(state.jobs[0].status, JobStatus::Cancelled);
         assert_eq!(q.next_actionable(), Some(id2));
     }
 
     #[test]
-    fn cancel_later_job_does_not_unblock_prior_failure() {
+    fn cancel_later_job_keeps_prior_failed_and_next_queued() {
         let mut q = SpeechQueue::new();
         let id1 = q.submit("first", snap()).unwrap();
         let _id2 = q.submit("second", snap()).unwrap();
@@ -1292,9 +1271,10 @@ mod tests {
         q.cancel_job(id3).unwrap();
 
         let state = q.state();
-        assert!(state.blocked);
+        assert_eq!(state.jobs[0].status, JobStatus::Failed);
         assert_eq!(state.jobs[2].status, JobStatus::Cancelled);
         assert_eq!(state.jobs[1].status, JobStatus::Queued);
+        assert_eq!(q.next_actionable(), Some(state.jobs[1].job_id));
     }
 
     #[test]
@@ -1465,18 +1445,16 @@ mod tests {
     }
 
     #[test]
-    fn skip_failed_job_cancels_and_unblocks() {
+    fn skip_failed_job_cancels_and_selects_next() {
         let mut q = SpeechQueue::new();
         let id1 = q.submit("first", snap()).unwrap();
         let id2 = q.submit("second", snap()).unwrap();
 
         q.start_generation(id1).unwrap();
         q.fail_generation(id1, "err".into()).unwrap();
-        assert!(q.state().blocked);
 
         q.skip_job(id1).unwrap();
         let state = q.state();
-        assert!(!state.blocked);
         assert_eq!(state.jobs[0].status, JobStatus::Cancelled);
         assert_eq!(q.next_actionable(), Some(id2));
     }
@@ -1831,11 +1809,10 @@ mod tests {
         assert_eq!(state.jobs[1].status, JobStatus::Failed);
         assert_eq!(state.jobs[2].job_id, id3);
         assert_eq!(state.jobs[2].status, JobStatus::Queued);
-        assert!(state.blocked);
     }
 
     #[test]
-    fn state_dto_not_blocked_after_all_completed() {
+    fn state_dto_reflects_completed_statuses_after_all_completed() {
         let mut q = SpeechQueue::new();
         let id1 = q.submit("first", snap()).unwrap();
         let id2 = q.submit("second", snap()).unwrap();
@@ -1851,27 +1828,27 @@ mod tests {
         q.mark_completed(id2).unwrap();
 
         let state = q.state();
-        assert!(!state.blocked);
-        assert!(state.blocked_reason.is_none());
+        assert_eq!(state.jobs.len(), 2);
+        assert_eq!(state.jobs[0].status, JobStatus::Completed);
+        assert_eq!(state.jobs[1].status, JobStatus::Completed);
     }
 
     #[test]
-    fn state_dto_not_blocked_when_empty() {
+    fn state_dto_empty_has_no_jobs() {
         let q = SpeechQueue::new();
         let state = q.state();
-        assert!(!state.blocked);
         assert!(state.jobs.is_empty());
     }
 
     #[test]
-    fn state_dto_blocked_when_only_failed_with_no_queued() {
+    fn state_dto_failed_job_preserves_error() {
         let mut q = SpeechQueue::new();
         let id = q.submit("only", snap()).unwrap();
         q.start_generation(id).unwrap();
         q.fail_generation(id, "err".into()).unwrap();
         let state = q.state();
-        assert!(state.blocked);
-        assert!(state.blocked_reason.is_some());
+        assert_eq!(state.jobs[0].status, JobStatus::Failed);
+        assert_eq!(state.jobs[0].error.as_deref(), Some("err"));
     }
 
     // ── idempotent errors ──
@@ -1901,59 +1878,79 @@ mod tests {
         assert!(ts <= after_ms);
     }
 
-    // ── blocked invariants ──
+    // ── failure paths followed by a queued job ──
 
     #[test]
-    fn queue_blocked_when_failed_with_subsequent_queued() {
+    fn generation_failure_keeps_failed_status_error_and_claims_next_queued() {
         let mut q = SpeechQueue::new();
         let id1 = q.submit("first", snap()).unwrap();
-        let _id2 = q.submit("second", snap()).unwrap();
+        let id2 = q.submit("second", snap()).unwrap();
+
         q.start_generation(id1).unwrap();
-        q.fail_generation(id1, "err".into()).unwrap();
-        assert!(q.state().blocked);
+        q.fail_generation(id1, "provider error".into()).unwrap();
+
+        let state = q.state();
+        assert_eq!(state.jobs[0].job_id, id1);
+        assert_eq!(state.jobs[0].status, JobStatus::Failed);
+        assert_eq!(state.jobs[0].error.as_deref(), Some("provider error"));
+
+        assert_eq!(q.next_actionable(), Some(id2));
+
+        let item = q.claim_next_generation().unwrap().expect("should claim second");
+        assert_eq!(item.job_id, id2);
+        assert_eq!(item.original_text, "second");
+
+        let state = q.state();
+        assert_eq!(state.jobs[0].status, JobStatus::Failed);
+        assert_eq!(state.jobs[0].error.as_deref(), Some("provider error"));
+        assert_eq!(state.jobs[1].status, JobStatus::Generating);
     }
 
     #[test]
-    fn queue_blocked_when_failed_without_subsequent_queued() {
+    fn playback_failure_keeps_failed_status_error_and_claims_next_queued() {
+        let mut q = SpeechQueue::new();
+        let id1 = q.submit("first", snap()).unwrap();
+        let id2 = q.submit("second", snap()).unwrap();
+
+        q.start_generation(id1).unwrap();
+        q.mark_ready(id1, "spoken first".into()).unwrap();
+        q.fail_playback(id1, "device lost".into()).unwrap();
+
+        let state = q.state();
+        assert_eq!(state.jobs[0].job_id, id1);
+        assert_eq!(state.jobs[0].status, JobStatus::Failed);
+        assert_eq!(state.jobs[0].error.as_deref(), Some("device lost"));
+
+        assert_eq!(q.next_actionable(), Some(id2));
+
+        let item = q.claim_next_generation().unwrap().expect("should claim second");
+        assert_eq!(item.job_id, id2);
+
+        let state = q.state();
+        assert_eq!(state.jobs[0].status, JobStatus::Failed);
+        assert_eq!(state.jobs[0].error.as_deref(), Some("device lost"));
+    }
+
+    #[test]
+    fn retry_of_only_failed_returns_to_queued() {
         let mut q = SpeechQueue::new();
         let id = q.submit("only", snap()).unwrap();
         q.start_generation(id).unwrap();
         q.fail_generation(id, "err".into()).unwrap();
-        assert!(q.state().blocked);
-    }
-
-    #[test]
-    fn queue_unblocked_after_retry_of_only_failed() {
-        let mut q = SpeechQueue::new();
-        let id = q.submit("only", snap()).unwrap();
-        q.start_generation(id).unwrap();
-        q.fail_generation(id, "err".into()).unwrap();
-        assert!(q.state().blocked);
         q.retry_job(id).unwrap();
-        assert!(!q.state().blocked);
+        assert_eq!(q.state().jobs[0].status, JobStatus::Queued);
+        assert_eq!(q.next_actionable(), Some(id));
     }
 
     #[test]
-    fn queue_unblocked_after_cancel_of_only_failed() {
+    fn cancel_of_only_failed_leaves_no_actionable() {
         let mut q = SpeechQueue::new();
         let id = q.submit("only", snap()).unwrap();
         q.start_generation(id).unwrap();
         q.fail_generation(id, "err".into()).unwrap();
-        assert!(q.state().blocked);
         q.cancel_job(id).unwrap();
-        assert!(!q.state().blocked);
-    }
-
-    #[test]
-    fn blocked_reason_preserved_after_retry_clears() {
-        let mut q = SpeechQueue::new();
-        let id = q.submit("test", snap()).unwrap();
-        q.start_generation(id).unwrap();
-        q.fail_generation(id, "disk full".into()).unwrap();
-        let reason = q.state().blocked_reason.unwrap();
-        assert!(reason.contains("disk full"));
-        q.retry_job(id).unwrap();
-        assert!(q.state().blocked_reason.is_none());
+        assert_eq!(q.state().jobs[0].status, JobStatus::Cancelled);
+        assert_eq!(q.next_actionable(), None);
     }
 
     // ── serialization regression ──

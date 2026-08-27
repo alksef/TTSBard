@@ -36,17 +36,16 @@ related_tasks: []
 
 Формат и соответствие каталога статусу проверяет `scripts/check-docs.ps1`.
 
-## Активные направления
-
-На текущий момент активных roadmap items нет.
-
 ## Завершённые направления
 
 ### Надёжность и ревью
 
+- [ROADMAP-084 — Ошибки очереди речи: Silero и глобальное уведомление](./completed/084-speech-queue-global-error-toast.md)
 - [ROADMAP-076 — remediation по release-review v0.21.0..HEAD](./completed/076-release-review-remediation.md)
 
 ### Редактор и история
+
+- [ROADMAP-085 — Provider text и чистая вставка из истории фраз](./completed/085-provider-text-and-clean-history-insert.md)
 
 - [ROADMAP-080 — сохранение текста редактора после отправки](./completed/080-keep-text-after-submit.md)
 - [ROADMAP-078 — горячие клавиши режимов редактора](./completed/078-editor-hotkeys-for-modes.md)

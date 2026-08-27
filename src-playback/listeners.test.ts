@@ -118,7 +118,7 @@ describe('registerPlaybackControlListeners', () => {
     const listen = createListenMock()
     const scope = createAsyncCleanupScope()
     const cbs = { refreshStatus: vi.fn(), onSpeechQueueChanged: vi.fn(), onAppearanceUpdate: vi.fn() }
-    const payload = { jobs: [], blocked: false, blocked_reason: null }
+    const payload = { jobs: [] }
 
     await registerPlaybackControlListeners(listen as unknown as ListenFn, scope, cbs)
 

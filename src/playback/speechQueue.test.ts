@@ -30,8 +30,8 @@ function makeJob(overrides: Partial<JobDto> = {}): JobDto {
   }
 }
 
-function makeDto(jobs: JobDto[] = [], blocked = false, blocked_reason: string | null = null) {
-  return { jobs, blocked, blocked_reason }
+function makeDto(jobs: JobDto[] = []) {
+  return { jobs }
 }
 
 function makeActivityRow(overrides: Partial<ActivityRow> = {}): ActivityRow {
@@ -72,13 +72,16 @@ describe('isSpeechQueueStateDto', () => {
     expect(isSpeechQueueStateDto(makeDto([]))).toBe(true)
   })
 
-  it('accepts populated spoken_text, error, and blocked_reason', () => {
-    const dto = makeDto(
-      [makeJob({ spoken_text: 'processed', error: 'TTS error', status: 'failed', attempt: 3 })],
-      true,
-      'blocked by failure',
-    )
+  it('accepts populated spoken_text and error', () => {
+    const dto = makeDto([
+      makeJob({ spoken_text: 'processed', error: 'TTS error', status: 'failed', attempt: 3 }),
+    ])
     expect(isSpeechQueueStateDto(dto)).toBe(true)
+  })
+
+  it('accepts legacy blocked fields without validating them', () => {
+    expect(isSpeechQueueStateDto({ jobs: [makeJob()], blocked: true, blocked_reason: 'legacy' })).toBe(true)
+    expect(isSpeechQueueStateDto({ jobs: [], blocked: false, blocked_reason: null })).toBe(true)
   })
 
   it('rejects null', () => {
@@ -95,27 +98,11 @@ describe('isSpeechQueueStateDto', () => {
   })
 
   it('rejects missing jobs', () => {
-    expect(isSpeechQueueStateDto({ blocked: false })).toBe(false)
+    expect(isSpeechQueueStateDto({})).toBe(false)
   })
 
   it('rejects non-array jobs', () => {
-    expect(isSpeechQueueStateDto({ jobs: 42, blocked: false })).toBe(false)
-  })
-
-  it('rejects missing blocked', () => {
-    expect(isSpeechQueueStateDto({ jobs: [] })).toBe(false)
-  })
-
-  it('rejects wrong blocked type', () => {
-    expect(isSpeechQueueStateDto({ jobs: [], blocked: 'yes' })).toBe(false)
-  })
-
-  it('rejects non-string blocked_reason', () => {
-    expect(isSpeechQueueStateDto({ jobs: [], blocked: false, blocked_reason: 42 })).toBe(false)
-  })
-
-  it('rejects undefined blocked_reason', () => {
-    expect(isSpeechQueueStateDto({ jobs: [], blocked: false, blocked_reason: undefined })).toBe(false)
+    expect(isSpeechQueueStateDto({ jobs: 42 })).toBe(false)
   })
 
   it('rejects job missing job_id', () => {

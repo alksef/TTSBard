@@ -90,8 +90,6 @@ const activityRows = ref<ActivityRow[]>([])
 
 const speechQueue = ref<SpeechQueueStateDto>({
   jobs: [],
-  blocked: false,
-  blocked_reason: null,
 })
 
 const pendingActions = ref<Set<string>>(new Set())
@@ -342,22 +340,6 @@ function showSpokenText(row: ActivityRow): boolean {
   )
 }
 
-function findFailedJobId(): string | null {
-  const failedJob = speechQueue.value.jobs.find(j => j.status === 'failed')
-  return failedJob?.job_id ?? null
-}
-
-async function scrollToFailed() {
-  const failedId = findFailedJobId()
-  if (!failedId) return
-  await nextTick()
-  const el = document.querySelector(`[data-row-id="${CSS.escape(failedId)}"]`)
-  if (el) {
-    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-    ;(el as HTMLElement).focus()
-  }
-}
-
 onMounted(async () => {
   try {
     const [loadedOpacity, loadedColor] = await invoke<[number, string]>('pc_get_appearance')
@@ -459,18 +441,6 @@ const pauseIcon = () =>
     </div>
 
     <div v-if="actionError" class="action-error">{{ actionError }}</div>
-
-    <div v-if="speechQueue.blocked" class="blocked-warning">
-      ⚠ Очередь заблокирована — последующие фразы не будут обработаны, пока ошибочная задача не будет повторена или пропущена.
-      <span v-if="speechQueue.blocked_reason" class="blocked-reason-detail">{{ speechQueue.blocked_reason }}</span>
-      <button
-        v-if="findFailedJobId()"
-        class="blocked-focus-btn"
-        @click="scrollToFailed"
-        title="Прокрутить к ошибочной задаче"
-        aria-label="Прокрутить к ошибочной задаче"
-      >Показать ошибочную задачу</button>
-    </div>
 
     <div v-if="activityRows.length > 0" class="activity-list">
       <div
@@ -720,7 +690,11 @@ body {
 
 .current-section {
   padding: 4px 4px;
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-height: 24px;
+  max-height: 120px;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .current-text {
@@ -766,43 +740,6 @@ body {
 .ctrl-btn:disabled {
   opacity: 0.3;
   cursor: not-allowed;
-}
-
-.blocked-warning {
-  padding: 6px 10px;
-  border-radius: 8px;
-  background: rgba(255, 183, 77, 0.12);
-  color: #ffb74d;
-  font-size: 0.75rem;
-  line-height: 1.4;
-  border: 1px solid rgba(255, 183, 77, 0.2);
-  flex-shrink: 0;
-}
-
-.blocked-reason-detail {
-  display: block;
-  margin-top: 2px;
-  opacity: 0.7;
-}
-
-.blocked-focus-btn {
-  display: block;
-  margin-top: 6px;
-  padding: 3px 10px;
-  border: 1px solid rgba(255, 183, 77, 0.35);
-  border-radius: 6px;
-  background: rgba(255, 183, 77, 0.1);
-  color: #ffb74d;
-  font-size: 0.72rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s;
-  font-family: inherit;
-}
-
-.blocked-focus-btn:hover {
-  background: rgba(255, 183, 77, 0.2);
-  border-color: #ffb74d;
 }
 
 .activity-list {

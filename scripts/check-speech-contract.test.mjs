@@ -48,14 +48,10 @@ const VALID_POPULATED = {
       last_activity_at_ms: 1000000000000,
     },
   ],
-  blocked: true,
-  blocked_reason: 'blocked',
 }
 
 const VALID_EMPTY = {
   jobs: [],
-  blocked: false,
-  blocked_reason: null,
 }
 
 const VALID_EVENT_TS_SOURCE = `
@@ -81,8 +77,6 @@ export interface JobDto {
 
 export interface SpeechQueueStateDto {
   jobs: JobDto[]
-  blocked: boolean
-  blocked_reason: string | null
 }
 `
 
@@ -324,8 +318,6 @@ export interface JobDto {
 
 export interface SpeechQueueStateDto {
   jobs: JobDto[]
-  blocked: boolean
-  blocked_reason: string | null
   ts_required: string
 }
 `
@@ -363,8 +355,6 @@ export interface JobDto {
 
 export interface SpeechQueueStateDto {
   jobs: JobDto[]
-  blocked: boolean
-  blocked_reason: string | null
 }
 `
     const result = checkSpeechEventContract({
@@ -382,8 +372,8 @@ export interface SpeechQueueStateDto {
     )
   })
 
-  it('detects blocked_reason nullability mismatch', () => {
-    // Fixture has blocked_reason: null but TS requires string
+  it('detects error nullability mismatch (jobs[0].error)', () => {
+    // Fixture has error: null on jobs[0] but TS declares it non-nullable.
     const tsSource = `
 export type JobStatus =
   | 'queued'
@@ -394,7 +384,7 @@ export interface JobDto {
   original_text: string
   spoken_text: string | null
   status: JobStatus
-  error: string | null
+  error: string
   attempt: number
   created_at_ms: number
   last_activity_at_ms: number
@@ -402,24 +392,19 @@ export interface JobDto {
 
 export interface SpeechQueueStateDto {
   jobs: JobDto[]
-  blocked: boolean
-  blocked_reason: string
 }
 `
     const result = checkSpeechEventContract({
       populatedFixture: VALID_POPULATED,
-      emptyFixture: {
-        ...VALID_EMPTY,
-        // blocked_reason: null in empty fixture but TS says string (non-nullable)
-      },
+      emptyFixture: VALID_EMPTY,
       sourceText: tsSource,
     })
     assert.ok(
       result.errors.some(
         e =>
-          e.includes('blocked_reason') && e.includes('non-nullable in TypeScript')
+          e.includes('jobs[0].error') && e.includes('non-nullable')
       ),
-      `expected blocked_reason nullability mismatch, got: ${result.errors.join('; ')}`
+      `expected jobs[0].error nullability mismatch, got: ${result.errors.join('; ')}`
     )
   })
 })

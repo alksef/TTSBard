@@ -24,6 +24,10 @@ import { useRuAccentRuntime } from './composables/useRuAccentRuntime'
 import { debugLog, debugError } from './utils/debug'
 import { createAsyncCleanupScope } from './utils/asyncCleanup'
 import { useErrorHandler } from './composables/useErrorHandler'
+import {
+  collectSpeechQueueFailures,
+  type SpeechQueueFailureKey,
+} from './composables/speechQueueFailureNotifications'
 
 type Panel = 'input' | 'tts' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'vtube-studio' | 'settings' | 'hotkeys' | 'intercept'
 
@@ -46,7 +50,7 @@ provide('isMinimalMode', isMinimalMode)
 
 // Create and provide app settings context
 const appSettings = provideAppSettings()
-const { showWarning } = useErrorHandler()
+const { showWarning, showError } = useErrorHandler()
 const { dispose: disposeRuAccentRuntime } = useRuAccentRuntime()
 
 watch(
@@ -93,6 +97,7 @@ const playbackPending = ref(false)
 const listenerScope = createAsyncCleanupScope()
 let visibilityListenerSetup: Promise<void> | null = null
 let visibilityToken = 0
+let speechQueueFailureKeys: ReadonlySet<SpeechQueueFailureKey> = new Set()
 
 function formatHotkeyDisplay(hotkey: { modifiers: string[]; key: string } | undefined): string {
   if (!hotkey || !hotkey.key) return ''
@@ -323,6 +328,22 @@ onMounted(async () => {
     }),
   ).then(() => undefined).catch(e => {
     debugError('[App] Failed to listen for visibility events:', e)
+  })
+
+  // Show a global toast when an accepted speech job transitions to failed
+  void listenerScope.track(
+    listen('speech-queue-changed', (event) => {
+      const { notifications, currentKeys } = collectSpeechQueueFailures(
+        (event as { payload: unknown }).payload,
+        speechQueueFailureKeys,
+      )
+      speechQueueFailureKeys = currentKeys
+      for (const notification of notifications) {
+        showError(notification.message)
+      }
+    }),
+  ).catch((e) => {
+    debugError('[App] Failed to listen for speech queue events:', e)
   })
 
   // Wait for listener setup before reading snapshot to avoid the gap
