@@ -121,7 +121,7 @@ pub fn replay_phrase_from_cache(
     let replay_id = format!("hist_{}", entry.cache_key);
     let enqueued = pb.enqueue_with_outputs(
         replay_id.clone(),
-        entry.text.clone(),
+        entry.insert_text.clone(),
         pcm,
         speaker_config,
         mic_config,

@@ -27,25 +27,137 @@ pub struct HistoryEntry {
     pub last_used: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// Russian vowel characters (the same set used by the stress adapters).
+fn is_russian_vowel(ch: char) -> bool {
+    matches!(
+        ch,
+        'А' | 'а'
+            | 'Е'
+            | 'е'
+            | 'Ё'
+            | 'ё'
+            | 'И'
+            | 'и'
+            | 'О'
+            | 'о'
+            | 'У'
+            | 'у'
+            | 'Ы'
+            | 'ы'
+            | 'Э'
+            | 'э'
+            | 'Ю'
+            | 'ю'
+            | 'Я'
+            | 'я'
+    )
+}
+
+/// Remove Piper stress markers (U+0301 combining acute after each stressed
+/// vowel) from provider text.
+fn strip_piper_markers(text: &str) -> String {
+    text.chars().filter(|c| *c != '\u{0301}').collect()
+}
+
+/// Remove Silero stress markers (`+` immediately before a Russian vowel).
+/// A `+` that is not immediately followed by a Russian vowel stays literal.
+fn strip_silero_markers(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut result = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '+' && i + 1 < chars.len() && is_russian_vowel(chars[i + 1]) {
+            i += 1;
+            continue;
+        }
+        result.push(chars[i]);
+        i += 1;
+    }
+    result
+}
+
+/// Derive the clean insert text from provider text by stripping the provider's
+/// stress markers. Piper uses U+0301 after the stressed vowel; Silero inserts
+/// `+` before the stressed Russian vowel. Unknown/plain providers return the
+/// input unchanged.
+pub fn strip_provider_markers(text: &str, provider: &str) -> String {
+    match provider.to_ascii_lowercase().as_str() {
+        "piper" => strip_piper_markers(text),
+        "silero" => strip_silero_markers(text),
+        _ => text.to_string(),
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct PhraseEntry {
-    // #[serde(default)] на каждом поле + Default на структуре — backwards-compatibility:
-    // при добавлении новых полей старые phrase_history.json продолжат десериализоваться
-    // (урок playback_pause / HotkeySettings, commit 704be39).
-    #[serde(default)]
+    // provider_text — provider-specific текст (с маркерами ударений), который
+    // отправляется в TTS, участвует в cache key и отображается в истории, чтобы
+    // пользователь видел фактические ударения.
     pub id: String,
-    #[serde(default)]
-    pub text: String,
-    #[serde(default)]
+    pub provider_text: String,
+    pub insert_text: String,
     pub count: u32,
-    #[serde(default)]
     pub last_used: i64,
-    #[serde(default)]
     pub provider: String,
-    #[serde(default)]
     pub voice: String,
-    #[serde(default)]
     pub cache_key: String,
+}
+
+// Backwards-compatible deserialization: старый phrase_history.json хранил одно
+// поле `text`. Новый формат хранит явные `provider_text` и `insert_text`.
+// При чтении legacy-записи `provider_text` сохраняет старое значение, а
+// `insert_text` выводится из него снятием provider-specific markers.
+impl<'de> Deserialize<'de> for PhraseEntry {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct PhraseEntryRaw {
+            #[serde(default)]
+            id: String,
+            #[serde(default)]
+            text: String,
+            #[serde(default)]
+            provider_text: String,
+            #[serde(default)]
+            insert_text: String,
+            #[serde(default)]
+            count: u32,
+            #[serde(default)]
+            last_used: i64,
+            #[serde(default)]
+            provider: String,
+            #[serde(default)]
+            voice: String,
+            #[serde(default)]
+            cache_key: String,
+        }
+
+        let raw = PhraseEntryRaw::deserialize(deserializer)?;
+
+        let provider_text = if !raw.provider_text.is_empty() {
+            raw.provider_text
+        } else {
+            raw.text
+        };
+        let insert_text = if !raw.insert_text.is_empty() {
+            raw.insert_text
+        } else {
+            strip_provider_markers(&provider_text, &raw.provider)
+        };
+
+        Ok(PhraseEntry {
+            id: raw.id,
+            provider_text,
+            insert_text,
+            count: raw.count,
+            last_used: raw.last_used,
+            provider: raw.provider,
+            voice: raw.voice,
+            cache_key: raw.cache_key,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -320,21 +432,24 @@ impl HistoryManager {
         Ok(())
     }
 
-    // Контракт нормализации фраз: храним text.trim(); дедупликация и поиск —
-    // case-insensitive по подстроке (to_lowercase()). См. также get_phrases.
-    // Не менять без обновления обоих методов — это сломает дедупликацию/поиск.
+    // Контракт нормализации фраз: храним provider_text.trim(); дедупликация и
+    // поиск — case-insensitive по подстроке (to_lowercase()). См. также
+    // get_phrases. Не менять без обновления обоих методов — это сломает
+    // дедупликацию/поиск.
     pub fn record_phrase(&self, text: &str) -> Result<()> {
-        self.record_phrase_with_meta(text, "", "", "")
+        self.record_phrase_with_meta(text, text, "", "", "")
     }
 
     pub fn record_phrase_with_meta(
         &self,
-        text: &str,
+        provider_text: &str,
+        insert_text: &str,
         provider: &str,
         voice: &str,
         cache_key: &str,
     ) -> Result<()> {
-        let trimmed = text.trim();
+        let trimmed = provider_text.trim();
+        let insert_trimmed = insert_text.trim();
         if trimmed.is_empty() {
             return Ok(());
         }
@@ -350,12 +465,12 @@ impl HistoryManager {
         let found = if provider.is_empty() && voice.is_empty() {
             phrases
                 .iter_mut()
-                .find(|e| e.text.trim().to_lowercase() == trimmed_lower)
+                .find(|e| e.provider_text.trim().to_lowercase() == trimmed_lower)
         } else {
             let prov_lower = provider.to_lowercase();
             let voice_lower = voice.to_lowercase();
             phrases.iter_mut().find(|e| {
-                e.text.trim().to_lowercase() == trimmed_lower
+                e.provider_text.trim().to_lowercase() == trimmed_lower
                     && e.provider.to_lowercase() == prov_lower
                     && e.voice.to_lowercase() == voice_lower
                     && e.cache_key == cache_key
@@ -365,6 +480,8 @@ impl HistoryManager {
         if let Some(existing) = found {
             existing.count += 1;
             existing.last_used = now;
+            existing.provider_text = trimmed.to_string();
+            existing.insert_text = insert_trimmed.to_string();
             if !cache_key.is_empty() {
                 existing.provider = provider.to_string();
                 existing.voice = voice.to_string();
@@ -373,7 +490,8 @@ impl HistoryManager {
         } else {
             phrases.push(PhraseEntry {
                 id: uuid::Uuid::new_v4().to_string(),
-                text: trimmed.to_string(),
+                provider_text: trimmed.to_string(),
+                insert_text: insert_trimmed.to_string(),
                 count: 1,
                 last_used: now,
                 provider: provider.to_string(),
@@ -419,7 +537,7 @@ impl HistoryManager {
             let f_lower = f.to_lowercase();
             phrases
                 .iter()
-                .filter(|e| e.text.to_lowercase().contains(&f_lower))
+                .filter(|e| e.provider_text.to_lowercase().contains(&f_lower))
                 .cloned()
                 .collect()
         } else {
@@ -494,14 +612,14 @@ pub fn cache_dir_path() -> Result<PathBuf> {
 }
 
 pub fn build_cache_key(
-    processed_text: &str,
+    provider_text: &str,
     provider: &str,
     voice: &str,
     effects_fingerprint: u64,
 ) -> String {
     let combined = format!(
         "{}|{}|{}|{:x}",
-        processed_text.trim().to_lowercase(),
+        provider_text.trim().to_lowercase(),
         provider.to_lowercase(),
         voice.to_lowercase(),
         effects_fingerprint
@@ -631,11 +749,68 @@ mod tests {
         let entries: Vec<PhraseEntry> = serde_json::from_str(old_json).unwrap();
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].id, "abc-123");
-        assert_eq!(entries[0].text, "hello world");
+        assert_eq!(entries[0].provider_text, "hello world");
+        assert_eq!(entries[0].insert_text, "hello world");
         assert_eq!(entries[0].provider, "");
         assert_eq!(entries[0].voice, "");
         assert_eq!(entries[0].cache_key, "");
         assert_eq!(entries[1].id, "def-456");
+    }
+
+    #[test]
+    fn legacy_piper_text_strips_combining_acute() {
+        let old_json = r#"[
+            {"id": "piper-1", "text": "краси\u0301вая де\u0301вушка", "provider": "piper",
+             "voice": "irina", "cache_key": "key", "count": 1, "last_used": 1}
+        ]"#;
+        let entries: Vec<PhraseEntry> = serde_json::from_str(old_json).unwrap();
+        assert_eq!(entries[0].provider_text, "краси\u{0301}вая де\u{0301}вушка");
+        assert_eq!(entries[0].insert_text, "красивая девушка");
+    }
+
+    #[test]
+    fn legacy_silero_text_strips_stress_plus() {
+        let old_json = r#"[
+            {"id": "silero-1", "text": "зам+ок и м+ука C++", "provider": "silero",
+             "voice": "", "cache_key": "key", "count": 1, "last_used": 1}
+        ]"#;
+        let entries: Vec<PhraseEntry> = serde_json::from_str(old_json).unwrap();
+        assert_eq!(entries[0].provider_text, "зам+ок и м+ука C++");
+        assert_eq!(entries[0].insert_text, "замок и мука C++");
+    }
+
+    #[test]
+    fn legacy_plain_provider_text_unchanged() {
+        let old_json = r#"[
+            {"id": "openai-1", "text": "hello world", "provider": "openai",
+             "voice": "alloy", "cache_key": "key", "count": 1, "last_used": 1}
+        ]"#;
+        let entries: Vec<PhraseEntry> = serde_json::from_str(old_json).unwrap();
+        assert_eq!(entries[0].provider_text, "hello world");
+        assert_eq!(entries[0].insert_text, "hello world");
+    }
+
+    #[test]
+    fn legacy_unknown_provider_keeps_literal_plus() {
+        let old_json = r#"[
+            {"id": "custom-1", "text": "зам+ок и C++", "provider": "custom",
+             "voice": "", "cache_key": "key", "count": 1, "last_used": 1}
+        ]"#;
+        let entries: Vec<PhraseEntry> = serde_json::from_str(old_json).unwrap();
+        assert_eq!(entries[0].provider_text, "зам+ок и C++");
+        assert_eq!(entries[0].insert_text, "зам+ок и C++");
+    }
+
+    #[test]
+    fn new_json_keeps_explicit_representations() {
+        let new_json = r#"[
+            {"id": "piper-2", "provider_text": "краси\u0301вая", "insert_text": "красивая",
+             "provider": "piper", "voice": "irina", "cache_key": "key",
+             "count": 2, "last_used": 2}
+        ]"#;
+        let entries: Vec<PhraseEntry> = serde_json::from_str(new_json).unwrap();
+        assert_eq!(entries[0].provider_text, "краси\u{0301}вая");
+        assert_eq!(entries[0].insert_text, "красивая");
     }
 
     #[test]
@@ -689,11 +864,11 @@ mod tests {
     fn test_record_phrase_with_meta_dedup_different_providers() {
         let (mgr, p1, p2, p3) = manager_in_tmp();
 
-        mgr.record_phrase_with_meta("hello world", "openai", "alloy", "key-1")
+        mgr.record_phrase_with_meta("hello world", "hello world", "openai", "alloy", "key-1")
             .unwrap();
-        mgr.record_phrase_with_meta("hello world", "silero", "voice-2", "key-2")
+        mgr.record_phrase_with_meta("hello world", "hello world", "silero", "voice-2", "key-2")
             .unwrap();
-        mgr.record_phrase_with_meta("hello world", "openai", "alloy", "key-1")
+        mgr.record_phrase_with_meta("hello world", "hello world", "openai", "alloy", "key-1")
             .unwrap();
 
         let phrases = mgr.get_phrases(None, 100);
@@ -739,11 +914,11 @@ mod tests {
     fn test_record_phrase_with_meta_same_provider_voice_dedup() {
         let (mgr, p1, p2, p3) = manager_in_tmp();
 
-        mgr.record_phrase_with_meta("hello", "openai", "alloy", "k1")
+        mgr.record_phrase_with_meta("hello", "hello", "openai", "alloy", "k1")
             .unwrap();
-        mgr.record_phrase_with_meta("hello", "openai", "alloy", "k1")
+        mgr.record_phrase_with_meta("hello", "hello", "openai", "alloy", "k1")
             .unwrap();
-        mgr.record_phrase_with_meta("hello", "openai", "alloy", "k1")
+        mgr.record_phrase_with_meta("hello", "hello", "openai", "alloy", "k1")
             .unwrap();
 
         let phrases = mgr.get_phrases(None, 100);
@@ -751,6 +926,36 @@ mod tests {
         assert_eq!(phrases[0].count, 3);
         assert_eq!(phrases[0].provider, "openai");
         assert_eq!(phrases[0].voice, "alloy");
+
+        let _ = fs::remove_file(&p1);
+        let _ = fs::remove_file(&p2);
+        let _ = fs::remove_file(&p3);
+    }
+
+    #[test]
+    fn record_phrase_with_meta_stores_both_representations() {
+        let (mgr, p1, p2, p3) = manager_in_tmp();
+
+        mgr.record_phrase_with_meta(
+            "зам+ок и м+ука",
+            "замок и мука",
+            "silero",
+            "voice-1",
+            "key-x",
+        )
+        .unwrap();
+
+        let phrases = mgr.get_phrases(None, 100);
+        assert_eq!(phrases.len(), 1);
+        assert_eq!(phrases[0].provider_text, "зам+ок и м+ука");
+        assert_eq!(phrases[0].insert_text, "замок и мука");
+        assert_eq!(phrases[0].provider, "silero");
+
+        // Persisted JSON carries both explicit fields (no legacy `text`).
+        let content = fs::read_to_string(&p3).unwrap();
+        assert!(content.contains("provider_text"));
+        assert!(content.contains("insert_text"));
+        assert!(!content.contains("\"text\""));
 
         let _ = fs::remove_file(&p1);
         let _ = fs::remove_file(&p2);
@@ -805,7 +1010,7 @@ mod tests {
         let (mgr, p1, p2, p3) = manager_in_tmp();
 
         mgr.record_phrase("hello world").unwrap();
-        mgr.record_phrase_with_meta("hello world", "openai", "alloy", "cache-x")
+        mgr.record_phrase_with_meta("hello world", "hello world", "openai", "alloy", "cache-x")
             .unwrap();
 
         let phrases = mgr.get_phrases(None, 100);
@@ -844,7 +1049,7 @@ mod tests {
 
         let phrases = mgr.get_phrases(None, 100);
         assert_eq!(phrases.len(), 1);
-        assert_eq!(phrases[0].text, "kept phrase");
+        assert_eq!(phrases[0].provider_text, "kept phrase");
 
         let _ = fs::remove_file(&parent);
     }

@@ -911,7 +911,8 @@ async fn speech_worker(
                     continue;
                 }
 
-                let processed_text = prepared.processed_text.clone();
+                let provider_text = prepared.provider_text.clone();
+                let insert_text = prepared.insert_text.clone();
 
                 let handoff_guard = {
                     let mut q = queue.lock();
@@ -922,7 +923,7 @@ async fn speech_worker(
                         let _ = app_handle.emit("speech-queue-changed", q_state_dto(&queue));
                         continue;
                     }
-                    let _ = q.mark_ready(job_id, processed_text.clone());
+                    let _ = q.mark_ready(job_id, insert_text.clone());
                     let guard = q
                         .get_handoff_guard(job_id)
                         .expect("handoff_guard missing after mark_ready");
@@ -948,7 +949,7 @@ async fn speech_worker(
                             if let Some(pb) = pb_guard.as_ref() {
                                 pb.enqueue_with_outputs(
                                     job_id.to_string(),
-                                    processed_text.clone(),
+                                    insert_text.clone(),
                                     prepared.audio,
                                     speaker,
                                     mic,
@@ -975,7 +976,7 @@ async fn speech_worker(
                 }
 
                 {
-                    let text = processed_text.clone();
+                    let text = insert_text.clone();
                     let webview_svc = webview.clone();
                     let twitch_svc = twitch.clone();
                     let skip_twitch = snapshot.skip_twitch;
@@ -998,13 +999,14 @@ async fn speech_worker(
                     if let Some(hm) = editor.history_manager.lock().as_ref() {
                         let record_result = if prepared.cache_saved || prepared.cache_hit {
                             hm.record_phrase_with_meta(
-                                &processed_text,
+                                &provider_text,
+                                &insert_text,
                                 &prepared.provider_name,
                                 &prepared.voice_name,
                                 &prepared.cache_key,
                             )
                         } else {
-                            hm.record_phrase(&processed_text)
+                            hm.record_phrase_with_meta(&provider_text, &insert_text, "", "", "")
                         };
                         if let Err(error) = record_result {
                             warn!(error = %error, "Failed to persist phrase history");
@@ -1013,7 +1015,7 @@ async fn speech_worker(
                 }
 
                 let history_event = crate::events::AppEvent::TextSentToTts(
-                    crate::events::RoutedText::broadcast(processed_text.clone()),
+                    crate::events::RoutedText::broadcast(insert_text.clone()),
                 );
                 let event_name = history_event.to_tauri_event();
                 let _ = app_handle.emit(event_name, &history_event);
@@ -1099,7 +1101,7 @@ fn missing_piper_notification(model_name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{missing_piper_model_name, missing_piper_notification};
+    use super::{missing_piper_model_name, missing_piper_notification, route_processed_text_from_handles};
 
     #[test]
     fn missing_saved_piper_returns_safe_model_name() {
@@ -1125,5 +1127,43 @@ mod tests {
             missing_piper_notification("irina"),
             "Piper-модель «irina» не найдена. Выбран провайдер Silero"
         );
+    }
+
+    #[test]
+    fn routed_text_to_webview_and_twitch_is_clean_without_provider_markers() {
+        use crate::events::{AppEvent, TwitchEvent};
+
+        let webview = crate::webview::service::WebViewService::new();
+        let (webview_tx, mut webview_rx) =
+            tokio::sync::mpsc::unbounded_channel::<AppEvent>();
+        webview.set_event_sender(webview_tx);
+
+        let (twitch_tx, mut twitch_rx) =
+            tokio::sync::broadcast::channel::<TwitchEvent>(16);
+        let twitch = crate::twitch::TwitchService::new(twitch_tx);
+        twitch.settings.blocking_write().enabled = true;
+
+        let clean_text = "Привет, мир";
+        route_processed_text_from_handles(&webview, &twitch, clean_text, false, false);
+
+        match webview_rx.try_recv() {
+            Ok(AppEvent::TextSentToTts(routed)) => {
+                assert_eq!(routed.text, clean_text);
+                assert!(!routed.text.contains('+'));
+                assert!(!routed.text.contains('\u{0301}'));
+            }
+            Ok(other) => panic!("unexpected webview event: {other:?}"),
+            Err(error) => panic!("missing webview event: {error}"),
+        }
+
+        match twitch_rx.try_recv() {
+            Ok(TwitchEvent::SendMessage(text)) => {
+                assert_eq!(text, clean_text);
+                assert!(!text.contains('+'));
+                assert!(!text.contains('\u{0301}'));
+            }
+            Ok(other) => panic!("unexpected twitch event: {other:?}"),
+            Err(error) => panic!("missing twitch event: {error}"),
+        }
     }
 }

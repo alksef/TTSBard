@@ -14,7 +14,8 @@ use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Clone)]
 pub struct PreparedSpeech {
-    pub processed_text: String,
+    pub provider_text: String,
+    pub insert_text: String,
     pub audio: AudioPcm,
     pub provider_name: String,
     pub voice_name: String,
@@ -103,6 +104,21 @@ fn provider_to_stress_adapter(provider: &TtsProvider) -> ProviderStressAdapter {
 /// Render structured stress for a provider into the text handed to synthesis.
 fn adapt_structured_stress(provider: &TtsProvider, stress: &StructuredStress) -> String {
     provider_to_stress_adapter(provider).adapt(stress)
+}
+
+/// Split structured stress into the two explicit representations of a phrase.
+///
+/// `provider_text` is the provider-specific rendering that reaches synthesis and
+/// the cache key; `insert_text` is always `StructuredStress.original`, so it is
+/// marker-free and never carries `ё` render-base restorations. Only
+/// `provider_text` crosses the provider boundary.
+fn provider_and_insert_text(
+    provider: &TtsProvider,
+    stress: &StructuredStress,
+) -> (String, String) {
+    let provider_text = adapt_structured_stress(provider, stress);
+    let insert_text = stress.original.clone();
+    (provider_text, insert_text)
 }
 
 /// Build structured stress for a text, annotating stress positions via the
@@ -371,17 +387,22 @@ pub async fn prepare_speech(
     };
 
     let stress = native_stress_blocking(snapshot.accentor_runtime.clone(), text.clone()).await?;
-    let text = adapt_structured_stress(&snapshot.tts_provider, &stress);
+    let (provider_text, insert_text) = provider_and_insert_text(&snapshot.tts_provider, &stress);
 
     let effects_fp =
         crate::history::compute_effects_fingerprint(&snapshot.audio_effects, &snapshot.dsp);
-    let cache_key =
-        crate::history::build_cache_key(&text, &snapshot.provider, &snapshot.voice, effects_fp);
+    let cache_key = crate::history::build_cache_key(
+        &provider_text,
+        &snapshot.provider,
+        &snapshot.voice,
+        effects_fp,
+    );
 
     match read_cache_blocking(cache_key.clone()).await {
         Ok(pcm) => {
             return Ok(PreparedSpeech {
-                processed_text: text,
+                provider_text,
+                insert_text,
                 audio: pcm,
                 provider_name: snapshot.provider.clone(),
                 voice_name: snapshot.voice.clone(),
@@ -397,7 +418,7 @@ pub async fn prepare_speech(
         }
     }
 
-    let audio_data = synthesize_with_provider(&snapshot.tts_provider, &text).await?;
+    let audio_data = synthesize_with_provider(&snapshot.tts_provider, &provider_text).await?;
     let audio = apply_effects_blocking(
         audio_data,
         snapshot.audio_effects.clone(),
@@ -408,7 +429,8 @@ pub async fn prepare_speech(
     let cache_saved = save_cache_blocking(cache_key.clone(), audio.clone()).await;
 
     Ok(PreparedSpeech {
-        processed_text: text,
+        provider_text,
+        insert_text,
         audio,
         provider_name: snapshot.provider.clone(),
         voice_name: snapshot.voice.clone(),
@@ -1050,6 +1072,60 @@ mod tests {
             adapt_structured_stress(&silero_provider(), &stress),
             "прив+ет"
         );
+    }
+
+    /// The insert text handed to labels and external routing is the marker-free
+    /// `StructuredStress.original`, not the provider-rendered base.
+    #[test]
+    fn insert_text_is_clean_original_for_silero() {
+        let stress = native_stress(None, "зам+ок и м+ука").expect("stress builds");
+        let (provider_text, insert_text) =
+            provider_and_insert_text(&silero_provider(), &stress);
+        assert_eq!(provider_text, "зам+ок и м+ука");
+        assert_eq!(insert_text, "замок и мука");
+        assert!(!insert_text.contains('+'));
+        assert!(!insert_text.contains('\u{0301}'));
+    }
+
+    /// Cache key is derived from `provider_text` (with markers), so it differs
+    /// from the clean insert text and re-uses cached audio only on an exact
+    /// provider-text match.
+    #[test]
+    fn cache_key_uses_provider_text_not_insert_text() {
+        let stress = native_stress(None, "зам+ок").expect("stress builds");
+        let (provider_text, insert_text) =
+            provider_and_insert_text(&silero_provider(), &stress);
+        assert_eq!(provider_text, "зам+ок");
+        assert_eq!(insert_text, "замок");
+
+        let fp = crate::history::compute_effects_fingerprint(
+            &crate::config::AudioEffectsSettings::default(),
+            &crate::config::DspSettings::default(),
+        );
+        let key_provider = crate::history::build_cache_key(&provider_text, "silero", "", fp);
+        let key_insert = crate::history::build_cache_key(&insert_text, "silero", "", fp);
+        assert_ne!(key_provider, key_insert);
+    }
+
+    /// `insert_text` is `StructuredStress.original`, so a `ё` render-base
+    /// restoration never leaks into external routing or insertion.
+    #[test]
+    fn insert_text_uses_original_not_render_base() {
+        use crate::stress::annotations::StressAnnotation;
+        let stress = StructuredStress::with_render_base(
+            "все".to_string(),
+            "всё".to_string(),
+            vec![StressAnnotation {
+                word_start: 0,
+                word_end: "все".len(),
+                stressed_vowel: "вс".len(),
+            }],
+        )
+        .expect("valid render-base stress");
+        let (provider_text, insert_text) =
+            provider_and_insert_text(&silero_provider(), &stress);
+        assert_eq!(provider_text, "вс+ё");
+        assert_eq!(insert_text, "все");
     }
 
     // ── Native accentor integration tests ──

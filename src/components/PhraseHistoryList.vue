@@ -82,15 +82,15 @@ function toggleExpand() {
 }
 
 function selectPhrase(phrase: PhraseEntry) {
-  emit('select', phrase.text)
+  emit('select', phrase.insert_text)
 }
 
 function appendPhrase(phrase: PhraseEntry) {
-  emit('append', phrase.text)
+  emit('append', phrase.insert_text)
 }
 
 function replacePhraseAction(phrase: PhraseEntry) {
-  emit('replace', phrase.text)
+  emit('replace', phrase.insert_text)
 }
 
 async function removePhrase(id: string) {
@@ -205,7 +205,7 @@ onUnmounted(() => {
           @click="selectPhrase(phrase)"
         >
           <div class="phrase-body">
-            <div class="phrase-text">{{ phrase.text }}</div>
+            <div class="phrase-text">{{ phrase.provider_text }}</div>
             <div class="phrase-meta">
               <span class="phrase-count">{{ phrase.count }}</span>
               <span class="phrase-time">{{ relativeTime(phrase.last_used) }}</span>
