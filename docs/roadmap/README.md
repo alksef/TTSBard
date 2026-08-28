@@ -38,6 +38,10 @@ related_tasks: []
 
 ## Завершённые направления
 
+### TTS-провайдеры
+
+- [ROADMAP-086 — управляемая видимость провайдеров в панели TTS](./completed/086-tts-provider-panel-visibility.md)
+
 ### Надёжность и ревью
 
 - [ROADMAP-084 — Ошибки очереди речи: Silero и глобальное уведомление](./completed/084-speech-queue-global-error-toast.md)

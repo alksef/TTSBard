@@ -143,6 +143,7 @@ export interface TtsSettingsDto {
   provider: TtsProviderType
   provider_id: string | null
   providers: TtsProviderInfoDto[]
+  visible_provider_ids?: string[]
   openai: OpenAiSettingsDto
   local: LocalTtsSettingsDto
   fish: FishAudioSettingsDto

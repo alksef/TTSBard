@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, inject } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, inject } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { createAsyncCleanupScope } from '../utils/asyncCleanup';
@@ -9,12 +9,18 @@ import { debugLog, debugError } from '../utils/debug';
 import { TELEGRAM_AUTH_KEY, type UseTelegramAuthReturn } from '../composables/useTelegramAuth';
 import TelegramAuthModal from './TelegramAuthModal.vue';
 import StatusMessage from './shared/StatusMessage.vue';
-import ProviderCard from './shared/ProviderCard.vue';
-import { Cpu } from 'lucide-vue-next';
 import TtsSileroCard from './tts/TtsSileroCard.vue';
 import TtsLocalCard from './tts/TtsLocalCard.vue';
 import TtsOpenAICard from './tts/TtsOpenAICard.vue';
 import TtsFishAudioCard from './tts/TtsFishAudioCard.vue';
+import {
+  BUILTIN_PROVIDER_ID_BY_TYPE,
+  deriveLegacyVisibleIds,
+  forceActiveVisible,
+  hasPiperRows,
+  isPersistedVisibility,
+  toggleVisibleId,
+} from './ttsProviderVisibility';
 import {
   getPiperProviderUiStatus,
   selectBuiltinTtsProvider,
@@ -31,15 +37,6 @@ interface TtsProviderState {
 const activeProvider = ref<TtsProviderType | null>(null);
 const activeProviderId = ref<string | null>(null);
 
-const BUILTIN_PROVIDER_IDS: Record<TtsProviderType, string> = {
-  silero: 'silero',
-  openai: 'openai',
-  local: 'local-http',
-  fish: 'fish',
-};
-function getBuiltinProviderId(type: TtsProviderType): string {
-  return BUILTIN_PROVIDER_IDS[type];
-}
 const providers = ref<Record<TtsProviderType, TtsProviderState>>({
   openai: { type: 'openai', configured: false, expanded: false },
   silero: { type: 'silero', configured: false, expanded: false },
@@ -74,6 +71,67 @@ const piperProviders = ref<TtsProviderInfoDto[]>([]);
 const piperLoading = ref<Record<string, boolean>>({});
 const piperError = ref<Record<string, string | null>>({});
 const activePiperId = ref<string | null>(null);
+
+// Provider visibility
+const visibilityOpen = ref(false);
+const visibilityButtonRef = ref<HTMLButtonElement | null>(null);
+const visibilityPopoverRef = ref<HTMLElement | null>(null);
+const visibilityOverride = ref<string[] | null>(null);
+
+const cloudVisibilityEntries = [
+  { id: BUILTIN_PROVIDER_ID_BY_TYPE.silero, label: 'Silero Bot' },
+  { id: BUILTIN_PROVIDER_ID_BY_TYPE.openai, label: 'OpenAI TTS' },
+  { id: BUILTIN_PROVIDER_ID_BY_TYPE.fish, label: 'Fish Audio' },
+];
+
+const localVisibilityEntries = [
+  { id: BUILTIN_PROVIDER_ID_BY_TYPE.local, label: 'Локальный сервер' },
+];
+
+const piperVisibilityEntries = computed(() =>
+  piperProviders.value.map(p => ({ id: p.id, label: p.display_name })),
+);
+
+const configuredProviderIds = computed<string[]>(() => {
+  const settings = ttsSettings.value;
+  if (!settings) return [];
+  const ids: string[] = [];
+  if (settings.openai?.api_key) ids.push(BUILTIN_PROVIDER_ID_BY_TYPE.openai);
+  if (settings.local?.url) ids.push(BUILTIN_PROVIDER_ID_BY_TYPE.local);
+  if (settings.fish?.api_key) ids.push(BUILTIN_PROVIDER_ID_BY_TYPE.fish);
+  return ids;
+});
+
+const piperIds = computed<string[]>(() => piperProviders.value.map(p => p.id));
+
+const baseVisibleIds = computed<string[]>(() => {
+  const persisted = ttsSettings.value?.visible_provider_ids;
+  if (isPersistedVisibility(persisted)) {
+    return [...(persisted as string[])];
+  }
+  return deriveLegacyVisibleIds({
+    activeProviderId: activeProviderId.value,
+    configuredIds: configuredProviderIds.value,
+    piperIds: piperIds.value,
+  });
+});
+
+const visibleIds = computed<string[]>(() =>
+  forceActiveVisible(visibilityOverride.value ?? baseVisibleIds.value, activeProviderId.value),
+);
+
+const sileroVisible = computed(() => visibleIds.value.includes(BUILTIN_PROVIDER_ID_BY_TYPE.silero));
+const openaiVisible = computed(() => visibleIds.value.includes(BUILTIN_PROVIDER_ID_BY_TYPE.openai));
+const fishVisible = computed(() => visibleIds.value.includes(BUILTIN_PROVIDER_ID_BY_TYPE.fish));
+const localVisible = computed(() => visibleIds.value.includes(BUILTIN_PROVIDER_ID_BY_TYPE.local));
+
+const piperBlockVisible = computed(() =>
+  hasPiperRows(visibleIds.value, piperIds.value, activeProviderId.value),
+);
+
+const visiblePiperProviders = computed(() =>
+  piperProviders.value.filter(p => visibleIds.value.includes(p.id)),
+);
 
 // Telegram auth
 const showTelegramModal = ref(false);
@@ -142,6 +200,41 @@ function showError(message: string) {
 
 function showSuccess(message: string) {
   showStatus(message, 'success');
+}
+
+function toggleVisibilityPopover() {
+  visibilityOpen.value = !visibilityOpen.value;
+}
+
+function closeVisibilityPopover() {
+  visibilityOpen.value = false;
+}
+
+function handleVisibilityDocumentClick(event: MouseEvent) {
+  if (!visibilityOpen.value) return;
+  const target = event.target as Node;
+  if (visibilityPopoverRef.value?.contains(target)) return;
+  if (visibilityButtonRef.value?.contains(target)) return;
+  closeVisibilityPopover();
+}
+
+function handleVisibilityDocumentKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Escape' || !visibilityOpen.value) return;
+  closeVisibilityPopover();
+  visibilityButtonRef.value?.focus();
+}
+
+async function onVisibilityToggle(id: string) {
+  if (id === activeProviderId.value) return;
+  const previous = visibilityOverride.value;
+  const next = toggleVisibleId(visibleIds.value, id, activeProviderId.value);
+  visibilityOverride.value = next;
+  try {
+    await invoke('set_visible_tts_provider_ids', { providerIds: next });
+  } catch (error) {
+    visibilityOverride.value = previous;
+    showError(error as string);
+  }
 }
 
 function toggleProvider(provider: TtsProviderType) {
@@ -291,7 +384,7 @@ async function setActiveProvider(provider: TtsProviderType) {
     await selectBuiltinTtsProvider(provider);
     activeProvider.value = provider;
     activePiperId.value = null;
-    activeProviderId.value = getBuiltinProviderId(provider);
+    activeProviderId.value = BUILTIN_PROVIDER_ID_BY_TYPE[provider];
     await reloadSettings();
   } catch (error) {
     showError(error as string);
@@ -325,6 +418,14 @@ function piperUiStatus(provider: TtsProviderInfoDto) {
     !!piperLoading.value[provider.id],
     piperError.value[provider.id],
   );
+}
+
+function piperRowStatus(provider: TtsProviderInfoDto) {
+  const ui = piperUiStatus(provider);
+  if (ui.kind === 'loading') return { kind: 'loading', text: 'Загрузка…', title: undefined };
+  if (ui.kind === 'ready') return { kind: 'ready', text: 'Загружена', title: undefined };
+  if (ui.kind === 'error') return { kind: 'error', text: 'Ошибка загрузки', title: ui.label };
+  return { kind: 'none', text: '', title: undefined };
 }
 
 function openTelegramModal() {
@@ -468,6 +569,10 @@ watch(showTelegramModal, async (isOpen) => {
 watch(ttsSettings, (newSettings) => {
   if (!newSettings) return;
 
+  if (isPersistedVisibility(newSettings.visible_provider_ids)) {
+    visibilityOverride.value = null;
+  }
+
   debugLog('[TTS] Settings updated from composable:', {
     provider: newSettings.provider,
     has_openai: !!newSettings.openai,
@@ -488,7 +593,7 @@ watch(ttsSettings, (newSettings) => {
   } else if (newSettings.provider) {
     debugLog('[TTS] Setting activeProvider to:', newSettings.provider);
     activeProvider.value = newSettings.provider;
-    activeProviderId.value = newSettings.provider_id ?? getBuiltinProviderId(newSettings.provider);
+    activeProviderId.value = newSettings.provider_id ?? BUILTIN_PROVIDER_ID_BY_TYPE[newSettings.provider];
   }
 
   if (newSettings.openai) {
@@ -541,6 +646,8 @@ watch(ttsSettings, (newSettings) => {
 
 // Load on mount
 onMounted(async () => {
+  document.addEventListener('click', handleVisibilityDocumentClick);
+  document.addEventListener('keydown', handleVisibilityDocumentKeydown);
   await listenerScope.track(listen('tts-error', (event) => {
     showError(event.payload as string);
   }));
@@ -548,6 +655,8 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (errorTimeout) clearTimeout(errorTimeout);
+  document.removeEventListener('click', handleVisibilityDocumentClick);
+  document.removeEventListener('keydown', handleVisibilityDocumentKeydown);
   listenerScope.dispose();
 });
 
@@ -565,10 +674,83 @@ function dismissStatus() {
       @dismiss="dismissStatus"
     />
 
+    <!-- Provider visibility control -->
+    <div class="visibility-control">
+      <button
+        ref="visibilityButtonRef"
+        type="button"
+        class="visibility-button"
+        title="Настроить видимость провайдеров"
+        aria-label="Настроить видимость провайдеров"
+        @click="toggleVisibilityPopover"
+      >⋯</button>
+
+      <div
+        v-if="visibilityOpen"
+        ref="visibilityPopoverRef"
+        class="visibility-popover"
+      >
+        <div class="visibility-group">
+          <div class="visibility-group-label">Облачные и интеграции</div>
+          <label
+            v-for="entry in cloudVisibilityEntries"
+            :key="entry.id"
+            class="visibility-entry"
+          >
+            <input
+              type="checkbox"
+              :checked="visibleIds.includes(entry.id)"
+              :disabled="entry.id === activeProviderId"
+              @change="onVisibilityToggle(entry.id)"
+            />
+            <span class="visibility-entry-label">{{ entry.label }}</span>
+            <span v-if="entry.id === activeProviderId" class="visibility-active">активный</span>
+          </label>
+        </div>
+
+        <div class="visibility-group">
+          <div class="visibility-group-label">Локальный сервер</div>
+          <label
+            v-for="entry in localVisibilityEntries"
+            :key="entry.id"
+            class="visibility-entry"
+          >
+            <input
+              type="checkbox"
+              :checked="visibleIds.includes(entry.id)"
+              :disabled="entry.id === activeProviderId"
+              @change="onVisibilityToggle(entry.id)"
+            />
+            <span class="visibility-entry-label">{{ entry.label }}</span>
+            <span v-if="entry.id === activeProviderId" class="visibility-active">активный</span>
+          </label>
+        </div>
+
+        <div class="visibility-group">
+          <div class="visibility-group-label">Piper</div>
+          <label
+            v-for="entry in piperVisibilityEntries"
+            :key="entry.id"
+            class="visibility-entry"
+          >
+            <input
+              type="checkbox"
+              :checked="visibleIds.includes(entry.id)"
+              :disabled="entry.id === activeProviderId"
+              @change="onVisibilityToggle(entry.id)"
+            />
+            <span class="visibility-entry-label">{{ entry.label }}</span>
+            <span v-if="entry.id === activeProviderId" class="visibility-active">активный</span>
+          </label>
+        </div>
+      </div>
+    </div>
+
     <!-- Provider Cards -->
     <div class="provider-cards">
       <!-- Silero Provider -->
       <TtsSileroCard
+        v-if="sileroVisible || activeProvider === 'silero'"
         :active="activeProvider === 'silero'"
         :expanded="providers.silero.expanded"
         :connected="telegramConnected"
@@ -600,6 +782,7 @@ function dismissStatus() {
 
       <!-- OpenAI Provider -->
       <TtsOpenAICard
+        v-if="openaiVisible || activeProvider === 'openai'"
         :active="activeProvider === 'openai'"
         :expanded="providers.openai.expanded"
         :api-key="openaiApiKey"
@@ -615,6 +798,7 @@ function dismissStatus() {
 
       <!-- Fish Audio Provider -->
       <TtsFishAudioCard
+        v-if="fishVisible || activeProvider === 'fish'"
         :active="activeProvider === 'fish'"
         :expanded="providers.fish.expanded"
         :api-key="fishAudioApiKey"
@@ -635,6 +819,7 @@ function dismissStatus() {
 
       <!-- Local Provider -->
       <TtsLocalCard
+        v-if="localVisible || activeProvider === 'local'"
         :active="activeProvider === 'local'"
         :expanded="providers.local.expanded"
         :url="localTtsUrl"
@@ -644,22 +829,29 @@ function dismissStatus() {
       />
 
       <!-- Piper Runtime Providers -->
-      <ProviderCard
-        v-for="p in piperProviders"
-        :key="p.id"
-        :title="p.display_name"
-        :icon="Cpu"
-        :active="activeProviderId === p.id"
-        :expanded="true"
-        :disabled="!!piperLoading[p.id]"
-        @select="selectPiperProvider(p.id)"
-      >
-        <div class="piper-card-status">
-          <div :class="`piper-status-${piperUiStatus(p).kind}`">
-            {{ piperUiStatus(p).label }}
-          </div>
-        </div>
-      </ProviderCard>
+      <div v-if="piperBlockVisible" class="piper-block">
+        <div class="piper-block-title">Piper</div>
+        <div class="piper-block-subtitle">Локальные модели</div>
+        <label
+          v-for="p in visiblePiperProviders"
+          :key="p.id"
+          class="piper-row"
+        >
+          <input
+            type="radio"
+            name="piper-provider"
+            :checked="activeProviderId === p.id"
+            :disabled="!!piperLoading[p.id]"
+            @change="selectPiperProvider(p.id)"
+          />
+          <span class="piper-row-name">{{ p.display_name }}</span>
+          <span
+            class="piper-row-status"
+            :class="`piper-row-status--${piperRowStatus(p).kind}`"
+            :title="piperRowStatus(p).title"
+          >{{ piperRowStatus(p).text }}</span>
+        </label>
+      </div>
     </div>
 
     <!-- Telegram Auth Modal -->
@@ -673,30 +865,162 @@ function dismissStatus() {
   margin: 0 auto;
 }
 
+.visibility-control {
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.visibility-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.3));
+  border-radius: 50%;
+  background: var(--color-surface, transparent);
+  color: var(--color-text, inherit);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.visibility-button:hover {
+  border-color: var(--color-text-secondary, rgba(128, 128, 128, 0.6));
+}
+
+.visibility-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  min-width: 260px;
+  padding: 8px;
+  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.3));
+  border-radius: 10px;
+  background: var(--color-surface, #ffffff);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+}
+
+.visibility-group + .visibility-group {
+  margin-top: 8px;
+}
+
+.visibility-group-label {
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-secondary, #888888);
+}
+
+.visibility-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.visibility-entry:hover {
+  background: var(--color-background-hover, rgba(128, 128, 128, 0.12));
+}
+
+.visibility-entry input {
+  margin: 0;
+}
+
+.visibility-entry-label {
+  flex: 1;
+  font-size: 14px;
+  color: var(--color-text, inherit);
+}
+
+.visibility-active {
+  font-size: 12px;
+  color: var(--color-text-secondary, #888888);
+}
+
 .provider-cards {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.piper-card-status {
-  padding-top: 8px;
+.piper-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px;
+  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.3));
+  border-radius: 10px;
+  background: var(--color-surface, transparent);
+}
+
+.piper-block-title {
+  margin-bottom: 2px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text, inherit);
+}
+
+.piper-block-subtitle {
+  margin-bottom: 6px;
   font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary, #888888);
 }
 
-.piper-status-loading {
-  color: var(--color-text-secondary);
+.piper-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  cursor: pointer;
 }
 
-.piper-status-discovered {
-  color: var(--color-text-secondary);
+.piper-row:hover {
+  background: var(--color-background-hover, rgba(128, 128, 128, 0.12));
+  border-radius: 6px;
 }
 
-.piper-status-error {
+.piper-row input {
+  margin: 0;
+}
+
+.piper-row-name {
+  flex: 1;
+  font-size: 14px;
+  color: var(--color-text, inherit);
+}
+
+.piper-row-status {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.piper-row-status--loading {
+  color: var(--color-text-secondary, #888888);
+}
+
+.piper-row-status--ready {
+  color: var(--color-success, #2ecc71);
+}
+
+.piper-row-status--error {
   color: var(--color-error, #e74c3c);
 }
 
-.piper-status-ready {
-  color: var(--color-success, #2ecc71);
+@media (max-width: 480px) {
+  .visibility-popover {
+    min-width: 0;
+    width: max-content;
+    max-width: calc(100vw - 24px);
+  }
 }
 </style>

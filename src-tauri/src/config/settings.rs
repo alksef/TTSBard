@@ -362,6 +362,14 @@ pub struct TtsSettings {
     pub network: NetworkSettings,
     #[serde(default)]
     pub provider_id: Option<String>,
+    /// Presentation-only list of provider IDs the frontend shows. Owned by the
+    /// frontend (runtime-derived); the backend never validates or mutates it.
+    #[serde(default = "default_visible_provider_ids")]
+    pub visible_provider_ids: Vec<String>,
+}
+
+fn default_visible_provider_ids() -> Vec<String> {
+    vec!["silero".to_string()]
 }
 
 impl Default for TtsSettings {
@@ -374,6 +382,7 @@ impl Default for TtsSettings {
             telegram: TelegramTtsSettings::default(),
             network: NetworkSettings::default(),
             provider_id: None,
+            visible_provider_ids: default_visible_provider_ids(),
         }
     }
 }
@@ -1558,6 +1567,18 @@ impl SettingsManager {
     /// Get TTS provider ID
     pub fn get_tts_provider_id(&self) -> Option<String> {
         self.cache.read().tts.provider_id.clone()
+    }
+
+    /// Atomically replace and persist the complete visible-provider-ID vector.
+    ///
+    /// Presentation-only preference: does not touch the active provider, runtime
+    /// registry, API keys, or any other TTS setting. The frontend owns the
+    /// current runtime-derived list and sends the full desired set (no dedup,
+    /// no validation against registered providers).
+    pub fn set_visible_tts_provider_ids(&self, provider_ids: Vec<String>) -> Result<()> {
+        self.update_settings_atomically(move |settings| {
+            settings.tts.visible_provider_ids = provider_ids;
+        })
     }
 
     /// Set OpenAI API key
@@ -2886,6 +2907,107 @@ mod tests {
             .expect("TtsSettings without provider_id must deserialize");
         assert_eq!(settings.provider_id, None);
         assert_eq!(settings.provider, TtsProviderType::OpenAi);
+    }
+
+    /// Backward-compat: old settings.json without `visible_provider_ids` field
+    /// must deserialize with the default `["silero"]`.
+    #[test]
+    fn tts_settings_deserializes_without_visible_provider_ids() {
+        let old_json = r#"{
+            "provider": "openai",
+            "openai": { "api_key": null, "voice": "alloy" },
+            "local": { "url": "http://127.0.0.1:8124" },
+            "fish": { "api_key": null, "voices": [], "reference_id": "", "format": "mp3", "temperature": 0.7, "sample_rate": 44100, "use_proxy": false },
+            "telegram": { "api_id": null, "proxy_mode": "none", "voices": [], "current_voice_id": "" },
+            "network": { "proxy": { "proxy_url": null }, "mtproxy": { "host": null, "port": 8888, "secret": null, "dc_id": null } }
+        }"#;
+        let settings: TtsSettings = serde_json::from_str(old_json)
+            .expect("TtsSettings without visible_provider_ids must deserialize");
+        assert_eq!(settings.visible_provider_ids, vec!["silero".to_string()]);
+    }
+
+    /// Fresh default TtsSettings contains exactly `silero` as the visible provider.
+    #[test]
+    fn tts_settings_default_visible_provider_ids_is_silero() {
+        assert_eq!(
+            TtsSettings::default().visible_provider_ids,
+            vec!["silero".to_string()]
+        );
+    }
+
+    /// Round-trip: visible_provider_ids persists through serialize/deserialize.
+    #[test]
+    fn tts_settings_visible_provider_ids_round_trip() {
+        let mut settings = TtsSettings::default();
+        settings.visible_provider_ids = vec![
+            "silero".to_string(),
+            "openai".to_string(),
+            "fish".to_string(),
+        ];
+        let json = serde_json::to_string(&settings).unwrap();
+        let back: TtsSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            back.visible_provider_ids,
+            vec![
+                "silero".to_string(),
+                "openai".to_string(),
+                "fish".to_string()
+            ]
+        );
+    }
+
+    /// set_visible_tts_provider_ids atomically replaces the complete list and
+    /// keeps disk/cache in sync without touching any other TTS setting.
+    #[test]
+    fn set_visible_tts_provider_ids_replaces_and_persists() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let config_dir = std::env::temp_dir().join(format!(
+            "ttsbard-visible-provider-ids-test-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&config_dir).unwrap();
+        let manager = SettingsManager::with_config_dir(config_dir.clone()).unwrap();
+
+        let before = manager.load().unwrap();
+        assert_eq!(
+            before.tts.visible_provider_ids,
+            vec!["silero".to_string()]
+        );
+        let before_provider = before.tts.provider;
+        let before_provider_id = before.tts.provider_id.clone();
+
+        manager
+            .set_visible_tts_provider_ids(vec!["fish".to_string(), "local-http".to_string()])
+            .unwrap();
+
+        let after = manager.load().unwrap();
+        assert_eq!(
+            after.tts.visible_provider_ids,
+            vec!["fish".to_string(), "local-http".to_string()]
+        );
+        assert_eq!(after.tts.provider, before_provider);
+        assert_eq!(after.tts.provider_id, before_provider_id);
+
+        let disk: AppSettings = serde_json::from_str(
+            &std::fs::read_to_string(config_dir.join("settings.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(disk, after, "disk and cache must agree");
+
+        // Complete replacement, not append.
+        manager
+            .set_visible_tts_provider_ids(vec!["silero".to_string()])
+            .unwrap();
+        assert_eq!(
+            manager.load().unwrap().tts.visible_provider_ids,
+            vec!["silero".to_string()]
+        );
+
+        let _ = std::fs::remove_dir_all(&config_dir);
     }
 
     // ==================== HomographAccentorSettings migration ====================

@@ -539,6 +539,27 @@ pub fn get_tts_provider(settings_manager: State<'_, SettingsManager>) -> TtsProv
     settings_manager.get_tts_provider()
 }
 
+/// Persist the complete set of visible TTS provider IDs (presentation only).
+///
+/// Replaces the persisted list verbatim — no deduplication, no validation
+/// against the runtime registry, no implicit addition of the active provider.
+/// Does not select, initialize, or stop any provider and leaves the runtime
+/// registry, API keys, and all other TTS settings untouched.
+#[tauri::command]
+pub async fn set_visible_tts_provider_ids(
+    app_handle: AppHandle,
+    settings_manager: State<'_, SettingsManager>,
+    provider_ids: Vec<String>,
+) -> Result<(), String> {
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_visible_tts_provider_ids(provider_ids)
+    })
+    .await?;
+
+    super::emit_settings_changed(&app_handle);
+    Ok(())
+}
+
 /// Set TTS provider type
 #[tauri::command]
 pub async fn set_tts_provider(

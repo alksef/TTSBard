@@ -399,6 +399,10 @@ pub struct TtsSettingsDto {
     pub provider_id: Option<String>,
     #[serde(default)]
     pub providers: Vec<TtsProviderInfoDto>,
+    /// Presentation-only list of visible provider IDs (empty is serialized as
+    /// omitted). Derived from `TtsSettings::visible_provider_ids` on output.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub visible_provider_ids: Vec<String>,
 }
 
 impl From<TtsSettings> for TtsSettingsDto {
@@ -412,6 +416,7 @@ impl From<TtsSettings> for TtsSettingsDto {
             network: s.network.into(),
             provider_id: s.provider_id,
             providers: Vec::new(),
+            visible_provider_ids: s.visible_provider_ids,
         }
     }
 }
@@ -426,6 +431,7 @@ impl From<TtsSettingsDto> for TtsSettings {
             telegram: dto.telegram.into(),
             network: dto.network.into(),
             provider_id: dto.provider_id,
+            visible_provider_ids: dto.visible_provider_ids,
         }
     }
 }
@@ -1469,6 +1475,7 @@ mod tests {
                 active: false,
                 runtime_status: Some("Ready".into()),
             }],
+            visible_provider_ids: vec![],
         };
 
         let webview = WebViewSettingsDto {
@@ -1823,6 +1830,7 @@ mod tests {
                 active: false,
                 runtime_status: None,
             }],
+            visible_provider_ids: vec![],
         };
 
         let webview = WebViewSettingsDto {
@@ -2151,6 +2159,44 @@ mod tests {
         let deserialized: AppSettingsDto = serde_json::from_str(&json1).expect("deserialize");
         let json2 = serde_json::to_string_pretty(&deserialized).expect("second serialize");
         assert_eq!(json1, json2, "Round-trip produced different JSON");
+    }
+
+    /// Backward-compat: a TtsSettingsDto without `visible_provider_ids`
+    /// deserializes to an empty list (the field is populated from TtsSettings
+    /// on output, not persisted independently).
+    #[test]
+    fn tts_settings_dto_deserializes_without_visible_provider_ids() {
+        let old_json = r#"{
+            "provider": "openai",
+            "openai": { "api_key": null, "voice": "alloy", "proxy_host": null, "proxy_port": null, "use_proxy": false },
+            "local": { "url": "http://127.0.0.1:8124" },
+            "telegram": { "api_id": null, "proxy_mode": "none", "voices": [], "current_voice_id": "" },
+            "network": { "proxy": { "proxy_url": null }, "mtproxy": { "host": null, "port": 8888, "secret": null, "dc_id": null } }
+        }"#;
+        let dto: TtsSettingsDto = serde_json::from_str(old_json)
+            .expect("old TtsSettingsDto without visible_provider_ids must deserialize");
+        assert!(dto.visible_provider_ids.is_empty());
+    }
+
+    /// Fresh TtsSettings converts to a DTO exposing exactly `["silero"]`.
+    #[test]
+    fn tts_settings_to_dto_default_visible_provider_ids_is_silero() {
+        let dto: TtsSettingsDto = TtsSettings::default().into();
+        assert_eq!(dto.visible_provider_ids, vec!["silero".to_string()]);
+    }
+
+    /// Round-trip TtsSettings -> DTO -> TtsSettings preserves visible_provider_ids.
+    #[test]
+    fn tts_settings_dto_visible_provider_ids_round_trip() {
+        let mut settings = TtsSettings::default();
+        settings.visible_provider_ids = vec!["silero".to_string(), "openai".to_string()];
+        let dto: TtsSettingsDto = settings.clone().into();
+        assert_eq!(
+            dto.visible_provider_ids,
+            vec!["silero".to_string(), "openai".to_string()]
+        );
+        let back: TtsSettings = dto.into();
+        assert_eq!(back.visible_provider_ids, settings.visible_provider_ids);
     }
 
     /// Regenerates all fixture files. Excluded from standard test runs.

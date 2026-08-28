@@ -41,7 +41,7 @@ use commands::ai::{
     set_ai_deepseek_api_key, set_ai_deepseek_model, set_ai_deepseek_use_proxy,
     set_ai_openai_api_key, set_ai_openai_model, set_ai_openai_use_proxy, set_ai_prompt,
     set_ai_provider, set_ai_zai_api_key, set_ai_zai_model, set_ai_zai_url, set_editor_ai,
-    set_editor_ai_completion,
+    set_editor_ai_completion, set_visible_tts_provider_ids,
 };
 use commands::logging::{get_logging_settings, save_logging_settings};
 use commands::playback_window::{pc_get_appearance, pc_set_bg_color, pc_set_opacity};
@@ -575,6 +575,7 @@ pub fn run() {
             set_ai_custom_use_proxy,
             get_ai_custom_model,
             ai_check_grammar,
+            set_visible_tts_provider_ids,
             // Fish Audio commands
             commands::get_fish_audio_api_key,
             commands::set_fish_audio_api_key,
