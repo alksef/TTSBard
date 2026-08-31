@@ -74,7 +74,7 @@ export function useInputServer() {
       case 'starting':
         return 'Запускается'
       case 'running':
-        return 'Работает'
+        return 'Запущен'
       case 'error':
         return 'Ошибка'
       default:

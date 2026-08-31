@@ -36,11 +36,11 @@ related_tasks: []
 
 Формат и соответствие каталога статусу проверяет `scripts/check-docs.ps1`.
 
-## Активные направления
-
-- [ROADMAP-087 — входной сервер текста для audio-only озвучивания](./active/087-external-text-input-server.md)
-
 ## Завершённые направления
+
+### Интеграции
+
+- [ROADMAP-087 — входной сервер текста для audio-only озвучивания](./completed/087-external-text-input-server.md)
 
 ### TTS-провайдеры
 

@@ -44,7 +44,7 @@ const {
 
     <section class="settings-section">
       <div class="section-header server-header">
-        <h2>Сервер</h2>
+        <h2>Входящий сервер</h2>
         <div class="server-status">
           <span
             class="status-indicator"
@@ -127,7 +127,7 @@ const {
         <span v-if="!isPortValid" class="error-text">Порт должен быть от 1024 до 65535</span>
       </div>
 
-      <div class="setting-row">
+      <div class="setting-row autoplay-row">
         <label class="checkbox-label">
           <input
             type="checkbox"
@@ -137,11 +137,18 @@ const {
           />
           <span>Автовоспроизведение</span>
         </label>
+        <p class="setting-hint">
+          При выключенном автовоспроизведении текст сохраняется во «Входящие» до принятия решения.
+        </p>
       </div>
-      <p class="setting-hint">
-        При выключенном автовоспроизведении текст сохраняется во «Входящие» до принятия решения.
-      </p>
     </section>
+
+    <div class="info-callout">
+      <Info :size="16" class="info-icon" />
+      <span>
+        Используется активный TTS-провайдер/пайплайн; доставка только аудио — текст не отправляется в WebView или Twitch.
+      </span>
+    </div>
 
     <section class="settings-section">
       <h2>Endpoint</h2>
@@ -185,13 +192,6 @@ const {
       </div>
       <div v-else-if="testError" class="test-result error">{{ testError }}</div>
     </section>
-
-    <div class="info-callout">
-      <Info :size="16" class="info-icon" />
-      <span>
-        Используется активный TTS-провайдер/пайплайн; доставка только аудио — текст не отправляется в WebView или Twitch.
-      </span>
-    </div>
   </div>
 </template>
 
@@ -393,6 +393,10 @@ h2 {
   margin-bottom: 0;
 }
 
+.autoplay-row {
+  display: block;
+}
+
 .setting-row label {
   min-width: 60px;
   font-weight: 500;
@@ -419,23 +423,25 @@ h2 {
 }
 
 .setting-hint {
+  display: block;
+  margin-top: 0.4rem;
+  margin-left: 2.4rem;
   font-size: 0.85rem;
-  color: var(--color-text-secondary);
-  margin: 0;
-  width: 100%;
+  color: var(--color-text-muted);
+  line-height: 1.4;
 }
 
 .address-inputs {
   display: flex;
   gap: 8px;
-  flex-wrap: wrap;
   min-width: 0;
 }
 
 .address-inputs .address-port {
-  flex: 1;
-  min-width: 120px;
-  max-width: 200px;
+  flex: 0 0 70px;
+  width: 70px;
+  min-width: 70px;
+  max-width: 70px;
   padding: 0.5rem;
   border: 1px solid var(--color-border-strong);
   border-radius: 10px;
@@ -550,19 +556,18 @@ h2 {
 
 .format-hint {
   margin: 0.5rem 0 0;
-  font-size: 0.85rem;
-  color: var(--color-text-secondary);
-  line-height: 1.5;
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+  line-height: 1.4;
 }
 
 .inline-code {
   font-family: var(--font-mono);
-  font-size: 0.85rem;
-  color: var(--color-text-primary);
-  background: var(--color-bg-field);
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  padding: 1px 5px;
+  font-size: 0.8rem;
+  color: inherit;
+  background: var(--info-bg-weak);
+  border-radius: 3px;
+  padding: 0.1rem 0.3rem;
 }
 
 .test-input {
@@ -659,6 +664,7 @@ h2 {
   align-items: flex-start;
   gap: 0.6rem;
   padding: 0.75rem 1rem;
+  margin-bottom: 1.5rem;
   background: var(--info-bg-weak);
   border: 1px solid var(--info-border);
   border-left: 4px solid var(--info-accent, var(--color-accent));

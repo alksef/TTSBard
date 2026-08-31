@@ -1,7 +1,7 @@
 # LunaTranslator → TTSBard: граница интеграции текста
 
 **Дата:** 2026-08-31
-**Связанный roadmap:** [ROADMAP-087](../roadmap/active/087-external-text-input-server.md)
+**Связанный roadmap:** [ROADMAP-087](../roadmap/completed/087-external-text-input-server.md)
 
 ## Вопрос
 

@@ -128,7 +128,7 @@ describe('inputServerTone', () => {
 
 describe('inputServerStatusLabel', () => {
   it('produces the exact Russian status labels', () => {
-    expect(inputServerStatusLabel({ state: 'running' })).toBe('Входящий сервер — работает')
+    expect(inputServerStatusLabel({ state: 'running' })).toBe('Входящий сервер — запущен')
     expect(inputServerStatusLabel({ state: 'starting' })).toBe('Входящий сервер — запускается')
     expect(inputServerStatusLabel({ state: 'stopped' })).toBe('Входящий сервер — остановлен')
     expect(inputServerStatusLabel({ state: 'error', message: 'порт занят' })).toBe(

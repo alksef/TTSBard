@@ -74,3 +74,7 @@ promts/
 # Local work artifacts (AI tasks, reviews, logs, screenshots)
 .work/
 .aider*
+
+# Python bytecode (integration scripts)
+__pycache__/
+*.pyc

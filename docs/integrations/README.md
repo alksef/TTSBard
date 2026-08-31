@@ -9,3 +9,5 @@ Telegram, VTube Studio и других интеграций TTSBard.
 - [WebView Server](./webview.md) — настройка HTTP-сервера, API и модель
   безопасности.
 - [SSE Integration](./sse.md) — события, endpoint и подключение клиентов.
+- [LunaTranslator](./lunatranslator/README.md) — скрипт selfbuild-движка:
+  игровой текст из Luna озвучивает TTSBard через входящий сервер.

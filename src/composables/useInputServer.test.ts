@@ -214,7 +214,7 @@ describe('useInputServer', () => {
     callback?.({ payload: { state: 'running' } })
 
     expect(status.value.state).toBe('running')
-    expect(statusLabel.value).toBe('Работает')
+    expect(statusLabel.value).toBe('Запущен')
   })
 
   it('reloads settings and status on the global settings-changed event', async () => {

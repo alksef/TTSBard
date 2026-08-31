@@ -98,7 +98,7 @@ const sidebarGroups: SidebarGroup[] = [
     buttons: [
       { id: 'webview', label: 'WebView Source', icon: Globe },
       { id: 'twitch', label: 'Twitch Chat', icon: TwitchIcon },
-      { id: 'input-server', label: 'Входной сервер', icon: Inbox },
+      { id: 'input-server', label: 'Входящий сервер', icon: Inbox },
       { id: 'vtube-studio', label: 'VTube Studio', icon: Tv }
     ]
   },

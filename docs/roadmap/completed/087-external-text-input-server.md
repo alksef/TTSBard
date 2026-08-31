@@ -1,6 +1,6 @@
 ---
 id: ROADMAP-087
-status: in_progress
+status: completed
 created: 2026-08-31
 updated: 2026-08-31
 related_tasks: []
@@ -268,6 +268,31 @@ server bind-ится на `0.0.0.0` и вместе с WebSocket публику�
 явный connector/profile после проверки bind/firewall и пользовательской
 настройки, а не маскировать под эмуляцию VITS.
 
+## Outcome
+
+Input Server принимает внешний текст от LunaTranslator через loopback HTTP API,
+ставит audio-only задачу в существующую очередь TTSBard и не передаёт текст в
+WebView или Twitch. Пользователь вручную подтвердил release-smoke: Luna отправила
+текст, TTSBard его принял, а Luna не начала собственное воспроизведение.
+
+### Поставленные блоки — 2026-08-31
+
+1. **Ядро Input Server:** typed external submit, принудительный `audio_only`,
+   loopback HTTP API, bounded review inbox и lifecycle listener
+   (`8b79cc3`, `3976bfc`).
+2. **Достоверность и доступность inbox:** runtime gating вкладки, корректные IPC
+   идентификаторы, сохранение review-поверхности между разделами и hotkeys
+   принятия/редактирования (`9b191f5`, `9b1dd72`, `4932159`, `894ef65`,
+   `edecabc`).
+3. **Панель и интеграция:** runtime status/titlebar, уточнение терминов и
+   компоновки панели, selfbuild-скрипт LunaTranslator (`3976bfc`, `e769ba5`,
+   `e7efc84`, `9f083dc`, `60cb97a`).
+
+### Release-smoke — пройден 2026-08-31
+
+LunaTranslator отправляет текст через подготовленный selfbuild-скрипт, TTSBard
+принимает его во входящий поток, а Luna не воспроизводит текст самостоятельно.
+
 ## Этапы
 
 ### P0–P3 — реализовано 2026-08-31
@@ -279,8 +304,8 @@ loopback-supervisor и HTTP API, настройки/панель Input Server, �
 активные external jobs; действия playback не дублируются.
 
 Автоматическая проверка подтвердила HTTP status/error mapping, lifecycle
-listener и запрет WebView/Twitch delivery. Ручная проверка с запущенной Luna и
-реальным аудиоустройством остаётся release-smoke сценарием.
+listener и запрет WebView/Twitch delivery. Ручной release-smoke с LunaTranslator
+подтвердил доставку в TTSBard без двойного playback.
 
 ### P4 — Надёжность при подтверждённой потребности
 
@@ -322,7 +347,7 @@ listener и запрет WebView/Twitch delivery. Ручная проверка 
 - эмуляция `vits-simple-api` в качестве Luna integration path;
 - замена существующего WebView/SSE protocol.
 
-## Требует подтверждения перед implementation
+## Принятые границы MVP
 
 - отдельный loopback port `10101`, а не общий WebView listener;
 - MVP с автоматическим приёмом и первой вкладкой `Входящие`; review actions —
@@ -333,6 +358,7 @@ listener и запрет WebView/Twitch delivery. Ручная проверка 
 
 ## Связанные материалы
 
+- [Интеграция с LunaTranslator — готовый selfbuild-скрипт](../../integrations/lunatranslator/README.md)
 - [ROADMAP-047 — очередь задач озвучивания](../completed/047-speech-job-queue.md)
 - [ROADMAP-050 — единый список управления воспроизведением](../completed/050-unified-playback-activity-list.md)
 - [ROADMAP-073 — маршрут фразы и результат доставки](../completed/073-readable-message-routing-and-delivery-outcomes.md)

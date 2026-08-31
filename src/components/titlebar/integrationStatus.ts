@@ -64,7 +64,7 @@ const INPUT_SERVER_NAME = 'Входящий сервер'
 export function inputServerStatusLabel(runtime: InputServerRuntime): string {
   switch (runtime.state) {
     case 'running':
-      return `${INPUT_SERVER_NAME} — работает`
+      return `${INPUT_SERVER_NAME} — запущен`
     case 'starting':
       return `${INPUT_SERVER_NAME} — запускается`
     case 'error':
