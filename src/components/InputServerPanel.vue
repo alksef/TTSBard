@@ -438,10 +438,10 @@ h2 {
 }
 
 .address-inputs .address-port {
-  flex: 0 0 70px;
-  width: 70px;
-  min-width: 70px;
-  max-width: 70px;
+  flex: 0 0 100px;
+  width: 100px;
+  min-width: 100px;
+  max-width: 100px;
   padding: 0.5rem;
   border: 1px solid var(--color-border-strong);
   border-radius: 10px;
