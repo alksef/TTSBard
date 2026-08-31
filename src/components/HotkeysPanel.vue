@@ -12,7 +12,7 @@ const hotkeys = computed(() => settings.value?.hotkeys)
 
 type HotkeyName = 'main_window' | 'sound_panel' | 'playback_control_window' | 'return_previous_window' | 'toggle_minimal_mode'
 
-const EDITOR_HOTKEY_NAMES = ['edit_word', 'submit_continue', 'submit_keep_text', 'submit_keep_focus', 'next_spelling_error', 'previous_spelling_error', 'next_tab', 'previous_tab', 'cycle_route', 'toggle_typing', 'cycle_quick_mode', 'toggle_history', 'accent_homographs'] as const
+const EDITOR_HOTKEY_NAMES = ['edit_word', 'submit_continue', 'submit_keep_text', 'submit_keep_focus', 'next_spelling_error', 'previous_spelling_error', 'next_tab', 'previous_tab', 'cycle_route', 'toggle_typing', 'cycle_quick_mode', 'toggle_history', 'accent_homographs', 'approve_next_incoming', 'edit_next_incoming'] as const
 type EditorHotkeyName = (typeof EDITOR_HOTKEY_NAMES)[number]
 
 function isEditorHotkeyName(name: string): name is EditorHotkeyName {
@@ -1193,6 +1193,105 @@ onUnmounted(async () => {
           </button>
         </div>
       </div>
+
+      <div class="hotkey-subgroup">
+        <div class="subgroup-title">Входящие</div>
+        <div class="hotkey-row">
+          <div class="hotkey-label">
+            <span>Подтвердить отправку следующего входящего</span>
+          </div>
+          <div class="hotkey-actions">
+            <span v-if="hotkeys && !recordingFor" class="hotkey-value">
+              {{ formatHotkey(hotkeys.editor.approve_next_incoming) }}
+            </span>
+            <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+
+            <!-- Recording state -->
+            <div v-if="recordingFor === 'approve_next_incoming' && currentRecording" class="hotkey-value recording">
+              {{ formatCurrentRecording() }}
+            </div>
+
+            <button
+              @click="startEditorRecording('approve_next_incoming')"
+              :disabled="recordingFor !== null || isLoading"
+              class="record-btn"
+              :class="{ recording: recordingFor === 'approve_next_incoming' }"
+              title="Записать клавишу"
+              aria-label="Записать клавишу"
+            >
+              <Keyboard :size="14" />
+              {{ recordingFor === 'approve_next_incoming' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+            </button>
+
+            <button
+              v-if="recordingFor === 'approve_next_incoming'"
+              @click="cancelRecording"
+              class="cancel-btn"
+              title="Отмена (Esc)"
+              aria-label="Отмена записи"
+            >
+              ✕
+            </button>
+
+            <button
+              @click="resetEditorToDefault('approve_next_incoming')"
+              class="reset-btn"
+              title="Сбросить к умолчанию"
+              aria-label="Сбросить к умолчанию"
+            >
+              <RotateCcw :size="14" />
+            </button>
+          </div>
+        </div>
+
+        <div class="hotkey-row">
+          <div class="hotkey-label">
+            <span>Редактировать следующий входящий</span>
+          </div>
+          <div class="hotkey-actions">
+            <span v-if="hotkeys && !recordingFor" class="hotkey-value">
+              {{ formatHotkey(hotkeys.editor.edit_next_incoming) }}
+            </span>
+            <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+
+            <!-- Recording state -->
+            <div v-if="recordingFor === 'edit_next_incoming' && currentRecording" class="hotkey-value recording">
+              {{ formatCurrentRecording() }}
+            </div>
+
+            <button
+              @click="startEditorRecording('edit_next_incoming')"
+              :disabled="recordingFor !== null || isLoading"
+              class="record-btn"
+              :class="{ recording: recordingFor === 'edit_next_incoming' }"
+              title="Записать клавишу"
+              aria-label="Записать клавишу"
+            >
+              <Keyboard :size="14" />
+              {{ recordingFor === 'edit_next_incoming' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+            </button>
+
+            <button
+              v-if="recordingFor === 'edit_next_incoming'"
+              @click="cancelRecording"
+              class="cancel-btn"
+              title="Отмена (Esc)"
+              aria-label="Отмена записи"
+            >
+              ✕
+            </button>
+
+            <button
+              @click="resetEditorToDefault('edit_next_incoming')"
+              class="reset-btn"
+              title="Сбросить к умолчанию"
+              aria-label="Сбросить к умолчанию"
+            >
+              <RotateCcw :size="14" />
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -1386,5 +1485,20 @@ onUnmounted(async () => {
 .reset-btn:hover {
   background: var(--color-bg-field-hover);
   color: var(--color-text-primary);
+}
+
+.hotkey-subgroup {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px dashed var(--color-border);
+}
+
+.subgroup-title {
+  margin-bottom: 0.85rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
 }
 </style>

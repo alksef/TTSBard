@@ -23,6 +23,7 @@ import { acceptClear, applyAiResponse } from './inputAcceptance'
 import { submitSpeech } from '../ipc/speech'
 import { deliverTwitchMessage } from '../ipc/twitchDelivery'
 import { matchesEditorHotkey } from './editor/keymapArbitration'
+import { incomingSurfaceHotkey, resolveIncomingTabTransition, type EditorHotkeyAction, type TabCycleDirection } from './editor/incomingHotkeys'
 import { Volume2, Clock, Keyboard, Twitch, ArrowDownToLine, Undo2 } from 'lucide-vue-next'
 import { enterOutcomeLabel, nextQuickMode, submitActionState, resolveKeepText } from './editor/submitAffordance'
 import type { SubmitKeepIntent } from './editor/submitAffordance'
@@ -32,6 +33,7 @@ import type { EditorRoute } from './editor/routeDecode'
 import { effectiveRoute, applyRouteToText, routeSubmit } from './editor/routeResolution'
 import { useTwitchRuntimeStatus } from '../composables/useTwitchRuntimeStatus'
 import { useRuAccentRuntime } from '../composables/useRuAccentRuntime'
+import { useInputServerRuntimeStatus } from '../composables/useInputServerRuntimeStatus'
 
 const { showError } = useErrorHandler()
 const { tabs, activeId, active, create: createTab, close: closeTab, select: selectTab, next: nextTab, previous: previousTab, rename: renameTab, init: initTabs, flushSave: flushTabsSave } = useEditorTabs()
@@ -51,6 +53,10 @@ const {
 
 const showIncomingTab = ref(false)
 
+const { state: inputServerState } = useInputServerRuntimeStatus()
+
+const inputServerRunning = computed(() => inputServerState.value === 'running')
+
 const incomingTabTitle = computed(() => `Входящие (${incomingCount.value})`)
 
 const text = computed<string>({
@@ -59,6 +65,8 @@ const text = computed<string>({
 })
 
 const editorRef = ref<InstanceType<typeof TtsEditor> | null>(null)
+
+const incomingTabRef = ref<InstanceType<typeof IncomingTextsTab> | null>(null)
 
 async function onCreate() {
   showIncomingTab.value = false
@@ -74,8 +82,16 @@ async function onSelect(id: string) {
   editorRef.value?.focus()
 }
 
-function onSelectPinned() {
+async function onClose(id: string) {
+  closeTab(id)
+  await nextTick()
+  focusEditor()
+}
+
+async function onSelectPinned() {
   showIncomingTab.value = true
+  await nextTick()
+  focusEditor()
 }
 
 async function onEditIncoming(id: string) {
@@ -592,6 +608,12 @@ watch(activeId, () => {
   lastSubmitOutcome.value = 'none'
 })
 
+watch(inputServerRunning, (running) => {
+  if (!running && showIncomingTab.value) {
+    showIncomingTab.value = false
+  }
+})
+
 async function handleSubmit(intent: SubmitKeepIntent) {
   const currentText = text.value
   const senderTabId = activeId.value
@@ -852,16 +874,65 @@ function toggleHistory() {
 
 async function focusEditor() {
   if (showIncomingTab.value) {
-    showIncomingTab.value = false
-    await nextTick()
+    incomingTabRef.value?.focus()
+    return
   }
   editorRef.value?.focus()
+}
+
+function cycleTabs(direction: TabCycleDirection) {
+  const transition = resolveIncomingTabTransition(
+    tabs.value.map(t => t.id),
+    activeId.value,
+    direction,
+    inputServerRunning.value,
+    showIncomingTab.value,
+  )
+  if (transition?.kind === 'incoming') {
+    showIncomingTab.value = true
+  } else if (transition?.kind === 'tab') {
+    showIncomingTab.value = false
+    selectTab(transition.id)
+  } else {
+    showIncomingTab.value = false
+    if (direction === 'next') nextTab()
+    else previousTab()
+  }
 }
 
 async function handleEditorScopeKeydown(event: KeyboardEvent) {
   if (event.target instanceof HTMLInputElement) return
   const bindings = hotkeySettings.value?.editor
   if (!bindings) return
+
+  if (showIncomingTab.value) {
+    const matched: EditorHotkeyAction | null = matchesEditorHotkey(bindings.next_tab, event)
+      ? 'next_tab'
+      : matchesEditorHotkey(bindings.previous_tab, event)
+        ? 'previous_tab'
+        : matchesEditorHotkey(bindings.approve_next_incoming, event)
+          ? 'approve_next_incoming'
+          : matchesEditorHotkey(bindings.edit_next_incoming, event)
+            ? 'edit_next_incoming'
+            : null
+    const firstPending = incomingPendingItems.value[0]
+    if (matched === 'approve_next_incoming' && firstPending) {
+      event.preventDefault()
+      event.stopPropagation()
+      void approveIncoming(firstPending.id)
+    } else if (matched === 'edit_next_incoming' && firstPending) {
+      event.preventDefault()
+      event.stopPropagation()
+      await onEditIncoming(firstPending.id)
+    } else if (matched && incomingSurfaceHotkey(matched) === 'cycle_tabs') {
+      event.preventDefault()
+      event.stopPropagation()
+      cycleTabs(matched === 'next_tab' ? 'next' : 'previous')
+      await nextTick()
+      focusEditor()
+    }
+    return
+  }
 
   if (matchesEditorHotkey(bindings.submit_keep_focus, event)) {
     event.preventDefault()
@@ -876,16 +947,34 @@ async function handleEditorScopeKeydown(event: KeyboardEvent) {
     return
   }
 
-  const switched = matchesEditorHotkey(bindings.next_tab, event)
-    ? nextTab()
+  const direction: TabCycleDirection | null = matchesEditorHotkey(bindings.next_tab, event)
+    ? 'next'
     : matchesEditorHotkey(bindings.previous_tab, event)
-      ? previousTab()
-      : false
-  if (switched) {
+      ? 'previous'
+      : null
+  if (direction) {
     event.preventDefault()
     event.stopPropagation()
+    cycleTabs(direction)
     await nextTick()
     focusEditor()
+    return
+  }
+
+  if (matchesEditorHotkey(bindings.approve_next_incoming, event)) {
+    const firstPending = incomingPendingItems.value[0]
+    if (!firstPending) return
+    event.preventDefault()
+    event.stopPropagation()
+    void approveIncoming(firstPending.id)
+    return
+  }
+  if (matchesEditorHotkey(bindings.edit_next_incoming, event)) {
+    const firstPending = incomingPendingItems.value[0]
+    if (!firstPending) return
+    event.preventDefault()
+    event.stopPropagation()
+    await onEditIncoming(firstPending.id)
     return
   }
 
@@ -936,15 +1025,16 @@ defineExpose({ focusEditor })
         <EditorTabs
           :tabs="tabs"
           :active-id="activeId"
-          :pinned-title="incomingTabTitle"
-          :pinned-active="showIncomingTab"
+          :pinned-title="inputServerRunning ? incomingTabTitle : undefined"
+          :pinned-active="inputServerRunning && showIncomingTab"
           @create="onCreate"
-          @close="closeTab"
+          @close="onClose"
           @select="onSelect"
           @rename="renameTab"
           @select-pinned="onSelectPinned"
         />
         <IncomingTextsTab
+          ref="incomingTabRef"
           v-if="showIncomingTab"
           :pending-items="incomingPendingItems"
           :external-jobs="incomingExternalJobs"

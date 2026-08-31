@@ -350,6 +350,18 @@
           "ctrl"
         ],
         "key": "U"
+      },
+      "approve_next_incoming": {
+        "modifiers": [
+          "ctrl"
+        ],
+        "key": "K"
+      },
+      "edit_next_incoming": {
+        "modifiers": [
+          "ctrl"
+        ],
+        "key": "I"
       }
     }
   },

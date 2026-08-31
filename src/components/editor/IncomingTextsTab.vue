@@ -1,8 +1,16 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { Check, Pencil, X } from 'lucide-vue-next'
 import { statusLabel, type JobDto } from '../../../src-playback/speechQueue'
 import type { IncomingTextItem } from '../../composables/useIncomingTexts'
+
+const rootRef = ref<HTMLElement | null>(null)
+
+function focus() {
+  rootRef.value?.focus()
+}
+
+defineExpose({ focus })
 
 const props = defineProps<{
   pendingItems: IncomingTextItem[]
@@ -28,7 +36,7 @@ function onAutoPlayChange(event: Event) {
 </script>
 
 <template>
-  <div class="incoming-tab" :class="{ compact }">
+  <div ref="rootRef" class="incoming-tab" tabindex="-1" aria-label="Входящие" :class="{ compact }">
     <div class="incoming-toolbar">
       <label class="autoplay-toggle" title="Озвучивать новые входящие тексты автоматически">
         <input
@@ -108,6 +116,10 @@ function onAutoPlayChange(event: Event) {
   width: 100%;
   max-width: 100%;
   min-width: 0;
+}
+
+.incoming-tab:focus {
+  outline: none;
 }
 
 .incoming-tab.compact {

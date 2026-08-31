@@ -91,6 +91,8 @@ function mockSettings(): AppSettingsDto {
         cycle_quick_mode: { modifiers: [], key: '' },
         toggle_history: { modifiers: [], key: '' },
         accent_homographs: { modifiers: [], key: '' },
+        approve_next_incoming: { modifiers: [], key: '' },
+        edit_next_incoming: { modifiers: [], key: '' },
       },
     },
     vtube_studio: {

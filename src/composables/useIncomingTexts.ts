@@ -9,6 +9,7 @@ import {
 import { useErrorHandler } from './useErrorHandler'
 import { debugError } from '../utils/debug'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
+import { normalizeCommandError } from '../ipc/commandError'
 import type { InputServerSettings } from './useInputServer'
 
 export interface IncomingTextItem {
@@ -25,6 +26,9 @@ export function isIncomingTextItem(value: unknown): value is IncomingTextItem {
 export function isIncomingTextList(payload: unknown): payload is IncomingTextItem[] {
   return Array.isArray(payload) && payload.every(isIncomingTextItem)
 }
+
+const UNKNOWN_ITEM_CODE = 'input_server.unknown_item'
+const UNKNOWN_ITEM_MESSAGE = 'Входящий текст уже обработан или отсутствует'
 
 /**
  * External queue statuses that are still "active" and therefore projected into
@@ -145,10 +149,14 @@ export function useIncomingTexts() {
     if (isBusy(id)) return
     markBusy(id)
     try {
-      await invoke('approve_incoming_text', { incoming_id: id })
+      await invoke('approve_incoming_text', { incomingId: id })
     } catch (e) {
       debugError('[IncomingTexts] Failed to approve item:', e)
-      showError('Не удалось озвучить текст')
+      showError(
+        normalizeCommandError(e).code === UNKNOWN_ITEM_CODE
+          ? UNKNOWN_ITEM_MESSAGE
+          : 'Не удалось озвучить текст',
+      )
     } finally {
       markIdle(id)
     }
@@ -160,12 +168,16 @@ export function useIncomingTexts() {
     markBusy(id)
     try {
       const item = await invoke<IncomingTextItem>('take_incoming_text_for_edit', {
-        incoming_id: id,
+        incomingId: id,
       })
       return item.text
     } catch (e) {
       debugError('[IncomingTexts] Failed to take item for edit:', e)
-      showError('Не удалось взять текст для редактирования')
+      showError(
+        normalizeCommandError(e).code === UNKNOWN_ITEM_CODE
+          ? UNKNOWN_ITEM_MESSAGE
+          : 'Не удалось взять текст для редактирования',
+      )
       return null
     } finally {
       markIdle(id)
@@ -176,10 +188,14 @@ export function useIncomingTexts() {
     if (isBusy(id)) return
     markBusy(id)
     try {
-      await invoke('discard_incoming_text', { incoming_id: id })
+      await invoke('discard_incoming_text', { incomingId: id })
     } catch (e) {
       debugError('[IncomingTexts] Failed to discard item:', e)
-      showError('Не удалось отклонить текст')
+      showError(
+        normalizeCommandError(e).code === UNKNOWN_ITEM_CODE
+          ? UNKNOWN_ITEM_MESSAGE
+          : 'Не удалось отклонить текст',
+      )
     } finally {
       markIdle(id)
     }

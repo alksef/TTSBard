@@ -32,6 +32,8 @@ export interface EditorHotkeySettingsDto {
   cycle_quick_mode: HotkeyDto
   toggle_history: HotkeyDto
   accent_homographs: HotkeyDto
+  approve_next_incoming: HotkeyDto
+  edit_next_incoming: HotkeyDto
 }
 
 export interface HotkeySettingsDto {

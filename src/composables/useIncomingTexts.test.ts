@@ -238,13 +238,13 @@ describe('useIncomingTexts', () => {
   it('approves an item via the matching backend command', async () => {
     const { approve } = await setupAndMount()
     await approve('item-1')
-    expect(mocks.mockInvoke).toHaveBeenCalledWith('approve_incoming_text', { incoming_id: 'item-1' })
+    expect(mocks.mockInvoke).toHaveBeenCalledWith('approve_incoming_text', { incomingId: 'item-1' })
   })
 
   it('discards an item via the matching backend command', async () => {
     const { discard } = await setupAndMount()
     await discard('item-1')
-    expect(mocks.mockInvoke).toHaveBeenCalledWith('discard_incoming_text', { incoming_id: 'item-1' })
+    expect(mocks.mockInvoke).toHaveBeenCalledWith('discard_incoming_text', { incomingId: 'item-1' })
   })
 
   it('edit returns the text for the caller to route into a new tab', async () => {
@@ -253,7 +253,7 @@ describe('useIncomingTexts', () => {
 
     const text = await edit('item-1')
 
-    expect(mocks.mockInvoke).toHaveBeenCalledWith('take_incoming_text_for_edit', { incoming_id: 'item-1' })
+    expect(mocks.mockInvoke).toHaveBeenCalledWith('take_incoming_text_for_edit', { incomingId: 'item-1' })
     expect(text).toBe('external text')
   })
 
@@ -265,6 +265,49 @@ describe('useIncomingTexts', () => {
 
     expect(text).toBeNull()
     expect(mocks.mockShowError).toHaveBeenCalled()
+  })
+
+  it('edit shows the specific message for an unknown-item rejection', async () => {
+    const { edit, pendingItems } = await setupAndMount()
+    mocks.mockInvoke.mockRejectedValueOnce({
+      code: 'input_server.unknown_item',
+      message: 'unknown id',
+      retryable: false,
+    })
+
+    const text = await edit('item-1')
+
+    expect(text).toBeNull()
+    expect(mocks.mockShowError).toHaveBeenCalledWith('Входящий текст уже обработан или отсутствует')
+    expect(pendingItems.value).toEqual([])
+  })
+
+  it('approve and discard show the specific message for an unknown-item rejection', async () => {
+    const { approve, discard } = await setupAndMount()
+    const envelope = {
+      code: 'input_server.unknown_item',
+      message: 'unknown id',
+      retryable: false,
+    }
+    mocks.mockInvoke.mockRejectedValueOnce(envelope)
+    await approve('item-1')
+    mocks.mockInvoke.mockRejectedValueOnce(envelope)
+    await discard('item-1')
+
+    expect(mocks.mockShowError).toHaveBeenCalledTimes(2)
+    expect(mocks.mockShowError).toHaveBeenCalledWith('Входящий текст уже обработан или отсутствует')
+  })
+
+  it('edit keeps the generic message for non-envelope rejections', async () => {
+    const { edit } = await setupAndMount()
+    mocks.mockInvoke.mockRejectedValueOnce(new Error('boom'))
+    await edit('item-1')
+    expect(mocks.mockShowError).toHaveBeenCalledWith('Не удалось взять текст для редактирования')
+
+    mocks.mockShowError.mockClear()
+    mocks.mockInvoke.mockRejectedValueOnce('string rejection')
+    await edit('item-1')
+    expect(mocks.mockShowError).toHaveBeenCalledWith('Не удалось взять текст для редактирования')
   })
 
   it('guards actions while in flight', async () => {

@@ -1022,6 +1022,8 @@ fn editor_action_label(action_id: &str) -> &str {
         "cycle_quick_mode" => "смены режима быстрого редактора",
         "toggle_history" => "показа/скрытия истории",
         "accent_homographs" => "расстановки ударений",
+        "approve_next_incoming" => "подтверждения отправки входящего",
+        "edit_next_incoming" => "редактирования входящего",
         _ => action_id,
     }
 }
@@ -2262,6 +2264,8 @@ impl SettingsManager {
             "cycle_quick_mode" => Hotkey::default_cycle_quick_mode(),
             "toggle_history" => Hotkey::default_toggle_history(),
             "accent_homographs" => Hotkey::default_accent_homographs(),
+            "approve_next_incoming" => Hotkey::default_approve_next_incoming(),
+            "edit_next_incoming" => Hotkey::default_edit_next_incoming(),
             _ => return Err(anyhow::anyhow!("Invalid editor action: {}", action_id)),
         };
         self.set_editor_hotkey(action_id, &default)?;
@@ -3462,6 +3466,20 @@ mod tests {
         );
     }
 
+    /// Conflict/validation messages must describe the approve_next_incoming
+    /// action as «подтверждения отправки входящего».
+    #[test]
+    fn editor_action_label_approve_next_incoming() {
+        assert_eq!(
+            editor_action_label("approve_next_incoming"),
+            "подтверждения отправки входящего"
+        );
+        assert_eq!(
+            editor_action_label("edit_next_incoming"),
+            "редактирования входящего"
+        );
+    }
+
     /// reset_editor_hotkey must return the canonical Ctrl+U default for
     /// accent_homographs and persist it.
     #[test]
@@ -3493,6 +3511,41 @@ mod tests {
 
         let settings = mgr.load().unwrap();
         assert_eq!(settings.hotkeys.editor.accent_homographs.key, "U");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// reset_editor_hotkey must return the canonical Ctrl+K default for
+    /// approve_next_incoming and persist it.
+    #[test]
+    fn reset_editor_hotkey_approve_next_incoming_returns_default() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-approve-hk-reset-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mgr = SettingsManager::with_config_dir(dir.clone()).unwrap();
+
+        let custom = crate::config::hotkeys::Hotkey {
+            modifiers: vec![],
+            key: "F12".to_string(),
+        };
+        mgr.set_editor_hotkey("approve_next_incoming", &custom).unwrap();
+
+        let default = mgr.reset_editor_hotkey("approve_next_incoming").unwrap();
+        assert_eq!(default.key, "K");
+        assert_eq!(
+            default.modifiers,
+            vec![crate::config::hotkeys::HotkeyModifier::Ctrl]
+        );
+
+        let settings = mgr.load().unwrap();
+        assert_eq!(settings.hotkeys.editor.approve_next_incoming.key, "K");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

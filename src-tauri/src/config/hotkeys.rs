@@ -39,6 +39,8 @@ pub struct EditorHotkeySettings {
     pub cycle_quick_mode: Hotkey,
     pub toggle_history: Hotkey,
     pub accent_homographs: Hotkey,
+    pub approve_next_incoming: Hotkey,
+    pub edit_next_incoming: Hotkey,
 }
 
 impl Default for EditorHotkeySettings {
@@ -57,6 +59,8 @@ impl Default for EditorHotkeySettings {
             cycle_quick_mode: Hotkey::default_cycle_quick_mode(),
             toggle_history: Hotkey::default_toggle_history(),
             accent_homographs: Hotkey::default_accent_homographs(),
+            approve_next_incoming: Hotkey::default_approve_next_incoming(),
+            edit_next_incoming: Hotkey::default_edit_next_incoming(),
         }
     }
 }
@@ -76,6 +80,8 @@ pub const EDITOR_ACTION_IDS: &[&str] = &[
     "cycle_quick_mode",
     "toggle_history",
     "accent_homographs",
+    "approve_next_incoming",
+    "edit_next_incoming",
 ];
 
 impl EditorHotkeySettings {
@@ -98,6 +104,8 @@ impl EditorHotkeySettings {
             "cycle_quick_mode" => Some(&self.cycle_quick_mode),
             "toggle_history" => Some(&self.toggle_history),
             "accent_homographs" => Some(&self.accent_homographs),
+            "approve_next_incoming" => Some(&self.approve_next_incoming),
+            "edit_next_incoming" => Some(&self.edit_next_incoming),
             _ => None,
         }
     }
@@ -117,6 +125,8 @@ impl EditorHotkeySettings {
             "cycle_quick_mode" => Some(&mut self.cycle_quick_mode),
             "toggle_history" => Some(&mut self.toggle_history),
             "accent_homographs" => Some(&mut self.accent_homographs),
+            "approve_next_incoming" => Some(&mut self.approve_next_incoming),
+            "edit_next_incoming" => Some(&mut self.edit_next_incoming),
             _ => None,
         }
     }
@@ -343,6 +353,22 @@ impl Hotkey {
         Self {
             modifiers: vec![HotkeyModifier::Ctrl],
             key: "U".to_string(),
+        }
+    }
+
+    /// Create a hotkey with Ctrl+K (approve next incoming default)
+    pub fn default_approve_next_incoming() -> Self {
+        Self {
+            modifiers: vec![HotkeyModifier::Ctrl],
+            key: "K".to_string(),
+        }
+    }
+
+    /// Create a hotkey with Ctrl+I (edit next incoming default)
+    pub fn default_edit_next_incoming() -> Self {
+        Self {
+            modifiers: vec![HotkeyModifier::Ctrl],
+            key: "I".to_string(),
         }
     }
 
@@ -639,6 +665,24 @@ mod tests {
     }
 
     #[test]
+    fn test_default_approve_next_incoming() {
+        let hk = Hotkey::default_approve_next_incoming();
+        assert_eq!(hk.key, "K");
+        assert_eq!(hk.modifiers.len(), 1);
+        assert_eq!(hk.modifiers[0], HotkeyModifier::Ctrl);
+        assert_eq!(hk.format_display(), "Ctrl+K");
+    }
+
+    #[test]
+    fn test_default_edit_next_incoming() {
+        let hk = Hotkey::default_edit_next_incoming();
+        assert_eq!(hk.key, "I");
+        assert_eq!(hk.modifiers.len(), 1);
+        assert_eq!(hk.modifiers[0], HotkeyModifier::Ctrl);
+        assert_eq!(hk.format_display(), "Ctrl+I");
+    }
+
+    #[test]
     fn test_hotkey_is_empty() {
         let empty = Hotkey {
             modifiers: vec![],
@@ -670,6 +714,8 @@ mod tests {
         assert_eq!(s.cycle_quick_mode.key, "W");
         assert_eq!(s.toggle_history.key, "H");
         assert_eq!(s.accent_homographs.key, "U");
+        assert_eq!(s.approve_next_incoming.key, "K");
+        assert_eq!(s.edit_next_incoming.key, "I");
     }
 
     #[test]

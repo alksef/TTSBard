@@ -1174,6 +1174,8 @@ pub struct EditorHotkeySettingsDto {
     pub cycle_quick_mode: HotkeyDto,
     pub toggle_history: HotkeyDto,
     pub accent_homographs: HotkeyDto,
+    pub approve_next_incoming: HotkeyDto,
+    pub edit_next_incoming: HotkeyDto,
 }
 
 impl From<EditorHotkeySettings> for EditorHotkeySettingsDto {
@@ -1192,6 +1194,8 @@ impl From<EditorHotkeySettings> for EditorHotkeySettingsDto {
             cycle_quick_mode: h.cycle_quick_mode.into(),
             toggle_history: h.toggle_history.into(),
             accent_homographs: h.accent_homographs.into(),
+            approve_next_incoming: h.approve_next_incoming.into(),
+            edit_next_incoming: h.edit_next_incoming.into(),
         }
     }
 }
@@ -1212,6 +1216,8 @@ impl From<EditorHotkeySettingsDto> for EditorHotkeySettings {
             cycle_quick_mode: dto.cycle_quick_mode.into(),
             toggle_history: dto.toggle_history.into(),
             accent_homographs: dto.accent_homographs.into(),
+            approve_next_incoming: dto.approve_next_incoming.into(),
+            edit_next_incoming: dto.edit_next_incoming.into(),
         }
     }
 }
@@ -1740,6 +1746,14 @@ mod tests {
                     modifiers: vec![HotkeyModifierDto::Ctrl],
                     key: "U".into(),
                 },
+                approve_next_incoming: HotkeyDto {
+                    modifiers: vec![HotkeyModifierDto::Ctrl],
+                    key: "K".into(),
+                },
+                edit_next_incoming: HotkeyDto {
+                    modifiers: vec![HotkeyModifierDto::Ctrl],
+                    key: "I".into(),
+                },
             },
         };
 
@@ -2076,6 +2090,14 @@ mod tests {
                     key: String::new(),
                 },
                 accent_homographs: HotkeyDto {
+                    modifiers: vec![],
+                    key: String::new(),
+                },
+                approve_next_incoming: HotkeyDto {
+                    modifiers: vec![],
+                    key: String::new(),
+                },
+                edit_next_incoming: HotkeyDto {
                     modifiers: vec![],
                     key: String::new(),
                 },

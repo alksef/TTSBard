@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, computed } from 'vue'
 import { Inbox } from 'lucide-vue-next'
 import type { EditorTab } from '../../composables/useEditorTabs'
 
@@ -42,6 +42,11 @@ function commitRename(id: string) {
 function cancelRename() {
   editingId.value = null
 }
+
+const pinnedCountText = computed(() => {
+  const match = props.pinnedTitle?.match(/\((\d+)\)/)
+  return match ? `(${match[1]})` : ''
+})
 </script>
 
 <template>
@@ -51,11 +56,12 @@ function cancelRename() {
         v-if="pinnedTitle"
         class="tab-item pinned-tab"
         :class="{ active: pinnedActive }"
-        :title="pinnedTitle"
+        title="Входящие"
+        aria-label="Входящие"
         @click="emit('select-pinned')"
       >
         <Inbox :size="13" class="pinned-icon" />
-        <span class="tab-title">{{ pinnedTitle }}</span>
+        <span class="tab-title">{{ pinnedCountText }}</span>
       </div>
       <div
         v-for="tab in tabs"
@@ -151,8 +157,8 @@ function cancelRename() {
 }
 
 .pinned-tab {
-  gap: 5px;
-  padding: 4px 10px 4px 10px;
+  gap: 3px;
+  padding: 2px 6px;
 }
 
 .pinned-icon {
