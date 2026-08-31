@@ -15,6 +15,8 @@ import PhraseHistoryList from './PhraseHistoryList.vue'
 import EditorMenu from './editor/EditorMenu.vue'
 import { useEditorTabs } from '../composables/useEditorTabs'
 import EditorTabs from './editor/EditorTabs.vue'
+import IncomingTextsTab from './editor/IncomingTextsTab.vue'
+import { useIncomingTexts } from '../composables/useIncomingTexts'
 import StatusMessage from './shared/StatusMessage.vue'
 import { useTypingBurst, type TypingConsumer } from '../composables/useTypingBurst'
 import { acceptClear, applyAiResponse } from './inputAcceptance'
@@ -34,6 +36,23 @@ import { useRuAccentRuntime } from '../composables/useRuAccentRuntime'
 const { showError } = useErrorHandler()
 const { tabs, activeId, active, create: createTab, close: closeTab, select: selectTab, next: nextTab, previous: previousTab, rename: renameTab, init: initTabs, flushSave: flushTabsSave } = useEditorTabs()
 
+const {
+  pendingItems: incomingPendingItems,
+  externalJobs: incomingExternalJobs,
+  autoPlay: incomingAutoPlay,
+  busyIds: incomingBusyIds,
+  loadError: incomingLoadError,
+  count: incomingCount,
+  approve: approveIncoming,
+  edit: editIncoming,
+  discard: discardIncoming,
+  setAutoPlay: setIncomingAutoPlay,
+} = useIncomingTexts()
+
+const showIncomingTab = ref(false)
+
+const incomingTabTitle = computed(() => `Входящие (${incomingCount.value})`)
+
 const text = computed<string>({
   get: () => active.value.text,
   set: (v) => { active.value.text = v },
@@ -42,15 +61,35 @@ const text = computed<string>({
 const editorRef = ref<InstanceType<typeof TtsEditor> | null>(null)
 
 async function onCreate() {
+  showIncomingTab.value = false
   createTab()
   await nextTick()
   editorRef.value?.focus()
 }
 
 async function onSelect(id: string) {
+  showIncomingTab.value = false
   selectTab(id)
   await nextTick()
   editorRef.value?.focus()
+}
+
+function onSelectPinned() {
+  showIncomingTab.value = true
+}
+
+async function onEditIncoming(id: string) {
+  const textToEdit = await editIncoming(id)
+  if (textToEdit === null) return
+  const newId = createTab()
+  const tab = tabs.value.find(t => t.id === newId)
+  if (tab) {
+    tab.text = textToEdit
+    tab.route = 'voice_only'
+  }
+  showIncomingTab.value = false
+  await nextTick()
+  focusEditor()
 }
 
 const isCorrecting = ref(false)
@@ -811,7 +850,11 @@ function toggleHistory() {
   showHistory.value = !showHistory.value
 }
 
-function focusEditor() {
+async function focusEditor() {
+  if (showIncomingTab.value) {
+    showIncomingTab.value = false
+    await nextTick()
+  }
   editorRef.value?.focus()
 }
 
@@ -889,44 +932,62 @@ defineExpose({ focusEditor })
       @dismiss="saveStatusMessage = ''"
     />
     <div class="input-group">
-      <div class="textarea-wrapper" :class="{ 'minimal-wrapper': isMinimalMode }" @keydown.capture="handleEditorScopeKeydown">
+      <div class="textarea-wrapper" :class="{ 'minimal-wrapper': isMinimalMode, 'incoming-wrapper': showIncomingTab }" @keydown.capture="handleEditorScopeKeydown">
         <EditorTabs
           :tabs="tabs"
           :active-id="activeId"
+          :pinned-title="incomingTabTitle"
+          :pinned-active="showIncomingTab"
           @create="onCreate"
           @close="closeTab"
           @select="onSelect"
           @rename="renameTab"
+          @select-pinned="onSelectPinned"
         />
-        <TtsEditor
-          ref="editorRef"
-          v-model="text"
-          :placeholder="'Введите текст для озвучивания...'"
-          :replacements="replacementsRecord"
-          :usernames="usernamesRecord"
-          :editor-height-px="editorHeightPx"
-          @user-edit="onUserEdit"
-          @enter="handleEnter"
-          @submit-continue="handleSubmitContinue"
-          @esc="handleEsc"
+        <IncomingTextsTab
+          v-if="showIncomingTab"
+          :pending-items="incomingPendingItems"
+          :external-jobs="incomingExternalJobs"
+          :auto-play="incomingAutoPlay"
+          :busy-ids="incomingBusyIds"
+          :compact="isMinimalMode"
+          :load-error="incomingLoadError"
+          @approve="approveIncoming"
+          @discard="discardIncoming"
+          @edit="onEditIncoming"
+          @toggle-auto-play="setIncomingAutoPlay"
         />
-        <div
-          class="editor-resize-handle"
-          :class="{ 'is-disabled': resizeHandleDisabled }"
-          role="separator"
-          aria-orientation="horizontal"
-          :aria-disabled="resizeHandleDisabled"
-          :aria-label="resizeHandleTitle"
-          :title="resizeHandleTitle"
-          @pointerdown="onResizePointerDown"
-          @pointermove="onResizePointerMove"
-          @pointerup="onResizePointerUp"
-          @pointercancel="onResizePointerCancel"
-          @lostpointercapture="onResizeLostPointerCapture"
-        />
+        <template v-else>
+          <TtsEditor
+            ref="editorRef"
+            v-model="text"
+            :placeholder="'Введите текст для озвучивания...'"
+            :replacements="replacementsRecord"
+            :usernames="usernamesRecord"
+            :editor-height-px="editorHeightPx"
+            @user-edit="onUserEdit"
+            @enter="handleEnter"
+            @submit-continue="handleSubmitContinue"
+            @esc="handleEsc"
+          />
+          <div
+            class="editor-resize-handle"
+            :class="{ 'is-disabled': resizeHandleDisabled }"
+            role="separator"
+            aria-orientation="horizontal"
+            :aria-disabled="resizeHandleDisabled"
+            :aria-label="resizeHandleTitle"
+            :title="resizeHandleTitle"
+            @pointerdown="onResizePointerDown"
+            @pointermove="onResizePointerMove"
+            @pointerup="onResizePointerUp"
+            @pointercancel="onResizePointerCancel"
+            @lostpointercapture="onResizeLostPointerCapture"
+          />
+        </template>
       </div>
 
-      <div class="editor-action-bar" :class="{ 'compact-action-bar': isMinimalMode }">
+      <div v-if="!showIncomingTab" class="editor-action-bar" :class="{ 'compact-action-bar': isMinimalMode }">
         <EditorMenu
           :is-ai-enabled="isAiButtonEnabled"
           :has-text="!!text.trim()"
@@ -1006,13 +1067,14 @@ defineExpose({ focusEditor })
       </div>
 
       <PhraseHistoryList
+        v-if="!showIncomingTab"
         v-model:expanded="showHistory"
         :hide-toggle="true"
         @select="appendPhrase"
         @append="appendPhrase"
         @replace="replacePhrase"
       />
-      <div v-if="aiEditorEnabled" class="ai-editor-hint">
+      <div v-if="aiEditorEnabled && !showIncomingTab" class="ai-editor-hint">
         AI
       </div>
     </div>
@@ -1055,6 +1117,11 @@ defineExpose({ focusEditor })
 .textarea-wrapper {
   position: relative;
   margin-bottom: 0;
+}
+
+.textarea-wrapper.incoming-wrapper {
+  display: flex;
+  flex-direction: column;
 }
 
 .textarea-wrapper.minimal-wrapper {

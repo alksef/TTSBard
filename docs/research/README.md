@@ -13,6 +13,7 @@ AI-сессий хранятся в `.work/ai/`, а не здесь.
 - [Архитектура улучшения аудиопотока](./08-audio-stream-enhancement-research.md)
 - [VTube Studio lip-sync](./11-vtube-studio-lipsync-deep-research.md)
 - [Stream Deck integration](./12-stream-deck-integration-research.md)
+- [LunaTranslator → TTSBard: граница интеграции текста](./15-lunatranslator-input-server-integration.md)
 
 Ранние дубли и исследования, полностью поглощённые реализацией, удалены. Их
 история при необходимости остаётся доступной через Git.

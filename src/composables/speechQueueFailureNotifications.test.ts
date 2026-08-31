@@ -12,6 +12,7 @@ function makeJob(overrides: Partial<JobDto> = {}): JobDto {
     attempt: 1,
     created_at_ms: 1234567890,
     last_activity_at_ms: 1234567890,
+    source: 'editor',
     ...overrides,
   }
 }

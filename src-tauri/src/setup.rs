@@ -68,6 +68,10 @@ pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std:
         upnp_enabled: settings.webview.upnp_enabled,
     };
 
+    // Load input server settings into AppState
+    info!("Loading input server settings...");
+    *app_state.inner().input_server.settings.blocking_write() = settings.input_server.clone();
+
     // Load hotkey_enabled setting into AppState
     info!("Loading hotkey_enabled setting...");
     *app_state.inner().hotkey_enabled.lock() = settings.hotkey_enabled;
@@ -308,6 +312,9 @@ pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std:
 
     // Initialize Twitch client
     init_twitch_client(&app_state, app.handle().clone());
+
+    // Initialize input server (after persisted input settings are loaded above)
+    init_input_server(&app_state, app.handle().clone());
 
     // Initialize VTube Studio autostart
     init_vtube_studio(&app_state, app.handle().clone());
@@ -678,6 +685,24 @@ fn init_twitch_client(app_state: &AppState, app_handle: AppHandle) {
     });
 }
 
+/// Initialize the input server loopback supervisor.
+fn init_input_server(app_state: &AppState, app_handle: AppHandle) {
+    // Seed the in-memory run request from the persisted boot preference before
+    // the supervisor begins. The run request is not persisted.
+    let start_on_boot = {
+        let settings = app_state.input_server.settings.blocking_read();
+        settings.start_on_boot
+    };
+    app_state.input_server.set_run_request(start_on_boot);
+
+    let shutdown = app_state.shutdown.clone();
+
+    app_state.runtime.spawn(async move {
+        crate::servers::run_input_server(app_handle, shutdown).await;
+    });
+    info!("Input server supervisor started");
+}
+
 /// Initialize window protection (Windows only)
 #[cfg(windows)]
 fn init_window_protection(app: &App, windows_manager: &WindowsManager) {
@@ -979,8 +1004,8 @@ async fn speech_worker(
                     let text = insert_text.clone();
                     let webview_svc = webview.clone();
                     let twitch_svc = twitch.clone();
-                    let skip_twitch = snapshot.skip_twitch;
-                    let skip_webview = snapshot.skip_webview;
+                    let skip_twitch = snapshot.delivery.skip_twitch();
+                    let skip_webview = snapshot.delivery.skip_webview();
                     let join_handle = tokio::task::spawn_blocking(move || {
                         route_processed_text_from_handles(
                             &webview_svc,
@@ -1101,7 +1126,9 @@ fn missing_piper_notification(model_name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{missing_piper_model_name, missing_piper_notification, route_processed_text_from_handles};
+    use super::{
+        missing_piper_model_name, missing_piper_notification, route_processed_text_from_handles,
+    };
 
     #[test]
     fn missing_saved_piper_returns_safe_model_name() {
@@ -1134,12 +1161,10 @@ mod tests {
         use crate::events::{AppEvent, TwitchEvent};
 
         let webview = crate::webview::service::WebViewService::new();
-        let (webview_tx, mut webview_rx) =
-            tokio::sync::mpsc::unbounded_channel::<AppEvent>();
+        let (webview_tx, mut webview_rx) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
         webview.set_event_sender(webview_tx);
 
-        let (twitch_tx, mut twitch_rx) =
-            tokio::sync::broadcast::channel::<TwitchEvent>(16);
+        let (twitch_tx, mut twitch_rx) = tokio::sync::broadcast::channel::<TwitchEvent>(16);
         let twitch = crate::twitch::TwitchService::new(twitch_tx);
         twitch.settings.blocking_write().enabled = true;
 
@@ -1165,5 +1190,29 @@ mod tests {
             Ok(other) => panic!("unexpected twitch event: {other:?}"),
             Err(error) => panic!("missing twitch event: {error}"),
         }
+    }
+
+    #[test]
+    fn routed_text_is_skipped_when_both_consumers_are_off() {
+        use crate::events::{AppEvent, TwitchEvent};
+
+        let webview = crate::webview::service::WebViewService::new();
+        let (webview_tx, mut webview_rx) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
+        webview.set_event_sender(webview_tx);
+
+        let (twitch_tx, mut twitch_rx) = tokio::sync::broadcast::channel::<TwitchEvent>(16);
+        let twitch = crate::twitch::TwitchService::new(twitch_tx);
+        twitch.settings.blocking_write().enabled = true;
+
+        route_processed_text_from_handles(&webview, &twitch, "hello", true, true);
+
+        assert!(
+            webview_rx.try_recv().is_err(),
+            "webview must not receive a skipped message"
+        );
+        assert!(
+            twitch_rx.try_recv().is_err(),
+            "twitch must not receive a skipped message"
+        );
     }
 }

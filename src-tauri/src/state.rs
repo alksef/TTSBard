@@ -79,6 +79,9 @@ pub struct AppState {
     /// WebView service (settings + event sender)
     pub webview: Arc<crate::webview::service::WebViewService>,
 
+    /// Input server service (settings, pending-review inbox, runtime status)
+    pub input_server: Arc<crate::input_server::InputServerService>,
+
     /// Включены ли хоткеи (runtime only, synced with settings.json)
     pub hotkey_enabled: Arc<Mutex<bool>>,
 
@@ -194,9 +197,12 @@ impl AppState {
 
         let webview = Arc::new(crate::webview::service::WebViewService::new());
 
+        let input_server = Arc::new(crate::input_server::InputServerService::new());
+
         Self {
             event_sender: Arc::new(Mutex::new(None)),
             webview,
+            input_server,
             hotkey_enabled: Arc::new(Mutex::new(true)), // default true
             tts_config: Arc::new(RwLock::new(TtsConfig::default())),
             tts_registry: Arc::new(Mutex::new(TtsProviderRegistry::new())),
@@ -1056,6 +1062,15 @@ mod tests {
 
         assert_eq!(state.take_notifications(), vec!["message"]);
         assert!(state.take_notifications().is_empty());
+    }
+
+    #[test]
+    fn input_server_service_is_initialized() {
+        let state = AppState::new();
+        assert_eq!(
+            state.input_server.status(),
+            crate::input_server::InputServerStatus::Stopped
+        );
     }
 
     #[test]

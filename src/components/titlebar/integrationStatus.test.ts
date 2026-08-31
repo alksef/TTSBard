@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   integrationStatusLabel,
+  inputServerStatusLabel,
+  inputServerTone,
   twitchTone,
   vtsTone,
   webviewTone,
@@ -111,6 +113,28 @@ describe('manual Stop after Error gives gray, not stale red', () => {
     expect(vtsTone({ shouldRun: false }, { state: 'Error', message: 'socket closed' })).toBe(
       'gray',
     )
+  })
+})
+
+describe('inputServerTone', () => {
+  it('is green for running, red for error, gray otherwise', () => {
+    expect(inputServerTone({ state: 'running' })).toBe('green')
+    expect(inputServerTone({ state: 'error', message: 'x' })).toBe('red')
+    expect(inputServerTone({ state: 'error' })).toBe('red')
+    expect(inputServerTone({ state: 'starting' })).toBe('gray')
+    expect(inputServerTone({ state: 'stopped' })).toBe('gray')
+  })
+})
+
+describe('inputServerStatusLabel', () => {
+  it('produces the exact Russian status labels', () => {
+    expect(inputServerStatusLabel({ state: 'running' })).toBe('Входящий сервер — работает')
+    expect(inputServerStatusLabel({ state: 'starting' })).toBe('Входящий сервер — запускается')
+    expect(inputServerStatusLabel({ state: 'stopped' })).toBe('Входящий сервер — остановлен')
+    expect(inputServerStatusLabel({ state: 'error', message: 'порт занят' })).toBe(
+      'Входящий сервер — ошибка: порт занят',
+    )
+    expect(inputServerStatusLabel({ state: 'error' })).toBe('Входящий сервер — ошибка')
   })
 })
 

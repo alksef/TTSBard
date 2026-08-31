@@ -26,6 +26,7 @@ function makeJob(overrides: Partial<JobDto> = {}): JobDto {
     attempt: 1,
     created_at_ms: 1234567890,
     last_activity_at_ms: 1234567890,
+    source: 'editor',
     ...overrides,
   }
 }
@@ -117,6 +118,31 @@ describe('isSpeechQueueStateDto', () => {
 
   it('rejects job with invalid status', () => {
     const bad = makeDto([{ ...makeJob(), status: 'bogus' as JobDto['status'] }])
+    expect(isSpeechQueueStateDto(bad)).toBe(false)
+  })
+
+  it('accepts job with editor source', () => {
+    const dto = makeDto([makeJob({ source: 'editor' })])
+    expect(isSpeechQueueStateDto(dto)).toBe(true)
+  })
+
+  it('accepts job with external source', () => {
+    const dto = makeDto([makeJob({ source: 'external' })])
+    expect(isSpeechQueueStateDto(dto)).toBe(true)
+  })
+
+  it('rejects job with missing source', () => {
+    const bad = makeDto([{ ...makeJob(), source: undefined as unknown as JobDto['source'] }])
+    expect(isSpeechQueueStateDto(bad)).toBe(false)
+  })
+
+  it('rejects job with unknown source', () => {
+    const bad = makeDto([{ ...makeJob(), source: 'telegram' as JobDto['source'] }])
+    expect(isSpeechQueueStateDto(bad)).toBe(false)
+  })
+
+  it('rejects job with non-string source', () => {
+    const bad = makeDto([{ ...makeJob(), source: 42 as unknown as JobDto['source'] }])
     expect(isSpeechQueueStateDto(bad)).toBe(false)
   })
 

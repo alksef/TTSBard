@@ -7,6 +7,8 @@ export type JobStatus =
   | 'failed'
   | 'cancelled'
 
+export type SubmissionSource = 'editor' | 'external'
+
 export interface JobDto {
   job_id: string
   original_text: string
@@ -16,6 +18,7 @@ export interface JobDto {
   attempt: number
   created_at_ms: number
   last_activity_at_ms: number
+  source: SubmissionSource
 }
 
 export interface SpeechQueueStateDto {
@@ -58,8 +61,14 @@ const VALID_STATUSES: ReadonlySet<string> = new Set([
   'cancelled',
 ])
 
+const VALID_SOURCES: ReadonlySet<string> = new Set(['editor', 'external'])
+
 function isJobStatus(s: unknown): s is JobStatus {
   return typeof s === 'string' && VALID_STATUSES.has(s)
+}
+
+function isSubmissionSource(s: unknown): s is SubmissionSource {
+  return typeof s === 'string' && VALID_SOURCES.has(s)
 }
 
 function isJobDto(job: unknown): job is JobDto {
@@ -77,7 +86,8 @@ function isJobDto(job: unknown): job is JobDto {
     typeof j.created_at_ms === 'number' &&
     Number.isFinite(j.created_at_ms) &&
     typeof j.last_activity_at_ms === 'number' &&
-    Number.isFinite(j.last_activity_at_ms)
+    Number.isFinite(j.last_activity_at_ms) &&
+    isSubmissionSource(j.source)
   )
 }
 

@@ -20,6 +20,59 @@ pub struct AcceptedJob {
     pub job_id: Uuid,
 }
 
+// ── Submission source metadata ──
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SubmissionSource {
+    Editor,
+    External,
+}
+
+impl Default for SubmissionSource {
+    fn default() -> Self {
+        SubmissionSource::Editor
+    }
+}
+
+// ── Delivery policy ──
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeliveryPolicy {
+    Editor {
+        skip_twitch: bool,
+        skip_webview: bool,
+    },
+    AudioOnly,
+}
+
+impl DeliveryPolicy {
+    pub fn editor(skip_twitch: bool, skip_webview: bool) -> Self {
+        DeliveryPolicy::Editor {
+            skip_twitch,
+            skip_webview,
+        }
+    }
+
+    pub fn audio_only() -> Self {
+        DeliveryPolicy::AudioOnly
+    }
+
+    pub fn skip_twitch(&self) -> bool {
+        match self {
+            DeliveryPolicy::Editor { skip_twitch, .. } => *skip_twitch,
+            DeliveryPolicy::AudioOnly => true,
+        }
+    }
+
+    pub fn skip_webview(&self) -> bool {
+        match self {
+            DeliveryPolicy::Editor { skip_webview, .. } => *skip_webview,
+            DeliveryPolicy::AudioOnly => true,
+        }
+    }
+}
+
 // ── WorkItem: returned by claim_next_generation ──
 
 #[derive(Clone)]
@@ -45,8 +98,8 @@ impl std::fmt::Debug for WorkItem {
 pub struct Snapshot {
     pub provider: String,
     pub voice: String,
-    pub skip_twitch: bool,
-    pub skip_webview: bool,
+    pub source: SubmissionSource,
+    pub delivery: DeliveryPolicy,
     pub ai_enabled: bool,
     pub audio_effects: AudioEffectsSettings,
     pub dsp: DspSettings,
@@ -84,6 +137,7 @@ pub struct SpeechJob {
     pub attempt: u32,
     pub created_at_ms: i64,
     pub last_activity_at_ms: i64,
+    pub source: SubmissionSource,
     pub snapshot: Snapshot,
     pub handoff_guard: Arc<parking_lot::Mutex<()>>,
 }
@@ -91,6 +145,7 @@ pub struct SpeechJob {
 impl SpeechJob {
     fn new(original_text: String, snapshot: Snapshot) -> Self {
         let now_ms = Utc::now().timestamp_millis();
+        let source = snapshot.source;
         Self {
             job_id: Uuid::new_v4(),
             original_text,
@@ -100,6 +155,7 @@ impl SpeechJob {
             attempt: 1,
             created_at_ms: now_ms,
             last_activity_at_ms: now_ms,
+            source,
             snapshot,
             handoff_guard: Arc::new(parking_lot::Mutex::new(())),
         }
@@ -117,6 +173,7 @@ impl SpeechJob {
         last_activity_at_ms: i64,
         snapshot: Snapshot,
     ) -> Self {
+        let source = snapshot.source;
         Self {
             job_id,
             original_text,
@@ -126,6 +183,7 @@ impl SpeechJob {
             attempt,
             created_at_ms,
             last_activity_at_ms,
+            source,
             snapshot,
             handoff_guard: Arc::new(parking_lot::Mutex::new(())),
         }
@@ -160,6 +218,7 @@ pub struct JobDto {
     pub attempt: u32,
     pub created_at_ms: i64,
     pub last_activity_at_ms: i64,
+    pub source: SubmissionSource,
 }
 
 impl From<&SpeechJob> for JobDto {
@@ -173,6 +232,7 @@ impl From<&SpeechJob> for JobDto {
             attempt: job.attempt,
             created_at_ms: job.created_at_ms,
             last_activity_at_ms: job.last_activity_at_ms,
+            source: job.source,
         }
     }
 }
@@ -538,8 +598,8 @@ mod tests {
         Snapshot {
             provider: "test-provider".into(),
             voice: "test-voice".into(),
-            skip_twitch: false,
-            skip_webview: false,
+            source: SubmissionSource::Editor,
+            delivery: DeliveryPolicy::editor(false, false),
             ai_enabled: false,
             audio_effects: AudioEffectsSettings::default(),
             dsp: DspSettings::default(),
@@ -556,6 +616,62 @@ mod tests {
 
     fn text_err(e: &QueueError) -> String {
         e.to_string()
+    }
+
+    // ── submission source / delivery policy ──
+
+    #[test]
+    fn submission_source_serializes_to_editor_and_external() {
+        assert_eq!(
+            serde_json::to_string(&SubmissionSource::Editor).unwrap(),
+            "\"editor\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SubmissionSource::External).unwrap(),
+            "\"external\""
+        );
+    }
+
+    #[test]
+    fn source_metadata_reaches_job_dto() {
+        let mut editor_q = SpeechQueue::new();
+        editor_q.submit("editor text", snap()).unwrap();
+        assert_eq!(editor_q.state().jobs[0].source, SubmissionSource::Editor);
+
+        let mut external_snapshot = snap();
+        external_snapshot.source = SubmissionSource::External;
+        external_snapshot.delivery = DeliveryPolicy::AudioOnly;
+
+        let mut external_q = SpeechQueue::new();
+        external_q
+            .submit("external text", external_snapshot)
+            .unwrap();
+        assert_eq!(
+            external_q.state().jobs[0].source,
+            SubmissionSource::External
+        );
+    }
+
+    #[test]
+    fn editor_delivery_reflects_prefix_skip_flags() {
+        let both = DeliveryPolicy::editor(true, true);
+        assert!(both.skip_twitch());
+        assert!(both.skip_webview());
+
+        let twitch_only = DeliveryPolicy::editor(true, false);
+        assert!(twitch_only.skip_twitch());
+        assert!(!twitch_only.skip_webview());
+
+        let everywhere = DeliveryPolicy::editor(false, false);
+        assert!(!everywhere.skip_twitch());
+        assert!(!everywhere.skip_webview());
+    }
+
+    #[test]
+    fn audio_only_delivery_forces_skip_webview_and_twitch() {
+        let policy = DeliveryPolicy::AudioOnly;
+        assert!(policy.skip_twitch());
+        assert!(policy.skip_webview());
     }
 
     // ── submit ──
@@ -733,7 +849,10 @@ mod tests {
         q.start_generation(id1).unwrap();
         q.fail_generation(id1, "err".into()).unwrap();
 
-        let item = q.claim_next_generation().unwrap().expect("should claim second");
+        let item = q
+            .claim_next_generation()
+            .unwrap()
+            .expect("should claim second");
         assert_eq!(item.job_id, id2);
         assert_eq!(item.original_text, "second");
         assert_eq!(q.state().jobs[0].status, JobStatus::Failed);
@@ -1896,7 +2015,10 @@ mod tests {
 
         assert_eq!(q.next_actionable(), Some(id2));
 
-        let item = q.claim_next_generation().unwrap().expect("should claim second");
+        let item = q
+            .claim_next_generation()
+            .unwrap()
+            .expect("should claim second");
         assert_eq!(item.job_id, id2);
         assert_eq!(item.original_text, "second");
 
@@ -1923,7 +2045,10 @@ mod tests {
 
         assert_eq!(q.next_actionable(), Some(id2));
 
-        let item = q.claim_next_generation().unwrap().expect("should claim second");
+        let item = q
+            .claim_next_generation()
+            .unwrap()
+            .expect("should claim second");
         assert_eq!(item.job_id, id2);
 
         let state = q.state();
@@ -2023,8 +2148,8 @@ mod tests {
         let snapshot = Snapshot {
             provider: "test".into(),
             voice: "alloy".into(),
-            skip_twitch: false,
-            skip_webview: false,
+            source: SubmissionSource::Editor,
+            delivery: DeliveryPolicy::editor(false, false),
             ai_enabled: true,
             audio_effects: AudioEffectsSettings::default(),
             dsp: DspSettings::default(),
@@ -2468,8 +2593,8 @@ mod tests {
         let snapshot = Snapshot {
             provider: "test-provider".into(),
             voice: "test-voice".into(),
-            skip_twitch: true,
-            skip_webview: false,
+            source: SubmissionSource::Editor,
+            delivery: DeliveryPolicy::editor(true, false),
             ai_enabled: true,
             audio_effects: AudioEffectsSettings::default(),
             dsp: DspSettings::default(),

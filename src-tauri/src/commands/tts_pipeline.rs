@@ -4,7 +4,7 @@ use crate::audio::{
 use crate::config::{
     AiSettings, AppSettings, AudioEffectsSettings, AudioSettings, DspSettings, NetworkSettings,
 };
-use crate::speech_queue::Snapshot;
+use crate::speech_queue::{DeliveryPolicy, Snapshot};
 use crate::state::AppState;
 use crate::stress::adapters::ProviderStressAdapter;
 use crate::stress::annotations::StructuredStress;
@@ -112,10 +112,7 @@ fn adapt_structured_stress(provider: &TtsProvider, stress: &StructuredStress) ->
 /// the cache key; `insert_text` is always `StructuredStress.original`, so it is
 /// marker-free and never carries `ё` render-base restorations. Only
 /// `provider_text` crosses the provider boundary.
-fn provider_and_insert_text(
-    provider: &TtsProvider,
-    stress: &StructuredStress,
-) -> (String, String) {
+fn provider_and_insert_text(provider: &TtsProvider, stress: &StructuredStress) -> (String, String) {
     let provider_text = adapt_structured_stress(provider, stress);
     let insert_text = stress.original.clone();
     (provider_text, insert_text)
@@ -352,19 +349,39 @@ async fn native_stress_blocking(
 
 // ── Snapshot-driven preparation (pure, no side effects) ──
 
+/// Resolve the synthesis content text from the submitted string and the
+/// delivery policy stored on the snapshot.
+///
+/// - Editor delivery preserves the current prefix parsing, prefix removal and
+///   mismatch protection.
+/// - `AudioOnly` treats the complete submitted string as content; a leading `!`
+///   is literal text and is never stripped or interpreted as a route.
+fn resolve_speech_content(snapshot: &Snapshot, original_text: &str) -> Result<String, String> {
+    match &snapshot.delivery {
+        DeliveryPolicy::Editor {
+            skip_twitch,
+            skip_webview,
+        } => {
+            let prefix_result = crate::preprocessor::parse_prefix(original_text);
+            if prefix_result.skip_twitch != *skip_twitch
+                || prefix_result.skip_webview != *skip_webview
+            {
+                return Err(
+                    "Internal error: prefix flags mismatch between snapshot and parsed text"
+                        .to_string(),
+                );
+            }
+            Ok(prefix_result.text)
+        }
+        DeliveryPolicy::AudioOnly => Ok(original_text.to_string()),
+    }
+}
+
 pub async fn prepare_speech(
     snapshot: &Snapshot,
     original_text: &str,
 ) -> Result<PreparedSpeech, String> {
-    let prefix_result = crate::preprocessor::parse_prefix(original_text);
-    if prefix_result.skip_twitch != snapshot.skip_twitch
-        || prefix_result.skip_webview != snapshot.skip_webview
-    {
-        return Err(
-            "Internal error: prefix flags mismatch between snapshot and parsed text".to_string(),
-        );
-    }
-    let text = prefix_result.text;
+    let text = resolve_speech_content(snapshot, original_text)?;
 
     let text = preprocess_text_with_preprocessor(&text, snapshot.preprocessor.as_ref());
 
@@ -563,6 +580,7 @@ pub async fn synthesize_and_export(state: &AppState, text: &str, path: &str) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::speech_queue::SubmissionSource;
 
     fn make_settings(boundary_cleanup: bool) -> AppSettings {
         let mut s = AppSettings::default();
@@ -681,8 +699,8 @@ mod tests {
         Snapshot {
             provider: "test-provider".into(),
             voice: "test-voice".into(),
-            skip_twitch,
-            skip_webview,
+            source: SubmissionSource::Editor,
+            delivery: DeliveryPolicy::editor(skip_twitch, skip_webview),
             ai_enabled,
             audio_effects: AudioEffectsSettings::default(),
             dsp: DspSettings::default(),
@@ -706,6 +724,55 @@ mod tests {
             err.contains("prefix flags mismatch"),
             "expected prefix mismatch error, got: {err}"
         );
+    }
+
+    /// Editor delivery preserves prefix parsing and prefix removal.
+    #[test]
+    fn editor_delivery_parses_and_strips_prefix() {
+        let both = make_snapshot(true, true, false);
+        assert_eq!(resolve_speech_content(&both, "!!hello").unwrap(), "hello");
+
+        let skip_twitch = make_snapshot(true, false, false);
+        assert_eq!(
+            resolve_speech_content(&skip_twitch, "!hello").unwrap(),
+            "hello"
+        );
+
+        let everywhere = make_snapshot(false, false, false);
+        assert_eq!(
+            resolve_speech_content(&everywhere, "hello").unwrap(),
+            "hello"
+        );
+    }
+
+    /// Editor delivery keeps its prefix mismatch protection intact.
+    #[test]
+    fn editor_delivery_preserves_prefix_mismatch_protection() {
+        let snapshot = make_snapshot(true, false, false);
+        let err = resolve_speech_content(&snapshot, "hello").unwrap_err();
+        assert!(
+            err.contains("prefix flags mismatch"),
+            "expected prefix mismatch error, got: {err}"
+        );
+    }
+
+    /// External audio-only treats the complete string as content; a leading `!`
+    /// is literal text and is neither stripped nor interpreted as a route.
+    #[test]
+    fn audio_only_delivery_treats_full_string_as_content() {
+        let mut snapshot = make_snapshot(false, false, false);
+        snapshot.source = SubmissionSource::External;
+        snapshot.delivery = DeliveryPolicy::AudioOnly;
+
+        assert_eq!(
+            resolve_speech_content(&snapshot, "!!hello").unwrap(),
+            "!!hello"
+        );
+        assert_eq!(
+            resolve_speech_content(&snapshot, "!hello").unwrap(),
+            "!hello"
+        );
+        assert_eq!(resolve_speech_content(&snapshot, "hello").unwrap(), "hello");
     }
 
     /// ai_correct_text_with_settings with ai_enabled=false returns unchanged text.
@@ -822,8 +889,8 @@ mod tests {
         let snapshot_alloy = Snapshot {
             provider: "openai".into(),
             voice: alloy_tts.voice().to_string(),
-            skip_twitch: false,
-            skip_webview: false,
+            source: SubmissionSource::Editor,
+            delivery: DeliveryPolicy::editor(false, false),
             ai_enabled: false,
             audio_effects: AudioEffectsSettings::default(),
             dsp: DspSettings::default(),
@@ -840,8 +907,8 @@ mod tests {
         let snapshot_echo = Snapshot {
             provider: "openai".into(),
             voice: echo_tts.voice().to_string(),
-            skip_twitch: false,
-            skip_webview: false,
+            source: SubmissionSource::Editor,
+            delivery: DeliveryPolicy::editor(false, false),
             ai_enabled: false,
             audio_effects: AudioEffectsSettings::default(),
             dsp: DspSettings::default(),
@@ -1079,8 +1146,7 @@ mod tests {
     #[test]
     fn insert_text_is_clean_original_for_silero() {
         let stress = native_stress(None, "зам+ок и м+ука").expect("stress builds");
-        let (provider_text, insert_text) =
-            provider_and_insert_text(&silero_provider(), &stress);
+        let (provider_text, insert_text) = provider_and_insert_text(&silero_provider(), &stress);
         assert_eq!(provider_text, "зам+ок и м+ука");
         assert_eq!(insert_text, "замок и мука");
         assert!(!insert_text.contains('+'));
@@ -1093,8 +1159,7 @@ mod tests {
     #[test]
     fn cache_key_uses_provider_text_not_insert_text() {
         let stress = native_stress(None, "зам+ок").expect("stress builds");
-        let (provider_text, insert_text) =
-            provider_and_insert_text(&silero_provider(), &stress);
+        let (provider_text, insert_text) = provider_and_insert_text(&silero_provider(), &stress);
         assert_eq!(provider_text, "зам+ок");
         assert_eq!(insert_text, "замок");
 
@@ -1122,8 +1187,7 @@ mod tests {
             }],
         )
         .expect("valid render-base stress");
-        let (provider_text, insert_text) =
-            provider_and_insert_text(&silero_provider(), &stress);
+        let (provider_text, insert_text) = provider_and_insert_text(&silero_provider(), &stress);
         assert_eq!(provider_text, "вс+ё");
         assert_eq!(insert_text, "все");
     }

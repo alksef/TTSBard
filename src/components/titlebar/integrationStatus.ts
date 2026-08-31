@@ -21,6 +21,12 @@ export type VtsRuntime =
   | { state: 'Connected'; authenticated: boolean }
   | { state: 'Error'; message?: string }
 
+export type InputServerRuntime =
+  | { state: 'stopped' }
+  | { state: 'starting' }
+  | { state: 'running' }
+  | { state: 'error'; message?: string }
+
 export type IntegrationService = 'webview' | 'twitch' | 'vts'
 export type AnyRuntime = WebViewRuntime | TwitchRuntime | VtsRuntime
 
@@ -45,6 +51,29 @@ export function vtsTone(desired: VtsDesired, runtime: VtsRuntime): IntegrationTo
     runtime.state === 'Connected' && runtime.authenticated,
     runtime.state === 'Error',
   )
+}
+
+export function inputServerTone(runtime: InputServerRuntime): IntegrationTone {
+  if (runtime.state === 'running') return 'green'
+  if (runtime.state === 'error') return 'red'
+  return 'gray'
+}
+
+const INPUT_SERVER_NAME = 'Входящий сервер'
+
+export function inputServerStatusLabel(runtime: InputServerRuntime): string {
+  switch (runtime.state) {
+    case 'running':
+      return `${INPUT_SERVER_NAME} — работает`
+    case 'starting':
+      return `${INPUT_SERVER_NAME} — запускается`
+    case 'error':
+      return runtime.message
+        ? `${INPUT_SERVER_NAME} — ошибка: ${runtime.message}`
+        : `${INPUT_SERVER_NAME} — ошибка`
+    case 'stopped':
+      return `${INPUT_SERVER_NAME} — остановлен`
+  }
 }
 
 const SERVICE_NAMES: Record<IntegrationService, string> = {

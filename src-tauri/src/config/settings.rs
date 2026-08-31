@@ -15,6 +15,7 @@ use super::persistence;
 
 use super::hotkeys::HotkeySettings;
 use super::validation::{validate_port, validate_volume};
+use crate::input_server::InputServerSettings;
 use crate::tts::TtsProviderType;
 use tracing::{info, warn};
 
@@ -1191,6 +1192,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub webview: WebViewSettings,
     #[serde(default)]
+    pub input_server: InputServerSettings,
+    #[serde(default)]
     pub logging: LoggingSettings,
     #[serde(default)]
     pub ai: AiSettings,
@@ -1218,6 +1221,7 @@ impl Default for AppSettings {
             theme: Theme::Dark,
             twitch: TwitchSettings::default(),
             webview: WebViewSettings::default(),
+            input_server: InputServerSettings::default(),
             logging: LoggingSettings::default(),
             ai: AiSettings::default(),
             hotkeys: HotkeySettings::default(),
@@ -1239,6 +1243,12 @@ impl AppSettings {
         if let Err(e) = validate_port(self.webview.port) {
             warn!(error = %e, "Invalid webview port, using default");
             self.webview.port = 10100;
+        }
+
+        // Validate input server port
+        if let Err(e) = validate_port(self.input_server.port) {
+            warn!(error = %e, "Invalid input server port, using default");
+            self.input_server.port = 10101;
         }
 
         // Validate and clamp Silero timing settings
@@ -1749,6 +1759,25 @@ impl SettingsManager {
             app_settings.webview.port = port;
             app_settings.webview.bind_address = bind_address;
             app_settings.webview.upnp_enabled = upnp_enabled;
+        })
+    }
+
+    // ========== Input Server Settings ==========
+
+    /// Atomically replace the three desired input-server settings.
+    ///
+    /// One load → mutate → save cycle; the port must be validated by the caller
+    /// before this is invoked.
+    pub fn set_input_server_section(
+        &self,
+        start_on_boot: bool,
+        port: u16,
+        auto_play: bool,
+    ) -> Result<()> {
+        self.update_settings_atomically(move |app_settings| {
+            app_settings.input_server.start_on_boot = start_on_boot;
+            app_settings.input_server.port = port;
+            app_settings.input_server.auto_play = auto_play;
         })
     }
 
@@ -2973,10 +3002,7 @@ mod tests {
         let manager = SettingsManager::with_config_dir(config_dir.clone()).unwrap();
 
         let before = manager.load().unwrap();
-        assert_eq!(
-            before.tts.visible_provider_ids,
-            vec!["silero".to_string()]
-        );
+        assert_eq!(before.tts.visible_provider_ids, vec!["silero".to_string()]);
         let before_provider = before.tts.provider;
         let before_provider_id = before.tts.provider_id.clone();
 
@@ -3923,5 +3949,129 @@ mod tests {
             .expect("old DTO (without timing fields) must deserialize");
         assert_eq!(dto.synthesis_response_timeout_ms, 10000);
         assert_eq!(dto.download_retry_delay_ms, 1000);
+    }
+
+    // ==================== Input server settings tests ====================
+
+    /// Default `AppSettings` carries the canonical `InputServerSettings` default.
+    #[test]
+    fn input_server_defaults_match_domain_default() {
+        let settings = AppSettings::default();
+        assert_eq!(settings.input_server, InputServerSettings::default());
+        assert!(!settings.input_server.start_on_boot);
+        assert_eq!(settings.input_server.port, 10101);
+        assert!(settings.input_server.auto_play);
+    }
+
+    /// Backward-compat: old settings.json without the `input_server` section
+    /// must deserialize with the domain default.
+    #[test]
+    fn app_settings_deserializes_without_input_server_section() {
+        let old_json = r#"{
+            "audio": { "speaker_device": null, "speaker_enabled": true, "speaker_volume": 80, "virtual_mic_device": null, "virtual_mic_volume": 100 },
+            "tts": { "provider": "openai", "openai": { "api_key": null, "voice": "alloy" }, "local": { "url": "http://127.0.0.1:8124" }, "fish": { "api_key": null, "voices": [], "reference_id": "", "format": "mp3", "temperature": 0.7, "sample_rate": 44100, "use_proxy": false }, "telegram": { "api_id": null, "proxy_mode": "none", "voices": [], "current_voice_id": "" }, "network": { "proxy": { "proxy_url": null }, "mtproxy": { "host": null, "port": 8888, "secret": null, "dc_id": null } } },
+            "audio_effects": { "enabled": false, "pitch": 0, "speed": 0, "volume": 100, "enhance_enabled": false, "enhance_atten_db": 12.0, "formant_preserved": true },
+            "hotkey_enabled": true,
+            "editor": { "quick": false, "ai": false, "ai_completion": false, "spellcheck_enabled": true, "spellcheck_source": "offline", "editor_height": 340 },
+            "theme": "dark",
+            "twitch": { "enabled": false, "username": "", "token": "", "channel": "", "start_on_boot": false },
+            "webview": { "enabled": false, "start_on_boot": false, "port": 10100, "bind_address": "0.0.0.0", "access_token": null, "upnp_enabled": false },
+            "logging": { "enabled": false, "level": "info", "module_levels": {} },
+            "ai": { "provider": "openai", "openai": { "api_key": null, "use_proxy": false, "model": "gpt-4o-mini" }, "zai": { "url": null, "api_key": null, "model": "glm-4.5" }, "deepseek": { "api_key": null, "use_proxy": false, "model": "deepseek-chat" }, "custom": { "url": null, "api_key": null, "use_proxy": false, "model": "deepseek-chat" }, "prompt": "test", "timeout": 20 },
+            "hotkeys": { "main_window": { "modifiers": ["ctrl"], "key": "F12" }, "sound_panel": { "modifiers": ["alt"], "key": "F12" }, "playback_pause": { "modifiers": [], "key": "" }, "playback_stop": { "modifiers": [], "key": "" }, "playback_repeat": { "modifiers": [], "key": "" }, "playback_control_window": { "modifiers": [], "key": "" } },
+            "show_playback_on_start": false
+        }"#;
+        let settings: AppSettings = serde_json::from_str(old_json)
+            .expect("old AppSettings (without input_server field) must deserialize");
+        assert_eq!(settings.input_server, InputServerSettings::default());
+        assert_eq!(settings.input_server.port, 10101);
+    }
+
+    /// An out-of-range persisted input-server port is reset to the fallback.
+    #[test]
+    fn input_server_invalid_port_falls_back_to_default() {
+        let mut settings = AppSettings::default();
+        settings.input_server.port = 80;
+        settings.validate();
+        assert_eq!(settings.input_server.port, 10101);
+
+        let mut zero = AppSettings::default();
+        zero.input_server.port = 0;
+        zero.validate();
+        assert_eq!(zero.input_server.port, 10101);
+
+        let mut valid = AppSettings::default();
+        valid.input_server.port = 20202;
+        valid.validate();
+        assert_eq!(valid.input_server.port, 20202);
+    }
+
+    /// Helper: build a SettingsManager over a fresh temp config dir.
+    fn input_server_section_tmp_manager(label: &str) -> (SettingsManager, PathBuf) {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-input-server-section-{}-{}-{}",
+            label,
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let manager = SettingsManager::with_config_dir(dir.clone()).unwrap();
+        (manager, dir)
+    }
+
+    /// The atomic setter persists all three fields and keeps cache/disk in sync.
+    #[test]
+    fn set_input_server_section_persists_three_fields_and_keeps_cache_in_sync() {
+        let (manager, dir) = input_server_section_tmp_manager("save-three");
+
+        manager
+            .set_input_server_section(true, 20202, false)
+            .unwrap();
+
+        let disk: AppSettings =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap())
+                .unwrap();
+        assert!(disk.input_server.start_on_boot);
+        assert_eq!(disk.input_server.port, 20202);
+        assert!(!disk.input_server.auto_play);
+
+        assert_eq!(manager.load().unwrap(), disk, "cache and disk must agree");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The atomic setter preserves unrelated settings.
+    #[test]
+    fn set_input_server_section_preserves_unrelated_settings() {
+        let (manager, dir) = input_server_section_tmp_manager("preserve-unrelated");
+
+        manager.set_speaker_volume(33).unwrap();
+        manager
+            .set_webview_access_token(Some("secret-token".to_string()))
+            .unwrap();
+        let before = manager.load().unwrap();
+        assert_eq!(before.audio.speaker_volume, 33);
+
+        manager
+            .set_input_server_section(true, 20202, false)
+            .unwrap();
+
+        let after = manager.load().unwrap();
+        assert_eq!(after.audio.speaker_volume, 33);
+        assert_eq!(after.webview.access_token, Some("secret-token".to_string()));
+        assert!(after.input_server.start_on_boot);
+        assert_eq!(after.input_server.port, 20202);
+        assert!(!after.input_server.auto_play);
+
+        let disk: AppSettings =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap())
+                .unwrap();
+        assert_eq!(disk, after, "disk and cache must agree");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

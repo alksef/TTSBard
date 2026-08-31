@@ -1616,7 +1616,7 @@ mod tests {
 
     // ── project_playback_activity ──
 
-    use crate::speech_queue::{JobDto, JobStatus};
+    use crate::speech_queue::{JobDto, JobStatus, SubmissionSource};
 
     fn job_dto(job_id: &str, status: JobStatus, text: &str, last_activity_at_ms: i64) -> JobDto {
         JobDto {
@@ -1628,6 +1628,7 @@ mod tests {
             attempt: 1,
             created_at_ms: last_activity_at_ms,
             last_activity_at_ms,
+            source: SubmissionSource::Editor,
         }
     }
 

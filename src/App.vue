@@ -15,6 +15,7 @@ import SettingsPanel from './components/SettingsPanel.vue'
 import HotkeysPanel from './components/HotkeysPanel.vue'
 import InterceptPanel from './components/InterceptPanel.vue'
 import VTubeStudioPanel from './components/VTubeStudioPanel.vue'
+import InputServerPanel from './components/InputServerPanel.vue'
 import ErrorToasts from './components/ErrorToasts.vue'
 import MinimalModeButton from './components/MinimalModeButton.vue'
 import IntegrationStatusCluster from './components/titlebar/IntegrationStatusCluster.vue'
@@ -29,7 +30,7 @@ import {
   type SpeechQueueFailureKey,
 } from './composables/speechQueueFailureNotifications'
 
-type Panel = 'input' | 'tts' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'vtube-studio' | 'settings' | 'hotkeys' | 'intercept'
+type Panel = 'input' | 'tts' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'input-server' | 'vtube-studio' | 'settings' | 'hotkeys' | 'intercept'
 
 const currentPanel = ref<Panel>('input')
 
@@ -431,6 +432,7 @@ onUnmounted(() => {
           <PreprocessorPanel v-show="currentPanel === 'preprocessor'" />
           <WebViewPanel v-show="currentPanel === 'webview'" />
           <TwitchPanel v-show="currentPanel === 'twitch'" />
+          <InputServerPanel v-show="currentPanel === 'input-server'" />
           <VTubeStudioPanel v-show="currentPanel === 'vtube-studio'" />
           <SettingsPanel v-show="currentPanel === 'settings'" />
           <HotkeysPanel v-show="currentPanel === 'hotkeys'" />

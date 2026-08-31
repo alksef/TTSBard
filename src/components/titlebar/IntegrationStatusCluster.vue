@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Globe, Twitch, Tv } from 'lucide-vue-next'
+import { Globe, Twitch, Tv, Inbox } from 'lucide-vue-next'
 import {
   webviewTone,
   twitchTone,
   vtsTone,
+  inputServerTone,
+  inputServerStatusLabel,
   integrationStatusLabel,
   type WebViewRuntime,
   type TwitchRuntime,
   type VtsRuntime,
+  type InputServerRuntime,
   type WebViewDesired,
   type TwitchDesired,
   type VtsDesired,
@@ -17,6 +20,7 @@ import {
 import { useWebViewRuntimeStatus } from '../../composables/useWebViewRuntimeStatus'
 import { useVtsRuntimeStatus } from '../../composables/useVtsRuntimeStatus'
 import { useTwitchRuntimeStatus } from '../../composables/useTwitchRuntimeStatus'
+import { useInputServerRuntimeStatus } from '../../composables/useInputServerRuntimeStatus'
 import {
   useWebViewSettings,
   useTwitchSettings,
@@ -26,6 +30,7 @@ import {
 const { state: webviewState, errorMessage: webviewErrorMessage } = useWebViewRuntimeStatus()
 const { status: twitchStatus } = useTwitchRuntimeStatus()
 const { state: vtsState, authenticated: vtsAuthenticated, desiredRunning: vtsDesiredRunning } = useVtsRuntimeStatus()
+const { state: inputServerState, errorMessage: inputServerErrorMessage } = useInputServerRuntimeStatus()
 
 const webviewSettings = useWebViewSettings()
 const twitchSettings = useTwitchSettings()
@@ -46,6 +51,12 @@ const vtsRuntime = computed<VtsRuntime>(() => {
   return { state: vtsState.value }
 })
 
+const inputServerRuntime = computed<InputServerRuntime>(() =>
+  inputServerState.value === 'error'
+    ? { state: 'error', message: inputServerErrorMessage.value ?? undefined }
+    : { state: inputServerState.value },
+)
+
 const webviewDesired = computed<WebViewDesired>(() => ({ enabled: webviewSettings.value?.enabled ?? false }))
 const twitchDesired = computed<TwitchDesired>(() => ({ enabled: twitchSettings.value?.enabled ?? false }))
 const vtsDesired = computed<VtsDesired>(() => ({
@@ -53,7 +64,7 @@ const vtsDesired = computed<VtsDesired>(() => ({
 }))
 
 interface StatusSlot {
-  service: 'webview' | 'twitch' | 'vts'
+  service: 'webview' | 'twitch' | 'vts' | 'inputServer'
   icon: typeof Globe
   tone: IntegrationTone
   label: string
@@ -64,6 +75,7 @@ const slots = computed<StatusSlot[]>(() => {
   const webviewToneValue = webviewTone(webviewDesired.value, webviewRuntime.value)
   const twitchToneValue = twitchTone(twitchDesired.value, twitchRuntime.value)
   const vtsToneValue = vtsTone(vtsDesired.value, vtsRuntime.value)
+  const inputServerToneValue = inputServerTone(inputServerRuntime.value)
 
   return [
     {
@@ -86,6 +98,13 @@ const slots = computed<StatusSlot[]>(() => {
       tone: vtsToneValue,
       label: integrationStatusLabel('vts', vtsToneValue, vtsRuntime.value),
       connecting: vtsRuntime.value.state === 'Connecting',
+    },
+    {
+      service: 'inputServer',
+      icon: Inbox,
+      tone: inputServerToneValue,
+      label: inputServerStatusLabel(inputServerRuntime.value),
+      connecting: inputServerRuntime.value.state === 'starting',
     },
   ]
 })

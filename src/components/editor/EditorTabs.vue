@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { ref, nextTick } from 'vue'
+import { Inbox } from 'lucide-vue-next'
 import type { EditorTab } from '../../composables/useEditorTabs'
 
 const props = defineProps<{
   tabs: EditorTab[]
   activeId: string
+  pinnedTitle?: string
+  pinnedActive?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -12,6 +15,7 @@ const emit = defineEmits<{
   close: [id: string]
   select: [id: string]
   rename: [id: string, title: string]
+  'select-pinned': []
 }>()
 
 const editingId = ref<string | null>(null)
@@ -44,10 +48,20 @@ function cancelRename() {
   <div class="editor-tabs" title="Рабочие вкладки">
     <div class="tabs-scroll">
       <div
+        v-if="pinnedTitle"
+        class="tab-item pinned-tab"
+        :class="{ active: pinnedActive }"
+        :title="pinnedTitle"
+        @click="emit('select-pinned')"
+      >
+        <Inbox :size="13" class="pinned-icon" />
+        <span class="tab-title">{{ pinnedTitle }}</span>
+      </div>
+      <div
         v-for="tab in tabs"
         :key="tab.id"
         class="tab-item"
-        :class="{ active: tab.id === activeId }"
+        :class="{ active: tab.id === activeId && !pinnedActive }"
         @click="emit('select', tab.id)"
       >
         <template v-if="editingId === tab.id">
@@ -134,6 +148,16 @@ function cancelRename() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.pinned-tab {
+  gap: 5px;
+  padding: 4px 10px 4px 10px;
+}
+
+.pinned-icon {
+  flex-shrink: 0;
+  color: var(--color-accent);
 }
 
 .tab-close {

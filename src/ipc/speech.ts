@@ -8,6 +8,7 @@ export const SPEECH_ERROR_META = {
   'speech.empty_text': { retryable: false },
   'speech.queue_full': { retryable: true },
   'speech.queue_rejected': { retryable: false },
+  'speech.twitch_only_route': { retryable: false },
 } as const
 
 export type SpeechErrorCode = keyof typeof SPEECH_ERROR_META

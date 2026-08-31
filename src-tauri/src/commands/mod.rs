@@ -10,6 +10,7 @@ use tracing::{error, info};
 
 pub mod ai;
 pub mod history;
+pub mod input_server;
 pub mod logging;
 pub mod playback;
 pub mod playback_window;

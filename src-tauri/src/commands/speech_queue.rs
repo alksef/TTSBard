@@ -1,7 +1,8 @@
 use crate::commands::playback::PlaybackState;
 use crate::ipc::{self, speech as speech_contract, CommandError};
 use crate::speech_queue::{
-    AcceptedJob, JobStatus, QueueError, Snapshot, SpeechQueue, SpeechQueueStateDto,
+    AcceptedJob, DeliveryPolicy, JobStatus, QueueError, Snapshot, SpeechQueue, SpeechQueueStateDto,
+    SubmissionSource,
 };
 use crate::state::AppState;
 use crate::telegram::SileroRuntimeSettings;
@@ -67,9 +68,12 @@ fn resolve_silero_speaker(settings_voice: &str, captured: Option<&str>) -> Resul
     }
 }
 
-pub(crate) fn build_snapshot(state: &AppState, text: &str) -> Result<Snapshot, String> {
+pub(crate) fn build_snapshot(
+    state: &AppState,
+    source: SubmissionSource,
+    delivery: DeliveryPolicy,
+) -> Result<Snapshot, String> {
     let settings = state.settings_cache.read().clone();
-    let prefix_result = crate::preprocessor::parse_prefix(text);
 
     let registry = state.tts_registry.lock();
     let entry = registry
@@ -106,8 +110,8 @@ pub(crate) fn build_snapshot(state: &AppState, text: &str) -> Result<Snapshot, S
     Ok(Snapshot {
         provider,
         voice,
-        skip_twitch: prefix_result.skip_twitch,
-        skip_webview: prefix_result.skip_webview,
+        source,
+        delivery,
         ai_enabled: settings.editor.ai,
         audio_effects: settings.audio_effects,
         dsp: settings.dsp,
@@ -118,6 +122,36 @@ pub(crate) fn build_snapshot(state: &AppState, text: &str) -> Result<Snapshot, S
         network_settings,
         accentor_runtime,
     })
+}
+
+/// Reusable application-level speech submission seam.
+///
+/// Builds a provider/settings snapshot, atomically enqueues the job, emits the
+/// typed queue event and wakes the speech worker. Shared by the Tauri
+/// `submit_speech` command (editor source) and later HTTP handlers
+/// (`external` + `audio_only`).
+pub fn submit_speech_job(
+    app_handle: &AppHandle,
+    state: &AppState,
+    queue: &SpeechQueueState,
+    text: String,
+    source: SubmissionSource,
+    delivery: DeliveryPolicy,
+) -> Result<AcceptedJob, CommandError> {
+    let snapshot = build_snapshot(state, source, delivery).map_err(|error| {
+        CommandError::new(
+            speech_contract::error_code::SNAPSHOT_UNAVAILABLE,
+            format!("Snapshot error: {error}"),
+            ipc::speech_error_code_to_retryable(speech_contract::error_code::SNAPSHOT_UNAVAILABLE),
+        )
+    })?;
+    let mut q = queue.lock();
+    let job_id = q.submit(&text, snapshot).map_err(map_submit_queue_error)?;
+    let dto = q.state();
+    drop(q);
+    emit_queue_changed(app_handle, dto);
+    queue.notify_one();
+    Ok(AcceptedJob { job_id })
 }
 
 #[tauri::command]
@@ -136,20 +170,15 @@ pub fn submit_speech(
         ));
     }
 
-    let snapshot = build_snapshot(&state, &text).map_err(|error| {
-        CommandError::new(
-            speech_contract::error_code::SNAPSHOT_UNAVAILABLE,
-            format!("Snapshot error: {error}"),
-            ipc::speech_error_code_to_retryable(speech_contract::error_code::SNAPSHOT_UNAVAILABLE),
-        )
-    })?;
-    let mut q = queue.lock();
-    let job_id = q.submit(&text, snapshot).map_err(map_submit_queue_error)?;
-    let dto = q.state();
-    drop(q);
-    emit_queue_changed(&app_handle, dto);
-    queue.notify_one();
-    Ok(AcceptedJob { job_id })
+    let delivery = DeliveryPolicy::editor(prefix.skip_twitch, prefix.skip_webview);
+    submit_speech_job(
+        &app_handle,
+        &state,
+        &queue,
+        text,
+        SubmissionSource::Editor,
+        delivery,
+    )
 }
 
 #[tauri::command]
@@ -369,6 +398,14 @@ mod tests {
     }
 
     #[test]
+    fn submit_generic_queue_error_is_structured_and_not_retryable() {
+        let error = map_submit_queue_error(QueueError::JobNotFound(Uuid::new_v4()));
+
+        assert_eq!(error.code, speech_contract::error_code::QUEUE_REJECTED);
+        assert!(!error.retryable);
+    }
+
+    #[test]
     fn resolve_silero_speaker_settings_takes_precedence_over_captured() {
         let result = resolve_silero_speaker("baya_16", Some("old_speaker"));
         assert_eq!(result, Ok("baya_16".to_string()));
@@ -446,7 +483,12 @@ mod tests {
             registry.select("silero").unwrap();
         }
 
-        let snapshot = build_snapshot(&state, "test text").expect("build_snapshot must succeed");
+        let snapshot = build_snapshot(
+            &state,
+            SubmissionSource::Editor,
+            DeliveryPolicy::editor(false, false),
+        )
+        .expect("build_snapshot must succeed");
 
         if let TtsProvider::Silero(silero) = &snapshot.tts_provider {
             let rt = silero.runtime_settings();

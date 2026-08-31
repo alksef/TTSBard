@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
 import { IpcCommandError } from './commandError'
-import { SUBMIT_SPEECH_COMMAND, submitSpeech } from './speech'
+import {
+  SPEECH_ERROR_META,
+  SUBMIT_SPEECH_COMMAND,
+  isKnownSpeechErrorCode,
+  submitSpeech,
+} from './speech'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 
@@ -10,6 +15,11 @@ const mockInvoke = vi.mocked(invoke)
 describe('submitSpeech IPC contract', () => {
   beforeEach(() => {
     mockInvoke.mockReset()
+  })
+
+  it('recognizes speech.twitch_only_route with non-retryable metadata', () => {
+    expect(isKnownSpeechErrorCode('speech.twitch_only_route')).toBe(true)
+    expect(SPEECH_ERROR_META['speech.twitch_only_route'].retryable).toBe(false)
   })
 
   it('uses the stable command name and preserves the accepted job shape', async () => {

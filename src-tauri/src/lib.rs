@@ -9,6 +9,7 @@ mod event_loop;
 mod events;
 mod history;
 mod hotkeys;
+mod input_server;
 pub mod ipc;
 pub mod playback;
 mod playback_window;
@@ -533,6 +534,17 @@ pub fn run() {
             commands::vtube_studio::get_vtube_studio_status,
             commands::vtube_studio::get_vtube_studio_authenticated,
             commands::vtube_studio::get_vtube_studio_desired_running,
+            // Input server commands
+            commands::input_server::get_input_server_settings,
+            commands::input_server::save_input_server_settings,
+            commands::input_server::get_input_server_status,
+            commands::input_server::start_input_server,
+            commands::input_server::stop_input_server,
+            commands::input_server::submit_input_server_test,
+            commands::input_server::list_incoming_texts,
+            commands::input_server::approve_incoming_text,
+            commands::input_server::take_incoming_text_for_edit,
+            commands::input_server::discard_incoming_text,
             // Logging commands
             get_logging_settings,
             save_logging_settings,
