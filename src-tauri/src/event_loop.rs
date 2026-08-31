@@ -6,6 +6,7 @@
 use crate::commands::speech_queue::SpeechQueueState;
 use crate::events::{AppEvent, InputLayout, RoutedText, TwitchEvent};
 use crate::soundpanel_window::update_soundpanel_appearance;
+use crate::speech_queue::JobStatus;
 use crate::state::AppState;
 use tauri::{AppHandle, Emitter, Manager};
 use tracing::{debug, error, info};
@@ -191,6 +192,7 @@ impl EventHandler {
 
     /// Process PlaybackFailed — if queue job, transition Ready/Playing→Failed, fail-closed.
     fn process_playback_failed(&self, text_id: &str, error_msg: &str) {
+        let mut notify_worker = false;
         if let Ok(job_id) = Uuid::parse_str(text_id) {
             if let Some(sq) = self.app_handle.try_state::<SpeechQueueState>() {
                 let mut q = sq.lock();
@@ -200,13 +202,30 @@ impl EventHandler {
                             let dto = q.state();
                             drop(q);
                             let _ = self.app_handle.emit("speech-queue-changed", dto);
-                            sq.notify_one();
+                            notify_worker = true;
                         }
                         Err(e) => {
-                            debug!(error = %e, job_id = %job_id, "PlaybackFailed: invalid transition for queue job");
+                            // A replay of an already-completed UUID job is expected
+                            // to reject the transition; leave it completed silently.
+                            let suppress = q.get_status(job_id) == Some(JobStatus::Completed);
+                            drop(q);
+                            if !suppress {
+                                debug!(error = %e, job_id = %job_id, "PlaybackFailed: invalid transition for queue job");
+                            }
                         }
                     }
                 }
+            }
+        }
+        // Always advance playback (fail-closed, matches successful completion).
+        if let Some(pb) = self.state.playback_manager.lock().as_ref() {
+            pb.on_playback_finished();
+        }
+        // Defer waking the queue worker until the playback current item has been
+        // advanced/cleared, so the failed item does not race a queue continuation.
+        if notify_worker {
+            if let Some(sq) = self.app_handle.try_state::<SpeechQueueState>() {
+                sq.notify_one();
             }
         }
     }

@@ -1,4 +1,5 @@
 use crate::commands::playback::PlaybackState;
+use crate::config::SettingsManager;
 use crate::ipc::{self, speech as speech_contract, CommandError};
 use crate::speech_queue::{
     AcceptedJob, DeliveryPolicy, JobStatus, QueueError, Snapshot, SpeechQueue, SpeechQueueStateDto,
@@ -327,6 +328,7 @@ pub fn restore_cancelled_speech_job(
     app_handle: AppHandle,
     queue: State<'_, SpeechQueueState>,
     playback: State<'_, PlaybackState>,
+    settings_manager: State<'_, SettingsManager>,
     job_id: Uuid,
 ) -> Result<(), String> {
     let spoken_text_is_set = {
@@ -342,8 +344,16 @@ pub fn restore_cancelled_speech_job(
     };
 
     if spoken_text_is_set {
+        let settings = settings_manager
+            .load()
+            .map_err(|e| format!("Failed to load settings: {}", e))?;
+        let (speaker, mic) = crate::commands::tts_pipeline::compute_output_configs(
+            &settings.audio,
+            &settings.audio_effects,
+        );
+
         let pb = &playback.inner().0;
-        match pb.replay_from_cache(&job_id.to_string()) {
+        match pb.replay_from_cache(&job_id.to_string(), speaker, mic) {
             Ok(()) => {
                 let mut q = queue.lock();
                 q.touch_activity(job_id);

@@ -248,14 +248,6 @@ pub fn project_playback_activity(
     rows
 }
 
-/// Динамическая конфигурация аудиовыходов — обновляется в runtime.
-/// Хранится в `Arc<RwLock<>>` и читается потоком на каждый Enqueue.
-#[derive(Clone)]
-pub struct AudioOutputsConfig {
-    pub speaker: Option<OutputConfig>,
-    pub mic: Option<OutputConfig>,
-}
-
 enum Cmd {
     Enqueue(QueuedPhrase),
     Pause,
@@ -838,13 +830,12 @@ impl PlaybackManager {
         true
     }
 
-    pub fn replay_from_cache(&self, id: &str) -> Result<(), String> {
-        // Этот метод больше не используется, так как все повторы теперь через команду history
-        // Но оставим для совместимости с возможными внешними вызовами
-        let audio_cfg = AudioOutputsConfig {
-            speaker: None,
-            mic: None,
-        };
+    pub fn replay_from_cache(
+        &self,
+        id: &str,
+        speaker: Option<OutputConfig>,
+        mic: Option<OutputConfig>,
+    ) -> Result<(), String> {
         let mut s = self.state.write();
 
         let cached = s
@@ -852,13 +843,7 @@ impl PlaybackManager {
             .ok_or_else(|| format!("CacheMiss: no cached audio for id '{}'", id))?;
         let (_, cached_text, cached_audio) = cached;
 
-        match s.accept_replay(
-            id,
-            cached_text,
-            cached_audio,
-            audio_cfg.speaker,
-            audio_cfg.mic,
-        ) {
+        match s.accept_replay(id, cached_text, cached_audio, speaker, mic) {
             Ok(EnqueueState::SendToThread(phrase)) => {
                 drop(s);
                 let _ = self.cmd_tx.send(Cmd::Enqueue(phrase));
@@ -2013,6 +1998,42 @@ mod tests {
             "expected SendToThread"
         );
         assert_eq!(s.current.as_ref().unwrap().id, "idle_replay");
+    }
+
+    #[test]
+    fn accept_replay_becomes_current_preserves_output_configs() {
+        let mut s = shared_with_cache("replay_cfg", 100);
+        let speaker = Some(OutputConfig {
+            device_id: Some("spk_dev".into()),
+            volume: 0.8,
+        });
+        let mic = Some(OutputConfig {
+            device_id: Some("mic_dev".into()),
+            volume: 0.3,
+        });
+        let (text, audio) = phrase_for_replay("replay_cfg");
+        match s.accept_replay("replay_cfg", text, audio, speaker.clone(), mic.clone()) {
+            Ok(EnqueueState::SendToThread(p)) => {
+                assert_eq!(
+                    p.speaker.as_ref().map(|c| c.device_id.as_deref()),
+                    Some(Some("spk_dev"))
+                );
+                assert_eq!(
+                    p.mic.as_ref().map(|c| c.device_id.as_deref()),
+                    Some(Some("mic_dev"))
+                );
+            }
+            other => panic!("expected SendToThread, got: {:?}", other),
+        }
+        let current = s.current.as_ref().unwrap();
+        assert_eq!(
+            current.speaker.as_ref().map(|c| c.device_id.as_deref()),
+            Some(Some("spk_dev"))
+        );
+        assert_eq!(
+            current.mic.as_ref().map(|c| c.device_id.as_deref()),
+            Some(Some("mic_dev"))
+        );
     }
 
     #[test]

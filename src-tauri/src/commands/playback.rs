@@ -60,9 +60,18 @@ pub fn replay_phrase(
     id: String,
     playback: State<'_, PlaybackState>,
     queue: State<'_, SpeechQueueState>,
+    settings_manager: State<'_, SettingsManager>,
 ) -> Result<(), String> {
+    let settings = settings_manager
+        .load()
+        .map_err(|e| format!("Failed to load settings: {}", e))?;
+    let (speaker, mic) = crate::commands::tts_pipeline::compute_output_configs(
+        &settings.audio,
+        &settings.audio_effects,
+    );
+
     let pb = &playback.inner().0;
-    pb.replay_from_cache(&id).map_err(|e| {
+    pb.replay_from_cache(&id, speaker, mic).map_err(|e| {
         debug!(target: "playback", error = %e, "replay_phrase cache miss");
         e
     })?;
