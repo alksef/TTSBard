@@ -98,23 +98,22 @@ const {
 
       <div class="setting-row port-setting-row">
         <label>Порт:</label>
-        <input
-          type="number"
-          v-model.number="settings.port"
-          class="text-input port-input"
-          :class="{ 'text-input-error': portError }"
-          :min="1024"
-          :max="65535"
-          placeholder="8001"
-        />
+        <div class="address-inputs">
+          <input
+            type="number"
+            v-model.number="settings.port"
+            class="text-input port-input"
+            :class="{ 'text-input-error': portError }"
+            :min="1024"
+            :max="65535"
+            placeholder="8001"
+          />
+          <button @click="save" class="save-button-inline" :disabled="busy" :class="{ disabled: busy }">
+            Сохранить
+          </button>
+        </div>
       </div>
       <div v-if="portError" class="port-error">{{ portError }}</div>
-
-      <div class="setting-row button-row">
-        <button @click="save" class="save-button-inline" :disabled="busy" :class="{ disabled: busy }">
-          Сохранить
-        </button>
-      </div>
     </section>
 
     <section class="settings-section">
@@ -578,6 +577,13 @@ h2 {
   max-width: 100px;
 }
 
+.address-inputs {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
 .test-parameters-row {
   flex-wrap: wrap;
 }
@@ -862,6 +868,12 @@ select.text-input {
     width: auto;
     min-width: 80px;
     max-width: 140px;
+  }
+
+  .address-inputs .port-input {
+    flex-basis: 100px;
+    width: 100px;
+    max-width: 100px;
   }
 
   .status-indicator {
