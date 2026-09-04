@@ -121,6 +121,64 @@ pub async fn coordinate_shutdown(app_handle: AppHandle) {
     app_handle.exit(0);
 }
 
+/// Launch the OS file manager for the given directory path.
+fn open_in_file_manager(path: &str) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .args([path])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .args([path])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .args([path])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+/// Open the application data/settings folder (%APPDATA%/ttsbard) in the OS file manager.
+///
+/// The path is fixed to the same directory `SettingsManager::new` uses
+/// (`dirs::config_dir()/ttsbard`). It never falls back to the current working
+/// directory, and no caller-controlled path is accepted.
+#[tauri::command]
+pub async fn open_app_folder() -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let app_dir = dirs::config_dir()
+            .ok_or_else(|| "Не удалось определить каталог конфигурации приложения".to_string())?
+            .join("ttsbard");
+
+        std::fs::create_dir_all(&app_dir)
+            .map_err(|e| format!("Не удалось создать папку приложения: {}", e))?;
+
+        let app_dir = app_dir
+            .canonicalize()
+            .map_err(|e| format!("Некорректный путь к папке приложения: {}", e))?;
+
+        let path = app_dir
+            .to_str()
+            .ok_or_else(|| "Некорректный путь к папке приложения".to_string())?;
+
+        open_in_file_manager(path)
+    })
+    .await
+    .map_err(|e| format!("Операция открытия папки была прервана: {}", e))?
+}
+
 /// Synthesize text and export raw audio bytes to a file (no effects, no playback)
 #[tauri::command]
 pub async fn speak_text_raw_export(

@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
-import { AlertTriangle } from 'lucide-vue-next';
+import { AlertTriangle, FolderOpen } from 'lucide-vue-next';
 import { useGeneralSettings, useWindowsSettings, useLoggingSettings } from '../../composables/useAppSettings';
 
 const showPlaybackOnStart = ref(false);
 const startCompact = ref(false);
+const folderOpening = ref(false);
 
 // Get settings from composables
 const generalSettings = useGeneralSettings();
@@ -35,6 +36,25 @@ const emit = defineEmits<{
 
 function showError(message: string) {
   emit('show-message', message);
+}
+
+function formatErrorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === 'string') return e;
+  return String(e);
+}
+
+async function openAppFolder() {
+  if (folderOpening.value) return;
+  folderOpening.value = true;
+
+  try {
+    await invoke('open_app_folder');
+  } catch (e) {
+    showError('Ошибка открытия папки приложения: ' + formatErrorMessage(e));
+  } finally {
+    folderOpening.value = false;
+  }
 }
 
 async function toggleExcludeFromCapture() {
@@ -203,6 +223,27 @@ watch(loggingSettings, (newSettings) => {
         Требуется перезапуск приложения для применения изменений
       </span>
     </section>
+
+    <!-- Application Folder -->
+    <section class="settings-section">
+      <div class="setting-row folder-row">
+        <div class="folder-text">
+          <span class="setting-label folder-label">Папка настроек и моделей</span>
+          <span class="folder-path">%APPDATA%\ttsbard</span>
+        </div>
+        <button
+          type="button"
+          class="folder-button"
+          :disabled="folderOpening"
+          title="%APPDATA%\ttsbard"
+          aria-label="Открыть папку приложения"
+          @click="openAppFolder"
+        >
+          <FolderOpen :size="16" />
+          <span>Открыть</span>
+        </button>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -311,5 +352,64 @@ watch(loggingSettings, (newSettings) => {
 
 .level-select option:hover {
   background: var(--select-bg-hover);
+}
+
+.folder-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+}
+
+.folder-text {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.folder-label {
+  display: block;
+  cursor: default;
+}
+
+.folder-path {
+  display: block;
+  margin-top: 0.2rem;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.folder-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+  padding: 0.4rem 0.8rem;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
+  color: var(--color-text-primary);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.folder-button:hover:not(:disabled) {
+  background: var(--color-bg-field);
+}
+
+.folder-button:focus-visible {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--focus-glow);
+}
+
+.folder-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 </style>

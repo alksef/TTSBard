@@ -437,6 +437,7 @@ pub fn run() {
             set_intercept_binding,
             clear_intercept_binding,
             open_file_dialog,
+            commands::open_app_folder,
             // Audio commands
             get_output_devices,
             get_virtual_mic_devices,
