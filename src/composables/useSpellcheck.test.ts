@@ -34,6 +34,8 @@ function createSettings(overrides?: Partial<AppSettingsDto['editor']>): AppSetti
     typing_enabled: true,
     default_route: 'everywhere',
     keep_text_after_send: false,
+    font_family: 'default',
+    font_size_px: 16,
     homograph_accentor: { enabled: false, accentor_pack_id: null, load_on_start: false },
     ...overrides,
   }

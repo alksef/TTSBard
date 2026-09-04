@@ -346,6 +346,9 @@ export interface PreprocessorSettingsDto {
 
 export type QuickEditorMode = 'disabled' | 'collapse' | 'return_focus'
 
+/** Editor typography font family: a built-in choice or an installed Windows family name. */
+export type EditorFontFamily = string
+
 export interface ContextualRuAccentSettingsDto {
   enabled: boolean
   python_executable: string | null
@@ -382,6 +385,8 @@ export interface EditorSettingsDto {
   typing_enabled: boolean
   default_route: EditorRoute
   keep_text_after_send: boolean
+  font_family: EditorFontFamily
+  font_size_px: number
   homograph_accentor: HomographAccentorSettingsDto
 }
 

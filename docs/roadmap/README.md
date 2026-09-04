@@ -75,6 +75,9 @@ related_tasks: []
 
 ### Редактор и история
 
+- [ROADMAP-094 — Полный системный каталог шрифтов редактора](./completed/094-system-font-catalog.md)
+- [ROADMAP-093 — Шрифт и размер текста редактора](./completed/093-editor-font-settings.md)
+
 - [ROADMAP-085 — Provider text и чистая вставка из истории фраз](./completed/085-provider-text-and-clean-history-insert.md)
 
 - [ROADMAP-080 — сохранение текста редактора после отправки](./completed/080-keep-text-after-submit.md)

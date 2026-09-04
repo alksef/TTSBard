@@ -181,6 +181,8 @@
     "typing_enabled": true,
     "default_route": "no_twitch",
     "keep_text_after_send": true,
+    "font_family": "georgia",
+    "font_size_px": 20,
     "homograph_accentor": {
       "enabled": true,
       "accentor_pack_id": "com.example.ruaccent",

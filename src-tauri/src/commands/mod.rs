@@ -5,6 +5,7 @@ use crate::config::{
 use crate::state::AppState;
 use crate::stress::packs::RuAccentPackDescriptor;
 use crate::stress::runtime::RuAccentRuntimeSlot;
+use crate::system_fonts::SystemFontCatalog;
 use crate::tts::TtsProvider;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tracing::{error, info, warn};
@@ -471,6 +472,61 @@ pub async fn set_editor_default_route(
     emit_settings_changed(&app_handle);
 
     Ok(route)
+}
+
+/// Set editor font family. The frontend selects from the catalog collected at
+/// startup; accepting the name here preserves existing settings after a font
+/// is later removed from Windows.
+#[tauri::command]
+pub async fn set_editor_font_family(
+    family: String,
+    app_handle: AppHandle,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<String, String> {
+    let selected_family = family.clone();
+    persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_editor_font_family(selected_family)
+    })
+    .await?;
+
+    emit_settings_changed(&app_handle);
+
+    Ok(family)
+}
+
+/// Get editor font family
+#[tauri::command]
+pub fn get_editor_font_family(settings_manager: State<'_, SettingsManager>) -> String {
+    settings_manager.get_editor_font_family()
+}
+
+/// Return the Windows font families loaded once before the backend becomes ready.
+#[tauri::command]
+pub fn get_system_font_families(catalog: State<'_, SystemFontCatalog>) -> Vec<String> {
+    catalog.families().to_vec()
+}
+
+/// Set editor font size in pixels (strict: invalid size is rejected without writes).
+#[tauri::command]
+pub async fn set_editor_font_size(
+    size_px: u32,
+    app_handle: AppHandle,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<u32, String> {
+    persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_editor_font_size_px(size_px)
+    })
+    .await?;
+
+    emit_settings_changed(&app_handle);
+
+    Ok(size_px)
+}
+
+/// Get editor font size in pixels
+#[tauri::command]
+pub fn get_editor_font_size_px(settings_manager: State<'_, SettingsManager>) -> u32 {
+    settings_manager.get_editor_font_size_px()
 }
 
 /// Prepare (warm up) a registered TTS provider by ID.

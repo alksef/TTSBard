@@ -168,6 +168,8 @@
     "typing_enabled": false,
     "default_route": "everywhere",
     "keep_text_after_send": false,
+    "font_family": "system",
+    "font_size_px": 16,
     "homograph_accentor": {
       "enabled": false,
       "accentor_pack_id": null,

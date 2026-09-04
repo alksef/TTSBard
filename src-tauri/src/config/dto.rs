@@ -871,6 +871,8 @@ pub struct EditorSettingsDto {
     pub typing_enabled: bool,
     pub default_route: String,
     pub keep_text_after_send: bool,
+    pub font_family: String,
+    pub font_size_px: u32,
     #[serde(default)]
     pub homograph_accentor: HomographAccentorSettingsDto,
 }
@@ -1429,6 +1431,8 @@ impl AppSettingsDto {
                 typing_enabled: params.config.editor.typing_enabled,
                 default_route: params.config.editor.default_route.as_str().to_string(),
                 keep_text_after_send: params.config.editor.keep_text_after_send,
+                font_family: params.config.editor.font_family.clone(),
+                font_size_px: params.config.editor.font_size_px,
                 homograph_accentor: params.config.editor.homograph_accentor.clone(),
             },
             ocr: params.config.ocr.clone(),
@@ -1625,6 +1629,8 @@ mod tests {
             typing_enabled: true,
             default_route: "no_twitch".into(),
             keep_text_after_send: true,
+            font_family: "georgia".into(),
+            font_size_px: 20,
             homograph_accentor: HomographAccentorSettingsDto {
                 enabled: true,
                 accentor_pack_id: Some("com.example.ruaccent".into()),
@@ -1994,6 +2000,8 @@ mod tests {
             typing_enabled: false,
             default_route: "everywhere".into(),
             keep_text_after_send: false,
+            font_family: "system".into(),
+            font_size_px: 16,
             homograph_accentor: HomographAccentorSettingsDto {
                 enabled: false,
                 accentor_pack_id: None,

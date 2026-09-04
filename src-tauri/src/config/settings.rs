@@ -812,6 +812,53 @@ pub enum SpellSource {
     Offline,
 }
 
+/// Default editor font selection. Other values are installed Windows font
+/// family names collected from DirectWrite at application startup.
+fn default_editor_font_family() -> String {
+    "default".to_string()
+}
+
+/// Keep a valid persisted family name, while allowing new fonts installed by
+/// the user without a release. Non-string and blank values recover safely.
+fn deserialize_font_family<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(match value {
+        serde_json::Value::String(value) if !value.trim().is_empty() => value,
+        _ => default_editor_font_family(),
+    })
+}
+
+/// Minimum/maximum/default editor font size in pixels.
+pub const EDITOR_FONT_SIZE_MIN_PX: u32 = 12;
+pub const EDITOR_FONT_SIZE_MAX_PX: u32 = 32;
+const EDITOR_FONT_SIZE_DEFAULT_PX: u32 = 16;
+
+fn default_editor_font_size_px() -> u32 {
+    EDITOR_FONT_SIZE_DEFAULT_PX
+}
+
+/// Forgiving deserializer for `font_size_px`: any value that is not an integer
+/// within `12..=32` falls back to the default `16`.
+fn deserialize_font_size_px<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(match value {
+        serde_json::Value::Number(n) => n
+            .as_u64()
+            .filter(|v| {
+                *v >= EDITOR_FONT_SIZE_MIN_PX as u64 && *v <= EDITOR_FONT_SIZE_MAX_PX as u64
+            })
+            .map(|v| v as u32)
+            .unwrap_or(EDITOR_FONT_SIZE_DEFAULT_PX),
+        _ => EDITOR_FONT_SIZE_DEFAULT_PX,
+    })
+}
+
 /// Quick editor behavior mode
 ///
 /// Controls how the main window reacts after Enter/Esc in the quick editor.
@@ -985,6 +1032,16 @@ pub struct EditorSettings {
     pub default_route: EditorRoute,
     #[serde(default)]
     pub keep_text_after_send: bool,
+    #[serde(
+        default = "default_editor_font_family",
+        deserialize_with = "deserialize_font_family"
+    )]
+    pub font_family: String,
+    #[serde(
+        default = "default_editor_font_size_px",
+        deserialize_with = "deserialize_font_size_px"
+    )]
+    pub font_size_px: u32,
     #[serde(default)]
     pub homograph_accentor: HomographAccentorSettings,
 }
@@ -1042,6 +1099,8 @@ impl Default for EditorSettings {
             typing_enabled: true,
             default_route: EditorRoute::Everywhere,
             keep_text_after_send: false,
+            font_family: default_editor_font_family(),
+            font_size_px: EDITOR_FONT_SIZE_DEFAULT_PX,
             homograph_accentor: HomographAccentorSettings::default(),
         }
     }
@@ -2056,6 +2115,32 @@ impl SettingsManager {
         self.update_field("/editor/default_route", &route)
     }
 
+    /// Set editor font family
+    pub fn set_editor_font_family(&self, family: String) -> Result<()> {
+        if family.trim().is_empty() {
+            return Err(anyhow::anyhow!("Editor font family must not be blank"));
+        }
+        self.update_field("/editor/font_family", &family)
+    }
+
+    /// Get editor font family
+    pub fn get_editor_font_family(&self) -> String {
+        self.cache.read().editor.font_family.clone()
+    }
+
+    /// Set editor font size (px), strict: rejects out-of-range values without writing.
+    pub fn set_editor_font_size_px(&self, size_px: u32) -> Result<()> {
+        if !(EDITOR_FONT_SIZE_MIN_PX..=EDITOR_FONT_SIZE_MAX_PX).contains(&size_px) {
+            return Err(anyhow::anyhow!("Invalid editor font size: {}", size_px));
+        }
+        self.update_field("/editor/font_size_px", &size_px)
+    }
+
+    /// Get editor font size (px)
+    pub fn get_editor_font_size_px(&self) -> u32 {
+        self.cache.read().editor.font_size_px
+    }
+
     /// Set homograph/accentor (RUAccent) enabled state and selected pack id in
     /// one atomic transaction. Validation of the pack id against discovered
     /// packs is performed by the caller (commands layer).
@@ -2993,10 +3078,9 @@ mod tests {
         let mut explicit = AppSettings::default();
         explicit.hide_on_minimize = true;
         explicit.show_playback_on_start = true;
-        let round: AppSettings = serde_json::from_value(
-            serde_json::to_value(&explicit).expect("serialize explicit"),
-        )
-        .expect("round-trip deserialize");
+        let round: AppSettings =
+            serde_json::from_value(serde_json::to_value(&explicit).expect("serialize explicit"))
+                .expect("round-trip deserialize");
         assert!(round.hide_on_minimize);
         assert!(round.show_playback_on_start);
     }
@@ -4633,6 +4717,255 @@ mod tests {
         let after = manager.load().unwrap();
         assert!(!after.ocr.enabled);
         assert_eq!(after.ocr.model_id.as_deref(), Some("com.example.ocr"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ==================== Editor font tests ====================
+
+    /// EditorSettings default font family is `default` and size is 16.
+    #[test]
+    fn editor_font_defaults() {
+        let s = EditorSettings::default();
+        assert_eq!(s.font_family, "default");
+        assert_eq!(s.font_size_px, 16);
+    }
+
+    /// Old settings missing both font fields deserialize to the ID default and 16.
+    #[test]
+    fn editor_font_deserializes_without_fields() {
+        let json = r#"{"quick":false,"ai":false,"ai_completion":false,"spellcheck_enabled":true,"spellcheck_source":"offline","editor_height":340}"#;
+        let settings: EditorSettings =
+            serde_json::from_str(json).expect("must deserialize without font fields");
+        assert_eq!(settings.font_family, "default");
+        assert_eq!(settings.font_size_px, 16);
+    }
+
+    /// Old stable ids and arbitrary installed-family names round-trip through
+    /// serde, so a custom font survives config reads and writes.
+    #[test]
+    fn editor_font_family_round_trip_old_ids_and_custom_names() {
+        for family in [
+            "default", "system", "arial", "georgia", "consolas", "PT Sans",
+        ] {
+            let s = EditorSettings {
+                font_family: family.to_owned(),
+                ..EditorSettings::default()
+            };
+            let json = serde_json::to_string(&s).unwrap();
+            let back: EditorSettings = serde_json::from_str(&json).unwrap();
+            assert_eq!(back.font_family, family, "round-trip failed for {}", json);
+        }
+    }
+
+    /// Font size boundaries (12 and 32) round-trip through serde.
+    #[test]
+    fn editor_font_size_boundaries_round_trip() {
+        for size in [EDITOR_FONT_SIZE_MIN_PX, EDITOR_FONT_SIZE_MAX_PX] {
+            let s = EditorSettings {
+                font_size_px: size,
+                ..EditorSettings::default()
+            };
+            let json = serde_json::to_string(&s).unwrap();
+            let back: EditorSettings = serde_json::from_str(&json).unwrap();
+            assert_eq!(back.font_size_px, size);
+        }
+    }
+
+    /// Malformed font values fall back individually without losing unrelated
+    /// editor values or failing the whole deserialization.
+    #[test]
+    fn editor_font_malformed_values_fall_back_individually() {
+        // Arbitrary family string is kept; out-of-range size -> 16.
+        let json = r#"{
+            "quick":"collapse","ai":true,"spellcheck_enabled":true,"spellcheck_source":"offline",
+            "editor_height":420,"typing_idle_timeout_ms":800,"typing_enabled":true,
+            "font_family":"PT Sans","font_size_px":99
+        }"#;
+        let settings: EditorSettings = serde_json::from_str(json)
+            .expect("custom family / out-of-range size must not fail deserialization");
+        assert_eq!(settings.font_family, "PT Sans");
+        assert_eq!(settings.font_size_px, 16);
+        assert_eq!(
+            settings.editor_height, 420,
+            "unrelated editor value preserved"
+        );
+        assert!(settings.ai);
+
+        // Blank, whitespace-only and wrong-type family -> default; wrong-type
+        // size (string) -> 16.
+        for raw in ["\"   \"", "42", "null", "true"] {
+            let json2 = format!(
+                r#"{{
+                    "quick":"collapse","ai":false,"spellcheck_enabled":true,"spellcheck_source":"offline",
+                    "editor_height":420,"font_family":{raw},"font_size_px":"big"
+                }}"#
+            );
+            let settings2: EditorSettings = serde_json::from_str(&json2)
+                .expect("blank or wrong-type family must not fail deserialization");
+            assert_eq!(
+                settings2.font_family, "default",
+                "font_family={} must fall back",
+                raw
+            );
+            assert_eq!(settings2.font_size_px, 16);
+            assert_eq!(settings2.editor_height, 420);
+        }
+
+        // Below-min, above-max, negative and float sizes all fall back to 16.
+        for raw in ["11", "33", "-5", "16.5", "null"] {
+            let json3 = format!(
+                r#"{{"quick":"disabled","spellcheck_enabled":true,"spellcheck_source":"offline","font_size_px":{}}}"#,
+                raw
+            );
+            let settings3: EditorSettings = serde_json::from_str(&json3)
+                .unwrap_or_else(|e| panic!("font_size_px={} must deserialize: {}", raw, e));
+            assert_eq!(
+                settings3.font_size_px, 16,
+                "font_size_px={} must fall back to 16",
+                raw
+            );
+        }
+    }
+
+    /// Helper: build a SettingsManager over a fresh temp config dir.
+    fn editor_font_tmp_manager(label: &str) -> (SettingsManager, PathBuf) {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-editor-font-{}-{}-{}",
+            label,
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let manager = SettingsManager::with_config_dir(dir.clone()).unwrap();
+        (manager, dir)
+    }
+
+    /// An invalid size setter is rejected and changes neither cache nor disk.
+    #[test]
+    fn editor_font_invalid_size_setter_changes_nothing() {
+        let (manager, dir) = editor_font_tmp_manager("invalid-size");
+
+        manager.set_editor_font_size_px(20).unwrap();
+        assert_eq!(manager.get_editor_font_size_px(), 20);
+
+        for invalid in [11, 33, 0, u32::MAX] {
+            let result = manager.set_editor_font_size_px(invalid);
+            assert!(result.is_err(), "size {} must be rejected", invalid);
+            assert_eq!(
+                manager.get_editor_font_size_px(),
+                20,
+                "cache must keep 20 after rejected size {}",
+                invalid
+            );
+            assert_eq!(
+                read_disk_settings(&dir).editor.font_size_px,
+                20,
+                "disk must keep 20 after rejected size {}",
+                invalid
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A blank family is rejected and changes neither cache nor disk, while
+    /// any non-empty name (including fonts later uninstalled) is accepted.
+    #[test]
+    fn editor_font_blank_family_setter_changes_nothing() {
+        let (manager, dir) = editor_font_tmp_manager("blank-family");
+
+        manager
+            .set_editor_font_family("Georgia".to_owned())
+            .unwrap();
+        assert_eq!(manager.get_editor_font_family(), "Georgia");
+
+        for blank in ["", "   ", "\t"] {
+            let result = manager.set_editor_font_family(blank.to_owned());
+            assert!(result.is_err(), "family {:?} must be rejected", blank);
+            assert_eq!(
+                manager.get_editor_font_family(),
+                "Georgia",
+                "cache must keep Georgia after rejected family {:?}",
+                blank
+            );
+            assert_eq!(
+                read_disk_settings(&dir).editor.font_family,
+                "Georgia",
+                "disk must keep Georgia after rejected family {:?}",
+                blank
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Valid font writes survive a reload (new manager over the same dir),
+    /// including a family that is a free-form Windows font name.
+    #[test]
+    fn editor_font_valid_writes_survive_reload() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-editor-font-reload-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        {
+            let manager = SettingsManager::with_config_dir(dir.clone()).unwrap();
+            manager
+                .set_editor_font_family("consolas".to_owned())
+                .unwrap();
+            manager
+                .set_editor_font_family("PT Sans".to_owned())
+                .unwrap();
+            manager.set_editor_font_size_px(28).unwrap();
+        }
+
+        let manager2 = SettingsManager::with_config_dir(dir.clone()).unwrap();
+        let after = manager2.load().unwrap();
+        assert_eq!(after.editor.font_family, "PT Sans");
+        assert_eq!(after.editor.font_size_px, 28);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Each setter only touches its own field, so concurrent updates never
+    /// overwrite the other.
+    #[test]
+    fn editor_font_setters_preserve_other_field() {
+        let (manager, dir) = editor_font_tmp_manager("independent");
+
+        manager
+            .set_editor_font_family("georgia".to_owned())
+            .unwrap();
+        manager.set_editor_font_size_px(24).unwrap();
+
+        let after = manager.load().unwrap();
+        assert_eq!(after.editor.font_family, "georgia");
+        assert_eq!(after.editor.font_size_px, 24);
+
+        manager.set_editor_font_size_px(18).unwrap();
+        assert_eq!(
+            manager.load().unwrap().editor.font_family,
+            "georgia",
+            "size setter must not clobber family"
+        );
+
+        manager.set_editor_font_family("arial".to_owned()).unwrap();
+        assert_eq!(
+            manager.load().unwrap().editor.font_size_px,
+            18,
+            "family setter must not clobber size"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

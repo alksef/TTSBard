@@ -6,6 +6,7 @@ import { useEditorSettings } from '../../composables/useAppSettings';
 import { useRuAccentRuntime } from '../../composables/useRuAccentRuntime';
 import type { HomographAccentorPackDto, QuickEditorMode } from '../../types/settings';
 import { normalizeTypingTimeout } from '../../utils/validateTypingTimeout';
+import EditorFontSettings from './EditorFontSettings.vue';
 
 const editorSettings = useEditorSettings();
 
@@ -242,6 +243,8 @@ watch(editorSettings, (newSettings) => {
 
 <template>
   <div class="settings-editor">
+    <EditorFontSettings />
+
     <section class="settings-section">
       <div class="card-header">
         <h3 class="card-title">Быстрый редактор</h3>

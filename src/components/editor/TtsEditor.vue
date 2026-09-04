@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, shallowRef } from 'vue'
-import { EditorView, keymap } from '@codemirror/view'
+import { ref, onMounted, onUnmounted, watch, shallowRef, computed, nextTick } from 'vue'
+import { EditorView, keymap, placeholder } from '@codemirror/view'
 import { EditorState, Annotation, Prec } from '@codemirror/state'
 import { defaultKeymap, historyKeymap, history, redo, isolateHistory } from '@codemirror/commands'
 import {
@@ -23,6 +23,7 @@ import { useSpellcheck } from '../../composables/useSpellcheck'
 import { useSpellContextMenu } from './spellContextMenu'
 import { debounceAsync } from '../../utils/debounce'
 import { matchesEditorHotkey, shouldEnterSubmit, shouldEscapeSubmit } from './keymapArbitration'
+import { editorFontCssStack, toEditorFontFamily, parseEditorFontSize, EDITOR_FONT_SIZE_DEFAULT } from '../../utils/editorFont'
 import SpellContextMenu from './SpellContextMenu.vue'
 
 const props = withDefaults(
@@ -56,6 +57,21 @@ const ExternalUpdate = Annotation.define<boolean>()
 const editorSettings = useEditorSettings()
 const hotkeySettings = useHotkeysSettings()
 const { checkWords, enabled, available } = useSpellcheck()
+
+const editorFontFamily = computed(() => {
+  return editorFontCssStack(toEditorFontFamily(editorSettings.value?.font_family))
+})
+
+const editorFontSize = computed(() => {
+  const size = parseEditorFontSize(editorSettings.value?.font_size_px) ?? EDITOR_FONT_SIZE_DEFAULT
+  return `${size}px`
+})
+
+const rootStyle = computed(() => ({
+  '--editor-height': props.editorHeightPx,
+  '--editor-font-family': editorFontFamily.value,
+  '--editor-font-size': editorFontSize.value,
+}))
 const spellLinter = createSpellLinter(checkWords, () => enabled.value)
 const {
   menuState,
@@ -91,8 +107,8 @@ const ttsTheme = EditorView.theme({
       '0 8px 24px rgba(var(--rgb-black), 0.04), 0 0 0 3px var(--focus-glow)',
   },
   '.cm-scroller': {
-    fontFamily: 'var(--font-mono)',
-    fontSize: '1rem',
+    fontFamily: 'var(--editor-font-family, var(--font-mono))',
+    fontSize: 'var(--editor-font-size, 1rem)',
     lineHeight: '1.6',
     color: 'var(--color-text-primary)',
     minHeight: 'var(--editor-height, 340px)',
@@ -102,8 +118,8 @@ const ttsTheme = EditorView.theme({
     padding: '0.5rem 0.5rem',
     minHeight: '100%',
     caretColor: 'var(--color-text-primary)',
-    fontFamily: 'var(--font-mono)',
-    fontSize: '1rem',
+    fontFamily: 'var(--editor-font-family, var(--font-mono))',
+    fontSize: 'var(--editor-font-size, 1rem)',
     lineHeight: '1.6',
     color: 'var(--color-text-primary)',
   },
@@ -121,8 +137,9 @@ const ttsTheme = EditorView.theme({
   },
   '.cm-placeholder': {
     color: 'var(--color-text-muted)',
-    fontSize: 'clamp(1.1rem, 2vw, 1.35rem)',
-    fontFamily: 'var(--font-mono)',
+    fontSize: 'var(--editor-font-size, 1rem)',
+    fontFamily: 'var(--editor-font-family, var(--font-mono))',
+    lineHeight: '1.6',
     // Rendered inside .cm-content, which already carries the editor padding —
     // an extra padding here doubles the inset of the placeholder text.
     padding: '0',
@@ -448,6 +465,7 @@ function createState() {
     doc: props.modelValue,
     extensions: [
       ttsTheme,
+      placeholder(props.placeholder),
       spellLinter,
       EditorView.lineWrapping,
       EditorState.readOnly.of(false),
@@ -537,6 +555,12 @@ watch(available, (val) => {
   if (!val) closeMenu()
 })
 
+watch([editorFontFamily, editorFontSize], () => {
+  void nextTick().then(() => {
+    view.value?.requestMeasure()
+  })
+})
+
 function focus() {
   view.value?.focus()
 }
@@ -545,7 +569,7 @@ defineExpose({ focus, openSpellMenu })
 </script>
 
 <template>
-  <div ref="editorRef" class="tts-editor" :style="{ '--editor-height': editorHeightPx }" @click="view?.focus()" />
+  <div ref="editorRef" class="tts-editor" :style="rootStyle" @click="view?.focus()" />
   <SpellContextMenu
     :visible="menuState.visible"
     :suggestions="menuState.suggestions"
