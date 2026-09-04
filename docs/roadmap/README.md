@@ -1,5 +1,12 @@
 # Дорожная карта TTSBard
 
+Если возникли проблемы:
+
+- **Silero:** при ошибке неподдерживаемого формата смените формат ответа бота на MP3: отправьте `/mp3` в чат с [@silero_voice_bot](https://t.me/silero_voice_bot) и повторите озвучку.
+- **Поверх игры:** некоторые игры мешают показу окна или работе горячих клавиш без повышения прав. Если это происходит (например, в Marvel Rivals), запустите TTSBard **от имени администратора**.
+
+Подробнее — в [FAQ](../faq.md).
+
 Этот раздел описывает путь развития продукта. Подробные roadmap items
 распределены по фактическому состоянию:
 
@@ -57,6 +64,7 @@ related_tasks: []
 
 ### Надёжность и ревью
 
+- [ROADMAP-091 — Подсказка о формате аудио Silero](./completed/091-silero-audio-format-error.md)
 - [ROADMAP-089 — remediation полного ревью 2026-09-02](./completed/089-full-review-2026-09-02-remediation.md)
 - [ROADMAP-084 — Ошибки очереди речи: Silero и глобальное уведомление](./completed/084-speech-queue-global-error-toast.md)
 - [ROADMAP-076 — remediation по release-review v0.21.0..HEAD](./completed/076-release-review-remediation.md)

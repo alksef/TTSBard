@@ -2,7 +2,14 @@ use crate::events::EventSender;
 use crate::telegram::{SileroRuntimeSettings, TelegramClient};
 use crate::tts::engine::TtsEngine;
 use async_trait::async_trait;
+use std::io::Cursor;
 use std::sync::Arc;
+use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL, CODEC_TYPE_OPUS};
+use symphonia::core::errors::Error as SymphoniaError;
+use symphonia::core::formats::FormatOptions;
+use symphonia::core::io::MediaSourceStream;
+use symphonia::core::meta::MetadataOptions;
+use symphonia::core::probe::Hint;
 use tokio::sync::Mutex;
 use tracing::debug;
 
@@ -78,6 +85,62 @@ impl Default for SileroTts {
     }
 }
 
+const SILERO_OGG_OPUS_UNSUPPORTED_MSG: &str =
+    "Формат аудио Silero не поддерживается. Смените формат ответа бота на MP3 командой /mp3.";
+
+const SILERO_OGG_UNSUPPORTED_MSG: &str =
+    "Формат аудио Silero не поддерживается. Смените формат ответа бота на MP3 командой /mp3.";
+
+/// Early guard for known-unsupported Silero audio codecs.
+///
+/// Silero answers with OGG/Opus voice messages that the local Symphonia build
+/// cannot decode. This inspects the actual container bytes before the effects
+/// pipeline runs and returns an actionable error only for confirmed OGG files
+/// whose codec lacks a decoder. It never decodes full audio; probe failures and
+/// truncated files pass through to the regular pipeline diagnostics.
+fn unsupported_silero_ogg_codec(audio_data: &[u8]) -> Option<String> {
+    // Non-OGG bytes pass through untouched: no allocation, no probing.
+    if !audio_data.starts_with(b"OggS") {
+        return None;
+    }
+
+    let cursor = Cursor::new(audio_data.to_vec());
+    let mss = MediaSourceStream::new(Box::new(cursor), Default::default());
+
+    let probed = match symphonia::default::get_probe().format(
+        &Hint::new(),
+        mss,
+        &FormatOptions::default(),
+        &MetadataOptions::default(),
+    ) {
+        Ok(probed) => probed,
+        Err(_) => return None,
+    };
+
+    let format = probed.format;
+
+    let track = match format
+        .tracks()
+        .iter()
+        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
+    {
+        Some(track) => track,
+        None => return None,
+    };
+
+    match symphonia::default::get_codecs().make(&track.codec_params, &DecoderOptions::default()) {
+        Ok(_) => None,
+        Err(SymphoniaError::Unsupported(_)) => {
+            if track.codec_params.codec == CODEC_TYPE_OPUS {
+                Some(SILERO_OGG_OPUS_UNSUPPORTED_MSG.to_string())
+            } else {
+                Some(SILERO_OGG_UNSUPPORTED_MSG.to_string())
+            }
+        }
+        Err(_) => None,
+    }
+}
+
 #[async_trait]
 impl TtsEngine for SileroTts {
     async fn synthesize(&self, text: &str) -> Result<Vec<u8>, String> {
@@ -132,6 +195,10 @@ impl TtsEngine for SileroTts {
             .await
             .map_err(|e| format!("Failed to read audio file: {}", e))?;
 
+        if let Some(message) = unsupported_silero_ogg_codec(&audio_data) {
+            return Err(message);
+        }
+
         Ok(audio_data)
     }
 }
@@ -139,6 +206,71 @@ impl TtsEngine for SileroTts {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::audio::effects::decode_audio;
+
+    const SILERO_OPUS_OGG: &[u8] = include_bytes!("testdata/silero-opus.ogg");
+    const SILERO_VORBIS_OGG: &[u8] = include_bytes!("testdata/silero-vorbis.ogg");
+    const TEST_MP3: &[u8] = include_bytes!("../assets/test_sound.mp3");
+
+    const OPUS_UNSUPPORTED_TEXT: &str =
+        "Формат аудио Silero не поддерживается. Смените формат ответа бота на MP3 командой /mp3.";
+
+    #[test]
+    fn opus_fixture_yields_exact_actionable_message() {
+        let message = unsupported_silero_ogg_codec(SILERO_OPUS_OGG)
+            .expect("OGG/Opus fixture must be flagged as an unsupported Silero codec");
+        assert_eq!(message, OPUS_UNSUPPORTED_TEXT);
+    }
+
+    #[test]
+    fn vorbis_fixture_is_not_flagged_as_unsupported() {
+        assert_eq!(unsupported_silero_ogg_codec(SILERO_VORBIS_OGG), None);
+    }
+
+    #[test]
+    fn mp3_fixture_is_not_flagged_as_unsupported() {
+        assert_eq!(unsupported_silero_ogg_codec(TEST_MP3), None);
+    }
+
+    #[test]
+    fn vorbis_fixture_still_decodes_with_existing_pipeline() {
+        let pcm = decode_audio(SILERO_VORBIS_OGG).expect("OGG/Vorbis fixture must decode");
+        assert!(!pcm.samples.is_empty());
+        assert!(pcm.sample_rate > 0);
+    }
+
+    #[test]
+    fn mp3_fixture_still_decodes_with_existing_pipeline() {
+        let pcm = decode_audio(TEST_MP3).expect("MP3 fixture must decode");
+        assert!(!pcm.samples.is_empty());
+        assert!(pcm.sample_rate > 0);
+    }
+
+    #[test]
+    fn opus_rejection_is_not_sticky_for_later_mp3_decode() {
+        let message = unsupported_silero_ogg_codec(SILERO_OPUS_OGG)
+            .expect("OGG/Opus fixture must be rejected first");
+        assert!(message.contains("/mp3"));
+
+        assert_eq!(unsupported_silero_ogg_codec(TEST_MP3), None);
+        let pcm = decode_audio(TEST_MP3).expect("MP3 must still decode after Opus rejection");
+        assert!(!pcm.samples.is_empty());
+    }
+
+    #[test]
+    fn non_ogg_bytes_pass_through_without_flagging() {
+        assert_eq!(unsupported_silero_ogg_codec(&[]), None);
+        assert_eq!(unsupported_silero_ogg_codec(b"OggS"), None);
+
+        let random: Vec<u8> = (0u8..=255).cycle().take(128).collect();
+        assert_eq!(unsupported_silero_ogg_codec(&random), None);
+    }
+
+    #[test]
+    fn truncated_ogg_is_not_mislabeled_as_unsupported_codec() {
+        let truncated = &SILERO_OPUS_OGG[..16];
+        assert_eq!(unsupported_silero_ogg_codec(truncated), None);
+    }
 
     #[test]
     fn captured_speaker_empty_string_treated_as_absent() {

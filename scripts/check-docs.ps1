@@ -281,6 +281,7 @@ function Test-TaskLifecycle([string]$TasksDirectory) {
 function Test-DocsStructure {
     $allowedEntries = @(
         'README.md',
+        'faq.md',
         'decisions',
         'development',
         'integrations',
