@@ -3035,12 +3035,14 @@ mod tests {
     /// Round-trip: visible_provider_ids persists through serialize/deserialize.
     #[test]
     fn tts_settings_visible_provider_ids_round_trip() {
-        let mut settings = TtsSettings::default();
-        settings.visible_provider_ids = vec![
-            "silero".to_string(),
-            "openai".to_string(),
-            "fish".to_string(),
-        ];
+        let settings = TtsSettings {
+            visible_provider_ids: vec![
+                "silero".to_string(),
+                "openai".to_string(),
+                "fish".to_string(),
+            ],
+            ..Default::default()
+        };
         let json = serde_json::to_string(&settings).unwrap();
         let back: TtsSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(
@@ -3599,7 +3601,8 @@ mod tests {
             modifiers: vec![],
             key: "F12".to_string(),
         };
-        mgr.set_editor_hotkey("approve_next_incoming", &custom).unwrap();
+        mgr.set_editor_hotkey("approve_next_incoming", &custom)
+            .unwrap();
 
         let default = mgr.reset_editor_hotkey("approve_next_incoming").unwrap();
         assert_eq!(default.key, "K");
@@ -4147,9 +4150,7 @@ mod tests {
     fn set_input_server_section_persists_two_fields_and_keeps_cache_in_sync() {
         let (manager, dir) = input_server_section_tmp_manager("save-two");
 
-        manager
-            .set_input_server_section(true, 20202)
-            .unwrap();
+        manager.set_input_server_section(true, 20202).unwrap();
 
         let disk: AppSettings =
             serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap())
@@ -4174,9 +4175,7 @@ mod tests {
         let before = manager.load().unwrap();
         assert_eq!(before.audio.speaker_volume, 33);
 
-        manager
-            .set_input_server_section(true, 20202)
-            .unwrap();
+        manager.set_input_server_section(true, 20202).unwrap();
 
         let after = manager.load().unwrap();
         assert_eq!(after.audio.speaker_volume, 33);
@@ -4223,8 +4222,12 @@ mod tests {
         assert!(IncomingSettings::default().auto_play);
         assert!(AppSettings::default().incoming.auto_play);
 
-        let parsed: AppSettings = serde_json::from_str(&legacy_incoming_settings_json(None)).unwrap();
-        assert!(parsed.incoming.auto_play, "missing incoming must use default");
+        let parsed: AppSettings =
+            serde_json::from_str(&legacy_incoming_settings_json(None)).unwrap();
+        assert!(
+            parsed.incoming.auto_play,
+            "missing incoming must use default"
+        );
     }
 
     /// Legacy `input_server.auto_play: false` migrates exactly to false.
@@ -4444,7 +4447,10 @@ mod tests {
         assert!(!after.incoming.auto_play);
         assert!(after.input_server.start_on_boot, "server section preserved");
         assert_eq!(after.input_server.port, 20202, "server port preserved");
-        assert_eq!(after.audio.speaker_volume, 33, "unrelated setting preserved");
+        assert_eq!(
+            after.audio.speaker_volume, 33,
+            "unrelated setting preserved"
+        );
 
         let disk = read_disk_value(&dir);
         assert_eq!(disk["incoming"]["auto_play"], serde_json::json!(false));

@@ -1357,7 +1357,7 @@ mod tests {
         let state = AppState::new();
         let root = tu::unique_test_root("incomplete-selected");
         tu::write_incomplete_root(&root, &["legacy"]);
-        state.refresh_ruaccent_packs(&[root.clone()]);
+        state.refresh_ruaccent_packs(std::slice::from_ref(&root));
 
         enable_homograph(&state, Some("ruaccent.upstream.legacy"));
         assert!(selected_ruaccent_runtime_slot(&state).is_none());
@@ -1373,7 +1373,7 @@ mod tests {
         let state = AppState::new();
         let root = tu::unique_test_root("complete-selected");
         tu::write_upstream_pack(&root, &["tiny"]);
-        state.refresh_ruaccent_packs(&[root.clone()]);
+        state.refresh_ruaccent_packs(std::slice::from_ref(&root));
 
         enable_homograph(&state, Some("ruaccent.upstream.tiny"));
         assert!(selected_ruaccent_runtime_slot(&state).is_none());
@@ -1396,7 +1396,7 @@ mod tests {
         let state = AppState::new();
         let root = tu::unique_test_root("complete-selected-not-ready");
         tu::write_upstream_pack(&root, &["tiny"]);
-        state.refresh_ruaccent_packs(&[root.clone()]);
+        state.refresh_ruaccent_packs(std::slice::from_ref(&root));
 
         enable_homograph(&state, Some("ruaccent.upstream.tiny"));
         assert!(selected_ruaccent_runtime_slot(&state).is_none());
@@ -1413,7 +1413,7 @@ mod tests {
         let state = AppState::new();
         let root = tu::unique_test_root("complete-preview-disabled");
         tu::write_upstream_pack(&root, &["tiny"]);
-        state.refresh_ruaccent_packs(&[root.clone()]);
+        state.refresh_ruaccent_packs(std::slice::from_ref(&root));
 
         select_homograph_disabled(&state, Some("ruaccent.upstream.tiny"));
         assert!(preview_ruaccent_runtime_slot(&state).is_none());
@@ -1436,7 +1436,7 @@ mod tests {
         let state = AppState::new();
         let root = tu::unique_test_root("complete-auto-disabled");
         tu::write_upstream_pack(&root, &["tiny"]);
-        state.refresh_ruaccent_packs(&[root.clone()]);
+        state.refresh_ruaccent_packs(std::slice::from_ref(&root));
 
         select_homograph_disabled(&state, Some("ruaccent.upstream.tiny"));
         assert!(selected_ruaccent_runtime_slot(&state).is_none());
@@ -1465,7 +1465,7 @@ mod tests {
         let state = AppState::new();
         let root = tu::unique_test_root("incomplete-preview-disabled");
         tu::write_incomplete_root(&root, &["legacy"]);
-        state.refresh_ruaccent_packs(&[root.clone()]);
+        state.refresh_ruaccent_packs(std::slice::from_ref(&root));
 
         select_homograph_disabled(&state, Some("ruaccent.upstream.legacy"));
         assert!(preview_ruaccent_runtime_slot(&state).is_none());

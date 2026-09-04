@@ -191,8 +191,8 @@ impl InputServerService {
 mod tests {
     use super::{ConsumeError, InputServerService};
     use crate::input_server::{
-        IncomingSettings, IncomingTextItem, InputServerError, InputServerSettings, InputServerStatus,
-        INBOX_CAPACITY,
+        IncomingSettings, IncomingTextItem, InputServerError, InputServerSettings,
+        InputServerStatus, INBOX_CAPACITY,
     };
     use crate::speech_queue::SubmissionSource;
 
@@ -286,10 +286,7 @@ mod tests {
     #[test]
     fn incoming_snapshot_updates_without_touching_server_settings() {
         let service = InputServerService::new();
-        service
-            .settings
-            .blocking_write()
-            .start_on_boot = true;
+        service.settings.blocking_write().start_on_boot = true;
 
         {
             let mut incoming = service.incoming.blocking_write();

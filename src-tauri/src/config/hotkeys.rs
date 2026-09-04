@@ -775,15 +775,17 @@ mod tests {
 
     #[test]
     fn find_duplicate_detects_same_binding() {
-        let mut s = EditorHotkeySettings::default();
         // Make next_tab identical to edit_word
-        s.edit_word = Hotkey {
-            modifiers: vec![HotkeyModifier::Ctrl],
-            key: "E".to_string(),
-        };
-        s.next_tab = Hotkey {
-            modifiers: vec![HotkeyModifier::Ctrl],
-            key: "E".to_string(),
+        let s = EditorHotkeySettings {
+            edit_word: Hotkey {
+                modifiers: vec![HotkeyModifier::Ctrl],
+                key: "E".to_string(),
+            },
+            next_tab: Hotkey {
+                modifiers: vec![HotkeyModifier::Ctrl],
+                key: "E".to_string(),
+            },
+            ..Default::default()
         };
         let conflict = s.find_duplicate("edit_word", &s.edit_word.clone());
         assert!(conflict.is_some());
@@ -802,14 +804,16 @@ mod tests {
 
     #[test]
     fn find_duplicate_detects_new_action_bindings() {
-        let mut s = EditorHotkeySettings::default();
-        s.cycle_route = Hotkey {
-            modifiers: vec![HotkeyModifier::Ctrl],
-            key: "R".to_string(),
-        };
-        s.toggle_typing = Hotkey {
-            modifiers: vec![HotkeyModifier::Ctrl],
-            key: "R".to_string(),
+        let s = EditorHotkeySettings {
+            cycle_route: Hotkey {
+                modifiers: vec![HotkeyModifier::Ctrl],
+                key: "R".to_string(),
+            },
+            toggle_typing: Hotkey {
+                modifiers: vec![HotkeyModifier::Ctrl],
+                key: "R".to_string(),
+            },
+            ..Default::default()
         };
         let conflict = s.find_duplicate("cycle_route", &s.cycle_route.clone());
         assert_eq!(conflict, Some("toggle_typing"));
@@ -827,14 +831,16 @@ mod tests {
 
     #[test]
     fn find_duplicate_detects_accent_homographs_conflict() {
-        let mut s = EditorHotkeySettings::default();
-        s.accent_homographs = Hotkey {
-            modifiers: vec![HotkeyModifier::Ctrl],
-            key: "U".to_string(),
-        };
-        s.toggle_history = Hotkey {
-            modifiers: vec![HotkeyModifier::Ctrl],
-            key: "U".to_string(),
+        let s = EditorHotkeySettings {
+            accent_homographs: Hotkey {
+                modifiers: vec![HotkeyModifier::Ctrl],
+                key: "U".to_string(),
+            },
+            toggle_history: Hotkey {
+                modifiers: vec![HotkeyModifier::Ctrl],
+                key: "U".to_string(),
+            },
+            ..Default::default()
         };
         let conflict = s.find_duplicate("accent_homographs", &s.accent_homographs.clone());
         assert_eq!(conflict, Some("toggle_history"));

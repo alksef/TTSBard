@@ -176,9 +176,7 @@ pub async fn save_input_server_settings(
 
 /// Read the source-neutral Incoming policy from the runtime snapshot.
 #[tauri::command]
-pub async fn get_incoming_settings(
-    state: State<'_, AppState>,
-) -> Result<IncomingSettings, String> {
+pub async fn get_incoming_settings(state: State<'_, AppState>) -> Result<IncomingSettings, String> {
     Ok(state.input_server.incoming.read().await.clone())
 }
 

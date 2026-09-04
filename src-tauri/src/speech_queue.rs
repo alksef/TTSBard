@@ -22,18 +22,13 @@ pub struct AcceptedJob {
 
 // ── Submission source metadata ──
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SubmissionSource {
+    #[default]
     Editor,
     Server,
     Ocr,
-}
-
-impl Default for SubmissionSource {
-    fn default() -> Self {
-        SubmissionSource::Editor
-    }
 }
 
 // ── Delivery policy ──
@@ -163,6 +158,7 @@ impl SpeechJob {
     }
 
     #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn test_job(
         job_id: Uuid,
         original_text: String,

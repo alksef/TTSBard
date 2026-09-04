@@ -2274,8 +2274,10 @@ mod tests {
     /// Round-trip TtsSettings -> DTO -> TtsSettings preserves visible_provider_ids.
     #[test]
     fn tts_settings_dto_visible_provider_ids_round_trip() {
-        let mut settings = TtsSettings::default();
-        settings.visible_provider_ids = vec!["silero".to_string(), "openai".to_string()];
+        let settings = TtsSettings {
+            visible_provider_ids: vec!["silero".to_string(), "openai".to_string()],
+            ..Default::default()
+        };
         let dto: TtsSettingsDto = settings.clone().into();
         assert_eq!(
             dto.visible_provider_ids,

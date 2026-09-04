@@ -56,10 +56,7 @@ fn should_bypass_intercept_for_soundpanel(window_focused: bool, vk_code: u32) ->
 /// Returns `Some((key, action))` for a recognized, bound key and `None`
 /// otherwise. Kept out of the `#[cfg(target_os = "windows")]` hook proc so the
 /// swallow decision can be unit-tested on any host.
-fn intercept_binding_for_key<'a>(
-    intercept: &'a InterceptSettings,
-    vk_code: u32,
-) -> Option<(&'a str, &'a str)> {
+fn intercept_binding_for_key(intercept: &InterceptSettings, vk_code: u32) -> Option<(&str, &str)> {
     if !intercept.enabled {
         return None;
     }
@@ -139,63 +136,6 @@ unsafe extern "system" fn soundpanel_keyboard_proc(
     }
 
     CallNextHookEx(HHOOK::default(), n_code, w_param, l_param)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::soundpanel::intercept::{InterceptBinding, InterceptSettings};
-
-    #[test]
-    fn active_soundpanel_bypasses_intercept_only_for_f1_through_f12() {
-        assert!(should_bypass_intercept_for_soundpanel(true, 0x70));
-        assert!(should_bypass_intercept_for_soundpanel(true, 0x7B));
-        assert!(!should_bypass_intercept_for_soundpanel(true, 0x6F));
-        assert!(!should_bypass_intercept_for_soundpanel(true, 0x7C));
-        assert!(!should_bypass_intercept_for_soundpanel(false, 0x70));
-    }
-
-    #[test]
-    fn intercept_binding_resolved_when_enabled_and_bound() {
-        let intercept = InterceptSettings {
-            enabled: true,
-            bindings: vec![InterceptBinding {
-                key: "NUMPAD1".into(),
-                action: "play_sound".into(),
-            }],
-        };
-        assert_eq!(
-            intercept_binding_for_key(&intercept, 0x61),
-            Some(("NUMPAD1", "play_sound"))
-        );
-    }
-
-    #[test]
-    fn intercept_binding_none_when_disabled() {
-        let intercept = InterceptSettings {
-            enabled: false,
-            bindings: vec![InterceptBinding {
-                key: "NUMPAD1".into(),
-                action: "play_sound".into(),
-            }],
-        };
-        assert_eq!(intercept_binding_for_key(&intercept, 0x61), None);
-    }
-
-    #[test]
-    fn intercept_binding_none_for_unbound_or_unrecognized_key() {
-        let intercept = InterceptSettings {
-            enabled: true,
-            bindings: vec![InterceptBinding {
-                key: "F5".into(),
-                action: "mute_mic".into(),
-            }],
-        };
-        // NUMPAD1 not bound
-        assert_eq!(intercept_binding_for_key(&intercept, 0x61), None);
-        // 'A' is outside the interceptable key range
-        assert_eq!(intercept_binding_for_key(&intercept, 0x41), None);
-    }
 }
 
 #[cfg(target_os = "windows")]
@@ -404,5 +344,62 @@ pub fn initialize_soundpanel_hook(state: SoundPanelState, app_handle: AppHandle)
     {
         error!("Keyboard hook is only supported on Windows");
         HookManager {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::soundpanel::intercept::{InterceptBinding, InterceptSettings};
+
+    #[test]
+    fn active_soundpanel_bypasses_intercept_only_for_f1_through_f12() {
+        assert!(should_bypass_intercept_for_soundpanel(true, 0x70));
+        assert!(should_bypass_intercept_for_soundpanel(true, 0x7B));
+        assert!(!should_bypass_intercept_for_soundpanel(true, 0x6F));
+        assert!(!should_bypass_intercept_for_soundpanel(true, 0x7C));
+        assert!(!should_bypass_intercept_for_soundpanel(false, 0x70));
+    }
+
+    #[test]
+    fn intercept_binding_resolved_when_enabled_and_bound() {
+        let intercept = InterceptSettings {
+            enabled: true,
+            bindings: vec![InterceptBinding {
+                key: "NUMPAD1".into(),
+                action: "play_sound".into(),
+            }],
+        };
+        assert_eq!(
+            intercept_binding_for_key(&intercept, 0x61),
+            Some(("NUMPAD1", "play_sound"))
+        );
+    }
+
+    #[test]
+    fn intercept_binding_none_when_disabled() {
+        let intercept = InterceptSettings {
+            enabled: false,
+            bindings: vec![InterceptBinding {
+                key: "NUMPAD1".into(),
+                action: "play_sound".into(),
+            }],
+        };
+        assert_eq!(intercept_binding_for_key(&intercept, 0x61), None);
+    }
+
+    #[test]
+    fn intercept_binding_none_for_unbound_or_unrecognized_key() {
+        let intercept = InterceptSettings {
+            enabled: true,
+            bindings: vec![InterceptBinding {
+                key: "F5".into(),
+                action: "mute_mic".into(),
+            }],
+        };
+        // NUMPAD1 not bound
+        assert_eq!(intercept_binding_for_key(&intercept, 0x61), None);
+        // 'A' is outside the interceptable key range
+        assert_eq!(intercept_binding_for_key(&intercept, 0x41), None);
     }
 }

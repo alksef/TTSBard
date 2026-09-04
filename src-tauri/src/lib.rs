@@ -119,36 +119,6 @@ fn should_hide_soundpanel_on_blur(
     hide_on_blur && !stay_visible && !config_mode
 }
 
-#[cfg(test)]
-mod should_hide_tests {
-    use super::*;
-
-    #[test]
-    fn hide_on_blur_ordinary() {
-        assert!(should_hide_soundpanel_on_blur(true, false, false));
-    }
-
-    #[test]
-    fn no_hide_when_hide_on_blur_disabled() {
-        assert!(!should_hide_soundpanel_on_blur(false, false, false));
-    }
-
-    #[test]
-    fn stay_visible_bypasses_hide_on_blur() {
-        assert!(!should_hide_soundpanel_on_blur(true, true, false));
-    }
-
-    #[test]
-    fn stay_visible_without_hide_on_blur_still_no_hide() {
-        assert!(!should_hide_soundpanel_on_blur(false, true, false));
-    }
-
-    #[test]
-    fn config_mode_suppresses_hide_on_blur() {
-        assert!(!should_hide_soundpanel_on_blur(true, false, true));
-    }
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Инициализируем состояние и менеджеры ДО setup
@@ -800,4 +770,34 @@ pub fn run() {
                 ));
             }
         });
+}
+
+#[cfg(test)]
+mod should_hide_tests {
+    use super::*;
+
+    #[test]
+    fn hide_on_blur_ordinary() {
+        assert!(should_hide_soundpanel_on_blur(true, false, false));
+    }
+
+    #[test]
+    fn no_hide_when_hide_on_blur_disabled() {
+        assert!(!should_hide_soundpanel_on_blur(false, false, false));
+    }
+
+    #[test]
+    fn stay_visible_bypasses_hide_on_blur() {
+        assert!(!should_hide_soundpanel_on_blur(true, true, false));
+    }
+
+    #[test]
+    fn stay_visible_without_hide_on_blur_still_no_hide() {
+        assert!(!should_hide_soundpanel_on_blur(false, true, false));
+    }
+
+    #[test]
+    fn config_mode_suppresses_hide_on_blur() {
+        assert!(!should_hide_soundpanel_on_blur(true, false, true));
+    }
 }

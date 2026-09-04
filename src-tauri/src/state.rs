@@ -1102,7 +1102,7 @@ mod tests {
         let root = tu::unique_test_root("visible");
         tu::write_upstream_pack(&root, &["one"]);
 
-        let count = state.refresh_ruaccent_packs(&[root.clone()]);
+        let count = state.refresh_ruaccent_packs(std::slice::from_ref(&root));
         assert_eq!(count, 1);
 
         let snapshot = state.get_ruaccent_packs();
@@ -1122,9 +1122,9 @@ mod tests {
         tu::write_upstream_pack(&root, &["first"]);
         tu::write_upstream_pack(&root2, &["second"]);
 
-        assert_eq!(state.refresh_ruaccent_packs(&[root.clone()]), 1);
+        assert_eq!(state.refresh_ruaccent_packs(std::slice::from_ref(&root)), 1);
 
-        let count = state.refresh_ruaccent_packs(&[root2.clone()]);
+        let count = state.refresh_ruaccent_packs(std::slice::from_ref(&root2));
         assert_eq!(count, 1);
 
         let snapshot = state.get_ruaccent_packs();
@@ -1147,7 +1147,7 @@ mod tests {
 
         let pack = tu::write_upstream_pack(&root, &["tiny"]);
 
-        let count = state.refresh_ruaccent_packs(&[root.clone()]);
+        let count = state.refresh_ruaccent_packs(std::slice::from_ref(&root));
         assert_eq!(count, 1);
 
         let slots = state.ruaccent_runtime_slots.read().clone();
@@ -1171,7 +1171,7 @@ mod tests {
         let root = tu::unique_test_root("preserve");
 
         tu::write_upstream_pack(&root, &["same"]);
-        assert_eq!(state.refresh_ruaccent_packs(&[root.clone()]), 1);
+        assert_eq!(state.refresh_ruaccent_packs(std::slice::from_ref(&root)), 1);
 
         let slot = state
             .get_ruaccent_runtime_slot("ruaccent.upstream.same")
@@ -1180,7 +1180,7 @@ mod tests {
         assert_eq!(slot.status(), RuAccentRuntimeStatus::Ready);
 
         // Same pack root and model: the live slot (and its status) is preserved.
-        assert_eq!(state.refresh_ruaccent_packs(&[root.clone()]), 1);
+        assert_eq!(state.refresh_ruaccent_packs(std::slice::from_ref(&root)), 1);
         let slot = state
             .get_ruaccent_runtime_slot("ruaccent.upstream.same")
             .expect("slot preserved");
@@ -1199,14 +1199,20 @@ mod tests {
         let root_b = tu::unique_test_root("replace-b");
 
         let pack_a = tu::write_upstream_pack(&root_a, &["move"]);
-        assert_eq!(state.refresh_ruaccent_packs(&[root_a.clone()]), 1);
+        assert_eq!(
+            state.refresh_ruaccent_packs(std::slice::from_ref(&root_a)),
+            1
+        );
         let slot = state
             .get_ruaccent_runtime_slot("ruaccent.upstream.move")
             .expect("slot");
         slot.mark_ready();
 
         let pack_b = tu::write_upstream_pack(&root_b, &["move"]);
-        assert_eq!(state.refresh_ruaccent_packs(&[root_b.clone()]), 1);
+        assert_eq!(
+            state.refresh_ruaccent_packs(std::slice::from_ref(&root_b)),
+            1
+        );
 
         let slot = state
             .get_ruaccent_runtime_slot("ruaccent.upstream.move")
@@ -1227,13 +1233,16 @@ mod tests {
         let root = tu::unique_test_root("remove");
 
         tu::write_upstream_pack(&root, &["gone"]);
-        assert_eq!(state.refresh_ruaccent_packs(&[root.clone()]), 1);
+        assert_eq!(state.refresh_ruaccent_packs(std::slice::from_ref(&root)), 1);
         assert!(state
             .get_ruaccent_runtime_slot("ruaccent.upstream.gone")
             .is_some());
 
         let empty_root = tu::unique_test_root("empty");
-        assert_eq!(state.refresh_ruaccent_packs(&[empty_root.clone()]), 0);
+        assert_eq!(
+            state.refresh_ruaccent_packs(std::slice::from_ref(&empty_root)),
+            0
+        );
         assert!(state
             .get_ruaccent_runtime_slot("ruaccent.upstream.gone")
             .is_none());

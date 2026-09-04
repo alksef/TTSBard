@@ -178,7 +178,7 @@ mod tests {
         let root = tu::unique_test_root("complete");
         let pack = tu::write_upstream_pack(&root, &["ruaccent-v1"]);
 
-        let descriptors = discover_ruaccent_packs(&[root.clone()]);
+        let descriptors = discover_ruaccent_packs(std::slice::from_ref(&root));
         assert_eq!(descriptors.len(), 1);
         let d = &descriptors[0];
         assert_eq!(d.id, "ruaccent.upstream.ruaccent-v1");
@@ -196,7 +196,7 @@ mod tests {
         let root = tu::unique_test_root("two-variants");
         let pack = tu::write_upstream_pack(&root, &["variant-b", "variant-a"]);
 
-        let descriptors = discover_ruaccent_packs(&[root.clone()]);
+        let descriptors = discover_ruaccent_packs(std::slice::from_ref(&root));
         let ids: Vec<&str> = descriptors.iter().map(|d| d.id.as_str()).collect();
         assert_eq!(
             ids,
@@ -214,7 +214,7 @@ mod tests {
         let root = tu::unique_test_root("incomplete-root");
         tu::write_incomplete_root(&root, &["variant"]);
 
-        assert!(discover_ruaccent_packs(&[root.clone()]).is_empty());
+        assert!(discover_ruaccent_packs(std::slice::from_ref(&root)).is_empty());
 
         std::fs::remove_dir_all(root).ok();
     }
@@ -225,7 +225,7 @@ mod tests {
         tu::write_upstream_pack(&root, &["complete-variant"]);
         tu::write_incomplete_variant(&root, "broken-variant");
 
-        let descriptors = discover_ruaccent_packs(&[root.clone()]);
+        let descriptors = discover_ruaccent_packs(std::slice::from_ref(&root));
         assert_eq!(descriptors.len(), 1);
         assert_eq!(descriptors[0].id, "ruaccent.upstream.complete-variant");
 
@@ -237,7 +237,7 @@ mod tests {
         let root = tu::unique_test_root("missing");
         assert!(!root.exists());
 
-        let descriptors = discover_ruaccent_packs(&[root.clone()]);
+        let descriptors = discover_ruaccent_packs(std::slice::from_ref(&root));
         assert!(descriptors.is_empty());
     }
 
