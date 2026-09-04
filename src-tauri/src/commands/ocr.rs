@@ -5,7 +5,10 @@ use crate::commands::speech_queue::SpeechQueueState;
 use crate::config::{Hotkey, SettingsManager};
 use crate::ocr::capture::{capture_virtual_desktop, CaptureError, VirtualScreenGeometry};
 use crate::ocr::packs::scan_ocr_packs;
-use crate::ocr::service::{decide_transition, BeginOutcome, FinishOutcome, OcrTransition};
+use crate::ocr::service::{
+    decide_ocr_refresh_reconcile, decide_transition, BeginOutcome, FinishOutcome,
+    OcrRefreshReconcile, OcrTransition,
+};
 use crate::ocr::settings::OcrSettings;
 use crate::ocr::OcrStatus;
 use crate::speech_queue::SubmissionSource;
@@ -436,6 +439,51 @@ fn unregister_ocr_capture(app_handle: &AppHandle, hotkey: &Hotkey) -> Result<(),
     Ok(())
 }
 
+/// Whether a failed OCR start requires an untick persist, and the model id to
+/// keep. Returns `Some(model_id)` when the feature is still enabled (the
+/// checkbox must be cleared), `None` when it is already disabled.
+fn failed_start_untick(enabled: bool, model_id: Option<String>) -> Option<Option<String>> {
+    enabled.then_some(model_id)
+}
+
+/// Untick the OCR checkbox after a failed start and persist the setting.
+///
+/// The runtime start already published `Error`; this helper makes the persisted
+/// `enabled` flag agree with that truth. `model_id` is kept as-is (a dangling id
+/// is allowed per spec) so returning the files restores the feature on re-enable.
+/// A persist failure is only warned about: the settings stay truthful (enabled,
+/// error visible via status) until the next successful save.
+async fn disable_ocr_after_failed_start(app_handle: &AppHandle, state: &AppState) {
+    let service = &state.ocr;
+    let (enabled, model_id) = {
+        let settings = service.settings.read().await;
+        (settings.enabled, settings.model_id.clone())
+    };
+
+    let Some(model_id) = failed_start_untick(enabled, model_id) else {
+        return;
+    };
+
+    let Some(settings_manager) = app_handle.try_state::<SettingsManager>() else {
+        tracing::warn!("SettingsManager unavailable while disabling OCR after failed start");
+        return;
+    };
+
+    match super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_ocr_section(false, model_id)
+    })
+    .await
+    {
+        Ok(()) => {
+            service.settings.write().await.enabled = false;
+            super::emit_settings_changed(app_handle);
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "Failed to persist OCR disable after failed start");
+        }
+    }
+}
+
 /// Start the OCR runtime against the current hotkey binding (shared seam used
 /// by both the save command and startup boot-apply).
 pub(crate) async fn start_ocr_runtime(app_handle: &AppHandle, state: &AppState, hotkey: &Hotkey) {
@@ -443,6 +491,12 @@ pub(crate) async fn start_ocr_runtime(app_handle: &AppHandle, state: &AppState, 
     let emit = |status: &OcrStatus| emit_ocr_status(app_handle, status);
     let register = |hotkey: &Hotkey| register_ocr_capture(app_handle, state, hotkey);
     service.start(hotkey, emit, register).await;
+
+    // A failed start must clear the persisted enable flag so the checkbox stays
+    // truthful ("enabled" only while the feature actually works).
+    if matches!(service.status(), OcrStatus::Error { .. }) {
+        disable_ocr_after_failed_start(app_handle, state).await;
+    }
 }
 
 /// Stop the OCR runtime, releasing the shortcut (shared seam used by both the
@@ -596,6 +650,87 @@ pub fn list_ocr_packs(state: State<'_, AppState>) -> Vec<OcrPackDto> {
         .collect()
 }
 
+/// Re-scan the OCR packs directory and reconcile the persisted selection.
+///
+/// The reconcile follows the shared checkbox rule: when the selected model is
+/// gone and not held in memory the feature is disabled with a save (auto-
+/// selecting the single remaining model); a dangling selection with exactly one
+/// pack auto-selects it without enabling; a model still held in memory is left
+/// untouched. Returns the fresh pack list.
+#[tauri::command]
+pub async fn refresh_ocr_packs(
+    state: State<'_, AppState>,
+    settings_manager: State<'_, SettingsManager>,
+    app_handle: AppHandle,
+) -> Result<Vec<OcrPackDto>, String> {
+    let packs = scan_ocr_packs(state.ocr.packs_root());
+    let persisted = settings_manager
+        .load()
+        .map_err(|e| format!("Failed to load settings: {e}"))?
+        .ocr;
+
+    let pack_ids: Vec<String> = packs.iter().map(|p| p.id.clone()).collect();
+
+    let holds_in_memory = {
+        let snapshot = state.ocr.settings.read().await;
+        state.ocr.is_runtime_active() && persisted.model_id.is_some() && *snapshot == persisted
+    };
+
+    let decision = decide_ocr_refresh_reconcile(
+        persisted.enabled,
+        persisted.model_id.as_deref(),
+        &pack_ids,
+        holds_in_memory,
+    );
+
+    match decision {
+        OcrRefreshReconcile::None => {}
+        OcrRefreshReconcile::Disable { model_id } => {
+            let model_id_for_persist = model_id.clone();
+            super::persist_blocking(settings_manager.inner(), move |mgr| {
+                mgr.set_ocr_section(false, model_id_for_persist)
+            })
+            .await?;
+            {
+                let mut snapshot = state.ocr.settings.write().await;
+                snapshot.enabled = false;
+                snapshot.model_id = model_id;
+            }
+            // Stop unconditionally: `stop_ocr_runtime` serializes on the
+            // service transition lock, so a stop issued while a concurrent
+            // startup is still `Starting` waits for that start and tears down
+            // whatever it installed. Gating on `is_runtime_active()` would
+            // skip the stop while a startup is mid-flight (no shortcut
+            // registered yet) and let that start publish `Ready` after
+            // `enabled` was already persisted false.
+            stop_ocr_runtime(&app_handle, state.inner()).await;
+            super::emit_settings_changed(&app_handle);
+        }
+        OcrRefreshReconcile::AutoSelect(id) => {
+            let id_for_persist = id.clone();
+            super::persist_blocking(settings_manager.inner(), move |mgr| {
+                mgr.set_ocr_section(false, Some(id_for_persist))
+            })
+            .await?;
+            {
+                let mut snapshot = state.ocr.settings.write().await;
+                snapshot.enabled = false;
+                snapshot.model_id = Some(id);
+            }
+            super::emit_settings_changed(&app_handle);
+        }
+    }
+
+    Ok(packs
+        .into_iter()
+        .map(|pack| OcrPackDto {
+            id: pack.id,
+            display_name: pack.display_name,
+            languages: pack.languages,
+        })
+        .collect())
+}
+
 /// Open the configured OCR packs root in the OS file manager.
 ///
 /// The target is resolved only from the managed state's `packs_root()`, so the
@@ -673,5 +808,50 @@ mod tests {
             Err(anyhow::anyhow!("affinity denied"))
         });
         assert!(called, "exclude closure must be invoked");
+    }
+
+    #[test]
+    fn failed_start_untick_only_when_enabled_and_keeps_model_id() {
+        assert_eq!(
+            super::failed_start_untick(true, Some("a".to_string())),
+            Some(Some("a".to_string()))
+        );
+        assert_eq!(super::failed_start_untick(true, None), Some(None));
+        assert_eq!(
+            super::failed_start_untick(false, Some("a".to_string())),
+            None
+        );
+    }
+
+    #[test]
+    fn failed_start_disable_persists_enabled_false_with_model_id_kept() {
+        use super::SettingsManager;
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-ocr-untick-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let manager = SettingsManager::with_config_dir(dir.clone()).unwrap();
+
+        manager
+            .set_ocr_section(true, Some("com.example.ocr".to_string()))
+            .unwrap();
+
+        // The failed-start untick persists enabled=false and keeps the model id.
+        manager
+            .set_ocr_section(false, Some("com.example.ocr".to_string()))
+            .unwrap();
+
+        let after = manager.load().unwrap();
+        assert!(!after.ocr.enabled);
+        assert_eq!(after.ocr.model_id.as_deref(), Some("com.example.ocr"));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

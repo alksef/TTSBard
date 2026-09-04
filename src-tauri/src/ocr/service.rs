@@ -90,6 +90,59 @@ pub fn decide_transition(
     }
 }
 
+/// Reconcile decision for an OCR pack refresh (`refresh_ocr_packs`).
+///
+/// Pure and free of any shortcut-plugin or ONNX dependency.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OcrRefreshReconcile {
+    /// Nothing to change: the selection is still valid, or the runtime holds the
+    /// removed model in memory.
+    None,
+    /// The selected model is confirmed gone everywhere: disable the feature,
+    /// auto-selecting the single remaining model when exactly one is left and
+    /// retaining the missing id when none remain.
+    Disable { model_id: Option<String> },
+    /// There was no (or a dangling) selection and exactly one pack exists:
+    /// select it without enabling.
+    AutoSelect(String),
+}
+
+/// Decide the reconcile action for an OCR pack refresh.
+///
+/// Rules (order matters):
+/// - `enabled` with a saved id that is no longer in `pack_ids` and not held in
+///   memory → `Disable` (auto-select the single remaining pack, retain the
+///   missing id when no packs remain, otherwise `None`);
+/// - disabled with exactly one pack whose id differs from the saved one →
+///   `AutoSelect`;
+/// - otherwise `None` (a removed model still held in memory is left untouched).
+pub fn decide_ocr_refresh_reconcile(
+    enabled: bool,
+    saved_id: Option<&str>,
+    pack_ids: &[String],
+    holds_in_memory: bool,
+) -> OcrRefreshReconcile {
+    if enabled
+        && saved_id.is_some()
+        && !pack_ids.iter().any(|id| Some(id.as_str()) == saved_id)
+        && !holds_in_memory
+    {
+        return OcrRefreshReconcile::Disable {
+            model_id: match pack_ids.len() {
+                0 => saved_id.map(str::to_string),
+                1 => Some(pack_ids[0].clone()),
+                _ => None,
+            },
+        };
+    }
+
+    if !enabled && pack_ids.len() == 1 && saved_id != Some(pack_ids[0].as_str()) {
+        return OcrRefreshReconcile::AutoSelect(pack_ids[0].clone());
+    }
+
+    OcrRefreshReconcile::None
+}
+
 /// Result of [`OcrService::begin_capture_session`].
 #[derive(Debug)]
 pub enum BeginOutcome {
@@ -834,6 +887,34 @@ mod tests {
         assert_eq!(service.status(), OcrStatus::Disabled);
     }
 
+    #[tokio::test]
+    async fn stop_from_starting_without_shortcut_lands_disabled_without_ready() {
+        let service = OcrService::with_packs_root(PathBuf::new());
+
+        // A start has begun (`Starting`) but has not yet installed a runtime or
+        // registered the capture shortcut — exactly the window a concurrent
+        // `refresh_ocr_packs` disable can observe and must stop against.
+        service.set_status(OcrStatus::Starting);
+        assert!(!service.is_runtime_active());
+
+        let mut published = Vec::new();
+        service
+            .stop(|status| published.push(status.clone()), noop_unregister())
+            .await;
+
+        assert_eq!(service.status(), OcrStatus::Disabled);
+        assert_eq!(
+            published,
+            vec![OcrStatus::Disabled],
+            "a stop from Starting must land Disabled directly"
+        );
+        assert!(
+            !published.contains(&OcrStatus::Ready),
+            "a stop from Starting must never publish Ready"
+        );
+        assert!(!service.is_runtime_active());
+    }
+
     #[test]
     fn decide_enable_flip_starts_and_stops() {
         let old = OcrSettings::default();
@@ -948,6 +1029,88 @@ mod tests {
         assert_eq!(
             decide_transition(&settings, &settings, None, None, &OcrStatus::Disabled),
             OcrTransition::Noop
+        );
+    }
+
+    // --- OCR refresh reconcile decision ---
+
+    #[test]
+    fn refresh_enabled_missing_model_not_in_memory_disables_with_none() {
+        let packs = vec!["a".to_string(), "b".to_string()];
+        assert_eq!(
+            decide_ocr_refresh_reconcile(true, Some("gone"), &packs, false),
+            OcrRefreshReconcile::Disable { model_id: None }
+        );
+    }
+
+    #[test]
+    fn refresh_enabled_missing_model_with_single_remaining_autoselects_on_disable() {
+        let packs = vec!["a".to_string()];
+        assert_eq!(
+            decide_ocr_refresh_reconcile(true, Some("gone"), &packs, false),
+            OcrRefreshReconcile::Disable {
+                model_id: Some("a".to_string())
+            }
+        );
+    }
+
+    #[test]
+    fn refresh_enabled_missing_model_held_in_memory_is_none() {
+        let packs = vec!["a".to_string()];
+        assert_eq!(
+            decide_ocr_refresh_reconcile(true, Some("gone"), &packs, true),
+            OcrRefreshReconcile::None
+        );
+    }
+
+    #[test]
+    fn refresh_enabled_model_still_present_is_none() {
+        let packs = vec!["a".to_string(), "b".to_string()];
+        assert_eq!(
+            decide_ocr_refresh_reconcile(true, Some("a"), &packs, false),
+            OcrRefreshReconcile::None
+        );
+    }
+
+    #[test]
+    fn refresh_disabled_single_pack_autoselects_when_different() {
+        let packs = vec!["a".to_string()];
+        assert_eq!(
+            decide_ocr_refresh_reconcile(false, None, &packs, false),
+            OcrRefreshReconcile::AutoSelect("a".to_string())
+        );
+        assert_eq!(
+            decide_ocr_refresh_reconcile(false, Some("gone"), &packs, false),
+            OcrRefreshReconcile::AutoSelect("a".to_string())
+        );
+    }
+
+    #[test]
+    fn refresh_disabled_single_pack_already_selected_is_none() {
+        let packs = vec!["a".to_string()];
+        assert_eq!(
+            decide_ocr_refresh_reconcile(false, Some("a"), &packs, false),
+            OcrRefreshReconcile::None
+        );
+    }
+
+    #[test]
+    fn refresh_disabled_multiple_packs_is_none() {
+        let packs = vec!["a".to_string(), "b".to_string()];
+        assert_eq!(
+            decide_ocr_refresh_reconcile(false, None, &packs, false),
+            OcrRefreshReconcile::None
+        );
+    }
+
+    #[test]
+    fn refresh_empty_packs_enabled_disables_retaining_missing_model() {
+        let packs: Vec<String> = vec![];
+        assert_eq!(
+            decide_ocr_refresh_reconcile(true, Some("gone"), &packs, false),
+            OcrRefreshReconcile::Disable {
+                model_id: Some("gone".to_string())
+            }
         );
     }
 

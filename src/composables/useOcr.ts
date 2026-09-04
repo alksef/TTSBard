@@ -37,6 +37,14 @@ const SETTINGS_CHANGED_EVENT = 'settings-changed'
 
 const DEFAULT_SETTINGS: OcrSettingsDto = { enabled: false, model_id: null }
 
+// Last known display names of ever-seen packs, so a model held in memory after
+// its pack left the disk still renders a human-readable label.
+const packLabelMemo = new Map<string, string>()
+
+function rememberPackLabels(list: OcrPackDto[]): void {
+  for (const pack of list) packLabelMemo.set(pack.id, pack.display_name)
+}
+
 // ============================================================================
 // Pure validators / converters
 // ============================================================================
@@ -170,6 +178,27 @@ export function useOcr() {
     return `Модель «${modelId}» не найдена среди установленных пакетов. Обновите список моделей или выберите другую.`
   })
 
+  /**
+   * True while the selected model is absent from the freshly scanned pack list
+   * but the runtime is still holding it live in memory (ready / selecting /
+   * recognizing). The panel renders it as a selected «(в памяти)» option and
+   * must not touch settings in that state.
+   */
+  const runtimeHoldsModel = computed(() => {
+    const modelId = settings.value.model_id
+    if (modelId === null) return false
+    if (packs.value.some((pack) => pack.id === modelId)) return false
+    const state = status.value.state
+    return state === 'ready' || state === 'selectingArea' || state === 'recognizing'
+  })
+
+  /** Human-readable label of the in-memory model (falls back to its id). */
+  const runtimeModelLabel = computed(() => {
+    const modelId = settings.value.model_id
+    if (modelId === null) return ''
+    return packLabelMemo.get(modelId) ?? modelId
+  })
+
   function showMessage(text: string) {
     message.value = text
     if (messageTimeout !== null) clearTimeout(messageTimeout)
@@ -212,6 +241,7 @@ export function useOcr() {
     const payload = await invoke<unknown>('list_ocr_packs')
     if (disposed) return
     packs.value = convertOcrPackListFromRust(payload)
+    rememberPackLabels(packs.value)
   }
 
   async function refreshPacks(): Promise<void> {
@@ -245,7 +275,14 @@ export function useOcr() {
       const errorMessage = e instanceof Error ? e.message : String(e)
       showMessage('Не удалось сохранить настройки: ' + errorMessage)
     } finally {
-      if (!disposed) savePending.value = false
+      if (!disposed) {
+        savePending.value = false
+        // The backend may have unticked `enabled` during `save_ocr_settings`
+        // (failed runtime start) and emitted `settings-changed` while the
+        // guard above was still dropping echoes. Re-read once the drain is
+        // done so the persisted `{ enabled: false }` lands on the checkbox.
+        void refreshSettings()
+      }
     }
   }
 
@@ -253,8 +290,14 @@ export function useOcr() {
     if (rescanPending.value) return
     rescanPending.value = true
     try {
-      await loadPacks()
-      if (!disposed) showMessage('Список моделей обновлён')
+      const payload = await invoke<unknown>('refresh_ocr_packs')
+      if (disposed) return
+      packs.value = convertOcrPackListFromRust(payload)
+      rememberPackLabels(packs.value)
+      showMessage('Список моделей обновлён')
+      // The backend reconciles (may untick) during the refresh; re-read the
+      // persisted settings. Idempotent and guarded against the save drain.
+      void refreshSettings()
     } catch (e) {
       if (disposed) return
       debugError('[Ocr] Failed to rescan packs:', e)
@@ -321,6 +364,8 @@ export function useOcr() {
     statusLabel,
     statusErrorMessage,
     missingModelError,
+    runtimeHoldsModel,
+    runtimeModelLabel,
     saveSettings,
     rescanPacks,
     openPacksFolder,

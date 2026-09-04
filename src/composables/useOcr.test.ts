@@ -58,26 +58,45 @@ interface SnapshotPayloads {
   packs?: unknown
 }
 
-function defaultInvoke() {
-  mocks.mockInvoke.mockImplementation(async (cmd: string) => {
-    if (cmd === 'get_ocr_settings') return { enabled: false, model_id: null }
-    if (cmd === 'get_ocr_status') return { state: 'disabled' }
-    if (cmd === 'list_ocr_packs') return []
+/**
+ * Stateful mock: `get_ocr_settings` echoes the last persisted settings (updated
+ * by `save_ocr_settings`), mirroring the real backend where a save may untick
+ * `enabled` and the follow-up refresh reads that persisted value.
+ */
+function installStatefulInvoke(payloads?: SnapshotPayloads) {
+  const rawSettings = payloads?.settings
+  const initialSettings =
+    typeof rawSettings === 'object' && rawSettings !== null
+      ? (rawSettings as { enabled?: boolean; model_id?: string | null })
+      : {}
+  const persisted: { enabled: boolean; model_id: string | null } = {
+    enabled: false,
+    model_id: null,
+    ...initialSettings,
+  }
+  mocks.mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+    if (cmd === 'get_ocr_settings') return { ...persisted }
+    if (cmd === 'get_ocr_status') return payloads?.status ?? { state: 'disabled' }
+    if (cmd === 'list_ocr_packs') return payloads?.packs ?? []
+    if (cmd === 'refresh_ocr_packs') return payloads?.packs ?? []
+    if (cmd === 'save_ocr_settings') {
+      const settings = (args as { settings?: { enabled?: unknown; model_id?: unknown } } | undefined)
+        ?.settings
+      if (settings && typeof settings === 'object') {
+        Object.assign(persisted, settings)
+      }
+      return undefined
+    }
     return undefined
   })
 }
 
+function defaultInvoke() {
+  installStatefulInvoke()
+}
+
 async function setupAndMount(payloads?: SnapshotPayloads): Promise<ReturnType<typeof useOcr>> {
-  if (payloads) {
-    mocks.mockInvoke.mockImplementation(async (cmd: string) => {
-      if (cmd === 'get_ocr_settings') return payloads.settings
-      if (cmd === 'get_ocr_status') return payloads.status
-      if (cmd === 'list_ocr_packs') return payloads.packs
-      return undefined
-    })
-  } else {
-    defaultInvoke()
-  }
+  installStatefulInvoke(payloads)
   const composable = useOcr()
   if (capturedOnMountedCb) {
     await capturedOnMountedCb()
@@ -407,10 +426,17 @@ describe('useOcr', () => {
     mocks.mockInvoke.mockClear()
 
     const saveCalls: unknown[] = []
+    const persisted: { enabled: boolean; model_id: string | null } = {
+      enabled: false,
+      model_id: null,
+    }
     let resolveFirst!: () => void
     mocks.mockInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === 'save_ocr_settings') {
         saveCalls.push(args)
+        const settings = (args as { settings?: { enabled?: unknown; model_id?: unknown } } | undefined)
+          ?.settings
+        if (settings && typeof settings === 'object') Object.assign(persisted, settings)
         if (saveCalls.length === 1) {
           return new Promise((resolve) => {
             resolveFirst = () => resolve(undefined)
@@ -418,6 +444,7 @@ describe('useOcr', () => {
         }
         return Promise.resolve(undefined)
       }
+      if (cmd === 'get_ocr_settings') return Promise.resolve({ ...persisted })
       return Promise.resolve(undefined)
     })
 
@@ -461,6 +488,10 @@ describe('useOcr', () => {
         }
         return Promise.reject(new Error('backend down'))
       }
+      // The post-save refresh re-reads the last persisted snapshot (pack-b).
+      if (cmd === 'get_ocr_settings') {
+        return Promise.resolve({ enabled: true, model_id: 'pack-b' })
+      }
       return Promise.resolve(undefined)
     })
 
@@ -483,15 +514,25 @@ describe('useOcr', () => {
     const { settings, saveSettings } = await setupAndMount()
 
     let resolveSave!: () => void
-    mocks.mockInvoke.mockImplementation((cmd: string) => {
+    const persisted: { enabled: boolean; model_id: string | null } = {
+      enabled: false,
+      model_id: null,
+    }
+    mocks.mockInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === 'save_ocr_settings') {
         return new Promise((resolve) => {
-          resolveSave = () => resolve(undefined)
+          resolveSave = () => {
+            const settings = (args as { settings?: { enabled?: unknown; model_id?: unknown } } | undefined)
+              ?.settings
+            if (settings && typeof settings === 'object') Object.assign(persisted, settings)
+            resolve(undefined)
+          }
         })
       }
-      // The echo refresh serves the stale pre-save snapshot.
+      // Echo the persisted state: stale pre-save snapshot while the save is in
+      // flight, the saved value after the drain completes.
       if (cmd === 'get_ocr_settings') {
-        return Promise.resolve({ enabled: false, model_id: null })
+        return Promise.resolve({ ...persisted })
       }
       return Promise.resolve(undefined)
     })
@@ -571,7 +612,7 @@ describe('useOcr', () => {
     expect(missingModelError.value).not.toBeNull()
 
     mocks.mockInvoke.mockImplementationOnce(async (cmd: string) => {
-      if (cmd === 'list_ocr_packs') return [makePack('pack-a')]
+      if (cmd === 'refresh_ocr_packs') return [makePack('pack-a')]
       return undefined
     })
     await rescanPacks()
@@ -594,13 +635,13 @@ describe('useOcr', () => {
     const { packs, rescanPacks } = await setupAndMount()
 
     mocks.mockInvoke.mockImplementationOnce(async (cmd: string) => {
-      if (cmd === 'list_ocr_packs') return [makePack('pack-1'), makePack('pack-2')]
+      if (cmd === 'refresh_ocr_packs') return [makePack('pack-1'), makePack('pack-2')]
       return undefined
     })
 
     await rescanPacks()
 
-    expect(mocks.mockInvoke).toHaveBeenCalledWith('list_ocr_packs')
+    expect(mocks.mockInvoke).toHaveBeenCalledWith('refresh_ocr_packs')
     expect(packs.value).toEqual([makePack('pack-1'), makePack('pack-2')])
   })
 
@@ -608,7 +649,7 @@ describe('useOcr', () => {
     const { packs, rescanPacks } = await setupAndMount()
 
     mocks.mockInvoke.mockImplementationOnce(async (cmd: string) => {
-      if (cmd === 'list_ocr_packs') {
+      if (cmd === 'refresh_ocr_packs') {
         return [makePack('good'), { id: 42, display_name: 'bad', path: 'C:\\x' }]
       }
       return undefined
@@ -625,7 +666,7 @@ describe('useOcr', () => {
 
     let resolveList!: (value: unknown) => void
     mocks.mockInvoke.mockImplementationOnce((cmd: string) => {
-      if (cmd === 'list_ocr_packs') {
+      if (cmd === 'refresh_ocr_packs') {
         return new Promise((resolve) => { resolveList = resolve })
       }
       return undefined
@@ -638,7 +679,7 @@ describe('useOcr', () => {
     resolveList([makePack('pack-1')])
     await first
 
-    const rescanCalls = mocks.mockInvoke.mock.calls.filter((call) => call[0] === 'list_ocr_packs')
+    const rescanCalls = mocks.mockInvoke.mock.calls.filter((call) => call[0] === 'refresh_ocr_packs')
     expect(rescanCalls).toHaveLength(1)
     expect(packs.value).toEqual([makePack('pack-1')])
   })
@@ -753,5 +794,78 @@ describe('useOcr', () => {
     await pending
 
     expect(packs.value).toEqual([])
+  })
+
+  it('rescanPacks invokes refresh_ocr_packs, updates packs and refreshes settings', async () => {
+    const { packs, rescanPacks } = await setupAndMount()
+    mocks.mockInvoke.mockClear()
+
+    mocks.mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'refresh_ocr_packs') return [makePack('pack-1'), makePack('pack-2')]
+      if (cmd === 'get_ocr_settings') return { enabled: false, model_id: null }
+      return undefined
+    })
+
+    await rescanPacks()
+
+    expect(mocks.mockInvoke).toHaveBeenCalledWith('refresh_ocr_packs')
+    expect(mocks.mockInvoke).not.toHaveBeenCalledWith('list_ocr_packs')
+    expect(packs.value).toEqual([makePack('pack-1'), makePack('pack-2')])
+    await vi.waitFor(() => expect(mocks.mockInvoke).toHaveBeenCalledWith('get_ocr_settings'))
+  })
+
+  it('rescanPacks surfaces an error and leaves packs untouched', async () => {
+    const { packs, rescanPacks, message } = await setupAndMount()
+    mocks.mockInvoke.mockClear()
+
+    mocks.mockInvoke.mockRejectedValueOnce(new Error('scan failed'))
+
+    await rescanPacks()
+
+    expect(mocks.mockInvoke).toHaveBeenCalledWith('refresh_ocr_packs')
+    expect(packs.value).toEqual([])
+    expect(message.value).toBe('Не удалось обновить список моделей')
+  })
+
+  describe('runtimeHoldsModel', () => {
+    it('is true when the runtime is ready and the model is absent from packs', async () => {
+      const { runtimeHoldsModel } = await setupAndMount({
+        settings: { enabled: true, model_id: 'gone' },
+        status: { state: 'ready' },
+        packs: [makePack('other')],
+      })
+
+      expect(runtimeHoldsModel.value).toBe(true)
+    })
+
+    it('is false when the selected model is present in packs', async () => {
+      const { runtimeHoldsModel } = await setupAndMount({
+        settings: { enabled: true, model_id: 'pack-1' },
+        status: { state: 'ready' },
+        packs: [makePack('pack-1')],
+      })
+
+      expect(runtimeHoldsModel.value).toBe(false)
+    })
+
+    it('is false when the runtime is disabled', async () => {
+      const { runtimeHoldsModel } = await setupAndMount({
+        settings: { enabled: true, model_id: 'gone' },
+        status: { state: 'disabled' },
+        packs: [makePack('other')],
+      })
+
+      expect(runtimeHoldsModel.value).toBe(false)
+    })
+
+    it('is false when no model is selected', async () => {
+      const { runtimeHoldsModel } = await setupAndMount({
+        settings: { enabled: false, model_id: null },
+        status: { state: 'ready' },
+        packs: [],
+      })
+
+      expect(runtimeHoldsModel.value).toBe(false)
+    })
   })
 })

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { AlertTriangle, Info, RefreshCw } from 'lucide-vue-next'
+import { AlertTriangle, Info, ListRestart } from 'lucide-vue-next'
 import { useOcr } from '../composables/useOcr'
 
 const {
@@ -14,6 +14,8 @@ const {
   statusErrorMessage,
   saveSettings,
   rescanPacks,
+  runtimeHoldsModel,
+  runtimeModelLabel,
 } = useOcr()
 
 const messageBoxClass = computed(() => {
@@ -48,32 +50,7 @@ const controlsDisabled = computed(() => savePending.value)
 
 const noPacks = computed(() => packs.value.length === 0)
 
-const noModelSelectedError = computed(() => {
-  if (status.value.state !== 'error' || settings.value.model_id !== null) return false
-  return statusErrorMessage.value === 'No OCR model selected'
-})
-
-const savedPackMissingError = computed(() => {
-  const id = settings.value.model_id
-  if (status.value.state !== 'error' || id === null) return false
-  if (packs.value.some((pack) => pack.id === id)) return false
-  return statusErrorMessage.value === `OCR model pack not found: ${id}`
-})
-
-const configError = computed(() => noModelSelectedError.value || savedPackMissingError.value)
-
-const showRuntimeError = computed(() => status.value.state === 'error' && !configError.value)
-
-const showStatusBadge = computed(() => {
-  if (configError.value) return false
-  if (status.value.state === 'disabled' && noPacks.value) return false
-  return true
-})
-
-const emptyCheckboxDisabled = computed(() => {
-  if (controlsDisabled.value) return true
-  return noPacks.value && !settings.value.enabled
-})
+const showRuntimeError = computed(() => status.value.state === 'error')
 
 function formatPackLanguages(languages: string[]): string {
   return languages.map((language) => language.toUpperCase()).join(', ')
@@ -82,10 +59,6 @@ function formatPackLanguages(languages: string[]): string {
 function onModelChange(event: Event) {
   const value = (event.target as HTMLSelectElement).value
   settings.value.model_id = value === '' ? null : value
-  void saveSettings()
-}
-
-function onRetry() {
   void saveSettings()
 }
 </script>
@@ -99,7 +72,7 @@ function onRetry() {
     <section class="settings-section">
       <div class="section-header server-header">
         <h2>OCR</h2>
-        <span v-if="showStatusBadge" class="status-indicator" :class="statusClass">
+        <span class="status-indicator" :class="statusClass">
           {{ status.state === 'ready' ? 'Загружено' : statusLabel }}
         </span>
       </div>
@@ -109,103 +82,77 @@ function onRetry() {
         <span class="callout-text">
           {{ statusErrorMessage ?? 'Произошла ошибка OCR runtime.' }}
         </span>
-        <button
-          class="retry-button"
-          :disabled="controlsDisabled"
-          @click="onRetry"
-          title="Повторить запуск"
-          aria-label="Повторить запуск OCR"
-        >
-          Повторить
-        </button>
       </div>
 
-      <template v-if="!noPacks">
-        <div class="setting-row enable-row">
-          <label class="checkbox-label">
-            <input
-              type="checkbox"
-              v-model="settings.enabled"
-              :disabled="controlsDisabled"
-              @change="saveSettings"
-            />
-            <span>Включить OCR</span>
-          </label>
-          <p class="setting-hint">
-            Если включено, OCR будет запущен автоматически при следующем запуске приложения.
-          </p>
-        </div>
+      <div class="setting-row enable-row">
+        <label class="checkbox-label">
+          <input
+            type="checkbox"
+            v-model="settings.enabled"
+            :disabled="controlsDisabled || (noPacks && !runtimeHoldsModel)"
+            @change="saveSettings"
+          />
+          <span>Включить OCR</span>
+        </label>
+        <p class="setting-hint">
+          Если включено, OCR будет запущен автоматически при следующем запуске приложения.
+        </p>
+      </div>
 
-        <div class="model-field">
-          <label for="ocr-model" class="model-label">Модель распознавания:</label>
-          <div class="model-row">
-            <select
-              id="ocr-model"
-              class="model-select"
-              :value="savedModelId ?? ''"
-              :disabled="controlsDisabled"
-              @change="onModelChange"
-            >
-              <option value="">Модель не выбрана</option>
+      <div class="model-field">
+        <label for="ocr-model" class="model-label">Модель распознавания:</label>
+        <div class="model-row">
+          <select
+            id="ocr-model"
+            class="model-select"
+            :value="noPacks && !runtimeHoldsModel ? '' : (savedModelId ?? '')"
+            :disabled="controlsDisabled || noPacks"
+            @change="onModelChange"
+          >
+            <option v-if="noPacks && !runtimeHoldsModel" value="" disabled>
+              Модели не найдены
+            </option>
+            <template v-else-if="!noPacks">
+              <option value="" disabled>Выберите модель</option>
               <option v-for="pack in packs" :key="pack.id" :value="pack.id">
                 {{ pack.display_name }} ({{ formatPackLanguages(pack.languages) }})
               </option>
-              <option v-if="selectedPackMissing" :value="savedModelId ?? ''" disabled>
-                {{ savedModelId }} (не установлен)
-              </option>
-            </select>
-            <button
-              class="refresh-button"
-              :disabled="rescanPending || controlsDisabled"
-              @click="rescanPacks"
-              title="Обновить список моделей"
-              aria-label="Обновить список моделей"
-            >
-              <RefreshCw :size="14" :class="{ 'button-spinner': rescanPending }" />
-            </button>
-          </div>
-          <p
-            v-if="selectedPackMissing"
-            class="path-hint"
-            role="status"
-            aria-live="polite"
-          >
-            Модель «{{ savedModelId }}» не установлена. Выберите другую модель или поместите
-            файлы моделей в:
-            <code>%APPDATA%\ttsbard\models\ocr</code>
-          </p>
-        </div>
-      </template>
-
-      <template v-else>
-        <div class="empty-state-row">
-          <label class="checkbox-label">
-            <input
-              type="checkbox"
-              v-model="settings.enabled"
-              :disabled="emptyCheckboxDisabled"
-              @change="saveSettings"
-            />
-            <span>Включить OCR</span>
-          </label>
+            </template>
+            <option v-if="runtimeHoldsModel" :value="savedModelId ?? ''" disabled>
+              {{ runtimeModelLabel }} (в памяти)
+            </option>
+            <option v-else-if="selectedPackMissing" :value="savedModelId ?? ''" disabled>
+              {{ savedModelId }} (не установлен)
+            </option>
+          </select>
           <button
-            class="refresh-button empty-refresh"
+            class="refresh-button"
             :disabled="rescanPending || controlsDisabled"
             @click="rescanPacks"
             title="Обновить список моделей"
             aria-label="Обновить список моделей"
           >
-            <RefreshCw :size="14" :class="{ 'button-spinner': rescanPending }" />
+            <ListRestart :size="14" :class="{ 'button-spinner': rescanPending }" />
           </button>
         </div>
-        <p class="path-hint empty-models-hint" role="status" aria-live="polite">
+        <p v-if="noPacks" class="path-hint" role="status" aria-live="polite">
           Модели OCR не найдены. Поместите файлы моделей в:
           <code>%APPDATA%\ttsbard\models\ocr</code>
         </p>
-      </template>
+        <p
+          v-else-if="selectedPackMissing && !runtimeHoldsModel"
+          class="path-hint"
+          role="status"
+          aria-live="polite"
+        >
+          Модель «{{ savedModelId }}» не установлена. Выберите другую модель или поместите
+          файлы моделей в:
+          <code>%APPDATA%\ttsbard\models\ocr</code>
+        </p>
+      </div>
     </section>
 
-    <div v-if="!noPacks" class="info-callout">
+    <div class="info-callout">
       <Info :size="16" class="info-icon" />
       <span>Распознанный текст поступает во «Входящие».</span>
     </div>
@@ -373,12 +320,16 @@ h2 {
 
 .model-field {
   display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 0.75rem;
+  row-gap: 0.5rem;
   margin-bottom: 1rem;
 }
 
 .model-label {
+  flex: 0 1 auto;
+  min-width: 0;
   font-weight: 500;
   color: var(--color-text-secondary);
   font-size: 14px;
@@ -388,16 +339,17 @@ h2 {
   display: flex;
   align-items: stretch;
   gap: 0.5rem;
+  flex: 1 1 240px;
   min-width: 0;
-  width: 100%;
 }
 
 .model-select {
   flex: 1 1 auto;
   min-width: 0;
   width: auto;
+  height: 36px;
   box-sizing: border-box;
-  padding: 0.5rem 0.6rem;
+  padding: 0 0.6rem;
   background: var(--color-bg-field-hover);
   border: 1px solid var(--color-border-strong);
   border-radius: 6px;
@@ -436,7 +388,7 @@ h2 {
 .refresh-button {
   flex: 0 0 auto;
   width: 38px;
-  height: auto;
+  height: 36px;
   padding: 0;
   background: var(--color-bg-field-hover);
   border: 1px solid var(--color-border-strong);
@@ -489,48 +441,10 @@ h2 {
   align-items: center;
 }
 
-.retry-button {
-  flex-shrink: 0;
-  margin-left: auto;
-  padding: 0.3rem 0.8rem;
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: var(--color-text-white);
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  font-weight: 500;
-  font-size: 12px;
-  transition: all 0.2s;
-}
-
-.retry-button:hover:not(:disabled) {
-  filter: brightness(1.06);
-  transform: translateY(-1px);
-}
-
-.retry-button:disabled {
-  background: var(--btn-disabled-bg);
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.empty-state-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  min-width: 0;
-}
-
-.empty-state-row .refresh-button {
-  flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
-}
-
 .path-hint {
   display: block;
   margin: 0;
+  flex: 0 0 100%;
   font-size: 0.85rem;
   color: var(--color-text-muted);
   line-height: 1.4;
@@ -548,10 +462,6 @@ h2 {
   font-size: 0.85em;
   overflow-wrap: anywhere;
   max-width: 100%;
-}
-
-.empty-models-hint {
-  margin-top: 0.5rem;
 }
 
 .button-spinner {

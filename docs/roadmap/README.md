@@ -44,6 +44,10 @@ related_tasks: []
 
 ## Завершённые направления
 
+### Ввод текста и OCR
+
+- [ROADMAP-090 — Единое поведение моделей OCR и RUAccent](./completed/090-ocr-ruaccent-model-panel-behavior.md)
+
 ### Интеграции
 
 - [ROADMAP-087 — входной сервер текста для audio-only озвучивания](./completed/087-external-text-input-server.md)

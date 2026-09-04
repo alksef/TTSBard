@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, watch, ref, onMounted, onUnmounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
-import { Play, Loader2, Check, RefreshCw } from 'lucide-vue-next';
+import { Play, Loader2, Check, RefreshCw, ListRestart } from 'lucide-vue-next';
 import { useEditorSettings } from '../../composables/useAppSettings';
 import { useRuAccentRuntime } from '../../composables/useRuAccentRuntime';
 import type { HomographAccentorPackDto, QuickEditorMode } from '../../types/settings';
@@ -95,10 +95,11 @@ function formatAccentorPackLabel(pack: HomographAccentorPackDto): string {
   return pack.display_name.trim()
 }
 
-const { statusFor, load: loadRuAccentModel, refreshPacks } = useRuAccentRuntime()
+const { statusFor, load: loadRuAccentModel, refreshPacks, rescanPacks, packLabelFor } = useRuAccentRuntime()
 
 const accentorPacks = ref<HomographAccentorPackDto[]>([])
 const selectedPackId = ref<string>('')
+const accentorRescanPending = ref(false)
 
 function syncAccentorFromSettings() {
   const persistedId = homographAccentor.value?.accentor_pack_id ?? ''
@@ -111,6 +112,22 @@ watch(homographAccentor, () => syncAccentorFromSettings(), { immediate: true })
 
 const accentorRuntimeStatus = statusFor(selectedPackId)
 const accentorReady = computed(() => accentorRuntimeStatus.value === 'ready')
+
+const noPacks = computed(() => accentorPacks.value.length === 0)
+
+const accentorInMemory = computed(() => {
+  const id = selectedPackId.value
+  if (!id) return false
+  if (accentorPacks.value.some((pack) => pack.id === id)) return false
+  const status = accentorRuntimeStatus.value
+  return status === 'loading' || status === 'ready'
+})
+
+const accentorSelectedMissing = computed(() => {
+  const id = selectedPackId.value
+  if (!id) return false
+  return !accentorPacks.value.some((pack) => pack.id === id)
+})
 
 const accentorStatusText = computed(() => {
   switch (accentorRuntimeStatus.value) {
@@ -149,6 +166,19 @@ async function loadAccentorPacks() {
   }
 }
 
+async function rescanAccentorPacks() {
+  if (accentorRescanPending.value) return
+  accentorRescanPending.value = true
+  try {
+    accentorPacks.value = await rescanPacks()
+  } catch (e) {
+    const errorMessage = e instanceof Error ? e.message : String(e)
+    emit('show-message', 'Ошибка обновления списка моделей RUAccent: ' + errorMessage)
+  } finally {
+    accentorRescanPending.value = false
+  }
+}
+
 onMounted(async () => {
   await loadAccentorPacks()
   syncAccentorFromSettings()
@@ -176,12 +206,21 @@ async function toggleAccentor() {
   await saveAccentor(next, packId)
 }
 
-async function onPackSelect() {
-  await saveAccentor(accentorEnabled.value, selectedPackId.value || null)
+function onPackSelect(event: Event) {
+  const value = (event.target as HTMLSelectElement).value
+  selectedPackId.value = value
+  void saveAccentor(accentorEnabled.value, value || null)
 }
 
 async function loadSelectedModel() {
-  if (!selectedPackId.value) return
+  if (
+    !selectedPackId.value ||
+    accentorSelectedMissing.value ||
+    accentorRuntimeStatus.value === 'loading' ||
+    accentorRuntimeStatus.value === 'ready'
+  ) {
+    return
+  }
   await loadRuAccentModel(selectedPackId.value)
 }
 
@@ -286,91 +325,97 @@ watch(editorSettings, (newSettings) => {
         </p>
       </div>
 
-      <div v-if="accentorPacks.length === 0" class="accentor-empty">
-        <div class="setting-row">
-          <label class="setting-label checkbox-label">
-            <input
-              type="checkbox"
-              class="checkbox-input"
-              disabled
-            />
-            <span>Автоматически расставлять ударения</span>
-          </label>
-        </div>
-        <div class="setting-hint accentor-empty" role="status" aria-live="polite">
-          Модели RUAccent не найдены. Поместите файлы моделей в:
-          <code>%APPDATA%\ttsbard\models\ruaccent</code>
-        </div>
-      </div>
-
-      <template v-else>
-        <div class="setting-row accentor-select-row">
-          <label class="setting-label" for="accentor-select">Модель RUAccent:</label>
-          <select
-            id="accentor-select"
-            v-model="selectedPackId"
-            class="accentor-select"
-            :disabled="accentorRuntimeStatus === 'loading'"
-            @change="onPackSelect"
-          >
+      <div class="setting-row accentor-select-row">
+        <label class="setting-label" for="accentor-select">Модель RUAccent:</label>
+        <select
+          id="accentor-select"
+          class="accentor-select"
+          :value="noPacks && !accentorInMemory ? '' : selectedPackId"
+          :disabled="noPacks || accentorRuntimeStatus === 'loading'"
+          @change="onPackSelect"
+        >
+          <option v-if="noPacks && !accentorInMemory" value="" disabled>Модели не найдены</option>
+          <template v-else-if="!noPacks">
             <option value="" disabled>Выберите модель</option>
             <option v-for="pack in accentorPacks" :key="pack.id" :value="pack.id">
               {{ formatAccentorPackLabel(pack) }}
             </option>
-          </select>
-          <button
-            type="button"
-            class="accentor-load-btn"
-            :disabled="!selectedPackId || accentorRuntimeStatus === 'loading' || accentorRuntimeStatus === 'ready'"
-            :title="accentorLoadTitle"
-            :aria-label="accentorLoadTitle"
-            @click="loadSelectedModel"
-          >
-            <Loader2 v-if="accentorRuntimeStatus === 'loading'" :size="16" class="accentor-spin" />
-            <Check v-else-if="accentorRuntimeStatus === 'ready'" :size="16" />
-            <RefreshCw v-else-if="accentorRuntimeStatus === 'failed'" :size="16" />
-            <Play v-else :size="16" />
-          </button>
-        </div>
-        <span
-          v-if="selectedPackId"
-          class="setting-hint accentor-status"
-          role="status"
-          aria-live="polite"
+          </template>
+          <option v-if="accentorInMemory" :value="selectedPackId" disabled>
+            {{ packLabelFor(selectedPackId) }} (в памяти)
+          </option>
+        </select>
+        <button
+          type="button"
+          class="accentor-load-btn"
+          :disabled="
+            !selectedPackId ||
+            accentorSelectedMissing ||
+            accentorRuntimeStatus === 'loading' ||
+            accentorRuntimeStatus === 'ready'
+          "
+          :title="accentorLoadTitle"
+          :aria-label="accentorLoadTitle"
+          @click="loadSelectedModel"
         >
-          Статус: {{ accentorStatusText }}
+          <Loader2 v-if="accentorRuntimeStatus === 'loading'" :size="16" class="accentor-spin" />
+          <Check v-else-if="accentorRuntimeStatus === 'ready'" :size="16" />
+          <RefreshCw v-else-if="accentorRuntimeStatus === 'failed'" :size="16" />
+          <Play v-else :size="16" />
+        </button>
+        <button
+          type="button"
+          class="accentor-rescan-btn"
+          :disabled="accentorRescanPending"
+          @click="rescanAccentorPacks"
+          title="Обновить список моделей"
+          aria-label="Обновить список моделей"
+        >
+          <ListRestart :size="16" :class="{ 'accentor-spin': accentorRescanPending }" />
+        </button>
+      </div>
+      <span
+        v-if="selectedPackId"
+        class="setting-hint accentor-status"
+        role="status"
+        aria-live="polite"
+      >
+        Статус: {{ accentorStatusText }}
+      </span>
+      <p v-if="noPacks" class="setting-hint accentor-empty" role="status" aria-live="polite">
+        Модели RUAccent не найдены. Поместите файлы моделей в:
+        <code>%APPDATA%\ttsbard\models\ruaccent</code>
+      </p>
+      <div class="setting-row accentor-load-on-start-row">
+        <label class="setting-label checkbox-label">
+          <input
+            :checked="accentorLoadOnStart"
+            :disabled="noPacks || !selectedPackId || accentorRuntimeStatus === 'loading'"
+            type="checkbox"
+            class="checkbox-input"
+            @change="toggleLoadOnStart"
+          />
+          <span>Загружать при запуске</span>
+        </label>
+        <span class="setting-hint">
+          (может немного увеличить время запуска приложения)
         </span>
-        <div class="setting-row accentor-load-on-start-row">
-          <label class="setting-label checkbox-label">
-            <input
-              :checked="accentorLoadOnStart"
-              :disabled="!selectedPackId || accentorRuntimeStatus === 'loading'"
-              type="checkbox"
-              class="checkbox-input"
-              @change="toggleLoadOnStart"
-            />
-            <span>Загружать при запуске</span>
-          </label>
-          <span class="setting-hint">
-            (может немного увеличить время запуска приложения)
-          </span>
-        </div>
-        <div class="setting-row accentor-enable-row">
-          <label class="setting-label checkbox-label">
-            <input
-              :checked="accentorEnabled"
-              :disabled="!accentorReady"
-              type="checkbox"
-              class="checkbox-input"
-              @change="toggleAccentor"
-            />
-            <span>Автоматически расставлять ударения</span>
-          </label>
-          <span class="setting-hint">
-            Применять к каждому сообщению перед синтезом; также разрешает омографы.
-          </span>
-        </div>
-      </template>
+      </div>
+      <div class="setting-row accentor-enable-row">
+        <label class="setting-label checkbox-label">
+          <input
+            :checked="accentorEnabled"
+            :disabled="!accentorReady"
+            type="checkbox"
+            class="checkbox-input"
+            @change="toggleAccentor"
+          />
+          <span>Автоматически расставлять ударения</span>
+        </label>
+        <span class="setting-hint">
+          Применять к каждому сообщению перед синтезом; также разрешает омографы.
+        </span>
+      </div>
     </section>
   </div>
 </template>
@@ -521,15 +566,29 @@ watch(editorSettings, (newSettings) => {
 }
 
 .accentor-select {
-  flex: 0 1 180px;
-  width: min(180px, 100%);
+  flex: 1 1 auto;
   min-width: 0;
-  padding: 0.5rem;
+  width: auto;
+  height: 36px;
+  box-sizing: border-box;
+  padding: 0 0.6rem;
+  background: var(--color-bg-field-hover);
   border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
+  border-radius: 6px;
   font-size: 14px;
-  background: var(--color-bg-field);
   color: var(--color-text-primary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.accentor-select:hover {
+  background: var(--btn-neutral-bg);
+  border-color: var(--color-border-strong);
+}
+
+.accentor-select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .accentor-enable-row {
@@ -540,30 +599,33 @@ watch(editorSettings, (newSettings) => {
   margin-top: 0.25rem;
 }
 
-.accentor-load-btn {
+.accentor-load-btn,
+.accentor-rescan-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 38px;
+  height: 36px;
   flex-shrink: 0;
+  box-sizing: border-box;
   padding: 0;
-  background: var(--color-bg-elevated);
+  background: var(--color-bg-field-hover);
   color: var(--color-text-primary);
   border: 1px solid var(--color-border-strong);
-  border-radius: 8px;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
-.accentor-load-btn:hover:not(:disabled) {
-  background: var(--color-accent);
-  color: var(--color-text-on-accent, #ffffff);
-  border-color: var(--color-accent);
+.accentor-load-btn:hover:not(:disabled),
+.accentor-rescan-btn:hover:not(:disabled) {
+  background: var(--btn-neutral-hover);
+  border-color: var(--color-border-strong);
 }
 
-.accentor-load-btn:disabled {
-  opacity: 0.55;
+.accentor-load-btn:disabled,
+.accentor-rescan-btn:disabled {
+  opacity: 0.6;
   cursor: not-allowed;
 }
 
@@ -583,7 +645,7 @@ watch(editorSettings, (newSettings) => {
 .accentor-select:focus {
   outline: none;
   border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-glow);
+  box-shadow: 0 0 0 2px var(--focus-glow);
 }
 
 </style>

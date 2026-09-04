@@ -31,6 +31,7 @@ import {
   type SpeechQueueFailureKey,
 } from './composables/speechQueueFailureNotifications'
 import { convertOcrOneShotFailure } from './composables/ocrFailureNotifications'
+import { useOcrRuntimeNotifications } from './composables/useOcrRuntimeNotifications'
 
 type Panel = 'input' | 'tts' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'input-server' | 'vtube-studio' | 'ocr' | 'settings' | 'hotkeys' | 'intercept'
 
@@ -55,6 +56,10 @@ provide('isMinimalMode', isMinimalMode)
 const appSettings = provideAppSettings()
 const { showWarning, showError } = useErrorHandler()
 const { dispose: disposeRuAccentRuntime } = useRuAccentRuntime()
+
+// Show a global toast on OCR runtime startup failures even when the OCR panel
+// is never opened. Registers its own status listener and boot snapshot read.
+useOcrRuntimeNotifications()
 
 watch(
   () => appSettings.settings.value?.notifications,

@@ -25,7 +25,7 @@ pub struct RuAccentPackDescriptor {
     pub omograph_model_id: String,
 }
 
-const PRIMARY_MODELS_SUBDIR: &str = "models/ruaccent";
+pub(crate) const PRIMARY_MODELS_SUBDIR: &str = "models/ruaccent";
 const UPSTREAM_COMMON_FILES: &[&str] = &[
     "dictionary/accents.json.gz",
     "dictionary/omographs.json.gz",
@@ -68,17 +68,34 @@ pub fn discover_ruaccent_packs(search_roots: &[PathBuf]) -> Vec<RuAccentPackDesc
 ///
 /// Returns one descriptor per complete `nn/nn_omograph/<model-id>` directory
 /// (a directory containing both `model.onnx` and `tokenizer.json`). An
-/// incomplete upstream root (missing any shared file) or an incomplete variant
-/// is ignored.
+/// absent root is normal (e.g. the resource dir) and stays silent; an EXISTING
+/// but incomplete root logs the failed check so a transient boot-time
+/// filesystem failure is diagnosable instead of reading as "no models".
 fn read_upstream_models(pack_root: &Path) -> Vec<RuAccentPackDescriptor> {
-    if !UPSTREAM_COMMON_FILES
-        .iter()
-        .all(|path| pack_root.join(path).is_file())
-    {
+    if !pack_root.is_dir() {
         return Vec::new();
     }
-    let Ok(entries) = std::fs::read_dir(pack_root.join("nn/nn_omograph")) else {
+    if let Some(missing) = UPSTREAM_COMMON_FILES
+        .iter()
+        .find(|path| !pack_root.join(path).is_file())
+    {
+        tracing::warn!(
+            root = %crate::secret_log::safe_path_for_log(pack_root),
+            missing = %missing,
+            "RUAccent upstream root incomplete; ignoring"
+        );
         return Vec::new();
+    }
+    let entries = match std::fs::read_dir(pack_root.join("nn/nn_omograph")) {
+        Ok(entries) => entries,
+        Err(error) => {
+            tracing::warn!(
+                root = %crate::secret_log::safe_path_for_log(pack_root),
+                error = %error,
+                "RUAccent omograph directory unreadable; ignoring"
+            );
+            return Vec::new();
+        }
     };
     let mut dirs: Vec<PathBuf> = entries
         .flatten()

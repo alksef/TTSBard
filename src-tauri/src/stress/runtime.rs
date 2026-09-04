@@ -96,6 +96,15 @@ impl RuAccentRuntimeSlot {
         matches!(self.status(), RuAccentRuntimeStatus::Ready)
     }
 
+    /// Whether the slot is currently live: a load is in flight or a runtime is
+    /// ready. A live slot for a disappeared pack must survive a re-scan.
+    pub fn is_live(&self) -> bool {
+        matches!(
+            self.status(),
+            RuAccentRuntimeStatus::Loading | RuAccentRuntimeStatus::Ready
+        )
+    }
+
     /// The pack descriptor backing this slot. Never creates sessions or reads
     /// model bytes.
     pub fn descriptor(&self) -> &RuAccentPackDescriptor {
@@ -323,6 +332,24 @@ mod tests {
 
         *slot.status.lock() = RuAccentRuntimeStatus::Loading;
         assert_eq!(slot.status().as_safe_str(), "loading");
+    }
+
+    #[test]
+    fn is_live_tracks_loading_and_ready() {
+        let slot = RuAccentRuntimeSlot::new(descriptor());
+        assert!(!slot.is_live());
+
+        *slot.status.lock() = RuAccentRuntimeStatus::Loading;
+        assert!(slot.is_live());
+
+        slot.mark_ready();
+        assert!(slot.is_live());
+
+        slot.mark_failed("boom".to_string());
+        assert!(!slot.is_live());
+
+        slot.unload();
+        assert!(!slot.is_live());
     }
 
     #[test]

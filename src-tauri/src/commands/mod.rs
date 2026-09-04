@@ -3,10 +3,11 @@ use crate::config::{
     SettingsManager, SpellSource, TtsProviderInfoDto, WindowsManager,
 };
 use crate::state::AppState;
+use crate::stress::packs::RuAccentPackDescriptor;
 use crate::stress::runtime::RuAccentRuntimeSlot;
 use crate::tts::TtsProvider;
 use tauri::{AppHandle, Emitter, Manager, State};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub mod ai;
 pub mod history;
@@ -536,23 +537,169 @@ fn ruaccent_runtime_status_string(slot: &crate::stress::runtime::RuAccentRuntime
     slot.status().as_safe_str().to_string()
 }
 
+/// Map a discovered RUAccent pack to its safe wire DTO.
+fn homograph_accentor_pack_dto(
+    state: &AppState,
+    d: &RuAccentPackDescriptor,
+) -> HomographAccentorPackDto {
+    HomographAccentorPackDto {
+        runtime_status: state
+            .get_ruaccent_runtime_slot(&d.id)
+            .as_ref()
+            .map(ruaccent_runtime_status_string)
+            .unwrap_or_else(|| "not_loaded".to_string()),
+        id: d.id.clone(),
+        display_name: d.display_name.clone(),
+        runtime_version: d.runtime_version.clone(),
+    }
+}
+
 /// Snapshot the currently discovered local RUAccent packs.
 #[tauri::command]
 pub fn list_homograph_accentor_packs(state: State<'_, AppState>) -> Vec<HomographAccentorPackDto> {
     state
         .get_ruaccent_packs()
-        .into_iter()
-        .map(|d| HomographAccentorPackDto {
-            runtime_status: state
-                .get_ruaccent_runtime_slot(&d.id)
-                .as_ref()
-                .map(ruaccent_runtime_status_string)
-                .unwrap_or_else(|| "not_loaded".to_string()),
-            id: d.id,
-            display_name: d.display_name,
-            runtime_version: d.runtime_version,
-        })
+        .iter()
+        .map(|d| homograph_accentor_pack_dto(state.inner(), d))
         .collect()
+}
+
+/// Reconcile decision for a RUAccent pack refresh.
+///
+/// Pure and free of any runtime/ONNX dependency.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuaccentRefreshReconcile {
+    /// Nothing to change: the selection is still valid, or the runtime holds the
+    /// removed model live.
+    None,
+    /// The selected model is confirmed gone everywhere: disable the layer,
+    /// auto-selecting the single remaining model when exactly one is left and
+    /// retaining the missing id when none remain.
+    Disable { pack_id: Option<String> },
+    /// There was no (or a dangling) selection and exactly one pack exists:
+    /// select it without enabling.
+    AutoSelect(String),
+}
+
+/// Decide the reconcile action for a RUAccent pack refresh. Symmetric with
+/// [`crate::ocr::service::decide_ocr_refresh_reconcile`], with one extra rule:
+/// a model held live stays selected (and untouched) even when the layer is
+/// disabled, so it takes priority over any disabled-state auto-selection.
+pub fn decide_ruaccent_refresh_reconcile(
+    enabled: bool,
+    saved_id: Option<&str>,
+    pack_ids: &[String],
+    holds_live: bool,
+) -> RuaccentRefreshReconcile {
+    if enabled
+        && saved_id.is_some()
+        && !pack_ids.iter().any(|id| Some(id.as_str()) == saved_id)
+        && !holds_live
+    {
+        return RuaccentRefreshReconcile::Disable {
+            pack_id: match pack_ids.len() {
+                0 => saved_id.map(str::to_string),
+                1 => Some(pack_ids[0].clone()),
+                _ => None,
+            },
+        };
+    }
+
+    if holds_live {
+        return RuaccentRefreshReconcile::None;
+    }
+
+    if !enabled && pack_ids.len() == 1 && saved_id != Some(pack_ids[0].as_str()) {
+        return RuaccentRefreshReconcile::AutoSelect(pack_ids[0].clone());
+    }
+
+    RuaccentRefreshReconcile::None
+}
+
+/// Resolve the RUAccent pack search roots from the app config and resource
+/// directories. Shared by startup discovery and the refresh command.
+pub(crate) fn ruaccent_search_roots(app_handle: &AppHandle) -> Vec<std::path::PathBuf> {
+    let mut roots: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(config_dir) = dirs::config_dir() {
+        roots.push(config_dir.join("ttsbard"));
+    } else {
+        warn!("Config directory not found; skipping AppData root for RUAccent discovery");
+    }
+    match app_handle.path().resource_dir() {
+        Ok(dir) => roots.push(dir),
+        Err(e) => warn!(error = %e, "resource_dir() failed for RUAccent discovery"),
+    }
+    roots
+}
+
+/// Re-scan the RUAccent pack directories and reconcile the persisted selection.
+///
+/// The reconcile follows the shared checkbox rule: when the selected model is
+/// gone and not held live the layer is disabled with a save (also clearing
+/// `load_on_start`), auto-selecting the single remaining model; a dangling
+/// selection with exactly one pack auto-selects it without enabling; a model
+/// still held live is left untouched. Returns the fresh pack list.
+#[tauri::command]
+pub async fn refresh_homograph_accentor_packs(
+    state: State<'_, AppState>,
+    settings_manager: State<'_, SettingsManager>,
+    app_handle: AppHandle,
+) -> Result<Vec<HomographAccentorPackDto>, String> {
+    let roots = ruaccent_search_roots(&app_handle);
+    state.refresh_ruaccent_packs(&roots);
+
+    let accentor = state
+        .settings_cache
+        .read()
+        .editor
+        .homograph_accentor
+        .clone();
+    let pack_ids: Vec<String> = state
+        .get_ruaccent_packs()
+        .iter()
+        .map(|d| d.id.clone())
+        .collect();
+
+    let holds_live = accentor
+        .accentor_pack_id
+        .as_deref()
+        .and_then(|id| state.get_ruaccent_runtime_slot(id))
+        .map(|slot| slot.is_live())
+        .unwrap_or(false);
+
+    let decision = decide_ruaccent_refresh_reconcile(
+        accentor.enabled,
+        accentor.accentor_pack_id.as_deref(),
+        &pack_ids,
+        holds_live,
+    );
+
+    match decision {
+        RuaccentRefreshReconcile::None => {}
+        RuaccentRefreshReconcile::Disable { pack_id } => {
+            let new_id = pack_id.clone();
+            persist_blocking(settings_manager.inner(), move |mgr| {
+                mgr.set_editor_homograph_accentor(false, new_id)?;
+                mgr.set_editor_homograph_accentor_load_on_start(false)
+            })
+            .await?;
+            emit_settings_changed(&app_handle);
+        }
+        RuaccentRefreshReconcile::AutoSelect(id) => {
+            let id_for_persist = id.clone();
+            persist_blocking(settings_manager.inner(), move |mgr| {
+                mgr.set_editor_homograph_accentor(false, Some(id_for_persist))
+            })
+            .await?;
+            emit_settings_changed(&app_handle);
+        }
+    }
+
+    Ok(state
+        .get_ruaccent_packs()
+        .iter()
+        .map(|d| homograph_accentor_pack_dto(state.inner(), d))
+        .collect())
 }
 
 /// Validate a homograph/accentor selection against the currently discovered
@@ -560,8 +707,8 @@ pub fn list_homograph_accentor_packs(state: State<'_, AppState>) -> Vec<Homograp
 ///
 /// Rules:
 /// - `enabled` requires a non-empty pack id that is present in `discovered_ids`;
-/// - when disabled the pack id may be kept for a later enable, but an unknown id
-///   is still rejected.
+/// - when disabled the pack id is kept as-is for a later enable, even when it is
+///   no longer discovered (a dangling id is allowed per spec).
 pub fn validate_homograph_accentor_selection(
     enabled: bool,
     accentor_pack_id: Option<String>,
@@ -577,13 +724,19 @@ pub fn validate_homograph_accentor_selection(
         return Ok(Some(id));
     }
 
-    if let Some(id) = accentor_pack_id {
-        if !discovered_ids.contains(&id) {
-            return Err(format!("Неизвестная модель RUAccent: {}", id));
-        }
-        Ok(Some(id))
+    Ok(accentor_pack_id)
+}
+
+/// Resolve the runtime slot to keep resident after a homograph/accentor
+/// selection save.
+///
+/// Disabling keeps nothing: every runtime, including the selected one, is
+/// unloaded. Enabling keeps only the selected slot.
+fn ruaccent_keep_id(enabled: bool, pack_id: Option<&str>) -> Option<String> {
+    if enabled {
+        pack_id.map(str::to_string)
     } else {
-        Ok(None)
+        None
     }
 }
 
@@ -608,15 +761,18 @@ pub async fn set_editor_homograph_accentor(
     let pack_id =
         validate_homograph_accentor_selection(enabled, accentor_pack_id, &discovered_ids)?;
 
+    let keep_id = ruaccent_keep_id(enabled, pack_id.as_deref());
+
     let pack_id_for_persist = pack_id.clone();
     persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_editor_homograph_accentor(enabled, pack_id_for_persist)
     })
     .await?;
 
-    // Keep only the selected runtime resident; never load the newly selected
-    // model automatically.
-    unload_ruaccent_runtimes_except(state.inner(), pack_id.as_deref()).await?;
+    // Enabling keeps only the selected runtime resident; disabling unloads every
+    // runtime including the selected one. Never load the newly selected model
+    // automatically.
+    unload_ruaccent_runtimes_except(state.inner(), keep_id.as_deref()).await?;
 
     emit_settings_changed(&app_handle);
 
@@ -796,6 +952,48 @@ pub(crate) async fn load_ruaccent_runtime(
     }
 }
 
+/// Persist disabling the RUAccent layer after a failed load attempt.
+///
+/// A failed load clears `enabled` (and, for the startup path, `load_on_start`)
+/// so the checkbox stays truthful. The selected pack id is kept as-is (a
+/// dangling id is allowed). A persist error is only warned about; the caller
+/// still returns its own load error.
+async fn disable_ruaccent_after_failed_load(
+    app_handle: &AppHandle,
+    state: &AppState,
+    also_load_on_start: bool,
+) {
+    let Some(settings_manager) = app_handle.try_state::<SettingsManager>() else {
+        warn!("SettingsManager unavailable while disabling RUAccent after failed load");
+        return;
+    };
+
+    let pack_id = state
+        .settings_cache
+        .read()
+        .editor
+        .homograph_accentor
+        .accentor_pack_id
+        .clone();
+
+    let pack_id_for_persist = pack_id.clone();
+    let result = persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_editor_homograph_accentor(false, pack_id_for_persist)?;
+        if also_load_on_start {
+            mgr.set_editor_homograph_accentor_load_on_start(false)?;
+        }
+        Ok(())
+    })
+    .await;
+
+    match result {
+        Ok(()) => emit_settings_changed(app_handle),
+        Err(error) => {
+            warn!(error = %error, "Failed to persist RUAccent disable after failed load");
+        }
+    }
+}
+
 /// Load a selected RUAccent model by ID (explicit command).
 ///
 /// Validates the ID against discovery, unloads other resident runtimes, runs
@@ -815,7 +1013,23 @@ pub async fn load_homograph_accentor_model(
         return Err(format!("Неизвестная модель RUAccent: {model_id}"));
     }
 
-    load_ruaccent_runtime(&app_handle, &state, model_id).await
+    match load_ruaccent_runtime(&app_handle, &state, model_id).await {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            // A failed manual load still clears the checkbox, but keeps
+            // `load_on_start` (this was not an auto-load attempt).
+            if state
+                .settings_cache
+                .read()
+                .editor
+                .homograph_accentor
+                .enabled
+            {
+                disable_ruaccent_after_failed_load(&app_handle, &state, false).await;
+            }
+            Err(error)
+        }
+    }
 }
 
 /// Start the persisted RUAccent startup load after the frontend has registered
@@ -846,6 +1060,7 @@ pub async fn start_homograph_accentor_startup_load(
                     message: message.clone(),
                 },
             );
+            disable_ruaccent_after_failed_load(&app_handle, &state, true).await;
             return Err(message);
         }
     };
@@ -858,10 +1073,15 @@ pub async fn start_homograph_accentor_startup_load(
                 message: message.clone(),
             },
         );
+        disable_ruaccent_after_failed_load(&app_handle, &state, true).await;
         return Err(message);
     }
 
-    load_ruaccent_runtime(&app_handle, &state, model_id).await
+    if let Err(error) = load_ruaccent_runtime(&app_handle, &state, model_id).await {
+        disable_ruaccent_after_failed_load(&app_handle, &state, true).await;
+        return Err(error);
+    }
+    Ok(())
 }
 
 /// Reject empty or whitespace-only preview input with a short Russian error.
@@ -966,7 +1186,7 @@ mod tests {
     }
 
     #[test]
-    fn disable_keeps_selected_id_and_rejects_unknown() {
+    fn disable_keeps_selected_id_even_when_unknown() {
         assert_eq!(
             validate_homograph_accentor_selection(false, None, &ids()),
             Ok(None)
@@ -975,12 +1195,123 @@ mod tests {
             validate_homograph_accentor_selection(false, Some("com.example.b".to_string()), &ids()),
             Ok(Some("com.example.b".to_string()))
         );
-        assert!(validate_homograph_accentor_selection(
-            false,
-            Some("com.example.unknown".to_string()),
-            &ids()
-        )
-        .is_err());
+        // A dangling id is allowed on disable: it is kept for a later enable.
+        assert_eq!(
+            validate_homograph_accentor_selection(
+                false,
+                Some("com.example.unknown".to_string()),
+                &ids()
+            ),
+            Ok(Some("com.example.unknown".to_string()))
+        );
+    }
+
+    // ── RUAccent refresh reconcile decision ──
+
+    #[test]
+    fn ruaccent_refresh_enabled_missing_model_not_live_disables_with_none() {
+        let packs = vec!["a".to_string(), "b".to_string()];
+        assert_eq!(
+            decide_ruaccent_refresh_reconcile(true, Some("gone"), &packs, false),
+            RuaccentRefreshReconcile::Disable { pack_id: None }
+        );
+    }
+
+    #[test]
+    fn ruaccent_refresh_enabled_missing_model_single_remaining_autoselects_on_disable() {
+        let packs = vec!["a".to_string()];
+        assert_eq!(
+            decide_ruaccent_refresh_reconcile(true, Some("gone"), &packs, false),
+            RuaccentRefreshReconcile::Disable {
+                pack_id: Some("a".to_string())
+            }
+        );
+    }
+
+    #[test]
+    fn ruaccent_refresh_enabled_missing_model_held_live_is_none() {
+        let packs = vec!["a".to_string()];
+        assert_eq!(
+            decide_ruaccent_refresh_reconcile(true, Some("gone"), &packs, true),
+            RuaccentRefreshReconcile::None
+        );
+    }
+
+    #[test]
+    fn ruaccent_refresh_enabled_model_still_present_is_none() {
+        let packs = vec!["a".to_string(), "b".to_string()];
+        assert_eq!(
+            decide_ruaccent_refresh_reconcile(true, Some("a"), &packs, false),
+            RuaccentRefreshReconcile::None
+        );
+    }
+
+    #[test]
+    fn ruaccent_refresh_disabled_single_pack_autoselects_when_different() {
+        let packs = vec!["a".to_string()];
+        assert_eq!(
+            decide_ruaccent_refresh_reconcile(false, None, &packs, false),
+            RuaccentRefreshReconcile::AutoSelect("a".to_string())
+        );
+        assert_eq!(
+            decide_ruaccent_refresh_reconcile(false, Some("gone"), &packs, false),
+            RuaccentRefreshReconcile::AutoSelect("a".to_string())
+        );
+    }
+
+    #[test]
+    fn ruaccent_refresh_disabled_single_pack_already_selected_is_none() {
+        let packs = vec!["a".to_string()];
+        assert_eq!(
+            decide_ruaccent_refresh_reconcile(false, Some("a"), &packs, false),
+            RuaccentRefreshReconcile::None
+        );
+    }
+
+    #[test]
+    fn ruaccent_refresh_disabled_multiple_packs_is_none() {
+        let packs = vec!["a".to_string(), "b".to_string()];
+        assert_eq!(
+            decide_ruaccent_refresh_reconcile(false, None, &packs, false),
+            RuaccentRefreshReconcile::None
+        );
+    }
+
+    #[test]
+    fn ruaccent_refresh_empty_packs_enabled_disables_retaining_missing_id() {
+        let packs: Vec<String> = vec![];
+        assert_eq!(
+            decide_ruaccent_refresh_reconcile(true, Some("gone"), &packs, false),
+            RuaccentRefreshReconcile::Disable {
+                pack_id: Some("gone".to_string())
+            }
+        );
+    }
+
+    #[test]
+    fn ruaccent_refresh_disabled_single_pack_held_live_is_none() {
+        let packs = vec!["a".to_string()];
+        assert_eq!(
+            decide_ruaccent_refresh_reconcile(false, Some("gone"), &packs, true),
+            RuaccentRefreshReconcile::None
+        );
+    }
+
+    // ── ruaccent_keep_id ──
+
+    #[test]
+    fn ruaccent_keep_id_unloads_everything_on_disable() {
+        assert_eq!(ruaccent_keep_id(false, None), None);
+        assert_eq!(ruaccent_keep_id(false, Some("com.example.a")), None);
+    }
+
+    #[test]
+    fn ruaccent_keep_id_retains_only_selected_on_enable() {
+        assert_eq!(
+            ruaccent_keep_id(true, Some("com.example.a")),
+            Some("com.example.a".to_string())
+        );
+        assert_eq!(ruaccent_keep_id(true, None), None);
     }
 
     // ── preview_contextual_ruaccent input validation ──

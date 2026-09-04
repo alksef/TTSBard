@@ -662,7 +662,7 @@ impl AppState {
                     slot.descriptor().pack_root == desc.pack_root
                         && slot.descriptor().omograph_model_id == desc.omograph_model_id
                 })
-                .unwrap_or(false)
+                .unwrap_or_else(|| slot.is_live())
         });
         for (id, desc) in &by_id {
             if !slots.contains_key(*id) {
@@ -671,6 +671,43 @@ impl AppState {
         }
 
         info!(count = count, "RUAccent pack discovery complete");
+        count
+    }
+
+    /// Re-scan RUAccent packs with a bounded retry when the primary models
+    /// directory exists but the scan finds nothing.
+    ///
+    /// A transient boot-time filesystem failure must not read as "models
+    /// removed": that would make the startup autoload fail and persist-disable
+    /// the feature (ROADMAP-090). Only this suspicious combination is retried;
+    /// a genuinely absent models directory and a persistently empty scan keep
+    /// the "no models" meaning.
+    pub fn refresh_ruaccent_packs_with_retry(&self, search_roots: &[std::path::PathBuf]) -> usize {
+        let mut count = self.refresh_ruaccent_packs(search_roots);
+        if count > 0 {
+            return count;
+        }
+        let primary_exists = search_roots
+            .first()
+            .map(|root| {
+                root.join(crate::stress::packs::PRIMARY_MODELS_SUBDIR)
+                    .is_dir()
+            })
+            .unwrap_or(false);
+        if !primary_exists {
+            return count;
+        }
+        for attempt in 1..=2 {
+            tracing::warn!(
+                attempt,
+                "RUAccent scan found no packs in an existing models directory; retrying"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            count = self.refresh_ruaccent_packs(search_roots);
+            if count > 0 {
+                return count;
+            }
+        }
         count
     }
 
@@ -1250,5 +1287,103 @@ mod tests {
 
         std::fs::remove_dir_all(&root).ok();
         std::fs::remove_dir_all(&empty_root).ok();
+    }
+
+    #[test]
+    fn ruaccent_refresh_preserves_ready_slot_for_missing_pack() {
+        use crate::stress::packs::test_util as tu;
+        use crate::stress::runtime::RuAccentRuntimeStatus;
+
+        let state = AppState::new();
+        let root = tu::unique_test_root("preserve-ready-missing");
+        tu::write_upstream_pack(&root, &["gone"]);
+        assert_eq!(state.refresh_ruaccent_packs(std::slice::from_ref(&root)), 1);
+
+        let slot = state
+            .get_ruaccent_runtime_slot("ruaccent.upstream.gone")
+            .expect("slot exists");
+        slot.mark_ready();
+
+        let empty_root = tu::unique_test_root("preserve-ready-empty");
+        assert_eq!(
+            state.refresh_ruaccent_packs(std::slice::from_ref(&empty_root)),
+            0
+        );
+
+        let slot = state
+            .get_ruaccent_runtime_slot("ruaccent.upstream.gone")
+            .expect("ready slot preserved for a missing pack");
+        assert_eq!(slot.status(), RuAccentRuntimeStatus::Ready);
+
+        std::fs::remove_dir_all(&root).ok();
+        std::fs::remove_dir_all(&empty_root).ok();
+    }
+
+    #[test]
+    fn ruaccent_refresh_drops_failed_slot_for_missing_pack() {
+        use crate::stress::packs::test_util as tu;
+
+        let state = AppState::new();
+        let root = tu::unique_test_root("drop-failed-missing");
+        tu::write_upstream_pack(&root, &["gone"]);
+        assert_eq!(state.refresh_ruaccent_packs(std::slice::from_ref(&root)), 1);
+
+        let slot = state
+            .get_ruaccent_runtime_slot("ruaccent.upstream.gone")
+            .expect("slot exists");
+        slot.mark_failed("load failed".to_string());
+
+        let empty_root = tu::unique_test_root("drop-failed-empty");
+        assert_eq!(
+            state.refresh_ruaccent_packs(std::slice::from_ref(&empty_root)),
+            0
+        );
+
+        assert!(state
+            .get_ruaccent_runtime_slot("ruaccent.upstream.gone")
+            .is_none());
+
+        std::fs::remove_dir_all(&root).ok();
+        std::fs::remove_dir_all(&empty_root).ok();
+    }
+
+    #[test]
+    fn ruaccent_refresh_retry_returns_packs_without_retry_when_complete() {
+        use crate::stress::packs::test_util as tu;
+
+        let state = AppState::new();
+        let root = tu::unique_test_root("retry-complete");
+        tu::write_upstream_pack(&root, &["tiny"]);
+        assert_eq!(
+            state.refresh_ruaccent_packs_with_retry(std::slice::from_ref(&root)),
+            1
+        );
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn ruaccent_refresh_retry_exhausts_retries_for_existing_incomplete_dir() {
+        use crate::stress::packs::test_util as tu;
+
+        let state = AppState::new();
+        let root = tu::unique_test_root("retry-incomplete");
+        tu::write_incomplete_root(&root, &["tiny"]);
+        assert_eq!(
+            state.refresh_ruaccent_packs_with_retry(std::slice::from_ref(&root)),
+            0
+        );
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn ruaccent_refresh_retry_skips_retry_when_models_dir_absent() {
+        let state = AppState::new();
+        let root = crate::stress::packs::test_util::unique_test_root("retry-absent");
+        // No pack written: the models directory does not exist at all.
+        assert_eq!(
+            state.refresh_ruaccent_packs_with_retry(std::slice::from_ref(&root)),
+            0
+        );
+        std::fs::remove_dir_all(&root).ok();
     }
 }
