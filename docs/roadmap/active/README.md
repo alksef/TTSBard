@@ -4,4 +4,6 @@
 `in_progress` и `deferred`. Это направления развития продукта, а не подробные
 implementation plans и не задания AI-агентам.
 
-Сейчас активных roadmap items нет.
+## Запланировано
+
+- [ROADMAP-088 — One-shot OCR выделенной области](./088-one-shot-screen-ocr.md)

@@ -126,21 +126,6 @@ const {
         </div>
         <span v-if="!isPortValid" class="error-text">Порт должен быть от 1024 до 65535</span>
       </div>
-
-      <div class="setting-row autoplay-row">
-        <label class="checkbox-label">
-          <input
-            type="checkbox"
-            v-model="settings.auto_play"
-            :disabled="loading"
-            @change="saveSettings"
-          />
-          <span>Автовоспроизведение</span>
-        </label>
-        <p class="setting-hint">
-          При выключенном автовоспроизведении текст сохраняется во «Входящие» до принятия решения.
-        </p>
-      </div>
     </section>
 
     <div class="info-callout">
@@ -393,10 +378,6 @@ h2 {
   margin-bottom: 0;
 }
 
-.autoplay-row {
-  display: block;
-}
-
 .setting-row label {
   min-width: 60px;
   font-weight: 500;
@@ -420,15 +401,6 @@ h2 {
 
 .checkbox-label input[type='checkbox']:disabled {
   cursor: not-allowed;
-}
-
-.setting-hint {
-  display: block;
-  margin-top: 0.4rem;
-  margin-left: 2.4rem;
-  font-size: 0.85rem;
-  color: var(--color-text-muted);
-  line-height: 1.4;
 }
 
 .address-inputs {

@@ -126,9 +126,19 @@ describe('isSpeechQueueStateDto', () => {
     expect(isSpeechQueueStateDto(dto)).toBe(true)
   })
 
-  it('accepts job with external source', () => {
-    const dto = makeDto([makeJob({ source: 'external' })])
+  it('accepts job with server source', () => {
+    const dto = makeDto([makeJob({ source: 'server' })])
     expect(isSpeechQueueStateDto(dto)).toBe(true)
+  })
+
+  it('accepts job with ocr source', () => {
+    const dto = makeDto([makeJob({ source: 'ocr' })])
+    expect(isSpeechQueueStateDto(dto)).toBe(true)
+  })
+
+  it('rejects job with removed external source', () => {
+    const bad = makeDto([{ ...makeJob(), source: 'external' as JobDto['source'] }])
+    expect(isSpeechQueueStateDto(bad)).toBe(false)
   })
 
   it('rejects job with missing source', () => {

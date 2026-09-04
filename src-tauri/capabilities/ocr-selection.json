@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "ocr-selection",
+  "description": "Minimal capability for the one-shot OCR selection overlay",
+  "windows": ["ocr-selection"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-hide",
+    "core:window:allow-start-dragging"
+  ]
+}

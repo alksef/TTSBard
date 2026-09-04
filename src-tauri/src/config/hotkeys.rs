@@ -167,6 +167,7 @@ pub struct HotkeySettings {
     pub playback_control_window: Hotkey,
     pub return_previous_window: Hotkey,
     pub toggle_minimal_mode: Hotkey,
+    pub ocr_capture: Hotkey,
     #[serde(default)]
     pub editor: EditorHotkeySettings,
 }
@@ -182,6 +183,7 @@ impl Default for HotkeySettings {
             playback_control_window: Hotkey::default_playback_control_window(),
             return_previous_window: Hotkey::default_return_previous_window(),
             toggle_minimal_mode: Hotkey::default_toggle_minimal_mode(),
+            ocr_capture: Hotkey::default_ocr_capture(),
             editor: EditorHotkeySettings::default(),
         }
     }
@@ -249,6 +251,14 @@ impl Hotkey {
         Self {
             modifiers: vec![HotkeyModifier::Ctrl],
             key: "M".to_string(),
+        }
+    }
+
+    /// Create a hotkey with Ctrl+Shift+P (one-shot screen OCR capture default)
+    pub fn default_ocr_capture() -> Self {
+        Self {
+            modifiers: vec![HotkeyModifier::Ctrl, HotkeyModifier::Shift],
+            key: "P".to_string(),
         }
     }
 
@@ -391,6 +401,7 @@ impl Hotkey {
             || global.playback_control_window == *self
             || global.return_previous_window == *self
             || global.toggle_minimal_mode == *self
+            || global.ocr_capture == *self
     }
 
     /// Convert to tauri_plugin_global_shortcut::Shortcut
@@ -933,5 +944,59 @@ mod tests {
         assert_eq!(back.editor.edit_word.key, "W");
         assert_eq!(back.editor.edit_word.modifiers.len(), 2);
         assert_eq!(back.editor.submit_continue.key, "Enter");
+    }
+
+    #[test]
+    fn test_default_ocr_capture() {
+        let hotkey = Hotkey::default_ocr_capture();
+        assert_eq!(hotkey.key, "P");
+        assert_eq!(hotkey.modifiers.len(), 2);
+        assert_eq!(hotkey.modifiers[0], HotkeyModifier::Ctrl);
+        assert_eq!(hotkey.modifiers[1], HotkeyModifier::Shift);
+        assert_eq!(hotkey.format_display(), "Ctrl+Shift+P");
+    }
+
+    /// Backward-compat: an old settings.json without `ocr_capture` must
+    /// deserialize with the Ctrl+Shift+P default.
+    #[test]
+    fn test_hotkey_settings_backwards_compatible_without_ocr_capture_field() {
+        let old_json = r#"{
+            "main_window": { "modifiers": ["ctrl", "shift"], "key": "F3" },
+            "sound_panel": { "modifiers": ["ctrl", "alt"], "key": "P" }
+        }"#;
+        let settings: HotkeySettings = serde_json::from_str(old_json).unwrap();
+        assert_eq!(settings.ocr_capture.key, "P");
+        assert_eq!(settings.ocr_capture.modifiers.len(), 2);
+        assert_eq!(settings.ocr_capture.modifiers[0], HotkeyModifier::Ctrl);
+        assert_eq!(settings.ocr_capture.modifiers[1], HotkeyModifier::Shift);
+    }
+
+    /// An editor hotkey equal to the new Ctrl+Shift+P default must conflict.
+    #[test]
+    fn conflicts_with_global_detects_ocr_capture_overlap() {
+        let editor_binding = Hotkey {
+            modifiers: vec![HotkeyModifier::Ctrl, HotkeyModifier::Shift],
+            key: "P".to_string(),
+        };
+        let global = HotkeySettings::default();
+        assert!(editor_binding.conflicts_with_global(&global));
+    }
+
+    /// Round-trip: a custom ocr_capture binding survives serialization.
+    #[test]
+    fn hotkey_settings_ocr_capture_round_trip() {
+        let original = HotkeySettings {
+            ocr_capture: Hotkey {
+                modifiers: vec![HotkeyModifier::Ctrl, HotkeyModifier::Alt],
+                key: "O".to_string(),
+            },
+            ..HotkeySettings::default()
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let back: HotkeySettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.ocr_capture.key, "O");
+        assert_eq!(back.ocr_capture.modifiers.len(), 2);
+        assert_eq!(back.ocr_capture.modifiers[0], HotkeyModifier::Ctrl);
+        assert_eq!(back.ocr_capture.modifiers[1], HotkeyModifier::Alt);
     }
 }

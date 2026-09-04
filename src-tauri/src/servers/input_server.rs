@@ -9,6 +9,7 @@ use crate::commands::speech_queue::SpeechQueueState;
 use crate::input_server::server::{build_router, TextIntake};
 use crate::input_server::{InputServerService, InputServerStatus};
 use crate::ipc::CommandError;
+use crate::speech_queue::SubmissionSource;
 use crate::state::AppState;
 use axum::Router;
 use std::net::SocketAddr;
@@ -46,7 +47,14 @@ impl TextIntake for ProductionTextIntake {
                     false,
                 )
             })?;
-        accept_external_text(&self.app_handle, app_state.inner(), queue.inner(), text).await
+        accept_external_text(
+            &self.app_handle,
+            app_state.inner(),
+            queue.inner(),
+            SubmissionSource::Server,
+            text,
+        )
+        .await
     }
 }
 
@@ -320,7 +328,6 @@ mod tests {
         *service.settings.write().await = InputServerSettings {
             start_on_boot: false,
             port,
-            auto_play: true,
         };
         service.set_run_request(true);
         let shutdown = CancellationToken::new();
@@ -363,7 +370,6 @@ mod tests {
         *service.settings.write().await = InputServerSettings {
             start_on_boot: false,
             port,
-            auto_play: true,
         };
         service.set_run_request(true);
         let shutdown = CancellationToken::new();
@@ -404,7 +410,6 @@ mod tests {
         *service.settings.write().await = InputServerSettings {
             start_on_boot: false,
             port,
-            auto_play: true,
         };
         service.set_run_request(true);
         let shutdown = CancellationToken::new();
@@ -439,7 +444,6 @@ mod tests {
         *service.settings.write().await = InputServerSettings {
             start_on_boot: false,
             port,
-            auto_play: true,
         };
         let shutdown = CancellationToken::new();
         let transitions = Arc::new(Mutex::new(Vec::new()));
@@ -473,7 +477,6 @@ mod tests {
         *service.settings.write().await = InputServerSettings {
             start_on_boot: false,
             port,
-            auto_play: true,
         };
         let shutdown = CancellationToken::new();
         let transitions = Arc::new(Mutex::new(Vec::new()));

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { Keyboard, RotateCcw, AppWindow, Music, MonitorPlay, SquarePen } from 'lucide-vue-next'
+import { Keyboard, RotateCcw, AppWindow, Music, MonitorPlay, SquarePen, ScanLine } from 'lucide-vue-next'
 import type { HotkeyDto } from '../types/settings'
 import { useAppSettings } from '../composables/useAppSettings'
 import { debugError } from '../utils/debug'
@@ -10,7 +10,7 @@ const { settings, isLoading, reload } = useAppSettings()
 
 const hotkeys = computed(() => settings.value?.hotkeys)
 
-type HotkeyName = 'main_window' | 'sound_panel' | 'playback_control_window' | 'return_previous_window' | 'toggle_minimal_mode'
+type HotkeyName = 'main_window' | 'sound_panel' | 'playback_control_window' | 'return_previous_window' | 'toggle_minimal_mode' | 'ocr_capture'
 
 const EDITOR_HOTKEY_NAMES = ['edit_word', 'submit_continue', 'submit_keep_text', 'submit_keep_focus', 'next_spelling_error', 'previous_spelling_error', 'next_tab', 'previous_tab', 'cycle_route', 'toggle_typing', 'cycle_quick_mode', 'toggle_history', 'accent_homographs', 'approve_next_incoming', 'edit_next_incoming'] as const
 type EditorHotkeyName = (typeof EDITOR_HOTKEY_NAMES)[number]
@@ -452,6 +452,56 @@ onUnmounted(async () => {
             @click="resetToDefault('playback_control_window')"
             class="reset-btn"
             title="Сбросить к умолчанию"
+          >
+            <RotateCcw :size="14" />
+          </button>
+        </div>
+      </div>
+
+      <!-- OCR Capture Hotkey -->
+      <div class="hotkey-row">
+        <div class="hotkey-label">
+          <ScanLine :size="16" />
+          <span>OCR: захват области</span>
+        </div>
+        <div class="hotkey-actions">
+          <span v-if="hotkeys && !recordingFor" class="hotkey-value">
+            {{ formatHotkey(hotkeys.ocr_capture) }}
+          </span>
+          <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+
+          <!-- Recording state -->
+          <div v-if="recordingFor === 'ocr_capture' && currentRecording" class="hotkey-value recording">
+            {{ formatCurrentRecording() }}
+          </div>
+
+          <button
+            @click="startRecording('ocr_capture')"
+            :disabled="recordingFor !== null || isLoading"
+            class="record-btn"
+            :class="{ recording: recordingFor === 'ocr_capture' }"
+            title="Записать клавишу"
+            aria-label="Записать клавишу"
+          >
+            <Keyboard :size="14" />
+            {{ recordingFor === 'ocr_capture' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+          </button>
+
+          <button
+            v-if="recordingFor === 'ocr_capture'"
+            @click="cancelRecording"
+            class="cancel-btn"
+            title="Отмена (Esc)"
+            aria-label="Отмена записи"
+          >
+            ✕
+          </button>
+
+          <button
+            @click="resetToDefault('ocr_capture')"
+            class="reset-btn"
+            title="Сбросить к умолчанию"
+            aria-label="Сбросить к умолчанию"
           >
             <RotateCcw :size="14" />
           </button>

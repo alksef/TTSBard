@@ -45,6 +45,7 @@ export interface HotkeySettingsDto {
   playback_control_window: HotkeyDto
   return_previous_window: HotkeyDto
   toggle_minimal_mode: HotkeyDto
+  ocr_capture: HotkeyDto
   editor: EditorHotkeySettingsDto
 }
 
@@ -497,6 +498,22 @@ export interface SceneItemRecord {
 }
 
 // ============================================================================
+// OCR Settings Types
+// ============================================================================
+
+/**
+ * Persisted one-shot screen OCR settings DTO.
+ *
+ * Mirrors the Rust `OcrSettings`/`OcrSettingsDto`: only the persisted desired
+ * state — `enabled` and nullable `model_id` — never runtime status, capture
+ * paths, engine internals or hotkeys.
+ */
+export interface OcrSettingsDto {
+  enabled: boolean
+  model_id: string | null
+}
+
+// ============================================================================
 // Main App Settings DTO
 // ============================================================================
 
@@ -518,6 +535,7 @@ export interface AppSettingsDto {
   preprocessor: PreprocessorSettingsDto
   soundpanel_bindings: SoundBinding[]
   editor: EditorSettingsDto
+  ocr: OcrSettingsDto
   ai: AiSettingsDto
   hotkeys: HotkeySettingsDto
   vtube_studio: VTubeStudioSettingsDto

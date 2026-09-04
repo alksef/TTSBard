@@ -15,7 +15,8 @@ use super::persistence;
 
 use super::hotkeys::HotkeySettings;
 use super::validation::{validate_port, validate_volume};
-use crate::input_server::InputServerSettings;
+use crate::input_server::{IncomingSettings, InputServerSettings};
+use crate::ocr::settings::OcrSettings;
 use crate::tts::TtsProviderType;
 use tracing::{info, warn};
 
@@ -1195,6 +1196,11 @@ pub struct AppSettings {
     pub webview: WebViewSettings,
     #[serde(default)]
     pub input_server: InputServerSettings,
+    /// Source-neutral Incoming policy (auto-play for server/OCR intake).
+    #[serde(default)]
+    pub incoming: IncomingSettings,
+    #[serde(default)]
+    pub ocr: OcrSettings,
     #[serde(default)]
     pub logging: LoggingSettings,
     #[serde(default)]
@@ -1224,6 +1230,8 @@ impl Default for AppSettings {
             twitch: TwitchSettings::default(),
             webview: WebViewSettings::default(),
             input_server: InputServerSettings::default(),
+            incoming: IncomingSettings::default(),
+            ocr: OcrSettings::default(),
             logging: LoggingSettings::default(),
             ai: AiSettings::default(),
             hotkeys: HotkeySettings::default(),
@@ -1342,7 +1350,15 @@ impl SettingsManager {
         if path.exists() {
             let content = fs::read_to_string(&path).context("Failed to read settings file")?;
 
-            let mut settings = match serde_json::from_str::<AppSettings>(&content) {
+            let json_value = match serde_json::from_str::<serde_json::Value>(&content) {
+                Ok(value) => value,
+                Err(e) => {
+                    warn!(error = %e, "settings.json is corrupted, recovering from backup");
+                    return persistence::recover_corrupted_json(&path, &AppSettings::default());
+                }
+            };
+
+            let mut settings = match serde_json::from_value::<AppSettings>(json_value.clone()) {
                 Ok(parsed) => parsed,
                 Err(e) => {
                     warn!(error = %e, "settings.json is corrupted, recovering from backup");
@@ -1354,7 +1370,7 @@ impl SettingsManager {
             // Новые playback-поля (pause/stop/repeat) уже заполнены дефолтом
             // при десериализации благодаря #[serde(default)] на HotkeySettings,
             // но старый файл нужно дописать, чтобы он стал консистентным.
-            let needs_migration = settings.hotkeys.main_window.key.is_empty()
+            let needs_hotkey_migration = settings.hotkeys.main_window.key.is_empty()
                 || settings.hotkeys.sound_panel.key.is_empty()
                 || settings.hotkeys.playback_pause.key.is_empty()
                 || settings.hotkeys.playback_stop.key.is_empty()
@@ -1362,9 +1378,34 @@ impl SettingsManager {
                 || settings.hotkeys.playback_control_window.key.is_empty()
                 || settings.hotkeys.return_previous_window.key.is_empty();
 
-            if needs_migration {
+            if needs_hotkey_migration {
                 info!("Migrating hotkey settings from defaults");
                 settings.hotkeys = HotkeySettings::default();
+            }
+
+            // Migrate legacy `input_server.auto_play` into the source-neutral
+            // top-level `incoming` section when the latter is absent. A boolean
+            // legacy value is preserved exactly; a missing/invalid value uses the
+            // Incoming default. When both the new `incoming` and the legacy value
+            // exist, the new value wins (no migration runs).
+            let needs_incoming_migration = json_value.get("incoming").is_none();
+            if needs_incoming_migration {
+                let legacy_auto_play = match json_value.pointer("/input_server/auto_play") {
+                    Some(serde_json::Value::Bool(value)) => {
+                        settings.incoming.auto_play = *value;
+                        *value
+                    }
+                    _ => settings.incoming.auto_play,
+                };
+                info!(
+                    auto_play = legacy_auto_play,
+                    "Migrating legacy input_server.auto_play into top-level incoming"
+                );
+            }
+
+            // Persist the migrated canonical file at most once: a single atomic
+            // write covers both the hotkey and the incoming migrations.
+            if needs_hotkey_migration || needs_incoming_migration {
                 // Save migrated settings
                 let content = serde_json::to_string_pretty(&settings)?;
                 let _guard = persistence::config_write_lock().lock();
@@ -1766,20 +1807,41 @@ impl SettingsManager {
 
     // ========== Input Server Settings ==========
 
-    /// Atomically replace the three desired input-server settings.
+    /// Atomically replace the two desired input-server settings.
     ///
     /// One load → mutate → save cycle; the port must be validated by the caller
-    /// before this is invoked.
-    pub fn set_input_server_section(
-        &self,
-        start_on_boot: bool,
-        port: u16,
-        auto_play: bool,
-    ) -> Result<()> {
+    /// before this is invoked. `auto_play` is intentionally not part of the
+    /// server settings anymore — it lives in the source-neutral `incoming`
+    /// policy and is only touched by [`Self::set_incoming_auto_play`].
+    pub fn set_input_server_section(&self, start_on_boot: bool, port: u16) -> Result<()> {
         self.update_settings_atomically(move |app_settings| {
             app_settings.input_server.start_on_boot = start_on_boot;
             app_settings.input_server.port = port;
-            app_settings.input_server.auto_play = auto_play;
+        })
+    }
+
+    // ========== Incoming Settings ==========
+
+    /// Atomically persist the source-neutral Incoming auto-play policy.
+    ///
+    /// One load → mutate → save cycle that never touches the input-server
+    /// section (or any other settings).
+    pub fn set_incoming_auto_play(&self, auto_play: bool) -> Result<()> {
+        self.update_settings_atomically(move |app_settings| {
+            app_settings.incoming.auto_play = auto_play;
+        })
+    }
+
+    // ========== OCR Settings ==========
+
+    /// Atomically replace the two desired OCR settings.
+    ///
+    /// One load → mutate → save cycle; validation of the model id against
+    /// discovered packs is performed by the caller (commands layer).
+    pub fn set_ocr_section(&self, enabled: bool, model_id: Option<String>) -> Result<()> {
+        self.update_settings_atomically(move |app_settings| {
+            app_settings.ocr.enabled = enabled;
+            app_settings.ocr.model_id = model_id;
         })
     }
 
@@ -2193,6 +2255,7 @@ impl SettingsManager {
             "playback_control_window" => settings.hotkeys.playback_control_window = hotkey.clone(),
             "return_previous_window" => settings.hotkeys.return_previous_window = hotkey.clone(),
             "toggle_minimal_mode" => settings.hotkeys.toggle_minimal_mode = hotkey.clone(),
+            "ocr_capture" => settings.hotkeys.ocr_capture = hotkey.clone(),
             _ => return Err(anyhow::anyhow!("Invalid hotkey name: {}", name)),
         }
         self.save(&settings)
@@ -2286,6 +2349,7 @@ impl SettingsManager {
             "playback_control_window" => super::hotkeys::Hotkey::default_playback_control_window(),
             "return_previous_window" => super::hotkeys::Hotkey::default_return_previous_window(),
             "toggle_minimal_mode" => super::hotkeys::Hotkey::default_toggle_minimal_mode(),
+            "ocr_capture" => super::hotkeys::Hotkey::default_ocr_capture(),
             _ => return Err(anyhow::anyhow!("Invalid hotkey name: {}", name)),
         };
         self.set_hotkey(name, &default)?;
@@ -4006,14 +4070,16 @@ mod tests {
 
     // ==================== Input server settings tests ====================
 
-    /// Default `AppSettings` carries the canonical `InputServerSettings` default.
+    /// Default `AppSettings` carries the canonical `InputServerSettings` default
+    /// and a source-neutral Incoming default with auto-play enabled.
     #[test]
     fn input_server_defaults_match_domain_default() {
         let settings = AppSettings::default();
         assert_eq!(settings.input_server, InputServerSettings::default());
         assert!(!settings.input_server.start_on_boot);
         assert_eq!(settings.input_server.port, 10101);
-        assert!(settings.input_server.auto_play);
+        assert_eq!(settings.incoming, IncomingSettings::default());
+        assert!(settings.incoming.auto_play);
     }
 
     /// Backward-compat: old settings.json without the `input_server` section
@@ -4076,13 +4142,13 @@ mod tests {
         (manager, dir)
     }
 
-    /// The atomic setter persists all three fields and keeps cache/disk in sync.
+    /// The atomic setter persists both fields and keeps cache/disk in sync.
     #[test]
-    fn set_input_server_section_persists_three_fields_and_keeps_cache_in_sync() {
-        let (manager, dir) = input_server_section_tmp_manager("save-three");
+    fn set_input_server_section_persists_two_fields_and_keeps_cache_in_sync() {
+        let (manager, dir) = input_server_section_tmp_manager("save-two");
 
         manager
-            .set_input_server_section(true, 20202, false)
+            .set_input_server_section(true, 20202)
             .unwrap();
 
         let disk: AppSettings =
@@ -4090,7 +4156,6 @@ mod tests {
                 .unwrap();
         assert!(disk.input_server.start_on_boot);
         assert_eq!(disk.input_server.port, 20202);
-        assert!(!disk.input_server.auto_play);
 
         assert_eq!(manager.load().unwrap(), disk, "cache and disk must agree");
 
@@ -4110,7 +4175,7 @@ mod tests {
         assert_eq!(before.audio.speaker_volume, 33);
 
         manager
-            .set_input_server_section(true, 20202, false)
+            .set_input_server_section(true, 20202)
             .unwrap();
 
         let after = manager.load().unwrap();
@@ -4118,12 +4183,383 @@ mod tests {
         assert_eq!(after.webview.access_token, Some("secret-token".to_string()));
         assert!(after.input_server.start_on_boot);
         assert_eq!(after.input_server.port, 20202);
-        assert!(!after.input_server.auto_play);
 
         let disk: AppSettings =
             serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap())
                 .unwrap();
         assert_eq!(disk, after, "disk and cache must agree");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ==================== Incoming policy tests ====================
+
+    /// Serialize a legacy settings.json: canonical defaults with the top-level
+    /// `incoming` section removed and (optionally) a legacy
+    /// `input_server.auto_play` value re-added.
+    fn legacy_incoming_settings_json(auto_play: Option<serde_json::Value>) -> String {
+        let mut value = serde_json::to_value(AppSettings::default()).unwrap();
+        let obj = value.as_object_mut().unwrap();
+        obj.remove("incoming");
+        if let Some(auto_play) = auto_play {
+            obj.get_mut("input_server")
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .insert("auto_play".to_string(), auto_play);
+        }
+        serde_json::to_string_pretty(&value).unwrap()
+    }
+
+    fn read_disk_value(config_dir: &Path) -> serde_json::Value {
+        serde_json::from_str(&std::fs::read_to_string(config_dir.join("settings.json")).unwrap())
+            .unwrap()
+    }
+
+    /// IncomingSettings::default must auto-play (the historical default), and a
+    /// canonical settings.json missing the `incoming` section carries it.
+    #[test]
+    fn incoming_settings_default_auto_play_is_true() {
+        assert!(IncomingSettings::default().auto_play);
+        assert!(AppSettings::default().incoming.auto_play);
+
+        let parsed: AppSettings = serde_json::from_str(&legacy_incoming_settings_json(None)).unwrap();
+        assert!(parsed.incoming.auto_play, "missing incoming must use default");
+    }
+
+    /// Legacy `input_server.auto_play: false` migrates exactly to false.
+    #[test]
+    fn incoming_migrates_legacy_auto_play_false_exactly() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-incoming-migrate-false-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("settings.json"),
+            legacy_incoming_settings_json(Some(serde_json::json!(false))),
+        )
+        .unwrap();
+
+        let manager = SettingsManager::with_config_dir(dir.clone()).unwrap();
+        let loaded = manager.load().unwrap();
+        assert!(
+            !loaded.incoming.auto_play,
+            "legacy false must migrate exactly, never flip to true"
+        );
+
+        let disk = read_disk_value(&dir);
+        assert_eq!(disk["incoming"]["auto_play"], serde_json::json!(false));
+        assert!(
+            disk["input_server"].get("auto_play").is_none(),
+            "legacy auto_play must be removed from input_server"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Legacy `input_server.auto_play: true` migrates exactly to true.
+    #[test]
+    fn incoming_migrates_legacy_auto_play_true_exactly() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-incoming-migrate-true-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("settings.json"),
+            legacy_incoming_settings_json(Some(serde_json::json!(true))),
+        )
+        .unwrap();
+
+        let manager = SettingsManager::with_config_dir(dir.clone()).unwrap();
+        assert!(manager.load().unwrap().incoming.auto_play);
+
+        let disk = read_disk_value(&dir);
+        assert_eq!(disk["incoming"]["auto_play"], serde_json::json!(true));
+        assert!(
+            disk["input_server"].get("auto_play").is_none(),
+            "legacy auto_play must be removed from input_server"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A missing or invalid legacy value falls back to the Incoming default
+    /// (true) and is still persisted as a canonical `incoming` section.
+    #[test]
+    fn incoming_missing_or_invalid_legacy_value_uses_default() {
+        for (label, legacy) in [
+            ("missing", None),
+            ("non-bool", Some(serde_json::json!("yes"))),
+            ("null", Some(serde_json::Value::Null)),
+        ] {
+            let unique = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let dir = std::env::temp_dir().join(format!(
+                "ttsbard-incoming-migrate-{label}-{}-{}",
+                std::process::id(),
+                unique
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join("settings.json"),
+                legacy_incoming_settings_json(legacy.clone()),
+            )
+            .unwrap();
+
+            let manager = SettingsManager::with_config_dir(dir.clone()).unwrap();
+            assert!(
+                manager.load().unwrap().incoming.auto_play,
+                "{label} legacy value must fall back to the default"
+            );
+
+            let disk = read_disk_value(&dir);
+            assert_eq!(disk["incoming"]["auto_play"], serde_json::json!(true));
+            assert!(
+                disk["input_server"].get("auto_play").is_none(),
+                "{label}: legacy auto_play must be removed"
+            );
+
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    /// When both the new `incoming` section and a legacy `input_server.auto_play`
+    /// coexist, the new value wins and no migration write occurs.
+    #[test]
+    fn incoming_new_value_wins_when_both_exist() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-incoming-both-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mut value = serde_json::to_value(AppSettings::default()).unwrap();
+        value["incoming"]["auto_play"] = serde_json::json!(false);
+        value["input_server"]["auto_play"] = serde_json::json!(true);
+        std::fs::write(
+            dir.join("settings.json"),
+            serde_json::to_string_pretty(&value).unwrap(),
+        )
+        .unwrap();
+
+        let manager = SettingsManager::with_config_dir(dir.clone()).unwrap();
+        let loaded = manager.load().unwrap();
+        assert!(
+            !loaded.incoming.auto_play,
+            "existing incoming section must win over the legacy value"
+        );
+
+        // The persisted input-server section still carries the leftover legacy
+        // field until the next section save — but it is ignored on load.
+        let disk = read_disk_value(&dir);
+        assert_eq!(disk["incoming"]["auto_play"], serde_json::json!(false));
+        assert_eq!(
+            disk["input_server"]["start_on_boot"],
+            serde_json::json!(false)
+        );
+        assert_eq!(disk["input_server"]["port"], serde_json::json!(10101));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A single load of a legacy file must persist the canonical `incoming`
+    /// section once and remove the legacy `input_server.auto_play` field.
+    #[test]
+    fn incoming_migration_persists_canonical_incoming_once() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-incoming-canonical-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("settings.json"),
+            legacy_incoming_settings_json(Some(serde_json::json!(false))),
+        )
+        .unwrap();
+
+        let manager = SettingsManager::with_config_dir(dir.clone()).unwrap();
+        let first = manager.load().unwrap();
+        assert!(!first.incoming.auto_play);
+
+        // Reloading the now-canonical file must be a no-op for the migration.
+        let disk_before = std::fs::read_to_string(dir.join("settings.json")).unwrap();
+        let manager2 = SettingsManager::with_config_dir(dir.clone()).unwrap();
+        let second = manager2.load().unwrap();
+        assert_eq!(second, first);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("settings.json")).unwrap(),
+            disk_before,
+            "reloading a canonical file must not rewrite it"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The source-neutral Incoming setter persists `incoming.auto_play` without
+    /// touching the input-server section (or any other settings).
+    #[test]
+    fn set_incoming_auto_play_preserves_unrelated_settings() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-incoming-setter-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let manager = SettingsManager::with_config_dir(dir.clone()).unwrap();
+
+        manager.set_input_server_section(true, 20202).unwrap();
+        manager.set_speaker_volume(33).unwrap();
+
+        manager.set_incoming_auto_play(false).unwrap();
+
+        let after = manager.load().unwrap();
+        assert!(!after.incoming.auto_play);
+        assert!(after.input_server.start_on_boot, "server section preserved");
+        assert_eq!(after.input_server.port, 20202, "server port preserved");
+        assert_eq!(after.audio.speaker_volume, 33, "unrelated setting preserved");
+
+        let disk = read_disk_value(&dir);
+        assert_eq!(disk["incoming"]["auto_play"], serde_json::json!(false));
+        assert!(
+            disk["input_server"].get("auto_play").is_none(),
+            "server section must never carry auto_play after a section save"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Saving the input-server section no longer mutates the Incoming policy:
+    /// `auto_play` keeps whatever the source-neutral `incoming` section holds.
+    #[test]
+    fn set_input_server_section_does_not_mutate_incoming_auto_play() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-incoming-save-server-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let manager = SettingsManager::with_config_dir(dir.clone()).unwrap();
+
+        manager.set_incoming_auto_play(false).unwrap();
+
+        manager.set_input_server_section(true, 20202).unwrap();
+
+        let after = manager.load().unwrap();
+        assert!(
+            !after.incoming.auto_play,
+            "input-server save must not flip auto-play"
+        );
+        assert!(after.input_server.start_on_boot);
+        assert_eq!(after.input_server.port, 20202);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ==================== OCR settings tests ====================
+
+    /// Default `AppSettings` carries the canonical `OcrSettings` default.
+    #[test]
+    fn ocr_defaults_match_domain_default() {
+        let settings = AppSettings::default();
+        assert_eq!(settings.ocr, OcrSettings::default());
+        assert!(!settings.ocr.enabled);
+        assert_eq!(settings.ocr.model_id, None);
+    }
+
+    /// Backward-compat: old settings.json without the `ocr` section must
+    /// deserialize with the domain default.
+    #[test]
+    fn app_settings_deserializes_without_ocr_section() {
+        let old_json = r#"{
+            "audio": { "speaker_device": null, "speaker_enabled": true, "speaker_volume": 80, "virtual_mic_device": null, "virtual_mic_volume": 100 },
+            "tts": { "provider": "openai", "openai": { "api_key": null, "voice": "alloy" }, "local": { "url": "http://127.0.0.1:8124" }, "fish": { "api_key": null, "voices": [], "reference_id": "", "format": "mp3", "temperature": 0.7, "sample_rate": 44100, "use_proxy": false }, "telegram": { "api_id": null, "proxy_mode": "none", "voices": [], "current_voice_id": "" }, "network": { "proxy": { "proxy_url": null }, "mtproxy": { "host": null, "port": 8888, "secret": null, "dc_id": null } } },
+            "audio_effects": { "enabled": false, "pitch": 0, "speed": 0, "volume": 100, "enhance_enabled": false, "enhance_atten_db": 12.0, "formant_preserved": true },
+            "hotkey_enabled": true,
+            "editor": { "quick": false, "ai": false, "ai_completion": false, "spellcheck_enabled": true, "spellcheck_source": "offline", "editor_height": 340 },
+            "theme": "dark",
+            "twitch": { "enabled": false, "username": "", "token": "", "channel": "", "start_on_boot": false },
+            "webview": { "enabled": false, "start_on_boot": false, "port": 10100, "bind_address": "0.0.0.0", "access_token": null, "upnp_enabled": false },
+            "logging": { "enabled": false, "level": "info", "module_levels": {} },
+            "ai": { "provider": "openai", "openai": { "api_key": null, "use_proxy": false, "model": "gpt-4o-mini" }, "zai": { "url": null, "api_key": null, "model": "glm-4.5" }, "deepseek": { "api_key": null, "use_proxy": false, "model": "deepseek-chat" }, "custom": { "url": null, "api_key": null, "use_proxy": false, "model": "deepseek-chat" }, "prompt": "test", "timeout": 20 },
+            "hotkeys": { "main_window": { "modifiers": ["ctrl"], "key": "F12" }, "sound_panel": { "modifiers": ["alt"], "key": "F12" }, "playback_pause": { "modifiers": [], "key": "" }, "playback_stop": { "modifiers": [], "key": "" }, "playback_repeat": { "modifiers": [], "key": "" }, "playback_control_window": { "modifiers": [], "key": "" } },
+            "show_playback_on_start": false
+        }"#;
+        let settings: AppSettings = serde_json::from_str(old_json)
+            .expect("old AppSettings (without ocr field) must deserialize");
+        assert_eq!(settings.ocr, OcrSettings::default());
+        assert!(!settings.ocr.enabled);
+        assert_eq!(settings.ocr.model_id, None);
+    }
+
+    /// The atomic setter persists both fields and keeps cache/disk in sync.
+    #[test]
+    fn set_ocr_section_persists_two_fields_and_keeps_cache_in_sync() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-ocr-section-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let manager = SettingsManager::with_config_dir(dir.clone()).unwrap();
+
+        assert!(!manager.load().unwrap().ocr.enabled);
+
+        manager
+            .set_ocr_section(true, Some("com.example.ocr".to_string()))
+            .unwrap();
+
+        let after = manager.load().unwrap();
+        assert!(after.ocr.enabled);
+        assert_eq!(after.ocr.model_id.as_deref(), Some("com.example.ocr"));
+
+        let disk: AppSettings =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap())
+                .unwrap();
+        assert_eq!(disk, after, "cache and disk must agree");
+
+        // Disable but preserve the selected id for a later re-enable.
+        manager
+            .set_ocr_section(false, Some("com.example.ocr".to_string()))
+            .unwrap();
+        let after = manager.load().unwrap();
+        assert!(!after.ocr.enabled);
+        assert_eq!(after.ocr.model_id.as_deref(), Some("com.example.ocr"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

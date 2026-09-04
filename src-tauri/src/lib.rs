@@ -11,6 +11,7 @@ mod history;
 mod hotkeys;
 mod input_server;
 pub mod ipc;
+mod ocr;
 pub mod playback;
 mod playback_window;
 mod preprocessor;
@@ -537,6 +538,8 @@ pub fn run() {
             // Input server commands
             commands::input_server::get_input_server_settings,
             commands::input_server::save_input_server_settings,
+            commands::input_server::get_incoming_settings,
+            commands::input_server::save_incoming_settings,
             commands::input_server::get_input_server_status,
             commands::input_server::start_input_server,
             commands::input_server::stop_input_server,
@@ -545,6 +548,14 @@ pub fn run() {
             commands::input_server::approve_incoming_text,
             commands::input_server::take_incoming_text_for_edit,
             commands::input_server::discard_incoming_text,
+            // OCR commands
+            commands::ocr::get_ocr_settings,
+            commands::ocr::save_ocr_settings,
+            commands::ocr::get_ocr_status,
+            commands::ocr::list_ocr_packs,
+            commands::ocr::open_ocr_packs_folder,
+            commands::ocr::ocr_selection_cancel,
+            commands::ocr::ocr_selection_submit,
             // Logging commands
             get_logging_settings,
             save_logging_settings,

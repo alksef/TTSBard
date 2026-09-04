@@ -352,8 +352,9 @@ pub async fn set_hotkey(
         "playback_control_window",
         "return_previous_window",
         "toggle_minimal_mode",
+        "ocr_capture",
     ];
-    let conflict_labels: [(&str, &str); 8] = [
+    let conflict_labels: [(&str, &str); 9] = [
         ("main_window", "главного окна"),
         ("sound_panel", "звуковой панели"),
         ("playback_pause", "паузы воспроизведения"),
@@ -365,6 +366,7 @@ pub async fn set_hotkey(
         ),
         ("return_previous_window", "возврата в предыдущее окно"),
         ("toggle_minimal_mode", "переключения компактного режима"),
+        ("ocr_capture", "OCR: захвата области"),
     ];
     for other_name in &all_global_names {
         if *other_name == name.as_str() {
@@ -379,6 +381,7 @@ pub async fn set_hotkey(
             "playback_control_window" => &settings.hotkeys.playback_control_window,
             "return_previous_window" => &settings.hotkeys.return_previous_window,
             "toggle_minimal_mode" => &settings.hotkeys.toggle_minimal_mode,
+            "ocr_capture" => &settings.hotkeys.ocr_capture,
             _ => continue,
         };
         if hotkey == *other_hotkey {
@@ -403,6 +406,24 @@ pub async fn set_hotkey(
     crate::hotkeys::reregister_hotkeys(&app_handle)
         .map_err(|e| format!("Failed to re-register hotkeys: {}", e))?;
 
+    if name == "ocr_capture" {
+        if let Some(app_state) = app_handle.try_state::<AppState>() {
+            if app_state.ocr.is_runtime_active() {
+                let hotkey_clone = hotkey.clone();
+                let app_handle_clone = app_handle.clone();
+                let state_clone = app_state.inner().clone();
+                tauri::async_runtime::spawn(async move {
+                    crate::commands::ocr::rebind_ocr_capture_hotkey(
+                        &app_handle_clone,
+                        &state_clone,
+                        &hotkey_clone,
+                    )
+                    .await;
+                });
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -423,6 +444,24 @@ pub async fn reset_hotkey_to_default(
 
     crate::hotkeys::reregister_hotkeys(&app_handle)
         .map_err(|e| format!("Failed to re-register hotkeys: {}", e))?;
+
+    if name == "ocr_capture" {
+        if let Some(app_state) = app_handle.try_state::<AppState>() {
+            if app_state.ocr.is_runtime_active() {
+                let default_clone = default.clone();
+                let app_handle_clone = app_handle.clone();
+                let state_clone = app_state.inner().clone();
+                tauri::async_runtime::spawn(async move {
+                    crate::commands::ocr::rebind_ocr_capture_hotkey(
+                        &app_handle_clone,
+                        &state_clone,
+                        &default_clone,
+                    )
+                    .await;
+                });
+            }
+        }
+    }
 
     Ok(default)
 }

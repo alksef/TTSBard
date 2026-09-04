@@ -65,6 +65,7 @@ tract-hir = "=0.21.4"
 tract-onnx = "=0.21.4"
 tract-pulse = "=0.21.4"
 image = "0.25"
+xcap = "0.9"
 regex = "1"
 lazy_static = "1.4"
 futures = "0.3"
@@ -110,6 +111,10 @@ spellbook = "0.4"
 # Piper TTS embedded runtime: static ONNX Runtime + phonemization
 ort = "=2.0.0-rc.13"
 espeak-rs = { git = "https://github.com/alksef/piper-rs.git", rev = "346f10f6e8520b2ee21e4d0117c1ca0e38e5cd0f", package = "espeak-rs" }
+
+# PP-OCRv5 one-shot screen OCR backend (ROADMAP-088). Default features are off:
+# no model downloader, no DirectML. Only the tokio worker wrapper is enabled.
+rapidocr-core = { version = "0.2.2", default-features = false, features = ["tokio"] }
 
 # Native RUAccent stress runtime (local sibling repository, see ROADMAP-082).
 ruaccent_rs = { git = "https://github.com/alksef/ruaccent-rs.git", tag = "v0.2.0" }

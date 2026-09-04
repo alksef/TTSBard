@@ -20,7 +20,7 @@ use tracing::{error, info, warn};
 use crate::commands::playback::PlaybackState;
 use crate::commands::speech_queue::SpeechQueueState;
 use crate::commands::telegram::TelegramState;
-use crate::config::{AppSettings, SettingsManager, WindowsManager, WindowsSettings};
+use crate::config::{AppSettings, Hotkey, SettingsManager, WindowsManager, WindowsSettings};
 use crate::event_loop::EventHandler;
 use crate::events::AppEvent;
 use crate::secret_log;
@@ -71,6 +71,15 @@ pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std:
     // Load input server settings into AppState
     info!("Loading input server settings...");
     *app_state.inner().input_server.settings.blocking_write() = settings.input_server.clone();
+
+    // Load the source-neutral Incoming policy into the shared runtime snapshot.
+    // Both the input server supervisor and OCR intake read auto-play from here.
+    info!("Loading Incoming settings...");
+    *app_state.inner().input_server.incoming.blocking_write() = settings.incoming.clone();
+
+    // Load OCR settings into AppState
+    info!("Loading OCR settings...");
+    *app_state.inner().ocr.settings.blocking_write() = settings.ocr.clone();
 
     // Load hotkey_enabled setting into AppState
     info!("Loading hotkey_enabled setting...");
@@ -315,6 +324,14 @@ pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std:
 
     // Initialize input server (after persisted input settings are loaded above)
     init_input_server(&app_state, app.handle().clone());
+
+    // Initialize OCR (after persisted OCR settings are loaded above)
+    init_ocr(
+        &app_state,
+        app.handle().clone(),
+        settings.ocr.enabled,
+        settings.hotkeys.ocr_capture.clone(),
+    );
 
     // Initialize VTube Studio autostart
     init_vtube_studio(&app_state, app.handle().clone());
@@ -701,6 +718,21 @@ fn init_input_server(app_state: &AppState, app_handle: AppHandle) {
         crate::servers::run_input_server(app_handle, shutdown).await;
     });
     info!("Input server supervisor started");
+}
+
+/// Initialize the OCR runtime from the persisted `enabled` setting.
+fn init_ocr(app_state: &AppState, app_handle: AppHandle, enabled: bool, hotkey: Hotkey) {
+    if !enabled {
+        info!("OCR disabled on boot (enabled=false)");
+        return;
+    }
+
+    let app_handle_clone = app_handle.clone();
+    let app_state_clone = app_state.clone();
+    app_state.runtime.spawn(async move {
+        crate::commands::ocr::start_ocr_runtime(&app_handle_clone, &app_state_clone, &hotkey).await;
+    });
+    info!("OCR boot start scheduled (enabled=true)");
 }
 
 /// Initialize window protection (Windows only)

@@ -186,6 +186,10 @@
       "load_on_start": true
     }
   },
+  "ocr": {
+    "enabled": true,
+    "model_id": "silero-ocr"
+  },
   "logging": {
     "enabled": true,
     "level": "info",
@@ -271,6 +275,13 @@
         "ctrl"
       ],
       "key": "F"
+    },
+    "ocr_capture": {
+      "modifiers": [
+        "ctrl",
+        "shift"
+      ],
+      "key": "P"
     },
     "editor": {
       "edit_word": {

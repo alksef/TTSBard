@@ -48,6 +48,7 @@ const {
   approve: approveIncoming,
   edit: editIncoming,
   discard: discardIncoming,
+  skipExternalJob,
   setAutoPlay: setIncomingAutoPlay,
 } = useIncomingTexts()
 
@@ -128,6 +129,12 @@ const ttsSettings = useTtsSettings()
 const hotkeySettings = useHotkeysSettings()
 
 const appSettingsContext = useAppSettings()
+
+const ocrDesiredEnabled = computed(() => appSettingsContext.settings.value?.ocr.enabled ?? false)
+
+const incomingAvailable = computed(() =>
+  inputServerRunning.value || ocrDesiredEnabled.value || incomingCount.value > 0,
+)
 
 const quickEditorModeOverride = ref<QuickEditorMode | null>(null)
 
@@ -608,8 +615,8 @@ watch(activeId, () => {
   lastSubmitOutcome.value = 'none'
 })
 
-watch(inputServerRunning, (running) => {
-  if (!running && showIncomingTab.value) {
+watch(incomingAvailable, (available) => {
+  if (!available && showIncomingTab.value) {
     showIncomingTab.value = false
   }
 })
@@ -885,7 +892,7 @@ function cycleTabs(direction: TabCycleDirection) {
     tabs.value.map(t => t.id),
     activeId.value,
     direction,
-    inputServerRunning.value,
+    incomingAvailable.value,
     showIncomingTab.value,
   )
   if (transition?.kind === 'incoming') {
@@ -1025,8 +1032,8 @@ defineExpose({ focusEditor })
         <EditorTabs
           :tabs="tabs"
           :active-id="activeId"
-          :pinned-title="inputServerRunning ? incomingTabTitle : undefined"
-          :pinned-active="inputServerRunning && showIncomingTab"
+          :pinned-title="incomingAvailable ? incomingTabTitle : undefined"
+          :pinned-active="incomingAvailable && showIncomingTab"
           @create="onCreate"
           @close="onClose"
           @select="onSelect"
@@ -1045,6 +1052,7 @@ defineExpose({ focusEditor })
           @approve="approveIncoming"
           @discard="discardIncoming"
           @edit="onEditIncoming"
+          @skip="skipExternalJob"
           @toggle-auto-play="setIncomingAutoPlay"
         />
         <template v-else>

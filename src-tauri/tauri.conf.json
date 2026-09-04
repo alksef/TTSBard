@@ -50,6 +50,20 @@
         "resizable": false,
         "visible": false,
         "hiddenTitle": true
+      },
+      {
+        "label": "ocr-selection",
+        "url": "src-ocr-selection/index.html",
+        "title": "",
+        "width": 800,
+        "height": 600,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "visible": false,
+        "hiddenTitle": true
       }
     ],
     "security": {

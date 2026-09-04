@@ -8,7 +8,6 @@ import { createAsyncCleanupScope } from '../utils/asyncCleanup'
 export interface InputServerSettings {
   start_on_boot: boolean
   port: number
-  auto_play: boolean
 }
 
 export type InputServerRuntimeState = 'stopped' | 'starting' | 'running' | 'error'
@@ -28,7 +27,6 @@ export const INPUT_SERVER_PATH = '/v1/speech'
 const DEFAULT_SETTINGS: InputServerSettings = {
   start_on_boot: false,
   port: 10101,
-  auto_play: true,
 }
 
 export function convertInputServerStatusFromRust(raw: unknown): InputServerStatus {

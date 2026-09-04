@@ -82,6 +82,9 @@ pub struct AppState {
     /// Input server service (settings, pending-review inbox, runtime status)
     pub input_server: Arc<crate::input_server::InputServerService>,
 
+    /// OCR service (desired settings, runtime lifecycle status, capture hotkey)
+    pub ocr: Arc<crate::ocr::OcrService>,
+
     /// Включены ли хоткеи (runtime only, synced with settings.json)
     pub hotkey_enabled: Arc<Mutex<bool>>,
 
@@ -199,10 +202,13 @@ impl AppState {
 
         let input_server = Arc::new(crate::input_server::InputServerService::new());
 
+        let ocr = Arc::new(crate::ocr::OcrService::new());
+
         Self {
             event_sender: Arc::new(Mutex::new(None)),
             webview,
             input_server,
+            ocr,
             hotkey_enabled: Arc::new(Mutex::new(true)), // default true
             tts_config: Arc::new(RwLock::new(TtsConfig::default())),
             tts_registry: Arc::new(Mutex::new(TtsProviderRegistry::new())),

@@ -5,8 +5,10 @@ use parking_lot::Mutex;
 use uuid::Uuid;
 
 use super::{
-    IncomingTextItem, InputServerError, InputServerSettings, InputServerStatus, INBOX_CAPACITY,
+    IncomingSettings, IncomingTextItem, InputServerError, InputServerSettings, InputServerStatus,
+    INBOX_CAPACITY,
 };
+use crate::speech_queue::SubmissionSource;
 
 /// Result of a failed [`InputServerService::consume`] transaction.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,6 +26,13 @@ pub enum ConsumeError<E> {
 /// supervisor. It does not open a listener or deliver text anywhere yet.
 pub struct InputServerService {
     pub settings: Arc<tokio::sync::RwLock<InputServerSettings>>,
+    /// In-memory Incoming policy snapshot read by the shared intake seam.
+    ///
+    /// Seeded from the persisted top-level `incoming` settings at setup and
+    /// kept in sync by `save_incoming_settings`. It lives beside the inbox on
+    /// this service for this slice so that Server and OCR intake observe the
+    /// same source-neutral policy without touching the input-server settings.
+    pub incoming: Arc<tokio::sync::RwLock<IncomingSettings>>,
     status: Arc<Mutex<InputServerStatus>>,
     inbox: Mutex<VecDeque<IncomingTextItem>>,
     wake_sender: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedSender<()>>>>,
@@ -36,6 +45,7 @@ impl InputServerService {
     pub fn new() -> Self {
         Self {
             settings: Arc::new(tokio::sync::RwLock::new(InputServerSettings::default())),
+            incoming: Arc::new(tokio::sync::RwLock::new(IncomingSettings::default())),
             status: Arc::new(Mutex::new(InputServerStatus::Stopped)),
             inbox: Mutex::new(VecDeque::with_capacity(INBOX_CAPACITY)),
             wake_sender: Arc::new(Mutex::new(None)),
@@ -105,8 +115,14 @@ impl InputServerService {
     /// Enqueue a new item, normalising the text by trimming outer whitespace.
     ///
     /// Blank text and a full inbox are rejected with distinct typed errors.
-    /// Editor route prefixes are intentionally not parsed here.
-    pub fn enqueue(&self, text: &str) -> Result<IncomingTextItem, InputServerError> {
+    /// The producer `source` is stored on the pending item so a later approval
+    /// can submit the speech job with the same producer. Editor route prefixes
+    /// are intentionally not parsed here.
+    pub fn enqueue(
+        &self,
+        text: &str,
+        source: SubmissionSource,
+    ) -> Result<IncomingTextItem, InputServerError> {
         let text = text.trim().to_string();
         if text.is_empty() {
             return Err(InputServerError::BlankText);
@@ -120,6 +136,7 @@ impl InputServerService {
         let item = IncomingTextItem {
             id: Uuid::new_v4().to_string(),
             text,
+            source,
         };
         inbox.push_back(item.clone());
         Ok(item)
@@ -174,15 +191,16 @@ impl InputServerService {
 mod tests {
     use super::{ConsumeError, InputServerService};
     use crate::input_server::{
-        IncomingTextItem, InputServerError, InputServerSettings, InputServerStatus, INBOX_CAPACITY,
+        IncomingSettings, IncomingTextItem, InputServerError, InputServerSettings, InputServerStatus,
+        INBOX_CAPACITY,
     };
+    use crate::speech_queue::SubmissionSource;
 
     #[test]
     fn settings_defaults() {
         let settings = InputServerSettings::default();
         assert!(!settings.start_on_boot);
         assert_eq!(settings.port, 10101);
-        assert!(settings.auto_play);
     }
 
     #[test]
@@ -255,13 +273,40 @@ mod tests {
         let settings = service.settings.blocking_read();
         assert!(!settings.start_on_boot);
         assert_eq!(settings.port, 10101);
-        assert!(settings.auto_play);
+    }
+
+    #[test]
+    fn incoming_snapshot_defaults_auto_play_true() {
+        let service = InputServerService::new();
+        let incoming = service.incoming.blocking_read();
+        assert!(incoming.auto_play);
+        assert_eq!(*incoming, IncomingSettings::default());
+    }
+
+    #[test]
+    fn incoming_snapshot_updates_without_touching_server_settings() {
+        let service = InputServerService::new();
+        service
+            .settings
+            .blocking_write()
+            .start_on_boot = true;
+
+        {
+            let mut incoming = service.incoming.blocking_write();
+            incoming.auto_play = false;
+        }
+
+        let settings = service.settings.blocking_read();
+        assert!(settings.start_on_boot, "server settings must be untouched");
+        assert!(!service.incoming.blocking_read().auto_play);
     }
 
     #[test]
     fn enqueue_trims_outer_whitespace() {
         let service = InputServerService::new();
-        let item = service.enqueue("  hello world  ").unwrap();
+        let item = service
+            .enqueue("  hello world  ", SubmissionSource::Server)
+            .unwrap();
         assert_eq!(item.text, "hello world");
         assert_eq!(service.pending_items()[0].text, "hello world");
     }
@@ -269,18 +314,27 @@ mod tests {
     #[test]
     fn enqueue_rejects_blank_text() {
         let service = InputServerService::new();
-        assert_eq!(service.enqueue(""), Err(InputServerError::BlankText));
-        assert_eq!(service.enqueue("   "), Err(InputServerError::BlankText));
-        assert_eq!(service.enqueue("\t\n"), Err(InputServerError::BlankText));
+        assert_eq!(
+            service.enqueue("", SubmissionSource::Server),
+            Err(InputServerError::BlankText)
+        );
+        assert_eq!(
+            service.enqueue("   ", SubmissionSource::Server),
+            Err(InputServerError::BlankText)
+        );
+        assert_eq!(
+            service.enqueue("\t\n", SubmissionSource::Server),
+            Err(InputServerError::BlankText)
+        );
         assert!(service.pending_items().is_empty());
     }
 
     #[test]
     fn pending_items_are_fifo_ordered() {
         let service = InputServerService::new();
-        let first = service.enqueue("one").unwrap();
-        let second = service.enqueue("two").unwrap();
-        let third = service.enqueue("three").unwrap();
+        let first = service.enqueue("one", SubmissionSource::Server).unwrap();
+        let second = service.enqueue("two", SubmissionSource::Server).unwrap();
+        let third = service.enqueue("three", SubmissionSource::Server).unwrap();
 
         let items = service.pending_items();
         assert_eq!(items.len(), 3);
@@ -293,11 +347,13 @@ mod tests {
     fn enqueue_rejects_full_inbox() {
         let service = InputServerService::new();
         for index in 0..INBOX_CAPACITY {
-            service.enqueue(&format!("item {index}")).unwrap();
+            service
+                .enqueue(&format!("item {index}"), SubmissionSource::Server)
+                .unwrap();
         }
 
         assert_eq!(
-            service.enqueue("overflow"),
+            service.enqueue("overflow", SubmissionSource::Server),
             Err(InputServerError::InboxFull)
         );
         assert_eq!(service.pending_items().len(), INBOX_CAPACITY);
@@ -306,8 +362,8 @@ mod tests {
     #[test]
     fn take_removes_exactly_one_item() {
         let service = InputServerService::new();
-        let first = service.enqueue("one").unwrap();
-        let second = service.enqueue("two").unwrap();
+        let first = service.enqueue("one", SubmissionSource::Server).unwrap();
+        let second = service.enqueue("two", SubmissionSource::Server).unwrap();
 
         assert_eq!(service.take(&first.id).unwrap(), first);
 
@@ -319,8 +375,8 @@ mod tests {
     #[test]
     fn discard_removes_exactly_one_item() {
         let service = InputServerService::new();
-        let first = service.enqueue("one").unwrap();
-        let second = service.enqueue("two").unwrap();
+        let first = service.enqueue("one", SubmissionSource::Server).unwrap();
+        let second = service.enqueue("two", SubmissionSource::Server).unwrap();
 
         assert_eq!(service.discard(&first.id), Ok(()));
 
@@ -332,8 +388,8 @@ mod tests {
     #[test]
     fn take_unknown_id_is_error_and_preserves_fifo() {
         let service = InputServerService::new();
-        let first = service.enqueue("one").unwrap();
-        let second = service.enqueue("two").unwrap();
+        let first = service.enqueue("one", SubmissionSource::Server).unwrap();
+        let second = service.enqueue("two", SubmissionSource::Server).unwrap();
 
         assert_eq!(service.take("missing"), Err(InputServerError::UnknownId));
 
@@ -346,7 +402,7 @@ mod tests {
     #[test]
     fn discard_unknown_id_is_error_and_preserves_fifo() {
         let service = InputServerService::new();
-        let first = service.enqueue("one").unwrap();
+        let first = service.enqueue("one", SubmissionSource::Server).unwrap();
 
         assert_eq!(service.discard("missing"), Err(InputServerError::UnknownId));
 
@@ -358,8 +414,8 @@ mod tests {
     #[test]
     fn consume_success_removes_exactly_one_item() {
         let service = InputServerService::new();
-        let first = service.enqueue("one").unwrap();
-        let second = service.enqueue("two").unwrap();
+        let first = service.enqueue("one", SubmissionSource::Server).unwrap();
+        let second = service.enqueue("two", SubmissionSource::Server).unwrap();
 
         let accepted = service
             .consume(&first.id, |item| {
@@ -377,9 +433,9 @@ mod tests {
     #[test]
     fn consume_rejection_preserves_fifo_position() {
         let service = InputServerService::new();
-        let first = service.enqueue("one").unwrap();
-        let second = service.enqueue("two").unwrap();
-        let third = service.enqueue("three").unwrap();
+        let first = service.enqueue("one", SubmissionSource::Server).unwrap();
+        let second = service.enqueue("two", SubmissionSource::Server).unwrap();
+        let third = service.enqueue("three", SubmissionSource::Server).unwrap();
 
         let result = service.consume(&second.id, |_item| Err::<(), _>("boom"));
         assert_eq!(result, Err(ConsumeError::Rejected("boom")));
@@ -394,7 +450,7 @@ mod tests {
     #[test]
     fn consume_unknown_id_does_not_call_closure() {
         let service = InputServerService::new();
-        let first = service.enqueue("one").unwrap();
+        let first = service.enqueue("one", SubmissionSource::Server).unwrap();
 
         let mut called = false;
         let result = service.consume("missing", |_item| {
@@ -412,7 +468,7 @@ mod tests {
     #[test]
     fn consume_second_attempt_after_accept_is_unknown_id() {
         let service = InputServerService::new();
-        let item = service.enqueue("one").unwrap();
+        let item = service.enqueue("one", SubmissionSource::Server).unwrap();
 
         let mut calls = 0;
         let first = service.consume(&item.id, |_item| {
@@ -455,14 +511,74 @@ mod tests {
     }
 
     #[test]
+    fn enqueue_stores_producer_source_on_pending_item() {
+        let service = InputServerService::new();
+        let server_item = service
+            .enqueue("server text", SubmissionSource::Server)
+            .unwrap();
+        assert_eq!(server_item.source, SubmissionSource::Server);
+
+        let ocr_item = service.enqueue("ocr text", SubmissionSource::Ocr).unwrap();
+        assert_eq!(ocr_item.source, SubmissionSource::Ocr);
+
+        let items = service.pending_items();
+        assert_eq!(items[0].source, SubmissionSource::Server);
+        assert_eq!(items[1].source, SubmissionSource::Ocr);
+    }
+
+    #[test]
+    fn pending_source_survives_take() {
+        let service = InputServerService::new();
+        let item = service.enqueue("survives", SubmissionSource::Ocr).unwrap();
+        let taken = service.take(&item.id).unwrap();
+        assert_eq!(taken.source, SubmissionSource::Ocr);
+    }
+
+    #[test]
+    fn consume_hands_stored_source_to_approval_closure() {
+        let service = InputServerService::new();
+        let server_item = service
+            .enqueue("approve server", SubmissionSource::Server)
+            .unwrap();
+        let ocr_item = service
+            .enqueue("approve ocr", SubmissionSource::Ocr)
+            .unwrap();
+
+        let seen_server = service
+            .consume(&server_item.id, |pending| {
+                Ok::<SubmissionSource, ()>(pending.source)
+            })
+            .unwrap();
+        assert_eq!(seen_server, SubmissionSource::Server);
+
+        let seen_ocr = service
+            .consume(&ocr_item.id, |pending| {
+                Ok::<SubmissionSource, ()>(pending.source)
+            })
+            .unwrap();
+        assert_eq!(seen_ocr, SubmissionSource::Ocr);
+    }
+
+    #[test]
     fn incoming_item_wire_shape_is_snake_case() {
         let item = IncomingTextItem {
             id: "abc".to_string(),
             text: "hello".to_string(),
+            source: SubmissionSource::Server,
         };
         assert_eq!(
             serde_json::to_value(item).unwrap(),
-            serde_json::json!({ "id": "abc", "text": "hello" })
+            serde_json::json!({ "id": "abc", "text": "hello", "source": "server" })
+        );
+
+        let ocr_item = IncomingTextItem {
+            id: "def".to_string(),
+            text: "bonjour".to_string(),
+            source: SubmissionSource::Ocr,
+        };
+        assert_eq!(
+            serde_json::to_value(ocr_item).unwrap(),
+            serde_json::json!({ "id": "def", "text": "bonjour", "source": "ocr" })
         );
     }
 

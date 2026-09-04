@@ -761,7 +761,7 @@ mod tests {
     #[test]
     fn audio_only_delivery_treats_full_string_as_content() {
         let mut snapshot = make_snapshot(false, false, false);
-        snapshot.source = SubmissionSource::External;
+        snapshot.source = SubmissionSource::Server;
         snapshot.delivery = DeliveryPolicy::AudioOnly;
 
         assert_eq!(

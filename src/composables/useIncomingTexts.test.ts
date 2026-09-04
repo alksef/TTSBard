@@ -65,7 +65,7 @@ function makeJob(overrides: Partial<JobDto> = {}): JobDto {
     attempt: 1,
     created_at_ms: 1000,
     last_activity_at_ms: 1000,
-    source: 'external',
+    source: 'server',
     ...overrides,
   }
 }
@@ -78,7 +78,7 @@ function defaultInvoke() {
   mocks.mockInvoke.mockImplementation(async (cmd: string) => {
     if (cmd === 'list_incoming_texts') return []
     if (cmd === 'get_speech_queue_state') return { jobs: [] }
-    if (cmd === 'get_input_server_settings') return { start_on_boot: false, port: 10101, auto_play: true }
+    if (cmd === 'get_incoming_settings') return { auto_play: true }
     return undefined
   })
 }
@@ -98,29 +98,37 @@ async function setupAndMount(invokeImpl?: (cmd: string) => Promise<unknown>) {
 
 describe('pure helpers', () => {
   it('validates incoming text items', () => {
-    expect(isIncomingTextItem({ id: 'a', text: 'hello' })).toBe(true)
-    expect(isIncomingTextItem({ id: 'a', text: 42 })).toBe(false)
-    expect(isIncomingTextItem({ id: 1, text: 'hello' })).toBe(false)
+    expect(isIncomingTextItem({ id: 'a', text: 'hello', source: 'server' })).toBe(true)
+    expect(isIncomingTextItem({ id: 'a', text: 'hello', source: 'ocr' })).toBe(true)
+    expect(isIncomingTextItem({ id: 'a', text: 'hello' })).toBe(false)
+    expect(isIncomingTextItem({ id: 'a', text: 'hello', source: 'editor' })).toBe(false)
+    expect(isIncomingTextItem({ id: 'a', text: 'hello', source: 'external' })).toBe(false)
+    expect(isIncomingTextItem({ id: 'a', text: 42, source: 'server' })).toBe(false)
+    expect(isIncomingTextItem({ id: 1, text: 'hello', source: 'server' })).toBe(false)
     expect(isIncomingTextItem(null)).toBe(false)
   })
 
   it('validates incoming text lists', () => {
-    expect(isIncomingTextList([{ id: 'a', text: 'x' }])).toBe(true)
+    expect(isIncomingTextList([{ id: 'a', text: 'x', source: 'ocr' }])).toBe(true)
     expect(isIncomingTextList([])).toBe(true)
-    expect(isIncomingTextList([{ id: 'a' }])).toBe(false)
-    expect(isIncomingTextList({ id: 'a', text: 'x' })).toBe(false)
+    expect(isIncomingTextList([{ id: 'a', text: 'x' }])).toBe(false)
+    expect(isIncomingTextList([{ id: 'a', text: 'x', source: 'editor' }])).toBe(false)
+    expect(isIncomingTextList({ id: 'a', text: 'x', source: 'server' })).toBe(false)
     expect(isIncomingTextList(null)).toBe(false)
   })
 
-  it('counts external jobs only for active statuses', () => {
-    expect(isActiveExternalJob(makeJob({ source: 'external', status: 'queued' }))).toBe(true)
-    expect(isActiveExternalJob(makeJob({ source: 'external', status: 'generating' }))).toBe(true)
-    expect(isActiveExternalJob(makeJob({ source: 'external', status: 'ready' }))).toBe(true)
-    expect(isActiveExternalJob(makeJob({ source: 'external', status: 'playing' }))).toBe(true)
-    expect(isActiveExternalJob(makeJob({ source: 'external', status: 'failed' }))).toBe(true)
-    expect(isActiveExternalJob(makeJob({ source: 'external', status: 'completed' }))).toBe(false)
-    expect(isActiveExternalJob(makeJob({ source: 'external', status: 'cancelled' }))).toBe(false)
+  it('counts active incoming jobs from both server and ocr sources', () => {
+    expect(isActiveExternalJob(makeJob({ source: 'server', status: 'queued' }))).toBe(true)
+    expect(isActiveExternalJob(makeJob({ source: 'ocr', status: 'queued' }))).toBe(true)
+    expect(isActiveExternalJob(makeJob({ source: 'server', status: 'generating' }))).toBe(true)
+    expect(isActiveExternalJob(makeJob({ source: 'server', status: 'ready' }))).toBe(true)
+    expect(isActiveExternalJob(makeJob({ source: 'server', status: 'playing' }))).toBe(true)
+    expect(isActiveExternalJob(makeJob({ source: 'server', status: 'failed' }))).toBe(true)
+    expect(isActiveExternalJob(makeJob({ source: 'server', status: 'completed' }))).toBe(false)
+    expect(isActiveExternalJob(makeJob({ source: 'server', status: 'cancelled' }))).toBe(false)
+    expect(isActiveExternalJob(makeJob({ source: 'ocr', status: 'playing' }))).toBe(true)
     expect(isActiveExternalJob(makeJob({ source: 'editor', status: 'queued' }))).toBe(false)
+    expect(isActiveExternalJob(makeJob({ source: 'external' as JobDto['source'], status: 'queued' }))).toBe(false)
   })
 
   it('exposes the expected active status set', () => {
@@ -129,15 +137,16 @@ describe('pure helpers', () => {
     )
   })
 
-  it('selects only active external jobs from a valid queue payload', () => {
+  it('selects active server and ocr jobs while excluding editor and terminal jobs', () => {
     const dto = makeDto([
-      makeJob({ job_id: 'ext-active' }),
-      makeJob({ job_id: 'ext-done', status: 'completed' }),
-      makeJob({ job_id: 'ext-cancelled', status: 'cancelled' }),
-      makeJob({ job_id: 'editor', source: 'editor' }),
+      makeJob({ job_id: 'server-active', source: 'server' }),
+      makeJob({ job_id: 'ocr-active', source: 'ocr' }),
+      makeJob({ job_id: 'server-done', source: 'server', status: 'completed' }),
+      makeJob({ job_id: 'server-cancelled', source: 'server', status: 'cancelled' }),
+      makeJob({ job_id: 'editor', source: 'editor', status: 'queued' }),
     ])
     const result = selectActiveExternalJobs(dto)
-    expect(result.map((j) => j.job_id)).toEqual(['ext-active'])
+    expect(result.map((j) => j.job_id)).toEqual(['server-active', 'ocr-active'])
   })
 
   it('returns an empty list for an invalid queue payload', () => {
@@ -146,8 +155,11 @@ describe('pure helpers', () => {
     expect(selectActiveExternalJobs({})).toEqual([])
   })
 
-  it('computes the incoming count as pending plus active external jobs', () => {
-    const pending = [{ id: 'a', text: 'one' }, { id: 'b', text: 'two' }]
+  it('computes the incoming count as pending plus active server/ocr jobs', () => {
+    const pending = [
+      { id: 'a', text: 'one', source: 'server' as const },
+      { id: 'b', text: 'two', source: 'ocr' as const },
+    ]
     const external = [makeJob()]
     expect(computeIncomingCount(pending, external)).toBe(3)
     expect(computeIncomingCount([], [])).toBe(0)
@@ -174,16 +186,24 @@ describe('useIncomingTexts', () => {
 
   it('loads the initial snapshot on mount', async () => {
     const { pendingItems, externalJobs, autoPlay, count } = await setupAndMount(async (cmd: string) => {
-      if (cmd === 'list_incoming_texts') return [{ id: 'a', text: 'one' }]
+      if (cmd === 'list_incoming_texts') {
+        return [
+          { id: 'a', text: 'one', source: 'server' },
+          { id: 'b', text: 'two', source: 'ocr' },
+        ]
+      }
       if (cmd === 'get_speech_queue_state') return makeDto([makeJob()])
-      if (cmd === 'get_input_server_settings') return { start_on_boot: false, port: 10101, auto_play: false }
+      if (cmd === 'get_incoming_settings') return { auto_play: false }
       return undefined
     })
 
-    expect(pendingItems.value).toEqual([{ id: 'a', text: 'one' }])
+    expect(pendingItems.value).toEqual([
+      { id: 'a', text: 'one', source: 'server' },
+      { id: 'b', text: 'two', source: 'ocr' },
+    ])
     expect(externalJobs.value).toHaveLength(1)
     expect(autoPlay.value).toBe(false)
-    expect(count.value).toBe(2)
+    expect(count.value).toBe(3)
   })
 
   it('updates pending items on the incoming-changed event and ignores invalid payloads', async () => {
@@ -191,40 +211,49 @@ describe('useIncomingTexts', () => {
 
     const callback = mocks.listenCallbacks.get('input-server-incoming-changed')
     expect(callback).toBeDefined()
-    callback?.({ payload: [{ id: 'a', text: 'one' }, { id: 'b', text: 'two' }] })
+    callback?.({
+      payload: [
+        { id: 'a', text: 'one', source: 'server' },
+        { id: 'b', text: 'two', source: 'ocr' },
+      ],
+    })
     expect(pendingItems.value).toHaveLength(2)
     expect(count.value).toBe(2)
 
     callback?.({ payload: { not: 'a list' } })
     expect(pendingItems.value).toHaveLength(2)
 
-    callback?.({ payload: [{ id: 1, text: 'bad' }] })
+    callback?.({ payload: [{ id: 1, text: 'bad', source: 'server' }] })
+    expect(pendingItems.value).toHaveLength(2)
+
+    callback?.({ payload: [{ id: 'c', text: 'missing source' }] })
     expect(pendingItems.value).toHaveLength(2)
   })
 
-  it('updates external jobs on the queue-changed event, filtering editor and terminal jobs', async () => {
+  it('updates external jobs on the queue-changed event, selecting server/ocr and filtering editor and terminal jobs', async () => {
     const { externalJobs } = await setupAndMount()
 
     const callback = mocks.listenCallbacks.get('speech-queue-changed')
     expect(callback).toBeDefined()
     callback?.({
       payload: makeDto([
-        makeJob({ job_id: 'active' }),
+        makeJob({ job_id: 'server-active', source: 'server' }),
+        makeJob({ job_id: 'ocr-active', source: 'ocr' }),
         makeJob({ job_id: 'done', status: 'completed' }),
         makeJob({ job_id: 'editor', source: 'editor' }),
       ]),
     })
-    expect(externalJobs.value.map((j) => j.job_id)).toEqual(['active'])
+    expect(externalJobs.value.map((j) => j.job_id)).toEqual(['server-active', 'ocr-active'])
 
     callback?.({ payload: { jobs: 'invalid' } })
-    expect(externalJobs.value.map((j) => j.job_id)).toEqual(['active'])
+    expect(externalJobs.value.map((j) => j.job_id)).toEqual(['server-active', 'ocr-active'])
   })
 
-  it('refreshes auto-play on the global settings-changed event', async () => {
+  it('refreshes auto-play from incoming settings on the global settings-changed event', async () => {
     const { autoPlay } = await setupAndMount()
 
     mocks.mockInvoke.mockImplementation(async (cmd: string) => {
-      if (cmd === 'get_input_server_settings') return { start_on_boot: true, port: 20000, auto_play: false }
+      if (cmd === 'get_incoming_settings') return { auto_play: false }
       return undefined
     })
 
@@ -233,6 +262,25 @@ describe('useIncomingTexts', () => {
     callback?.({ payload: undefined })
 
     await vi.waitFor(() => expect(autoPlay.value).toBe(false))
+  })
+
+  it('auto-play toggle never touches input server settings', async () => {
+    const { autoPlay, setAutoPlay } = await setupAndMount()
+
+    mocks.mockInvoke.mockClear()
+    mocks.mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_incoming_settings') return { auto_play: false }
+      return undefined
+    })
+
+    await setAutoPlay(false)
+
+    expect(mocks.mockInvoke).toHaveBeenCalledWith('save_incoming_settings', {
+      settings: { auto_play: false },
+    })
+    expect(autoPlay.value).toBe(false)
+    expect(mocks.mockInvoke.mock.calls.some(([cmd]) => cmd === 'get_input_server_settings')).toBe(false)
+    expect(mocks.mockInvoke.mock.calls.some(([cmd]) => cmd === 'save_input_server_settings')).toBe(false)
   })
 
   it('approves an item via the matching backend command', async () => {
@@ -334,37 +382,145 @@ describe('useIncomingTexts', () => {
     expect(busyIds.value.has('item-1')).toBe(false)
   })
 
-  it('persists auto-play toggles through the shared server settings', async () => {
+  it('persists auto-play toggles through the source-neutral incoming settings command', async () => {
     const { autoPlay, setAutoPlay } = await setupAndMount()
 
     mocks.mockInvoke.mockClear()
     mocks.mockInvoke.mockImplementation(async (cmd: string) => {
-      if (cmd === 'get_input_server_settings') return { start_on_boot: false, port: 10101, auto_play: true }
-      if (cmd === 'save_input_server_settings') return undefined
+      if (cmd === 'save_incoming_settings') return undefined
       return undefined
     })
 
     await expect(setAutoPlay(false)).resolves.toBeUndefined()
 
-    expect(mocks.mockInvoke).toHaveBeenNthCalledWith(1, 'get_input_server_settings')
-    expect(mocks.mockInvoke).toHaveBeenNthCalledWith(2, 'save_input_server_settings', {
-      settings: { start_on_boot: false, port: 10101, auto_play: false },
+    expect(mocks.mockInvoke).toHaveBeenCalledWith('save_incoming_settings', {
+      settings: { auto_play: false },
     })
     expect(autoPlay.value).toBe(false)
   })
 
-  it('reverts auto-play when the save is rejected', async () => {
+  it('ignores a duplicate auto-play toggle for the already-active value', async () => {
+    const { setAutoPlay } = await setupAndMount()
+    mocks.mockInvoke.mockClear()
+
+    await setAutoPlay(true)
+
+    expect(mocks.mockInvoke).not.toHaveBeenCalledWith('save_incoming_settings')
+  })
+
+  it('sends only one save when the same toggle fires repeatedly', async () => {
+    const { setAutoPlay } = await setupAndMount()
+
+    await setAutoPlay(false)
+    await setAutoPlay(false)
+
+    const saveCalls = mocks.mockInvoke.mock.calls.filter((call) => call[0] === 'save_incoming_settings')
+    expect(saveCalls).toHaveLength(1)
+  })
+
+  it('reverts auto-play when the incoming settings save is rejected', async () => {
     const { autoPlay, setAutoPlay } = await setupAndMount()
-    mocks.mockInvoke.mockImplementation(async (cmd: string) => {
-      if (cmd === 'get_input_server_settings') return { start_on_boot: false, port: 10101, auto_play: true }
-      return undefined
-    })
     mocks.mockInvoke.mockRejectedValueOnce(new Error('backend down'))
 
     await setAutoPlay(false)
 
     expect(autoPlay.value).toBe(true)
     expect(mocks.mockShowError).toHaveBeenCalled()
+  })
+
+  it('keeps the latest event when it arrives during a pending-items snapshot', async () => {
+    const { pendingItems, refreshPendingItems } = await setupAndMount()
+
+    mocks.mockInvoke.mockClear()
+    let resolveList!: (value: unknown) => void
+    mocks.mockInvoke.mockImplementationOnce(() => {
+      return new Promise((resolve) => { resolveList = resolve })
+    })
+
+    const pending = refreshPendingItems()
+
+    mocks.listenCallbacks.get('input-server-incoming-changed')?.({
+      payload: [{ id: 'new', text: 'new', source: 'server' }],
+    })
+
+    resolveList([{ id: 'old', text: 'old', source: 'server' }])
+    await pending
+
+    expect(pendingItems.value).toEqual([{ id: 'new', text: 'new', source: 'server' }])
+  })
+
+  it('keeps the latest event when it arrives during an external-jobs snapshot', async () => {
+    const { externalJobs, refreshExternalJobs } = await setupAndMount()
+
+    mocks.mockInvoke.mockClear()
+    let resolveQueue!: (value: unknown) => void
+    mocks.mockInvoke.mockImplementationOnce(() => {
+      return new Promise((resolve) => { resolveQueue = resolve })
+    })
+
+    const pending = refreshExternalJobs()
+
+    mocks.listenCallbacks.get('speech-queue-changed')?.({
+      payload: makeDto([makeJob({ job_id: 'new', source: 'server' })]),
+    })
+
+    resolveQueue(makeDto([makeJob({ job_id: 'old', source: 'server' })]))
+    await pending
+
+    expect(externalJobs.value.map((j) => j.job_id)).toEqual(['new'])
+  })
+
+  it('sets loadError and keeps the last valid list on an invalid snapshot payload', async () => {
+    const { pendingItems, loadError, refreshPendingItems } = await setupAndMount(
+      async (cmd: string) => {
+        if (cmd === 'list_incoming_texts') {
+          return [{ id: 'a', text: 'one', source: 'server' }]
+        }
+        if (cmd === 'get_speech_queue_state') return makeDto([])
+        if (cmd === 'get_incoming_settings') return { auto_play: true }
+        return undefined
+      },
+    )
+
+    expect(pendingItems.value).toEqual([{ id: 'a', text: 'one', source: 'server' }])
+    expect(loadError.value).toBeNull()
+
+    mocks.mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'list_incoming_texts') return { not: 'a list' }
+      return undefined
+    })
+
+    await refreshPendingItems()
+
+    expect(pendingItems.value).toEqual([{ id: 'a', text: 'one', source: 'server' }])
+    expect(loadError.value).toBe('Не удалось загрузить входящие')
+  })
+
+  it('skip removes a failed external job from the active list', async () => {
+    const { externalJobs, busyIds, skipExternalJob } = await setupAndMount(
+      async (cmd: string) => {
+        if (cmd === 'list_incoming_texts') return []
+        if (cmd === 'get_speech_queue_state') {
+          return makeDto([makeJob({ job_id: 'failed-job', status: 'failed', source: 'server' })])
+        }
+        if (cmd === 'get_incoming_settings') return { auto_play: true }
+        return undefined
+      },
+    )
+
+    expect(externalJobs.value.map((j) => j.job_id)).toEqual(['failed-job'])
+
+    mocks.mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'skip_speech_job') return undefined
+      if (cmd === 'get_speech_queue_state') return makeDto([])
+      return undefined
+    })
+
+    await skipExternalJob('failed-job')
+
+    expect(mocks.mockInvoke).toHaveBeenCalledWith('skip_speech_job', { jobId: 'failed-job' })
+    expect(externalJobs.value).toEqual([])
+    expect(busyIds.value.has('failed-job')).toBe(false)
   })
 
   it('unregisters all listeners on unmount', async () => {

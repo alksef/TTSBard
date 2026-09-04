@@ -7,7 +7,7 @@ export type JobStatus =
   | 'failed'
   | 'cancelled'
 
-export type SubmissionSource = 'editor' | 'external'
+export type SubmissionSource = 'editor' | 'server' | 'ocr'
 
 export interface JobDto {
   job_id: string
@@ -61,7 +61,7 @@ const VALID_STATUSES: ReadonlySet<string> = new Set([
   'cancelled',
 ])
 
-const VALID_SOURCES: ReadonlySet<string> = new Set(['editor', 'external'])
+const VALID_SOURCES: ReadonlySet<string> = new Set(['editor', 'server', 'ocr'])
 
 function isJobStatus(s: unknown): s is JobStatus {
   return typeof s === 'string' && VALID_STATUSES.has(s)

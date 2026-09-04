@@ -2,7 +2,7 @@ use crate::commands::speech_queue::{submit_speech_job, SpeechQueueState};
 use crate::config::{validate_port, SettingsManager};
 use crate::input_server::service::ConsumeError;
 use crate::input_server::{
-    IncomingTextItem, InputServerError, InputServerSettings, InputServerStatus,
+    IncomingSettings, IncomingTextItem, InputServerError, InputServerSettings, InputServerStatus,
 };
 use crate::ipc::CommandError;
 use crate::speech_queue::{DeliveryPolicy, SubmissionSource};
@@ -74,30 +74,38 @@ fn emit_incoming_changed(app_handle: &AppHandle, state: &AppState) {
 /// Reusable application-level intake seam for external text.
 ///
 /// Not itself a Tauri boundary. Trims outer whitespace, rejects blank/overlong
-/// text, then either submits directly to the speech queue (`auto_play`) or
-/// enqueues into the pending-review inbox. The normalized text (including a
-/// leading `!`) is submitted/stored unchanged except for the outer trim.
+/// text, then either submits directly to the speech queue (`incoming.auto_play`)
+/// or enqueues into the pending-review inbox. The normalized text (including a
+/// leading `!`) is submitted/stored unchanged except for the outer trim. The
+/// producer `source` is preserved end to end: auto-play submits the speech job
+/// with that source, manual review stores it on the pending item, and approval
+/// resubmits with the stored source. Server and OCR producers always use
+/// `DeliveryPolicy::AudioOnly`.
 pub async fn accept_external_text(
     app_handle: &AppHandle,
     state: &AppState,
     queue: &SpeechQueueState,
+    source: SubmissionSource,
     text: String,
 ) -> Result<InputServerAccepted, CommandError> {
     let text = normalize_external_text(&text)?;
 
-    let auto_play = state.input_server.settings.read().await.auto_play;
+    let auto_play = state.input_server.incoming.read().await.auto_play;
     if auto_play {
         let job = submit_speech_job(
             app_handle,
             state,
             queue,
             text,
-            SubmissionSource::External,
+            source,
             DeliveryPolicy::AudioOnly,
         )?;
         Ok(InputServerAccepted::Queued { job_id: job.job_id })
     } else {
-        let item = state.input_server.enqueue(&text).map_err(map_inbox_error)?;
+        let item = state
+            .input_server
+            .enqueue(&text, source)
+            .map_err(map_inbox_error)?;
         emit_incoming_changed(app_handle, state);
         Ok(InputServerAccepted::PendingReview {
             incoming_id: item.id,
@@ -142,10 +150,9 @@ pub async fn save_input_server_settings(
     let settings_manager = app_handle
         .try_state::<SettingsManager>()
         .ok_or_else(|| "SettingsManager not available".to_string())?;
-    let (start_on_boot, port, auto_play) =
-        (settings.start_on_boot, settings.port, settings.auto_play);
+    let (start_on_boot, port) = (settings.start_on_boot, settings.port);
     super::persist_blocking(settings_manager.inner(), move |mgr| {
-        mgr.set_input_server_section(start_on_boot, port, auto_play)
+        mgr.set_input_server_section(start_on_boot, port)
     })
     .await?;
 
@@ -154,16 +161,47 @@ pub async fn save_input_server_settings(
     let mut s = state.input_server.settings.write().await;
     s.start_on_boot = start_on_boot;
     s.port = port;
-    s.auto_play = auto_play;
     drop(s);
 
     super::emit_settings_changed(&app_handle);
 
     // A port change rebinds an active/requested listener. Toggling the persisted
-    // boot preference or auto_play must not start/stop the server this session.
+    // boot preference must not start/stop the server this session.
     if port_changed {
         state.input_server.wake();
     }
+
+    Ok(())
+}
+
+/// Read the source-neutral Incoming policy from the runtime snapshot.
+#[tauri::command]
+pub async fn get_incoming_settings(
+    state: State<'_, AppState>,
+) -> Result<IncomingSettings, String> {
+    Ok(state.input_server.incoming.read().await.clone())
+}
+
+/// Persist the source-neutral Incoming policy, update the runtime snapshot and
+/// notify the frontend through the global settings-changed event.
+#[tauri::command]
+pub async fn save_incoming_settings(
+    settings: IncomingSettings,
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    let settings_manager = app_handle
+        .try_state::<SettingsManager>()
+        .ok_or_else(|| "SettingsManager not available".to_string())?;
+    let auto_play = settings.auto_play;
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_incoming_auto_play(auto_play)
+    })
+    .await?;
+
+    state.input_server.incoming.write().await.auto_play = settings.auto_play;
+
+    super::emit_settings_changed(&app_handle);
 
     Ok(())
 }
@@ -175,7 +213,14 @@ pub async fn submit_input_server_test(
     state: State<'_, AppState>,
     queue: State<'_, SpeechQueueState>,
 ) -> Result<InputServerAccepted, CommandError> {
-    accept_external_text(&app_handle, state.inner(), queue.inner(), text).await
+    accept_external_text(
+        &app_handle,
+        state.inner(),
+        queue.inner(),
+        SubmissionSource::Server,
+        text,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -191,7 +236,8 @@ pub async fn approve_incoming_text(
     queue: State<'_, SpeechQueueState>,
 ) -> Result<InputServerAccepted, CommandError> {
     // Submit and remove atomically under the inbox lock so a concurrent
-    // approval of the same item can never enqueue a second speech job.
+    // approval of the same item can never enqueue a second speech job. The job
+    // inherits the producer source stored on the pending item.
     let job = state
         .input_server
         .consume(&incoming_id, |item| {
@@ -200,7 +246,7 @@ pub async fn approve_incoming_text(
                 state.inner(),
                 queue.inner(),
                 item.text.clone(),
-                SubmissionSource::External,
+                item.source,
                 DeliveryPolicy::AudioOnly,
             )
         })

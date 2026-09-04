@@ -17,6 +17,7 @@ use crate::config::{
     AppSettings as ConfigAppSettings, AudioSettings, EditorHotkeySettings, Hotkey, HotkeyModifier,
     HotkeySettings, LoggingSettings, TwitchSettings,
 };
+use crate::ocr::settings::OcrSettings;
 use crate::soundpanel::SoundBinding;
 use crate::tts::TtsProviderType;
 use crate::tts::VoiceModel;
@@ -1233,6 +1234,7 @@ pub struct HotkeySettingsDto {
     pub playback_control_window: HotkeyDto,
     pub return_previous_window: HotkeyDto,
     pub toggle_minimal_mode: HotkeyDto,
+    pub ocr_capture: HotkeyDto,
     pub editor: EditorHotkeySettingsDto,
 }
 
@@ -1247,6 +1249,7 @@ impl From<HotkeySettings> for HotkeySettingsDto {
             playback_control_window: h.playback_control_window.into(),
             return_previous_window: h.return_previous_window.into(),
             toggle_minimal_mode: h.toggle_minimal_mode.into(),
+            ocr_capture: h.ocr_capture.into(),
             editor: h.editor.into(),
         }
     }
@@ -1263,6 +1266,7 @@ impl From<HotkeySettingsDto> for HotkeySettings {
             playback_control_window: dto.playback_control_window.into(),
             return_previous_window: dto.return_previous_window.into(),
             toggle_minimal_mode: dto.toggle_minimal_mode.into(),
+            ocr_capture: dto.ocr_capture.into(),
             editor: dto.editor.into(),
         }
     }
@@ -1332,6 +1336,17 @@ pub struct VtsHotkeyInfoDto {
 }
 
 // ============================================================================
+// OCR Settings DTO
+// ============================================================================
+
+/// Persisted one-shot screen OCR settings DTO.
+///
+/// Reuses the safe `OcrSettings` domain type verbatim: it exposes only the
+/// persisted desired state (`enabled`, nullable `model_id`) and no runtime
+/// status, capture paths, engine internals or hotkeys.
+pub type OcrSettingsDto = OcrSettings;
+
+// ============================================================================
 // Main App Settings DTO
 // ============================================================================
 
@@ -1369,6 +1384,8 @@ pub struct AppSettingsDto {
     pub general: GeneralSettingsDto,
     /// Editor settings
     pub editor: EditorSettingsDto,
+    /// OCR settings (persisted desired state only: `enabled`, nullable `model_id`)
+    pub ocr: OcrSettingsDto,
     /// Logging settings
     pub logging: LoggingSettingsDto,
     /// Preprocessor settings
@@ -1412,6 +1429,7 @@ impl AppSettingsDto {
                 keep_text_after_send: params.config.editor.keep_text_after_send,
                 homograph_accentor: params.config.editor.homograph_accentor.clone(),
             },
+            ocr: params.config.ocr.clone(),
             logging: params.config.logging.clone(),
             preprocessor: PreprocessorSettingsDto::from_preprocessor(params.preprocessor),
             soundpanel_bindings: params.soundpanel_bindings,
@@ -1611,6 +1629,11 @@ mod tests {
             },
         };
 
+        let ocr = OcrSettingsDto {
+            enabled: true,
+            model_id: Some("silero-ocr".to_string()),
+        };
+
         let logging = LoggingSettingsDto {
             enabled: true,
             level: "info".into(),
@@ -1692,6 +1715,10 @@ mod tests {
             toggle_minimal_mode: HotkeyDto {
                 modifiers: vec![HotkeyModifierDto::Ctrl],
                 key: "F".into(),
+            },
+            ocr_capture: HotkeyDto {
+                modifiers: vec![HotkeyModifierDto::Ctrl, HotkeyModifierDto::Shift],
+                key: "P".into(),
             },
             editor: EditorHotkeySettingsDto {
                 edit_word: HotkeyDto {
@@ -1784,6 +1811,7 @@ mod tests {
             dsp,
             general,
             editor,
+            ocr,
             logging,
             preprocessor,
             soundpanel_bindings,
@@ -1969,6 +1997,11 @@ mod tests {
             },
         };
 
+        let ocr = OcrSettingsDto {
+            enabled: false,
+            model_id: None,
+        };
+
         let logging = LoggingSettingsDto {
             enabled: false,
             level: "warn".into(),
@@ -2037,6 +2070,10 @@ mod tests {
                 key: String::new(),
             },
             toggle_minimal_mode: HotkeyDto {
+                modifiers: vec![],
+                key: String::new(),
+            },
+            ocr_capture: HotkeyDto {
                 modifiers: vec![],
                 key: String::new(),
             },
@@ -2131,6 +2168,7 @@ mod tests {
             dsp,
             general,
             editor,
+            ocr,
             logging,
             preprocessor,
             soundpanel_bindings: vec![SoundBinding {
@@ -2181,6 +2219,32 @@ mod tests {
         let deserialized: AppSettingsDto = serde_json::from_str(&json1).expect("deserialize");
         let json2 = serde_json::to_string_pretty(&deserialized).expect("second serialize");
         assert_eq!(json1, json2, "Round-trip produced different JSON");
+    }
+
+    /// OCR is exposed as exactly `{"enabled":..., "model_id":...}` — the
+    /// persisted desired state only, with no runtime status, capture paths,
+    /// engine internals or hotkeys leaking into the wire shape.
+    #[test]
+    fn app_settings_dto_ocr_wire_shape_is_desired_state_only() {
+        let dto = build_populated();
+        let json = serde_json::to_value(&dto).expect("serialize");
+        let ocr = json
+            .get("ocr")
+            .unwrap_or_else(|| panic!("AppSettingsDto must serialize an `ocr` object"));
+        let obj = ocr
+            .as_object()
+            .unwrap_or_else(|| panic!("`ocr` must serialize as a JSON object"));
+        let mut keys: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, vec!["enabled", "model_id"]);
+        assert_eq!(obj["enabled"], serde_json::json!(true));
+        assert_eq!(obj["model_id"], serde_json::json!("silero-ocr"));
+
+        let compact = serde_json::to_string(&dto).expect("serialize compact");
+        assert!(
+            compact.contains(r#""ocr":{"enabled":true,"model_id":"silero-ocr"}"#),
+            "unexpected compact OCR wire shape: {compact}"
+        );
     }
 
     /// Backward-compat: a TtsSettingsDto without `visible_provider_ids`

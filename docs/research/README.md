@@ -14,6 +14,8 @@ AI-сессий хранятся в `.work/ai/`, а не здесь.
 - [VTube Studio lip-sync](./11-vtube-studio-lipsync-deep-research.md)
 - [Stream Deck integration](./12-stream-deck-integration-research.md)
 - [LunaTranslator → TTSBard: граница интеграции текста](./15-lunatranslator-input-server-integration.md)
+- [Встроенный экранный OCR: продуктовая граница и локальный runtime](./16-built-in-screen-ocr-feasibility.md)
+- [PP-OCRv5 eSlav: benchmark на реальных игровых кадрах](./18-ocr-ppocrv5-eslav-benchmark.md)
 
 Ранние дубли и исследования, полностью поглощённые реализацией, удалены. Их
 история при необходимости остаётся доступной через Git.

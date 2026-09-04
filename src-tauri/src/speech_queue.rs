@@ -26,7 +26,8 @@ pub struct AcceptedJob {
 #[serde(rename_all = "snake_case")]
 pub enum SubmissionSource {
     Editor,
-    External,
+    Server,
+    Ocr,
 }
 
 impl Default for SubmissionSource {
@@ -621,14 +622,18 @@ mod tests {
     // ── submission source / delivery policy ──
 
     #[test]
-    fn submission_source_serializes_to_editor_and_external() {
+    fn submission_source_serializes_to_editor_server_and_ocr() {
         assert_eq!(
             serde_json::to_string(&SubmissionSource::Editor).unwrap(),
             "\"editor\""
         );
         assert_eq!(
-            serde_json::to_string(&SubmissionSource::External).unwrap(),
-            "\"external\""
+            serde_json::to_string(&SubmissionSource::Server).unwrap(),
+            "\"server\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SubmissionSource::Ocr).unwrap(),
+            "\"ocr\""
         );
     }
 
@@ -638,18 +643,21 @@ mod tests {
         editor_q.submit("editor text", snap()).unwrap();
         assert_eq!(editor_q.state().jobs[0].source, SubmissionSource::Editor);
 
-        let mut external_snapshot = snap();
-        external_snapshot.source = SubmissionSource::External;
-        external_snapshot.delivery = DeliveryPolicy::AudioOnly;
+        let mut server_snapshot = snap();
+        server_snapshot.source = SubmissionSource::Server;
+        server_snapshot.delivery = DeliveryPolicy::AudioOnly;
 
-        let mut external_q = SpeechQueue::new();
-        external_q
-            .submit("external text", external_snapshot)
-            .unwrap();
-        assert_eq!(
-            external_q.state().jobs[0].source,
-            SubmissionSource::External
-        );
+        let mut server_q = SpeechQueue::new();
+        server_q.submit("server text", server_snapshot).unwrap();
+        assert_eq!(server_q.state().jobs[0].source, SubmissionSource::Server);
+
+        let mut ocr_snapshot = snap();
+        ocr_snapshot.source = SubmissionSource::Ocr;
+        ocr_snapshot.delivery = DeliveryPolicy::AudioOnly;
+
+        let mut ocr_q = SpeechQueue::new();
+        ocr_q.submit("ocr text", ocr_snapshot).unwrap();
+        assert_eq!(ocr_q.state().jobs[0].source, SubmissionSource::Ocr);
     }
 
     #[test]

@@ -173,6 +173,10 @@
       "load_on_start": false
     }
   },
+  "ocr": {
+    "enabled": false,
+    "model_id": null
+  },
   "logging": {
     "enabled": false,
     "level": "warn",
@@ -246,6 +250,10 @@
       "key": ""
     },
     "toggle_minimal_mode": {
+      "modifiers": [],
+      "key": ""
+    },
+    "ocr_capture": {
       "modifiers": [],
       "key": ""
     },

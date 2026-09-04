@@ -63,6 +63,7 @@ function mockSettings(): AppSettingsDto {
     preprocessor: { enabled: false, replacements_count: 0 },
     soundpanel_bindings: [],
     editor: { quick: 'disabled', ai: false, ai_completion: false, spellcheck_enabled: false, spellcheck_source: 'online', editor_height: 200, typing_idle_timeout_ms: 800, typing_enabled: true, default_route: 'everywhere', keep_text_after_send: false, homograph_accentor: { enabled: false, accentor_pack_id: null, load_on_start: false } },
+    ocr: { enabled: false, model_id: null },
     ai: {
       provider: 'openai',
       openai: { api_key: null, use_proxy: false, model: 'gpt-4o-mini' },
@@ -81,6 +82,7 @@ function mockSettings(): AppSettingsDto {
       playback_control_window: { modifiers: [], key: '' },
       return_previous_window: { modifiers: [], key: '' },
       toggle_minimal_mode: { modifiers: [], key: '' },
+      ocr_capture: { modifiers: [], key: '' },
       editor: {
         edit_word: { modifiers: [], key: '' },
         submit_continue: { modifiers: [], key: '' },

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Check, Pencil, X } from 'lucide-vue-next'
+import { Check, Pencil, X, SkipForward } from 'lucide-vue-next'
 import { statusLabel, type JobDto } from '../../../src-playback/speechQueue'
 import type { IncomingTextItem } from '../../composables/useIncomingTexts'
 
@@ -26,6 +26,7 @@ const emit = defineEmits<{
   discard: [id: string]
   edit: [id: string]
   'toggle-auto-play': [value: boolean]
+  skip: [job_id: string]
 }>()
 
 const hasItems = computed(() => props.pendingItems.length + props.externalJobs.length > 0)
@@ -102,6 +103,16 @@ function onAutoPlayChange(event: Event) {
       >
         <div class="incoming-text">{{ job.original_text }}</div>
         <span class="incoming-status">{{ statusLabel(job.status) }}</span>
+        <button
+          v-if="job.status === 'failed'"
+          class="incoming-btn skip"
+          :disabled="busyIds.has(job.job_id)"
+          title="Пропустить"
+          aria-label="Пропустить"
+          @click="emit('skip', job.job_id)"
+        >
+          <SkipForward :size="14" />
+        </button>
       </div>
     </div>
   </div>

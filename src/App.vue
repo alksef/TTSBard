@@ -16,6 +16,7 @@ import HotkeysPanel from './components/HotkeysPanel.vue'
 import InterceptPanel from './components/InterceptPanel.vue'
 import VTubeStudioPanel from './components/VTubeStudioPanel.vue'
 import InputServerPanel from './components/InputServerPanel.vue'
+import OcrPanel from './components/OcrPanel.vue'
 import ErrorToasts from './components/ErrorToasts.vue'
 import MinimalModeButton from './components/MinimalModeButton.vue'
 import IntegrationStatusCluster from './components/titlebar/IntegrationStatusCluster.vue'
@@ -29,8 +30,9 @@ import {
   collectSpeechQueueFailures,
   type SpeechQueueFailureKey,
 } from './composables/speechQueueFailureNotifications'
+import { convertOcrOneShotFailure } from './composables/ocrFailureNotifications'
 
-type Panel = 'input' | 'tts' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'input-server' | 'vtube-studio' | 'settings' | 'hotkeys' | 'intercept'
+type Panel = 'input' | 'tts' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'input-server' | 'vtube-studio' | 'ocr' | 'settings' | 'hotkeys' | 'intercept'
 
 const currentPanel = ref<Panel>('input')
 
@@ -347,6 +349,25 @@ onMounted(async () => {
     debugError('[App] Failed to listen for speech queue events:', e)
   })
 
+  // Show one unobtrusive toast for a one-shot OCR failure: an empty recognized
+  // result (warning) or a fixed safe failure category (error). Unknown payloads
+  // are ignored so arbitrary backend text never reaches the UI.
+  void listenerScope.track(
+    listen('ocr-one-shot-failed', (event) => {
+      const notification = convertOcrOneShotFailure(
+        (event as { payload: unknown }).payload,
+      )
+      if (!notification) return
+      if (notification.severity === 'warning') {
+        showWarning(notification.message)
+      } else {
+        showError(notification.message)
+      }
+    }),
+  ).catch((e) => {
+    debugError('[App] Failed to listen for OCR one-shot failure events:', e)
+  })
+
   // Wait for listener setup before reading snapshot to avoid the gap
   await visibilityListenerSetup
 
@@ -434,6 +455,7 @@ onUnmounted(() => {
           <TwitchPanel v-show="currentPanel === 'twitch'" />
           <InputServerPanel v-show="currentPanel === 'input-server'" />
           <VTubeStudioPanel v-show="currentPanel === 'vtube-studio'" />
+          <OcrPanel v-show="currentPanel === 'ocr'" />
           <SettingsPanel v-show="currentPanel === 'settings'" />
           <HotkeysPanel v-show="currentPanel === 'hotkeys'" />
           <InterceptPanel v-show="currentPanel === 'intercept'" />

@@ -10,17 +10,34 @@ import { useErrorHandler } from './useErrorHandler'
 import { debugError } from '../utils/debug'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
 import { normalizeCommandError } from '../ipc/commandError'
-import type { InputServerSettings } from './useInputServer'
+
+/** Source-neutral Incoming policy persisted under the top-level `incoming` section. */
+export interface IncomingSettings {
+  auto_play: boolean
+}
+
+export type IncomingTextSource = 'server' | 'ocr'
+
+const VALID_INCOMING_SOURCES: ReadonlySet<string> = new Set(['server', 'ocr'])
 
 export interface IncomingTextItem {
   id: string
   text: string
+  source: IncomingTextSource
+}
+
+function isIncomingTextSource(value: unknown): value is IncomingTextSource {
+  return typeof value === 'string' && VALID_INCOMING_SOURCES.has(value)
 }
 
 export function isIncomingTextItem(value: unknown): value is IncomingTextItem {
   if (!value || typeof value !== 'object') return false
   const item = value as Record<string, unknown>
-  return typeof item.id === 'string' && typeof item.text === 'string'
+  return (
+    typeof item.id === 'string' &&
+    typeof item.text === 'string' &&
+    isIncomingTextSource(item.source)
+  )
 }
 
 export function isIncomingTextList(payload: unknown): payload is IncomingTextItem[] {
@@ -31,7 +48,7 @@ const UNKNOWN_ITEM_CODE = 'input_server.unknown_item'
 const UNKNOWN_ITEM_MESSAGE = 'Входящий текст уже обработан или отсутствует'
 
 /**
- * External queue statuses that are still "active" and therefore projected into
+ * Speech-queue statuses that are still "active" and therefore projected into
  * the incoming tab. Completed/cancelled jobs are terminal and are excluded.
  */
 export const ACTIVE_EXTERNAL_JOB_STATUSES: ReadonlySet<JobStatus> = new Set([
@@ -43,10 +60,11 @@ export const ACTIVE_EXTERNAL_JOB_STATUSES: ReadonlySet<JobStatus> = new Set([
 ])
 
 export function isActiveExternalJob(job: JobDto): boolean {
-  return job.source === 'external' && ACTIVE_EXTERNAL_JOB_STATUSES.has(job.status)
+  const isIncomingProducer = job.source === 'server' || job.source === 'ocr'
+  return isIncomingProducer && ACTIVE_EXTERNAL_JOB_STATUSES.has(job.status)
 }
 
-/** Validates a `speech-queue-changed` payload and returns only active external jobs. */
+/** Validates a `speech-queue-changed` payload and returns only active server/OCR jobs. */
 export function selectActiveExternalJobs(payload: unknown): JobDto[] {
   if (!isSpeechQueueStateDto(payload)) return []
   return payload.jobs.filter(isActiveExternalJob)
@@ -76,6 +94,11 @@ export function useIncomingTexts() {
 
   const listenerScope = createAsyncCleanupScope()
   let disposed = false
+  // Event-wins guards: an event arriving while a snapshot invoke is in flight
+  // must win over the (possibly stale) snapshot result, mirroring
+  // `runtimeStatusSource`'s `eventArrived` flag — one per channel.
+  let pendingItemsEventArrived = false
+  let externalJobsEventArrived = false
 
   function isBusy(id: string): boolean {
     return busyIds.value.has(id)
@@ -94,10 +117,15 @@ export function useIncomingTexts() {
   }
 
   async function refreshPendingItems(): Promise<void> {
+    pendingItemsEventArrived = false
     try {
       const payload = await invoke<unknown>('list_incoming_texts')
-      if (disposed) return
-      pendingItems.value = isIncomingTextList(payload) ? payload : []
+      if (disposed || pendingItemsEventArrived) return
+      if (isIncomingTextList(payload)) {
+        pendingItems.value = payload
+      } else {
+        loadError.value = 'Не удалось загрузить входящие'
+      }
     } catch (e) {
       if (disposed) return
       debugError('[IncomingTexts] Failed to load pending items:', e)
@@ -106,9 +134,10 @@ export function useIncomingTexts() {
   }
 
   async function refreshExternalJobs(): Promise<void> {
+    externalJobsEventArrived = false
     try {
       const payload = await invoke<unknown>('get_speech_queue_state')
-      if (disposed) return
+      if (disposed || externalJobsEventArrived) return
       externalJobs.value = selectActiveExternalJobs(payload)
     } catch (e) {
       if (disposed) return
@@ -118,7 +147,7 @@ export function useIncomingTexts() {
 
   async function refreshAutoPlay(): Promise<void> {
     try {
-      const settings = await invoke<InputServerSettings>('get_input_server_settings')
+      const settings = await invoke<IncomingSettings>('get_incoming_settings')
       if (disposed) return
       autoPlay.value = settings.auto_play
     } catch (e) {
@@ -132,9 +161,8 @@ export function useIncomingTexts() {
     const previous = autoPlay.value
     autoPlay.value = value
     try {
-      const current = await invoke<InputServerSettings>('get_input_server_settings')
-      await invoke('save_input_server_settings', {
-        settings: { ...current, auto_play: value },
+      await invoke('save_incoming_settings', {
+        settings: { auto_play: value },
       })
       if (disposed) return
     } catch (e) {
@@ -201,14 +229,32 @@ export function useIncomingTexts() {
     }
   }
 
+  async function skipExternalJob(id: string): Promise<void> {
+    if (isBusy(id)) return
+    markBusy(id)
+    try {
+      await invoke('skip_speech_job', { jobId: id })
+      if (disposed) return
+      await refreshExternalJobs()
+    } catch (e) {
+      if (disposed) return
+      debugError('[IncomingTexts] Failed to skip external job:', e)
+      showError('Не удалось пропустить задание')
+    } finally {
+      markIdle(id)
+    }
+  }
+
   onMounted(async () => {
     await listenerScope.track(
       listen<unknown>(INCOMING_CHANGED_EVENT, (event) => {
+        pendingItemsEventArrived = true
         if (isIncomingTextList(event.payload)) pendingItems.value = event.payload
       }),
     )
     await listenerScope.track(
       listen<unknown>(QUEUE_CHANGED_EVENT, (event) => {
+        externalJobsEventArrived = true
         if (isSpeechQueueStateDto(event.payload)) {
           externalJobs.value = event.payload.jobs.filter(isActiveExternalJob)
         }
@@ -241,6 +287,7 @@ export function useIncomingTexts() {
     approve,
     edit,
     discard,
+    skipExternalJob,
     setAutoPlay,
     refreshPendingItems,
     refreshExternalJobs,

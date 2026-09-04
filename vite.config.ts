@@ -40,7 +40,8 @@ export default defineConfig(async () => ({
       input: {
         main: './index.html',
         soundpanel: './src-soundpanel/index.html',
-        playback: './src-playback/index.html'
+        playback: './src-playback/index.html',
+        'ocr-selection': './src-ocr-selection/index.html'
       }
     }
   }

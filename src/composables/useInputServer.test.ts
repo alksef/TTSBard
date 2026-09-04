@@ -49,7 +49,7 @@ import { useInputServer, convertInputServerStatusFromRust } from './useInputServ
 
 function defaultInvoke() {
   mocks.mockInvoke.mockImplementation(async (cmd: string) => {
-    if (cmd === 'get_input_server_settings') return { start_on_boot: false, port: 10101, auto_play: true }
+    if (cmd === 'get_input_server_settings') return { start_on_boot: false, port: 10101 }
     if (cmd === 'get_input_server_status') return { state: 'stopped' }
     return undefined
   })
@@ -77,7 +77,7 @@ describe('useInputServer', () => {
   it('starts with default settings, stopped status and derived endpoint', () => {
     const { settings, status, statusLabel, endpoint, isPortValid } = useInputServer()
 
-    expect(settings.value).toEqual({ start_on_boot: false, port: 10101, auto_play: true })
+    expect(settings.value).toEqual({ start_on_boot: false, port: 10101 })
     expect(status.value).toEqual({ state: 'stopped' })
     expect(statusLabel.value).toBe('Остановлен')
     expect(endpoint.value).toBe('http://127.0.0.1:10101/v1/speech')
@@ -96,12 +96,11 @@ describe('useInputServer', () => {
     const { settings, saveSettings } = await setupAndMount()
 
     settings.value.port = 12000
-    settings.value.auto_play = false
 
     await saveSettings()
 
     expect(mocks.mockInvoke).toHaveBeenCalledWith('save_input_server_settings', {
-      settings: { start_on_boot: false, port: 12000, auto_play: false },
+      settings: { start_on_boot: false, port: 12000 },
     })
   })
 
@@ -149,25 +148,23 @@ describe('useInputServer', () => {
     mocks.mockInvoke.mockRejectedValueOnce(new Error('port busy'))
 
     settings.value.port = 12000
-    settings.value.auto_play = false
 
     await saveSettings()
 
-    expect(settings.value).toEqual({ start_on_boot: false, port: 10101, auto_play: true })
+    expect(settings.value).toEqual({ start_on_boot: false, port: 10101 })
   })
 
   it('a successful save becomes the fallback snapshot for later failures', async () => {
     const { settings, saveSettings } = await setupAndMount()
 
     settings.value.port = 12000
-    settings.value.auto_play = false
     await saveSettings()
 
     settings.value.port = 15000
     mocks.mockInvoke.mockRejectedValueOnce(new Error('port busy'))
     await saveSettings()
 
-    expect(settings.value).toEqual({ start_on_boot: false, port: 12000, auto_play: false })
+    expect(settings.value).toEqual({ start_on_boot: false, port: 12000 })
   })
 
   it('convertInputServerStatusFromRust omits non-string message values', () => {
@@ -221,7 +218,7 @@ describe('useInputServer', () => {
     const { settings, status } = await setupAndMount()
 
     mocks.mockInvoke.mockImplementation(async (cmd: string) => {
-      if (cmd === 'get_input_server_settings') return { start_on_boot: true, port: 20000, auto_play: false }
+      if (cmd === 'get_input_server_settings') return { start_on_boot: true, port: 20000 }
       if (cmd === 'get_input_server_status') return { state: 'running' }
       return undefined
     })
@@ -231,7 +228,7 @@ describe('useInputServer', () => {
     callback?.({ payload: undefined })
 
     await vi.waitFor(() =>
-      expect(settings.value).toEqual({ start_on_boot: true, port: 20000, auto_play: false }),
+      expect(settings.value).toEqual({ start_on_boot: true, port: 20000 }),
     )
     await vi.waitFor(() => expect(status.value.state).toBe('running'))
   })
@@ -262,9 +259,9 @@ describe('useInputServer', () => {
 
     const pending = refreshSettings()
     capturedOnUnmountedCb?.()
-    resolveSettings({ start_on_boot: true, port: 9999, auto_play: false })
+    resolveSettings({ start_on_boot: true, port: 9999 })
     await pending
 
-    expect(settings.value).toEqual({ start_on_boot: false, port: 10101, auto_play: true })
+    expect(settings.value).toEqual({ start_on_boot: false, port: 10101 })
   })
 })

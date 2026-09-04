@@ -12,6 +12,7 @@ pub mod ai;
 pub mod history;
 pub mod input_server;
 pub mod logging;
+pub mod ocr;
 pub mod playback;
 pub mod playback_window;
 pub mod preprocessor;
@@ -101,6 +102,11 @@ pub async fn coordinate_shutdown(app_handle: AppHandle) {
 
     state.shutdown.cancel();
     info!("Shutdown token cancelled — all servers notified");
+
+    // Stop the OCR runtime without waiting for an in-flight recognition: the
+    // shutdown stop defers the real stop to a background task when the
+    // transition lock is held, so app exit is never delayed by OCR.
+    crate::commands::ocr::stop_ocr_runtime_for_shutdown(&app_handle, state.inner()).await;
 
     state.webview.send_event(crate::events::AppEvent::Quit);
 
