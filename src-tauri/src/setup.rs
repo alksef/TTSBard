@@ -370,6 +370,17 @@ pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std:
         let _ = crate::playback_window::show_playback_window(app.handle());
     }
 
+    // Register the second-instance show callback (Windows only). The hidden
+    // receiver window is created at the very start of run(); this callback
+    // fires when another process asks this instance to surface its main window.
+    #[cfg(windows)]
+    {
+        let app_handle = app.handle().clone();
+        crate::single_instance::register_show_callback(move || {
+            crate::setup::show_main_window(&app_handle, "second-instance");
+        });
+    }
+
     info!("Setup complete - hotkeys will be registered when window gains focus");
     Ok(())
 }
@@ -490,18 +501,24 @@ fn init_spellcheck(app: &App, app_state: &AppState) {
 fn init_windows(
     app: &App,
     windows: &WindowsSettings,
-    _windows_manager: &WindowsManager,
+    windows_manager: &WindowsManager,
     settings: &AppSettings,
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!("State initialized");
 
     // Apply saved main window position (window will be shown after backend is ready)
     if let Some(main_window) = app.get_webview_window("main") {
-        if let Some(x) = windows.main.x {
-            if let Some(y) = windows.main.y {
+        if let (Some(x), Some(y)) = (windows.main.x, windows.main.y) {
+            if saved_main_position_is_visible(&main_window, x, y) {
                 info!(x, y, "Restoring main window position");
                 let _ = main_window
                     .set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
+            } else {
+                warn!(
+                    x,
+                    y, "Saved main window position is outside available work areas; recovering"
+                );
+                recover_main_window_to_primary(&main_window, windows_manager, "startup");
             }
         }
 
@@ -525,10 +542,172 @@ fn init_windows(
     Ok(())
 }
 
+const MIN_VISIBLE_WINDOW_WIDTH: i32 = 160;
+const MIN_VISIBLE_WINDOW_HEIGHT: i32 = 80;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PhysicalRect {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+}
+
+impl PhysicalRect {
+    fn right(self) -> i64 {
+        i64::from(self.x) + i64::from(self.width)
+    }
+
+    fn bottom(self) -> i64 {
+        i64::from(self.y) + i64::from(self.height)
+    }
+}
+
+fn has_sufficient_visible_area(window: PhysicalRect, work_areas: &[PhysicalRect]) -> bool {
+    work_areas.iter().any(|area| {
+        let overlap_width =
+            (window.right().min(area.right()) - i64::from(window.x).max(i64::from(area.x))).max(0);
+        let overlap_height = (window.bottom().min(area.bottom())
+            - i64::from(window.y).max(i64::from(area.y)))
+        .max(0);
+        overlap_width >= i64::from(MIN_VISIBLE_WINDOW_WIDTH)
+            && overlap_height >= i64::from(MIN_VISIBLE_WINDOW_HEIGHT)
+    })
+}
+
+fn monitor_work_areas(window: &tauri::WebviewWindow) -> Result<Vec<PhysicalRect>, tauri::Error> {
+    window.available_monitors().map(|monitors| {
+        monitors
+            .into_iter()
+            .map(|monitor| {
+                let area = monitor.work_area();
+                PhysicalRect {
+                    x: area.position.x,
+                    y: area.position.y,
+                    width: area.size.width,
+                    height: area.size.height,
+                }
+            })
+            .collect()
+    })
+}
+
+fn saved_main_position_is_visible(window: &tauri::WebviewWindow, x: i32, y: i32) -> bool {
+    let size = match window.outer_size() {
+        Ok(size) => size,
+        Err(error) => {
+            warn!(error = %error, "Could not read main window size; keeping saved position");
+            return true;
+        }
+    };
+    let work_areas = match monitor_work_areas(window) {
+        Ok(work_areas) if !work_areas.is_empty() => work_areas,
+        Ok(_) => {
+            warn!("No monitors available; keeping saved main window position");
+            return true;
+        }
+        Err(error) => {
+            warn!(error = %error, "Could not enumerate monitors; keeping saved main window position");
+            return true;
+        }
+    };
+    has_sufficient_visible_area(
+        PhysicalRect {
+            x,
+            y,
+            width: size.width,
+            height: size.height,
+        },
+        &work_areas,
+    )
+}
+
+fn recover_main_window_to_primary(
+    window: &tauri::WebviewWindow,
+    windows_manager: &WindowsManager,
+    action: &str,
+) {
+    let size = match window.outer_size() {
+        Ok(size) => size,
+        Err(error) => {
+            warn!(action, error = %error, "Could not read main window size for recovery");
+            return;
+        }
+    };
+    let primary = match window.primary_monitor() {
+        Ok(Some(monitor)) => monitor,
+        Ok(None) => {
+            warn!(
+                action,
+                "No primary monitor available for main window recovery"
+            );
+            return;
+        }
+        Err(error) => {
+            warn!(action, error = %error, "Could not read primary monitor for main window recovery");
+            return;
+        }
+    };
+    let area = primary.work_area();
+    let width = i32::try_from(size.width).unwrap_or(i32::MAX);
+    let height = i32::try_from(size.height).unwrap_or(i32::MAX);
+    let area_width = i32::try_from(area.size.width).unwrap_or(i32::MAX);
+    let area_height = i32::try_from(area.size.height).unwrap_or(i32::MAX);
+    let x = area
+        .position
+        .x
+        .saturating_add(area_width.saturating_sub(width) / 2);
+    let y = area
+        .position
+        .y
+        .saturating_add(area_height.saturating_sub(height) / 2);
+    if let Err(error) =
+        window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }))
+    {
+        warn!(action, error = %error, "Could not recover main window position");
+        return;
+    }
+    match window.outer_position() {
+        Ok(position) => {
+            if let Err(error) =
+                windows_manager.set_main_position(Some(position.x), Some(position.y))
+            {
+                warn!(action, error = %error, "Could not persist recovered main window position");
+            }
+        }
+        Err(error) => {
+            warn!(action, error = %error, "Could not read recovered main window position")
+        }
+    }
+}
+
+fn ensure_main_window_visible(
+    window: &tauri::WebviewWindow,
+    windows_manager: &WindowsManager,
+    action: &str,
+) {
+    let position = match window.outer_position() {
+        Ok(position) => position,
+        Err(error) => {
+            warn!(action, error = %error, "Could not read main window position before showing");
+            return;
+        }
+    };
+    if !saved_main_position_is_visible(window, position.x, position.y) {
+        warn!(
+            action,
+            x = position.x,
+            y = position.y,
+            "Main window is outside available work areas; recovering before show"
+        );
+        recover_main_window_to_primary(window, windows_manager, action);
+    }
+}
+
 /// Show (restore) the main webview window: show, unminimize, and focus.
 ///
 /// Logs failures with `warn!` and the provided `action` context, without panicking.
-fn show_main_window(app_handle: &AppHandle, action: &str) {
+pub(crate) fn show_main_window(app_handle: &AppHandle, action: &str) {
     let window = match app_handle.get_webview_window("main") {
         Some(w) => w,
         None => {
@@ -536,6 +715,8 @@ fn show_main_window(app_handle: &AppHandle, action: &str) {
             return;
         }
     };
+    let windows_manager = app_handle.state::<WindowsManager>();
+    ensure_main_window_visible(&window, windows_manager.inner(), action);
     if let Err(e) = window.show() {
         warn!(action, error = %e, "show_main_window: show failed");
     }
@@ -1152,8 +1333,58 @@ fn missing_piper_notification(model_name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        missing_piper_model_name, missing_piper_notification, route_processed_text_from_handles,
+        has_sufficient_visible_area, missing_piper_model_name, missing_piper_notification,
+        route_processed_text_from_handles, PhysicalRect,
     };
+
+    fn rect(x: i32, y: i32, width: u32, height: u32) -> PhysicalRect {
+        PhysicalRect {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    #[test]
+    fn visible_area_accepts_window_on_primary_monitor() {
+        assert!(has_sufficient_visible_area(
+            rect(100, 100, 800, 630),
+            &[rect(0, 0, 1920, 1040)],
+        ));
+    }
+
+    #[test]
+    fn visible_area_accepts_window_on_negative_coordinate_monitor() {
+        assert!(has_sufficient_visible_area(
+            rect(-1800, 100, 800, 630),
+            &[rect(-1920, 0, 1920, 1040), rect(0, 0, 1920, 1040)],
+        ));
+    }
+
+    #[test]
+    fn visible_area_rejects_window_lost_after_monitor_disconnect() {
+        assert!(!has_sufficient_visible_area(
+            rect(2200, 100, 800, 630),
+            &[rect(0, 0, 1920, 1040)],
+        ));
+    }
+
+    #[test]
+    fn visible_area_rejects_narrow_strip() {
+        assert!(!has_sufficient_visible_area(
+            rect(1800, 100, 800, 630),
+            &[rect(0, 0, 1920, 1040)],
+        ));
+    }
+
+    #[test]
+    fn visible_area_accepts_sufficient_partial_overlap() {
+        assert!(has_sufficient_visible_area(
+            rect(1760, 950, 800, 630),
+            &[rect(0, 0, 1920, 1040)],
+        ));
+    }
 
     #[test]
     fn missing_saved_piper_returns_safe_model_name() {

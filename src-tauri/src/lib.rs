@@ -20,6 +20,8 @@ mod secret_log;
 mod servers;
 mod setup;
 mod signalsmith;
+#[cfg(windows)]
+mod single_instance;
 mod soundpanel;
 mod soundpanel_window;
 pub mod speech_queue;
@@ -72,9 +74,11 @@ use commands::{
     set_editor_homograph_accentor, set_editor_homograph_accentor_load_on_start, set_editor_hotkey,
     set_editor_keep_text, set_editor_quick, set_editor_spellcheck_enabled,
     set_editor_spellcheck_source, set_editor_typing_enabled, set_editor_typing_idle_timeout_ms,
-    set_global_exclude_from_capture, set_hotkey, set_hotkey_enabled, set_hotkey_recording,
+    set_global_exclude_from_capture, set_hide_on_minimize, set_hotkey, set_hotkey_enabled,
+    set_hotkey_recording,
     set_local_tts_url, set_main_bg_color, set_main_compact_dims, set_main_custom_background,
-    set_main_custom_opacity, set_main_opacity, set_main_opacity_compact_only, set_openai_api_key,
+    set_main_custom_opacity, set_main_opacity, set_main_opacity_compact_only,
+    set_openai_api_key,
     set_openai_voice, set_playback_appearance_source, set_show_playback_on_start,
     set_soundpanel_appearance_source, set_speaker_device, set_speaker_enabled, set_speaker_volume,
     set_start_compact, set_tts_provider, set_virtual_mic_device, set_virtual_mic_volume,
@@ -121,6 +125,9 @@ fn should_hide_soundpanel_on_blur(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(windows)]
+    crate::single_instance::acquire_lock_or_exit();
+
     // Инициализируем состояние и менеджеры ДО setup
     let mut app_state = AppState::new();
 
@@ -619,6 +626,7 @@ pub fn run() {
             set_show_playback_on_start,
             get_show_playback_on_start,
             set_start_compact,
+            set_hide_on_minimize,
             // Window appearance commands
             get_main_appearance,
             set_main_custom_background,
@@ -661,17 +669,6 @@ pub fn run() {
             move |app| setup::init_app(app, settings_clone.clone())
         })
         .on_window_event(|window, event| {
-            // Обрабатываем события главного окна
-            if window.label() == "main" {
-                // Позиция сохраняется только при закрытии (событие Destroyed)
-                // Предотвращаем закрытие - скрываем окно вместо этого
-                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                    info!("Main window close requested - hiding to tray");
-                    api.prevent_close();
-                    let _ = window.hide();
-                }
-            }
-
             #[cfg(windows)]
             if window.label() == "main" {
                 match event {
@@ -707,6 +704,33 @@ pub fn run() {
                             let _ = window.set_always_on_top(false);
                         }
                     }
+                    tauri::WindowEvent::Resized(_) => {
+                        // tao 0.34.6 forwards the WM_SIZE lparam, but tauri-runtime-wry
+                        // 2.11.4 WindowEventWrapper::parse recomputes the size via
+                        // inner_size(), so a 0x0 width/height is not a reliable
+                        // minimized signal at this layer. Query the window state
+                        // directly instead of assuming any particular dimensions.
+                        match window.is_minimized() {
+                            Ok(true) => {
+                                let hide_on_minimize = window
+                                    .app_handle()
+                                    .state::<SettingsManager>()
+                                    .get_hide_on_minimize();
+                                if hide_on_minimize {
+                                    info!("Main window minimized - hiding to tray (hide_on_minimize enabled)");
+                                    let _ = window.hide();
+                                }
+                                // When hide_on_minimize is disabled, leave the
+                                // normal taskbar minimization untouched.
+                            }
+                            Ok(false) => {
+                                // Not minimized: ordinary resize, no action.
+                            }
+                            Err(e) => {
+                                error!(error = %e, "Failed to query main window minimized state");
+                            }
+                        }
+                    }
                     tauri::WindowEvent::Destroyed => {
                         // Сохраняем позицию главного окна
                         if let Some(windows_manager) =
@@ -718,6 +742,20 @@ pub fn run() {
                                 info!(x, y, "Main window destroyed - saving position");
                                 let _ = windows_manager.set_main_position(Some(x), Some(y));
                             }
+                        }
+
+                        // Вспомогательные окна живут скрытыми всю сессию, поэтому закрытие
+                        // главного окна само по себе не завершает процесс — координируем
+                        // завершение явно (идемпотентно через begin_shutdown).
+                        let app_state = window.app_handle().state::<AppState>();
+                        if !app_state
+                            .shutdown_started
+                            .load(std::sync::atomic::Ordering::SeqCst)
+                        {
+                            info!("Main window destroyed - starting coordinated shutdown");
+                            tauri::async_runtime::spawn(crate::commands::coordinate_shutdown(
+                                window.app_handle().clone(),
+                            ));
                         }
                     }
                     _ => {}

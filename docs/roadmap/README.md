@@ -54,6 +54,10 @@ related_tasks: []
 - [ROADMAP-088 — One-shot OCR выделенной области](./completed/088-one-shot-screen-ocr.md)
 - [ROADMAP-090 — Единое поведение моделей OCR и RUAccent](./completed/090-ocr-ruaccent-model-panel-behavior.md)
 
+### Окна и запуск приложения
+
+- [ROADMAP-092 — Одна копия приложения и понятное сворачивание окна](./completed/092-single-instance-and-window-lifecycle.md)
+
 ### Интеграции
 
 - [ROADMAP-087 — входной сервер текста для audio-only озвучивания](./completed/087-external-text-input-server.md)

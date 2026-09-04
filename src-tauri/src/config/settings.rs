@@ -1215,6 +1215,9 @@ pub struct AppSettings {
     /// Запускать главное окно сразу в компактном режиме
     #[serde(default)]
     pub start_compact: bool,
+    /// Скрывать свёрнутое главное окно с панели задач (в трей)
+    #[serde(default)]
+    pub hide_on_minimize: bool,
 }
 
 impl Default for AppSettings {
@@ -1238,6 +1241,7 @@ impl Default for AppSettings {
             vtube_studio: VTubeStudioSettings::default(),
             show_playback_on_start: false,
             start_compact: false,
+            hide_on_minimize: false,
         }
     }
 }
@@ -2373,6 +2377,16 @@ impl SettingsManager {
         self.update_field("/start_compact", &value)
     }
 
+    /// Get hide main window on minimize
+    pub fn get_hide_on_minimize(&self) -> bool {
+        self.cache.read().hide_on_minimize
+    }
+
+    /// Set hide main window on minimize
+    pub fn set_hide_on_minimize(&self, value: bool) -> Result<()> {
+        self.update_field("/hide_on_minimize", &value)
+    }
+
     // ========== VTube Studio Settings ==========
 
     pub fn get_vtube_studio_settings(&self) -> VTubeStudioSettings {
@@ -2932,6 +2946,59 @@ mod tests {
         assert!(!settings.dsp.compressor.enabled);
         assert!(!settings.dsp.limiter.enabled);
         assert_eq!(settings.dsp.eq.bands.len(), 3);
+    }
+
+    /// Backward-compat: old settings.json without `hide_on_minimize` field
+    /// must deserialize with the field defaulting to `false`.
+    #[test]
+    fn settings_deserializes_without_hide_on_minimize_field() {
+        let old_json = r#"{
+            "audio": { "speaker_device": null, "speaker_enabled": true, "speaker_volume": 80, "virtual_mic_device": null, "virtual_mic_volume": 100 },
+            "tts": { "provider": "openai", "openai": { "api_key": "sk-test", "voice": "alloy" }, "local": { "url": "http://127.0.0.1:8124" }, "fish": { "api_key": null, "voices": [], "reference_id": "", "format": "mp3", "temperature": 0.7, "sample_rate": 44100, "use_proxy": false }, "telegram": { "api_id": null, "proxy_mode": "none", "voices": [], "current_voice_id": "" }, "network": { "proxy": { "proxy_url": null }, "mtproxy": { "host": null, "port": 8888, "secret": null, "dc_id": null } } },
+            "audio_effects": { "enabled": false, "pitch": 0, "speed": 0, "volume": 100, "enhance_enabled": false, "enhance_atten_db": 12.0, "formant_preserved": true },
+            "hotkey_enabled": true,
+            "editor": { "quick": false, "ai": false, "ai_completion": false, "spellcheck_enabled": true, "spellcheck_source": "offline", "editor_height": 340 },
+            "theme": "dark",
+            "twitch": { "enabled": false, "username": "", "token": "", "channel": "", "start_on_boot": false },
+            "webview": { "enabled": false, "start_on_boot": false, "port": 10100, "bind_address": "0.0.0.0", "access_token": null, "upnp_enabled": false },
+            "logging": { "enabled": false, "level": "info", "module_levels": {} },
+            "ai": { "provider": "openai", "openai": { "api_key": null, "use_proxy": false, "model": "gpt-4o-mini" }, "zai": { "url": null, "api_key": null, "model": "glm-4.5" }, "deepseek": { "api_key": null, "use_proxy": false, "model": "deepseek-chat" }, "custom": { "url": null, "api_key": null, "use_proxy": false, "model": "deepseek-chat" }, "prompt": "test", "timeout": 20 },
+            "hotkeys": { "main_window": { "modifiers": ["ctrl"], "key": "F12" }, "sound_panel": { "modifiers": ["alt"], "key": "F12" }, "playback_pause": { "modifiers": [], "key": "" }, "playback_stop": { "modifiers": [], "key": "" }, "playback_repeat": { "modifiers": [], "key": "" }, "playback_control_window": { "modifiers": [], "key": "" } },
+            "show_playback_on_start": false
+        }"#;
+        let settings: AppSettings = serde_json::from_str(old_json)
+            .expect("old AppSettings (without hide_on_minimize field) must deserialize");
+        assert!(!settings.hide_on_minimize);
+    }
+
+    /// Focused contract for the renamed setting: the legacy experimental
+    /// `minimize_to_taskbar` value is ignored (no migration), and an explicit
+    /// `hide_on_minimize: true` survives a serde round-trip while unrelated
+    /// fields are preserved.
+    #[test]
+    fn hide_on_minimize_ignores_legacy_field_and_round_trips() {
+        // Legacy field present, new field absent -> new field defaults to false.
+        let mut legacy = serde_json::to_value(AppSettings::default()).expect("serialize default");
+        let obj = legacy.as_object_mut().expect("default must be an object");
+        obj.remove("hide_on_minimize");
+        obj.insert("minimize_to_taskbar".into(), serde_json::json!(false));
+        let settings: AppSettings =
+            serde_json::from_value(legacy).expect("legacy settings must deserialize");
+        assert!(
+            !settings.hide_on_minimize,
+            "legacy minimize_to_taskbar=false must not enable hide_on_minimize"
+        );
+
+        // Explicit true survives a serde round-trip; unrelated field preserved.
+        let mut explicit = AppSettings::default();
+        explicit.hide_on_minimize = true;
+        explicit.show_playback_on_start = true;
+        let round: AppSettings = serde_json::from_value(
+            serde_json::to_value(&explicit).expect("serialize explicit"),
+        )
+        .expect("round-trip deserialize");
+        assert!(round.hide_on_minimize);
+        assert!(round.show_playback_on_start);
     }
 
     /// Backward-compat: old settings.json without `boundary_cleanup_enabled`

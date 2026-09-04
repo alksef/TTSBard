@@ -328,6 +328,7 @@ export interface GeneralSettingsDto {
   theme?: Theme
   show_playback_on_start: boolean
   start_compact: boolean
+  hide_on_minimize: boolean
 }
 
 // ============================================================================

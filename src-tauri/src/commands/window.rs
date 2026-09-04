@@ -316,6 +316,21 @@ pub async fn set_start_compact(
     Ok(())
 }
 
+/// Set hide main window on minimize
+#[tauri::command]
+pub async fn set_hide_on_minimize(
+    value: bool,
+    app_handle: AppHandle,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<(), String> {
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_hide_on_minimize(value)
+    })
+    .await?;
+    super::emit_settings_changed(&app_handle);
+    Ok(())
+}
+
 /// Get all hotkey settings
 #[tauri::command]
 pub async fn get_hotkey_settings(

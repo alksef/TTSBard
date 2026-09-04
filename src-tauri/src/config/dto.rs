@@ -798,6 +798,7 @@ pub struct GeneralSettingsDto {
     pub theme: Option<String>,
     pub show_playback_on_start: bool,
     pub start_compact: bool,
+    pub hide_on_minimize: bool,
 }
 
 impl GeneralSettingsDto {
@@ -810,6 +811,7 @@ impl GeneralSettingsDto {
             }),
             show_playback_on_start: config.show_playback_on_start,
             start_compact: config.start_compact,
+            hide_on_minimize: config.hide_on_minimize,
         }
     }
 }
@@ -1609,6 +1611,7 @@ mod tests {
             theme: Some("dark".into()),
             show_playback_on_start: false,
             start_compact: false,
+            hide_on_minimize: true,
         };
 
         let editor = EditorSettingsDto {
@@ -1977,6 +1980,7 @@ mod tests {
             theme: None,
             show_playback_on_start: false,
             start_compact: false,
+            hide_on_minimize: false,
         };
 
         let editor = EditorSettingsDto {

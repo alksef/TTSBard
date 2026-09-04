@@ -89,14 +89,6 @@ async function minimizeWindow() {
   }
 }
 
-async function closeWindow() {
-  try {
-    await getCurrentWindow().close()
-  } catch (e) {
-    debugLog('[App] Failed to close window:', e)
-  }
-}
-
 // Floating window visibility state
 const soundpanelVisible = ref(false)
 const playbackVisible = ref(false)
@@ -431,12 +423,6 @@ onUnmounted(() => {
             <line x1="5" y1="12" x2="19" y2="12" />
           </svg>
         </button>
-        <button class="titlebar-btn close" @click="closeWindow" title="Закрыть" aria-label="Закрыть">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
       </div>
     </div>
 
@@ -569,15 +555,6 @@ onUnmounted(() => {
 .titlebar-btn:hover {
   background: var(--color-bg-field-hover);
   color: var(--color-text-primary);
-}
-
-.titlebar-btn.close {
-  color: color-mix(in srgb, var(--color-text-secondary) 75%, transparent);
-}
-
-.titlebar-btn.close:hover {
-  background: var(--status-disconnected, #e5484d);
-  color: var(--color-text-white, #fff);
 }
 
 .titlebar-btn.floating-window.active {

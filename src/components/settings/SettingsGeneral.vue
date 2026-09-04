@@ -6,6 +6,8 @@ import { useGeneralSettings, useWindowsSettings, useLoggingSettings } from '../.
 
 const showPlaybackOnStart = ref(false);
 const startCompact = ref(false);
+const hideOnMinimize = ref(false);
+const hideOnMinimizeSaving = ref(false);
 const folderOpening = ref(false);
 
 // Get settings from composables
@@ -120,11 +122,28 @@ async function toggleShowPlaybackOnStart() {
   }
 }
 
+async function toggleHideOnMinimize() {
+  if (hideOnMinimizeSaving.value) return;
+  const previousValue = hideOnMinimize.value;
+  const newValue = !previousValue;
+  hideOnMinimize.value = newValue;
+  hideOnMinimizeSaving.value = true;
+  try {
+    await invoke('set_hide_on_minimize', { value: newValue });
+  } catch (e) {
+    hideOnMinimize.value = previousValue;
+    showError('Ошибка сохранения настройки: ' + (e as Error).message);
+  } finally {
+    hideOnMinimizeSaving.value = false;
+  }
+}
+
 // Watch for settings changes from composables
 watch(generalSettings, (newSettings) => {
   if (!newSettings) return;
   showPlaybackOnStart.value = newSettings.show_playback_on_start ?? false;
   startCompact.value = newSettings.start_compact ?? false;
+  hideOnMinimize.value = newSettings.hide_on_minimize ?? false;
 }, { immediate: true });
 
 watch(windowsSettings, (newSettings) => {
@@ -169,6 +188,23 @@ watch(loggingSettings, (newSettings) => {
           <span>Показывать окно управления при запуске</span>
         </label>
         <span class="setting-hint">Автоматически открывает окно очереди воспроизведения при старте приложения</span>
+      </div>
+    </section>
+
+    <!-- Hide on minimize -->
+    <section class="settings-section">
+      <div class="setting-row">
+        <label class="setting-label checkbox-label">
+          <input
+            :checked="hideOnMinimize"
+            :disabled="hideOnMinimizeSaving"
+            @change="toggleHideOnMinimize"
+            type="checkbox"
+            class="checkbox-input"
+          />
+          <span>Скрывать с панели задач при сворачивании</span>
+        </label>
+        <span class="setting-hint">Приложение продолжает работать. Вернуть окно можно через значок в трее или повторным запуском.</span>
       </div>
     </section>
 
