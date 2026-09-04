@@ -16,6 +16,9 @@ Review запускается **только вручную** по решени�
 
 Отчёт сохраняется локально как
 `.work/ai/<work-id>/reviews/ai-ready-review-NNN-YYYY-MM-DD.md` и не коммитится.
+Repository-wide исключение из bounded scope оформляется в
+`.work/ai/full-review/<id>/reviews/` по правилу из
+[`ai-workflow.md`](../ai-workflow.md).
 Долговечный вывод переносится в профильную документацию только как конкретное
 правило, проверка, решение или отобранная задача.
 

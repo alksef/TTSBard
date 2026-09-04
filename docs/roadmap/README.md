@@ -58,6 +58,7 @@ related_tasks: []
 
 ### Надёжность и ревью
 
+- [ROADMAP-089 — remediation полного ревью 2026-09-02](./completed/089-full-review-2026-09-02-remediation.md)
 - [ROADMAP-084 — Ошибки очереди речи: Silero и глобальное уведомление](./completed/084-speech-queue-global-error-toast.md)
 - [ROADMAP-076 — remediation по release-review v0.21.0..HEAD](./completed/076-release-review-remediation.md)
 
