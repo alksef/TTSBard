@@ -496,6 +496,77 @@ describe('useIncomingTexts', () => {
     expect(loadError.value).toBe('Не удалось загрузить входящие')
   })
 
+  it('clears loadError when a rejected snapshot is followed by a valid snapshot', async () => {
+    const { pendingItems, loadError, refreshPendingItems } = await setupAndMount(
+      async (cmd: string) => {
+        if (cmd === 'list_incoming_texts') {
+          throw new Error('backend down')
+        }
+        if (cmd === 'get_speech_queue_state') return makeDto([])
+        if (cmd === 'get_incoming_settings') return { auto_play: true }
+        return undefined
+      },
+    )
+
+    expect(loadError.value).toBe('Не удалось загрузить входящие')
+
+    mocks.mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'list_incoming_texts') {
+        return [{ id: 'a', text: 'one', source: 'server' }]
+      }
+      return undefined
+    })
+
+    await refreshPendingItems()
+
+    expect(pendingItems.value).toEqual([{ id: 'a', text: 'one', source: 'server' }])
+    expect(loadError.value).toBeNull()
+  })
+
+  it('clears loadError when a rejected snapshot is followed by a valid incoming-changed event', async () => {
+    const { pendingItems, loadError } = await setupAndMount(
+      async (cmd: string) => {
+        if (cmd === 'list_incoming_texts') {
+          throw new Error('backend down')
+        }
+        if (cmd === 'get_speech_queue_state') return makeDto([])
+        if (cmd === 'get_incoming_settings') return { auto_play: true }
+        return undefined
+      },
+    )
+
+    expect(loadError.value).toBe('Не удалось загрузить входящие')
+
+    mocks.listenCallbacks.get('input-server-incoming-changed')?.({
+      payload: [{ id: 'a', text: 'one', source: 'server' }],
+    })
+
+    expect(pendingItems.value).toEqual([{ id: 'a', text: 'one', source: 'server' }])
+    expect(loadError.value).toBeNull()
+  })
+
+  it('keeps loadError when a rejected snapshot is followed by an invalid incoming-changed event', async () => {
+    const { pendingItems, loadError } = await setupAndMount(
+      async (cmd: string) => {
+        if (cmd === 'list_incoming_texts') {
+          throw new Error('backend down')
+        }
+        if (cmd === 'get_speech_queue_state') return makeDto([])
+        if (cmd === 'get_incoming_settings') return { auto_play: true }
+        return undefined
+      },
+    )
+
+    expect(loadError.value).toBe('Не удалось загрузить входящие')
+
+    mocks.listenCallbacks.get('input-server-incoming-changed')?.({
+      payload: { not: 'a list' },
+    })
+
+    expect(pendingItems.value).toEqual([])
+    expect(loadError.value).toBe('Не удалось загрузить входящие')
+  })
+
   it('skip removes a failed external job from the active list', async () => {
     const { externalJobs, busyIds, skipExternalJob } = await setupAndMount(
       async (cmd: string) => {

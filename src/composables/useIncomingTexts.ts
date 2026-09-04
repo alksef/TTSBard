@@ -123,6 +123,7 @@ export function useIncomingTexts() {
       if (disposed || pendingItemsEventArrived) return
       if (isIncomingTextList(payload)) {
         pendingItems.value = payload
+        loadError.value = null
       } else {
         loadError.value = 'Не удалось загрузить входящие'
       }
@@ -249,7 +250,10 @@ export function useIncomingTexts() {
     await listenerScope.track(
       listen<unknown>(INCOMING_CHANGED_EVENT, (event) => {
         pendingItemsEventArrived = true
-        if (isIncomingTextList(event.payload)) pendingItems.value = event.payload
+        if (isIncomingTextList(event.payload)) {
+          pendingItems.value = event.payload
+          loadError.value = null
+        }
       }),
     )
     await listenerScope.track(
