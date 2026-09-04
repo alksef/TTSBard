@@ -44,7 +44,7 @@ const {
 
     <section class="settings-section">
       <div class="section-header server-header">
-        <h2>Входящий сервер</h2>
+        <h2>Сервер</h2>
         <div class="server-status">
           <span
             class="status-indicator"

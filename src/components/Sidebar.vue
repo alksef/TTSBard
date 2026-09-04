@@ -97,11 +97,11 @@ const sidebarGroups: SidebarGroup[] = [
   {
     title: 'ИНТЕГРАЦИЯ',
     buttons: [
-      { id: 'webview', label: 'WebView Source', icon: Globe },
+      { id: 'webview', label: 'WebView', icon: Globe },
       { id: 'twitch', label: 'Twitch Chat', icon: TwitchIcon },
-      { id: 'input-server', label: 'Входящий сервер', icon: Inbox },
       { id: 'vtube-studio', label: 'VTube Studio', icon: Tv },
-      { id: 'ocr', label: 'OCR', icon: ScanText }
+      { id: 'ocr', label: 'OCR', icon: ScanText },
+      { id: 'input-server', label: 'Входящий сервер', icon: Inbox }
     ]
   },
   {
