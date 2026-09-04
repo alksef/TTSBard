@@ -38,14 +38,13 @@ related_tasks: []
 
 ## Активные направления
 
-### Ввод текста и OCR
-
-- [ROADMAP-088 — One-shot OCR выделенной области](./active/088-one-shot-screen-ocr.md)
+Активных направлений нет.
 
 ## Завершённые направления
 
 ### Ввод текста и OCR
 
+- [ROADMAP-088 — One-shot OCR выделенной области](./completed/088-one-shot-screen-ocr.md)
 - [ROADMAP-090 — Единое поведение моделей OCR и RUAccent](./completed/090-ocr-ruaccent-model-panel-behavior.md)
 
 ### Интеграции

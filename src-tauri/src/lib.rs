@@ -527,6 +527,11 @@ pub fn run() {
             commands::ocr::list_ocr_packs,
             commands::ocr::refresh_ocr_packs,
             commands::ocr::open_ocr_packs_folder,
+            // OCR overlay lifecycle: preview (load the frozen frame), ready
+            // (reveal it), failed (abandon it), then cancel/submit the session.
+            commands::ocr::ocr_selection_preview,
+            commands::ocr::ocr_selection_ready,
+            commands::ocr::ocr_selection_failed,
             commands::ocr::ocr_selection_cancel,
             commands::ocr::ocr_selection_submit,
             // Logging commands

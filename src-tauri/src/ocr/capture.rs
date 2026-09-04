@@ -1,9 +1,9 @@
 //! Windows virtual-desktop capture: monitor geometry, composition and crop.
 //!
-//! Backend-only P2 slice (ROADMAP-088). Captures the full virtual desktop from
-//! per-monitor screenshots and crops a selection rectangle from the saved
-//! frame. Nothing calls it yet — the future consumer is the OCR capture command
-//! flow (capture → selection overlay → `OcrRuntime::recognize`).
+//! OCR capture path (ROADMAP-088). Captures the full virtual desktop from
+//! per-monitor screenshots, composes one saved frame and crops a selection
+//! rectangle from that saved frame. Consumed by the one-shot OCR capture
+//! command flow (capture → selection overlay → recognition).
 #![allow(dead_code)]
 
 use image::{RgbImage, Rgba, RgbaImage};
@@ -142,8 +142,11 @@ pub fn validate_selection(rect: SelectionRect) -> Result<SelectionRect, CaptureE
 
 /// Compose per-monitor images into one frame in virtual-screen coordinates.
 ///
-/// Each monitor image is painted at its `(x - origin.x, y - origin.y)` offset
-/// onto an opaque black frame of `geometry.size`; uncovered areas stay black.
+/// Monitor images are painted at their `(x - origin.x, y - origin.y)` offsets
+/// without alpha-blending: pixel RGB is copied verbatim and the source alpha
+/// (a GDI `BI_RGB` padding byte, not transparency) is ignored. The resulting
+/// frame is fully opaque — alpha is 255 in every pixel. Uncovered areas stay
+/// opaque black.
 pub fn compose_virtual_frame(
     images: &[(MonitorRect, RgbaImage)],
     geometry: &VirtualScreenGeometry,
@@ -154,7 +157,11 @@ pub fn compose_virtual_frame(
     for (monitor, image) in images {
         let dx = (monitor.x - geometry.origin.0) as i64;
         let dy = (monitor.y - geometry.origin.1) as i64;
-        image::imageops::overlay(&mut frame, image, dx, dy);
+        image::imageops::replace(&mut frame, image, dx, dy);
+    }
+
+    for pixel in frame.pixels_mut() {
+        pixel.0[3] = 255;
     }
 
     frame
@@ -387,6 +394,27 @@ mod tests {
         assert_eq!(frame.get_pixel(1, 0), &BLUE);
         assert_eq!(frame.get_pixel(2, 0), &BLACK);
         assert_eq!(frame.get_pixel(3, 0), &GREEN);
+    }
+
+    #[test]
+    fn compose_ignores_monitor_alpha_and_forces_opaque() {
+        let geometry = VirtualScreenGeometry {
+            origin: (0, 0),
+            size: (2, 1),
+            monitors: vec![rect(0, 0, 2, 1)],
+        };
+
+        let mut image = RgbaImage::new(2, 1);
+        image.put_pixel(0, 0, Rgba([255, 0, 0, 0]));
+        image.put_pixel(1, 0, Rgba([0, 255, 0, 128]));
+
+        let captures = vec![(rect(0, 0, 2, 1), image)];
+
+        let frame = compose_virtual_frame(&captures, &geometry);
+
+        assert_eq!(frame.dimensions(), (2, 1));
+        assert_eq!(frame.get_pixel(0, 0), &Rgba([255, 0, 0, 255]));
+        assert_eq!(frame.get_pixel(1, 0), &Rgba([0, 255, 0, 255]));
     }
 
     #[test]

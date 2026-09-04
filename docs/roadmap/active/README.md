@@ -6,4 +6,4 @@ implementation plans и не задания AI-агентам.
 
 ## В работе
 
-- [ROADMAP-088 — One-shot OCR выделенной области](./088-one-shot-screen-ocr.md)
+Активных направлений нет.

@@ -12,6 +12,7 @@ use std::sync::Arc;
 use image::{RgbImage, RgbaImage};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use super::capture::{
     clamp_selection, crop_to_rgb, normalize_selection, validate_selection, CaptureError,
@@ -160,7 +161,7 @@ pub enum BeginOutcome {
     OverlayFailed(String),
 }
 
-/// Result of [`OcrService::finish_selection`].
+/// Result of submitting a selection against the in-flight capture session.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FinishOutcome {
     /// The selection was empty or smaller than [`capture::MIN_SELECTION_SIDE`].
@@ -179,9 +180,44 @@ pub enum FinishOutcome {
 ///
 /// Owns the virtual-screen geometry and the full frame saved BEFORE the
 /// selection overlay was shown, so cropping never contains overlay pixels.
+/// A random [`Uuid`] identity lets the command layer route late overlay events
+/// (present/cancel/submit) to the exact session that produced them, and
+/// `presented` records whether the stored frame has been revealed. A session
+/// starts unpresented: it is stored at capture time, revealed later by
+/// [`OcrService::present_selection`] only once the overlay is ready for it.
 struct CaptureSession {
+    id: String,
     geometry: VirtualScreenGeometry,
     frame: Arc<RgbaImage>,
+    presented: bool,
+}
+
+/// Read-only snapshot of the in-flight `SelectingArea` session for the overlay.
+///
+/// Clone shares the pixel buffer by [`Arc`]; no pixels are copied, so the
+/// overlay render and the later crop read the exact same saved frame. Geometry
+/// is deliberately not exposed here: the overlay is positioned by the backend
+/// through the guarded `present_selection` callback, never by the frontend.
+#[derive(Debug, Clone)]
+pub struct SelectionSnapshot {
+    /// Session identity, used to guard overlay events against staleness.
+    pub id: String,
+    pub frame: Arc<RgbaImage>,
+}
+
+/// Two overlay-local physical corners of a dragged selection.
+///
+/// The corners are reported by the selection overlay in physical pixels local
+/// to its own client area (whose top-left sits on the stored geometry origin)
+/// and may arrive in any drag order. They travel whole through the submit seam
+/// as one small [`Copy`] value and are shifted into virtual-screen coordinates
+/// only inside `OcrService::finish_session_locked`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SelectionCorners {
+    pub x1: i32,
+    pub y1: i32,
+    pub x2: i32,
+    pub y2: i32,
 }
 
 /// Map overlay-local physical corners into virtual-screen coordinates.
@@ -540,8 +576,10 @@ impl OcrService {
         };
 
         *self.session.lock().await = Some(CaptureSession {
+            id: Uuid::new_v4().to_string(),
             geometry: geometry.clone(),
             frame: Arc::new(frame),
+            presented: false,
         });
 
         self.publish_status(OcrStatus::SelectingArea, &mut emit);
@@ -558,7 +596,93 @@ impl OcrService {
         BeginOutcome::Started
     }
 
+    /// Snapshot of the current `SelectingArea` session for the overlay to
+    /// render, serialized by the transition lock.
+    ///
+    /// Returns `None` when no session is selecting. The snapshot clones only
+    /// the [`Arc`] of the stored frame — never its pixels — so the overlay
+    /// render and the later crop read the exact same saved buffer.
+    pub async fn selection_snapshot(&self) -> Option<SelectionSnapshot> {
+        let _guard = self.transition_lock.lock().await;
+
+        if self.status() != OcrStatus::SelectingArea {
+            return None;
+        }
+
+        let session = self.session.lock().await;
+        session.as_ref().map(|session| SelectionSnapshot {
+            id: session.id.clone(),
+            frame: Arc::clone(&session.frame),
+        })
+    }
+
+    /// Reveal the overlay over the stored frame of a specific session.
+    ///
+    /// The transition lock is acquired and the current session must exist and
+    /// match `id` while the status is `SelectingArea`. A stale or missing
+    /// session returns `Ok(false)` without running `show` (or any other
+    /// callback). The `show` closure is invoked only after the session mutex is
+    /// released (the transition lock stays held) and receives the session
+    /// geometry for window placement; a successful reveal marks the session
+    /// `presented`. A failed reveal drops the matching session, restores
+    /// `Ready` while the runtime is active and returns the error. Re-showing an
+    /// already-presented matching session is allowed so a too-small retry can
+    /// reveal the same frame again.
+    pub async fn present_selection<E, S>(
+        &self,
+        id: &str,
+        mut emit: E,
+        show: S,
+    ) -> Result<bool, String>
+    where
+        E: FnMut(&OcrStatus),
+        S: FnOnce(&VirtualScreenGeometry) -> Result<(), String>,
+    {
+        let _guard = self.transition_lock.lock().await;
+
+        if self.status() != OcrStatus::SelectingArea {
+            return Ok(false);
+        }
+
+        let geometry = {
+            let session = self.session.lock().await;
+            let Some(session) = session.as_ref() else {
+                return Ok(false);
+            };
+            if session.id != id {
+                return Ok(false);
+            }
+            session.geometry.clone()
+        };
+
+        if let Err(reason) = show(&geometry) {
+            // Reveal failed: drop the matching session and return to `Ready` so
+            // the runtime can start a fresh one.
+            self.session.lock().await.take();
+            if self.is_runtime_active() {
+                self.publish_status(OcrStatus::Ready, &mut emit);
+            }
+            return Err(reason);
+        }
+
+        // The transition lock keeps the session identity stable between the
+        // check above and this update, so re-locking finds the same session.
+        let mut session = self.session.lock().await;
+        if let Some(current) = session.as_mut() {
+            if current.id == id {
+                current.presented = true;
+            }
+        }
+        Ok(true)
+    }
+
     /// Submit a selection rectangle for the in-flight session.
+    ///
+    /// Test-only legacy unguarded entry point, compiled under `#[cfg(test)]`
+    /// and kept for pre-identity tests: it accepts whatever session is current
+    /// regardless of identity or presentation. The presented-overlay flow uses
+    /// [`Self::finish_selection_for_session`] instead; both share
+    /// [`Self::finish_session_locked`].
     ///
     /// The overlay reports the corners as physical coordinates local to its own
     /// client area (its top-left sits on the stored geometry origin), so both
@@ -572,13 +696,14 @@ impl OcrService {
     /// [`crop_to_rgb`] and runs recognition through the injected closure (the
     /// command layer locks [`Self::runtime_slot`]); the status is published
     /// back to `Ready` either way. No pixel work happens under any lock.
+    #[cfg(test)]
     pub async fn finish_selection<E, F, Fut>(
         &self,
         x1: i32,
         y1: i32,
         x2: i32,
         y2: i32,
-        mut emit: E,
+        emit: E,
         recognize: F,
     ) -> FinishOutcome
     where
@@ -592,10 +717,97 @@ impl OcrService {
             return FinishOutcome::NoSession;
         };
 
-        // The overlay-local corners are physical px relative to the overlay's
-        // own client area; the saved frame lives in virtual-screen coordinates,
-        // so shift both corners by the session geometry origin first. A
-        // representational overflow is retryable, never a panic.
+        let selection = SelectionCorners { x1, y1, x2, y2 };
+        self.finish_session_locked(session, selection, emit, recognize)
+            .await
+    }
+
+    /// Submit a selection for one specific, already-presented session.
+    ///
+    /// Guarded entry for the presented-overlay flow. Under the transition lock
+    /// the current session must exist, match `id` and be marked `presented`; a
+    /// stale, missing or still-unpresented session is a `Ok(NoSession)` that
+    /// never hides or recognizes. A matching session first runs the injected
+    /// `hide` callback while still serialized (the session mutex is released
+    /// first); when hiding fails the session is dropped, `Ready` is restored
+    /// while the runtime is active and the error is returned. Otherwise the
+    /// shared [`Self::finish_session_locked`] flow runs unchanged. A too-small
+    /// selection keeps the same session (id, frame and `presented`) under
+    /// `SelectingArea` so the command layer can re-show it via
+    /// [`Self::present_selection`].
+    pub async fn finish_selection_for_session<E, H, F, Fut>(
+        &self,
+        id: &str,
+        selection: SelectionCorners,
+        mut emit: E,
+        hide: H,
+        recognize: F,
+    ) -> Result<FinishOutcome, String>
+    where
+        E: FnMut(&OcrStatus),
+        H: FnOnce() -> Result<(), String>,
+        F: FnOnce(Arc<RgbImage>) -> Fut,
+        Fut: Future<Output = Result<OcrResult, String>>,
+    {
+        let _guard = self.transition_lock.lock().await;
+
+        // Identity + presentation guard: only the current presented session may
+        // submit. The session is checked in place (and only then taken) so a
+        // stale or unpresented submit leaves the live session untouched.
+        let session = {
+            let mut guard = self.session.lock().await;
+            let Some(current) = guard.as_ref() else {
+                return Ok(FinishOutcome::NoSession);
+            };
+            if current.id != id || !current.presented {
+                return Ok(FinishOutcome::NoSession);
+            }
+            guard.take().expect("matching presented session present")
+        };
+
+        // Hide the overlay while still serialized but without the session
+        // mutex held. A failed hide abandons the session entirely.
+        if let Err(reason) = hide() {
+            drop(session);
+            if self.is_runtime_active() {
+                self.publish_status(OcrStatus::Ready, &mut emit);
+            }
+            return Err(reason);
+        }
+
+        Ok(self
+            .finish_session_locked(session, selection, emit, recognize)
+            .await)
+    }
+
+    /// Shared selection-processing body for a submitted selection; the caller
+    /// already holds the transition lock and has removed the session from the
+    /// slot. Reached through [`Self::finish_selection_for_session`] and the
+    /// test-only legacy `Self::finish_selection` (`#[cfg(test)]`).
+    ///
+    /// `selection` carries the two overlay-local corners in physical px relative
+    /// to the overlay's own client area; the saved frame lives in
+    /// virtual-screen coordinates, so both corners are first shifted by the
+    /// session geometry origin. A representational overflow, an empty/outside
+    /// rectangle or a selection below [`capture::MIN_SELECTION_SIDE`] is
+    /// retryable: the session is put back (keeping its id/frame/`presented`)
+    /// and `TooSmall` is returned. A valid selection publishes `Recognizing`,
+    /// crops the SAVED frame on the blocking pool and runs recognition; `Ready`
+    /// is restored while the runtime is active either way. No pixel work happens
+    /// under any lock.
+    async fn finish_session_locked<E, F, Fut>(
+        &self,
+        session: CaptureSession,
+        selection: SelectionCorners,
+        mut emit: E,
+        recognize: F,
+    ) -> FinishOutcome
+    where
+        E: FnMut(&OcrStatus),
+        F: FnOnce(Arc<RgbImage>) -> Fut,
+        Fut: Future<Output = Result<OcrResult, String>>,
+    {
+        let SelectionCorners { x1, y1, x2, y2 } = selection;
         let Some((x1, y1, x2, y2)) =
             translate_by_session_origin(x1, y1, x2, y2, session.geometry.origin)
         else {
@@ -661,8 +873,13 @@ impl OcrService {
 
     /// Cancel the in-flight capture session.
     ///
-    /// Drops the stored frame and returns to `Ready` when a session was active;
-    /// a session-less call is a no-op. Returns whether a session was dropped.
+    /// Test-only legacy unguarded helper, compiled under `#[cfg(test)]` and kept
+    /// for pre-identity tests: it drops whatever session is current regardless
+    /// of identity or presentation. The command layer exclusively uses the
+    /// guarded [`Self::cancel_selection`]. Drops the stored frame and returns
+    /// to `Ready` when a session was active; a session-less call is a no-op.
+    /// Returns whether a session was dropped.
+    #[cfg(test)]
     pub async fn cancel_session<E>(&self, mut emit: E) -> bool
     where
         E: FnMut(&OcrStatus),
@@ -677,6 +894,58 @@ impl OcrService {
             self.publish_status(OcrStatus::Ready, &mut emit);
         }
         had_session
+    }
+
+    /// Cancel a specific capture session, hiding the overlay first.
+    ///
+    /// Guards against stale lifecycle events: under the transition lock the
+    /// current session must exist and match `id`, and — when `only_unpresented`
+    /// is set — must not yet be `presented`. Anything stale, missing or an
+    /// unpresented-only timeout against an already-presented session is a
+    /// `Ok(false)` that never runs `hide` or touches the status. Otherwise the
+    /// injected `hide` closure runs and the session is dropped even when hiding
+    /// fails; `Ready` is restored while the runtime is active and `Ok(true)` or
+    /// the hide error is returned. This covers user cancel, a preview decode
+    /// failure and a guarded presentation timeout.
+    pub async fn cancel_selection<E, H>(
+        &self,
+        id: &str,
+        only_unpresented: bool,
+        mut emit: E,
+        hide: H,
+    ) -> Result<bool, String>
+    where
+        E: FnMut(&OcrStatus),
+        H: FnOnce() -> Result<(), String>,
+    {
+        let _guard = self.transition_lock.lock().await;
+
+        // Identity guard: a stale or missing id, or a presented session behind
+        // an unpresented-only timeout, is a no-op.
+        {
+            let session = self.session.lock().await;
+            let Some(session) = session.as_ref() else {
+                return Ok(false);
+            };
+            if session.id != id || (only_unpresented && session.presented) {
+                return Ok(false);
+            }
+        }
+
+        let hidden = hide();
+
+        // Drop the session unconditionally, even when the hide callback fails:
+        // a cancelled selection must never linger.
+        self.session.lock().await.take();
+
+        if self.is_runtime_active() {
+            self.publish_status(OcrStatus::Ready, &mut emit);
+        }
+
+        match hidden {
+            Ok(()) => Ok(true),
+            Err(reason) => Err(reason),
+        }
     }
 }
 
@@ -1131,6 +1400,11 @@ mod tests {
 
     fn test_frame() -> RgbaImage {
         RgbaImage::from_pixel(100, 100, Rgba([255, 0, 0, 255]))
+    }
+
+    /// Build overlay-local corners for a guarded `finish_selection_for_session`.
+    fn corners(x1: i32, y1: i32, x2: i32, y2: i32) -> SelectionCorners {
+        SelectionCorners { x1, y1, x2, y2 }
     }
 
     fn fake_ocr_result(text: &str) -> OcrResult {
@@ -1816,5 +2090,617 @@ mod tests {
         assert!(!registered, "no register call with an empty runtime slot");
         assert_eq!(service.status(), OcrStatus::Disabled);
         assert_eq!(service.registered_hotkey(), None);
+    }
+
+    // --- Presented-overlay session identity and guards ---
+
+    /// Begin a selecting session on `service` and return its identity.
+    async fn begin_test_session(service: &OcrService, frame: RgbaImage) -> String {
+        let outcome = service
+            .begin_capture_session(|_| {}, move || Ok((test_geometry(), frame)), |_| Ok(()))
+            .await;
+        assert!(matches!(outcome, BeginOutcome::Started));
+        service
+            .selection_snapshot()
+            .await
+            .expect("session started")
+            .id
+    }
+
+    #[tokio::test]
+    async fn selection_snapshot_shares_frame_arc_and_content() {
+        let service = ready_service();
+        begin_test_session(&service, test_frame()).await;
+        assert_eq!(service.status(), OcrStatus::SelectingArea);
+
+        let snap1 = service.selection_snapshot().await.expect("active session");
+        let snap2 = service.selection_snapshot().await.expect("active session");
+
+        assert!(!snap1.id.is_empty());
+        assert_eq!(snap1.id, snap2.id);
+        assert!(
+            Arc::ptr_eq(&snap1.frame, &snap2.frame),
+            "snapshot must clone the Arc, never the pixels"
+        );
+        assert_eq!(
+            snap1.frame.get_pixel(50, 50),
+            &Rgba([255, 0, 0, 255]),
+            "snapshot must expose the exact saved frame content"
+        );
+    }
+
+    #[tokio::test]
+    async fn selection_snapshot_is_none_outside_selecting_area() {
+        let service = ready_service();
+        assert!(service.selection_snapshot().await.is_none());
+        assert_eq!(service.status(), OcrStatus::Ready);
+    }
+
+    #[tokio::test]
+    async fn second_session_gets_a_distinct_identity() {
+        let service = ready_service();
+        let first = begin_test_session(&service, test_frame()).await;
+        assert!(
+            service.cancel_session(|_| {}).await,
+            "first session dropped"
+        );
+        assert_eq!(service.status(), OcrStatus::Ready);
+
+        let second = begin_test_session(&service, test_frame()).await;
+        assert_ne!(
+            first, second,
+            "each capture session needs a unique identity"
+        );
+    }
+
+    #[tokio::test]
+    async fn present_marks_session_and_allows_reshow() {
+        let service = ready_service();
+        let id = begin_test_session(&service, test_frame()).await;
+
+        let mut shows = 0;
+        let result = service
+            .present_selection(
+                &id,
+                |_| {},
+                |_geometry| {
+                    shows += 1;
+                    Ok(())
+                },
+            )
+            .await;
+        assert_eq!(result, Ok(true));
+        assert_eq!(shows, 1);
+        assert_eq!(service.status(), OcrStatus::SelectingArea);
+
+        // Re-showing an already-presented matching session is permitted
+        // (too-small retry after the overlay was hidden).
+        let result = service
+            .present_selection(
+                &id,
+                |_| {},
+                |_geometry| {
+                    shows += 1;
+                    Ok(())
+                },
+            )
+            .await;
+        assert_eq!(result, Ok(true));
+        assert_eq!(shows, 2);
+        assert_eq!(service.status(), OcrStatus::SelectingArea);
+    }
+
+    #[tokio::test]
+    async fn present_without_matching_session_is_noop() {
+        let service = ready_service();
+
+        // No session at all: never call the show callback.
+        let mut shown = false;
+        let result = service
+            .present_selection(
+                "ghost",
+                |_| {},
+                |_| {
+                    shown = true;
+                    Ok(())
+                },
+            )
+            .await;
+        assert_eq!(result, Ok(false));
+        assert!(!shown, "show must not run without a session");
+        assert_eq!(service.status(), OcrStatus::Ready);
+
+        // A stale id for a session that is no longer current.
+        let id = begin_test_session(&service, test_frame()).await;
+        service.cancel_session(|_| {}).await;
+        assert_eq!(service.status(), OcrStatus::Ready);
+
+        let mut shown = false;
+        let result = service
+            .present_selection(
+                &id,
+                |_| {},
+                |_| {
+                    shown = true;
+                    Ok(())
+                },
+            )
+            .await;
+        assert_eq!(result, Ok(false));
+        assert!(!shown, "a stale id must never show");
+    }
+
+    #[tokio::test]
+    async fn present_show_failure_drops_session_and_publishes_ready() {
+        let service = ready_service();
+        let id = begin_test_session(&service, test_frame()).await;
+
+        let mut published = Vec::new();
+        let result = service
+            .present_selection(
+                &id,
+                |status| published.push(status.clone()),
+                |_geometry| Err("selection window missing".to_string()),
+            )
+            .await;
+
+        assert_eq!(result, Err("selection window missing".to_string()));
+        assert_eq!(published, vec![OcrStatus::Ready]);
+        assert_eq!(service.status(), OcrStatus::Ready);
+        assert!(service.selection_snapshot().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn stale_events_for_older_session_leave_newer_session_intact() {
+        let service = ready_service();
+        let old_id = begin_test_session(&service, test_frame()).await;
+        service
+            .present_selection(&old_id, |_| {}, |_| Ok(()))
+            .await
+            .unwrap();
+
+        // End the first session and start a newer one behind it.
+        assert!(service
+            .cancel_selection(&old_id, false, |_| {}, || Ok(()))
+            .await
+            .unwrap());
+        assert_eq!(service.status(), OcrStatus::Ready);
+        let new_id = begin_test_session(&service, test_frame()).await;
+        assert_ne!(old_id, new_id);
+        assert_eq!(service.status(), OcrStatus::SelectingArea);
+
+        // Stale present must not show.
+        let mut stale_shown = false;
+        let result = service
+            .present_selection(
+                &old_id,
+                |_| {},
+                |_| {
+                    stale_shown = true;
+                    Ok(())
+                },
+            )
+            .await;
+        assert_eq!(result, Ok(false));
+        assert!(!stale_shown, "stale present must not reveal the overlay");
+
+        // Stale cancel must not hide or publish anything.
+        let mut stale_hidden = false;
+        let mut published = Vec::new();
+        let result = service
+            .cancel_selection(
+                &old_id,
+                false,
+                |status| published.push(status.clone()),
+                || {
+                    stale_hidden = true;
+                    Ok(())
+                },
+            )
+            .await;
+        assert_eq!(result, Ok(false));
+        assert!(!stale_hidden, "stale cancel must not run hide");
+        assert!(published.is_empty(), "stale cancel must not publish");
+
+        // Stale submit must not hide or recognize.
+        let mut stale_hidden = false;
+        let mut stale_recognized = false;
+        let result = service
+            .finish_selection_for_session(
+                &old_id,
+                corners(0, 0, 40, 40),
+                |_| {},
+                || {
+                    stale_hidden = true;
+                    Ok(())
+                },
+                |_image| {
+                    stale_recognized = true;
+                    async { Ok(fake_ocr_result("stale")) }
+                },
+            )
+            .await;
+        assert_eq!(result, Ok(FinishOutcome::NoSession));
+        assert!(!stale_hidden, "stale submit must not run hide");
+        assert!(!stale_recognized, "stale submit must not run recognition");
+
+        // The newer session is untouched and still current.
+        assert_eq!(service.status(), OcrStatus::SelectingArea);
+        let snapshot = service
+            .selection_snapshot()
+            .await
+            .expect("newer session survives");
+        assert_eq!(snapshot.id, new_id);
+    }
+
+    #[tokio::test]
+    async fn cancelled_pending_preview_cannot_be_presented() {
+        let service = ready_service();
+        let id = begin_test_session(&service, test_frame()).await;
+        // The session exists but its preview is still pending (not presented).
+        assert_eq!(
+            service
+                .cancel_selection(&id, false, |_| {}, || Ok(()))
+                .await,
+            Ok(true)
+        );
+        assert_eq!(service.status(), OcrStatus::Ready);
+
+        // A late present for the cancelled pending preview must never reveal.
+        let mut shown = false;
+        let result = service
+            .present_selection(
+                &id,
+                |_| {},
+                |_geometry| {
+                    shown = true;
+                    Ok(())
+                },
+            )
+            .await;
+        assert_eq!(result, Ok(false));
+        assert!(!shown, "cancelled pending preview must never show");
+        assert_eq!(service.status(), OcrStatus::Ready);
+    }
+
+    #[tokio::test]
+    async fn only_unpresented_cancel_guards_pending_timeout() {
+        let service = ready_service();
+
+        // Timeout fires while the preview is still pending (not presented).
+        let id = begin_test_session(&service, test_frame()).await;
+        let mut hidden = 0;
+        assert_eq!(
+            service
+                .cancel_selection(
+                    &id,
+                    true,
+                    |_| {},
+                    || {
+                        hidden += 1;
+                        Ok(())
+                    }
+                )
+                .await,
+            Ok(true)
+        );
+        assert_eq!(hidden, 1);
+        assert_eq!(service.status(), OcrStatus::Ready);
+
+        // The same unpresented-only timeout after ready (session gone) is a
+        // no-op that never calls hide.
+        let mut hidden = 0;
+        assert_eq!(
+            service
+                .cancel_selection(
+                    &id,
+                    true,
+                    |_| {},
+                    || {
+                        hidden += 1;
+                        Ok(())
+                    }
+                )
+                .await,
+            Ok(false)
+        );
+        assert_eq!(hidden, 0);
+        assert_eq!(service.status(), OcrStatus::Ready);
+    }
+
+    #[tokio::test]
+    async fn only_unpresented_cancel_never_hits_a_presented_session() {
+        let service = ready_service();
+        let id = begin_test_session(&service, test_frame()).await;
+        service
+            .present_selection(&id, |_| {}, |_| Ok(()))
+            .await
+            .unwrap();
+
+        let mut hidden = 0;
+        let result = service
+            .cancel_selection(
+                &id,
+                true,
+                |_| {},
+                || {
+                    hidden += 1;
+                    Ok(())
+                },
+            )
+            .await;
+        assert_eq!(
+            result,
+            Ok(false),
+            "an unpresented-only timeout must ignore a presented session"
+        );
+        assert_eq!(hidden, 0);
+        assert_eq!(service.status(), OcrStatus::SelectingArea);
+
+        // A real (presented) cancel still works afterwards.
+        assert_eq!(
+            service
+                .cancel_selection(&id, false, |_| {}, || Ok(()))
+                .await,
+            Ok(true)
+        );
+        assert_eq!(service.status(), OcrStatus::Ready);
+    }
+
+    #[tokio::test]
+    async fn cancel_hide_failure_still_drops_session_and_returns_ready() {
+        let service = ready_service();
+        let id = begin_test_session(&service, test_frame()).await;
+        service
+            .present_selection(&id, |_| {}, |_| Ok(()))
+            .await
+            .unwrap();
+
+        let mut published = Vec::new();
+        let result = service
+            .cancel_selection(
+                &id,
+                false,
+                |status| published.push(status.clone()),
+                || Err("window gone".to_string()),
+            )
+            .await;
+
+        assert_eq!(result, Err("window gone".to_string()));
+        assert_eq!(published, vec![OcrStatus::Ready]);
+        assert_eq!(service.status(), OcrStatus::Ready);
+        assert!(service.selection_snapshot().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn guarded_submit_requires_current_presented_session() {
+        let service = ready_service();
+
+        // No session at all: NoSession without hide or recognition.
+        let mut hidden = false;
+        let mut recognized = false;
+        let result = service
+            .finish_selection_for_session(
+                "ghost",
+                corners(0, 0, 40, 40),
+                |_| {},
+                || {
+                    hidden = true;
+                    Ok(())
+                },
+                |_image| {
+                    recognized = true;
+                    async { Ok(fake_ocr_result("x")) }
+                },
+            )
+            .await;
+        assert_eq!(result, Ok(FinishOutcome::NoSession));
+        assert!(!hidden && !recognized);
+
+        // A session that exists but is still unpresented must not submit.
+        let id = begin_test_session(&service, test_frame()).await;
+        let mut hidden = false;
+        let mut recognized = false;
+        let result = service
+            .finish_selection_for_session(
+                &id,
+                corners(0, 0, 40, 40),
+                |_| {},
+                || {
+                    hidden = true;
+                    Ok(())
+                },
+                |_image| {
+                    recognized = true;
+                    async { Ok(fake_ocr_result("x")) }
+                },
+            )
+            .await;
+        assert_eq!(result, Ok(FinishOutcome::NoSession));
+        assert!(!hidden && !recognized);
+        assert_eq!(service.status(), OcrStatus::SelectingArea);
+        assert_eq!(
+            service
+                .selection_snapshot()
+                .await
+                .expect("session intact")
+                .id,
+            id
+        );
+
+        // A stale id after the session is gone is also NoSession.
+        assert!(service
+            .cancel_selection(&id, false, |_| {}, || Ok(()))
+            .await
+            .unwrap());
+        let mut hidden = false;
+        let result = service
+            .finish_selection_for_session(
+                &id,
+                corners(0, 0, 40, 40),
+                |_| {},
+                || {
+                    hidden = true;
+                    Ok(())
+                },
+                |_image| async { Ok(fake_ocr_result("x")) },
+            )
+            .await;
+        assert_eq!(result, Ok(FinishOutcome::NoSession));
+        assert!(!hidden);
+        assert_eq!(service.status(), OcrStatus::Ready);
+    }
+
+    #[tokio::test]
+    async fn guarded_too_small_keeps_session_and_allows_reshow() {
+        let service = ready_service();
+        let id = begin_test_session(&service, test_frame()).await;
+        service
+            .present_selection(&id, |_| {}, |_| Ok(()))
+            .await
+            .unwrap();
+        let frame_before = service.selection_snapshot().await.unwrap().frame;
+
+        let mut hidden = 0;
+        let mut recognized = false;
+        let outcome = service
+            .finish_selection_for_session(
+                &id,
+                corners(
+                    0,
+                    0,
+                    MIN_SELECTION_SIDE as i32 - 1,
+                    MIN_SELECTION_SIDE as i32,
+                ),
+                |_| {},
+                || {
+                    hidden += 1;
+                    Ok(())
+                },
+                |_image| {
+                    recognized = true;
+                    async { Ok(fake_ocr_result("nope")) }
+                },
+            )
+            .await;
+
+        assert_eq!(outcome, Ok(FinishOutcome::TooSmall));
+        assert_eq!(hidden, 1, "a submitted selection hides the overlay first");
+        assert!(!recognized, "too-small selection must not run recognition");
+        assert_eq!(service.status(), OcrStatus::SelectingArea);
+
+        // The exact same session (id + frame Arc) survives for the retry.
+        let snapshot = service
+            .selection_snapshot()
+            .await
+            .expect("retained session");
+        assert_eq!(snapshot.id, id);
+        assert!(
+            Arc::ptr_eq(&snapshot.frame, &frame_before),
+            "TooSmall must keep the saved frame Arc"
+        );
+
+        // The retained presented session can be re-shown for the retry.
+        let mut shown = false;
+        assert_eq!(
+            service
+                .present_selection(
+                    &id,
+                    |_| {},
+                    |_| {
+                        shown = true;
+                        Ok(())
+                    }
+                )
+                .await,
+            Ok(true)
+        );
+        assert!(shown);
+        assert_eq!(service.status(), OcrStatus::SelectingArea);
+    }
+
+    #[tokio::test]
+    async fn guarded_finish_hide_failure_abandons_session_and_returns_error() {
+        let service = ready_service();
+        let id = begin_test_session(&service, test_frame()).await;
+        service
+            .present_selection(&id, |_| {}, |_| Ok(()))
+            .await
+            .unwrap();
+
+        let mut published = Vec::new();
+        let mut recognized = false;
+        let result = service
+            .finish_selection_for_session(
+                &id,
+                corners(0, 0, 40, 40),
+                |status| published.push(status.clone()),
+                || Err("hide broke".to_string()),
+                |_image| {
+                    recognized = true;
+                    async { Ok(fake_ocr_result("x")) }
+                },
+            )
+            .await;
+
+        assert_eq!(result, Err("hide broke".to_string()));
+        assert!(!recognized, "recognition must not run after a failed hide");
+        assert_eq!(published, vec![OcrStatus::Ready]);
+        assert_eq!(service.status(), OcrStatus::Ready);
+        assert!(service.selection_snapshot().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn guarded_finish_crops_exact_saved_frame() {
+        let service = ready_service();
+        let mut frame = RgbaImage::from_pixel(100, 100, Rgba([0, 0, 0, 255]));
+        frame.put_pixel(10, 20, Rgba([255, 0, 0, 255]));
+        frame.put_pixel(49, 59, Rgba([0, 0, 255, 255]));
+
+        let id = begin_test_session(&service, frame).await;
+        service
+            .present_selection(&id, |_| {}, |_| Ok(()))
+            .await
+            .unwrap();
+
+        let order = Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
+        let order_hide = Arc::clone(&order);
+        let order_recognize = Arc::clone(&order);
+        let mut published = Vec::new();
+        let seen = Arc::new(std::sync::Mutex::new(None));
+        let seen_clone = Arc::clone(&seen);
+
+        let outcome = service
+            .finish_selection_for_session(
+                &id,
+                corners(10, 20, 50, 60),
+                |status| published.push(status.clone()),
+                move || {
+                    order_hide.lock().unwrap().push("hide");
+                    Ok(())
+                },
+                move |image: Arc<RgbImage>| {
+                    order_recognize.lock().unwrap().push("recognize");
+                    *seen_clone.lock().unwrap() = Some(image);
+                    async { Ok(fake_ocr_result("guarded")) }
+                },
+            )
+            .await;
+
+        assert_eq!(
+            outcome,
+            Ok(FinishOutcome::Recognized(fake_ocr_result("guarded")))
+        );
+        assert_eq!(published, vec![OcrStatus::Recognizing, OcrStatus::Ready]);
+        assert_eq!(service.status(), OcrStatus::Ready);
+        let cropped = seen.lock().unwrap().take().expect("recognition ran");
+        assert_eq!(cropped.dimensions(), (40, 40));
+        assert_eq!(cropped.get_pixel(0, 0), &image::Rgb([255, 0, 0]));
+        assert_eq!(cropped.get_pixel(39, 39), &image::Rgb([0, 0, 255]));
+        assert_eq!(
+            *order.lock().unwrap(),
+            vec!["hide", "recognize"],
+            "hide must run before recognition"
+        );
     }
 }

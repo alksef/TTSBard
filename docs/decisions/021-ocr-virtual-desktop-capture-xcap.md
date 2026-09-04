@@ -1,7 +1,7 @@
 # DECISION-021 — Захват виртуального рабочего стола через xcap
 
 **Статус:** `accepted`
-**Связанный roadmap:** [ROADMAP-088](../roadmap/active/088-one-shot-screen-ocr.md)
+**Связанный roadmap:** [ROADMAP-088](../roadmap/completed/088-one-shot-screen-ocr.md)
 
 ## Контекст
 

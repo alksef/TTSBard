@@ -119,7 +119,7 @@ RUAccent при обновлении, полная выгрузка RUAccent п�
 Форматы пакетов и алгоритмы OCR/расстановки ударений не меняются. Ошибка чтения
 каталога намеренно не различается с отсутствием моделей.
 
-- [ROADMAP-088 — One-shot OCR](../active/088-one-shot-screen-ocr.md).
+- [ROADMAP-088 — One-shot OCR](./088-one-shot-screen-ocr.md).
 - [ROADMAP-083 — Модели RUAccent и UI загрузки](../completed/083-ruaccent-omograph-model-selection.md):
   этот item меняет описанное там пустое состояние; завершённый outcome остаётся
   историей предыдущей реализации.

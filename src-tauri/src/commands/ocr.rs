@@ -1,4 +1,9 @@
 use std::sync::Arc;
+use std::time::Duration;
+
+use base64::Engine;
+use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+use image::{ImageEncoder, RgbImage, RgbaImage};
 
 use crate::commands::input_server::accept_external_text;
 use crate::commands::speech_queue::SpeechQueueState;
@@ -7,13 +12,12 @@ use crate::ocr::capture::{capture_virtual_desktop, CaptureError, VirtualScreenGe
 use crate::ocr::packs::scan_ocr_packs;
 use crate::ocr::service::{
     decide_ocr_refresh_reconcile, decide_transition, BeginOutcome, FinishOutcome,
-    OcrRefreshReconcile, OcrTransition,
+    OcrRefreshReconcile, OcrTransition, SelectionCorners,
 };
 use crate::ocr::settings::OcrSettings;
-use crate::ocr::OcrStatus;
+use crate::ocr::{OcrService, OcrStatus};
 use crate::speech_queue::SubmissionSource;
 use crate::state::AppState;
-use image::RgbImage;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
@@ -26,8 +30,13 @@ pub const OCR_STATUS_CHANGED_EVENT: &str = "ocr-status-changed";
 pub const OCR_ONE_SHOT_FAILED_EVENT: &str = "ocr-one-shot-failed";
 
 /// Event emitted when a submitted selection was rejected as too small and the
-/// overlay is re-shown at its unchanged geometry. No payload.
+/// overlay is re-shown at its unchanged geometry. Payload: `{ sessionId }`
+/// (camelCase), matching the session that stays active for the retry.
 pub const OCR_SELECTION_REJECTED_EVENT: &str = "ocr-selection-rejected";
+
+/// Label of the declarative webview that hosts the OCR selection overlay. The
+/// preview/ready handshake and the selection IPCs only accept this caller.
+const OCR_SELECTION_WINDOW_LABEL: &str = "ocr-selection";
 
 /// Safe presentation DTO for a discovered OCR pack (no resolved paths).
 #[derive(Debug, Clone, Serialize)]
@@ -43,6 +52,29 @@ pub struct OcrPackDto {
 #[serde(rename_all = "camelCase")]
 pub struct OcrOneShotFailedPayload {
     pub reason: String,
+}
+
+/// Serializable payload for [`OCR_SELECTION_REJECTED_EVENT`]: the session id
+/// that was re-shown for another drag, so a stale TooSmall retry is never
+/// mistaken for a live one.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcrSelectionRejectedPayload {
+    pub session_id: String,
+}
+
+/// Ephemeral PNG preview of the current OCR selection frame.
+///
+/// Deliberately only dimensions plus the base64-encoded frozen frame — no
+/// path, no URL and no server/protocol registration. The payload is returned
+/// only to the `ocr-selection` webview that requested it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewDto {
+    pub session_id: String,
+    pub width: u32,
+    pub height: u32,
+    pub png_base64: String,
 }
 
 /// Fixed safe user-facing reason for a [`CaptureError`] category. The detailed
@@ -131,40 +163,93 @@ fn handle_ocr_capture(app_handle: &AppHandle, app_state: &AppState) {
         let service = app_state.ocr.clone();
         let emit = |status: &OcrStatus| emit_ocr_status(&app_handle, status);
         let capture = capture_virtual_desktop;
-        let show_overlay =
-            |geometry: &VirtualScreenGeometry| show_ocr_selection_overlay(&app_handle, geometry);
+        // PREPARE only: hide, position, size and exclude the overlay while the
+        // begin lock is held. The window is revealed later by `present_selection`
+        // through `ocr_selection_ready`, once the frame preview is loaded.
+        let prepare_overlay =
+            |geometry: &VirtualScreenGeometry| prepare_ocr_selection_overlay(&app_handle, geometry);
 
         match service
-            .begin_capture_session(emit, capture, show_overlay)
+            .begin_capture_session(emit, capture, prepare_overlay)
             .await
         {
-            BeginOutcome::Started | BeginOutcome::Ignored => {}
+            BeginOutcome::Started => {
+                // The overlay stays hidden until the frontend fetches and
+                // decodes the frozen frame. A bounded watchdog cancels a session
+                // whose preview is never acknowledged, so a dead overlay cannot
+                // leak the SelectingArea state or keep its frame alive.
+                if let Some(snapshot) = service.selection_snapshot().await {
+                    schedule_preview_timeout(app_handle.clone(), service, snapshot.id);
+                }
+            }
+            BeginOutcome::Ignored => {}
             BeginOutcome::CaptureFailed(error) => {
                 tracing::warn!(error = %error, "One-shot OCR capture failed");
                 emit_ocr_one_shot_failed(&app_handle, capture_failed_reason(&error).to_string());
             }
             BeginOutcome::OverlayFailed(reason) => {
-                tracing::warn!(error = %reason, "Failed to open ocr-selection overlay");
+                tracing::warn!(error = %reason, "Failed to prepare ocr-selection overlay");
                 emit_ocr_one_shot_failed(&app_handle, "overlayOpenFailed".to_string());
             }
         }
     });
 }
 
-/// Position, exclude from capture, show and focus the declarative
-/// `ocr-selection` overlay window over the captured virtual desktop.
+/// Bound a prepared-but-unpresented overlay may wait for the frontend to fetch
+/// and decode the frozen frame before it is cancelled as a pending preview.
+const OCR_SELECTION_PREVIEW_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Watch a just-prepared capture session that has not been revealed yet.
 ///
-/// The window is placed in physical virtual-screen coordinates (`origin` may
-/// be negative for monitors left/above the primary). Every failure is a safe
-/// `Err(String)`; if the window may already be visible, it is best-effort
-/// hidden again before the error is returned.
-fn show_ocr_selection_overlay(
+/// If the overlay never acknowledges the preview (no `ocr_selection_ready`)
+/// within [`OCR_SELECTION_PREVIEW_TIMEOUT`], cancel that exact session through
+/// `cancel_selection(id, only_unpresented: true, ...)` — which ignores an
+/// already-presented or superseded session — and surface the fixed-safe
+/// `overlayOpenFailed` only when the pending session was actually cancelled.
+/// Holds only the session id (never the frame `Arc`) and runs detached on the
+/// app runtime, so the hotkey handler never blocks on the wait.
+fn schedule_preview_timeout(app_handle: AppHandle, service: Arc<OcrService>, session_id: String) {
+    tokio::spawn(async move {
+        tokio::time::sleep(OCR_SELECTION_PREVIEW_TIMEOUT).await;
+        let emit = |status: &OcrStatus| emit_ocr_status(&app_handle, status);
+        let hide = || hide_ocr_selection_overlay(&app_handle);
+        match service
+            .cancel_selection(&session_id, true, emit, hide)
+            .await
+        {
+            Ok(false) => {}
+            Ok(true) | Err(_) => {
+                // The pending session was cancelled (an Err only means the
+                // post-cancel hide also failed): notify exactly once.
+                emit_ocr_one_shot_failed(&app_handle, "overlayOpenFailed".to_string());
+            }
+        }
+    });
+}
+
+/// PREPARE the declarative `ocr-selection` overlay over the captured virtual
+/// desktop without revealing it: hide any leftover overlay first, then place
+/// the window in physical virtual-screen coordinates (`origin` may be negative
+/// for monitors left/above the primary) and apply the capture exclusion.
+///
+/// Runs as the `show_overlay` callback of
+/// [`OcrService::begin_capture_session`] while the begin transition lock is
+/// held, so geometry is settled before any later ready command can reveal the
+/// window. The actual show/focus happens only through
+/// [`present_ocr_selection_overlay`], after the overlay has decoded the frozen
+/// frame (preview → ready). Every failure is a safe `Err(String)` and leaves
+/// the service to drop the session and restore `Ready`.
+fn prepare_ocr_selection_overlay(
     app_handle: &AppHandle,
     geometry: &VirtualScreenGeometry,
 ) -> Result<(), String> {
     let window = app_handle
-        .get_webview_window("ocr-selection")
+        .get_webview_window(OCR_SELECTION_WINDOW_LABEL)
         .ok_or_else(|| "ocr-selection window not found".to_string())?;
+
+    // A reveal from a previous TooSmall retry may still be visible; a fresh
+    // capture must never appear on top of it, so hide first.
+    let _ = window.hide();
 
     window
         .set_position(tauri::Position::Physical(tauri::PhysicalPosition {
@@ -183,7 +268,7 @@ fn show_ocr_selection_overlay(
     #[cfg(windows)]
     {
         // Capture exclusion is non-fatal: the frame was already saved before
-        // the overlay is shown, so privacy is preserved by capture→show
+        // the overlay is revealed, so privacy is preserved by capture→reveal
         // ordering. A failed exclusion only degrades a later re-capture and is
         // logged, never surfaced as an overlay-open failure.
         if let Ok(hwnd) = window.hwnd() {
@@ -196,14 +281,27 @@ fn show_ocr_selection_overlay(
         }
     }
 
+    Ok(())
+}
+
+/// Reveal and focus the already-prepared `ocr-selection` overlay window.
+///
+/// Runs inside the guarded `present_selection` callback (frontend-ready and
+/// TooSmall re-show) after the frozen frame has been decoded and rendered, so
+/// the window never becomes visible before its pixels are ready. Every failure
+/// surfaces only the fixed safe code `overlayOpenFailed` (the detail is
+/// traced); the window is hidden best-effort before the error returns.
+fn present_ocr_selection_overlay(window: &tauri::WebviewWindow) -> Result<(), String> {
     if let Err(error) = window.show() {
         let _ = window.hide();
-        return Err(format!("Failed to show ocr-selection overlay: {error}"));
+        tracing::warn!(error = %error, "Failed to present ocr-selection overlay show");
+        return Err("overlayOpenFailed".to_string());
     }
 
     if let Err(error) = window.set_focus() {
         let _ = window.hide();
-        return Err(format!("Failed to focus ocr-selection overlay: {error}"));
+        tracing::warn!(error = %error, "Failed to present ocr-selection overlay focus");
+        return Err("overlayOpenFailed".to_string());
     }
 
     Ok(())
@@ -241,86 +339,248 @@ fn hide_ocr_selection_overlay(app_handle: &AppHandle) -> Result<(), String> {
 }
 
 /// Handler for the `ocr_selection_cancel` command invoked by the selection
-/// overlay on Escape/window blur.
+/// overlay on Escape/window blur, carrying the active `session_id`.
 ///
-/// The overlay is hidden best-effort first, then [`OcrService::cancel_session`]
-/// always runs so an active `SelectingArea` session is dropped and status
-/// returns to `Ready` — a missing window or a failed hide must never leave a
-/// stale session. Such failures are traced in detail and surfaced only as the
-/// fixed safe code [`hide_ocr_selection_overlay`] reports. This is an ordinary
-/// user cancellation, so no `ocr-one-shot-failed` event is emitted.
+/// The overlay is only ever hidden and the session dropped after
+/// [`OcrService::cancel_selection`] verifies the identity under the transition
+/// lock: a stale or missing id is a silent no-op that must not hide a newer
+/// overlay or touch its status. A matching session is hidden, dropped and the
+/// status returned to `Ready`. This is an ordinary user cancellation, so no
+/// `ocr-one-shot-failed` event is emitted; a hide failure after cancellation
+/// surfaces only the fixed safe code [`hide_ocr_selection_overlay`] reports.
 #[tauri::command]
 pub async fn ocr_selection_cancel(
-    app_handle: AppHandle,
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
+    session_id: String,
 ) -> Result<(), String> {
-    let hide_result = hide_ocr_selection_overlay(&app_handle);
-
+    ensure_ocr_selection_window(&window)?;
+    let app_handle = window.app_handle().clone();
     let service = state.ocr.clone();
     let emit = |status: &OcrStatus| emit_ocr_status(&app_handle, status);
-    let cancelled = service.cancel_session(emit).await;
-    tracing::debug!(cancelled, "One-shot OCR selection cancelled");
+    let hide = || hide_ocr_selection_overlay(&app_handle);
 
-    hide_result
+    match service
+        .cancel_selection(&session_id, false, emit, hide)
+        .await
+    {
+        Ok(_) => Ok(()),
+        Err(reason) => Err(reason),
+    }
 }
 
-/// Best-effort re-show and focus of the still-positioned `ocr-selection` overlay.
+/// Require the `ocr-selection` overlay as the caller of the OCR session IPCs.
 ///
-/// Used after a too-small selection: the window kept its virtual-screen
-/// geometry from the session start, so only visibility and focus are restored.
-/// A missing window or a failed show/focus returns the fixed safe code
-/// `overlayOpenFailed`; the detailed Tauri error is never surfaced.
-fn restore_ocr_selection_overlay(app_handle: &AppHandle) -> Result<tauri::WebviewWindow, String> {
-    let window = app_handle
-        .get_webview_window("ocr-selection")
-        .ok_or_else(|| "overlayOpenFailed".to_string())?;
-
-    if let Err(error) = window.show() {
-        let _ = window.hide();
-        tracing::warn!(error = %error, "Failed to restore ocr-selection overlay show");
-        return Err("overlayOpenFailed".to_string());
+/// The preview/ready handshake and the cancel/submit commands mutate the
+/// guarded session and reveal or hide a window, so only the overlay webview
+/// may drive them. A foreign caller gets a fixed safe error and no side effect.
+fn ensure_ocr_selection_window(window: &tauri::WebviewWindow) -> Result<(), String> {
+    if window.label() == OCR_SELECTION_WINDOW_LABEL {
+        Ok(())
+    } else {
+        tracing::warn!(
+            label = window.label(),
+            "Rejected OCR selection command from a non-overlay window"
+        );
+        Err("invalidCaller".to_string())
     }
+}
 
-    if let Err(error) = window.set_focus() {
-        let _ = window.hide();
-        tracing::warn!(error = %error, "Failed to restore ocr-selection overlay focus");
-        return Err("overlayOpenFailed".to_string());
+/// Fast PNG encode of a frozen RGBA frame to a base64 payload.
+///
+/// Uses the explicit fast/sub PNG encoder instead of the crate default, whose
+/// debug-mode compression is far too slow for a whole virtual desktop. Only the
+/// encoder error is ever traced — never pixels, base64 or text.
+fn encode_frame_png_base64(frame: &RgbaImage) -> Result<String, String> {
+    let mut png = Vec::new();
+    PngEncoder::new_with_quality(&mut png, CompressionType::Fast, FilterType::Sub)
+        .write_image(
+            frame.as_raw(),
+            frame.width(),
+            frame.height(),
+            image::ExtendedColorType::Rgba8,
+        )
+        .map_err(|error| {
+            tracing::warn!(error = %error, "OCR preview PNG encode failed");
+            "previewEncodeFailed".to_string()
+        })?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(&png))
+}
+
+/// Cancel the exact matching selection and surface the fixed-safe one-shot
+/// failure only when that session was actually cancelled.
+///
+/// Used by the preview-encode failure and the explicit overlay `failed`
+/// handshake. A stale or already-presented id (per `only_unpresented`) is a
+/// silent no-op that must never notify about — or cancel — a newer session; an
+/// `Err` from the service means the hide failed AFTER the matching session was
+/// already cancelled and dropped, so the failure is still surfaced.
+async fn cancel_matching_selection_and_notify(
+    app_handle: &AppHandle,
+    service: &OcrService,
+    session_id: &str,
+    only_unpresented: bool,
+) -> Result<(), String> {
+    let emit = |status: &OcrStatus| emit_ocr_status(app_handle, status);
+    let hide = || hide_ocr_selection_overlay(app_handle);
+    match service
+        .cancel_selection(session_id, only_unpresented, emit, hide)
+        .await
+    {
+        Ok(false) => Ok(()),
+        Ok(true) => {
+            emit_ocr_one_shot_failed(app_handle, "overlayOpenFailed".to_string());
+            Ok(())
+        }
+        Err(reason) => {
+            emit_ocr_one_shot_failed(app_handle, "overlayOpenFailed".to_string());
+            Err(reason)
+        }
     }
+}
 
-    Ok(window)
+/// Handler for the `ocr_selection_preview` command: fetch the frozen frame of
+/// the current selection session and return it as an ephemeral PNG preview.
+///
+/// Invoked by the `ocr-selection` overlay once the SelectingArea status tells
+/// it a frame is waiting. The SAME stored `Arc<RgbaImage>` that recognition
+/// will later crop is encoded on a blocking worker (no pixels are copied) into
+/// a camelCase DTO `{ sessionId, width, height, pngBase64 }`. If the session is
+/// superseded while the encoder runs the result is dropped and `Ok(None)` is
+/// returned, so a stale frame is never revealed. An encode failure cancels only
+/// the matching unpresented session (surfacing `overlayOpenFailed` when it did)
+/// and returns a fixed safe error. Nothing is shown, recaptured, cached or
+/// served: the overlay reveals through `ocr_selection_ready` only after it has
+/// decoded this payload.
+#[tauri::command]
+pub async fn ocr_selection_preview(
+    window: tauri::WebviewWindow,
+    state: State<'_, AppState>,
+) -> Result<Option<PreviewDto>, String> {
+    ensure_ocr_selection_window(&window)?;
+    let app_handle = window.app_handle().clone();
+    let service = state.ocr.clone();
+
+    let Some(snapshot) = service.selection_snapshot().await else {
+        return Ok(None);
+    };
+    let session_id = snapshot.id;
+    let width = snapshot.frame.width();
+    let height = snapshot.frame.height();
+
+    let encode = {
+        let frame = Arc::clone(&snapshot.frame);
+        move || encode_frame_png_base64(&frame)
+    };
+
+    let png_base64 = match tokio::task::spawn_blocking(encode).await {
+        Ok(Ok(png)) => png,
+        Ok(Err(_)) => {
+            // The encoder already traced its detail. Cancel only the matching
+            // pending session and notify only if that cancel actually happened.
+            let _ = cancel_matching_selection_and_notify(&app_handle, &service, &session_id, true)
+                .await;
+            return Err("previewEncodeFailed".to_string());
+        }
+        Err(join_error) => {
+            tracing::warn!(error = %join_error, "OCR preview encode worker panicked");
+            let _ = cancel_matching_selection_and_notify(&app_handle, &service, &session_id, true)
+                .await;
+            return Err("previewEncodeFailed".to_string());
+        }
+    };
+
+    // Revalidate before handing pixels out: a session replaced while encoding
+    // must never expose the stale frame as if it were the current one.
+    match service.selection_snapshot().await {
+        Some(current) if current.id == session_id => Ok(Some(PreviewDto {
+            session_id,
+            width,
+            height,
+            png_base64,
+        })),
+        _ => Ok(None),
+    }
+}
+
+/// Handler for the `ocr_selection_ready` command: the overlay has decoded and
+/// rendered the preview payload, so reveal it now.
+///
+/// `present_selection` atomically verifies that `session_id` is still the
+/// current SelectingArea session under the transition lock (a stale or missing
+/// id returns `Ok(false)` and shows/hides nothing), then shows and focuses the
+/// overlay through the guarded callback. A failed reveal leaves the matching
+/// session dropped — the service restores `Ready` — and surfaces the fixed-safe
+/// `overlayOpenFailed`.
+#[tauri::command]
+pub async fn ocr_selection_ready(
+    window: tauri::WebviewWindow,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<bool, String> {
+    ensure_ocr_selection_window(&window)?;
+    let service = state.ocr.clone();
+    let emit = |status: &OcrStatus| emit_ocr_status(&app_handle, status);
+    let show = |_geometry: &VirtualScreenGeometry| present_ocr_selection_overlay(&window);
+
+    match service.present_selection(&session_id, emit, show).await {
+        Ok(presented) => Ok(presented),
+        Err(reason) => {
+            emit_ocr_one_shot_failed(&app_handle, "overlayOpenFailed".to_string());
+            Err(reason)
+        }
+    }
+}
+
+/// Handler for the `ocr_selection_failed` command: the overlay could not decode
+/// or render the preview, so drop the matching session.
+///
+/// Cancels exactly the session that failed through `cancel_selection(id,
+/// only_unpresented: false)`. A stale id has no effect and never touches a
+/// newer session; `overlayOpenFailed` is emitted only when a matching session
+/// was actually cancelled (or the post-cancel hide failed).
+#[tauri::command]
+pub async fn ocr_selection_failed(
+    window: tauri::WebviewWindow,
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<(), String> {
+    ensure_ocr_selection_window(&window)?;
+    let app_handle = window.app_handle().clone();
+    cancel_matching_selection_and_notify(&app_handle, &state.ocr, &session_id, false).await
 }
 
 /// Handler for the `ocr_selection_submit` command invoked by the selection
-/// overlay with the physical corners of the dragged rectangle in the overlay's
-/// own client-area coordinates.
+/// overlay with the active `session_id` and the physical corners of the dragged
+/// rectangle in the overlay's own client-area coordinates.
 ///
-/// The overlay is hidden first so its pixels can never enter OCR input, then
-/// [`OcrService::finish_selection`] shifts the corners into virtual-screen
-/// coordinates (by the saved session geometry origin) and crops the saved
-/// frame for recognition through the stored runtime. The recognized text is
-/// forwarded to the shared incoming intake seam; failures surface only as the
-/// fixed safe reasons of [`OCR_ONE_SHOT_FAILED_EVENT`].
+/// [`OcrService::finish_selection_for_session`] verifies identity and
+/// presentation under the transition lock first, hides the overlay while still
+/// serialized (so its pixels can never enter OCR input), then shifts the
+/// corners into virtual-screen coordinates (by the saved session geometry
+/// origin) and crops the saved frame for recognition through the stored
+/// runtime. A too-small selection keeps the same session and is re-shown
+/// through the guarded `present_selection` so a stale retry can never reopen a
+/// window over a newer session. The recognized text is forwarded to the shared
+/// incoming intake seam; failures surface only as the fixed safe reasons of
+/// [`OCR_ONE_SHOT_FAILED_EVENT`].
 #[tauri::command]
 pub async fn ocr_selection_submit(
-    app_handle: AppHandle,
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
+    session_id: String,
     x1: i32,
     y1: i32,
     x2: i32,
     y2: i32,
 ) -> Result<(), String> {
-    if let Err(reason) = hide_ocr_selection_overlay(&app_handle) {
-        // A failed hide must never leave a stale session: always cancel it,
-        // then surface only the fixed safe code.
-        let service = state.ocr.clone();
-        let emit = |status: &OcrStatus| emit_ocr_status(&app_handle, status);
-        service.cancel_session(emit).await;
-        emit_ocr_one_shot_failed(&app_handle, "overlayHideFailed".to_string());
-        return Err(reason);
-    }
+    ensure_ocr_selection_window(&window)?;
+    let app_handle = window.app_handle().clone();
 
     let service = state.ocr.clone();
     let emit = |status: &OcrStatus| emit_ocr_status(&app_handle, status);
+    let hide = || hide_ocr_selection_overlay(&app_handle);
     let recognize = {
         let service = service.clone();
         move |image: Arc<RgbImage>| {
@@ -344,30 +604,39 @@ pub async fn ocr_selection_submit(
         }
     };
 
+    let selection = SelectionCorners { x1, y1, x2, y2 };
     let outcome = service
-        .finish_selection(x1, y1, x2, y2, emit, recognize)
+        .finish_selection_for_session(&session_id, selection, emit, hide, recognize)
         .await;
 
     match outcome {
-        FinishOutcome::TooSmall => {
-            // The session stays active: restore the overlay at its unchanged
-            // geometry and tell it to re-arm for another drag.
-            match restore_ocr_selection_overlay(&app_handle) {
-                Ok(window) => {
-                    let _ = window.emit(OCR_SELECTION_REJECTED_EVENT, ());
+        Ok(FinishOutcome::TooSmall) => {
+            // The session stays active with its same id/frame: re-show the
+            // overlay through the guarded present_selection and only then tell
+            // it to re-arm, so a stale retry can never reopen anything over a
+            // newer session (and never emits stale notifications).
+            let emit = |status: &OcrStatus| emit_ocr_status(&app_handle, status);
+            let show = |_geometry: &VirtualScreenGeometry| present_ocr_selection_overlay(&window);
+            match service.present_selection(&session_id, emit, show).await {
+                Ok(true) => {
+                    let _ = window.emit(
+                        OCR_SELECTION_REJECTED_EVENT,
+                        OcrSelectionRejectedPayload {
+                            session_id: session_id.clone(),
+                        },
+                    );
                     Ok(())
                 }
+                Ok(false) => Ok(()),
                 Err(reason) => {
-                    // No usable overlay: drop the retained session and surface
-                    // only the fixed safe code.
-                    let emit = |status: &OcrStatus| emit_ocr_status(&app_handle, status);
-                    service.cancel_session(emit).await;
+                    // No usable overlay: the session is already dropped by the
+                    // service; surface only the fixed safe code.
                     emit_ocr_one_shot_failed(&app_handle, "overlayOpenFailed".to_string());
                     Err(reason)
                 }
             }
         }
-        FinishOutcome::Recognized(result) => {
+        Ok(FinishOutcome::Recognized(result)) => {
             // A normalized blank/whitespace-only result is not a real
             // recognition: surface exactly one fixed-safe `emptyResult`
             // failure, create no incoming item/job and return success to the
@@ -388,7 +657,7 @@ pub async fn ocr_selection_submit(
                 }
             }
         }
-        FinishOutcome::RecognizeFailed(reason) => {
+        Ok(FinishOutcome::RecognizeFailed(reason)) => {
             // Only the allowlisted `runtimeUnavailable` is preserved; every
             // other closure reason maps to the fixed safe `recognitionFailed`
             // so arbitrary strings are never emitted to the frontend.
@@ -400,7 +669,14 @@ pub async fn ocr_selection_submit(
             emit_ocr_one_shot_failed(&app_handle, reason.to_string());
             Ok(())
         }
-        FinishOutcome::NoSession => Ok(()),
+        Ok(FinishOutcome::NoSession) => Ok(()),
+        Err(reason) => {
+            // finish_selection_for_session errors only when the overlay hide
+            // failed after the identity check; the matching session is already
+            // dropped and `Ready` restored. Preserve the overlayHideFailed code.
+            emit_ocr_one_shot_failed(&app_handle, "overlayHideFailed".to_string());
+            Err(reason)
+        }
     }
 }
 
@@ -509,6 +785,11 @@ pub(crate) async fn stop_ocr_runtime(app_handle: &AppHandle, state: &AppState) {
     let emit = |status: &OcrStatus| emit_ocr_status(app_handle, status);
     let unregister = |hotkey: &Hotkey| unregister_ocr_capture(app_handle, hotkey);
     service.stop(emit, unregister).await;
+    // A ready command that raced the stop may have revealed the overlay after
+    // the early hide above but before the stop drained the session. Once the
+    // stop completed there is no session left to present, so hide again: a
+    // late-ready window must never stay visible.
+    let _ = hide_ocr_selection_overlay(app_handle);
 }
 
 /// Stop the OCR runtime for app shutdown without blocking on an in-flight
@@ -795,6 +1076,24 @@ mod tests {
         assert!(!is_blank_ocr_text("привет"));
         assert!(!is_blank_ocr_text("  hello world  "));
         assert!(!is_blank_ocr_text("\n\nпервая строка\n\n"));
+    }
+
+    #[test]
+    fn preview_png_round_trips_dimensions_and_color() {
+        use base64::Engine;
+
+        let mut frame = image::RgbaImage::from_pixel(4, 3, image::Rgba([12, 34, 56, 255]));
+        frame.put_pixel(3, 2, image::Rgba([200, 60, 5, 255]));
+
+        let encoded = super::encode_frame_png_base64(&frame).expect("fast PNG encode");
+        let png = base64::engine::general_purpose::STANDARD
+            .decode(&encoded)
+            .expect("valid base64");
+        let decoded = image::load_from_memory(&png).expect("valid PNG").to_rgba8();
+
+        assert_eq!(decoded.dimensions(), (4, 3), "dimensions must round-trip");
+        assert_eq!(decoded.get_pixel(0, 0), &image::Rgba([12, 34, 56, 255]));
+        assert_eq!(decoded.get_pixel(3, 2), &image::Rgba([200, 60, 5, 255]));
     }
 
     #[cfg(windows)]

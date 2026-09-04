@@ -18,7 +18,7 @@ related_tasks: []
 
 MAJOR-пункты 2–4 — доработка контрактов действующих направлений
 [ROADMAP-087](./087-external-text-input-server.md) и
-[ROADMAP-088](../active/088-one-shot-screen-ocr.md), а не новая функциональность:
+[ROADMAP-088](./088-one-shot-screen-ocr.md), а не новая функциональность:
 state-machine и hotkey-инварианты 088, сетевая инварианта «loopback = только
 локальные клиенты» из 087.
 
@@ -132,4 +132,4 @@ warnings`, `cargo test` (1643 passed), `npm test` (789), `check:ipc`,
 Отчёты ревью и таски остаются локально в
 `.work/ai/full-review/2026-09-02-full-code-review/`. Ручной runtime smoke
 оверлея OCR (мульти-мониторы/DPI, blur-гонка) остаётся на пользователе в
-контексте [ROADMAP-088](../active/088-one-shot-screen-ocr.md).
+контексте [ROADMAP-088](./088-one-shot-screen-ocr.md).
