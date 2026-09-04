@@ -42,10 +42,25 @@ export function useWebView() {
   const serverStatus = ref<WebViewServerStatus>({ state: 'stopped' })
 
   let errorTimeout: number | null = null
+  let displayUrlRequest = 0
   const listenerScope = createAsyncCleanupScope()
 
-  function updateDisplayUrl() {
-    displayUrl.value = `http://127.0.0.1:${settings.value.port}`
+  async function updateDisplayUrl() {
+    const request = ++displayUrlRequest
+    const { bind_address, port } = settings.value
+    const fallbackUrl = `http://127.0.0.1:${port}`
+    displayUrl.value = fallbackUrl
+
+    if (bind_address !== '0.0.0.0') return
+
+    try {
+      const localIp = await invoke<string>('get_local_ip')
+      if (request !== displayUrlRequest) return
+      displayUrl.value = `http://${localIp}:${port}`
+    } catch (e) {
+      if (request !== displayUrlRequest) return
+      showError('Не удалось получить локальный IP: ' + (e as Error).message)
+    }
   }
 
   const externalUrl = computed(() => {
@@ -130,7 +145,6 @@ export function useWebView() {
     try {
       debugLog('[WebView] Saving server settings')
       const result = await invoke<string>('save_webview_settings', { settings: settings.value })
-      updateDisplayUrl()
       showError(result)
     } catch (e) {
       debugError('[WebView] Failed to save server settings:', e)
@@ -261,7 +275,6 @@ export function useWebView() {
 
   onMounted(async () => {
     await loadToken()
-    updateDisplayUrl()
     await listenerScope.track(
       listen<WebViewServerStatus>('webview-server-status-changed', (event) => {
         serverStatus.value = event.payload
@@ -302,10 +315,23 @@ export function useWebView() {
     }
   }, { immediate: true, deep: true })
 
+  // Keep displayUrl synchronized with live bind_address/port edits and with
+  // asynchronously loaded settings, so the panel never shows a stale URL
+  // between save/restart cycles. Each change invalidates in-flight lookups.
+  watch(
+    [() => settings.value.bind_address, () => settings.value.port],
+    () => {
+      void updateDisplayUrl()
+    },
+    { immediate: true },
+  )
+
   onUnmounted(() => {
     if (errorTimeout !== null) {
       clearTimeout(errorTimeout)
     }
+    // Invalidate any pending local-IP lookup so it cannot write after teardown.
+    displayUrlRequest++
     listenerScope.dispose()
   })
 
