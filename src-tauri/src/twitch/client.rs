@@ -1,11 +1,23 @@
 use super::TwitchSettings;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, WriteHalf};
+use std::time::Duration;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio_native_tls::TlsConnector;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
+
+/// Default Twitch IRC endpoint (host:port)
+const DEFAULT_ENDPOINT: &str = "irc.chat.twitch.tv:6697";
+/// SNI/TLS hostname used for the handshake, regardless of the TCP endpoint
+const TLS_HOST: &str = "irc.chat.twitch.tv";
+/// Application-level deadline for connection setup (TCP + TLS + auth write)
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
+
+type TlsStream = tokio_native_tls::TlsStream<TcpStream>;
+type TlsWriter = WriteHalf<TlsStream>;
+type TlsReader = ReadHalf<TlsStream>;
 
 /// Статус подключения к Twitch
 #[derive(Debug, Clone, PartialEq)]
@@ -60,173 +72,199 @@ fn is_reconnect_command(line: &str) -> bool {
 pub struct TwitchClient {
     settings: TwitchSettings,
     status: Arc<Mutex<TwitchStatus>>,
-    shutdown: Arc<AtomicBool>,
-    writer: Arc<Mutex<Option<WriteHalf<tokio_native_tls::TlsStream<TcpStream>>>>>,
+    cancel: Arc<CancellationToken>,
+    writer: Arc<Mutex<Option<TlsWriter>>>,
+    endpoint: String,
 }
 
 impl TwitchClient {
-    /// Создаёт новый клиент Twitch
-    pub fn new(settings: TwitchSettings) -> Self {
+    fn build(settings: TwitchSettings, endpoint: String) -> Self {
         Self {
             settings,
             status: Arc::new(Mutex::new(TwitchStatus::Disconnected)),
-            shutdown: Arc::new(AtomicBool::new(false)),
+            cancel: Arc::new(CancellationToken::new()),
             writer: Arc::new(Mutex::new(None)),
+            endpoint,
         }
+    }
+
+    /// Создаёт новый клиент Twitch
+    pub fn new(settings: TwitchSettings) -> Self {
+        Self::build(settings, DEFAULT_ENDPOINT.to_string())
+    }
+
+    /// Test seam: construct a client pointing at a custom endpoint.
+    #[cfg(test)]
+    fn with_endpoint(settings: TwitchSettings, endpoint: impl Into<String>) -> Self {
+        Self::build(settings, endpoint.into())
     }
 
     /// Запускает IRC подключение
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
-        // Сброс shutdown флага
-        self.shutdown.store(false, Ordering::SeqCst);
         *self.status.lock().await = TwitchStatus::Connecting;
 
         info!(username = %self.settings.username, "Connecting to IRC");
         info!(channel = %self.settings.channel, "Target channel");
 
-        // ОДНО подключение TCP + TLS
-        let tcp_stream = TcpStream::connect("irc.chat.twitch.tv:6697").await?;
-        debug!("TCP connected");
-
-        // Explicit TLS configuration with certificate validation
-        let connector = TlsConnector::from(
-            native_tls::TlsConnector::builder()
-                .danger_accept_invalid_certs(false)
-                .danger_accept_invalid_hostnames(false)
-                .build()
-                .map_err(|e| format!("Failed to build TLS connector: {}", e))?,
-        );
-        let tls_stream = connector.connect("irc.chat.twitch.tv", tcp_stream).await?;
-        debug!("TLS connected");
-
-        let (reader, writer) = tokio::io::split(tls_stream);
+        let reader = self.connect(STARTUP_TIMEOUT).await?;
         let mut reader_lines = BufReader::new(reader).lines();
-
-        // Сохраняем writer для отправки сообщений
-        *self.writer.lock().await = Some(writer);
-
-        // Авторизация через сохранённый writer
-        let mut writer_ref = self.writer.lock().await;
-        if let Some(writer) = writer_ref.as_mut() {
-            let auth_messages = format!(
-                "PASS {}\r\nNICK {}\r\nJOIN #{}\r\n",
-                self.settings.irc_token(),
-                self.settings.username,
-                self.settings.channel
-            );
-            debug!(username = %self.settings.username, channel = %self.settings.channel,
-                "Sending auth and join");
-            writer.write_all(auth_messages.as_bytes()).await?;
-            debug!("Auth sent, waiting for response");
-        }
-        drop(writer_ref);
 
         // Запуск listener task (reader из ТОГО ЖЕ подключения)
         let status_clone = Arc::clone(&self.status);
         let writer_clone = Arc::clone(&self.writer);
-        let shutdown_clone = Arc::clone(&self.shutdown);
+        let token = Arc::clone(&self.cancel);
         let settings_channel = self.settings.channel.clone();
 
         info!("Listener task started");
 
         tokio::spawn(async move {
-            // Используем цикл с futures::select! вместо tokio::select!
-            // для проверки AtomicBool
             loop {
-                // Проверяем shutdown флаг с небольшой задержкой
-                if shutdown_clone.load(Ordering::SeqCst) {
-                    info!("Shutdown signal received");
-                    *status_clone.lock().await = TwitchStatus::Disconnected;
-                    break;
-                }
+                tokio::select! {
+                    _ = token.cancelled() => {
+                        info!("Shutdown signal received");
+                        *status_clone.lock().await = TwitchStatus::Disconnected;
+                        break;
+                    }
+                    line = reader_lines.next_line() => {
+                        match line {
+                            Ok(Some(line)) => {
+                                // Лируем только важные сообщения
+                                if line.starts_with("PING")
+                                    || !line.contains("PRIVMSG")
+                                    || line.contains("test message")
+                                {
+                                    debug!(%line, "Received");
+                                }
 
-                // Читаем одну строку с timeout
-                match tokio::time::timeout(
-                    tokio::time::Duration::from_millis(100),
-                    reader_lines.next_line(),
-                )
-                .await
-                {
-                    Ok(Ok(Some(line))) => {
-                        // Лируем только важные сообщения
-                        if line.starts_with("PING")
-                            || !line.contains("PRIVMSG")
-                            || line.contains("test message")
-                        {
-                            debug!(%line, "Received");
-                        }
-
-                        // === RECONNECT (сервер просит переподключиться) ===
-                        if is_reconnect_command(&line) {
-                            warn!("Server requested RECONNECT");
-                            *status_clone.lock().await = TwitchStatus::TransportFailure(
-                                "Server requested reconnect".to_string(),
-                            );
-                            break;
-                        }
-
-                        // === PING/PONG обработка (КРИТИЧНО!) ===
-                        if line.starts_with("PING") {
-                            debug!("PING received, sending PONG");
-
-                            // Extract the payload from PING (format: "PING :payload")
-                            let payload = if line.contains(":") {
-                                line.split(':').nth(1).unwrap_or(":tmi.twitch.tv")
-                            } else {
-                                ":tmi.twitch.tv"
-                            };
-
-                            if let Some(writer_guard) = writer_clone.lock().await.as_mut() {
-                                let pong_msg = format!("PONG :{}\r\n", payload);
-                                if let Err(e) = writer_guard.write_all(pong_msg.as_bytes()).await {
-                                    error!(error = %e, "Failed to send PONG");
-                                    *status_clone.lock().await =
-                                        TwitchStatus::TransportFailure(e.to_string());
+                                // === RECONNECT (сервер просит переподключиться) ===
+                                if is_reconnect_command(&line) {
+                                    warn!("Server requested RECONNECT");
+                                    *status_clone.lock().await = TwitchStatus::TransportFailure(
+                                        "Server requested reconnect".to_string(),
+                                    );
                                     break;
-                                } else {
-                                    debug!(%payload, "PONG sent");
+                                }
+
+                                // === PING/PONG обработка (КРИТИЧНО!) ===
+                                if line.starts_with("PING") {
+                                    debug!("PING received, sending PONG");
+
+                                    // Extract the payload from PING (format: "PING :payload")
+                                    let payload = if line.contains(":") {
+                                        line.split(':').nth(1).unwrap_or(":tmi.twitch.tv")
+                                    } else {
+                                        ":tmi.twitch.tv"
+                                    };
+
+                                    if let Some(writer_guard) = writer_clone.lock().await.as_mut() {
+                                        let pong_msg = format!("PONG :{}\r\n", payload);
+                                        if let Err(e) = writer_guard.write_all(pong_msg.as_bytes()).await {
+                                            error!(error = %e, "Failed to send PONG");
+                                            *status_clone.lock().await =
+                                                TwitchStatus::TransportFailure(e.to_string());
+                                            break;
+                                        } else {
+                                            debug!(%payload, "PONG sent");
+                                        }
+                                    }
+                                }
+
+                                // Успешный вход (376 или GLHF)
+                                if line.contains("376") || line.contains("GLHF") {
+                                    info!(channel = %settings_channel, "Successfully joined channel");
+                                    info!("Connection established");
+                                    *status_clone.lock().await = TwitchStatus::Connected;
+                                }
+
+                                // Ошибка авторизации
+                                if line.contains("Login authentication failed")
+                                    || line.contains("Login unsuccessful")
+                                {
+                                    error!("Authentication failed");
+                                    error!("Check your username and token");
+                                    *status_clone.lock().await =
+                                        TwitchStatus::Error("Authentication failed".to_string());
                                 }
                             }
+                            Ok(None) => {
+                                warn!("Connection closed by server");
+                                *status_clone.lock().await = TwitchStatus::TransportFailure(
+                                    "Connection closed by server".to_string(),
+                                );
+                                break;
+                            }
+                            Err(e) => {
+                                error!(error = %e, "Read error");
+                                *status_clone.lock().await = TwitchStatus::TransportFailure(e.to_string());
+                                break;
+                            }
                         }
-
-                        // Успешный вход (376 или GLHF)
-                        if line.contains("376") || line.contains("GLHF") {
-                            info!(channel = %settings_channel, "Successfully joined channel");
-                            info!("Connection established");
-                            *status_clone.lock().await = TwitchStatus::Connected;
-                        }
-
-                        // Ошибка авторизации
-                        if line.contains("Login authentication failed")
-                            || line.contains("Login unsuccessful")
-                        {
-                            error!("Authentication failed");
-                            error!("Check your username and token");
-                            *status_clone.lock().await =
-                                TwitchStatus::Error("Authentication failed".to_string());
-                        }
-                    }
-                    Ok(Ok(None)) => {
-                        warn!("Connection closed by server");
-                        *status_clone.lock().await = TwitchStatus::TransportFailure(
-                            "Connection closed by server".to_string(),
-                        );
-                        break;
-                    }
-                    Ok(Err(e)) => {
-                        error!(error = %e, "Read error");
-                        *status_clone.lock().await = TwitchStatus::TransportFailure(e.to_string());
-                        break;
-                    }
-                    Err(_) => {
-                        // Timeout - продолжаем цикл
-                        continue;
                     }
                 }
             }
         });
 
         Ok(())
+    }
+
+    /// Устанавливает TCP/TLS соединение и отправляет авторизацию, ограничивая
+    /// весь этап дедлайном. Возвращает read-half для запуска listener-задачи.
+    async fn connect(&self, deadline: Duration) -> Result<TlsReader, Box<dyn std::error::Error>> {
+        if self.cancel.is_cancelled() {
+            return Err("Connection setup cancelled".into());
+        }
+
+        let token = Arc::clone(&self.cancel);
+
+        let connect = async {
+            // ОДНО подключение TCP + TLS
+            let tcp_stream = TcpStream::connect(self.endpoint.as_str()).await?;
+            debug!("TCP connected");
+
+            // Explicit TLS configuration with certificate validation
+            let connector = TlsConnector::from(
+                native_tls::TlsConnector::builder()
+                    .danger_accept_invalid_certs(false)
+                    .danger_accept_invalid_hostnames(false)
+                    .build()
+                    .map_err(|e| format!("Failed to build TLS connector: {}", e))?,
+            );
+            let tls_stream = connector.connect(TLS_HOST, tcp_stream).await?;
+            debug!("TLS connected");
+
+            let (reader, writer) = tokio::io::split(tls_stream);
+
+            // Сохраняем writer для отправки сообщений
+            *self.writer.lock().await = Some(writer);
+
+            // Авторизация через сохранённый writer
+            let mut writer_ref = self.writer.lock().await;
+            if let Some(writer) = writer_ref.as_mut() {
+                let auth_messages = format!(
+                    "PASS {}\r\nNICK {}\r\nJOIN #{}\r\n",
+                    self.settings.irc_token(),
+                    self.settings.username,
+                    self.settings.channel
+                );
+                debug!(username = %self.settings.username, channel = %self.settings.channel,
+                    "Sending auth and join");
+                writer.write_all(auth_messages.as_bytes()).await?;
+                debug!("Auth sent, waiting for response");
+            }
+            drop(writer_ref);
+
+            Ok(reader)
+        };
+
+        tokio::select! {
+            _ = token.cancelled() => {
+                Err("Connection setup cancelled".into())
+            }
+            result = tokio::time::timeout(deadline, connect) => match result {
+                Ok(inner) => inner,
+                Err(_) => Err("Connection setup timed out".into()),
+            },
+        }
     }
 
     /// Отправляет сообщение в чат Twitch
@@ -262,9 +300,7 @@ impl TwitchClient {
 
     /// Останавливает клиент
     pub async fn stop(&self) {
-        self.shutdown.store(true, Ordering::SeqCst);
-        // Даем время task-у завершиться
-        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        self.cancel.cancel();
     }
 
     /// Возвращает текущий статус
@@ -276,6 +312,7 @@ impl TwitchClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::twitch::TwitchSettings;
 
     #[test]
     fn test_irc_crlf_injection_prevention() {
@@ -355,5 +392,51 @@ mod tests {
             TwitchStatus::Disconnected,
             TwitchStatus::TransportFailure("Connection reset".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn start_with_cancelled_token_returns_promptly() {
+        let client = TwitchClient::new(TwitchSettings::default());
+        client.stop().await;
+
+        let result = tokio::time::timeout(Duration::from_secs(2), client.start()).await;
+        let err = result
+            .expect("start() should resolve promptly")
+            .expect_err("expected a cancellation error");
+        assert!(
+            err.to_string().contains("cancelled"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn connect_deadline_expires_against_silent_local_server() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind local listener");
+        let addr = listener.local_addr().expect("local addr");
+
+        tokio::spawn(async move {
+            if let Ok((socket, _)) = listener.accept().await {
+                // Hold the connection open without writing anything, so the
+                // TLS handshake stalls until the deadline fires.
+                let _held = socket;
+                std::future::pending::<()>().await;
+            }
+        });
+
+        let client = TwitchClient::with_endpoint(TwitchSettings::default(), addr.to_string());
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            client.connect(Duration::from_millis(200)),
+        )
+        .await
+        .expect("connect() should resolve promptly")
+        .expect_err("expected a timeout error");
+
+        let msg = result.to_string();
+        assert!(msg.contains("timed out"), "unexpected error: {}", msg);
     }
 }
