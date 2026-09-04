@@ -14,6 +14,7 @@ use crate::state::AppState;
 use axum::Router;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
@@ -89,9 +90,12 @@ pub async fn run_input_server(app_handle: AppHandle, shutdown: CancellationToken
         app_handle: app_handle.clone(),
     });
 
-    let serve = |listener: TcpListener, router: Router| {
+    let serve = |listener: TcpListener, router: Router, token: CancellationToken| {
         tokio::spawn(async move {
-            if let Err(error) = axum::serve(listener, router).await {
+            if let Err(error) = axum::serve(listener, router)
+                .with_graceful_shutdown(token.cancelled_owned())
+                .await
+            {
                 warn!(error = %error, "Input server serve error");
             }
         })
@@ -105,6 +109,22 @@ pub async fn run_input_server(app_handle: AppHandle, shutdown: CancellationToken
     };
 
     run_input_server_core(service, wake_rx, shutdown, intake, serve, emit).await;
+}
+
+/// Upper bound for draining in-flight requests before a listener stop aborts
+/// the serve task as insurance.
+const GRACEFUL_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Gracefully drain a running server task, aborting it as insurance only when
+/// the drain exceeds [`GRACEFUL_DRAIN_TIMEOUT`].
+async fn drain_server_task(server_task: &mut JoinHandle<()>) {
+    if tokio::time::timeout(GRACEFUL_DRAIN_TIMEOUT, &mut *server_task)
+        .await
+        .is_err()
+    {
+        server_task.abort();
+        let _ = server_task.await;
+    }
 }
 
 /// Testable supervisor core: one lifecycle loop over the in-memory run request.
@@ -124,9 +144,15 @@ async fn run_input_server_core<E, S>(
     mut emit: E,
 ) where
     E: FnMut(&InputServerStatus),
-    S: Fn(TcpListener, Router) -> JoinHandle<()>,
+    S: Fn(TcpListener, Router, CancellationToken) -> JoinHandle<()>,
 {
     loop {
+        // Coalesce wake bursts: a rapid stop→start queues several wake messages
+        // before this loop observes them. Draining here lets the loop process
+        // only the latest state, so a rapid stop→start never double-binds the
+        // same port.
+        while wake_rx.try_recv().is_ok() {}
+
         let (requested, port) = {
             let requested = service.run_requested();
             let settings = service.settings.read().await;
@@ -164,23 +190,24 @@ async fn run_input_server_core<E, S>(
             }
         };
 
-        let router = build_router(intake.clone());
-        let mut server_task = serve(listener, router);
+        let router = build_router(intake.clone(), port);
+        let server_token = shutdown.child_token();
+        let mut server_task = serve(listener, router, server_token.clone());
         service.publish_status(InputServerStatus::Running, &mut emit);
         info!(port, "Input server running");
 
         tokio::select! {
             biased;
             _ = shutdown.cancelled() => {
-                server_task.abort();
-                let _ = server_task.await;
+                server_token.cancel();
+                drain_server_task(&mut server_task).await;
                 service.publish_status(InputServerStatus::Stopped, &mut emit);
                 info!("Input server stopped on shutdown");
                 return;
             }
             _ = wake_rx.recv() => {
-                server_task.abort();
-                let _ = server_task.await;
+                server_token.cancel();
+                drain_server_task(&mut server_task).await;
                 service.publish_status(InputServerStatus::Stopped, &mut emit);
                 info!("Input server stopped on settings wake; rereading settings");
                 continue;
@@ -227,9 +254,32 @@ mod tests {
         }
     }
 
-    fn real_serve(listener: TcpListener, router: Router) -> JoinHandle<()> {
+    /// Intake that blocks a request in-flight until the test releases it.
+    struct GatedIntake {
+        entered: Arc<tokio::sync::Notify>,
+        release: Arc<tokio::sync::Notify>,
+    }
+
+    #[async_trait::async_trait]
+    impl TextIntake for GatedIntake {
+        async fn accept(&self, _text: String) -> Result<InputServerAccepted, CommandError> {
+            self.entered.notify_one();
+            self.release.notified().await;
+            Ok(InputServerAccepted::Queued {
+                job_id: Uuid::nil(),
+            })
+        }
+    }
+
+    fn real_serve(
+        listener: TcpListener,
+        router: Router,
+        token: CancellationToken,
+    ) -> JoinHandle<()> {
         tokio::spawn(async move {
-            let _ = axum::serve(listener, router).await;
+            let _ = axum::serve(listener, router)
+                .with_graceful_shutdown(token.cancelled_owned())
+                .await;
         })
     }
 
@@ -290,7 +340,15 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn disabled_server_waits_stopped_then_starts_on_wake() {
+        // A free port, not the fixed default (10101): a running ttsbard.exe or
+        // another test process holding the default port must not fail this
+        // test with a bind error.
+        let port = free_loopback_port().await;
         let service = Arc::new(InputServerService::new());
+        *service.settings.write().await = InputServerSettings {
+            start_on_boot: false,
+            port,
+        };
         let shutdown = CancellationToken::new();
         let transitions = Arc::new(Mutex::new(Vec::new()));
         let handle = spawn_core(service.clone(), shutdown.clone(), transitions.clone());
@@ -495,5 +553,114 @@ mod tests {
 
         shutdown.cancel();
         handle.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn two_fast_wakes_coalesce_into_single_rebind() {
+        let port = free_loopback_port().await;
+        let service = Arc::new(InputServerService::new());
+        *service.settings.write().await = InputServerSettings {
+            start_on_boot: false,
+            port,
+        };
+        service.set_run_request(true);
+        let shutdown = CancellationToken::new();
+        let transitions = Arc::new(Mutex::new(Vec::new()));
+        let handle = spawn_core(service.clone(), shutdown.clone(), transitions.clone());
+
+        wait_for_status(&service, InputServerStatus::Running).await;
+        transitions.lock().clear();
+
+        // Two rapid wakes queue before the supervisor reacts to either; the
+        // coalesce drain must collapse them into a single stop→start rebound.
+        service.wake();
+        service.wake();
+
+        for _ in 0..500 {
+            if service.status() == InputServerStatus::Running
+                && transitions.lock().contains(&InputServerStatus::Stopped)
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        // Allow any (incorrect) second cycle to surface before asserting.
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        assert_eq!(
+            transitions.lock().clone(),
+            vec![
+                InputServerStatus::Stopped,
+                InputServerStatus::Starting,
+                InputServerStatus::Running,
+            ],
+            "two rapid wakes must coalesce into one rebind cycle"
+        );
+
+        shutdown.cancel();
+        handle.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn shutdown_drains_inflight_request_before_completing() {
+        let port = free_loopback_port().await;
+        let service = Arc::new(InputServerService::new());
+        *service.settings.write().await = InputServerSettings {
+            start_on_boot: false,
+            port,
+        };
+        service.set_run_request(true);
+
+        let shutdown = CancellationToken::new();
+        let transitions = Arc::new(Mutex::new(Vec::new()));
+        let (wake_tx, wake_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+        service.install_wake_sender(wake_tx);
+
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let intake: Arc<dyn TextIntake> = Arc::new(GatedIntake {
+            entered: entered.clone(),
+            release: release.clone(),
+        });
+        let emit = move |status: &InputServerStatus| {
+            transitions.lock().push(status.clone());
+        };
+        let handle = tokio::spawn(run_input_server_core(
+            service.clone(),
+            wake_rx,
+            shutdown.clone(),
+            intake,
+            real_serve,
+            emit,
+        ));
+
+        wait_for_status(&service, InputServerStatus::Running).await;
+
+        let response_task = tokio::spawn(async move {
+            reqwest::Client::new()
+                .post(format!("http://127.0.0.1:{port}/v1/speech"))
+                .header("content-type", "application/json")
+                .body(serde_json::json!({ "text": "hello" }).to_string())
+                .send()
+                .await
+        });
+
+        // Wait until the request is inside the intake, then shut down while it
+        // is still in-flight.
+        entered.notified().await;
+        shutdown.cancel();
+
+        // Release the request: graceful shutdown must let it finish (no abort),
+        // proving in-flight text is not dropped and re-sent on client retry.
+        release.notify_one();
+
+        let response = response_task
+            .await
+            .unwrap()
+            .expect("in-flight request must complete during graceful shutdown");
+        assert_eq!(response.status(), reqwest::StatusCode::ACCEPTED);
+
+        handle.await.unwrap();
+        assert_eq!(service.status(), InputServerStatus::Stopped);
     }
 }

@@ -1,8 +1,9 @@
 use crate::commands::input_server::{error_code, InputServerAccepted};
 use crate::ipc::{speech as speech_contract, CommandError};
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{DefaultBodyLimit, State};
-use axum::http::StatusCode;
+use axum::extract::{DefaultBodyLimit, Request, State};
+use axum::http::{header, StatusCode};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -19,6 +20,10 @@ pub const INVALID_REQUEST_CODE: &str = "input_server.invalid_request";
 
 /// Stable error code used when the request body exceeds [`MAX_BODY_BYTES`].
 pub const BODY_TOO_LARGE_CODE: &str = "input_server.body_too_large";
+
+/// Stable error code used when the request Host header is missing or does not
+/// name this loopback listener (`127.0.0.1:<port>` / `localhost:<port>`).
+pub const FORBIDDEN_HOST_CODE: &str = "input_server.forbidden_host";
 
 /// Test-injectable asynchronous intake seam for the loopback server.
 ///
@@ -44,13 +49,41 @@ struct SpeechRequest {
 /// Build the loopback input server router.
 ///
 /// Routes: `GET /health`, `POST /v1/speech`. No CORS middleware; body limited
-/// to [`MAX_BODY_BYTES`].
-pub fn build_router(intake: Arc<dyn TextIntake>) -> Router {
+/// to [`MAX_BODY_BYTES`]. Every request is gated on an exact loopback
+/// `Host` header (`127.0.0.1:<port>` / `localhost:<port>`) so DNS-rebinding
+/// pages rebinding an attacker domain to 127.0.0.1 are rejected with 403
+/// before any handler or intake runs.
+pub fn build_router(intake: Arc<dyn TextIntake>, port: u16) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/v1/speech", post(post_speech))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
+        .layer(middleware::from_fn_with_state(port, host_gate))
         .with_state(RouterState { intake })
+}
+
+async fn host_gate(State(port): State<u16>, request: Request, next: Next) -> Response {
+    let allowed = request
+        .headers()
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|host| host_matches_listener(host, port));
+    if allowed {
+        next.run(request).await
+    } else {
+        let error = CommandError::new(FORBIDDEN_HOST_CODE, "Forbidden host", false);
+        (StatusCode::FORBIDDEN, Json(error)).into_response()
+    }
+}
+
+fn host_matches_listener(host: &str, port: u16) -> bool {
+    let Some((hostname, host_port)) = host.rsplit_once(':') else {
+        return false;
+    };
+    if host_port.parse::<u16>() != Ok(port) {
+        return false;
+    }
+    hostname == "127.0.0.1" || hostname.eq_ignore_ascii_case("localhost")
 }
 
 async fn health() -> impl IntoResponse {
@@ -135,15 +168,36 @@ mod tests {
         }
     }
 
+    const TEST_PORT: u16 = 10101;
+
     fn app(result: Result<InputServerAccepted, CommandError>) -> (Router, Arc<FakeIntake>) {
         let intake = Arc::new(FakeIntake::new(result));
-        (build_router(intake.clone()), intake)
+        (build_router(intake.clone(), TEST_PORT), intake)
     }
 
     fn request(method: Method, uri: &str, content_type: Option<&str>, body: Body) -> Request<Body> {
+        request_with_host(
+            method,
+            uri,
+            content_type,
+            body,
+            Some(&format!("127.0.0.1:{TEST_PORT}")),
+        )
+    }
+
+    fn request_with_host(
+        method: Method,
+        uri: &str,
+        content_type: Option<&str>,
+        body: Body,
+        host: Option<&str>,
+    ) -> Request<Body> {
         let mut builder = Request::builder().method(method).uri(uri);
         if let Some(content_type) = content_type {
             builder = builder.header(header::CONTENT_TYPE, content_type);
+        }
+        if let Some(host) = host {
+            builder = builder.header(header::HOST, host);
         }
         builder.body(body).unwrap()
     }
@@ -164,7 +218,7 @@ mod tests {
         let intake = Arc::new(FakeIntake::new(Ok(InputServerAccepted::Queued {
             job_id: Uuid::nil(),
         })));
-        let app = build_router(intake);
+        let app = build_router(intake, TEST_PORT);
 
         let response = app
             .oneshot(request(Method::GET, "/health", None, Body::empty()))
@@ -428,5 +482,153 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::ACCEPTED);
         assert_eq!(intake.call_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn foreign_host_returns_403_and_does_not_call_adapter() {
+        let (app, intake) = app(Ok(InputServerAccepted::Queued {
+            job_id: Uuid::nil(),
+        }));
+
+        let response = app
+            .oneshot(request_with_host(
+                Method::POST,
+                "/v1/speech",
+                Some("application/json"),
+                json_body("hello world"),
+                Some(&format!("evil.example:{TEST_PORT}")),
+            ))
+            .await
+            .unwrap();
+
+        let (status, value) = response_parts(response).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(value["code"], FORBIDDEN_HOST_CODE);
+        assert_eq!(value["message"], "Forbidden host");
+        assert!(!value["retryable"].as_bool().unwrap());
+        assert_eq!(intake.call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn missing_host_returns_403_and_does_not_call_adapter() {
+        let (app, intake) = app(Ok(InputServerAccepted::Queued {
+            job_id: Uuid::nil(),
+        }));
+
+        let response = app
+            .oneshot(request_with_host(
+                Method::POST,
+                "/v1/speech",
+                Some("application/json"),
+                json_body("hello world"),
+                None,
+            ))
+            .await
+            .unwrap();
+
+        let (status, value) = response_parts(response).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(value["code"], FORBIDDEN_HOST_CODE);
+        assert_eq!(intake.call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn health_with_foreign_host_returns_403() {
+        let (app, intake) = app(Ok(InputServerAccepted::Queued {
+            job_id: Uuid::nil(),
+        }));
+
+        let response = app
+            .oneshot(request_with_host(
+                Method::GET,
+                "/health",
+                None,
+                Body::empty(),
+                Some(&format!("rebind.example:{TEST_PORT}")),
+            ))
+            .await
+            .unwrap();
+
+        let (status, value) = response_parts(response).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(value["code"], FORBIDDEN_HOST_CODE);
+        assert_eq!(intake.call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn loopback_ip_and_localhost_hosts_are_accepted() {
+        for host in [
+            format!("127.0.0.1:{TEST_PORT}"),
+            format!("localhost:{TEST_PORT}"),
+            format!("LOCALHOST:{TEST_PORT}"),
+        ] {
+            let (app, intake) = app(Ok(InputServerAccepted::Queued {
+                job_id: Uuid::nil(),
+            }));
+
+            let response = app
+                .oneshot(request_with_host(
+                    Method::POST,
+                    "/v1/speech",
+                    Some("application/json"),
+                    json_body("hello world"),
+                    Some(&host),
+                ))
+                .await
+                .unwrap();
+
+            assert_eq!(
+                response.status(),
+                StatusCode::ACCEPTED,
+                "host {host} must be accepted"
+            );
+            assert_eq!(intake.call_count(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn loopback_hostname_with_wrong_port_returns_403() {
+        let (app, intake) = app(Ok(InputServerAccepted::Queued {
+            job_id: Uuid::nil(),
+        }));
+
+        let response = app
+            .oneshot(request_with_host(
+                Method::POST,
+                "/v1/speech",
+                Some("application/json"),
+                json_body("hello world"),
+                Some(&format!("127.0.0.1:{}", TEST_PORT + 1)),
+            ))
+            .await
+            .unwrap();
+
+        let (status, value) = response_parts(response).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(value["code"], FORBIDDEN_HOST_CODE);
+        assert_eq!(intake.call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn ipv6_loopback_host_returns_403() {
+        let (app, intake) = app(Ok(InputServerAccepted::Queued {
+            job_id: Uuid::nil(),
+        }));
+
+        let response = app
+            .oneshot(request_with_host(
+                Method::POST,
+                "/v1/speech",
+                Some("application/json"),
+                json_body("hello world"),
+                Some(&format!("[::1]:{TEST_PORT}")),
+            ))
+            .await
+            .unwrap();
+
+        let (status, value) = response_parts(response).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(value["code"], FORBIDDEN_HOST_CODE);
+        assert_eq!(intake.call_count(), 0);
     }
 }
