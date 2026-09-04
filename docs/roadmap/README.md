@@ -45,7 +45,7 @@ related_tasks: []
 
 ## Активные направления
 
-- [ROADMAP-095 — Устойчивое переподключение Twitch IRC](./active/095-twitch-irc-reconnect-resilience.md)
+Активных направлений нет.
 
 ## Завершённые направления
 
@@ -60,6 +60,7 @@ related_tasks: []
 
 ### Интеграции
 
+- [ROADMAP-095 — Устойчивое переподключение Twitch IRC](./completed/095-twitch-irc-reconnect-resilience.md)
 - [ROADMAP-087 — входной сервер текста для audio-only озвучивания](./completed/087-external-text-input-server.md)
 
 ### TTS-провайдеры

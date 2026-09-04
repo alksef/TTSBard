@@ -18,7 +18,7 @@ Repository-wide AI-ready scan от 2026-07-30 показал, что часть 
   используют зарегистрированную команду `spellcheck` и покрыты тестами;
 - завершённый ROADMAP-040 одновременно описывает исходное отсутствие Vitest и
   Windows Rust tests и актуальный результат с frontend test suite и Windows CI;
-- `PROBLEMS.md` оформляет глобальный перехват текста и потоковую отправку по
+- [исходная постановка продукта](../../research/initial-product-concept.md) оформляет глобальный перехват текста и потоковую отправку по
   terminating characters как действующие MVP-требования, хотя актуальная
   архитектура использует явный `submit_speech → SpeechQueue`;
 - автоматическая проверка структуры документации не обнаруживает этот lifecycle
@@ -52,7 +52,7 @@ scope. Запуск frontend и Rust tests в Windows workflow также уже
    документацию, после чего удалить task-файл и запись из `docs/tasks/README.md`.
 2. В ROADMAP-040 переименовать исходный test baseline и добавить короткий
    актуальный итог без противоречия между разделами.
-3. Обозначить `PROBLEMS.md` как историческую постановку либо переписать её
+3. Обозначить `initial-product-concept.md` как историческую постановку либо переписать её
    функциональные требования по текущим README, architecture и roadmap.
 4. Сохранить глобальный key-action intercept как действующую функцию, не
    смешивая его с удалённым глобальным перехватом вводимого текста.
@@ -72,7 +72,7 @@ scope. Запуск frontend и Rust tests в Windows workflow также уже
 - TASK-118 отсутствует среди текущих задач, а его результат доступен в
   долговечном owning source;
 - ROADMAP-040 не содержит взаимоисключающих утверждений о текущем test/CI state;
-- `PROBLEMS.md` не может быть прочитан как требование вернуть удалённый global
+- `initial-product-concept.md` не может быть прочитан как требование вернуть удалённый global
   text-interception flow;
 - новый lifecycle check имеет positive и negative fixtures либо эквивалентный
   детерминированный тест;
@@ -84,7 +84,7 @@ scope. Запуск frontend и Rust tests в Windows workflow также уже
 - Завершённый TASK-118 удалён из `docs/tasks/`; его совместимый spellcheck-итог
   сохранён в ROADMAP-055.
 - Исходный test baseline ROADMAP-040 отделён от актуального результата, а
-  `PROBLEMS.md` однозначно обозначен как историческая постановка со ссылками на
+  `initial-product-concept.md` однозначно обозначен как историческая постановка со ссылками на
   текущие README и architecture.
 - `scripts/check-docs.ps1` теперь двунаправленно сверяет task-файлы с индексом и
   их statuses. Детерминированный Windows PowerShell test покрывает корректный

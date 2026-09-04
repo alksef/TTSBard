@@ -17,6 +17,9 @@ flowchart LR
     Core --> OS["Windows hooks, hotkeys and windows"]
     Core --> Services["WebView, Twitch, Telegram, VTube Studio"]
     Browser["OBS / browser clients"] <-->|"HTTP + SSE"| Services
+    External["External text clients"] -->|"POST /v1/speech, loopback"| Intake["Shared external-text intake"]
+    Screen["Screen selection"] --> OCR["Local OCR"] --> Intake
+    Intake --> Inbox["Incoming: review or auto-play"] --> Core
 ```
 
 ## Точки входа и запуск
@@ -45,6 +48,8 @@ flowchart LR
 | Редактор | `editor.rs`, `preprocessor/`, `spellcheck.rs` | Подготовка текста, история и проверка орфографии |
 | Окна и ввод | `window.rs`, `hotkeys.rs`, `soundpanel/` | Окна, глобальные клавиши и низкоуровневый ввод |
 | Интеграции | `webview/`, `twitch/`, `telegram/`, `vtube_studio/` | Внешние протоколы и lifecycle подключений |
+| Внешний текст | `input_server/`, `commands/input_server.rs` | Loopback listener, общий intake, очередь ожидающих реплик |
+| OCR | `ocr/`, `commands/ocr.rs` | Пакеты моделей, runtime, захват, распознавание и передача в intake |
 
 ## Frontend ↔ backend
 
@@ -64,6 +69,10 @@ Frontend вызывает Rust через Tauri commands. Команда дол�
 `AppState` — основной runtime-контейнер. В нём находятся общие сервисы WebView,
 Twitch, VTube Studio и editor, TTS registry, единый Tokio runtime, cancellation
 token, кэши и небольшие runtime-флаги.
+
+`AppState` также владеет `InputServerService` и `OcrService`. Общая политика
+«Входящих» и ожидающие элементы пока принадлежат `InputServerService`, хотя
+используются и OCR без запущенного HTTP-listener.
 
 Отдельные Tauri-managed состояния используются там, где жизненный цикл уже
 выделен из `AppState`: настройки, окна, playback, SoundPanel, история, вкладки и
@@ -106,6 +115,25 @@ InputPanel
 Старый путь глобального перехвата текста и `AppEvent::TextReady` удалён; low-level
 keyboard hook используется только экспериментальным Numpad/F-key control для
 дискретных действий приложения.
+
+### Внешний текст и OCR
+
+HTTP `POST /v1/speech` и результат OCR сходятся в
+`commands/input_server.rs::accept_external_text`. Общий intake валидирует
+вход и применяет политику `IncomingSettings`: принять задание в `SpeechQueue`
+либо сохранить элемент для ручного разбора. OCR выполняет локальный захват и
+распознавание, после чего передаёт текст с отметкой источника OCR.
+
+Для автоматически принятой реплики создаётся snapshot провайдера и голоса.
+Далее используется общий speech pipeline. Delivery policy внешнего текста
+исключает WebView и Twitch. Действие «Редактировать» открывает обычную вкладку:
+последующая отправка подчиняется уже маршруту редактора.
+
+Frontend показывает вкладку «Входящие», если HTTP-сервер работает, OCR включён
+в настройках или есть ожидающие элементы (`InputPanel.vue::incomingAvailable`).
+Это условие доступности вкладки, а не подтверждение готовности OCR runtime.
+Контракты — [HTTP](../user/input-server.md), пользовательский разбор —
+[«Входящие»](../user/incoming.md), установка моделей — [OCR](../user/ocr.md).
 
 ### Рассылка текста и typing state
 
@@ -195,7 +223,7 @@ Frontend сначала подписывается на `webview-server-status-c
 - WebView server применяет собственные правила bind address и token; отдельный
   CORS layer не установлен, а встроенный template использует same-origin пути;
   см.
-  [модель безопасности WebView](../integrations/webview.md#security-model).
+  [доступ из сети WebView](../integrations/webview.md#доступ-из-сети).
 - Windows hooks активируются только в требуемом режиме и освобождаются при
   shutdown.
 - Новая интеграция должна иметь явные connect/disconnect операции, timeout и

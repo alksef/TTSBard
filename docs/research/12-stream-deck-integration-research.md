@@ -1,5 +1,8 @@
 # Research: интеграция Stream Deck с TTSBard
 
+> Состояние на 2026-09-04: Предложение без текущего обязательства реализации; возвращаться при спросе на плагин с обратной связью.
+> Итоги и связи — в [индексе исследований](./README.md).
+
 **Дата:** 2026-07-18
 **Статус:** research note
 **Связано:** `src-tauri/src/commands/mod.rs`, `src-tauri/src/commands/playback.rs`, `src/components/InputPanel.vue`, `src/components/InterceptPanel.vue`

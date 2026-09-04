@@ -1,5 +1,8 @@
 # LunaTranslator → TTSBard: граница интеграции текста
 
+> Состояние на 2026-09-04: HTTP-интеграция реализована в ROADMAP-087; это основания решения, не инструкция установки.
+> Итоги и связи — в [индексе исследований](./README.md).
+
 **Дата:** 2026-08-31
 **Связанный roadmap:** [ROADMAP-087](../roadmap/completed/087-external-text-input-server.md)
 **Продолжение:** [встроенный one-shot OCR](./16-built-in-screen-ocr-feasibility.md)

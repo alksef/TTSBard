@@ -256,7 +256,7 @@ fire-and-forget путь.
 
 ## Связанные материалы
 
-- [Руководство: управление отправкой](../../user/guide.md#управление-отправкой)
+- [Руководство: управление отправкой](../../user/editor.md#управление-отправкой)
 - [ROADMAP-047 — очередь задач озвучивания](047-speech-job-queue.md)
 - [ROADMAP-055 — request-local routing flags](055-quality-and-ai-ready-architecture.md)
 - [DECISION-019 — integration settings Arc contract](../../decisions/019-integration-settings-arc-contract.md)

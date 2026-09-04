@@ -1,6 +1,6 @@
 ---
 id: ROADMAP-095
-status: in_progress
+status: completed
 created: 2026-09-04
 updated: 2026-09-04
 related_tasks: []
@@ -66,7 +66,30 @@ Legacy-скрипт `.work/TITTS.py` содержал ориентир пове�
 7. Текст пользовательских сообщений, OAuth token и сырые IRC-пакеты не попадают
    в info/warn/error логи.
 
-## Этапы
+## Outcome
+
+- `TwitchClient` различает намеренное отключение, ошибку аутентификации и
+  retryable transport failure. Команда IRC `RECONNECT`, EOF/read error listener,
+  ошибка `PONG` и неудачная запись `PRIVMSG` переводят только текущую сессию в
+  transport failure; сообщение с неопределённой доставкой не повторяется.
+- `run_twitch_client` — единственный владелец retry lifecycle: он удаляет
+  отказавший client до ожидания и создаёт следующую сессию последовательно.
+  Backoff начинается с 500 ms, удваивается до 30 s и дополняется jitter 100–500
+  ms. Подключение остаётся в состоянии `Connecting`, пока повтор ожидается или
+  выполняется.
+- `Stop`, `Restart`, выключение интеграции и shutdown сбрасывают ожидание;
+  неактуальный listener не может опубликовать состояние новой сессии. Ошибка
+  аутентификации остаётся диагностируемым `Error` без бесконечных повторов.
+- Проверка 2026-09-04: `scripts/cargo.ps1 test --manifest-path
+  src-tauri/Cargo.toml twitch::` — 17 passed; `fmt --check` и `check` — exit 0.
+  Пользовательский smoke на локальной версии 0.25.0 подтвердил восстановление
+  Twitch IRC после обрыва.
+
+Автоматизированного сценария с управляемым transport seam пока нет; чистые
+тесты покрывают policy и классификацию. Такой integration-test остаётся
+улучшением покрытия, а не незакрытым пользовательским дефектом.
+
+## Реализованные этапы
 
 ### P1 — Lifecycle ownership и reconnect policy
 

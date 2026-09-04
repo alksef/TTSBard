@@ -31,16 +31,25 @@ Rust-тестов на Windows через
 Перед тегом синхронизируйте версию штатным скриптом, проверьте diff и сборку:
 
 ```powershell
-node scripts/set-version.cjs 0.14.0
+node scripts/set-version.cjs 0.26.0
 npm run build
-cargo check --manifest-path src-tauri/Cargo.toml
+./scripts/cargo.ps1 check --manifest-path src-tauri/Cargo.toml --locked
 ```
 
-После коммита версии создайте и отправьте тег, указывающий на нужный commit:
+Скрипт обновляет `package.json`, `src-tauri/Cargo.toml`,
+`src-tauri/tauri.conf.json` и `src/version.ts`. Также синхронизируйте версию
+корневого пакета в `package-lock.json` (верхний уровень и `packages[""]`)
+и запись пакета `ttsbard` в `src-tauri/Cargo.lock`, не меняя версии зависимостей.
+Заполните `CHANGELOG.md` пользовательскими результатами изменений с прошлого
+тега и выполните `./scripts/check-docs.ps1`. Полную локальную релизную сборку
+запускайте через `./scripts/build.ps1 -Mode release`.
+
+После одобрения и создания коммита версии создайте и отправьте тег,
+указывающий на нужный commit (номер ниже — пример текущего релиза):
 
 ```powershell
-git tag v0.14.0
-git push origin v0.14.0
+git tag v0.26.0
+git push origin v0.26.0
 ```
 
 В CI версия извлекается из имени тега и повторно применяется через

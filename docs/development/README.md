@@ -41,8 +41,18 @@ npm run build
 ./scripts/check-docs.ps1
 ```
 
-Проверка валидирует локальные Markdown-ссылки, lifecycle-статусы и отсутствие
-tracked scratch-артефактов. Она также запускается в GitHub Actions.
+Проверка валидирует локальные Markdown-ссылки и якоря заголовков, lifecycle-статусы
+и отсутствие tracked scratch-артефактов. Она также запускается в GitHub Actions.
+Поддерживаются ATX-заголовки (`#`–`######`), повторяющиеся заголовки и явные
+HTML-якоря; содержимое fenced code blocks не считается документацией. Проверка
+не подтверждает доступность внешних URL и соответствие инструкций runtime.
+
+Изолированные проверки валидатора:
+
+```powershell
+./scripts/tests/test-check-docs-anchors.ps1
+./scripts/tests/test-check-docs-task-lifecycle.ps1
+```
 
 ## Сборка приложения на Windows
 

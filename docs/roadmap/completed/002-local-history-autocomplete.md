@@ -25,7 +25,7 @@ related_tasks: []
 самых частых.
 
 > Это **локальный автокомплит слов** — отдельная фича от AI-продолжения фраз
-> (`PROBLEMS.md:57,74`, Anthropic Claude API) и от не-AI продолжения предложений
+> ([исходная постановка продукта](../../research/initial-product-concept.md), Anthropic Claude API) и от не-AI продолжения предложений
 > (`03-text-completion-without-ai.md`).
 
 ---
@@ -37,7 +37,7 @@ related_tasks: []
   если нужно сохранять между запусками надёжно и не упираться в лимиты localStorage.
 - Модель данных: массив/словарь `{ word: string, count: number, lastUsed: timestamp }`.
 
-> Учесть: в `PROBLEMS.md:86` заявлено, что «история фраз — только в сессии (не сохраняется
+> Учесть: в `initial-product-concept.md` заявлено, что «история фраз — только в сессии (не сохраняется
 > между запусками)». Эта фича **расширяет** то поведение —persistent личный словарь.
 > Решить с пользователем: сохранять между запусками или нет.
 
@@ -89,7 +89,7 @@ related_tasks: []
 ---
 
 ## Открытые вопросы
-1. ~~Persistent или сессия?~~ → **Persistent** (между запусками). Расширяет `PROBLEMS.md:86`.
+1. ~~Persistent или сессия?~~ → **Persistent** (между запусками). Расширяет `initial-product-concept.md`.
 2. ~~Где хранить~~ → **Tauri-стор** (Rust): файл `%APPDATA%\ttsbard\input_history.json`,
    через новую serde-структуру + `RwLock`-кэш + `#[tauri::command]` (по образцу
    `save_replacements` / `SettingsManager`).

@@ -7,6 +7,9 @@ related: ROADMAP-082, ROADMAP-083, .work/silero-stress-research.md
 
 # RUAccent: benchmark, переносимость в Rust и поиск существующих порт-ов
 
+> Состояние на 2026-09-04: Native runtime и выбор модели реализованы в ROADMAP-082/083. Локальные пути ниже относятся к старым измерениям.
+> Итоги и связи — в [индексе исследований](./README.md).
+
 Продолжение `.work/silero-stress-research.md` (2026-08-21). Все измерения и
 артефакты: `E:\TTS\ruaccent-bench\` (`RESULTS.md`, `PORT-ANALYSIS.md`,
 `bench.py`, `bench_silero.py`, `per_text.py`, `*.json`, `*.log`).

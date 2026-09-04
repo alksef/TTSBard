@@ -1,15 +1,18 @@
 # Research: Актуализация проблемы и идеи улучшения работы с TTS
 
+> Состояние на 2026-09-04: Исторический набор идей; не текущий план реализации.
+> Итоги и связи — в [индексе исследований](./README.md).
+
 **Дата:** 2026-06-28
 **Автор:** Claude (research)
 **Статус:** research note
-**Связано:** `PROBLEMS.md`, [решения](../decisions/README.md), [ROADMAP-001](../roadmap/completed/001-monaco-vs-codemirror-editor-research.md), [ROADMAP-002](../roadmap/completed/002-local-history-autocomplete.md), [ROADMAP-003](../roadmap/completed/003-text-completion-without-ai.md)
+**Связано:** [исходная постановка продукта](./initial-product-concept.md), [решения](../decisions/README.md), [ROADMAP-001](../roadmap/completed/001-monaco-vs-codemirror-editor-research.md), [ROADMAP-002](../roadmap/completed/002-local-history-autocomplete.md), [ROADMAP-003](../roadmap/completed/003-text-completion-without-ai.md)
 
 ---
 
 ## 1. Цель документа
 
-Переоценить исходную проблему (`PROBLEMS.md`), проверить — **достаточно ли текущего решения
+Переоценить исходную проблему (`initial-product-concept.md`), проверить — **достаточно ли текущего решения
 после доработок (планы 71–73)**, и собрать **новые идеи** улучшения работы с TTS на основе
 текущих best practices и конкурентов (AAC-приложения, стримерские TTS-тулы, realtime-voice).
 
@@ -42,7 +45,7 @@ Windows-only, с упором на стримеров/мессенджеры).
 | **72** | Локальная persistent история ввода + автокомплит слов (взвешенный Trie, по подстроке) |
 | **73** | Гибридное продолжение фраз: слой n-грамм (без AI) + опц. AI-продолжение (Claude API) |
 
-Эти доработки закрывают пункт `PROBLEMS.md` «Низкая скорость ввода» гораздо полнее —
+Эти доработки закрывают пункт `initial-product-concept.md` «Низкая скорость ввода» гораздо полнее —
 автокомплит слов + предсказание фраз = радикальное ускорение набора повторяющихся реплик.
 
 ---
@@ -89,7 +92,7 @@ Windows-only, с упором на стримеров/мессенджеры).
 - *Связь:* естественно расширяет существующий [текстовый pipeline](../decisions/007-text-pipeline-and-ai.md).
 
 **C. История отправленных фраз (Persistent Phrase History)**
-- Сейчас история — только в сессии (`PROBLEMS.md:86`) и пресеты вручную.
+- Сейчас история — только в сессии (`initial-product-concept.md`) и пресеты вручную.
 - **Идея:** persistent журнал последних N отправленных фраз с быстрым повтором
   (один клик/горячая клавиша → повторно озвучить).
 - AAC-приложения (Speech Assistant, Spoken) имеют «history for quick access».

@@ -1,536 +1,123 @@
-# WebView Server
+# WebView: оверлей для OBS
 
-The WebView Server provides real-time text display via HTTP with Server-Sent Events (SSE), designed for integration with OBS, browser sources, and custom overlays.
+WebView-сервер показывает реплики TTSBard в браузере или источнике OBS.
+Он передаёт текст и состояние набора; звук выводится через аудиоустройства
+TTSBard. Формат событий и примеры собственного клиента — в [справке SSE](./sse.md).
 
-## Features
+## Подключить OBS на том же компьютере
 
-- **Real-time text broadcasting** - SSE endpoint for live text updates
-- **Customizable HTML/CSS** - Edit templates to match your overlay style
-- **Security** - Token-based authentication for external access
-- **Local network bypass** - No authentication required for LAN connections
-- **Auto-start** - Option to start server on application launch
+1. В TTSBard откройте **Интеграция → WebView**.
+2. Для локального использования выберите адрес `127.0.0.1`, порт `10100`
+   и сохраните настройки. Если сервер уже работает, сначала остановите его.
+3. Нажмите **«Запустить»** и дождитесь статуса **«Запущен»**.
+4. Скопируйте URL из панели. В OBS добавьте источник **«Браузер»** с адресом
+   `http://127.0.0.1:10100/`, задайте размер источника.
+5. В редакторе TTSBard выберите маршрут, включающий WebView, и отправьте фразу.
 
-## Quick Start
+Маршрут **«Только голос»** не отправляет текст в оверлей. Реплики из входящего
+HTTP-сервера и OCR предназначены для аудио и автоматически не дублируются
+в WebView. Для проверки сервера можно использовать тестовую отправку в панели.
 
-### For Local Use (OBS on same machine)
+## Настройки сервера
 
-1. Open **WebView Source** panel
-2. Enable the server (click **Start** button)
-3. Copy the **Local URL (OBS)**
-4. In OBS, add **Browser Source** with the URL
-5. Done! Text will appear in real-time
+| Настройка | Значение и поведение |
+|---|---|
+| Адрес | `127.0.0.1` — только этот компьютер; `0.0.0.0` — все IPv4-интерфейсы, включая LAN. Исходное значение — `0.0.0.0`. |
+| Порт | По умолчанию `10100`; должен быть свободен. |
+| Запускать при старте приложения | По умолчанию выключено. Включите для автоматического запуска при следующем открытии TTSBard. |
+| Статус | «Запускается», «Запущен», «Остановлен» или «Ошибка». Только «Запущен» подтверждает успешное открытие порта. |
 
-### For External Access (Different machine/internet)
+`0.0.0.0` — адрес привязки сервера, а не адрес для браузера. На другом
+компьютере используйте LAN-IP машины с TTSBard, например `http://192.168.1.10:10100/`.
+Изменение адреса и порта требует остановки, сохранения настроек и нового запуска.
 
-1. Open **WebView Source → Security**
-2. Click **Generate Token** to create access token
-3. Enable **UPnP** (if supported by your router) or set up manual port forwarding
-4. Copy the **External URL**
-5. Use URL in OBS or browser: `http://<your-ip>:<port>/?token=<token>`
+## Доступ из сети
 
-## Configuration
+### Локальная сеть
 
-### Server Settings
+При привязке к `0.0.0.0` клиенты из локальных диапазонов подключаются без токена.
+Это относится к IPv4 loopback `127.0.0.0/8`, частным сетям `10.0.0.0/8`,
+`172.16.0.0/12`, `192.168.0.0/16`, link-local `169.254.0.0/16`, а также к
+IPv6 loopback `::1` и unique-local `fc00::/7`, если запрос достигает listener.
 
-| Setting | Description | Default |
-|---------|-------------|---------|
-| **Enabled** | Desired state: сервер должен быть запущен | `false` |
-| **Start on boot** | Auto-start when app launches | `false` |
-| **Bind address** | Network interface (0.0.0.0 = all, 127.0.0.1 = local only) | `0.0.0.0` |
-| **Port** | TCP port for the server | `10100` |
+При необходимости разрешите входящее подключение TTSBard в брандмауэре Windows
+для используемого сетевого профиля. Если оверлей нужен только локально,
+оставьте привязку к `127.0.0.1`.
 
-### Security Settings
+### Внешнее подключение
 
-| Setting | Description | Default |
-|---------|-------------|---------|
-| **Access Token** | Token for external access (UUID v4) | None |
-| **UPnP** | Automatic port forwarding on router | `false` |
+1. Выберите `0.0.0.0`, сохраните настройки и запустите сервер.
+2. В блоке внешнего подключения сгенерируйте токен доступа.
+3. Настройте проброс TCP-порта на роутере вручную или включите UPnP.
+4. Используйте внешний URL из панели вида
+   `http://<внешний-IP>:10100/?token=<токен>`.
 
-### Runtime status
+Без действительного токена запросы из публичной сети к странице и SSE
+отклоняются. Страница с правильным токеном устанавливает cookie для последующих
+SSE-подключений. Отдельного session key нет.
 
-Панель отдельно показывает фактический listener status: `Starting`, `Running`,
-`Stopped` или `Error`. Только `Running` означает, что TCP port успешно привязан;
-`Enabled` может оставаться включённым после ошибки bind, чтобы настройки можно
-было исправить и сохранить. `get_webview_server_status()` возвращает snapshot,
-а `webview-server-status-changed` сообщает переходы.
+Токен хранится в настройках, передаётся в URL и cookie. HTTP не шифрует соединение;
+для защищённого внешнего доступа нужен HTTPS на reverse proxy. Не публикуйте URL
+с токеном. При использовании proxy учитывайте, что сервер определяет локальность
+по адресу непосредственного TCP-клиента: локальный proxy должен сам контролировать
+внешний доступ, иначе запросы могут попасть под обход аутентификации для LAN.
 
-## API Endpoints
+### UPnP
 
-### GET `/`
+UPnP доступен при нелокальной привязке и настроенном токене. TTSBard ищет шлюз
+и запрашивает TCP-проброс того же порта с арендой на один час. Автоматического
+продления аренды нет. Проверяйте правило на роутере при длительной работе;
+для постоянного доступа можно настроить проброс вручную.
 
-Serves the HTML page with embedded SSE client.
+При отключении UPnP или остановке сервера приложение пытается удалить правило.
+Отсутствие поддержки UPnP, двойной NAT или ограничения сети могут потребовать
+другой настройки маршрутизации. Сам факт включения галочки не подтверждает
+доступность сервера из интернета.
 
-**Query Parameters:**
-- `token` (optional) - Access token for external connections
+## Оформление оверлея
 
-**Response:** HTML page with embedded CSS and SSE JavaScript
+Нажмите **«Открыть папку»** в панели WebView. Шаблоны находятся в:
 
-### GET `/auth?token=<token>`
-
-Authenticates the client and sets an HttpOnly cookie.
-
-**Query Parameters:**
-- `token` (required) - Access token
-
-**Response:**
-- `200 OK` - Authentication successful, `Set-Cookie` header included
-- `401 Unauthorized` - Invalid or missing token
-
-### GET `/sse`
-
-SSE endpoint for receiving real-time text updates.
-
-**Authentication:**
-- **Local networks** (192.168.x.x, 10.x.x.x, 127.0.0.1): No auth required
-- **External networks**: Requires valid auth cookie
-
-**Response:**
-- `200 OK` - SSE stream with `text/event-stream` content type
-- `401 Unauthorized` - Authentication failed (external connections only)
-
-**Event Format:**
-
-The server sends two kinds of SSE events:
-
-1. **Unnamed text event** (default `onmessage`):
-
-```
-data: {"text":"Your message here"}
+```text
+%APPDATA%\ttsbard\webview\
+  index.html
+  style.css
 ```
 
-No `event:` line — received by `EventSource.onmessage`. Backward-compatible.
+`index.html` содержит HTML и клиентский JavaScript. На месте `{{CSS}}` сервер
+подставляет содержимое `style.css`. После редактирования нажмите **«Обновить»**
+в TTSBard и перезагрузите источник в OBS или страницу в браузере.
 
-2. **Named typing event** (uses `addEventListener('typing', ...)`):
+Существующие шаблоны не перезаписываются при обновлении или перезапуске:
+стандартный файл создаётся только при его отсутствии. Поэтому новые возможности
+шаблона могут потребовать ручного добавления в вашу копию.
 
-```
-event: typing
-data: {"typing":true}
-```
+Например, в `style.css` можно изменить размер и цвет текста:
 
-Sent when the editor typing state changes. Named events do not fire `onmessage`,
-so old templates remain compatible.
-
-## Security Model
-
-### Origin policy
-
-Сервер не добавляет CORS headers и не имеет общего CORS middleware. Встроенные
-страницы и SSE используют same-origin relative paths (`/auth`, `/sse`). Внешний
-overlay должен размещаться на том же origin либо использовать reverse proxy,
-который явно задаёт нужную CORS policy.
-
-### Access Control by IP Range
-
-The server automatically detects local network IPs and bypasses authentication:
-
-| IP Range | Type | Auth Required |
-|----------|------|---------------|
-| `127.0.0.1` | Loopback | ❌ No |
-| `192.168.0.0/16` | Private Class C | ❌ No |
-| `10.0.0.0/8` | Private Class A | ❌ No |
-| `172.16.0.0/12` | Private Class B | ❌ No |
-| `169.254.0.0/16` | Link-local | ❌ No |
-| `::1` | IPv6 Loopback | ❌ No |
-| `fc00::/7` | IPv6 Unique Local | ❌ No |
-| All other IPs | Public | ✅ Yes |
-
-### Authentication Flow
-
-**External Access Flow:**
-
-```
-1. Client opens: http://server:10100/?token=uuid
-   ↓
-2. Page loads with token in URL
-   ↓
-3. JavaScript calls /auth?token=uuid
-   ↓
-4. Server validates token (constant-time compare)
-   ↓
-5. Server sets HttpOnly cookie: webview_auth=uuid
-   ↓
-6. SSE connection includes credentials
-   ↓
-7. Server validates cookie on each SSE connection
-```
-
-### Security Features
-
-1. **Constant-time token comparison** - Prevents timing attacks using `subtle` crate
-2. **HttpOnly cookies** - JavaScript cannot read auth cookies
-3. **SameSite=Lax** - Prevents CSRF attacks
-4. **UUID v4 tokens** - Cryptographically random tokens
-5. **Token regeneration** - Invalidate old tokens by generating new ones
-6. **No credential leakage** - Tokens stored only in local settings file
-
-## Templates
-
-### File Locations
-
-Templates are stored in your config directory:
-
-- **Windows**: `%APPDATA%\ttsbard\webview\`
-- **Linux**: `~/.config/ttsbard/webview/`
-- **macOS**: `~/Library/Application Support/ttsbard/webview/`
-
-### Files
-
-- **`index.html`** - HTML template with `{{CSS}}` placeholder
-- **`style.css`** - CSS stylesheet (injected into HTML)
-
-### Editing Templates
-
-1. Click **Open Folder** in WebView Source panel
-2. Edit HTML or CSS files in your preferred editor
-3. Click **Reload** in the app to apply changes
-4. Refresh the browser source in OBS
-
-**Existing template files are never overwritten automatically.** Each default file is
-created only when that specific file does not exist. Upgrading or restarting the
-server will not replace your custom `index.html` or `style.css`.
-
-### Typing indicator (`html.is-typing` CSS hook)
-
-The default `index.html` template adds an `is-typing` class to `<html>` while the
-user is actively typing. No visual change is applied by default — this is a pure
-CSS/JS extension hook.
-
-To add a visual indicator to your custom template, add this listener:
-
-```javascript
-evtSource.addEventListener('typing', (event) => {
-    const data = JSON.parse(event.data);
-    document.documentElement.classList.toggle('is-typing', data.typing === true);
-});
-```
-
-Example CSS:
-
-```css
-html.is-typing .connection-indicator {
-    background: #60a5fa;
-    border-color: #3b82f6;
-    box-shadow: 0 0 8px rgba(96, 165, 250, 0.6);
-    animation: pulse 0.4s ease-in-out infinite;
-}
-```
-
-### Default Template Structure
-
-**HTML** (`index.html`):
-- Contains `{{CSS}}` placeholder for CSS injection
-- Embedded JavaScript for SSE connection
-- Token-based authentication support
-- Auto-reconnection on connection loss
-
-**CSS** (`style.css`):
-- Centered white text with black shadow
-- Fade in/out animations
-- Transparent background for OBS overlays
-
-## Customization Examples
-
-### Different Text Styles
-
-**Large Bold Text:**
-```css
-#text-container {
-    font-size: 64px;
-    font-weight: bold;
-    color: #00ff00;
-    text-shadow: 3px 3px 6px rgba(0,0,0,0.9);
-}
-```
-
-**Glowing Text:**
 ```css
 #text-container {
     font-size: 48px;
     color: #ffffff;
-    text-shadow:
-        0 0 10px #fff,
-        0 0 20px #fff,
-        0 0 30px #00ffff,
-        0 0 40px #00ffff;
+    text-shadow: 2px 2px 4px #000000;
 }
 ```
 
-**Bottom-Positioned Text:**
-```css
-body {
-    display: flex;
-    justify-content: center;
-    align-items: flex-end;  /* Bottom instead of center */
-    min-height: 100vh;
-    padding-bottom: 50px;
-}
-```
-
-### Multiple Text Lines
-
-Modify the HTML template to show multiple lines:
-
-```html
-<div id="text-history">
-    <div class="line line-1"></div>
-    <div class="line line-2"></div>
-    <div class="line line-3"></div>
-</div>
-
-<script>
-    const lines = document.querySelectorAll('.line');
-    let currentIndex = 0;
-
-    evtSource.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-
-        // Shift lines up
-        lines[currentIndex].textContent = data.text;
-        lines[currentIndex].classList.add('visible');
-
-        currentIndex = (currentIndex + 1) % 3;
-
-        // Hide old line
-        lines[currentIndex].classList.remove('visible');
-    };
-</script>
-```
-
-## Tauri Commands
-
-The WebView server exposes the following Tauri commands:
-
-### Server Management
-
-- `get_webview_settings()` - Get all server settings
-- `get_webview_server_status()` - Get actual runtime listener status
-- `get_webview_enabled()` - Get server enabled status
-- `get_webview_start_on_boot()` - Get auto-start on boot status
-- `get_webview_port()` - Get server port
-- `get_webview_bind_address()` - Get bind address
-- `save_webview_settings(settings)` - Save and apply settings
-- `get_local_ip()` - Get local IP address
-- `open_template_folder()` - Open templates folder in file explorer
-- `reload_templates()` - Reload templates without server restart
-- `send_test_message(text)` - Send test message to SSE
-
-### Security
-
-- `generate_webview_token()` - Generate new access token
-- `get_webview_token()` - Get masked access token (first 8 chars)
-- `copy_webview_token()` - Copy access token to clipboard
-- `regenerate_webview_token()` - Regenerate access token
-- `set_webview_upnp_enabled(enabled)` - Enable/disable UPnP
-- `get_webview_upnp_enabled()` - Get UPnP status
-- `get_external_ip()` - Get public IP address
-
-## Port Forwarding
-
-### Manual Port Forwarding
-
-If UPnP is not available or not working:
-
-1. Find your router's gateway IP (usually `192.168.1.1` or `192.168.0.1`)
-2. Login to router admin panel
-3. Find **Port Forwarding** or **NAT** settings
-4. Add rule:
-   - **External port**: `10100` (or your configured port)
-   - **Internal port**: `10100`
-   - **Protocol**: TCP
-   - **Internal IP**: Your computer's LAN IP (check in app settings)
-5. Save and apply
-
-### UPnP (Automatic)
-
-The UPnP feature automatically forwards the configured port on UPnP-enabled routers.
-
-**Requirements:**
-- UPnP enabled on router
-- Router supports UPnP IGD protocol
-- Device on same network as router
-
-**To enable:**
-1. Toggle **UPnP** switch in WebView Source → Security
-2. Port forwarding is applied immediately (no server restart required)
-3. Verify in router admin panel that rule was created
-
-**Notes:**
-- Port mapping uses 1-hour lease and is refreshed automatically
-- Mapping is removed when server stops or UPnP is disabled
-- Falls back gracefully if UPnP is unavailable
-
-## Troubleshooting
-
-### Server Won't Start
-
-**"Address already in use":**
-- Another application is using the port
-- Try a different port in settings
-- Check for existing server instances
-
-**"Permission denied":**
-- Port < 1024 requires administrator privileges
-- Use port 1024 or higher
-
-### SSE Connection Issues
-
-**"401 Unauthorized":**
-- External connection without token
-- Generate token in Security section
-- Include token in URL: `/?token=<your-token>`
-
-**Connection drops:**
-- Check network connectivity
-- Verify firewall settings
-- External connections require valid cookie
-
-### OBS Display Issues
-
-**No text appearing:**
-- Verify server is running
-- Check OBS browser source URL
-- Send test message from app
-- Check OBS browser source width/height
-
-**Text not styled:**
-- Verify `style.css` exists in template folder
-- Click **Reload** button after editing templates
-- Refresh OBS browser source
-
-### Template Changes Not Applying
-
-1. Click **Reload** button in WebView Source panel
-2. Right-click OBS browser source → **Refresh**
-3. If still not working, restart server
-
-## Firewall Configuration
-
-### Windows Defender Firewall
-
-1. Open **Windows Defender Firewall**
-2. Click **Allow an app through Windows Defender Firewall**
-3. Find **ttsbard** or **TTS Bard**
-4. Allow on:
-   - **Private** (for LAN access)
-   - **Public** (only if needed for external access)
-
-### Third-Party Firewall
-
-Allow inbound connections on:
-- Port: `10100` (or your configured port)
-- Protocol: TCP
-- Application: `ttsbard.exe`
-
-## Advanced Configuration
-
-### Custom HTML Templates
-
-The `{{CSS}}` placeholder allows dynamic CSS injection:
-
-```html
-<!DOCTYPE html>
-<html>
-<head>
-    <title>TTSBard WebView</title>
-    <style>{{CSS}}</style>
-    <link rel="stylesheet" href="https://example.com/custom.css">
-</head>
-<body>
-    <div id="text-container"></div>
-    <script src="https://example.com/custom.js"></script>
-    <script>
-        // Custom SSE handling
-        const evtSource = new EventSource('/sse');
-        // ... custom logic
-    </script>
-</body>
-</html>
-```
-
-### Reverse Proxy (HTTPS)
-
-For production use, consider a reverse proxy with SSL:
-
-**Nginx Example:**
-```nginx
-server {
-    listen 443 ssl;
-    server_name tts.example.com;
-
-    ssl_certificate /path/to/cert.pem;
-    ssl_certificate_key /path/to/key.pem;
-
-    location / {
-        proxy_pass http://localhost:10100;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
-
-## Architecture
-
-### Server Structure
-
-```
-WebViewServer
-├── Settings (Arc<RwLock<WebViewSettings>>)
-├── SSE Sender (broadcast::Sender<String>)
-├── Templates (TemplateCache)
-└── UPnP Manager (Option<Arc<UpnpManager>>)
-```
-
-### Event Flow
-
-```
-User Input / Integration
-        ↓
-TextSentToTts event
-        ↓
-WebViewServer::broadcast_text()
-        ↓
-SSE broadcast
-        ↓
-Connected clients receive {"text": "..."}
-```
-
-### Security Flow
-
-```
-External Connection Request
-        ↓
-Check IP address
-        ↓
-Is local network?
-    ├── YES → Allow connection
-    └── NO → Check cookie
-            ├── Has valid cookie? → Allow
-            └── No/Invalid cookie → 401 Unauthorized
-```
-
-## Best Practices
-
-### Security
-
-1. **Local only when possible** - Use `127.0.0.1` bind address if external access not needed
-2. **Strong tokens** - Generated UUID v4 tokens are cryptographically random
-3. **Token regeneration** - Regenerate tokens if unauthorized access is suspected
-4. **Firewall rules** - Only allow necessary IPs/networks
-
-### Performance
-
-1. **Reasonable keep-alive** - SSE keep-alive set to 10 seconds
-2. **Broadcast limit** - Channel capacity of 100 concurrent clients
-3. **Template caching** - Templates loaded once and cached in memory
-
-### Reliability
-
-1. **Auto-reconnection** - Built-in retry logic in JavaScript client
-2. **Graceful degradation** - Failed auth shows error message
-3. **Hot reload** - Templates reload without server restart
-
----
-
-*Last updated: 2026-04-15*
+Стандартный шаблон переключает класс `is-typing` у `<html>` при наборе текста.
+Сам по себе класс не добавляет визуального эффекта. Можно использовать его
+в собственном CSS; обработчик для старых HTML-шаблонов приведён в
+[справке SSE](./sse.md#клиент-в-шаблоне).
+
+## Если не работает
+
+| Симптом | Что проверить |
+|---|---|
+| Сервер сообщает об ошибке | Порт может быть занят. Остановите другой listener или задайте свободный порт и запустите снова. |
+| OBS не открывает страницу | Статус должен быть «Запущен»; проверьте адрес, порт и брандмауэр. На другой машине `localhost` указывает на неё саму. |
+| Страница открылась, но фразы нет | Выберите маршрут с WebView. Входящие HTTP/OCR и маршрут «Только голос» не являются проверкой оверлея. |
+| Нет индикатора набора | Включите передачу набора в редакторе; проверьте обработчик `typing` и CSS в шаблоне. |
+| Ошибка `401` снаружи | Откройте URL с текущим токеном заново. Для собственного клиента используйте cookie-аутентификацию из справки SSE. |
+| Свой HTML получает CORS-ошибку | Разместите его как шаблон на origin WebView. Сервер не разрешает произвольные cross-origin запросы. |
+| Изменения CSS не видны | Обновите шаблоны в TTSBard, затем перезагрузите страницу OBS. |
+
+Описание HTTP endpoints, ограничений доставки и клиентских примеров находится
+в [SSE: контракт для клиентов](./sse.md).

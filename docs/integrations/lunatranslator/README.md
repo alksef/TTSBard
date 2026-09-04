@@ -2,7 +2,10 @@
 
 Готовый скрипт самодельного TTS-движка для LunaTranslator, пересылающий
 игровой текст (HOOK/OCR + перевод делает Luna) в TTSBard через его
-[входящий сервер](../../roadmap/completed/087-external-text-input-server.md).
+[входящий сервер](../../user/input-server.md).
+
+Для захвата экрана непосредственно в TTSBard внешняя программа не нужна:
+см. [встроенный OCR и установку моделей](../../user/ocr.md).
 
 Синтез и воспроизведение полностью выполняет TTSBard: активный провайдер и
 голос, препроцессор, ударения, эффекты, общая очередь и аудиовыходы
@@ -51,15 +54,17 @@ LunaTranslator (HOOK/OCR, перевод) --POST {"text"}--> TTSBard (audio-only
 
 ## Проверка
 
-```bash
-curl http://127.0.0.1:10101/health
-# {"status":"ok"}
-
-curl -X POST http://127.0.0.1:10101/v1/speech \
-     -H "Content-Type: application/json" \
-     -d '{"text":"проверка связи"}'
-# 202 {"status":"queued","job_id":"..."} — фраза должна прозвучать из TTSBard
+```powershell
+Invoke-RestMethod http://127.0.0.1:10101/health
+$body = [Text.Encoding]::UTF8.GetBytes('{"text":"проверка связи"}')
+Invoke-RestMethod http://127.0.0.1:10101/v1/speech `
+    -Method Post -ContentType 'application/json; charset=utf-8' -Body $body
 ```
+
+Первый запрос возвращает `status: ok`. При включённом автовоспроизведении
+второй принимается с HTTP `202`, полями `status: queued` и `job_id`;
+фраза должна прозвучать. При ручном разборе возвращаются
+`status: pending_review` и `incoming_id`.
 
 Затем в Luna — любую фразу с озвучкой: звук идёт из TTSBard, очередь задачи
 видна в окне управления воспроизведением, во вкладке «Входящие» раздела

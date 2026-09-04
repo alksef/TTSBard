@@ -1,5 +1,8 @@
 # Deep Research: lip-sync TTSBard → VTube Studio
 
+> Состояние на 2026-09-04: Lip-sync остаётся отдельным вопросом. Завершённые ROADMAP-042/045 относятся к набору текста.
+> Итоги и связи — в [индексе исследований](./README.md).
+
 **Дата:** 2026-07-18  
 **Статус:** углублённое исследование / product and technical validation  
 **Связано:** [ROADMAP-042](../roadmap/completed/042-vtube-studio-typing-ui.md), [ROADMAP-045](../roadmap/completed/045-vtube-studio-typing-output-modes.md), [tts_pipeline.rs](../../src-tauri/src/commands/tts_pipeline.rs), [playback.rs](../../src-tauri/src/playback.rs)

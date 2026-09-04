@@ -1,6 +1,7 @@
 ﻿[CmdletBinding()]
 param(
-    [string]$TaskLifecycleFixtureRoot
+    [string]$TaskLifecycleFixtureRoot,
+    [string]$MarkdownAnchorFixtureRoot
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,7 +37,7 @@ function Test-MarkdownLinks([string[]]$Files) {
     $linkPattern = '\[[^\]]*\]\((?<target>[^)]+)\)'
 
     foreach ($file in $Files) {
-        $content = Get-Content -LiteralPath $file -Raw -Encoding UTF8
+        $content = Remove-FencedCode (Get-Content -LiteralPath $file -Raw -Encoding UTF8)
         foreach ($match in [regex]::Matches($content, $linkPattern)) {
             $target = $match.Groups['target'].Value.Trim()
             if ($target -match '^(?:https?://|mailto:|#)') {
@@ -56,6 +57,157 @@ function Test-MarkdownLinks([string[]]$Files) {
             $resolved = Join-Path (Split-Path $file) $target
             if (-not (Test-Path -LiteralPath $resolved)) {
                 $relativeFile = $file.Substring($repoRoot.Length + 1)
+                Add-Error "$relativeFile -> $target"
+            }
+        }
+    }
+}
+
+function Remove-FencedCode([string]$Content) {
+    $sb = [System.Text.StringBuilder]::new()
+    $inFence = $false
+    $fenceChar = [string]::Empty
+    $fenceLength = 0
+    foreach ($line in ($Content -split '\r?\n')) {
+        if (-not $inFence) {
+            if ($line -match '^\s{0,3}(?<f>`{3,}|~{3,})') {
+                $inFence = $true
+                $fenceChar = $matches['f'].Substring(0, 1)
+                $fenceLength = $matches['f'].Length
+                $null = $sb.AppendLine()
+                continue
+            }
+            $null = $sb.AppendLine($line)
+        }
+        else {
+            $closingPattern = '^\s{0,3}' + [regex]::Escape($fenceChar) + '{' + $fenceLength + ',}\s*$'
+            if ($line -match $closingPattern) {
+                $inFence = $false
+                $fenceChar = [string]::Empty
+                $null = $sb.AppendLine()
+                continue
+            }
+            $null = $sb.AppendLine()
+        }
+    }
+    $sb.ToString()
+}
+
+function ConvertFrom-PercentEncoded([string]$Value) {
+    try {
+        return [System.Uri]::UnescapeDataString($Value)
+    }
+    catch {
+        return $Value
+    }
+}
+
+function Get-GitHubSlug([string]$Text) {
+    $s = $Text
+    $s = [regex]::Replace($s, '!\[([^\]]*)\]\([^)]*\)', '$1')
+    $s = [regex]::Replace($s, '\[([^\]]*)\]\([^)]*\)', '$1')
+    $s = [regex]::Replace($s, '!\[([^\]]*)\]\[[^\]]*\]', '$1')
+    $s = [regex]::Replace($s, '\[([^\]]*)\]\[[^\]]*\]', '$1')
+    $s = [regex]::Replace($s, '<[^>]+>', '')
+    $s = $s.ToLowerInvariant()
+    $s = [regex]::Replace($s, '[^\p{L}\p{N}\p{M}_ -]', '')
+    return $s.Replace(' ', '-')
+}
+
+function Get-DocumentAnchors([string]$Content) {
+    $anchors = @{}
+    $clean = Remove-FencedCode $Content
+
+    foreach ($m in [regex]::Matches($clean, '(?i)<[a-z][^>]*?\s(?:id|name)\s*=\s*"([^"]+)"[^>]*>')) {
+        $anchors[$m.Groups[1].Value] = $true
+    }
+    foreach ($m in [regex]::Matches($clean, "(?i)<[a-z][^>]*?\s(?:id|name)\s*=\s*'([^']+)'[^>]*>")) {
+        $anchors[$m.Groups[1].Value] = $true
+    }
+
+    $counts = @{}
+    foreach ($line in ($clean -split '\r?\n')) {
+        $headingMatch = [regex]::Match($line, '^\s{0,3}#{1,6}\s+(?<text>.+)$')
+        if (-not $headingMatch.Success) {
+            continue
+        }
+
+        $headingText = $headingMatch.Groups['text'].Value.Trim()
+        $headingText = [regex]::Replace($headingText, '#+\s*$', '')
+        $headingText = $headingText.Trim()
+        if ([string]::IsNullOrEmpty($headingText)) {
+            continue
+        }
+
+        $slug = Get-GitHubSlug $headingText
+        if ([string]::IsNullOrEmpty($slug)) {
+            continue
+        }
+
+        $baseSlug = $slug
+        $suffix = 0
+        while ($counts.ContainsKey($slug)) {
+            $suffix++
+            $slug = "$baseSlug-$suffix"
+        }
+        $counts[$slug] = $true
+        $anchors[$slug] = $true
+    }
+
+    return $anchors
+}
+
+function Test-MarkdownAnchors([string[]]$Files, [string]$BaseDirectory) {
+    $base = [IO.Path]::GetFullPath($BaseDirectory)
+    $anchorMaps = @{}
+    $mdSet = @{}
+    foreach ($file in $Files) {
+        $full = [IO.Path]::GetFullPath($file)
+        $content = Get-Content -LiteralPath $full -Raw -Encoding UTF8
+        $anchorMaps[$full] = Get-DocumentAnchors $content
+        $mdSet[$full] = $true
+    }
+
+    $linkPattern = '\[[^\]]*\]\((?<target>[^)]+)\)'
+    foreach ($file in $Files) {
+        $full = [IO.Path]::GetFullPath($file)
+        $content = Get-Content -LiteralPath $full -Raw -Encoding UTF8
+        $body = Remove-FencedCode $content
+        foreach ($match in [regex]::Matches($body, $linkPattern)) {
+            $target = $match.Groups['target'].Value.Trim()
+            if ($target -match '^(?:https?://|mailto:)') {
+                continue
+            }
+
+            if ($target.StartsWith('<') -and $target.EndsWith('>')) {
+                $target = $target.Substring(1, $target.Length - 2)
+            }
+
+            $hashIndex = $target.IndexOf('#')
+            if ($hashIndex -lt 0) {
+                continue
+            }
+
+            $pathPart = $target.Substring(0, $hashIndex)
+            $fragment = ConvertFrom-PercentEncoded ($target.Substring($hashIndex + 1))
+            if ([string]::IsNullOrWhiteSpace($fragment)) {
+                continue
+            }
+
+            if ([string]::IsNullOrWhiteSpace($pathPart)) {
+                $targetFile = $full
+            }
+            else {
+                $decoded = ConvertFrom-PercentEncoded $pathPart
+                $targetFile = [IO.Path]::GetFullPath((Join-Path (Split-Path $full) $decoded))
+            }
+
+            if (-not $mdSet.ContainsKey($targetFile)) {
+                continue
+            }
+
+            if (-not $anchorMaps[$targetFile].ContainsKey($fragment)) {
+                $relativeFile = $full.Substring($base.Length + 1)
                 Add-Error "$relativeFile -> $target"
             }
         }
@@ -282,10 +434,10 @@ function Test-DocsStructure {
     $allowedEntries = @(
         'README.md',
         'faq.md',
+        'product-overview.md',
         'decisions',
         'development',
         'integrations',
-        'reference',
         'research',
         'roadmap',
         'tasks',
@@ -297,6 +449,9 @@ function Test-DocsStructure {
     }
 
     foreach ($path in $paths) {
+        if (-not (Test-Path -LiteralPath (Join-Path $repoRoot $path))) {
+            continue
+        }
         $entry = ($path -split '/')[1]
         if ($allowedEntries -notcontains $entry) {
             Add-Error "Unexpected tracked docs root entry: docs/$entry"
@@ -339,8 +494,25 @@ if (-not [string]::IsNullOrWhiteSpace($TaskLifecycleFixtureRoot)) {
     exit 0
 }
 
+if (-not [string]::IsNullOrWhiteSpace($MarkdownAnchorFixtureRoot)) {
+    $fixtureFiles = @(
+        Get-ChildItem -LiteralPath $MarkdownAnchorFixtureRoot -Recurse -Filter '*.md' -File |
+            Select-Object -ExpandProperty FullName
+    )
+    Test-MarkdownAnchors $fixtureFiles $MarkdownAnchorFixtureRoot
+    if ($errors.Count -gt 0) {
+        foreach ($failure in $errors) {
+            Write-Output "ERROR: $failure"
+        }
+        exit 1
+    }
+    Write-Output 'Markdown anchor validation passed.'
+    exit 0
+}
+
 $markdownFiles = @(Get-RepoMarkdownFiles)
 Test-MarkdownLinks $markdownFiles
+Test-MarkdownAnchors $markdownFiles $repoRoot
 Test-RoadmapFiles 'docs/roadmap/active' @('exploring', 'planned', 'in_progress', 'deferred')
 Test-RoadmapFiles 'docs/roadmap/completed' @('completed', 'superseded')
 Test-RoadmapFiles 'docs/roadmap/rejected' @('rejected', 'superseded')
