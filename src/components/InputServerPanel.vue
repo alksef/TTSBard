@@ -642,13 +642,13 @@ h2 {
   border-left: 4px solid var(--info-accent, var(--color-accent));
   border-radius: 10px;
   font-size: 0.85rem;
-  color: var(--info-text);
+  color: var(--info-text-bright);
   line-height: 1.5;
 }
 
 .info-icon {
   flex-shrink: 0;
   margin-top: 1px;
-  color: var(--info-text);
+  color: var(--info-text-bright);
 }
 </style>
