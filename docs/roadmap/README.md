@@ -45,7 +45,7 @@ related_tasks: []
 
 ## Активные направления
 
-Активных направлений нет.
+- [ROADMAP-095 — Устойчивое переподключение Twitch IRC](./active/095-twitch-irc-reconnect-resilience.md)
 
 ## Завершённые направления
 

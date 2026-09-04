@@ -13,7 +13,10 @@ pub enum TwitchStatus {
     Disconnected,
     Connecting,
     Connected,
+    /// Ошибка авторизации (не retryable)
     Error(String),
+    /// Транспортная ошибка, которую можно повторить переподключением
+    TransportFailure(String),
 }
 
 /// Sanitize text for IRC to prevent injection attacks
@@ -33,6 +36,22 @@ fn sanitize_irc_text(text: &str) -> String {
         clean[..500].trim().to_string()
     } else {
         clean.to_string()
+    }
+}
+
+/// Classifies an IRC line as a server-requested reconnect.
+/// Only the IRC command field (case-insensitive) may be `RECONNECT`;
+/// message text containing that word is not mistaken for the command.
+fn is_reconnect_command(line: &str) -> bool {
+    let line = line.trim();
+    // Опускаем опциональный префикс ":<hostname> " перед командой
+    let rest = line
+        .strip_prefix(':')
+        .and_then(|prefix| prefix.split_once(' ').map(|(_, rest)| rest))
+        .unwrap_or(line);
+    match rest.split(' ').next() {
+        Some(command) => command.eq_ignore_ascii_case("RECONNECT"),
+        None => false,
     }
 }
 
@@ -137,6 +156,15 @@ impl TwitchClient {
                             debug!(%line, "Received");
                         }
 
+                        // === RECONNECT (сервер просит переподключиться) ===
+                        if is_reconnect_command(&line) {
+                            warn!("Server requested RECONNECT");
+                            *status_clone.lock().await = TwitchStatus::TransportFailure(
+                                "Server requested reconnect".to_string(),
+                            );
+                            break;
+                        }
+
                         // === PING/PONG обработка (КРИТИЧНО!) ===
                         if line.starts_with("PING") {
                             debug!("PING received, sending PONG");
@@ -152,6 +180,9 @@ impl TwitchClient {
                                 let pong_msg = format!("PONG :{}\r\n", payload);
                                 if let Err(e) = writer_guard.write_all(pong_msg.as_bytes()).await {
                                     error!(error = %e, "Failed to send PONG");
+                                    *status_clone.lock().await =
+                                        TwitchStatus::TransportFailure(e.to_string());
+                                    break;
                                 } else {
                                     debug!(%payload, "PONG sent");
                                 }
@@ -177,12 +208,14 @@ impl TwitchClient {
                     }
                     Ok(Ok(None)) => {
                         warn!("Connection closed by server");
-                        *status_clone.lock().await = TwitchStatus::Disconnected;
+                        *status_clone.lock().await = TwitchStatus::TransportFailure(
+                            "Connection closed by server".to_string(),
+                        );
                         break;
                     }
                     Ok(Err(e)) => {
                         error!(error = %e, "Read error");
-                        *status_clone.lock().await = TwitchStatus::Error(e.to_string());
+                        *status_clone.lock().await = TwitchStatus::TransportFailure(e.to_string());
                         break;
                     }
                     Err(_) => {
@@ -214,7 +247,10 @@ impl TwitchClient {
 
         let mut writer_guard = self.writer.lock().await;
         if let Some(writer) = writer_guard.as_mut() {
-            writer.write_all(message.as_bytes()).await?;
+            if let Err(e) = writer.write_all(message.as_bytes()).await {
+                *self.status.lock().await = TwitchStatus::TransportFailure(e.to_string());
+                return Err(e.into());
+            }
             info!(channel = %self.settings.channel, text_len = clean_text.chars().count(), "Sent to channel");
         } else {
             error!("Cannot send message - writer not available");
@@ -287,5 +323,37 @@ mod tests {
         assert_eq!(result3, "тест привет");
         assert!(!result3.contains('\r'));
         assert!(!result3.contains('\n'));
+    }
+
+    #[test]
+    fn test_reconnect_command_detection() {
+        assert!(is_reconnect_command(":tmi.twitch.tv RECONNECT"));
+        assert!(is_reconnect_command("RECONNECT"));
+        assert!(is_reconnect_command(":tmi.twitch.tv reconnect"));
+    }
+
+    #[test]
+    fn test_reconnect_not_mistaken_for_message_text() {
+        let msg = ":user!user@user.tmi.twitch.tv PRIVMSG #channel :RECONNECT please";
+        assert!(!is_reconnect_command(msg));
+        assert!(!is_reconnect_command("PING :tmi.twitch.tv"));
+        assert!(!is_reconnect_command(""));
+    }
+
+    #[test]
+    fn test_status_semantic_distinction() {
+        let retryable = TwitchStatus::TransportFailure("Connection reset".to_string());
+        let auth_error = TwitchStatus::Error("Authentication failed".to_string());
+
+        assert!(matches!(retryable, TwitchStatus::TransportFailure(_)));
+        assert_ne!(retryable, TwitchStatus::Disconnected);
+        assert_ne!(retryable, auth_error);
+
+        assert!(matches!(auth_error, TwitchStatus::Error(_)));
+        assert_ne!(auth_error, TwitchStatus::Disconnected);
+        assert_ne!(
+            TwitchStatus::Disconnected,
+            TwitchStatus::TransportFailure("Connection reset".to_string())
+        );
     }
 }

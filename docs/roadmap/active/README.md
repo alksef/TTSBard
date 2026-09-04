@@ -6,4 +6,4 @@ implementation plans и не задания AI-агентам.
 
 ## В работе
 
-Активных направлений нет.
+- [ROADMAP-095 — Устойчивое переподключение Twitch IRC](./095-twitch-irc-reconnect-resilience.md)
