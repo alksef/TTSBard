@@ -119,14 +119,10 @@ fn unsupported_silero_ogg_codec(audio_data: &[u8]) -> Option<String> {
 
     let format = probed.format;
 
-    let track = match format
+    let track = format
         .tracks()
         .iter()
-        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-    {
-        Some(track) => track,
-        None => return None,
-    };
+        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)?;
 
     match symphonia::default::get_codecs().make(&track.codec_params, &DecoderOptions::default()) {
         Ok(_) => None,

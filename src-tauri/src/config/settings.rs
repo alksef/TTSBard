@@ -3075,9 +3075,11 @@ mod tests {
         );
 
         // Explicit true survives a serde round-trip; unrelated field preserved.
-        let mut explicit = AppSettings::default();
-        explicit.hide_on_minimize = true;
-        explicit.show_playback_on_start = true;
+        let explicit = AppSettings {
+            hide_on_minimize: true,
+            show_playback_on_start: true,
+            ..AppSettings::default()
+        };
         let round: AppSettings =
             serde_json::from_value(serde_json::to_value(&explicit).expect("serialize explicit"))
                 .expect("round-trip deserialize");
