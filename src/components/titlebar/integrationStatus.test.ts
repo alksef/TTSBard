@@ -45,7 +45,7 @@ describe('twitchTone', () => {
     { state: 'Error', message: 'auth failed' },
     { state: 'Error' },
   ]
-  const expected: IntegrationTone[] = ['gray', 'gray', 'green', 'red', 'red']
+  const expected: IntegrationTone[] = ['gray', 'yellow', 'green', 'red', 'red']
 
   it('is gray for every runtime when disabled', () => {
     for (const r of runtime) {
@@ -176,6 +176,9 @@ describe('integrationStatusLabel', () => {
     expect(
       integrationStatusLabel('webview', 'gray', { state: 'starting' }),
     ).toBe('WebView — запускается')
+    expect(
+      integrationStatusLabel('twitch', 'yellow', { state: 'Connecting' }),
+    ).toBe('Twitch — подключение')
     expect(
       integrationStatusLabel('twitch', 'gray', { state: 'Connecting' }),
     ).toBe('Twitch — подключается')

@@ -38,7 +38,7 @@ const {
             error: currentStatus === 'Error'
           }">
             {{ currentStatus === 'Connected' ? 'Подключено' :
-               currentStatus === 'Connecting' ? 'Подключение...' :
+               currentStatus === 'Connecting' ? 'Подключение' :
                currentStatus === 'Error' ? 'Ошибка' :
                'Отключено' }}
           </span>
@@ -197,9 +197,9 @@ h2 {
 }
 
 .status-indicator.connecting {
-  color: var(--success-text-bright);
-  background: var(--success-bg-weak);
-  border-color: var(--success-border);
+  color: var(--warning-text-bright);
+  background: var(--warning-bg-weak);
+  border-color: var(--warning-border);
 }
 
 .status-indicator.error {

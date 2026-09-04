@@ -1,4 +1,4 @@
-export type IntegrationTone = 'gray' | 'green' | 'red'
+export type IntegrationTone = 'gray' | 'green' | 'red' | 'yellow'
 
 export type WebViewDesired = { enabled: boolean }
 export type WebViewRuntime =
@@ -42,7 +42,11 @@ export function webviewTone(desired: WebViewDesired, runtime: WebViewRuntime): I
 }
 
 export function twitchTone(desired: TwitchDesired, runtime: TwitchRuntime): IntegrationTone {
-  return tone(desired.enabled, runtime.state === 'Connected', runtime.state === 'Error')
+  if (!desired.enabled) return 'gray'
+  if (runtime.state === 'Connected') return 'green'
+  if (runtime.state === 'Error') return 'red'
+  if (runtime.state === 'Connecting') return 'yellow'
+  return 'gray'
 }
 
 export function vtsTone(desired: VtsDesired, runtime: VtsRuntime): IntegrationTone {
@@ -97,6 +101,10 @@ export function integrationStatusLabel(
     const message = 'message' in runtime && runtime.message ? runtime.message : undefined
     const prefix = service === 'webview' ? 'ошибка запуска' : 'ошибка'
     return `${name} — ${prefix}${message ? `: ${message}` : ''}`
+  }
+
+  if (tone === 'yellow') {
+    return `${name} — подключение`
   }
 
   switch (runtime.state) {

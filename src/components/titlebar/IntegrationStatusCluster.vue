@@ -151,6 +151,10 @@ const slots = computed<StatusSlot[]>(() => {
   color: var(--status-disconnected);
 }
 
+.integration-status.tone-yellow {
+  color: var(--warning-text-bright);
+}
+
 .integration-status.connecting {
   animation: integration-status-pulse 1.6s ease-in-out infinite;
 }
