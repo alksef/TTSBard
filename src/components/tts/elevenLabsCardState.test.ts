@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, beforeAll, afterEach } from 'vitest'
+import { i18n } from '../../i18n'
+import enCatalog from '../../../locales/en.json'
+import ruCatalog from '../../../locales/ru.json'
 import {
   completeElevenLabsCatalogRefresh,
   createElevenLabsCatalogState,
@@ -19,6 +22,10 @@ import {
   type ElevenLabsGenerationForm,
 } from './elevenLabsCardState'
 import type { ElevenLabsModel, ElevenLabsVoice } from '../../types/settings'
+
+function activate(localeCode: 'en' | 'ru') {
+  ;(i18n.global.locale as unknown as { value: string }).value = localeCode
+}
 
 function voice(id: string, name: string, extra?: Partial<ElevenLabsVoice>): ElevenLabsVoice {
   return {
@@ -52,6 +59,17 @@ function form(extra?: Partial<ElevenLabsGenerationForm>): ElevenLabsGenerationFo
     ...extra,
   }
 }
+
+beforeAll(() => {
+  const enMessages = (enCatalog as { messages: Record<string, string> }).messages
+  const ruMessages = (ruCatalog as { messages: Record<string, string> }).messages
+  i18n.global.setLocaleMessage('en', enMessages)
+  i18n.global.setLocaleMessage('ru', ruMessages)
+})
+
+afterEach(() => {
+  activate('en')
+})
 
 describe('ElevenLabs independent catalog refresh state', () => {
   it('replaces the model catalog and clears the error on success', () => {
@@ -214,16 +232,23 @@ describe('ElevenLabs voice rendering and selection', () => {
 
   it('appends Default as the final label segment', () => {
     const v = voice('id-1', 'Emma', { classification: 'default' })
+    activate('en')
     expect(elevenLabsVoiceLabel(v)).toBe('Emma — Default')
+    activate('ru')
+    expect(elevenLabsVoiceLabel(v)).toBe('Emma — Стандартные')
   })
 
   it('appends Library as the final label segment', () => {
     const v = voice('id-1', 'Emma', { classification: 'library' })
+    activate('en')
     expect(elevenLabsVoiceLabel(v)).toBe('Emma — Library')
+    activate('ru')
+    expect(elevenLabsVoiceLabel(v)).toBe('Emma — Библиотека')
   })
 
   it('appends the classification after the existing name, category and labels', () => {
     const v = voice('id-1', 'Emma', { category: 'premade', labels: ['american', 'female'], classification: 'library' })
+    activate('en')
     expect(elevenLabsVoiceLabel(v)).toBe('Emma — premade — american, female — Library')
   })
 

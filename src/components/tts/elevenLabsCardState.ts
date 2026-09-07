@@ -1,4 +1,5 @@
 import type { ElevenLabsModel, ElevenLabsVoice } from '../../types/settings'
+import { t } from '../../i18n'
 
 /**
  * Pure state helpers for the ElevenLabs card's voice and model catalogs.
@@ -25,8 +26,8 @@ export function elevenLabsVoiceLabel(voice: ElevenLabsVoice): string {
   const parts: string[] = [voice.name]
   if (voice.category) parts.push(voice.category)
   if (voice.labels && voice.labels.length > 0) parts.push(voice.labels.join(', '))
-  if (voice.classification === 'default') parts.push('Default')
-  else if (voice.classification === 'library') parts.push('Library')
+  if (voice.classification === 'default') parts.push(t('tts.elevenlabs.classification_default'))
+  else if (voice.classification === 'library') parts.push(t('tts.elevenlabs.classification_library'))
   return parts.join(' — ')
 }
 

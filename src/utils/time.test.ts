@@ -42,7 +42,14 @@ describe('relativeTime', () => {
   })
 
   it('returns minutes for 60..3599 seconds', () => {
+    activate('en')
     setNow(1000)
+    expect(relativeTime(940)).toBe('1m')
+    expect(relativeTime(900)).toBe('1m')
+    expect(relativeTime(400)).toBe('10m')
+    expect(relativeTime(1)).toBe('16m')
+
+    activate('ru')
     expect(relativeTime(940)).toBe('1м')
     expect(relativeTime(900)).toBe('1м')
     expect(relativeTime(400)).toBe('10м')
@@ -50,7 +57,14 @@ describe('relativeTime', () => {
   })
 
   it('returns hours for 3600..86399 seconds', () => {
+    activate('en')
     setNow(10000)
+    expect(relativeTime(6400)).toBe('1h')
+    expect(relativeTime(6000)).toBe('1h')
+    expect(relativeTime(1000)).toBe('2h')
+    expect(relativeTime(1)).toBe('2h')
+
+    activate('ru')
     expect(relativeTime(6400)).toBe('1ч')
     expect(relativeTime(6000)).toBe('1ч')
     expect(relativeTime(1000)).toBe('2ч')
@@ -58,7 +72,14 @@ describe('relativeTime', () => {
   })
 
   it('returns days for 86400..604799 seconds', () => {
+    activate('en')
     setNow(200000)
+    expect(relativeTime(113600)).toBe('1d')
+    expect(relativeTime(100000)).toBe('1d')
+    expect(relativeTime(27200)).toBe('2d')
+    expect(relativeTime(1)).toBe('2d')
+
+    activate('ru')
     expect(relativeTime(113600)).toBe('1д')
     expect(relativeTime(100000)).toBe('1д')
     expect(relativeTime(27200)).toBe('2д')
