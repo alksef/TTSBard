@@ -516,12 +516,17 @@ fn init_tts_provider(
                     .iter()
                     .any(|voice| voice.voice_id == settings.tts.elevenlabs.voice_id);
             match &settings.tts.elevenlabs.api_key {
-                Some(key) if !key.is_empty() && has_model && has_voice => {
-                    app_state.init_elevenlabs_tts(key.clone());
+                Some(key) if !key.trim().is_empty() => {
+                    app_state.init_elevenlabs_tts(key.trim().to_string());
                     info!("ElevenLabs TTS initialized as active provider");
+                    if models.is_empty() || voices.is_empty() {
+                        warn!("ElevenLabs catalog cache is unavailable; keeping persisted model/voice selection");
+                    } else if !has_model || !has_voice {
+                        warn!("ElevenLabs selected model or voice is missing from the cached catalog");
+                    }
                 }
                 _ => {
-                    warn!("ElevenLabs selected but its API key, model or voice is unavailable");
+                    warn!("ElevenLabs selected but its API key is unavailable");
                 }
             }
         }
