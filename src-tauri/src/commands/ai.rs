@@ -1220,9 +1220,10 @@ pub async fn save_elevenlabs_api_key(
             .get_elevenlabs_api_key()
             .filter(|k| !k.is_empty())
             .ok_or_else(|| "ElevenLabs API key is not configured.".to_string())?;
+        let el = settings_manager.get_elevenlabs_settings();
         state.set_elevenlabs_api_key(Some(trimmed.clone()));
         state.set_elevenlabs_voice_id(String::new());
-        state.set_elevenlabs_model_settings(String::new(), 0.0, false);
+        state.set_elevenlabs_model_settings(String::new(), el.style, el.use_speaker_boost);
         state.init_elevenlabs_tts(trimmed);
     }
     super::emit_settings_changed(&app_handle);
