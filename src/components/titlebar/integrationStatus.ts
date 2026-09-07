@@ -1,3 +1,5 @@
+import { t } from '../../i18n'
+
 export type IntegrationTone = 'gray' | 'green' | 'red' | 'yellow'
 
 export type WebViewDesired = { enabled: boolean }
@@ -63,20 +65,29 @@ export function inputServerTone(runtime: InputServerRuntime): IntegrationTone {
   return 'gray'
 }
 
-const INPUT_SERVER_NAME = 'Входящий сервер'
+const INPUT_SERVER = 'integrations.status.input_server'
+
+function messageText(runtime: unknown): string | undefined {
+  if (typeof runtime !== 'object' || runtime === null) return undefined
+  const message = (runtime as { message?: unknown }).message
+  return typeof message === 'string' && message.length > 0 ? message : undefined
+}
 
 export function inputServerStatusLabel(runtime: InputServerRuntime): string {
+  const service = t(INPUT_SERVER)
   switch (runtime.state) {
     case 'running':
-      return `${INPUT_SERVER_NAME} — запущен`
+      return t('integrations.status.running', { service })
     case 'starting':
-      return `${INPUT_SERVER_NAME} — запускается`
-    case 'error':
-      return runtime.message
-        ? `${INPUT_SERVER_NAME} — ошибка: ${runtime.message}`
-        : `${INPUT_SERVER_NAME} — ошибка`
+      return t('integrations.status.starting', { service })
+    case 'error': {
+      const message = messageText(runtime)
+      return message
+        ? t('integrations.status.error_message', { service, message })
+        : t('integrations.status.error', { service })
+    }
     case 'stopped':
-      return `${INPUT_SERVER_NAME} — остановлен`
+      return t('integrations.status.stopped', { service })
   }
 }
 
@@ -94,35 +105,44 @@ export function integrationStatusLabel(
   const name = SERVICE_NAMES[service]
 
   if (tone === 'green') {
-    return service === 'webview' ? `${name} — запущен` : `${name} — подключён`
+    const key = service === 'webview'
+      ? 'integrations.status.running'
+      : 'integrations.status.connected'
+    return t(key, { service: name })
   }
 
   if (tone === 'red') {
-    const message = 'message' in runtime && runtime.message ? runtime.message : undefined
-    const prefix = service === 'webview' ? 'ошибка запуска' : 'ошибка'
-    return `${name} — ${prefix}${message ? `: ${message}` : ''}`
+    const message = messageText(runtime)
+    if (service === 'webview') {
+      return message
+        ? t('integrations.status.start_error_message', { service: name, message })
+        : t('integrations.status.start_error', { service: name })
+    }
+    return message
+      ? t('integrations.status.error_message', { service: name, message })
+      : t('integrations.status.error', { service: name })
   }
 
   if (tone === 'yellow') {
-    return `${name} — подключение`
+    return t('integrations.status.connecting_short', { service: name })
   }
 
   switch (runtime.state) {
     case 'starting':
-      return `${name} — запускается`
-    case 'Connecting':
-      return `${name} — подключается`
+      return t('integrations.status.starting', { service: name })
     case 'running':
-      return `${name} — запущен`
+      return t('integrations.status.running', { service: name })
     case 'stopped':
-      return service === 'webview' ? `${name} — остановлен` : `${name} — выключен`
+      return t('integrations.status.stopped', { service: name })
+    case 'Connecting':
+      return t('integrations.status.connecting', { service: name })
     case 'Connected':
-      return service === 'vts'
-        ? `${name} — подключён (не авторизован)`
-        : `${name} — подключён`
+      return service === 'vts' && 'authenticated' in runtime && !runtime.authenticated
+        ? t('integrations.status.connected_unauth', { service: name })
+        : t('integrations.status.connected', { service: name })
     case 'Disconnected':
     case 'error':
     case 'Error':
-      return `${name} — выключен`
+      return t('integrations.status.disabled', { service: name })
   }
 }

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { Eye, EyeOff } from 'lucide-vue-next';
+import { t } from '../../i18n';
 
 interface Props {
   modelValue: string;
@@ -55,7 +56,7 @@ function updateValue(event: Event) {
       type="button"
       class="toggle-icon-button"
       @click="showValue = !showValue"
-      :title="showValue ? 'Скрыть' : 'Показать'"
+      :title="showValue ? t('common.hide') : t('common.show')"
     >
       <Eye v-if="!showValue" :size="18" />
       <EyeOff v-else :size="18" />

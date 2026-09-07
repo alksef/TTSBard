@@ -2,6 +2,7 @@
 import { ref, watch, inject } from 'vue'
 import { Eye, EyeOff } from 'lucide-vue-next'
 import { type TelegramCredentials, TELEGRAM_AUTH_KEY, type UseTelegramAuthReturn } from '../composables/useTelegramAuth'
+import { t } from '../i18n'
 
 interface Props {
   modelValue: boolean
@@ -72,15 +73,15 @@ async function close() {
 async function handleRequestCode() {
   // Validate credentials
   if (!credentials.value.phone.trim()) {
-    errorMessage.value = 'Введите номер телефона'
+    errorMessage.value = t('tts.telegram.auth.error.phone_required')
     return
   }
   if (!credentials.value.api_id.trim()) {
-    errorMessage.value = 'Введите API ID'
+    errorMessage.value = t('tts.telegram.auth.error.api_id_required')
     return
   }
   if (!credentials.value.api_hash.trim()) {
-    errorMessage.value = 'Введите API Hash'
+    errorMessage.value = t('tts.telegram.auth.error.api_hash_required')
     return
   }
 
@@ -92,7 +93,7 @@ async function handleRequestCode() {
 
 async function handleSignIn() {
   if (!code.value.trim()) {
-    errorMessage.value = 'Введите код из Telegram'
+    errorMessage.value = t('tts.telegram.auth.error.code_required')
     return
   }
 
@@ -104,7 +105,7 @@ async function handleSignIn() {
 
 async function handleCheckPassword() {
   if (!password.value.trim()) {
-    errorMessage.value = 'Введите пароль 2FA'
+    errorMessage.value = t('tts.telegram.auth.error.password_required')
     return
   }
 
@@ -141,7 +142,7 @@ async function handleSignOut() {
     <div class="modal-container">
       <!-- Header -->
       <div class="modal-header">
-        <h2>Подключение Telegram</h2>
+        <h2>{{ t('tts.telegram.auth.title') }}</h2>
         <button class="close-button" @click="close">×</button>
       </div>
 
@@ -156,7 +157,7 @@ async function handleSignOut() {
         <div v-if="canInit || state === 'loading'" class="auth-form">
           <div class="form-info">
             <p class="info-link">
-              Получите API credentials на
+              {{ t('tts.telegram.auth.credentials_hint') }}
               <a
                 href="https://my.telegram.org/apps"
                 target="_blank"
@@ -168,7 +169,7 @@ async function handleSignOut() {
           </div>
 
           <div class="form-group">
-            <label for="phone">Номер телефона</label>
+            <label for="phone">{{ t('tts.telegram.auth.phone') }}</label>
             <div class="input-with-toggle">
               <input
                 id="phone"
@@ -182,7 +183,7 @@ async function handleSignOut() {
                 type="button"
                 class="toggle-button"
                 @click="showPhone = !showPhone"
-                :title="showPhone ? 'Скрыть' : 'Показать'"
+                :title="showPhone ? t('tts.telegram.auth.hide') : t('tts.telegram.auth.show')"
               >
                 <Eye v-if="!showPhone" :size="16" />
                 <EyeOff v-else :size="16" />
@@ -191,7 +192,7 @@ async function handleSignOut() {
           </div>
 
           <div class="form-group password-group">
-            <label for="api_id">API ID</label>
+            <label for="api_id">{{ t('tts.telegram.auth.api_id') }}</label>
             <div class="input-with-toggle">
               <input
                 id="api_id"
@@ -205,7 +206,7 @@ async function handleSignOut() {
                 type="button"
                 class="toggle-button"
                 @click="showApiId = !showApiId"
-                :title="showApiId ? 'Скрыть' : 'Показать'"
+                :title="showApiId ? t('tts.telegram.auth.hide') : t('tts.telegram.auth.show')"
               >
                 <Eye v-if="!showApiId" :size="16" />
                 <EyeOff v-else :size="16" />
@@ -214,13 +215,13 @@ async function handleSignOut() {
           </div>
 
           <div class="form-group password-group">
-            <label for="api_hash">API Hash</label>
+            <label for="api_hash">{{ t('tts.telegram.auth.api_hash') }}</label>
             <div class="input-with-toggle">
               <input
                 id="api_hash"
                 v-model="credentials.api_hash"
                 :type="showApiHash ? 'text' : 'password'"
-                placeholder="ваш_api_hash"
+                :placeholder="t('tts.telegram.auth.api_hash_placeholder')"
                 :disabled="isLoading"
                 @keypress.enter="handleRequestCode"
               />
@@ -228,7 +229,7 @@ async function handleSignOut() {
                 type="button"
                 class="toggle-button"
                 @click="showApiHash = !showApiHash"
-                :title="showApiHash ? 'Скрыть' : 'Показать'"
+                :title="showApiHash ? t('tts.telegram.auth.hide') : t('tts.telegram.auth.show')"
               >
                 <Eye v-if="!showApiHash" :size="16" />
                 <EyeOff v-else :size="16" />
@@ -241,18 +242,18 @@ async function handleSignOut() {
             :disabled="isLoading"
             @click="handleRequestCode"
           >
-            {{ isLoading ? 'Отправка...' : 'Получить код' }}
+            {{ isLoading ? t('tts.telegram.auth.sending') : t('tts.telegram.auth.send_code') }}
           </button>
         </div>
 
         <!-- State 2: Enter Code -->
         <div v-else-if="needsCode" class="auth-form">
           <div class="form-info">
-            <p>Введите код подтверждения, который пришел в Telegram.</p>
+            <p>{{ t('tts.telegram.auth.code_hint') }}</p>
           </div>
 
           <div class="form-group">
-            <label for="code">Код из Telegram</label>
+            <label for="code">{{ t('tts.telegram.auth.code_label') }}</label>
             <input
               id="code"
               v-model="code"
@@ -269,28 +270,28 @@ async function handleSignOut() {
             :disabled="isLoading"
             @click="handleSignIn"
           >
-            {{ isLoading ? 'Проверка...' : 'Войти' }}
+            {{ isLoading ? t('tts.telegram.auth.checking') : t('tts.telegram.auth.sign_in') }}
           </button>
 
           <button class="back-button" :disabled="isLoading" @click="reset">
-            Назад
+            {{ t('tts.telegram.auth.back') }}
           </button>
         </div>
 
         <!-- State 2.5: Enter 2FA Password -->
         <div v-else-if="needsPassword" class="auth-form">
           <div class="form-info">
-            <p>Введите пароль двухфакторной аутентификации, установленный в настройках Telegram.</p>
+            <p>{{ t('tts.telegram.auth.password_hint') }}</p>
           </div>
 
           <div class="form-group password-group">
-            <label for="tg-password">Пароль 2FA</label>
+            <label for="tg-password">{{ t('tts.telegram.auth.password_label') }}</label>
             <div class="input-with-toggle">
               <input
                 id="tg-password"
                 v-model="password"
                 :type="showPassword ? 'text' : 'password'"
-                placeholder="Ваш пароль 2FA"
+                :placeholder="t('tts.telegram.auth.password_placeholder')"
                 :disabled="isLoading"
                 @keypress.enter="handleCheckPassword"
                 autofocus
@@ -299,7 +300,7 @@ async function handleSignOut() {
                 type="button"
                 class="toggle-button"
                 @click="showPassword = !showPassword"
-                :title="showPassword ? 'Скрыть' : 'Показать'"
+                :title="showPassword ? t('tts.telegram.auth.hide') : t('tts.telegram.auth.show')"
               >
                 <Eye v-if="!showPassword" :size="16" />
                 <EyeOff v-else :size="16" />
@@ -312,33 +313,33 @@ async function handleSignOut() {
             :disabled="isLoading"
             @click="handleCheckPassword"
           >
-            {{ isLoading ? 'Проверка...' : 'Подтвердить' }}
+            {{ isLoading ? t('tts.telegram.auth.checking') : t('tts.telegram.auth.confirm') }}
           </button>
 
           <button class="back-button" :disabled="isLoading" @click="handleRetry">
-            Назад
+            {{ t('tts.telegram.auth.back') }}
           </button>
         </div>
 
         <!-- State 3: Error -->
         <div v-else-if="hasError" class="error-state">
           <div class="error-icon-modal">⚠</div>
-          <h3>Ошибка подключения</h3>
+          <h3>{{ t('tts.telegram.auth.error_title') }}</h3>
 
           <div v-if="errorMessage" class="error-message-modal">
             {{ errorMessage }}
           </div>
 
           <div class="form-info error-info">
-            <p>Произошла ошибка при подключении к Telegram. Попробуйте снова или отключите интеграцию.</p>
+            <p>{{ t('tts.telegram.auth.error_hint') }}</p>
           </div>
 
           <div class="button-group">
             <button class="retry-button" @click="handleRetry">
-              Попробовать снова
+              {{ t('tts.telegram.auth.retry') }}
             </button>
             <button class="disable-button" @click="handleDisableAndClose">
-              Отключить
+              {{ t('tts.telegram.auth.disable') }}
             </button>
           </div>
         </div>
@@ -346,7 +347,7 @@ async function handleSignOut() {
         <!-- State 4: Connected -->
         <div v-else-if="isConnected" class="connected-state">
           <div class="connected-icon">✓</div>
-          <h3>Подключено!</h3>
+          <h3>{{ t('tts.telegram.auth.connected_title') }}</h3>
 
           <div v-if="status" class="user-info">
             <p v-if="status.first_name || status.last_name" class="user-name">
@@ -357,18 +358,18 @@ async function handleSignOut() {
           </div>
 
           <div class="form-info success-info">
-            <p>Теперь вы можете использовать Silero TTS для озвучивания текста.</p>
+            <p>{{ t('tts.telegram.auth.success_info') }}</p>
             <p class="info-hint">
-              Убедитесь, что в боте @SileroBot включены голосовые сообщения.
+              {{ t('tts.telegram.auth.success_hint') }}
             </p>
           </div>
 
           <div class="button-group">
             <button class="disconnect-button" @click="handleSignOut">
-              Отключить
+              {{ t('tts.telegram.auth.disconnect') }}
             </button>
             <button class="close-button-primary" @click="close">
-              Закрыть
+              {{ t('tts.telegram.auth.close') }}
             </button>
           </div>
         </div>
@@ -376,7 +377,7 @@ async function handleSignOut() {
         <!-- Loading State -->
         <div v-else-if="isLoading && !needsCode && !isConnected" class="loading-state">
           <div class="spinner"></div>
-          <p>Подключение к Telegram...</p>
+          <p>{{ t('tts.telegram.auth.loading') }}</p>
         </div>
       </div>
     </div>

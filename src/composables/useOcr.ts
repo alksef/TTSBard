@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
 import { debugError } from '../utils/debug'
 import type { OcrSettingsDto } from '../types/settings'
+import { t } from '../i18n'
 
 // ============================================================================
 // Typed DTOs (mirror the Rust OCR backend contract)
@@ -128,6 +129,7 @@ export function useOcr() {
   const status = ref<OcrStatusDto>({ state: 'disabled' })
   const packs = ref<OcrPackDto[]>([])
   const message = ref<string | null>(null)
+  const messageType = ref<'success' | 'error' | null>(null)
   const savePending = ref(false)
   const rescanPending = ref(false)
   const openPending = ref(false)
@@ -149,17 +151,17 @@ export function useOcr() {
   const statusLabel = computed(() => {
     switch (status.value.state) {
       case 'starting':
-        return 'Запускается'
+        return t('ocr.status.starting')
       case 'ready':
-        return 'Готов'
+        return t('ocr.status.ready')
       case 'selectingArea':
-        return 'Выбор области'
+        return t('ocr.status.selecting_area')
       case 'recognizing':
-        return 'Распознавание…'
+        return t('ocr.status.recognizing')
       case 'error':
-        return 'Ошибка'
+        return t('ocr.status.error')
       default:
-        return 'Отключено'
+        return t('ocr.status.disabled')
     }
   })
 
@@ -175,7 +177,7 @@ export function useOcr() {
     const modelId = settings.value.model_id
     if (modelId === null) return null
     if (packs.value.some((pack) => pack.id === modelId)) return null
-    return `Модель «${modelId}» не найдена среди установленных пакетов. Обновите список моделей или выберите другую.`
+    return t('ocr.error.missing_model', { model: modelId })
   })
 
   /**
@@ -199,11 +201,13 @@ export function useOcr() {
     return packLabelMemo.get(modelId) ?? modelId
   })
 
-  function showMessage(text: string) {
+  function showMessage(text: string, type: 'success' | 'error' = 'success') {
     message.value = text
+    messageType.value = type
     if (messageTimeout !== null) clearTimeout(messageTimeout)
     messageTimeout = window.setTimeout(() => {
       message.value = null
+      messageType.value = null
       messageTimeout = null
     }, 3000)
   }
@@ -268,12 +272,12 @@ export function useOcr() {
         if (ocrSettingsEqual(settings.value, payload)) break
         payload = { ...settings.value }
       }
-      showMessage('Настройки сохранены')
+      showMessage(t('ocr.message.saved'), 'success')
     } catch (e) {
       if (disposed) return
       settings.value = { ...confirmedSettings }
       const errorMessage = e instanceof Error ? e.message : String(e)
-      showMessage('Не удалось сохранить настройки: ' + errorMessage)
+      showMessage(t('ocr.message.save_error', { detail: errorMessage }), 'error')
     } finally {
       if (!disposed) {
         savePending.value = false
@@ -294,14 +298,14 @@ export function useOcr() {
       if (disposed) return
       packs.value = convertOcrPackListFromRust(payload)
       rememberPackLabels(packs.value)
-      showMessage('Список моделей обновлён')
+      showMessage(t('ocr.message.list_updated'), 'success')
       // The backend reconciles (may untick) during the refresh; re-read the
       // persisted settings. Idempotent and guarded against the save drain.
       void refreshSettings()
     } catch (e) {
       if (disposed) return
       debugError('[Ocr] Failed to rescan packs:', e)
-      showMessage('Не удалось обновить список моделей')
+      showMessage(t('ocr.message.list_update_error'), 'error')
     } finally {
       if (!disposed) rescanPending.value = false
     }
@@ -315,7 +319,7 @@ export function useOcr() {
     } catch (e) {
       if (disposed) return
       debugError('[Ocr] Failed to open packs folder:', e)
-      showMessage('Не удалось открыть папку моделей')
+      showMessage(t('ocr.message.open_folder_error'), 'error')
     } finally {
       if (!disposed) openPending.value = false
     }
@@ -356,6 +360,7 @@ export function useOcr() {
     status,
     packs,
     message,
+    messageType,
     savePending,
     rescanPending,
     openPending,

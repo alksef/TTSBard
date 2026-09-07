@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import ruCatalog from '../../locales/ru.json'
+import enCatalog from '../../locales/en.json'
 
 const mocks = vi.hoisted(() => ({
   mockInvoke: vi.fn(),
@@ -30,6 +32,19 @@ vi.mock('./useErrorHandler', () => ({
 async function loadModule() {
   vi.resetModules()
   return await import('./useRuAccentRuntime')
+}
+
+async function withLocale(code: 'ru' | 'en', fn: () => void | Promise<void>) {
+  const { i18n } = await import('../i18n')
+  const catalog = code === 'ru' ? ruCatalog : enCatalog
+  i18n.global.setLocaleMessage(code, (catalog as { messages: Record<string, string> }).messages)
+  const previous = (i18n.global.locale as unknown as { value: string }).value
+  ;(i18n.global.locale as unknown as { value: string }).value = code
+  try {
+    await fn()
+  } finally {
+    ;(i18n.global.locale as unknown as { value: string }).value = previous
+  }
 }
 
 function emit(event: string, payload: unknown) {
@@ -103,7 +118,7 @@ describe('useRuAccentRuntime', () => {
     })
 
     expect(runtime.statusFor('com.example.a').value).toBe('failed')
-    expect(mocks.mockShowError).toHaveBeenCalledWith('Не удалось загрузить модель RUAccent')
+    expect(mocks.mockShowError).toHaveBeenCalledWith('Could not load the RUAccent model')
   })
 
   it('does not roll back a newer event with a stale snapshot', async () => {
@@ -194,7 +209,7 @@ describe('useRuAccentRuntime', () => {
     const { useRuAccentRuntime } = await loadModule()
     useRuAccentRuntime()
 
-    await vi.waitFor(() => expect(mocks.mockShowError).toHaveBeenCalledWith('ранняя ошибка'))
+    await vi.waitFor(() => expect(mocks.mockShowError).toHaveBeenCalledWith('Could not load the RUAccent model'))
   })
 
   it('does not show a duplicate toast when load rejects after a failed event', async () => {
@@ -215,7 +230,7 @@ describe('useRuAccentRuntime', () => {
 
     await runtime.load('com.example.a')
     expect(mocks.mockShowError).toHaveBeenCalledTimes(1)
-    expect(mocks.mockShowError).toHaveBeenCalledWith('boom')
+    expect(mocks.mockShowError).toHaveBeenCalledWith('Could not load the RUAccent model')
   })
 
   it('shows the rejection message when load fails without an error event', async () => {
@@ -232,7 +247,7 @@ describe('useRuAccentRuntime', () => {
     await vi.waitFor(() => expect(mocks.mockListen).toHaveBeenCalledTimes(2))
 
     await runtime.load('com.example.a')
-    expect(mocks.mockShowError).toHaveBeenCalledWith('model failed')
+    expect(mocks.mockShowError).toHaveBeenCalledWith('Could not load the RUAccent model')
     expect(runtime.statusFor('com.example.a').value).toBe('failed')
   })
 
@@ -558,7 +573,7 @@ describe('useRuAccentRuntime', () => {
     expect(mocks.mockShowError).not.toHaveBeenCalled()
     const reason = await refreshOutcome
     expect(reason instanceof Error).toBe(true)
-    expect((reason as Error).message).toBe('Бэкенд ещё не готов — повторите попытку позже')
+    expect((reason as Error).message).toBe('The backend is not ready yet — try again later')
 
     backendReady = true
     useRuAccentRuntime()
@@ -705,4 +720,69 @@ describe('useRuAccentRuntime', () => {
     expect(startupCalls).toHaveLength(1)
     expect(mocks.mockListen).toHaveBeenCalledTimes(3)
   })
+})
+
+describe('useRuAccentRuntime command error localization', () => {
+  beforeEach(() => {
+    mocks.mockInvoke.mockReset()
+    mocks.mockListen.mockReset()
+    mocks.mockShowError.mockReset()
+    mocks.listenCallbacks.clear()
+    mocks.unlisteners.length = 0
+
+    mocks.mockListen.mockImplementation(
+      (event: string, callback: (event: { payload: unknown }) => void) => {
+        mocks.listenCallbacks.set(event, callback)
+        const unlisten = vi.fn()
+        mocks.unlisteners.push(unlisten)
+        return Promise.resolve(unlisten)
+      },
+    )
+
+    mocks.mockInvoke.mockImplementation((cmd: string) =>
+      Promise.resolve(cmd === 'is_backend_ready' ? true : undefined),
+    )
+  })
+
+  const rawRussian = 'Не удалось загрузить модель RUAccent: файл повреждён'
+  const expected = {
+    ru: 'Не удалось загрузить модель RUAccent',
+    en: 'Could not load the RUAccent model',
+  } as const
+
+  for (const locale of ['ru', 'en'] as const) {
+    it(`presents the ${locale} fallback for a runtime error event instead of the raw message`, async () => {
+      const { useRuAccentRuntime } = await loadModule()
+      const runtime = useRuAccentRuntime()
+      await vi.waitFor(() => expect(mocks.mockListen).toHaveBeenCalledTimes(2))
+
+      await withLocale(locale, () => {
+        emit('ruaccent-runtime-error', { model_id: 'com.example.a', message: rawRussian })
+      })
+
+      expect(runtime.statusFor('com.example.a').value).toBe('failed')
+      expect(mocks.mockShowError).toHaveBeenCalledTimes(1)
+      expect(mocks.mockShowError).toHaveBeenCalledWith(expected[locale])
+    })
+
+    it(`presents the ${locale} fallback for a load command rejection instead of the raw message`, async () => {
+      mocks.mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === 'is_backend_ready') return Promise.resolve(true)
+        if (cmd === 'load_homograph_accentor_model') return Promise.reject(rawRussian)
+        return Promise.resolve(undefined)
+      })
+
+      const { useRuAccentRuntime } = await loadModule()
+      const runtime = useRuAccentRuntime()
+      await vi.waitFor(() => expect(mocks.mockListen).toHaveBeenCalledTimes(2))
+
+      await withLocale(locale, async () => {
+        await runtime.load('com.example.a')
+      })
+
+      expect(runtime.statusFor('com.example.a').value).toBe('failed')
+      expect(mocks.mockShowError).toHaveBeenCalledTimes(1)
+      expect(mocks.mockShowError).toHaveBeenCalledWith(expected[locale])
+    })
+  }
 })

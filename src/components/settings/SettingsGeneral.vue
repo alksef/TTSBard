@@ -3,12 +3,18 @@ import { ref, computed, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { AlertTriangle, FolderOpen } from 'lucide-vue-next';
 import { useGeneralSettings, useWindowsSettings, useLoggingSettings } from '../../composables/useAppSettings';
+import { presentCommandError } from '../../ipc/commandError';
+import { availableLanguages, locale, setLanguage, t } from '../../i18n';
 
 const showPlaybackOnStart = ref(false);
 const startCompact = ref(false);
 const hideOnMinimize = ref(false);
 const hideOnMinimizeSaving = ref(false);
 const folderOpening = ref(false);
+const languageSaving = ref(false);
+const languageError = ref<string | null>(null);
+const languageSaved = ref(false);
+const pendingLanguage = ref<string | null>(null);
 
 // Get settings from composables
 const generalSettings = useGeneralSettings();
@@ -18,32 +24,46 @@ const loggingSettings = useLoggingSettings();
 // Local state for immediate UI feedback
 const localLoggingEnabled = ref(false);
 
-const loggingLevels = [
-  { value: 'error', label: 'Error' },
-  { value: 'warn', label: 'Warning' },
-  { value: 'info', label: 'Info' },
-  { value: 'debug', label: 'Debug' },
-  { value: 'trace', label: 'Trace' }
-];
+const loggingLevels = computed(() => [
+  { value: 'error', label: t('general.logging.level.error') },
+  { value: 'warn', label: t('general.logging.level.warn') },
+  { value: 'info', label: t('general.logging.level.info') },
+  { value: 'debug', label: t('general.logging.level.debug') },
+  { value: 'trace', label: t('general.logging.level.trace') }
+]);
 
 // Computed properties
 const excludeFromCapture = computed(() => windowsSettings.value?.global.exclude_from_capture ?? false);
 const loggingEnabled = computed(() => localLoggingEnabled.value);
 const loggingLevel = computed(() => loggingSettings.value?.level ?? 'info');
+const selectedLanguage = computed(() => pendingLanguage.value ?? locale.value);
 
 // Emit error message event for parent to display
 const emit = defineEmits<{
-  (e: 'show-message', message: string): void;
+  (e: 'show-message', message: string, severity?: 'error' | 'warning' | 'info'): void;
 }>();
 
-function showError(message: string) {
-  emit('show-message', message);
+function showMessage(message: string, severity: 'error' | 'warning' | 'info') {
+  emit('show-message', message, severity);
 }
 
-function formatErrorMessage(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  if (typeof e === 'string') return e;
-  return String(e);
+async function onLanguageChange(event: Event) {
+  const nextLanguage = (event.target as HTMLSelectElement).value;
+  if (nextLanguage === selectedLanguage.value || languageSaving.value) return;
+
+  languageSaving.value = true;
+  languageError.value = null;
+  languageSaved.value = false;
+  try {
+    await setLanguage(nextLanguage);
+    pendingLanguage.value = nextLanguage;
+    languageSaved.value = true;
+    showMessage(t('settings.language.saved.restart'), 'warning');
+  } catch (e) {
+    languageError.value = presentCommandError(e, t('settings.language.save_failed'));
+  } finally {
+    languageSaving.value = false;
+  }
 }
 
 async function openAppFolder() {
@@ -53,7 +73,7 @@ async function openAppFolder() {
   try {
     await invoke('open_app_folder');
   } catch (e) {
-    showError('Ошибка открытия папки приложения: ' + formatErrorMessage(e));
+    showMessage(presentCommandError(e, t('general.error.open_folder')), 'error');
   } finally {
     folderOpening.value = false;
   }
@@ -63,9 +83,9 @@ async function toggleExcludeFromCapture() {
   try {
     const newValue = !(windowsSettings.value?.global.exclude_from_capture ?? false);
     await invoke('set_global_exclude_from_capture', { value: newValue });
-    showError('Настройка сохранена. Перезапустите приложение для применения изменений.');
+    showMessage(t('general.saved.restart'), 'warning');
   } catch (e) {
-    showError('Ошибка переключения скрытия от захвата: ' + (e as Error).message);
+    showMessage(presentCommandError(e, t('general.error.capture')), 'error');
   }
 }
 
@@ -78,11 +98,11 @@ async function setLoggingEnabled(value: boolean) {
       enabled: value,
       level: loggingSettings.value?.level ?? 'info'
     });
-    showError('Настройка сохранена. Перезапустите приложение для применения изменений.');
+    showMessage(t('general.saved.restart'), 'warning');
   } catch (e) {
     // Rollback to previous value on error
     localLoggingEnabled.value = previousValue;
-    showError('Ошибка сохранения настроек логирования: ' + (e as Error).message);
+    showMessage(presentCommandError(e, t('general.error.logging')), 'error');
   }
 }
 
@@ -94,9 +114,9 @@ async function onLoggingLevelChange(event: Event) {
       enabled: localLoggingEnabled.value,
       level: newLevel
     });
-    showError('Уровень сохранён. Перезапустите приложение для применения изменений.');
+    showMessage(t('general.level_saved.restart'), 'warning');
   } catch (e) {
-    showError('Ошибка сохранения уровня логирования: ' + (e as Error).message);
+    showMessage(presentCommandError(e, t('general.error.logging_level')), 'error');
   }
 }
 
@@ -107,7 +127,7 @@ async function toggleStartCompact() {
     await invoke('set_start_compact', { value: newValue });
   } catch (e) {
     startCompact.value = !startCompact.value;
-    showError('Ошибка сохранения настройки: ' + (e as Error).message);
+    showMessage(presentCommandError(e, t('general.error.save')), 'error');
   }
 }
 
@@ -118,7 +138,7 @@ async function toggleShowPlaybackOnStart() {
     await invoke('set_show_playback_on_start', { value: newValue });
   } catch (e) {
     showPlaybackOnStart.value = !showPlaybackOnStart.value;
-    showError('Ошибка сохранения настройки: ' + (e as Error).message);
+    showMessage(presentCommandError(e, t('general.error.save')), 'error');
   }
 }
 
@@ -132,7 +152,7 @@ async function toggleHideOnMinimize() {
     await invoke('set_hide_on_minimize', { value: newValue });
   } catch (e) {
     hideOnMinimize.value = previousValue;
-    showError('Ошибка сохранения настройки: ' + (e as Error).message);
+    showMessage(presentCommandError(e, t('general.error.save')), 'error');
   } finally {
     hideOnMinimizeSaving.value = false;
   }
@@ -159,6 +179,26 @@ watch(loggingSettings, (newSettings) => {
 
 <template>
   <div class="settings-general">
+    <section class="settings-section">
+      <div class="setting-row">
+        <label class="setting-label" for="ui-language">{{ t('settings.language') }}</label>
+        <select
+          id="ui-language"
+          class="level-select language-select"
+          :value="selectedLanguage"
+          :disabled="languageSaving"
+          @change="onLanguageChange"
+        >
+          <option v-for="language in availableLanguages" :key="language.locale" :value="language.locale">
+            {{ language.name }}
+          </option>
+        </select>
+        <span class="setting-hint language-hint">{{ t('settings.language.restart_hint') }}</span>
+        <span v-if="languageSaved" class="setting-warning"><AlertTriangle :size="14" /> {{ t('settings.language.saved.restart') }}</span>
+        <span v-if="languageError" class="setting-warning">{{ languageError }}</span>
+      </div>
+    </section>
+
     <!-- Start in compact mode -->
     <section class="settings-section">
       <div class="setting-row">
@@ -169,9 +209,9 @@ watch(loggingSettings, (newSettings) => {
             type="checkbox"
             class="checkbox-input"
           />
-          <span>Запускать в компактном режиме</span>
+          <span>{{ t('general.start_compact.label') }}</span>
         </label>
-        <span class="setting-hint">При запуске окно открывается уменьшенным — только редактор</span>
+        <span class="setting-hint">{{ t('general.start_compact.hint') }}</span>
       </div>
     </section>
 
@@ -185,9 +225,9 @@ watch(loggingSettings, (newSettings) => {
             type="checkbox"
             class="checkbox-input"
           />
-          <span>Показывать окно управления при запуске</span>
+          <span>{{ t('general.show_playback.label') }}</span>
         </label>
-        <span class="setting-hint">Автоматически открывает окно очереди воспроизведения при старте приложения</span>
+        <span class="setting-hint">{{ t('general.show_playback.hint') }}</span>
       </div>
     </section>
 
@@ -202,9 +242,9 @@ watch(loggingSettings, (newSettings) => {
             type="checkbox"
             class="checkbox-input"
           />
-          <span>Скрывать с панели задач при сворачивании</span>
+          <span>{{ t('general.hide_on_minimize.label') }}</span>
         </label>
-        <span class="setting-hint">Приложение продолжает работать. Вернуть окно можно через значок в трее или повторным запуском.</span>
+        <span class="setting-hint">{{ t('general.hide_on_minimize.hint') }}</span>
       </div>
     </section>
 
@@ -218,10 +258,10 @@ watch(loggingSettings, (newSettings) => {
             class="checkbox-input"
             @change="toggleExcludeFromCapture"
           />
-          <span>Скрыть от записи/захвата экрана</span>
+          <span>{{ t('general.exclude_capture.label') }}</span>
         </label>
-        <span class="setting-hint">Скрывает все окна от OBS, Game Bar и других средств записи</span>
-        <span class="setting-warning"><AlertTriangle :size="14" /> Требуется перезапуск приложения для применения настройки</span>
+        <span class="setting-hint">{{ t('general.exclude_capture.hint') }}</span>
+        <span class="setting-warning"><AlertTriangle :size="14" /> {{ t('general.restart_required') }}</span>
       </div>
     </section>
 
@@ -235,13 +275,13 @@ watch(loggingSettings, (newSettings) => {
             type="checkbox"
             class="checkbox-input"
           />
-          <span>Включить логирование</span>
+          <span>{{ t('general.logging.enabled') }}</span>
         </label>
       </div>
 
       <div v-if="loggingEnabled" class="setting-group">
-        <div class="setting-row">
-          <label>Уровень:</label>
+        <div class="setting-row logging-level-row">
+          <label>{{ t('general.logging.level.label') }}</label>
           <select
             :value="loggingLevel"
             @change="onLoggingLevelChange"
@@ -256,7 +296,7 @@ watch(loggingSettings, (newSettings) => {
 
       <span class="setting-warning">
         <AlertTriangle :size="14" />
-        Требуется перезапуск приложения для применения изменений
+        {{ t('general.restart_required') }}
       </span>
     </section>
 
@@ -264,7 +304,7 @@ watch(loggingSettings, (newSettings) => {
     <section class="settings-section">
       <div class="setting-row folder-row">
         <div class="folder-text">
-          <span class="setting-label folder-label">Папка настроек и моделей</span>
+          <span class="setting-label folder-label">{{ t('general.folder.label') }}</span>
           <span class="folder-path">%APPDATA%\ttsbard</span>
         </div>
         <button
@@ -272,11 +312,11 @@ watch(loggingSettings, (newSettings) => {
           class="folder-button"
           :disabled="folderOpening"
           title="%APPDATA%\ttsbard"
-          aria-label="Открыть папку приложения"
+          :aria-label="t('general.folder.open')"
           @click="openAppFolder"
         >
           <FolderOpen :size="16" />
-          <span>Открыть</span>
+          <span>{{ t('general.folder.open') }}</span>
         </button>
       </div>
     </section>
@@ -334,6 +374,19 @@ watch(loggingSettings, (newSettings) => {
   line-height: 1.4;
 }
 
+.language-hint {
+  margin-left: 0;
+}
+
+.language-select {
+  width: min(100%, 180px);
+  background: var(--color-bg);
+}
+
+.language-select:hover {
+  background: var(--color-bg);
+}
+
 .setting-warning {
   display: flex;
   align-items: center;
@@ -346,7 +399,7 @@ watch(loggingSettings, (newSettings) => {
 
 .setting-group {
   margin-top: 1rem;
-  padding-left: 2.4rem;
+  padding-left: 0;
 }
 
 .setting-group label {
@@ -358,6 +411,8 @@ watch(loggingSettings, (newSettings) => {
 }
 
 .level-select {
+  box-sizing: border-box;
+  height: 34px;
   padding: 0.4rem 0.6rem;
   background: var(--color-bg-field-hover);
   border: 1px solid var(--color-border-strong);
@@ -367,6 +422,22 @@ watch(loggingSettings, (newSettings) => {
   cursor: pointer;
   transition: all 0.15s ease;
   min-width: 140px;
+}
+
+.logging-level-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.logging-level-row label {
+  margin-right: 0;
+  min-width: 0;
+}
+
+.logging-level-row .level-select {
+  width: 180px;
+  flex: 0 0 auto;
 }
 
 .level-select:hover {

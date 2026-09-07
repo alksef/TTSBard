@@ -20,6 +20,7 @@ import OcrPanel from './components/OcrPanel.vue'
 import ErrorToasts from './components/ErrorToasts.vue'
 import MinimalModeButton from './components/MinimalModeButton.vue'
 import IntegrationStatusCluster from './components/titlebar/IntegrationStatusCluster.vue'
+import { t } from './i18n'
 import { useTelegramAuth, TELEGRAM_AUTH_KEY } from './composables/useTelegramAuth'
 import { provideAppSettings } from './composables/useAppSettings'
 import { useRuAccentRuntime } from './composables/useRuAccentRuntime'
@@ -109,8 +110,8 @@ function formatHotkeyDisplay(hotkey: { modifiers: string[]; key: string } | unde
 const soundPanelHotkey = computed(() => appSettings.settings.value?.hotkeys?.sound_panel)
 const playbackHotkey = computed(() => appSettings.settings.value?.hotkeys?.playback_control_window)
 
-const soundPanelAction = computed(() => soundpanelVisible.value ? 'Скрыть саундпад' : 'Показать саундпад')
-const playbackAction = computed(() => playbackVisible.value ? 'Скрыть управление воспроизведением' : 'Показать управление воспроизведением')
+const soundPanelAction = computed(() => soundpanelVisible.value ? t('shell.soundpanel.hide') : t('shell.soundpanel.show'))
+const playbackAction = computed(() => playbackVisible.value ? t('shell.playback.hide') : t('shell.playback.show'))
 
 const soundPanelTitle = computed(() => {
   const hk = formatHotkeyDisplay(soundPanelHotkey.value)
@@ -418,7 +419,7 @@ onUnmounted(() => {
         >
           <MonitorPlay :size="14" />
         </button>
-        <button class="titlebar-btn minimize" @click="minimizeWindow" title="Свернуть" aria-label="Свернуть">
+        <button class="titlebar-btn minimize" @click="minimizeWindow" :title="t('shell.minimize')" :aria-label="t('shell.minimize')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="5" y1="12" x2="19" y2="12" />
           </svg>
@@ -428,8 +429,8 @@ onUnmounted(() => {
 
     <!-- Show error if settings failed to load -->
     <div v-if="appSettings.error.value && appSettings.error.value.length > 0" class="error-container">
-      <p>Failed to load settings: {{ appSettings.error.value }}</p>
-      <button @click="appSettings.reload()">Retry</button>
+      <p>{{ t('shell.settings_load_error', { detail: appSettings.error.value }) }}</p>
+      <button @click="appSettings.reload()">{{ t('shell.retry') }}</button>
     </div>
 
     <!-- Main app content -->

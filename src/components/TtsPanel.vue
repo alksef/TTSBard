@@ -6,6 +6,8 @@ import { createAsyncCleanupScope } from '../utils/asyncCleanup';
 import { useTtsSettings, useAppSettings } from '../composables/useAppSettings';
 import type { FishAudioConnectionSettingsInput, TtsProviderType, TtsProviderInfoDto, VoiceModel } from '../types/settings';
 import { debugLog, debugError } from '../utils/debug';
+import { t } from '../i18n';
+import { presentCommandError } from '../ipc/commandError';
 import { TELEGRAM_AUTH_KEY, type UseTelegramAuthReturn } from '../composables/useTelegramAuth';
 import TelegramAuthModal from './TelegramAuthModal.vue';
 import StatusMessage from './shared/StatusMessage.vue';
@@ -78,15 +80,15 @@ const visibilityButtonRef = ref<HTMLButtonElement | null>(null);
 const visibilityPopoverRef = ref<HTMLElement | null>(null);
 const visibilityOverride = ref<string[] | null>(null);
 
-const cloudVisibilityEntries = [
-  { id: BUILTIN_PROVIDER_ID_BY_TYPE.silero, label: 'Silero Bot' },
-  { id: BUILTIN_PROVIDER_ID_BY_TYPE.openai, label: 'OpenAI TTS' },
-  { id: BUILTIN_PROVIDER_ID_BY_TYPE.fish, label: 'Fish Audio' },
-];
+const cloudVisibilityEntries = computed(() => [
+  { id: BUILTIN_PROVIDER_ID_BY_TYPE.silero, label: t('tts.providers.silero') },
+  { id: BUILTIN_PROVIDER_ID_BY_TYPE.openai, label: t('tts.providers.openai') },
+  { id: BUILTIN_PROVIDER_ID_BY_TYPE.fish, label: t('tts.providers.fish') },
+]);
 
-const localVisibilityEntries = [
-  { id: BUILTIN_PROVIDER_ID_BY_TYPE.local, label: 'Локальный сервер' },
-];
+const localVisibilityEntries = computed(() => [
+  { id: BUILTIN_PROVIDER_ID_BY_TYPE.local, label: t('tts.local.title') },
+]);
 
 const piperVisibilityEntries = computed(() =>
   piperProviders.value.map(p => ({ id: p.id, label: p.display_name })),
@@ -163,7 +165,7 @@ const sileroError = ref<string | null>(null);
 // Telegram proxy state
 const telegramProxyMode = ref<string>('none');
 const telegramProxyModes = [
-  { value: 'none', label: 'Нет' },
+  { value: 'none', label: t('tts.proxy.none') },
   { value: 'socks5', label: 'SOCKS5' },
   { value: 'mtproxy', label: 'MTProxy' }
 ];
@@ -233,7 +235,7 @@ async function onVisibilityToggle(id: string) {
     await invoke('set_visible_tts_provider_ids', { providerIds: next });
   } catch (error) {
     visibilityOverride.value = previous;
-    showError(error as string);
+    showError(presentCommandError(error, t('tts.error.set_visibility')));
   }
 }
 
@@ -245,7 +247,7 @@ async function saveOpenAiApiKey(key: string) {
   debugLog('[TTS] Saving OpenAI API key...');
 
   if (!key.trim()) {
-    showError('API Key не может быть пустым');
+    showError(t('tts.error.api_key_required'));
     return;
   }
 
@@ -253,10 +255,10 @@ async function saveOpenAiApiKey(key: string) {
     await invoke('set_openai_api_key', { key });
     providers.value.openai.configured = true;
     debugLog('[TTS] OpenAI API key saved successfully');
-    showSuccess('API Key сохранён');
+    showSuccess(t('tts.api_key.saved'));
   } catch (error) {
     debugError('[TTS] Failed to save OpenAI API key:', error);
-    showError(error as string);
+    showError(presentCommandError(error, t('tts.error.save_api_key')));
   }
 }
 
@@ -265,10 +267,10 @@ async function saveOpenAiVoice(voice: string) {
   try {
     await invoke('set_openai_voice', { voice });
     debugLog('[TTS] OpenAI voice saved successfully:', voice);
-    showSuccess(`Голос "${voice}" сохранён`);
+    showSuccess(t('tts.voice.saved', { voice }));
   } catch (error) {
     debugError('[TTS] Failed to save OpenAI voice:', error);
-    showError(error as string);
+    showError(presentCommandError(error, t('tts.error.save_voice')));
   }
 }
 
@@ -282,10 +284,10 @@ async function toggleOpenAiUseProxy(enabled: boolean) {
       debugLog('[TTS] Applied proxy settings to OpenAI provider');
     }
 
-    showSuccess(enabled ? 'Прокси включён' : 'Прокси выключен');
+    showSuccess(enabled ? t('tts.proxy.enabled') : t('tts.proxy.disabled'));
   } catch (error) {
     debugError('[TTS] Failed to toggle OpenAI proxy:', error);
-    showError(error as string);
+    showError(presentCommandError(error, t('tts.error.toggle_proxy')));
     // Revert on error - the parent will handle this
     throw error;
   }
@@ -296,9 +298,9 @@ async function saveLocalTtsUrl(url: string) {
     await invoke('set_local_tts_url', { url });
     localTtsUrl.value = url;
     providers.value.local.configured = true;
-    showSuccess('URL сохранён');
+    showSuccess(t('tts.url.saved'));
   } catch (error) {
-    showError(error as string);
+    showError(presentCommandError(error, t('tts.error.save_url')));
   }
 }
 
@@ -306,8 +308,8 @@ async function saveFishAudioSettings(data: FishAudioConnectionSettingsInput): Pr
   debugLog('[TTS] Saving Fish Audio settings...');
 
   if (!data.apiKey.trim()) {
-    showError('API Key не может быть пустым');
-    throw new Error('API Key не может быть пустым');
+    showError(t('tts.error.api_key_required'));
+    throw new Error(t('tts.error.api_key_required'));
   }
 
   try {
@@ -323,10 +325,10 @@ async function saveFishAudioSettings(data: FishAudioConnectionSettingsInput): Pr
     providers.value.fish.configured = true;
     await reloadSettings();
     debugLog('[TTS] Fish Audio settings saved successfully');
-    showSuccess('Настройки сохранены');
+    showSuccess(t('tts.settings.saved'));
   } catch (error) {
     debugError('[TTS] Failed to save Fish Audio settings:', error);
-    showError(error as string);
+    showError(presentCommandError(error, t('tts.error.save_fish_settings')));
     throw error;
   }
 }
@@ -335,7 +337,7 @@ async function saveFishAudioReferenceId(referenceId: string) {
   try {
     await invoke('set_fish_audio_reference_id', { referenceId });
   } catch (error) {
-    showError(error as string);
+    showError(presentCommandError(error, t('tts.error.save_fish_reference_id')));
   }
 }
 
@@ -343,9 +345,9 @@ async function addFishAudioVoice(model: VoiceModel) {
   try {
     await invoke('add_fish_audio_voice', { voice: model });
     await reloadSettings();
-    showSuccess('Голосовая модель добавлена');
+    showSuccess(t('tts.voice_model.added'));
   } catch (error) {
-    showError(error as string);
+    showError(presentCommandError(error, t('tts.error.add_fish_voice')));
   }
 }
 
@@ -353,9 +355,9 @@ async function removeFishAudioVoice(voiceId: string) {
   try {
     await invoke('remove_fish_audio_voice', { voiceId });
     await reloadSettings();
-    showSuccess('Голосовая модель удалена');
+    showSuccess(t('tts.voice_model.removed'));
   } catch (error) {
-    showError(error as string);
+    showError(presentCommandError(error, t('tts.error.remove_fish_voice')));
   }
 }
 
@@ -372,9 +374,9 @@ async function toggleFishAudioUseProxy(enabled: boolean) {
       await invoke('apply_fish_audio_proxy_settings');
     }
 
-    showSuccess(enabled ? 'Прокси включён' : 'Прокси выключен');
+    showSuccess(enabled ? t('tts.proxy.enabled') : t('tts.proxy.disabled'));
   } catch (error) {
-    showError(error as string);
+    showError(presentCommandError(error, t('tts.error.toggle_proxy')));
     throw error;
   }
 }
@@ -387,7 +389,7 @@ async function setActiveProvider(provider: TtsProviderType) {
     activeProviderId.value = BUILTIN_PROVIDER_ID_BY_TYPE[provider];
     await reloadSettings();
   } catch (error) {
-    showError(error as string);
+    showError(presentCommandError(error, t('tts.error.select_provider')));
   }
 }
 
@@ -402,10 +404,10 @@ async function selectPiperProvider(id: string) {
     activeProvider.value = null;
     activePiperId.value = id;
     activeProviderId.value = id;
-    showSuccess('Модель загружена');
+    showSuccess(t('tts.model.loaded'));
   } catch (error) {
-    piperError.value[id] = error as string;
-    showError(error as string);
+    piperError.value[id] = presentCommandError(error, t('tts.model.load_error'));
+    showError(presentCommandError(error, t('tts.model.load_error')));
   } finally {
     piperLoading.value[id] = false;
     await reloadSettings();
@@ -422,9 +424,9 @@ function piperUiStatus(provider: TtsProviderInfoDto) {
 
 function piperRowStatus(provider: TtsProviderInfoDto) {
   const ui = piperUiStatus(provider);
-  if (ui.kind === 'loading') return { kind: 'loading', text: 'Загрузка…', title: undefined };
-  if (ui.kind === 'ready') return { kind: 'ready', text: 'Загружена', title: undefined };
-  if (ui.kind === 'error') return { kind: 'error', text: 'Ошибка загрузки', title: ui.label };
+  if (ui.kind === 'loading') return { kind: 'loading', text: t('tts.model.loading'), title: undefined };
+  if (ui.kind === 'ready') return { kind: 'ready', text: t('tts.model.ready'), title: undefined };
+  if (ui.kind === 'error') return { kind: 'error', text: t('tts.model.load_error'), title: ui.label };
   return { kind: 'none', text: '', title: undefined };
 }
 
@@ -486,10 +488,10 @@ async function reconnectTelegram() {
     await loadTelegramProxyStatus();
     void refreshTelegramLimits();
 
-    showSuccess('Telegram переподключён');
+    showSuccess(t('tts.telegram.reconnected'));
   } catch (error) {
     debugError('[TTS] Failed to reconnect Telegram:', error);
-    showError(error as string);
+    showError(presentCommandError(error, t('tts.error.reconnect_telegram')));
   } finally {
     reconnectingTelegram.value = false;
   }
@@ -499,19 +501,19 @@ async function reconnectTelegram() {
 async function handleRefreshVoice() {
   try {
     await autoRefreshTelegramVoice();
-    showSuccess('Текущий голос обновлен');
+    showSuccess(t('tts.telegram.voice_updated'));
   } catch (error) {
-    showError(error as string);
+    showError(presentCommandError(error, t('tts.error.refresh_voice')));
   }
 }
 
 async function handleAddVoice(data: { code: string; description?: string }, callback: (success: boolean, error?: string) => void) {
   try {
     await addTelegramVoiceCode(data);
-    showSuccess('Голос добавлен');
+    showSuccess(t('tts.telegram.voice_added'));
     callback(true);
   } catch (error) {
-    const errorMsg = error as string;
+    const errorMsg = presentCommandError(error, t('tts.silero.add_voice.error'));
     // Ошибка уже покажется в диалоге, не дублируем
     callback(false, errorMsg);
   }
@@ -520,18 +522,18 @@ async function handleAddVoice(data: { code: string; description?: string }, call
 async function handleRemoveVoice(id: string) {
   try {
     await removeTelegramVoiceCode(id);
-    showSuccess('Голос удалён');
+    showSuccess(t('tts.telegram.voice_removed'));
   } catch (error) {
-    showError(error as string);
+    showError(presentCommandError(error, t('tts.error.remove_voice')));
   }
 }
 
 async function handleSelectVoice(id: string) {
   try {
     await selectTelegramVoice(id);
-    showSuccess('Голос выбран');
+    showSuccess(t('tts.telegram.voice_selected'));
   } catch (error) {
-    showError(error as string);
+    showError(presentCommandError(error, t('tts.error.select_voice')));
   }
 }
 
@@ -680,8 +682,8 @@ function dismissStatus() {
         ref="visibilityButtonRef"
         type="button"
         class="visibility-button"
-        title="Настроить видимость провайдеров"
-        aria-label="Настроить видимость провайдеров"
+        :title="t('tts.visibility.configure')"
+        :aria-label="t('tts.visibility.configure')"
         @click="toggleVisibilityPopover"
       >⋯</button>
 
@@ -691,7 +693,7 @@ function dismissStatus() {
         class="visibility-popover"
       >
         <div class="visibility-group">
-          <div class="visibility-group-label">Облачные и интеграции</div>
+          <div class="visibility-group-label">{{ t('tts.visibility.cloud') }}</div>
           <label
             v-for="entry in cloudVisibilityEntries"
             :key="entry.id"
@@ -704,12 +706,12 @@ function dismissStatus() {
               @change="onVisibilityToggle(entry.id)"
             />
             <span class="visibility-entry-label">{{ entry.label }}</span>
-            <span v-if="entry.id === activeProviderId" class="visibility-active">активный</span>
+            <span v-if="entry.id === activeProviderId" class="visibility-active">{{ t('tts.visibility.active') }}</span>
           </label>
         </div>
 
         <div class="visibility-group">
-          <div class="visibility-group-label">Локальный сервер</div>
+          <div class="visibility-group-label">{{ t('tts.local.title') }}</div>
           <label
             v-for="entry in localVisibilityEntries"
             :key="entry.id"
@@ -722,12 +724,12 @@ function dismissStatus() {
               @change="onVisibilityToggle(entry.id)"
             />
             <span class="visibility-entry-label">{{ entry.label }}</span>
-            <span v-if="entry.id === activeProviderId" class="visibility-active">активный</span>
+            <span v-if="entry.id === activeProviderId" class="visibility-active">{{ t('tts.visibility.active') }}</span>
           </label>
         </div>
 
         <div class="visibility-group">
-          <div class="visibility-group-label">Piper</div>
+          <div class="visibility-group-label">{{ t('tts.piper.title') }}</div>
           <label
             v-for="entry in piperVisibilityEntries"
             :key="entry.id"
@@ -740,7 +742,7 @@ function dismissStatus() {
               @change="onVisibilityToggle(entry.id)"
             />
             <span class="visibility-entry-label">{{ entry.label }}</span>
-            <span v-if="entry.id === activeProviderId" class="visibility-active">активный</span>
+            <span v-if="entry.id === activeProviderId" class="visibility-active">{{ t('tts.visibility.active') }}</span>
           </label>
         </div>
       </div>
@@ -830,8 +832,8 @@ function dismissStatus() {
 
       <!-- Piper Runtime Providers -->
       <div v-if="piperBlockVisible" class="piper-block">
-        <div class="piper-block-title">Piper</div>
-        <div class="piper-block-subtitle">Локальные модели</div>
+        <div class="piper-block-title">{{ t('tts.piper.title') }}</div>
+        <div class="piper-block-subtitle">{{ t('tts.piper.local_models') }}</div>
         <label
           v-for="p in visiblePiperProviders"
           :key="p.id"

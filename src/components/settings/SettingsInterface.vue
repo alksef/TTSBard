@@ -4,16 +4,20 @@ import { invoke } from '@tauri-apps/api/core';
 import { Moon, Sun } from 'lucide-vue-next';
 import type { Theme } from '../../types/settings';
 import { useGeneralSettings, useWindowsSettings } from '../../composables/useAppSettings';
+import { presentCommandError } from '../../ipc/commandError';
+import { t } from '../../i18n';
 
 const generalSettings = useGeneralSettings();
 const windowsSettings = useWindowsSettings();
 
+type MessageSeverity = 'error' | 'success' | 'warning' | 'info';
+
 const emit = defineEmits<{
-  (e: 'show-message', message: string): void;
+  (e: 'show-message', message: string, severity?: MessageSeverity): void;
 }>();
 
 function showError(message: string) {
-  emit('show-message', message);
+  emit('show-message', message, 'error');
 }
 
 function opacityToTransparency(opacity: number): number {
@@ -51,7 +55,7 @@ async function setTheme(theme: Theme) {
   try {
     await invoke('update_theme', { theme });
   } catch (e) {
-    showError('Ошибка изменения темы: ' + (e as Error).message);
+    showError(presentCommandError(e, t('settings.interface.error.theme')));
   }
 }
 
@@ -64,7 +68,7 @@ async function toggleMainCustomBackground() {
     await invoke('set_main_custom_background', { value: newValue });
   } catch (e) {
     mainCustomBackground.value = !newValue;
-    showError('Ошибка сохранения настройки: ' + (e as Error).message);
+    showError(presentCommandError(e, t('settings.interface.error.save')));
   }
 }
 
@@ -72,7 +76,7 @@ async function saveMainBgColor() {
   try {
     await invoke('set_main_bg_color', { color: mainBgColor.value });
   } catch (e) {
-    showError('Ошибка сохранения цвета: ' + (e as Error).message);
+    showError(presentCommandError(e, t('settings.interface.error.color')));
   }
 }
 
@@ -80,7 +84,7 @@ async function saveMainTransparency() {
   try {
     await invoke('set_main_opacity', { value: transparencyToOpacity(mainTransparency.value) });
   } catch (e) {
-    showError('Ошибка сохранения прозрачности: ' + (e as Error).message);
+    showError(presentCommandError(e, t('settings.interface.error.transparency')));
   }
 }
 
@@ -91,7 +95,7 @@ async function toggleMainOpacityCompactOnly() {
     await invoke('set_main_opacity_compact_only', { value: newValue });
   } catch (e) {
     mainOpacityCompactOnly.value = !newValue;
-    showError('Ошибка сохранения настройки: ' + (e as Error).message);
+    showError(presentCommandError(e, t('settings.interface.error.save')));
   }
 }
 
@@ -104,7 +108,7 @@ async function setSpSource(source: 'main' | 'own') {
     await invoke('set_soundpanel_appearance_source', { source });
   } catch (e) {
     spSource.value = previous;
-    showError('Ошибка сохранения источника оформления: ' + (e as Error).message);
+    showError(presentCommandError(e, t('settings.interface.error.appearance_source')));
   }
 }
 
@@ -112,7 +116,7 @@ async function saveSpBgColor() {
   try {
     await invoke('sp_set_floating_bg_color', { color: spBgColor.value });
   } catch (e) {
-    showError('Ошибка сохранения цвета: ' + (e as Error).message);
+    showError(presentCommandError(e, t('settings.interface.error.color')));
   }
 }
 
@@ -120,7 +124,7 @@ async function saveSpTransparency() {
   try {
     await invoke('sp_set_floating_opacity', { value: transparencyToOpacity(spTransparency.value) });
   } catch (e) {
-    showError('Ошибка сохранения прозрачности: ' + (e as Error).message);
+    showError(presentCommandError(e, t('settings.interface.error.transparency')));
   }
 }
 
@@ -133,7 +137,7 @@ async function setPbSource(source: 'main' | 'own') {
     await invoke('set_playback_appearance_source', { source });
   } catch (e) {
     pbSource.value = previous;
-    showError('Ошибка сохранения источника оформления: ' + (e as Error).message);
+    showError(presentCommandError(e, t('settings.interface.error.appearance_source')));
   }
 }
 
@@ -141,7 +145,7 @@ async function savePbBgColor() {
   try {
     await invoke('pc_set_bg_color', { color: pbBgColor.value });
   } catch (e) {
-    showError('Ошибка сохранения цвета: ' + (e as Error).message);
+    showError(presentCommandError(e, t('settings.interface.error.color')));
   }
 }
 
@@ -149,7 +153,7 @@ async function savePbTransparency() {
   try {
     await invoke('pc_set_opacity', { value: transparencyToOpacity(pbTransparency.value) });
   } catch (e) {
-    showError('Ошибка сохранения прозрачности: ' + (e as Error).message);
+    showError(presentCommandError(e, t('settings.interface.error.transparency')));
   }
 }
 
@@ -190,7 +194,7 @@ watch(
             @change="setTheme('dark')"
           />
           <Moon :size="16" />
-          <span>Тёмная</span>
+          <span>{{ t('settings.interface.theme.dark') }}</span>
         </label>
 
         <label class="theme-option" :class="{ active: generalSettings?.theme === 'light' }">
@@ -201,14 +205,14 @@ watch(
             @change="setTheme('light')"
           />
           <Sun :size="16" />
-          <span>Светлая</span>
+          <span>{{ t('settings.interface.theme.light') }}</span>
         </label>
       </div>
     </section>
 
     <!-- Main window -->
     <section class="settings-section">
-      <h2 class="section-title">Главное окно</h2>
+      <h2 class="section-title">{{ t('settings.interface.main.title') }}</h2>
 
       <div class="setting-row">
         <label class="setting-label checkbox-label">
@@ -218,14 +222,14 @@ watch(
             class="checkbox-input"
             @change="toggleMainCustomBackground"
           />
-          <span>Использовать свой цвет</span>
+          <span>{{ t('settings.interface.use_custom_color') }}</span>
         </label>
-        <span class="setting-hint">Если выключено, используется цвет активной темы</span>
+        <span class="setting-hint">{{ t('settings.interface.use_custom_color.hint') }}</span>
       </div>
 
       <div class="appearance-grid" style="margin-bottom: 0.5rem">
         <div class="appearance-column">
-          <label class="setting-label">Цвет</label>
+          <label class="setting-label">{{ t('settings.interface.color') }}</label>
           <div class="appearance-controls">
             <input
               v-model="mainBgColor"
@@ -248,7 +252,7 @@ watch(
         </div>
 
         <div class="appearance-column">
-          <label class="setting-label">Прозрачность</label>
+          <label class="setting-label">{{ t('settings.interface.transparency') }}</label>
           <div class="appearance-controls">
             <input
               v-model.number="mainTransparency"
@@ -272,15 +276,15 @@ watch(
             class="checkbox-input"
             @change="toggleMainOpacityCompactOnly"
           />
-          <span>Применять прозрачность только в компактном режиме</span>
+          <span>{{ t('settings.interface.opacity_compact_only') }}</span>
         </label>
-        <span class="setting-hint">В обычном режиме окно будет полностью непрозрачным</span>
+        <span class="setting-hint">{{ t('settings.interface.opacity_compact_only.hint') }}</span>
       </div>
     </section>
 
     <!-- Sound panel -->
     <section class="settings-section">
-      <h2 class="section-title">Звуковая панель</h2>
+      <h2 class="section-title">{{ t('settings.interface.soundpanel.title') }}</h2>
 
       <div class="setting-row">
         <label class="setting-label checkbox-label">
@@ -290,14 +294,14 @@ watch(
             class="checkbox-input"
             @change="setSpSource(($event.target as HTMLInputElement).checked ? 'own' : 'main')"
           />
-          <span>Использовать свой цвет</span>
+          <span>{{ t('settings.interface.use_custom_color') }}</span>
         </label>
-        <span class="setting-hint">Если выключено, используется цвет активной темы</span>
+        <span class="setting-hint">{{ t('settings.interface.use_custom_color.hint') }}</span>
       </div>
 
       <div class="appearance-grid">
         <div class="appearance-column">
-          <label class="setting-label">Цвет</label>
+          <label class="setting-label">{{ t('settings.interface.color') }}</label>
           <div class="appearance-controls">
             <input
               v-model="spBgColor"
@@ -320,7 +324,7 @@ watch(
         </div>
 
         <div class="appearance-column">
-          <label class="setting-label">Прозрачность</label>
+          <label class="setting-label">{{ t('settings.interface.transparency') }}</label>
           <div class="appearance-controls">
             <input
               v-model.number="spTransparency"
@@ -340,7 +344,7 @@ watch(
 
     <!-- Playback control -->
     <section class="settings-section">
-      <h2 class="section-title">Управление воспроизведением</h2>
+      <h2 class="section-title">{{ t('settings.interface.playback.title') }}</h2>
 
       <div class="setting-row">
         <label class="setting-label checkbox-label">
@@ -350,14 +354,14 @@ watch(
             class="checkbox-input"
             @change="setPbSource(($event.target as HTMLInputElement).checked ? 'own' : 'main')"
           />
-          <span>Использовать свой цвет</span>
+          <span>{{ t('settings.interface.use_custom_color') }}</span>
         </label>
-        <span class="setting-hint">Если выключено, используется цвет активной темы</span>
+        <span class="setting-hint">{{ t('settings.interface.use_custom_color.hint') }}</span>
       </div>
 
       <div class="appearance-grid">
         <div class="appearance-column">
-          <label class="setting-label">Цвет</label>
+          <label class="setting-label">{{ t('settings.interface.color') }}</label>
           <div class="appearance-controls">
             <input
               v-model="pbBgColor"
@@ -380,7 +384,7 @@ watch(
         </div>
 
         <div class="appearance-column">
-          <label class="setting-label">Прозрачность</label>
+          <label class="setting-label">{{ t('settings.interface.transparency') }}</label>
           <div class="appearance-controls">
             <input
               v-model.number="pbTransparency"

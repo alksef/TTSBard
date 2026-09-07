@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest'
 import { effectScope, shallowRef, nextTick } from 'vue'
 import type { WebViewSettingsDto } from '../types/settings'
 
@@ -52,6 +52,25 @@ vi.mock('./useAppSettings', () => ({
 }))
 
 import { useWebView } from './useWebView'
+import { i18n } from '../i18n'
+import ruCatalog from '../../locales/ru.json'
+import enCatalog from '../../locales/en.json'
+
+beforeAll(() => {
+  i18n.global.setLocaleMessage('ru', (ruCatalog as { messages: Record<string, string> }).messages)
+  i18n.global.setLocaleMessage('en', (enCatalog as { messages: Record<string, string> }).messages)
+  ;(i18n.global.locale as unknown as { value: string }).value = 'ru'
+})
+
+async function withLocale(code: 'ru' | 'en', fn: () => Promise<void> | void) {
+  const previous = (i18n.global.locale as unknown as { value: string }).value
+  ;(i18n.global.locale as unknown as { value: string }).value = code
+  try {
+    await fn()
+  } finally {
+    ;(i18n.global.locale as unknown as { value: string }).value = previous
+  }
+}
 
 function makeSettings(overrides: Partial<WebViewSettingsDto> = {}): WebViewSettingsDto {
   return {
@@ -163,7 +182,7 @@ describe('useWebView displayUrl', () => {
     await updateDisplayUrl()
 
     expect(displayUrl.value).toBe('http://127.0.0.1:8080')
-    expect(errorMessage.value).toBe('Не удалось получить локальный IP: No network route')
+    expect(errorMessage.value).toBe('Не удалось получить локальный IP')
   })
 
   it('does not let an outdated local-IP lookup overwrite a newer URL', async () => {
@@ -331,7 +350,7 @@ describe('saveUpnpEnabled', () => {
     await nextTick()
 
     expect(settings.value.upnp_enabled).toBe(false)
-    expect(errorMessage.value).toBe('Ошибка: Token required')
+    expect(errorMessage.value).toBe('Не удалось изменить настройку UPnP')
     expect(mockDebugError).toHaveBeenCalledWith('[WebView] UPnP toggle failed:', 'Token required')
     expect(mockInvoke).toHaveBeenCalledWith('set_webview_upnp_enabled', { enabled: true })
   })
@@ -349,7 +368,7 @@ describe('saveUpnpEnabled', () => {
     await nextTick()
 
     expect(settings.value.upnp_enabled).toBe(true)
-    expect(errorMessage.value).toBe('Ошибка: Cannot disable')
+    expect(errorMessage.value).toBe('Не удалось изменить настройку UPnP')
     expect(mockDebugError).toHaveBeenCalledWith('[WebView] UPnP toggle failed:', 'Cannot disable')
     expect(mockInvoke).toHaveBeenCalledWith('set_webview_upnp_enabled', { enabled: false })
   })
@@ -387,4 +406,235 @@ describe('saveUpnpEnabled', () => {
     expect(errorMessage.value).toBe('UPnP выключен')
     expect(mockInvoke).toHaveBeenCalledWith('set_webview_upnp_enabled', { enabled: false })
   })
+})
+
+type WebViewComposable = ReturnType<typeof useWebView>
+
+interface WebViewFallbackCase {
+  name: string
+  rawMessage: string
+  trigger: (webview: WebViewComposable) => Promise<void>
+  expected: Record<'ru' | 'en', string>
+}
+
+const webviewFallbackCases: WebViewFallbackCase[] = [
+  {
+    name: 'save',
+    rawMessage: 'Не удалось сохранить настройки',
+    trigger: async (webview) => { await webview.save() },
+    expected: {
+      ru: 'Не удалось сохранить настройки',
+      en: 'Failed to save settings',
+    },
+  },
+  {
+    name: 'saveServerSettings',
+    rawMessage: 'Не удалось сохранить настройки сервера',
+    trigger: async (webview) => { await webview.saveServerSettings() },
+    expected: {
+      ru: 'Не удалось сохранить настройки сервера',
+      en: 'Failed to save server settings',
+    },
+  },
+  {
+    name: 'copyToken',
+    rawMessage: 'Токен не скопирован',
+    trigger: async (webview) => { await webview.copyToken() },
+    expected: {
+      ru: 'Не удалось скопировать токен в буфер обмена',
+      en: 'Could not copy the token to the clipboard',
+    },
+  },
+  {
+    name: 'saveUpnpEnabled',
+    rawMessage: 'UPnP не включён',
+    trigger: async (webview) => {
+      webview.settings.value.upnp_enabled = true
+      await webview.saveUpnpEnabled()
+    },
+    expected: {
+      ru: 'Не удалось изменить настройку UPnP',
+      en: 'Could not change the UPnP setting',
+    },
+  },
+  {
+    name: 'regenerateAccessToken',
+    rawMessage: 'Не удалось перегенерировать токен',
+    trigger: async (webview) => { await webview.regenerateAccessToken() },
+    expected: {
+      ru: 'Не удалось перегенерировать токен доступа',
+      en: 'Could not regenerate the access token',
+    },
+  },
+  {
+    name: 'showExternalUrl',
+    rawMessage: 'Нет внешнего IP',
+    trigger: async (webview) => { await webview.showExternalUrl() },
+    expected: {
+      ru: 'Не удалось получить внешний IP',
+      en: 'Could not get external IP',
+    },
+  },
+  {
+    name: 'openTemplateFolder',
+    rawMessage: 'Папка недоступна',
+    trigger: async (webview) => { await webview.openTemplateFolder() },
+    expected: {
+      ru: 'Не удалось открыть папку',
+      en: 'Could not open folder',
+    },
+  },
+  {
+    name: 'sendTest',
+    rawMessage: 'Не удалось отправить сообщение',
+    trigger: async (webview) => {
+      webview.serverStatus.value = { state: 'running' }
+      webview.testMessage.value = 'hello'
+      await webview.sendTest()
+    },
+    expected: {
+      ru: 'Не удалось отправить сообщение',
+      en: 'Could not send the message',
+    },
+  },
+  {
+    name: 'reloadTemplates',
+    rawMessage: 'Ошибка обновления шаблонов',
+    trigger: async (webview) => { await webview.reloadTemplates() },
+    expected: {
+      ru: 'Не удалось обновить шаблоны',
+      en: 'Could not refresh templates',
+    },
+  },
+  {
+    name: 'updateDisplayUrl',
+    rawMessage: 'Нет маршрута к сети',
+    trigger: async (webview) => { await webview.updateDisplayUrl() },
+    expected: {
+      ru: 'Не удалось получить локальный IP',
+      en: 'Could not get local IP',
+    },
+  },
+]
+
+describe('useWebView command error localization', () => {
+  beforeEach(() => {
+    resetHarness()
+  })
+
+  for (const testCase of webviewFallbackCases) {
+    for (const locale of ['ru', 'en'] as const) {
+      it(`presents the ${locale} fallback instead of raw "${testCase.rawMessage}" in ${testCase.name}`, async () => {
+        mockWebViewSettingsRef.value = makeSettings({ bind_address: '0.0.0.0' })
+        const webview = await setupAndMount()
+        mockInvoke.mockRejectedValueOnce(testCase.rawMessage)
+
+        await withLocale(locale, async () => {
+          await testCase.trigger(webview)
+          expect(webview.errorMessage.value).toBe(testCase.expected[locale])
+        })
+      })
+    }
+  }
+
+  it('presents the English fallback when copying the external URL fails with a raw Russian clipboard error', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ bind_address: '127.0.0.1' })
+    const webview = await setupAndMount()
+    webview.settings.value.access_token = 'token'
+    webview.externalIp.value = '1.2.3.4'
+
+    const previousNavigator = globalThis.navigator
+    const writeText = vi.fn().mockRejectedValue('Ошибка записи в буфер обмена')
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    try {
+      await withLocale('en', async () => {
+        await webview.copyExternalUrl()
+        expect(webview.errorMessage.value).toBe('Could not copy the external URL')
+      })
+    } finally {
+      if (previousNavigator === undefined) {
+        vi.unstubAllGlobals()
+        vi.stubGlobal('window', globalThis)
+      } else {
+        vi.stubGlobal('navigator', previousNavigator)
+      }
+    }
+  })
+})
+
+interface WebViewEventHarness {
+  webview: WebViewComposable
+  listeners: Map<string, (event: { payload: unknown }) => void>
+}
+
+async function setupAndMountWithEvents(impl: InvokeImpl = defaultInvokeImpl): Promise<WebViewEventHarness> {
+  const listeners = new Map<string, (event: { payload: unknown }) => void>()
+  const captureListen = async (event: string, callback: (event: { payload: unknown }) => void) => {
+    listeners.set(event, callback)
+    return vi.fn()
+  }
+  listenMock.mockImplementation(captureListen as never)
+  mockInvoke.mockImplementation(impl)
+  const scope = effectScope()
+  let composable!: ReturnType<typeof useWebView>
+  scope.run(() => {
+    composable = useWebView()
+  })
+  activeScopes.push(scope)
+  const onMounted = capturedOnMountedCbs.shift()
+  if (onMounted) {
+    await onMounted()
+  }
+  return { webview: composable, listeners }
+}
+
+describe('useWebView runtime error localization', () => {
+  beforeEach(() => {
+    resetHarness()
+  })
+
+  const runtimeRawMessage = 'Сервер WebView завершился с ошибкой'
+
+  for (const locale of ['ru', 'en'] as const) {
+    const expected = locale === 'ru'
+      ? 'Сервер WebView сообщил об ошибке'
+      : 'The WebView server reported an error'
+
+    it(`localizes a raw runtime status error to the ${locale} fallback while preserving the state`, async () => {
+      const { webview, listeners } = await setupAndMountWithEvents()
+      const statusChanged = listeners.get('webview-server-status-changed')
+      expect(statusChanged).toBeDefined()
+
+      await withLocale(locale, () => {
+        statusChanged?.({ payload: { state: 'error', message: runtimeRawMessage } })
+      })
+
+      expect(webview.serverStatus.value).toEqual({ state: 'error', message: runtimeRawMessage })
+      expect(webview.errorMessage.value).toBe(expected)
+    })
+
+    it(`localizes a plain-string webview-server-error payload to the ${locale} fallback`, async () => {
+      const { webview, listeners } = await setupAndMountWithEvents()
+      const onServerError = listeners.get('webview-server-error')
+      expect(onServerError).toBeDefined()
+
+      await withLocale(locale, () => {
+        onServerError?.({ payload: runtimeRawMessage })
+      })
+
+      expect(webview.errorMessage.value).toBe(expected)
+    })
+
+    it(`localizes a {"WebViewServerError"} webview-server-error payload to the ${locale} fallback`, async () => {
+      const { webview, listeners } = await setupAndMountWithEvents()
+      const onServerError = listeners.get('webview-server-error')
+      expect(onServerError).toBeDefined()
+
+      await withLocale(locale, () => {
+        onServerError?.({ payload: { WebViewServerError: runtimeRawMessage } })
+      })
+
+      expect(webview.errorMessage.value).toBe(expected)
+    })
+  }
 })

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
-import { editorFontLabel } from '../../utils/editorFont'
+import { t } from '../../i18n'
 import { useEditorFontSettings } from '../../composables/useEditorFontSettings'
 
 const {
@@ -25,8 +25,15 @@ const previewStyle = computed(() => ({
   fontSize: `${previewFontSize.value}px`,
 }))
 
+function builtinFontLabel(id: string): string {
+  if (id === 'default') return t('settings.editor.font.default')
+  if (id === 'system') return t('settings.editor.font.system')
+  return id
+}
+
 const selectedLabel = computed(
-  () => fontOptions.value.find((opt) => opt.id === family.value)?.label ?? editorFontLabel(family.value),
+  () => fontOptions.value.find((opt) => opt.id === family.value)?.label
+    ?? builtinFontLabel(family.value),
 )
 const filteredFontOptions = computed(() => {
   const query = search.value.trim().toLocaleLowerCase()
@@ -86,7 +93,7 @@ function onSizeInput(event: Event): void {
   >
     <div class="font-controls-row">
       <div class="font-field font-family-field">
-        <label class="font-field-label" for="editor-font-family">Шрифт</label>
+        <label class="font-field-label" for="editor-font-family">{{ t('settings.editor.font.label_family') }}</label>
         <div ref="pickerRoot" class="font-picker">
           <button
             id="editor-font-family"
@@ -108,15 +115,15 @@ function onSizeInput(event: Event): void {
             id="editor-font-options"
             class="font-popup"
             role="listbox"
-            aria-label="Шрифт"
+            :aria-label="t('settings.editor.font.label_family')"
           >
             <input
               ref="searchInput"
               v-model="search"
               type="search"
               class="font-search"
-              placeholder="Найти шрифт"
-              aria-label="Найти шрифт"
+              :placeholder="t('settings.editor.font.search_placeholder')"
+              :aria-label="t('settings.editor.font.search_placeholder')"
               @click.stop
             />
             <button
@@ -132,13 +139,13 @@ function onSizeInput(event: Event): void {
             >
               {{ opt.label }}
             </button>
-            <p v-if="filteredFontOptions.length === 0" class="font-empty">Шрифт не найден</p>
+            <p v-if="filteredFontOptions.length === 0" class="font-empty">{{ t('settings.editor.font.empty') }}</p>
           </div>
         </div>
       </div>
 
       <div class="font-field font-size-field">
-        <label class="font-field-label" for="editor-font-size">Размер</label>
+        <label class="font-field-label" for="editor-font-size">{{ t('settings.editor.font.label_size') }}</label>
         <div class="font-size-wrap">
           <input
             id="editor-font-size"
@@ -157,12 +164,12 @@ function onSizeInput(event: Event): void {
     </div>
 
     <div v-if="saving || saveError" class="font-status" aria-live="polite">
-      <span v-if="saving" class="font-saving" role="status">Сохранение…</span>
+      <span v-if="saving" class="font-saving" role="status">{{ t('settings.editor.font.saving') }}</span>
       <span v-else-if="saveError" class="font-error" role="alert">{{ saveError }}</span>
     </div>
 
     <p class="font-sample" :style="previewStyle">
-      Текст. 0123
+      {{ t('settings.editor.font.sample') }}
     </p>
   </section>
 </template>

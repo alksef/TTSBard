@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll } from 'vitest'
 import {
   enterOutcomeLabel,
   enterOutcomeLabelCompact,
@@ -8,6 +8,13 @@ import {
 } from './submitAffordance'
 import type { SubmitKeepIntent } from './submitAffordance'
 import type { QuickEditorMode } from '../../types/settings'
+import { i18n } from '../../i18n'
+import ruCatalog from '../../../locales/ru.json'
+
+beforeAll(() => {
+  i18n.global.setLocaleMessage('ru', (ruCatalog as { messages: Record<string, string> }).messages)
+  ;(i18n.global.locale as unknown as { value: string }).value = 'ru'
+})
 
 const modes: QuickEditorMode[] = ['disabled', 'collapse', 'return_focus']
 

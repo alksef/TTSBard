@@ -86,7 +86,8 @@
     ],
     "resources": {
       "resources/dict": "resources/dict",
-      "resources/espeak-ng-data": "espeak-ng-data"
+      "resources/espeak-ng-data": "espeak-ng-data",
+      "locales": "locales"
     }
   }
 }

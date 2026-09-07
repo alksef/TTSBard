@@ -2,6 +2,7 @@
 import { ref, nextTick, computed } from 'vue'
 import { Inbox } from 'lucide-vue-next'
 import type { EditorTab } from '../../composables/useEditorTabs'
+import { t } from '../../i18n'
 
 const props = defineProps<{
   tabs: EditorTab[]
@@ -50,14 +51,14 @@ const pinnedCountText = computed(() => {
 </script>
 
 <template>
-  <div class="editor-tabs" title="Рабочие вкладки">
+  <div class="editor-tabs" :title="t('editor.tabs.label')">
     <div class="tabs-scroll">
       <div
         v-if="pinnedTitle"
         class="tab-item pinned-tab"
         :class="{ active: pinnedActive }"
-        title="Входящие"
-        aria-label="Входящие"
+        :title="t('editor.incoming.title')"
+        :aria-label="t('editor.incoming.title')"
         @click="emit('select-pinned')"
       >
         <Inbox :size="13" class="pinned-icon" />
@@ -89,7 +90,7 @@ const pinnedCountText = computed(() => {
           <button
             class="tab-close"
             @click.stop="emit('close', tab.id)"
-            title="Закрыть вкладку"
+            :title="t('editor.tabs.close')"
           >&times;</button>
         </template>
       </div>
@@ -97,7 +98,7 @@ const pinnedCountText = computed(() => {
     <button
       class="tab-add"
       @click="emit('create')"
-      title="Новая вкладка"
+      :title="t('editor.tabs.add')"
     >+</button>
   </div>
 </template>

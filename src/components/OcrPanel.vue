@@ -2,12 +2,14 @@
 import { computed } from 'vue'
 import { AlertTriangle, Info, ListRestart } from 'lucide-vue-next'
 import { useOcr } from '../composables/useOcr'
+import { t } from '../i18n'
 
 const {
   settings,
   status,
   packs,
   message,
+  messageType,
   savePending,
   rescanPending,
   statusLabel,
@@ -17,13 +19,6 @@ const {
   runtimeHoldsModel,
   runtimeModelLabel,
 } = useOcr()
-
-const messageBoxClass = computed(() => {
-  const m = (message.value ?? '').toLowerCase()
-  if (['error', 'ошибка', 'не удалось'].some((k) => m.includes(k))) return 'error'
-  if (['сохранен', 'обновл'].some((k) => m.includes(k))) return 'success'
-  return ''
-})
 
 const statusClass = computed(() => {
   switch (status.value.state) {
@@ -65,7 +60,7 @@ function onModelChange(event: Event) {
 
 <template>
   <div class="ocr-panel">
-    <div v-if="message" class="message-box" :class="messageBoxClass">
+    <div v-if="message" class="message-box" :class="messageType">
       {{ message }}
     </div>
 
@@ -73,14 +68,14 @@ function onModelChange(event: Event) {
       <div class="section-header server-header">
         <h2>OCR</h2>
         <span class="status-indicator" :class="statusClass">
-          {{ status.state === 'ready' ? 'Загружено' : statusLabel }}
+          {{ status.state === 'ready' ? t('ocr.status.loaded') : statusLabel }}
         </span>
       </div>
 
       <div v-if="showRuntimeError" class="callout runtime-error-box">
         <AlertTriangle :size="15" class="callout-icon" />
         <span class="callout-text">
-          {{ statusErrorMessage ?? 'Произошла ошибка OCR runtime.' }}
+          {{ statusErrorMessage ?? t('ocr.runtime_error_fallback') }}
         </span>
       </div>
 
@@ -92,15 +87,15 @@ function onModelChange(event: Event) {
             :disabled="controlsDisabled || (noPacks && !runtimeHoldsModel)"
             @change="saveSettings"
           />
-          <span>Включить OCR</span>
+          <span>{{ t('ocr.enable') }}</span>
         </label>
         <p class="setting-hint">
-          Если включено, OCR будет запущен автоматически при следующем запуске приложения.
+          {{ t('ocr.enable_hint') }}
         </p>
       </div>
 
       <div class="model-field">
-        <label for="ocr-model" class="model-label">Модель распознавания:</label>
+        <label for="ocr-model" class="model-label">{{ t('ocr.model_label') }}</label>
         <div class="model-row">
           <select
             id="ocr-model"
@@ -110,33 +105,33 @@ function onModelChange(event: Event) {
             @change="onModelChange"
           >
             <option v-if="noPacks && !runtimeHoldsModel" value="" disabled>
-              Модели не найдены
+              {{ t('ocr.no_models_option') }}
             </option>
             <template v-else-if="!noPacks">
-              <option value="" disabled>Выберите модель</option>
+              <option value="" disabled>{{ t('ocr.select_model_option') }}</option>
               <option v-for="pack in packs" :key="pack.id" :value="pack.id">
                 {{ pack.display_name }} ({{ formatPackLanguages(pack.languages) }})
               </option>
             </template>
             <option v-if="runtimeHoldsModel" :value="savedModelId ?? ''" disabled>
-              {{ runtimeModelLabel }} (в памяти)
+              {{ t('ocr.model_in_memory', { name: runtimeModelLabel }) }}
             </option>
             <option v-else-if="selectedPackMissing" :value="savedModelId ?? ''" disabled>
-              {{ savedModelId }} (не установлен)
+              {{ t('ocr.model_not_installed', { id: savedModelId ?? '' }) }}
             </option>
           </select>
           <button
             class="refresh-button"
             :disabled="rescanPending || controlsDisabled"
             @click="rescanPacks"
-            title="Обновить список моделей"
-            aria-label="Обновить список моделей"
+            :title="t('ocr.refresh_models')"
+            :aria-label="t('ocr.refresh_models')"
           >
             <ListRestart :size="14" :class="{ 'button-spinner': rescanPending }" />
           </button>
         </div>
         <p v-if="noPacks" class="path-hint" role="status" aria-live="polite">
-          Модели OCR не найдены. Поместите файлы моделей в:
+          {{ t('ocr.no_models_hint') }}
           <code>%APPDATA%\ttsbard\models\ocr</code>
         </p>
         <p
@@ -145,8 +140,7 @@ function onModelChange(event: Event) {
           role="status"
           aria-live="polite"
         >
-          Модель «{{ savedModelId }}» не установлена. Выберите другую модель или поместите
-          файлы моделей в:
+          {{ t('ocr.model_missing_hint', { model: savedModelId ?? '' }) }}
           <code>%APPDATA%\ttsbard\models\ocr</code>
         </p>
       </div>
@@ -154,7 +148,7 @@ function onModelChange(event: Event) {
 
     <div class="info-callout">
       <Info :size="16" class="info-icon" />
-      <span>Распознанный текст поступает во «Входящие».</span>
+      <span>{{ t('ocr.info_to_incoming') }}</span>
     </div>
   </div>
 </template>

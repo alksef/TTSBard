@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch, nextTick } from 'vue'
+import { t } from '../../i18n'
 
 const props = defineProps<{
   visible: boolean
@@ -56,13 +57,13 @@ const menuStyle = computed(() => ({
       class="spell-context-menu"
       :style="menuStyle"
       role="menu"
-      aria-label="Spelling suggestions"
+      :aria-label="t('editor.spell.menu_aria')"
     >
       <div
         v-if="suggestions.length > 0"
         class="spell-context-menu__actions"
         role="group"
-        aria-label="Suggestions"
+        :aria-label="t('editor.spell.group_aria')"
       >
         <button
           v-for="(s, index) in suggestions"
@@ -70,7 +71,7 @@ const menuStyle = computed(() => ({
           class="spell-context-menu__action"
           :class="{ 'spell-context-menu__action--selected': selectedSuggestionIndex === index }"
           role="menuitem"
-          :aria-label="`Replace with ${s}`"
+          :aria-label="t('editor.spell.replace_aria', { word: s })"
           @mousedown.prevent
           @mouseenter="$emit('select', index)"
           @click.stop="$emit('apply', s)"
@@ -79,7 +80,7 @@ const menuStyle = computed(() => ({
         </button>
       </div>
       <div v-else class="spell-context-menu__no-suggestions">
-        No suggestions
+        {{ t('editor.spell.no_suggestions') }}
       </div>
     </div>
   </Teleport>

@@ -3,6 +3,8 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { Loader2 } from 'lucide-vue-next';
 import { debugLog, debugError } from '../../utils/debug';
+import { presentCommandError } from '../../ipc/commandError';
+import { t } from '../../i18n';
 import InputWithToggle from '../shared/InputWithToggle.vue';
 import StatusMessage from '../shared/StatusMessage.vue';
 import TestResult, { type TestResult as TestResultType } from '../shared/TestResult.vue';
@@ -38,14 +40,20 @@ const mtSecret = ref<string>('');
 const mtDcId = ref<string>('');
 
 // DC ID options for MTProxy
-const dcIdOptions = [
-  { value: '', label: 'Авто' },
+const dcIdOptions = computed(() => [
+  { value: '', label: t('settings.network.auto') },
   { value: '1', label: '1' },
   { value: '2', label: '2' },
   { value: '3', label: '3' },
   { value: '4', label: '4' },
   { value: '5', label: '5' },
-];
+]);
+
+function formatError(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === 'string') return e;
+  return String(e);
+}
 
 // UI State
 const isLoadingNetwork = ref(false);
@@ -120,7 +128,7 @@ async function loadProxySettings() {
     }
   } catch (error) {
     debugError('Failed to load proxy settings:', error);
-    showStatus('Ошибка загрузки настроек SOCKS5: ' + (error as Error).message, 'error');
+    showStatus(presentCommandError(error, t('settings.network.error.load_socks5')), 'error');
   } finally {
     isLoadingNetwork.value = false;
   }
@@ -169,23 +177,23 @@ async function saveNetworkSettings() {
         url: '',
         proxyType: 'socks5'
       });
-      showStatus('Настройки SOCKS5 очищены', 'success');
+      showStatus(t('settings.network.socks5.cleared'), 'success');
     } catch (error) {
-      showStatus('Ошибка сохранения: ' + (error as Error).message, 'error');
+      showStatus(presentCommandError(error, t('settings.network.error.save')), 'error');
     }
     return;
   }
 
   // Validate host
   if (!host.value.trim()) {
-    showStatus('Введите хост SOCKS5 прокси', 'error');
+    showStatus(t('settings.network.socks5.host_required'), 'error');
     return;
   }
 
   // Validate port
   const portNum = parseInt(port.value) || 1080;
   if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
-    showStatus('Порт должен быть от 1 до 65535', 'error');
+    showStatus(t('settings.network.error.port_range'), 'error');
     return;
   }
 
@@ -195,10 +203,10 @@ async function saveNetworkSettings() {
       url: socks5Url.value,
       proxyType: 'socks5'
     });
-    showStatus('Настройки SOCKS5 сохранены', 'success');
+    showStatus(t('settings.network.socks5.saved'), 'success');
   } catch (error) {
     debugError('Failed to save proxy URL:', error);
-    showStatus('Ошибка сохранения: ' + (error as Error).message, 'error');
+    showStatus(presentCommandError(error, t('settings.network.error.save')), 'error');
   } finally {
     isSavingNetwork.value = false;
   }
@@ -206,12 +214,12 @@ async function saveNetworkSettings() {
 
 async function testConnection() {
   if (!hasProxyData.value) {
-    showStatus('Введите данные SOCKS5 прокси для тестирования', 'error');
+    showStatus(t('settings.network.socks5.test_data_required'), 'error');
     return;
   }
 
   if (!host.value.trim()) {
-    showStatus('Введите хост SOCKS5 прокси', 'error');
+    showStatus(t('settings.network.socks5.host_required'), 'error');
     return;
   }
 
@@ -246,14 +254,11 @@ async function testConnection() {
 
     if (result.success) {
       showStatus(
-        `Соединение успешно! Задержка: ${result.latency_ms}мс`,
+        t('settings.network.test_success', { latency: result.latency_ms }),
         'success'
       );
     } else {
-      showStatus(
-        `Ошибка соединения: ${result.error || 'Неизвестная ошибка'}`,
-        'error'
-      );
+      showStatus(t('settings.network.error.connection'), 'error');
     }
   } catch (error) {
     debugError('Failed to test proxy:', error);
@@ -261,9 +266,9 @@ async function testConnection() {
       success: false,
       latency_ms: null,
       mode: 'socks5',
-      error: (error as Error).message
+      error: formatError(error)
     };
-    showStatus('Ошибка тестирования: ' + (error as Error).message, 'error');
+    showStatus(presentCommandError(error, t('settings.network.error.test')), 'error');
   } finally {
     isTestingSocks5.value = false;
   }
@@ -280,21 +285,21 @@ async function loadMtProxySettings() {
     mtDcId.value = settings.dc_id?.toString() || '';
   } catch (error) {
     debugError('Failed to load MTProxy settings:', error);
-    showStatus('Ошибка загрузки настроек MTProxy: ' + (error as Error).message, 'error');
+    showStatus(presentCommandError(error, t('settings.network.error.load_mtproxy')), 'error');
   }
 }
 
 async function saveMtProxySettings() {
   // Validate host
   if (!mtHost.value.trim()) {
-    showStatus('Введите хост MTProxy', 'error');
+    showStatus(t('settings.network.mtproxy.host_required'), 'error');
     return;
   }
 
   // Validate port
   const portNum = parseInt(mtPort.value) || 8888;
   if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
-    showStatus('Порт должен быть от 1 до 65535', 'error');
+    showStatus(t('settings.network.error.port_range'), 'error');
     return;
   }
 
@@ -302,7 +307,7 @@ async function saveMtProxySettings() {
   if (mtSecret.value.trim()) {
     const secretLen = mtSecret.value.trim().length;
     if (secretLen < 24 || (secretLen >= 32 && secretLen % 2 !== 0)) {
-      showStatus('Секрет должен быть ≥24 символов (base64) или ≥32, чётное (hex)', 'error');
+      showStatus(t('settings.network.mtproxy.secret_invalid'), 'error');
       return;
     }
   }
@@ -318,10 +323,10 @@ async function saveMtProxySettings() {
       secret: mtSecret.value.trim() || undefined,
       dcId: dcIdNum
     });
-    showStatus('Настройки MTProxy сохранены', 'success');
+    showStatus(t('settings.network.mtproxy.saved'), 'success');
   } catch (error) {
     debugError('Failed to save MTProxy settings:', error);
-    showStatus('Ошибка сохранения: ' + (error as Error).message, 'error');
+    showStatus(presentCommandError(error, t('settings.network.error.save')), 'error');
   } finally {
     isSavingNetwork.value = false;
   }
@@ -330,13 +335,13 @@ async function saveMtProxySettings() {
 async function testMtProxyConnection() {
   // Validate host
   if (!mtHost.value.trim()) {
-    showStatus('Введите хост MTProxy', 'error');
+    showStatus(t('settings.network.mtproxy.host_required'), 'error');
     return;
   }
 
   // Validate secret
   if (!mtSecret.value.trim()) {
-    showStatus('Введите секрет MTProxy', 'error');
+    showStatus(t('settings.network.mtproxy.secret_required'), 'error');
     return;
   }
 
@@ -372,14 +377,11 @@ async function testMtProxyConnection() {
 
     if (result.success) {
       showStatus(
-        `Соединение MTProxy успешно! Задержка: ${result.latency_ms}мс`,
+        t('settings.network.test_success_mtproxy', { latency: result.latency_ms }),
         'success'
       );
     } else {
-      showStatus(
-        `Ошибка соединения MTProxy: ${result.error || 'Неизвестная ошибка'}`,
-        'error'
-      );
+      showStatus(t('settings.network.error.connection_mtproxy'), 'error');
     }
   } catch (error) {
     debugError('Failed to test MTProxy:', error);
@@ -387,9 +389,9 @@ async function testMtProxyConnection() {
       success: false,
       latency_ms: null,
       mode: 'mtproxy',
-      error: (error as Error).message
+      error: formatError(error)
     };
-    showStatus('Ошибка тестирования MTProxy: ' + (error as Error).message, 'error');
+    showStatus(presentCommandError(error, t('settings.network.error.test_mtproxy')), 'error');
   } finally {
     isTestingMtProxy.value = false;
   }
@@ -432,7 +434,7 @@ onUnmounted(() => {
 
     <div v-if="isLoadingNetwork" class="loading-state">
       <Loader2 :size="24" class="spinner" />
-      <span>Загрузка настроек...</span>
+      <span>{{ t('settings.network.loading') }}</span>
     </div>
 
     <div v-else class="network-content">
@@ -443,13 +445,13 @@ onUnmounted(() => {
         <div class="network-form">
           <!-- Host and Port Row -->
           <div class="form-row">
-            <label>Хост:</label>
+            <label>{{ t('settings.network.host') }}:</label>
             <input
               v-model="host"
               type="text"
               class="network-input network-input-host"
             />
-            <label>Порт:</label>
+            <label>{{ t('settings.network.port') }}:</label>
             <input
               v-model="port"
               type="number"
@@ -461,18 +463,18 @@ onUnmounted(() => {
 
           <!-- Username and Password Row -->
           <div class="form-row">
-            <label>Логин:</label>
+            <label>{{ t('settings.network.login') }}:</label>
             <input
               v-model="username"
               type="text"
-              placeholder="(опционально)"
+              :placeholder="t('settings.network.optional')"
               class="network-input network-input-host"
             />
-            <label>Пароль:</label>
+            <label>{{ t('settings.network.password') }}:</label>
             <InputWithToggle
               v-model="password"
               type="password"
-              placeholder="(опционально)"
+              :placeholder="t('settings.network.optional')"
               class="network-input-wide"
             />
           </div>
@@ -484,8 +486,8 @@ onUnmounted(() => {
               :disabled="isTestingSocks5 || !hasProxyData"
               class="test-button"
               :class="{ disabled: isTestingSocks5 || !hasProxyData }"
-            >{{ isTestingSocks5 ? 'Проверка...' : 'Тест' }}</button>
-            <button @click="saveNetworkSettings" :disabled="isSavingNetwork" class="save-button-inline">Сохранить</button>
+            >{{ isTestingSocks5 ? t('settings.network.testing') : t('settings.network.test') }}</button>
+            <button @click="saveNetworkSettings" :disabled="isSavingNetwork" class="save-button-inline">{{ t('settings.network.save') }}</button>
           </div>
 
           <!-- Test Result -->
@@ -500,13 +502,13 @@ onUnmounted(() => {
         <div class="network-form">
           <!-- Host and Port Row -->
           <div class="form-row">
-            <label>Хост:</label>
+            <label>{{ t('settings.network.host') }}:</label>
             <input
               v-model="mtHost"
               type="text"
               class="network-input network-input-host"
             />
-            <label>Порт:</label>
+            <label>{{ t('settings.network.port') }}:</label>
             <input
               v-model="mtPort"
               type="number"
@@ -518,7 +520,7 @@ onUnmounted(() => {
 
           <!-- Secret Row -->
           <div class="form-row">
-            <label>Ключ:</label>
+            <label>{{ t('settings.network.secret') }}:</label>
             <InputWithToggle
               v-model="mtSecret"
               type="password"
@@ -546,8 +548,8 @@ onUnmounted(() => {
               :disabled="isTestingMtProxy || !hasMtProxyData"
               class="test-button"
               :class="{ disabled: isTestingMtProxy || !hasMtProxyData }"
-            >{{ isTestingMtProxy ? 'Проверка...' : 'Тест' }}</button>
-            <button @click="saveMtProxySettings" :disabled="isSavingNetwork" class="save-button-inline">Сохранить</button>
+            >{{ isTestingMtProxy ? t('settings.network.testing') : t('settings.network.test') }}</button>
+            <button @click="saveMtProxySettings" :disabled="isSavingNetwork" class="save-button-inline">{{ t('settings.network.save') }}</button>
           </div>
 
           <!-- Test Result -->

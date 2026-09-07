@@ -5,12 +5,14 @@ import { createAsyncCleanupScope } from '../utils/asyncCleanup'
 import { debugError } from '../utils/debug'
 import { convertOcrStatusFromRust, OCR_RUNTIME_STATES, type OcrStatusDto } from './useOcr'
 import { useErrorHandler } from './useErrorHandler'
+import { t } from '../i18n'
 
 const OCR_STATUS_CHANGED_EVENT = 'ocr-status-changed'
 const GET_OCR_STATUS_COMMAND = 'get_ocr_status'
 
-export const OCR_RUNTIME_ERROR_TOAST_MESSAGE =
-  'Не удалось запустить OCR. Проверьте модель и настройки OCR.'
+export function ocrRuntimeErrorToastMessage(): string {
+  return t('ocr.runtime_error_toast')
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
@@ -60,7 +62,7 @@ export function useOcrRuntimeNotifications(): void {
     }
     if (inErrorEpisode) return
     inErrorEpisode = true
-    showError(OCR_RUNTIME_ERROR_TOAST_MESSAGE)
+    showError(ocrRuntimeErrorToastMessage())
   }
 
   onMounted(async () => {

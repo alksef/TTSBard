@@ -1,10 +1,17 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll } from 'vitest'
 import {
   convertOcrOneShotFailure,
   OCR_FAILURE_REASONS,
   type OcrFailureReason,
   type OcrFailureSeverity,
 } from './ocrFailureNotifications'
+import { i18n } from '../i18n'
+import ruCatalog from '../../locales/ru.json'
+
+beforeAll(() => {
+  i18n.global.setLocaleMessage('ru', (ruCatalog as { messages: Record<string, string> }).messages)
+  ;(i18n.global.locale as unknown as { value: string }).value = 'ru'
+})
 
 const EXPECTED_PRESENTATION: Record<OcrFailureReason, { severity: OcrFailureSeverity; message: string }> = {
   emptyResult: {

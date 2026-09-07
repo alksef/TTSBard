@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { LogicalSize } from '@tauri-apps/api/dpi'
+import { t } from '../src/i18n'
 import { createAsyncCleanupScope } from '../src/utils/asyncCleanup'
 import { registerPlaybackControlListeners } from './listeners'
 import {
@@ -75,6 +76,8 @@ interface PlaybackStateDto {
 
 const playbackStatus = ref<PlaybackStatus>('Idle')
 const currentText = ref<string | null>(null)
+
+const playbackStatusText = computed(() => t(`playback.status.${playbackStatus.value.toLowerCase()}`))
 
 async function fetchPlaybackStatus() {
   try {
@@ -153,7 +156,7 @@ function doPause() {
   pendingActions.value = new Set([...pendingActions.value, 'pause:' + rowId])
   invoke('playback_pause').catch((e) => {
     if (rowId) {
-      rowErrors.value = { ...rowErrors.value, [rowId]: 'Ошибка паузы: ' + formatError(e) }
+      rowErrors.value = { ...rowErrors.value, [rowId]: t('playback.error.pause', { detail: formatError(e) }) }
     }
   }).finally(() => {
     pendingActions.value = new Set([...pendingActions.value].filter((a) => a !== 'pause:' + rowId))
@@ -170,7 +173,7 @@ function doResume() {
   pendingActions.value = new Set([...pendingActions.value, 'resume:' + rowId])
   invoke('playback_resume').catch((e) => {
     if (rowId) {
-      rowErrors.value = { ...rowErrors.value, [rowId]: 'Ошибка возобновления: ' + formatError(e) }
+      rowErrors.value = { ...rowErrors.value, [rowId]: t('playback.error.resume', { detail: formatError(e) }) }
     }
   }).finally(() => {
     pendingActions.value = new Set([...pendingActions.value].filter((a) => a !== 'resume:' + rowId))
@@ -187,7 +190,7 @@ function doStop() {
   pendingActions.value = new Set([...pendingActions.value, 'stop:' + rowId])
   invoke('playback_stop').catch((e) => {
     if (rowId) {
-      rowErrors.value = { ...rowErrors.value, [rowId]: 'Ошибка остановки: ' + formatError(e) }
+      rowErrors.value = { ...rowErrors.value, [rowId]: t('playback.error.stop', { detail: formatError(e) }) }
     }
   }).finally(() => {
     pendingActions.value = new Set([...pendingActions.value].filter((a) => a !== 'stop:' + rowId))
@@ -204,7 +207,7 @@ function doRestart() {
   pendingActions.value = new Set([...pendingActions.value, 'restart:' + rowId])
   invoke('playback_repeat').catch((e) => {
     if (rowId) {
-      rowErrors.value = { ...rowErrors.value, [rowId]: 'Ошибка повтора: ' + formatError(e) }
+      rowErrors.value = { ...rowErrors.value, [rowId]: t('playback.error.repeat', { detail: formatError(e) }) }
     }
   }).finally(() => {
     pendingActions.value = new Set([...pendingActions.value].filter((a) => a !== 'restart:' + rowId))
@@ -219,7 +222,7 @@ async function doReplay(id: string) {
   try {
     await invoke('replay_phrase', { id })
   } catch (e) {
-    const msg = 'Ошибка повтора: ' + formatError(e)
+    const msg = t('playback.error.repeat', { detail: formatError(e) })
     rowErrors.value = { ...rowErrors.value, [id]: msg }
   } finally {
     pendingActions.value = new Set([...pendingActions.value].filter((a) => a !== 'replay:' + id))
@@ -244,7 +247,7 @@ async function doRetry(job_id: string) {
   try {
     await invoke('retry_speech_job', { jobId: job_id })
   } catch (e) {
-    const msg = 'Ошибка повтора: ' + formatError(e)
+    const msg = t('playback.error.repeat', { detail: formatError(e) })
     rowErrors.value = { ...rowErrors.value, [job_id]: msg }
   } finally {
     pendingActions.value = new Set([...pendingActions.value].filter((id) => id !== job_id))
@@ -261,7 +264,7 @@ async function doSkip(job_id: string) {
   try {
     await invoke('skip_speech_job', { jobId: job_id })
   } catch (e) {
-    const msg = 'Ошибка пропуска: ' + formatError(e)
+    const msg = t('playback.error.skip', { detail: formatError(e) })
     rowErrors.value = { ...rowErrors.value, [job_id]: msg }
   } finally {
     pendingActions.value = new Set([...pendingActions.value].filter((id) => id !== job_id))
@@ -278,7 +281,7 @@ async function doCancelJob(job_id: string) {
   try {
     await invoke('cancel_speech_job', { jobId: job_id })
   } catch (e) {
-    const msg = 'Ошибка отмены: ' + formatError(e)
+    const msg = t('playback.error.cancel', { detail: formatError(e) })
     rowErrors.value = { ...rowErrors.value, [job_id]: msg }
   } finally {
     await fetchSpeechQueue()
@@ -295,7 +298,7 @@ async function doRestore(job_id: string) {
   try {
     await invoke('restore_cancelled_speech_job', { jobId: job_id })
   } catch (e) {
-    const msg = 'Ошибка возврата в очередь: ' + formatError(e)
+    const msg = t('playback.error.restore', { detail: formatError(e) })
     rowErrors.value = { ...rowErrors.value, [job_id]: msg }
   } finally {
     await fetchSpeechQueue()
@@ -312,7 +315,7 @@ async function doCancelReplay(id: string) {
   try {
     await invoke('cancel_queued_replay', { id })
   } catch (e) {
-    const msg = 'Ошибка отмены: ' + formatError(e)
+    const msg = t('playback.error.cancel', { detail: formatError(e) })
     rowErrors.value = { ...rowErrors.value, [id]: msg }
   } finally {
     pendingActions.value = new Set([...pendingActions.value].filter((a) => a !== id))
@@ -393,11 +396,11 @@ const pauseIcon = () =>
 <template>
   <div ref="playbackCard" class="playback-window" :class="{ 'light-background': isLightBackground }" :style="overlayStyle">
     <div class="window-header" data-tauri-drag-region>
-      <span class="title">Управление</span>
+      <span class="title">{{ t('playback.title') }}</span>
       <span class="status-badge" :class="playbackStatus.toLowerCase()">
-        {{ playbackStatus }}
+        {{ playbackStatusText }}
       </span>
-      <button class="close-btn" @click="closeWindow" title="Закрыть" aria-label="Закрыть">
+      <button class="close-btn" @click="closeWindow" :title="t('common.close')" :aria-label="t('common.close')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <line x1="18" y1="6" x2="6" y2="18" />
           <line x1="6" y1="6" x2="18" y2="18" />
@@ -407,7 +410,7 @@ const pauseIcon = () =>
 
     <div class="current-section">
       <div v-if="currentText" class="current-text">{{ currentText }}</div>
-      <div v-else class="current-text empty">Нет активной фразы</div>
+      <div v-else class="current-text empty">{{ t('playback.current_empty') }}</div>
     </div>
 
     <div class="controls">
@@ -415,8 +418,8 @@ const pauseIcon = () =>
         class="ctrl-btn"
         :disabled="playbackStatus === 'Idle' || playbackStatus === 'Stopped'"
         @click="playbackStatus === 'Paused' ? doResume() : doPause()"
-        :title="playbackStatus === 'Paused' ? 'Возобновить' : 'Пауза'"
-        :aria-label="playbackStatus === 'Paused' ? 'Возобновить' : 'Пауза'"
+        :title="playbackStatus === 'Paused' ? t('playback.action.resume') : t('playback.action.pause')"
+        :aria-label="playbackStatus === 'Paused' ? t('playback.action.resume') : t('playback.action.pause')"
       >
         {{ pauseIcon() }}
       </button>
@@ -424,8 +427,8 @@ const pauseIcon = () =>
         class="ctrl-btn"
         :disabled="playbackStatus === 'Idle' || playbackStatus === 'Stopped'"
         @click="doStop"
-        title="Стоп"
-        aria-label="Стоп"
+        :title="t('playback.action.stop')"
+        :aria-label="t('playback.action.stop')"
       >
         ⏹
       </button>
@@ -433,8 +436,8 @@ const pauseIcon = () =>
         class="ctrl-btn"
         :disabled="playbackStatus === 'Idle' || playbackStatus === 'Stopped'"
         @click="doRestart"
-        title="Начать сначала"
-        aria-label="Начать сначала"
+        :title="t('playback.action.restart')"
+        :aria-label="t('playback.action.restart')"
       >
         🔁
       </button>
@@ -466,32 +469,32 @@ const pauseIcon = () =>
             <button
               class="row-action-btn pause"
               @click="doPause()"
-              title="Пауза"
-              aria-label="Пауза"
+              :title="t('playback.action.pause')"
+              :aria-label="t('playback.action.pause')"
             >⏸</button>
           </template>
           <template v-if="activityActions(row).canResume">
             <button
               class="row-action-btn resume"
               @click="doResume()"
-              title="Возобновить"
-              aria-label="Возобновить"
+              :title="t('playback.action.resume')"
+              :aria-label="t('playback.action.resume')"
             >▶</button>
           </template>
           <template v-if="activityActions(row).canStop">
             <button
               class="row-action-btn stop"
               @click="doStop()"
-              title="Стоп"
-              aria-label="Стоп"
+              :title="t('playback.action.stop')"
+              :aria-label="t('playback.action.stop')"
             >⏹</button>
           </template>
           <template v-if="activityActions(row).canRestart">
             <button
               class="row-action-btn restart"
               @click="doRestart()"
-              title="Начать сначала"
-              aria-label="Начать сначала"
+              :title="t('playback.action.restart')"
+              :aria-label="t('playback.action.restart')"
             >🔁</button>
           </template>
           <template v-if="activityActions(row).canReplay">
@@ -499,8 +502,8 @@ const pauseIcon = () =>
               class="row-action-btn replay"
               :disabled="isPending(row.id)"
               @click="doReplay(row.id)"
-              title="Воспроизвести снова"
-              aria-label="Воспроизвести снова"
+              :title="t('playback.action.replay')"
+              :aria-label="t('playback.action.replay')"
             >🔄</button>
           </template>
           <template v-if="activityActions(row).canRetry">
@@ -508,8 +511,8 @@ const pauseIcon = () =>
               class="row-action-btn retry"
               :disabled="isPending(row.id)"
               @click="doRetry(row.job_id!)"
-              title="Повторить генерацию"
-              aria-label="Повторить генерацию"
+              :title="t('playback.action.retry')"
+              :aria-label="t('playback.action.retry')"
             >↻</button>
           </template>
           <template v-if="activityActions(row).canSkip">
@@ -517,8 +520,8 @@ const pauseIcon = () =>
               class="row-action-btn skip"
               :disabled="isPending(row.id)"
               @click="doSkip(row.job_id!)"
-              title="Пропустить"
-              aria-label="Пропустить задачу"
+              :title="t('playback.action.skip')"
+              :aria-label="t('playback.action.skip_aria')"
             >⏭</button>
           </template>
           <template v-if="activityActions(row).canCancel">
@@ -527,16 +530,16 @@ const pauseIcon = () =>
               class="row-action-btn cancel"
               :disabled="isPending(row.id)"
               @click="doCancelReplay(row.id)"
-              title="Отменить"
-              aria-label="Отменить задачу"
+              :title="t('playback.action.cancel')"
+              :aria-label="t('playback.action.cancel_aria')"
             >✕</button>
             <button
               v-else
               class="row-action-btn cancel"
               :disabled="isPending(row.id)"
               @click="doCancelJob(row.job_id!)"
-              title="Отменить"
-              aria-label="Отменить задачу"
+              :title="t('playback.action.cancel')"
+              :aria-label="t('playback.action.cancel_aria')"
             >✕</button>
           </template>
           <template v-if="activityActions(row).canRestore">
@@ -544,8 +547,8 @@ const pauseIcon = () =>
               class="row-action-btn restore"
               :disabled="isPending(row.id)"
               @click="doRestore(row.job_id!)"
-              title="Вернуть в очередь"
-              aria-label="Вернуть в очередь"
+              :title="t('playback.action.restore')"
+              :aria-label="t('playback.action.restore')"
             >↻</button>
           </template>
         </div>
@@ -553,7 +556,7 @@ const pauseIcon = () =>
     </div>
 
     <div v-else-if="speechQueue.jobs.length === 0" class="empty-list-hint">
-      Нет активных задач
+      {{ t('playback.empty_tasks') }}
     </div>
   </div>
 </template>

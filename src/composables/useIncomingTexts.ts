@@ -10,6 +10,7 @@ import { useErrorHandler } from './useErrorHandler'
 import { debugError } from '../utils/debug'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
 import { normalizeCommandError } from '../ipc/commandError'
+import { t } from '../i18n'
 
 /** Source-neutral Incoming policy persisted under the top-level `incoming` section. */
 export interface IncomingSettings {
@@ -45,7 +46,10 @@ export function isIncomingTextList(payload: unknown): payload is IncomingTextIte
 }
 
 const UNKNOWN_ITEM_CODE = 'input_server.unknown_item'
-const UNKNOWN_ITEM_MESSAGE = 'Входящий текст уже обработан или отсутствует'
+
+function unknownItemError(): string {
+  return t('editor.incoming.error.already_processed')
+}
 
 /**
  * Speech-queue statuses that are still "active" and therefore projected into
@@ -125,12 +129,12 @@ export function useIncomingTexts() {
         pendingItems.value = payload
         loadError.value = null
       } else {
-        loadError.value = 'Не удалось загрузить входящие'
+        loadError.value = t('editor.incoming.error.load')
       }
     } catch (e) {
       if (disposed) return
       debugError('[IncomingTexts] Failed to load pending items:', e)
-      loadError.value = 'Не удалось загрузить входящие'
+      loadError.value = t('editor.incoming.error.load')
     }
   }
 
@@ -170,7 +174,7 @@ export function useIncomingTexts() {
       if (disposed) return
       autoPlay.value = previous
       debugError('[IncomingTexts] Failed to save auto-play setting:', e)
-      showError('Не удалось сохранить настройку автовоспроизведения')
+      showError(t('editor.incoming.error.autoplay_save'))
     }
   }
 
@@ -183,8 +187,8 @@ export function useIncomingTexts() {
       debugError('[IncomingTexts] Failed to approve item:', e)
       showError(
         normalizeCommandError(e).code === UNKNOWN_ITEM_CODE
-          ? UNKNOWN_ITEM_MESSAGE
-          : 'Не удалось озвучить текст',
+          ? unknownItemError()
+          : t('editor.incoming.error.approve'),
       )
     } finally {
       markIdle(id)
@@ -204,8 +208,8 @@ export function useIncomingTexts() {
       debugError('[IncomingTexts] Failed to take item for edit:', e)
       showError(
         normalizeCommandError(e).code === UNKNOWN_ITEM_CODE
-          ? UNKNOWN_ITEM_MESSAGE
-          : 'Не удалось взять текст для редактирования',
+          ? unknownItemError()
+          : t('editor.incoming.error.take_edit'),
       )
       return null
     } finally {
@@ -222,8 +226,8 @@ export function useIncomingTexts() {
       debugError('[IncomingTexts] Failed to discard item:', e)
       showError(
         normalizeCommandError(e).code === UNKNOWN_ITEM_CODE
-          ? UNKNOWN_ITEM_MESSAGE
-          : 'Не удалось отклонить текст',
+          ? unknownItemError()
+          : t('editor.incoming.error.discard'),
       )
     } finally {
       markIdle(id)
@@ -240,7 +244,7 @@ export function useIncomingTexts() {
     } catch (e) {
       if (disposed) return
       debugError('[IncomingTexts] Failed to skip external job:', e)
-      showError('Не удалось пропустить задание')
+      showError(t('editor.incoming.error.skip'))
     } finally {
       markIdle(id)
     }

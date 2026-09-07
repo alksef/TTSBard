@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest'
 
 const { mockInvoke } = vi.hoisted(() => ({
   mockInvoke: vi.fn(),
@@ -16,6 +16,25 @@ vi.mock('../utils/debug', () => ({
 import { useTelegramAuth } from './useTelegramAuth'
 import type { TelegramStatus } from './useTelegramAuth'
 import type { AppSettingsDto } from '../types/settings'
+import { i18n } from '../i18n'
+import ruCatalog from '../../locales/ru.json'
+import enCatalog from '../../locales/en.json'
+
+beforeAll(() => {
+  i18n.global.setLocaleMessage('ru', (ruCatalog as { messages: Record<string, string> }).messages)
+  i18n.global.setLocaleMessage('en', (enCatalog as { messages: Record<string, string> }).messages)
+  ;(i18n.global.locale as unknown as { value: string }).value = 'ru'
+})
+
+async function withLocale(code: 'ru' | 'en', fn: () => Promise<void> | void) {
+  const previous = (i18n.global.locale as unknown as { value: string }).value
+  ;(i18n.global.locale as unknown as { value: string }).value = code
+  try {
+    await fn()
+  } finally {
+    ;(i18n.global.locale as unknown as { value: string }).value = previous
+  }
+}
 
 function mockUser(): TelegramStatus {
   return {
@@ -54,7 +73,7 @@ function mockSettings(): AppSettingsDto {
       compressor: { enabled: false, threshold_db: -20, ratio: 4, attack_ms: 5, release_ms: 50, knee_db: 6, makeup_db: 0 },
       limiter: { enabled: false, ceiling_db: -1, release_ms: 50 },
     },
-    general: { hotkey_enabled: true, theme: 'dark', show_playback_on_start: false, start_compact: false, hide_on_minimize: false },
+    general: { hotkey_enabled: true, theme: 'dark', ui_language: 'ru', show_playback_on_start: false, start_compact: false, hide_on_minimize: false },
     logging: { enabled: true, level: 'info', module_levels: {} },
     preprocessor: { enabled: false, replacements_count: 0 },
     soundpanel_bindings: [],
@@ -154,24 +173,24 @@ describe('useTelegramAuth', () => {
       expect(canInit.value).toBe(true)
     })
 
-    it('sets state to idle when client not initialized', async () => {
+    it('sets state to error on not-initialized rejection', async () => {
       mockInvoke.mockRejectedValueOnce('клиент не инициализирован')
 
       const { getStatus, state, status } = useTelegramAuth()
       const result = await getStatus()
 
       expect(result).toBeNull()
-      expect(state.value).toBe('idle')
+      expect(state.value).toBe('error')
       expect(status.value).toBeNull()
     })
 
-    it('sets state to idle when error contains "not initialized"', async () => {
+    it('sets state to error when rejection contains "not initialized"', async () => {
       mockInvoke.mockRejectedValueOnce('Error: client not initialized')
 
       const { getStatus, state } = useTelegramAuth()
       await getStatus()
 
-      expect(state.value).toBe('idle')
+      expect(state.value).toBe('error')
     })
 
     it('sets state to error on unexpected error', async () => {
@@ -641,7 +660,7 @@ describe('useTelegramAuth', () => {
 
       await refreshLimits()
       expect(limits.value).toEqual({ voices: '17/666', gifs: '5/50' })
-      expect(limitsError.value).toBe('limits fetch failed')
+      expect(limitsError.value).toBe('Не удалось получить информацию о лимитах')
     })
 
     it('sets limitsError when backend returns null', async () => {
@@ -676,7 +695,7 @@ describe('useTelegramAuth', () => {
       await refreshLimits()
 
       expect(limits.value).toBeNull()
-      expect(limitsError.value).toBe('network error')
+      expect(limitsError.value).toBe('Не удалось получить информацию о лимитах')
     })
   })
 
@@ -817,5 +836,126 @@ describe('useTelegramAuth', () => {
       expect(savedVoices.value).toHaveLength(2)
       expect(savedVoices.value[0].id).toBe('voice1')
     })
+  })
+
+  describe('command error localization', () => {
+    interface FallbackCase {
+      name: string
+      rawMessage: string
+      invoke: (auth: ReturnType<typeof useTelegramAuth>) => Promise<unknown>
+      read: (auth: ReturnType<typeof useTelegramAuth>) => string | null
+      expected: Record<'ru' | 'en', string>
+    }
+
+    const cases: FallbackCase[] = [
+      {
+        name: 'getStatus',
+        rawMessage: 'клиент не инициализирован',
+        invoke: (auth) => auth.getStatus(),
+        read: (auth) => auth.errorMessage.value,
+        expected: {
+          ru: 'Не удалось проверить статус подключения Telegram.',
+          en: 'Could not check the Telegram connection status.',
+        },
+      },
+      {
+        name: 'requestCode',
+        rawMessage: 'Ошибка сети при запросе кода',
+        invoke: (auth) => auth.requestCode(credentials),
+        read: (auth) => auth.errorMessage.value,
+        expected: {
+          ru: 'Не удалось запросить код подтверждения. Попробуйте снова.',
+          en: 'Could not request the confirmation code. Try again.',
+        },
+      },
+      {
+        name: 'signIn',
+        rawMessage: 'Неверный код подтверждения',
+        invoke: (auth) => auth.signIn('12345'),
+        read: (auth) => auth.errorMessage.value,
+        expected: {
+          ru: 'Не удалось войти. Проверьте код и попробуйте снова.',
+          en: 'Could not sign in. Check the code and try again.',
+        },
+      },
+      {
+        name: 'checkPassword',
+        rawMessage: 'Неверный пароль',
+        invoke: (auth) => auth.checkPassword('mypassword'),
+        read: (auth) => auth.errorMessage.value,
+        expected: {
+          ru: 'Не удалось проверить пароль 2FA.',
+          en: 'Could not verify the 2FA password.',
+        },
+      },
+      {
+        name: 'signOut',
+        rawMessage: 'Ошибка отключения от сервера',
+        invoke: (auth) => auth.signOut(),
+        read: (auth) => auth.errorMessage.value,
+        expected: {
+          ru: 'Не удалось выйти из Telegram.',
+          en: 'Could not sign out of Telegram.',
+        },
+      },
+      {
+        name: 'refreshLimits',
+        rawMessage: 'Не удалось получить лимиты',
+        invoke: (auth) => auth.refreshLimits(),
+        read: (auth) => auth.limitsError.value,
+        expected: {
+          ru: 'Не удалось получить информацию о лимитах',
+          en: 'Could not get limits information',
+        },
+      },
+      {
+        name: 'refreshVoice',
+        rawMessage: 'Ошибка получения голоса',
+        invoke: (auth) => auth.refreshVoice(),
+        read: (auth) => auth.errorMessage.value,
+        expected: {
+          ru: 'Не удалось получить информацию о голосе. Проверьте подключение к боту.',
+          en: 'Could not get voice information. Check your bot connection.',
+        },
+      },
+      {
+        name: 'addVoiceCode',
+        rawMessage: 'Ошибка сети при добавлении голоса',
+        invoke: async (auth) => {
+          await expect(auth.addVoiceCode({ code: 'hamster' })).rejects.toBeTruthy()
+        },
+        read: (auth) => auth.voiceError.value,
+        expected: {
+          ru: 'Ошибка добавления голоса',
+          en: 'Failed to add voice',
+        },
+      },
+      {
+        name: 'selectVoice',
+        rawMessage: 'Ошибка при выборе голоса',
+        invoke: async (auth) => {
+          await expect(auth.selectVoice('hamster')).rejects.toBeTruthy()
+        },
+        read: (auth) => auth.voiceError.value,
+        expected: {
+          ru: 'Не удалось выбрать голос',
+          en: 'Could not select voice',
+        },
+      },
+    ]
+
+    for (const testCase of cases) {
+      for (const locale of ['ru', 'en'] as const) {
+        it(`presents the ${locale} fallback instead of raw "${testCase.rawMessage}" in ${testCase.name}`, async () => {
+          const auth = useTelegramAuth()
+          mockInvoke.mockRejectedValueOnce(testCase.rawMessage)
+
+          await withLocale(locale, async () => {
+            await testCase.invoke(auth)
+            expect(testCase.read(auth)).toBe(testCase.expected[locale])
+          })
+        })
+      }
+    }
   })
 })

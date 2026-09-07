@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t } from '../../i18n';
+
 interface Props {
   voices: string[];
   selectedVoiceId: string;
@@ -13,7 +15,7 @@ interface Emits {
 
 const props = withDefaults(defineProps<Props>(), {
   loading: false,
-  label: 'Голос',
+  label: '',
 });
 
 const emit = defineEmits<Emits>();
@@ -26,7 +28,7 @@ function handleChange(event: Event) {
 
 <template>
   <div class="voice-selector">
-    <label>{{ label }}:</label>
+    <label>{{ label || t('tts.voice') }}:</label>
     <div class="voice-select-wrapper">
       <select
         :value="selectedVoiceId"

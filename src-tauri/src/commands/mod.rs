@@ -13,6 +13,7 @@ use tracing::{error, info, warn};
 pub mod ai;
 pub mod history;
 pub mod input_server;
+pub mod localization;
 pub mod logging;
 pub mod ocr;
 pub mod playback;

@@ -25,6 +25,7 @@ import { debounceAsync } from '../../utils/debounce'
 import { matchesEditorHotkey, shouldEnterSubmit, shouldEscapeSubmit } from './keymapArbitration'
 import { editorFontCssStack, toEditorFontFamily, parseEditorFontSize, EDITOR_FONT_SIZE_DEFAULT } from '../../utils/editorFont'
 import SpellContextMenu from './SpellContextMenu.vue'
+import { t } from '../../i18n'
 
 const props = withDefaults(
   defineProps<{
@@ -580,7 +581,7 @@ defineExpose({ focus, openSpellMenu })
     @select="selectSuggestionAt"
     @close="closeMenu"
   />
-  <div v-if="enabled && !available" class="spell-unavailable">словарь недоступен</div>
+  <div v-if="enabled && !available" class="spell-unavailable">{{ t('editor.spell.dictionary_unavailable') }}</div>
 </template>
 
 <style scoped>

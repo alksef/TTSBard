@@ -2,9 +2,11 @@
 import { ref, watch, computed } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { Cloud, Server } from 'lucide-vue-next';
+import { t } from '../i18n';
 import { useAiSettings, useEditorSettings } from '../composables/useAppSettings';
 import type { AiProviderType } from '../types/settings';
 import { debugLog, debugError } from '../utils/debug';
+import { presentCommandError } from '../ipc/commandError';
 import InputWithToggle from './shared/InputWithToggle.vue';
 import StatusMessage from './shared/StatusMessage.vue';
 import ProviderCard from './shared/ProviderCard.vue';
@@ -109,17 +111,17 @@ async function saveGlobalPrompt() {
 
   // Validate prompt
   if (!globalPrompt.value.trim()) {
-    showError('Глобальный промпт не может быть пустым');
+    showError(t('settings.ai.prompt.empty'));
     return;
   }
 
   try {
     await invoke('set_ai_prompt', { prompt: globalPrompt.value });
     debugLog('[AI] Global prompt saved successfully');
-    showSuccess('Промпт сохранён');
+    showSuccess(t('settings.ai.prompt.saved'));
   } catch (error) {
     debugError('[AI] Failed to save global prompt:', error);
-    showError(error as string);
+    showError(presentCommandError(error, t('settings.ai.error.save_prompt')));
   }
 }
 
@@ -128,7 +130,7 @@ async function saveOpenAiSettings() {
 
   // Validate API Key
   if (!openaiApiKey.value.trim()) {
-    showError('API Key не может быть пустым');
+    showError(t('tts.error.api_key_required'));
     return;
   }
 
@@ -136,10 +138,10 @@ async function saveOpenAiSettings() {
     await invoke('set_ai_openai_api_key', { key: openaiApiKey.value });
     providers.value.openai.configured = true;
     debugLog('[AI] OpenAI settings saved successfully');
-    showSuccess('Настройки сохранены');
+    showSuccess(t('settings.ai.saved'));
   } catch (error) {
     debugError('[AI] Failed to save OpenAI settings:', error);
-    showError(error as string);
+    showError(presentCommandError(error, t('settings.ai.error.save_openai')));
   }
 }
 
@@ -147,10 +149,10 @@ async function toggleOpenAiUseProxy() {
   try {
     await invoke('set_ai_openai_use_proxy', { enabled: openaiUseProxy.value });
     debugLog('[AI] OpenAI use proxy toggled:', openaiUseProxy.value);
-    showSuccess(openaiUseProxy.value ? 'Прокси включён' : 'Прокси выключен');
+    showSuccess(openaiUseProxy.value ? t('tts.proxy.enabled') : t('tts.proxy.disabled'));
   } catch (error) {
     debugError('[AI] Failed to toggle OpenAI proxy:', error);
-    showError(error as string);
+    showError(presentCommandError(error, t('settings.ai.error.toggle_proxy')));
     // Revert the toggle on error
     openaiUseProxy.value = !openaiUseProxy.value;
   }
@@ -161,12 +163,12 @@ async function saveZaiSettings() {
 
   // Validate URL and API key
   if (!zaiUrl.value.trim()) {
-    showError('URL не может быть пустым');
+    showError(t('settings.ai.url_required'));
     return;
   }
 
   if (!zaiApiKey.value.trim()) {
-    showError('Ключ API не может быть пустым');
+    showError(t('settings.ai.api_key_required'));
     return;
   }
 
@@ -175,10 +177,10 @@ async function saveZaiSettings() {
     await invoke('set_ai_zai_api_key', { apiKey: zaiApiKey.value });
     providers.value.zai.configured = true;
     debugLog('[AI] Z.ai settings saved successfully');
-    showSuccess('Настройки сохранены');
+    showSuccess(t('settings.ai.saved'));
   } catch (error) {
     debugError('[AI] Failed to save Z.ai settings:', error);
-    showError(error as string);
+    showError(presentCommandError(error, t('settings.ai.error.save_zai')));
   }
 }
 
@@ -186,7 +188,7 @@ async function saveDeepSeekSettings() {
   debugLog('[AI] Saving DeepSeek settings...');
 
   if (!deepseekApiKey.value.trim()) {
-    showError('Ключ API не может быть пустым');
+    showError(t('settings.ai.api_key_required'));
     return;
   }
 
@@ -194,10 +196,10 @@ async function saveDeepSeekSettings() {
     await invoke('set_ai_deepseek_api_key', { key: deepseekApiKey.value });
     providers.value.deepseek.configured = true;
     debugLog('[AI] DeepSeek settings saved successfully');
-    showSuccess('Настройки сохранены');
+    showSuccess(t('settings.ai.saved'));
   } catch (error) {
     debugError('[AI] Failed to save DeepSeek settings:', error);
-    showError(error as string);
+    showError(presentCommandError(error, t('settings.ai.error.save_deepseek')));
   }
 }
 
@@ -205,10 +207,10 @@ async function toggleDeepSeekUseProxy() {
   try {
     await invoke('set_ai_deepseek_use_proxy', { enabled: deepseekUseProxy.value });
     debugLog('[AI] DeepSeek use proxy toggled:', deepseekUseProxy.value);
-    showSuccess(deepseekUseProxy.value ? 'Прокси включён' : 'Прокси выключен');
+    showSuccess(deepseekUseProxy.value ? t('tts.proxy.enabled') : t('tts.proxy.disabled'));
   } catch (error) {
     debugError('[AI] Failed to toggle DeepSeek proxy:', error);
-    showError(error as string);
+    showError(presentCommandError(error, t('settings.ai.error.toggle_proxy')));
     deepseekUseProxy.value = !deepseekUseProxy.value;
   }
 }
@@ -222,17 +224,17 @@ async function saveCustomSettings() {
   const model = customModel.value;
 
   if (!url.trim()) {
-    showError('API URL не может быть пустым');
+    showError(t('settings.ai.api_url_required'));
     return;
   }
 
   if (!apiKey.trim()) {
-    showError('Ключ API не может быть пустым');
+    showError(t('settings.ai.api_key_required'));
     return;
   }
 
   if (!model.trim()) {
-    showError('Модель не может быть пустой');
+    showError(t('settings.ai.model_required'));
     return;
   }
 
@@ -242,10 +244,10 @@ async function saveCustomSettings() {
     await invoke('set_ai_custom_model', { model });
     providers.value.custom.configured = true;
     debugLog('[AI] Custom settings saved successfully');
-    showSuccess('Настройки сохранены');
+    showSuccess(t('settings.ai.saved'));
   } catch (error) {
     debugError('[AI] Failed to save Custom settings:', error);
-    showError(error as string);
+    showError(presentCommandError(error, t('settings.ai.error.save_custom')));
   }
 }
 
@@ -253,10 +255,10 @@ async function toggleCustomUseProxy() {
   try {
     await invoke('set_ai_custom_use_proxy', { enabled: customUseProxy.value });
     debugLog('[AI] Custom use proxy toggled:', customUseProxy.value);
-    showSuccess(customUseProxy.value ? 'Прокси включён' : 'Прокси выключен');
+    showSuccess(customUseProxy.value ? t('tts.proxy.enabled') : t('tts.proxy.disabled'));
   } catch (error) {
     debugError('[AI] Failed to toggle Custom proxy:', error);
-    showError(error as string);
+    showError(presentCommandError(error, t('settings.ai.error.toggle_proxy')));
     customUseProxy.value = !customUseProxy.value;
   }
 }
@@ -268,7 +270,7 @@ async function setActiveProvider(provider: AiProviderType) {
     debugLog('[AI] Active provider set to:', provider);
   } catch (error) {
     debugError('[AI] Failed to set active provider:', error);
-    showError(error as string);
+    showError(presentCommandError(error, t('settings.ai.error.set_provider')));
   }
 }
 
@@ -423,13 +425,13 @@ function dismissStatus() {
           class="checkbox-input"
           :disabled="!isCurrentProviderConfigured"
         />
-        <span>Применять AI коррекцию автоматически</span>
+        <span>{{ t('settings.ai.auto_correct.label') }}</span>
       </label>
       <span v-if="!isCurrentProviderConfigured" class="setting-hint warning">
-        ⚠️ Сначала настройте API ключ выбранного провайдера
+        ⚠️ {{ t('settings.ai.provider_unconfigured') }}
       </span>
       <span v-else class="setting-hint">
-        Текст будет корректироваться перед отправкой на TTS
+        {{ t('settings.ai.auto_correct.hint') }}
       </span>
     </div>
 
@@ -443,20 +445,20 @@ function dismissStatus() {
           class="checkbox-input"
           :disabled="!isCurrentProviderConfigured"
         />
-        <span>AI-продолжение текста (автодополнение)</span>
+        <span>{{ t('settings.ai.auto_complete.label') }}</span>
       </label>
       <span v-if="!isCurrentProviderConfigured" class="setting-hint warning">
-        ⚠️ Сначала настройте API ключ выбранного провайдера
+        ⚠️ {{ t('settings.ai.provider_unconfigured') }}
       </span>
       <span v-else class="setting-hint">
-        AI будет предлагать продолжение текста в редакторе
+        {{ t('settings.ai.auto_complete.hint') }}
       </span>
     </div>
 
     <!-- Global Prompt Section -->
     <div class="global-prompt-section">
       <div class="prompt-header">
-        <h3 class="prompt-title">Промт</h3>
+        <h3 class="prompt-title">{{ t('settings.ai.prompt.title') }}</h3>
       </div>
       <div class="prompt-content">
         <textarea
@@ -467,7 +469,7 @@ function dismissStatus() {
         ></textarea>
         <div class="button-row">
           <button @click="saveGlobalPrompt" class="save-button-inline">
-            Сохранить
+            {{ t('common.save') }}
           </button>
         </div>
       </div>
@@ -488,7 +490,7 @@ function dismissStatus() {
           <!-- URL -->
           <div class="setting-group">
             <div class="zai-form-row">
-              <label>URL:</label>
+              <label>{{ t('settings.ai.url') }}:</label>
               <input
                 v-model="zaiUrl"
                 type="text"
@@ -500,7 +502,7 @@ function dismissStatus() {
           <!-- API Key -->
           <div class="setting-group">
             <div class="zai-form-row">
-              <label>Ключ API:</label>
+              <label>{{ t('tts.api_key') }}:</label>
               <InputWithToggle
                 v-model="zaiApiKey"
                 type="password"
@@ -511,7 +513,7 @@ function dismissStatus() {
 
           <!-- Buttons Row -->
           <div class="button-row">
-            <button @click="saveZaiSettings" class="save-button-inline zai-save-button">Сохранить</button>
+            <button @click="saveZaiSettings" class="save-button-inline zai-save-button">{{ t('common.save') }}</button>
           </div>
         </div>
       </ProviderCard>
@@ -529,14 +531,14 @@ function dismissStatus() {
           <!-- API Key -->
           <div class="setting-group">
             <div class="openai-api-row">
-              <label>Ключ API:</label>
+              <label>{{ t('tts.api_key') }}:</label>
               <InputWithToggle
                 v-model="openaiApiKey"
                 type="password"
                 placeholder="sk-..."
                 class="openai-input-wide"
               />
-              <button @click="saveOpenAiSettings" class="save-settings-button">Сохранить</button>
+              <button @click="saveOpenAiSettings" class="save-settings-button">{{ t('common.save') }}</button>
             </div>
           </div>
 
@@ -551,7 +553,7 @@ function dismissStatus() {
                 class="proxy-checkbox"
               />
               <label for="ai-openai-use-proxy" class="proxy-checkbox-label">
-                Использовать SOCKS5
+                {{ t('tts.use_socks5') }}
               </label>
             </div>
           </div>
@@ -571,14 +573,14 @@ function dismissStatus() {
           <!-- API Key -->
           <div class="setting-group">
             <div class="openai-api-row">
-              <label>Ключ API:</label>
+              <label>{{ t('tts.api_key') }}:</label>
               <InputWithToggle
                 v-model="deepseekApiKey"
                 type="password"
                 placeholder="sk-..."
                 class="openai-input-wide"
               />
-              <button @click="saveDeepSeekSettings" class="save-settings-button">Сохранить</button>
+              <button @click="saveDeepSeekSettings" class="save-settings-button">{{ t('common.save') }}</button>
             </div>
           </div>
 
@@ -593,7 +595,7 @@ function dismissStatus() {
                 class="proxy-checkbox"
               />
               <label for="ai-deepseek-use-proxy" class="proxy-checkbox-label">
-                Использовать SOCKS5
+                {{ t('tts.use_socks5') }}
               </label>
             </div>
           </div>
@@ -613,7 +615,7 @@ function dismissStatus() {
           <!-- URL -->
           <div class="setting-group">
             <div class="zai-form-row">
-              <label>API URL:</label>
+              <label>{{ t('settings.ai.api_url') }}:</label>
               <input
                 v-model="customUrl"
                 type="text"
@@ -626,7 +628,7 @@ function dismissStatus() {
           <!-- API Key -->
           <div class="setting-group">
             <div class="zai-form-row">
-              <label>Ключ API:</label>
+              <label>{{ t('tts.api_key') }}:</label>
               <InputWithToggle
                 v-model="customApiKey"
                 type="password"
@@ -638,7 +640,7 @@ function dismissStatus() {
           <!-- Model -->
           <div class="setting-group">
             <div class="zai-form-row">
-              <label>Модель:</label>
+              <label>{{ t('settings.ai.model') }}:</label>
               <input
                 v-model="customModel"
                 type="text"
@@ -658,10 +660,10 @@ function dismissStatus() {
                 class="proxy-checkbox"
               />
               <label for="ai-custom-use-proxy" class="proxy-checkbox-label">
-                Использовать SOCKS5
+                {{ t('tts.use_socks5') }}
               </label>
             </div>
-            <button @click="saveCustomSettings" class="save-button-inline zai-save-button">Сохранить</button>
+            <button @click="saveCustomSettings" class="save-button-inline zai-save-button">{{ t('common.save') }}</button>
           </div>
         </div>
       </ProviderCard>

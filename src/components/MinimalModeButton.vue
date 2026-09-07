@@ -5,6 +5,7 @@ import { Minimize2, Maximize2 } from 'lucide-vue-next'
 import { useGeneralSettings, useWindowsSettings } from '../composables/useAppSettings'
 import { compactModeState, initCompactDims } from '../composables/compactModeState'
 import { debugError } from '../utils/debug'
+import { t } from '../i18n'
 
 const isMinimalMode = ref(false)
 const isAnimating = ref(false)
@@ -85,7 +86,8 @@ async function toggleMinimalMode() {
     class="minimal-mode-toggle"
     :class="{ 'is-minimal': isMinimalMode, 'is-animating': isAnimating }"
     @click="toggleMinimalMode"
-    :title="isMinimalMode ? 'Восстановить' : 'Компактный режим'"
+    :title="isMinimalMode ? t('shell.minimal.exit') : t('shell.minimal.enter')"
+    :aria-label="isMinimalMode ? t('shell.minimal.exit') : t('shell.minimal.enter')"
   >
     <Minimize2 v-if="!isMinimalMode" :size="18" />
     <Maximize2 v-else :size="18" />

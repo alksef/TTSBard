@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, nextTick } from 'vue';
+import { ref, nextTick, computed } from 'vue';
+import { t } from '../../i18n';
 import EqSettings from './EqSettings.vue';
 import CompressorSettings from './CompressorSettings.vue';
 import LimiterSettings from './LimiterSettings.vue';
@@ -52,19 +53,19 @@ const dspTabs = ['eq', 'compressor', 'limiter'] as const;
 type DspTab = typeof dspTabs[number];
 const activeDspTab = ref<DspTab>('eq');
 
-const tabLabels: Record<DspTab, string> = {
+const tabLabels = computed<Record<DspTab, string>>(() => ({
   eq: 'EQ',
-  compressor: 'Компрессор',
-  limiter: 'Лимитер',
-};
+  compressor: t('dsp.compressor'),
+  limiter: t('dsp.limiter'),
+}));
 
 function isBlockEnabled(tab: DspTab): boolean {
   return props.draftDsp[tab].enabled;
 }
 
 function getTabAriaLabel(tab: DspTab): string {
-  const label = tabLabels[tab];
-  const status = isBlockEnabled(tab) ? 'включен' : 'выключен';
+  const label = tabLabels.value[tab];
+  const status = isBlockEnabled(tab) ? t('audio.enabled') : t('audio.disabled');
   return `${label} (${status})`;
 }
 
@@ -93,35 +94,35 @@ function handleDspTabKey(e: KeyboardEvent) {
 <template>
   <div class="setting-section">
     <div class="dsp-presets">
-      <span class="dsp-presets-label">Режим:</span>
+      <span class="dsp-presets-label">{{ t('dsp.mode') }}</span>
       <div class="toggle-buttons">
         <button
           @click="emit('set-preset', 'natural')"
           :class="{ active: dspPreset === 'natural' }"
           class="toggle-btn"
           :disabled="dspPreset === 'natural'"
-          title="Только защитный лимитер"
-          aria-label="Natural — только лимитер"
+          :title="t('dsp.preset.natural.title')"
+          :aria-label="t('dsp.preset.natural.aria')"
         >Natural</button>
         <button
           @click="emit('set-preset', 'clear')"
           :class="{ active: dspPreset === 'clear' }"
           class="toggle-btn"
           :disabled="dspPreset === 'clear'"
-          title="Мягкая обработка для разборчивости"
-          aria-label="Clear — мягкая обработка"
+          :title="t('dsp.preset.clear.title')"
+          :aria-label="t('dsp.preset.clear.aria')"
         >Clear</button>
         <button
           :class="{ active: dspPreset === 'custom' }"
           class="toggle-btn"
           disabled
-          title="Ручная настройка DSP-параметров"
-          aria-label="Custom — ручная настройка"
+          :title="t('dsp.preset.custom.title')"
+          :aria-label="t('dsp.preset.custom.aria')"
         >Custom</button>
       </div>
     </div>
 
-    <div class="dsp-tabs" role="tablist" aria-label="DSP-редакторы">
+    <div class="dsp-tabs" role="tablist" :aria-label="t('dsp.tabs_label')">
       <button
         v-for="tab in dspTabs"
         :key="tab"

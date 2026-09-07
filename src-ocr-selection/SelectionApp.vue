@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { t } from '../src/i18n'
 import { createAsyncCleanupScope } from '../src/utils/asyncCleanup'
 import { createFrameSession } from './frameSession'
 import type { LoadedFrame, PreviewDto } from './frameSession'
@@ -330,8 +331,8 @@ onBeforeUnmount(() => {
       :style="rectStyle"
       aria-hidden="true"
     ></div>
-    <div v-if="frame" class="hint">Выделите область · Esc — отмена</div>
-    <div v-if="tooSmallHint" class="too-small">Область слишком маленькая</div>
+    <div v-if="frame" class="hint">{{ t('ocr_selection.hint') }}</div>
+    <div v-if="tooSmallHint" class="too-small">{{ t('ocr_selection.area_too_small') }}</div>
   </div>
 </template>
 

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import './dsp-shared.css';
+import { t } from '../../i18n';
 
 defineProps<{
   compressor: {
@@ -21,7 +22,7 @@ const emit = defineEmits<{
 <template>
   <div class="dsp-subsection">
     <div class="section-header">
-      <span class="section-title">Компрессор</span>
+      <span class="section-title">{{ t('dsp.compressor') }}</span>
       <label class="toggle-switch">
         <input type="checkbox" v-model="compressor.enabled" @change="emit('mark-dirty')" />
         <span class="toggle-slider"></span>

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest'
 
 vi.stubGlobal('window', globalThis)
 
@@ -40,7 +40,14 @@ vi.mock('./useErrorHandler', () => ({
   useErrorHandler: () => ({ showError: mocks.mockShowError }),
 }))
 
-import { useOcrRuntimeNotifications, OCR_RUNTIME_ERROR_TOAST_MESSAGE } from './useOcrRuntimeNotifications'
+import { useOcrRuntimeNotifications, ocrRuntimeErrorToastMessage } from './useOcrRuntimeNotifications'
+import { i18n } from '../i18n'
+import ruCatalog from '../../locales/ru.json'
+
+beforeAll(() => {
+  i18n.global.setLocaleMessage('ru', (ruCatalog as { messages: Record<string, string> }).messages)
+  ;(i18n.global.locale as unknown as { value: string }).value = 'ru'
+})
 
 function installDefaultListen(): void {
   mocks.mockListen.mockImplementation(
@@ -75,7 +82,7 @@ describe('useOcrRuntimeNotifications', () => {
   })
 
   it('exports the fixed safe Russian toast message', () => {
-    expect(OCR_RUNTIME_ERROR_TOAST_MESSAGE).toBe('Не удалось запустить OCR. Проверьте модель и настройки OCR.')
+    expect(ocrRuntimeErrorToastMessage()).toBe('Не удалось запустить OCR. Проверьте модель и настройки OCR.')
   })
 
   it('registers the status listener before reading the initial snapshot', async () => {
@@ -99,7 +106,7 @@ describe('useOcrRuntimeNotifications', () => {
     await mount({ state: 'error', message: 'onnx crashed at C:/secrets/det.onnx' })
 
     expect(mocks.mockShowError).toHaveBeenCalledTimes(1)
-    expect(mocks.mockShowError).toHaveBeenCalledWith(OCR_RUNTIME_ERROR_TOAST_MESSAGE)
+    expect(mocks.mockShowError).toHaveBeenCalledWith(ocrRuntimeErrorToastMessage())
     expect(mocks.mockShowError.mock.calls[0][0]).not.toContain('secrets')
   })
 
@@ -119,7 +126,7 @@ describe('useOcrRuntimeNotifications', () => {
     emit('ocr-status-changed', { state: 'error', message: 'worker died' })
 
     expect(mocks.mockShowError).toHaveBeenCalledTimes(1)
-    expect(mocks.mockShowError).toHaveBeenCalledWith(OCR_RUNTIME_ERROR_TOAST_MESSAGE)
+    expect(mocks.mockShowError).toHaveBeenCalledWith(ocrRuntimeErrorToastMessage())
   })
 
   it('dedupes repeated error events within one episode', async () => {

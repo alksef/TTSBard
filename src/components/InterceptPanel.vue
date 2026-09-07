@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
 import { Crosshair, Trash2, Keyboard } from 'lucide-vue-next'
+import { t } from '../i18n'
 
 interface InterceptBindingDto {
   key: string
@@ -25,23 +26,25 @@ const messageState = ref<'error' | 'success' | 'warning' | null>(null)
 let messageTimeoutId: ReturnType<typeof setTimeout> | null = null
 const listenerScope = createAsyncCleanupScope()
 
-const ACTIONS: { value: string; label: string }[] = [
-  { value: 'show_main_window', label: 'Главное окно' },
-  { value: 'show_soundpanel_window', label: 'Звуковая панель' },
-  { value: 'show_playback_control_window', label: 'Управление воспроизведением' },
-  { value: 'playback_pause', label: 'Пауза / Продолжить' },
-  { value: 'playback_stop', label: 'Остановить' },
-  { value: 'playback_repeat', label: 'Повторить' },
-]
+const ACTION_IDS = [
+  'show_main_window',
+  'show_soundpanel_window',
+  'show_playback_control_window',
+  'playback_pause',
+  'playback_stop',
+  'playback_repeat',
+] as const
 
-
+const ACTIONS = computed<{ value: string; label: string }[]>(() =>
+  ACTION_IDS.map((id) => ({ value: id, label: t(`intercept.actions.${id}`) })),
+)
 
 async function loadSettings() {
   try {
     isLoading.value = true
     settings.value = await invoke<InterceptSettingsDto>('get_intercept_settings')
   } catch (e) {
-    showError('Ошибка загрузки: ' + (e as Error).message)
+    showMessage(t('intercept.error.load', { detail: (e as Error).message }), 'error')
   } finally {
     isLoading.value = false
   }
@@ -53,7 +56,7 @@ async function toggleEnabled() {
     const newVal = !settings.value.enabled
     await invoke('set_intercept_enabled', { enabled: newVal })
   } catch (e) {
-    showError('Ошибка: ' + (e as Error).message)
+    showMessage(t('intercept.error.generic', { detail: (e as Error).message }), 'error')
   }
 }
 
@@ -95,7 +98,7 @@ function handleKeyDown(e: KeyboardEvent) {
     if (fNum >= 1 && fNum <= 24) canonicalName = e.code
     else return
   } else {
-    showError('Только NumPad или F1-F24')
+    showMessage(t('intercept.error.numpad_only'), 'warning')
     return
   }
 
@@ -112,7 +115,7 @@ async function saveBinding() {
     await invoke('set_intercept_binding', { key, action })
     await loadSettings()
   } catch (e) {
-    showError('Ошибка: ' + (e as Error).message)
+    showMessage(t('intercept.error.generic', { detail: (e as Error).message }), 'error')
   }
   recordingKeyFor.value = null
   newBindingAction.value = 'show_main_window'
@@ -123,7 +126,7 @@ async function updateBindingAction(binding: InterceptBindingDto, action: string)
     await invoke('set_intercept_binding', { key: binding.key, action })
     await loadSettings()
   } catch (e) {
-    showError('Ошибка: ' + (e as Error).message)
+    showMessage(t('intercept.error.generic', { detail: (e as Error).message }), 'error')
   }
 }
 
@@ -132,19 +135,13 @@ async function removeBinding(key: string) {
     await invoke('clear_intercept_binding', { key })
     await loadSettings()
   } catch (e) {
-    showError('Ошибка: ' + (e as Error).message)
+    showMessage(t('intercept.error.generic', { detail: (e as Error).message }), 'error')
   }
 }
 
-function showError(msg: string) {
+function showMessage(msg: string, type: 'error' | 'success' | 'warning') {
   errorMessage.value = msg
-  if (msg.includes('Ошибка') || msg.includes('ошибка')) {
-    messageState.value = 'error'
-  } else if (msg.includes('сохранен') || msg.includes('Сброшено')) {
-    messageState.value = 'success'
-  } else {
-    messageState.value = 'warning'
-  }
+  messageState.value = type
   if (messageTimeoutId !== null) clearTimeout(messageTimeoutId)
   messageTimeoutId = setTimeout(() => {
     errorMessage.value = null
@@ -189,7 +186,7 @@ onUnmounted(() => {
       <div class="toggle-row">
         <div class="toggle-label">
           <Crosshair :size="18" />
-          <span>Перехват клавиш</span>
+          <span>{{ t('intercept.title') }}</span>
         </div>
         <label class="toggle-switch">
           <input
@@ -202,27 +199,27 @@ onUnmounted(() => {
       </div>
 
       <p class="hint-text">
-        Когда включено, забинженные NumPad / F-клавиши не доходят до системы и вызывают выбранное действие.
+        {{ t('intercept.hint') }}
       </p>
 
       <!-- Bindings list -->
       <div class="bindings-section">
         <div class="bindings-header">
-          <span class="section-title">Биндинги</span>
+          <span class="section-title">{{ t('intercept.bindings') }}</span>
           <button
             v-if="!recordingKey && !recordingKeyFor"
             @click="startRecordingKey"
             class="record-btn"
           >
             <Keyboard :size="14" />
-            Записать клавишу
+            {{ t('intercept.record') }}
           </button>
           <button
             v-if="recordingKey"
             @click="cancelRecordingKey"
             class="record-btn recording"
           >
-            Нажмите клавишу... (Esc — отмена)
+            {{ t('intercept.recording_prompt') }}
           </button>
         </div>
 
@@ -235,12 +232,12 @@ onUnmounted(() => {
               {{ a.label }}
             </option>
           </select>
-          <button @click="saveBinding" class="save-btn">Сохранить</button>
-          <button @click="(recordingKeyFor = null, newBindingAction = 'show_main_window')" class="cancel-btn">Отмена</button>
+          <button @click="saveBinding" class="save-btn">{{ t('common.save') }}</button>
+          <button @click="(recordingKeyFor = null, newBindingAction = 'show_main_window')" class="cancel-btn">{{ t('common.cancel') }}</button>
         </div>
 
         <div v-if="settings && settings.bindings.length === 0 && !recordingKeyFor" class="empty-hint">
-          Нет биндингов. Нажмите «Записать клавишу» и нажмите NumPad или F-клавишу.
+          {{ t('intercept.empty_hint') }}
         </div>
 
         <div v-for="binding in settings?.bindings ?? []" :key="binding.key" class="binding-row">
@@ -258,7 +255,7 @@ onUnmounted(() => {
           <button
             @click="removeBinding(binding.key)"
             class="remove-btn"
-            title="Очистить биндинг"
+            :title="t('intercept.clear_binding')"
           >
             <Trash2 :size="14" />
           </button>

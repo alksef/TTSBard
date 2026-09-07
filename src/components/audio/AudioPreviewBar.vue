@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue';
 import { FileAudio, Upload, Play, AudioLines, Square, FolderOpen, X } from 'lucide-vue-next';
+import { t } from '../../i18n';
 
 interface FileInfo {
   path: string;
@@ -46,11 +47,11 @@ watch(() => props.isPreviewPlaying, (val) => {
       <template v-if="!selectedFile">
         <div class="info-group">
           <FileAudio class="bar-icon" :size="18" />
-          <span class="bar-title">Проверить эффекты</span>
+          <span class="bar-title">{{ t('audio.preview.title') }}</span>
         </div>
         <button @click="emit('pickFile')" class="pick-btn">
           <Upload :size="16" />
-          <span>Выбрать файл</span>
+          <span>{{ t('audio.preview.choose_file') }}</span>
         </button>
       </template>
 
@@ -65,45 +66,45 @@ watch(() => props.isPreviewPlaying, (val) => {
             :disabled="isPreviewPlaying"
             :class="{ 'playing-original': playingMode === 'original' && isPreviewPlaying }"
             class="play-btn"
-            title="Воспроизвести оригинал без эффектов"
-            aria-label="Воспроизвести оригинал"
+            :title="t('audio.preview.play_original.title')"
+            :aria-label="t('audio.preview.play_original.aria')"
           >
             <Play :size="16" />
-            <span class="btn-label">Оригинал</span>
+            <span class="btn-label">{{ t('audio.preview.original') }}</span>
           </button>
           <button
             @click="onPlay('effects')"
             :disabled="isPreviewPlaying"
             :class="{ 'playing-effects': playingMode === 'effects' && isPreviewPlaying }"
             class="play-btn"
-            title="Воспроизвести со всеми эффектами и DSP"
-            aria-label="Воспроизвести со всеми эффектами"
+            :title="t('audio.preview.play_effects.title')"
+            :aria-label="t('audio.preview.play_effects.aria')"
           >
             <AudioLines :size="16" />
-            <span class="btn-label">С эффектами</span>
+            <span class="btn-label">{{ t('audio.preview.with_effects') }}</span>
           </button>
           <button
             @click="onStop"
             :disabled="!isPreviewPlaying"
             class="icon-btn stop-btn"
-            title="Остановить воспроизведение"
-            aria-label="Остановить воспроизведение"
+            :title="t('audio.preview.stop')"
+            :aria-label="t('audio.preview.stop')"
           >
             <Square :size="16" />
           </button>
           <button
             @click="emit('replaceFile')"
             class="icon-btn"
-            title="Заменить файл"
-            aria-label="Заменить файл"
+            :title="t('audio.preview.replace_file')"
+            :aria-label="t('audio.preview.replace_file')"
           >
             <FolderOpen :size="16" />
           </button>
           <button
             @click="emit('clearFile')"
             class="icon-btn"
-            title="Очистить выбранный файл"
-            aria-label="Очистить выбранный файл"
+            :title="t('audio.preview.clear_file')"
+            :aria-label="t('audio.preview.clear_file')"
           >
             <X :size="16" />
           </button>

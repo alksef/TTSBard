@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { t } from '../../i18n'
 
 const emit = defineEmits<{
   correct: []
@@ -20,8 +21,8 @@ const props = defineProps<{
 
 const accentHomographsTitle = computed(() =>
   props.accentHomographsBinding
-    ? `Расставить ударения (${props.accentHomographsBinding})`
-    : 'Расставить ударения',
+    ? t('editor.menu.accent_homographs_binding', { binding: props.accentHomographsBinding })
+    : t('editor.menu.accent_homographs'),
 )
 
 const open = ref(false)
@@ -73,8 +74,8 @@ function run(fn: () => void) { close(); fn() }
       :class="{ compact }"
       :aria-expanded="open"
       aria-haspopup="true"
-      title="Меню редактора"
-      aria-label="Меню редактора"
+      :title="t('editor.menu.title')"
+      :aria-label="t('editor.menu.title')"
       @click="onTriggerClick"
     >
       ⋯
@@ -86,21 +87,21 @@ function run(fn: () => void) { close(); fn() }
         :disabled="!hasText || !isAiEnabled"
         @click="run(() => emit('correct'))"
       >
-        AI: корректировать
+        {{ t('editor.menu.ai_correct') }}
       </button>
       <button
         class="menu-item"
         :disabled="!hasText || !isAiEnabled"
         @click="run(() => emit('complete'))"
       >
-        AI: дописать
+        {{ t('editor.menu.ai_complete') }}
       </button>
       <button
         class="menu-item"
         :disabled="!hasText || !isAiEnabled"
         @click="run(() => emit('grammar'))"
       >
-        AI: грамматика
+        {{ t('editor.menu.ai_grammar') }}
       </button>
       <button
         class="menu-item"
@@ -109,7 +110,7 @@ function run(fn: () => void) { close(); fn() }
         :aria-label="accentHomographsTitle"
         @click="run(() => emit('accent-homographs'))"
       >
-        Расставить ударения
+        {{ t('editor.menu.accent_homographs') }}
       </button>
       <div class="menu-separator" />
       <button
@@ -117,7 +118,7 @@ function run(fn: () => void) { close(); fn() }
         :disabled="!hasText"
         @click="run(() => emit('save-audio'))"
       >
-        Сохранить аудио…
+        {{ t('editor.menu.save_audio') }}
       </button>
     </div>
   </div>

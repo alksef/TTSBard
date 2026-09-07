@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import './dsp-shared.css';
+import { t } from '../../i18n';
 
 defineProps<{
   limiter: {
@@ -17,7 +18,7 @@ const emit = defineEmits<{
 <template>
   <div class="dsp-subsection">
     <div class="section-header">
-      <span class="section-title">Лимитер</span>
+      <span class="section-title">{{ t('dsp.limiter') }}</span>
       <label class="toggle-switch">
         <input type="checkbox" v-model="limiter.enabled" @change="emit('mark-dirty')" />
         <span class="toggle-slider"></span>
@@ -40,7 +41,7 @@ const emit = defineEmits<{
         </div>
       </div>
       <div class="limiter-hint">
-        <span>Лимитер — защитный потолок. Не допускает выход сигнала выше ceiling.</span>
+        <span>{{ t('dsp.limiter.hint') }}</span>
       </div>
     </div>
   </div>

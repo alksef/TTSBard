@@ -6,6 +6,7 @@ import ProviderCard from '../shared/ProviderCard.vue';
 import InputWithToggle from '../shared/InputWithToggle.vue';
 import FishAudioModelPicker from './FishAudioModelPicker.vue';
 import type { FishAudioConnectionSettingsInput, VoiceModel } from '../../types/settings';
+import { t } from '../../i18n';
 
 interface Props {
   active?: boolean;
@@ -110,8 +111,8 @@ async function handleSaveAll() {
 async function handleRemoveVoice(voiceId: string, voiceTitle: string, event: Event) {
   event.stopPropagation();
 
-  const confirmed = await confirm(`Удалить голос "${voiceTitle}"?`, {
-    title: 'Подтверждение удаления',
+  const confirmed = await confirm(t('tts.remove_voice.message', { name: voiceTitle }), {
+    title: t('tts.remove_voice.title'),
     kind: 'warning'
   });
 
@@ -139,12 +140,12 @@ function handleProxyToggle(event: Event) {
       <!-- API Key -->
       <div class="setting-group">
         <div class="form-row">
-          <label>Ключ API:</label>
+          <label>{{ t('tts.api_key') }}:</label>
           <InputWithToggle
             :model-value="localApiKey"
             @update:model-value="localApiKey = $event"
             type="password"
-            placeholder="Введите API ключ"
+            :placeholder="t('tts.api_key_placeholder')"
             class="input-wide"
           />
         </div>
@@ -155,7 +156,7 @@ function handleProxyToggle(event: Event) {
         <!-- Format and Sample Rate in one row -->
         <div class="audio-settings-row">
           <div class="audio-setting">
-            <label>Формат:</label>
+            <label>{{ t('tts.format') }}:</label>
             <select
               :value="localFormat"
               @change="localFormat = ($event.target as HTMLSelectElement).value"
@@ -168,7 +169,7 @@ function handleProxyToggle(event: Event) {
           </div>
 
           <div class="audio-setting">
-            <label>Частота:</label>
+            <label>{{ t('tts.sample_rate') }}:</label>
             <select
               :value="localSampleRate"
               @change="localSampleRate = Number(($event.target as HTMLSelectElement).value)"
@@ -184,7 +185,7 @@ function handleProxyToggle(event: Event) {
         <!-- Temperature in separate row -->
         <div class="audio-settings-row">
           <div class="audio-setting">
-            <label>Температура: {{ localTemperature }}</label>
+            <label>{{ t('tts.temperature') }}: {{ localTemperature }}</label>
             <input
               type="range"
               :value="localTemperature"
@@ -206,7 +207,7 @@ function handleProxyToggle(event: Event) {
             :class="{ disabled: isSaving }"
           >
             <Loader2 v-if="isSaving" :size="16" class="spinner" />
-            {{ isSaving ? 'Сохранение...' : 'Сохранить' }}
+            {{ isSaving ? t('tts.saving') : t('common.save') }}
           </button>
         </div>
       </div>
@@ -222,7 +223,7 @@ function handleProxyToggle(event: Event) {
             class="proxy-checkbox"
           />
           <label for="fish-use-proxy" class="proxy-checkbox-label">
-            Использовать SOCKS5
+            {{ t('tts.use_socks5') }}
           </label>
         </div>
       </div>
@@ -230,10 +231,10 @@ function handleProxyToggle(event: Event) {
       <!-- Voice Management -->
       <div class="setting-group">
         <div class="voice-header">
-          <label>Голоса</label>
+          <label>{{ t('tts.voices') }}</label>
           <button @click="handleOpenModelPicker" class="add-model-button">
             <Plus :size="16" />
-            Добавить
+            {{ t('tts.add') }}
           </button>
         </div>
 
@@ -257,14 +258,15 @@ function handleProxyToggle(event: Event) {
             <button
               @click="handleRemoveVoice(voice.id, voice.title, $event)"
               class="remove-button"
-              title="Удалить"
+              :title="t('tts.delete')"
+              :aria-label="t('tts.delete')"
             >
               <Trash2 :size="14" />
             </button>
           </div>
         </div>
         <div v-else class="empty-voices">
-          Нет добавленных голосов
+          {{ t('tts.no_voices_added') }}
         </div>
       </div>
     </div>

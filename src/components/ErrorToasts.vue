@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { watch } from 'vue'
 import { useErrorHandler, ErrorLevel } from '../composables/useErrorHandler'
+import { t } from '../i18n'
 
 const { errors, removeError } = useErrorHandler()
 
@@ -38,7 +39,7 @@ function getErrorClass(level: ErrorLevel): string {
           @click="removeError(error.id)"
         >
           <span class="toast-message">{{ error.message }}</span>
-          <button class="toast-close" @click.stop="removeError(error.id)">×</button>
+          <button class="toast-close" :title="t('toast.close')" :aria-label="t('toast.close')" @click.stop="removeError(error.id)">×</button>
         </div>
       </TransitionGroup>
     </div>

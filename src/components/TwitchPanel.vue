@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { Eye, EyeOff, Play, Square, RotateCw } from 'lucide-vue-next'
 import { useTwitch } from '../composables/useTwitch'
+import { t } from '../i18n'
 
 const {
   settings,
   errorMessage,
+  errorMessageType,
   currentStatus,
   showToken,
   isConnected,
@@ -20,41 +22,37 @@ const {
 <template>
   <div class="twitch-panel">
     <!-- Error/Info Message Display -->
-    <div v-if="errorMessage" class="message-box" :class="{
-      error: errorMessage.includes('Failed') || errorMessage.includes('failed') || errorMessage.includes('Error') || errorMessage.includes('Ошибка'),
-      success: errorMessage.includes('saved') || errorMessage.includes('сохранен') || errorMessage.includes('валид') || errorMessage.includes('Подключено') || errorMessage.includes('Подключение к Twitch') || errorMessage.includes('Перезапуск') || errorMessage.includes('Переподключение'),
-      info: errorMessage.includes('Тестовое сообщение отправлено') || errorMessage.includes('Отключено') || errorMessage.includes('disconnect') || errorMessage.includes('Stopped') || errorMessage.includes('Disconnected')
-    }">
+    <div v-if="errorMessage" class="message-box" :class="errorMessageType">
       {{ errorMessage }}
     </div>
 
     <section class="settings-section">
       <div class="section-header server-header">
-        <h2>Подключение</h2>
+        <h2>{{ t('twitch.connection') }}</h2>
         <div class="server-status">
           <span class="status-indicator" :class="{
             running: currentStatus === 'Connected',
             connecting: currentStatus === 'Connecting',
             error: currentStatus === 'Error'
           }">
-            {{ currentStatus === 'Connected' ? 'Подключено' :
-               currentStatus === 'Connecting' ? 'Подключение' :
-               currentStatus === 'Error' ? 'Ошибка' :
-               'Отключено' }}
+            {{ currentStatus === 'Connected' ? t('twitch.status.connected') :
+               currentStatus === 'Connecting' ? t('twitch.status.connecting') :
+               currentStatus === 'Error' ? t('twitch.status.error') :
+               t('twitch.status.disconnected') }}
           </span>
           <template v-if="currentStatus === 'Connected'">
-            <button @click="restartTwitch" class="status-button refresh" title="Перезапустить">
+            <button @click="restartTwitch" class="status-button refresh" :title="t('twitch.restart')" :aria-label="t('twitch.restart')">
               <RotateCw :size="14" />
             </button>
-            <button @click="stopTwitch" class="status-button stop" title="Отключиться">
+            <button @click="stopTwitch" class="status-button stop" :title="t('twitch.disconnect')" :aria-label="t('twitch.disconnect')">
               <Square :size="14" />
             </button>
           </template>
           <template v-else>
-            <button @click="startTwitch" class="status-button start" :disabled="currentStatus === 'Connecting'" :class="{ disabled: currentStatus === 'Connecting' }" title="Подключиться">
+            <button @click="startTwitch" class="status-button start" :disabled="currentStatus === 'Connecting'" :class="{ disabled: currentStatus === 'Connecting' }" :title="t('twitch.connect')" :aria-label="t('twitch.connect')">
               <Play :size="14" />
             </button>
-            <button @click="stopTwitch" class="status-button stop disabled" title="Отключиться" disabled>
+            <button @click="stopTwitch" class="status-button stop disabled" :title="t('twitch.disconnect')" :aria-label="t('twitch.disconnect')" disabled>
               <Square :size="14" />
             </button>
           </template>
@@ -64,12 +62,12 @@ const {
       <div class="setting-row">
         <label class="checkbox-label">
           <input type="checkbox" v-model="settings.start_on_boot" @change="saveStartOnBoot" />
-          <span>Запускать при старте приложения</span>
+          <span>{{ t('twitch.start_on_boot') }}</span>
         </label>
       </div>
 
       <div class="setting-row">
-        <label>Username:</label>
+        <label>{{ t('twitch.username') }}:</label>
         <input
           type="text"
           v-model="settings.username"
@@ -79,7 +77,7 @@ const {
       </div>
 
       <div class="setting-row">
-        <label>Token:</label>
+        <label>{{ t('twitch.token') }}:</label>
         <div class="input-with-toggle">
           <input
             :type="showToken ? 'text' : 'password'"
@@ -91,7 +89,8 @@ const {
             type="button"
             class="toggle-icon-button"
             @click="showToken = !showToken"
-            :title="showToken ? 'Hide' : 'Show'"
+            :title="showToken ? t('twitch.token.hide') : t('twitch.token.show')"
+            :aria-label="showToken ? t('twitch.token.hide') : t('twitch.token.show')"
           >
             <Eye v-if="!showToken" :size="18" />
             <EyeOff v-else :size="18" />
@@ -100,7 +99,7 @@ const {
       </div>
 
       <div class="setting-row">
-        <label>Channel:</label>
+        <label>{{ t('twitch.channel') }}:</label>
         <input
           type="text"
           v-model="settings.channel"
@@ -115,21 +114,21 @@ const {
           class="test-message-button"
           :disabled="!isConnected"
           :class="{ disabled: !isConnected }"
-        >Тестовое сообщение</button>
-        <button @click="save" class="save-button-inline">Сохранить</button>
+        >{{ t('twitch.send_test') }}</button>
+        <button @click="save" class="save-button-inline">{{ t('common.save') }}</button>
       </div>
     </section>
 
     <section class="settings-section help-section">
-      <h2>Помощь</h2>
+      <h2>{{ t('twitch.help.title') }}</h2>
       <p class="help-text">
-        Получите OAuth токен с:
+        {{ t('twitch.help.oauth_intro') }}
       </p>
       <a href="https://twitchtokengenerator.com" target="_blank" rel="noopener noreferrer" class="help-link">
         https://twitchtokengenerator.com
       </a>
       <p class="help-text">
-        Формат токена: <code>xxxxxxxxxxxxxxx</code> (вставьте только токен, префикс "oauth:" добавляется автоматически)
+        {{ t('twitch.help.token_format_prefix') }}<code>xxxxxxxxxxxxxxx</code>{{ t('twitch.help.token_format_suffix') }}
       </p>
     </section>
   </div>

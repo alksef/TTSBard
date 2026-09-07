@@ -796,6 +796,7 @@ pub struct GeneralSettingsDto {
     pub hotkey_enabled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
+    pub ui_language: String,
     pub show_playback_on_start: bool,
     pub start_compact: bool,
     pub hide_on_minimize: bool,
@@ -809,6 +810,7 @@ impl GeneralSettingsDto {
                 crate::config::settings::Theme::Dark => "dark".to_string(),
                 crate::config::settings::Theme::Light => "light".to_string(),
             }),
+            ui_language: config.ui_language.clone(),
             show_playback_on_start: config.show_playback_on_start,
             start_compact: config.start_compact,
             hide_on_minimize: config.hide_on_minimize,
@@ -1613,6 +1615,7 @@ mod tests {
         let general = GeneralSettingsDto {
             hotkey_enabled: true,
             theme: Some("dark".into()),
+            ui_language: "ru".into(),
             show_playback_on_start: false,
             start_compact: false,
             hide_on_minimize: true,
@@ -1984,6 +1987,7 @@ mod tests {
         let general = GeneralSettingsDto {
             hotkey_enabled: false,
             theme: None,
+            ui_language: "ru".into(),
             show_playback_on_start: false,
             start_compact: false,
             hide_on_minimize: false,

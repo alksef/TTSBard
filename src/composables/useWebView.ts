@@ -5,6 +5,10 @@ import { confirm } from '@tauri-apps/plugin-dialog'
 import { useWebViewSettings } from './useAppSettings'
 import { debugLog, debugError } from '../utils/debug'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
+import { presentCommandError } from '../ipc/commandError'
+import { t } from '../i18n'
+
+type UiMessageKind = 'success' | 'info' | 'error'
 
 
 export interface WebViewSettings {
@@ -37,6 +41,7 @@ export function useWebView() {
   const externalIp = ref<string | null>(null)
   const maskedToken = ref<string | null>(null)
   const errorMessage = ref<string | null>(null)
+  const errorMessageType = ref<UiMessageKind>('info')
   const testMessage = ref('')
   const displayUrl = ref('')
   const serverStatus = ref<WebViewServerStatus>({ state: 'stopped' })
@@ -59,7 +64,7 @@ export function useWebView() {
       displayUrl.value = `http://${localIp}:${port}`
     } catch (e) {
       if (request !== displayUrlRequest) return
-      showError('Не удалось получить локальный IP: ' + (e as Error).message)
+      showError(presentCommandError(e, t('webview.error.local_ip')))
     }
   }
 
@@ -69,7 +74,7 @@ export function useWebView() {
   })
 
   const externalDisplay = computed(() => {
-    return externalUrl.value || 'Нажмите кнопку справа для получения внешнего URL'
+    return externalUrl.value || t('webview.external_url_prompt')
   })
 
   const hasToken = computed(() => {
@@ -87,12 +92,13 @@ export function useWebView() {
     return savedBindAddress.value === '0.0.0.0'
   })
 
-  function showError(message: string) {
+  function showError(message: string, type: UiMessageKind = 'error') {
     // Defensive normalization: the backend emits this event both directly
     // (plain string) and via the AppEvent broadcast (externally tagged enum
     // object {"WebViewServerError": "..."}). A non-string here used to crash
     // the panel render (errorMessage.includes is not a function).
     errorMessage.value = typeof message === 'string' ? message : String(message)
+    errorMessageType.value = type
     if (errorTimeout !== null) {
       clearTimeout(errorTimeout)
     }
@@ -107,10 +113,10 @@ export function useWebView() {
       debugLog('[WebView] Saving settings:', { enabled: settings.value.enabled, port: settings.value.port, bind_address: settings.value.bind_address, has_token: !!settings.value.access_token, upnp_enabled: settings.value.upnp_enabled, start_on_boot: settings.value.start_on_boot })
       const result = await invoke<string>('save_webview_settings', { settings: settings.value })
       debugLog('[WebView] Save result:', result)
-      showError(result)
+      showError(result, 'success')
     } catch (e) {
       debugError('[WebView] Save failed:', e)
-      showError('Failed to save settings: ' + (e as Error).message)
+      showError(presentCommandError(e, t('webview.error.save_settings')))
     }
   }
 
@@ -145,16 +151,16 @@ export function useWebView() {
     try {
       debugLog('[WebView] Saving server settings')
       const result = await invoke<string>('save_webview_settings', { settings: settings.value })
-      showError(result)
+      showError(result, 'success')
     } catch (e) {
       debugError('[WebView] Failed to save server settings:', e)
-      showError('Failed to save server settings: ' + (e as Error).message)
+      showError(presentCommandError(e, t('webview.error.save_server_settings')))
     }
   }
 
   function copyUrl() {
     navigator.clipboard.writeText(displayUrl.value)
-    showError('URL скопирован')
+    showError(t('webview.url_copied'), 'info')
   }
 
   async function loadToken() {
@@ -169,9 +175,9 @@ export function useWebView() {
     try {
       const token = await invoke<string>('copy_webview_token')
       await navigator.clipboard.writeText(token)
-      showError('Токен скопирован в буфер обмена')
+      showError(t('webview.token_copied'), 'success')
     } catch (e) {
-      showError('Ошибка: ' + (e as Error).message)
+      showError(presentCommandError(e, t('webview.error.copy_token')))
     }
   }
 
@@ -180,30 +186,30 @@ export function useWebView() {
     try {
       await invoke<string>('set_webview_upnp_enabled', { enabled: settings.value.upnp_enabled })
       if (settings.value.upnp_enabled) {
-        showError('UPnP включён')
+        showError(t('webview.upnp.enabled'), 'success')
       } else {
-        showError('UPnP выключен')
+        showError(t('webview.upnp.disabled'), 'info')
       }
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : String(e)
       debugError('[WebView] UPnP toggle failed:', errorMsg)
       settings.value.upnp_enabled = webviewSettingsFromComposable.value?.upnp_enabled ?? confirmedBefore
-      showError('Ошибка: ' + errorMsg)
+      showError(presentCommandError(e, t('webview.error.upnp')))
     }
   }
 
   async function regenerateAccessToken() {
-    const confirmedResult = await confirm('Сделает старую ссылку недействительной и перезапустит сервер. Продолжить?', {
-      title: 'Подтверждение',
+    const confirmedResult = await confirm(t('webview.token.regenerate_confirm_text'), {
+      title: t('webview.confirm_title'),
       kind: 'warning'
     })
     if (!confirmedResult) return
     try {
       await invoke('regenerate_webview_token')
       externalIp.value = null
-      showError('Токен перегенерирован. Сервер перезапускается...')
+      showError(t('webview.token.regenerated'), 'success')
     } catch (e) {
-      showError('Ошибка: ' + (e as Error).message)
+      showError(presentCommandError(e, t('webview.error.regenerate_token')))
     }
   }
 
@@ -211,20 +217,20 @@ export function useWebView() {
     try {
       externalIp.value = await invoke<string>('get_external_ip')
     } catch (e) {
-      showError('Не удалось получить внешний IP: ' + (e as Error).message)
+      showError(presentCommandError(e, t('webview.error.external_ip')))
     }
   }
 
   async function copyExternalUrl() {
     if (!externalUrl.value) {
-      showError('Сначала получите внешний IP и токен')
+      showError(t('webview.external_url_missing'), 'info')
       return
     }
     try {
       await navigator.clipboard.writeText(externalUrl.value)
-      showError('Внешний URL скопирован')
+      showError(t('webview.external_url_copied'), 'info')
     } catch (e) {
-      showError('Ошибка: ' + (e as Error).message)
+      showError(presentCommandError(e, t('webview.error.copy_external_url')))
     }
   }
 
@@ -232,7 +238,7 @@ export function useWebView() {
     try {
       await invoke('open_template_folder')
     } catch (e) {
-      showError('Не удалось открыть папку: ' + (e as Error).message)
+      showError(presentCommandError(e, t('webview.error.open_folder')))
     }
   }
 
@@ -258,18 +264,18 @@ export function useWebView() {
     if (serverStatus.value.state !== 'running') return
     try {
       await invoke('send_test_message', { text: testMessage.value })
-      showError('Сообщение отправлено!')
+      showError(t('webview.test.sent'), 'success')
     } catch (e) {
-      showError('Ошибка отправки: ' + (e as Error).message)
+      showError(presentCommandError(e, t('webview.error.send')))
     }
   }
 
   async function reloadTemplates() {
     try {
       const message = await invoke<string>('reload_templates')
-      showError(message)
+      showError(message, 'success')
     } catch (e) {
-      showError('Не удалось обновить шаблоны: ' + (e as Error).message)
+      showError(presentCommandError(e, t('webview.error.reload_templates')))
     }
   }
 
@@ -278,7 +284,7 @@ export function useWebView() {
     await listenerScope.track(
       listen<WebViewServerStatus>('webview-server-status-changed', (event) => {
         serverStatus.value = event.payload
-        if (event.payload.state === 'error') showError(event.payload.message)
+        if (event.payload.state === 'error') showError(presentCommandError(event.payload.message, t('webview.error.runtime')))
       }),
     )
     try {
@@ -292,11 +298,14 @@ export function useWebView() {
       listen<unknown>('webview-server-error', (event) => {
         // Two emitters share this event name: the direct emit sends a plain
         // string, the AppEvent broadcast sends {"WebViewServerError": "..."}.
+        // Neither shape is trusted for display: the raw backend text is replaced
+        // with a localized fallback.
         const payload = event.payload
         if (typeof payload === 'string') {
-          showError(payload)
+          showError(presentCommandError(payload, t('webview.error.runtime')))
         } else if (payload && typeof payload === 'object' && 'WebViewServerError' in payload) {
-          showError(String((payload as { WebViewServerError: unknown }).WebViewServerError))
+          const raw = (payload as { WebViewServerError: unknown }).WebViewServerError
+          showError(presentCommandError(raw, t('webview.error.runtime')))
         }
       }),
     )
@@ -340,6 +349,7 @@ export function useWebView() {
     externalIp,
     maskedToken,
     errorMessage,
+    errorMessageType,
     testMessage,
     displayUrl,
     serverStatus,

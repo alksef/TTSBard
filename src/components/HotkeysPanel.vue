@@ -5,6 +5,7 @@ import { Keyboard, RotateCcw, AppWindow, Music, MonitorPlay, SquarePen, ScanLine
 import type { HotkeyDto } from '../types/settings'
 import { useAppSettings } from '../composables/useAppSettings'
 import { debugError } from '../utils/debug'
+import { t } from '../i18n'
 
 const { settings, isLoading, reload } = useAppSettings()
 
@@ -19,9 +20,11 @@ function isEditorHotkeyName(name: string): name is EditorHotkeyName {
   return (EDITOR_HOTKEY_NAMES as readonly string[]).includes(name)
 }
 
+type HotkeyMessageType = 'error' | 'success' | 'warning' | null
+
 const recordingFor = ref<HotkeyName | EditorHotkeyName | null>(null)
 const errorMessage = ref<string | null>(null)
-const messageState = ref<'error' | 'success' | 'warning' | null>(null)
+const messageState = ref<HotkeyMessageType>(null)
 const currentRecording = ref<{ modifiers: HotkeyDto['modifiers']; key: string } | null>(null)
 let messageTimeoutId: ReturnType<typeof setTimeout> | null = null
 
@@ -42,7 +45,7 @@ async function startRecording(name: HotkeyName) {
     document.addEventListener('keydown', handleKeyDown)
     document.addEventListener('keyup', handleKeyUp)
   } catch (e) {
-    showError('Ошибка: ' + (e as Error).message)
+    showMessage(t('hotkeys.error_prefix', { detail: (e as Error).message }), 'error')
     // Сбрасываем флаг при ошибке
     try {
       await invoke('set_hotkey_recording', { recording: false })
@@ -66,7 +69,7 @@ async function startEditorRecording(name: EditorHotkeyName) {
     document.addEventListener('keydown', handleKeyDown)
     document.addEventListener('keyup', handleKeyUp)
   } catch (e) {
-    showError('Ошибка: ' + (e as Error).message)
+    showMessage(t('hotkeys.error_prefix', { detail: (e as Error).message }), 'error')
     // Сбрасываем флаг при ошибке
     try {
       await invoke('set_hotkey_recording', { recording: false })
@@ -198,7 +201,7 @@ async function saveHotkey(name: string, hotkey: HotkeyDto) {
     await invoke('set_hotkey_recording', { recording: false })
   } catch (e) {
     // При ошибке нужно восстановить хоткеи вручную
-    showError('Ошибка: ' + (e as Error).message)
+    showMessage(t('hotkeys.error_prefix', { detail: (e as Error).message }), 'error')
     try {
       await invoke('set_hotkey_recording', { recording: false })
       if (!isEditorHotkeyName(name)) {
@@ -218,9 +221,9 @@ async function resetToDefault(name: HotkeyName) {
   try {
     await invoke('reset_hotkey_to_default', { name })
     await reload()
-    showError('Сброшено к значению по умолчанию')
+    showMessage(t('hotkeys.reset_success'), 'success')
   } catch (e) {
-    showError('Ошибка: ' + (e as Error).message)
+    showMessage(t('hotkeys.error_prefix', { detail: (e as Error).message }), 'error')
   }
 }
 
@@ -229,9 +232,9 @@ async function resetEditorToDefault(name: EditorHotkeyName) {
   try {
     await invoke('reset_editor_hotkey', { actionId: name })
     await reload()
-    showError('Сброшено к значению по умолчанию')
+    showMessage(t('hotkeys.reset_success'), 'success')
   } catch (e) {
-    showError('Ошибка: ' + (e as Error).message)
+    showMessage(t('hotkeys.error_prefix', { detail: (e as Error).message }), 'error')
   }
 }
 
@@ -257,19 +260,9 @@ function formatCurrentRecording(): string {
   return mods.length > 0 ? `${mods.join('+')}+${currentRecording.value.key}` : currentRecording.value.key
 }
 
-function showError(msg: string) {
+function showMessage(msg: string, type: Exclude<HotkeyMessageType, null>) {
   errorMessage.value = msg
-
-  // Determine message type
-  if (msg.includes('Ошибка') || msg.includes('ошибка') || msg.includes('Error') || msg.includes('Failed')) {
-    messageState.value = 'error'
-  } else if (msg.includes('сохранен') || msg.includes('сохранена') || msg.includes('Saved') || msg.includes('Сброшено')) {
-    messageState.value = 'success'
-  } else if (msg.includes('Перезапустите') || msg.includes('перезапустите')) {
-    messageState.value = 'warning'
-  } else {
-    messageState.value = null
-  }
+  messageState.value = type
 
   if (messageTimeoutId !== null) {
     clearTimeout(messageTimeoutId)
@@ -317,20 +310,20 @@ onUnmounted(async () => {
     <div class="setting-section">
       <div class="section-header">
         <Keyboard :size="18" class="section-icon" />
-        <span class="section-title">Глобальные</span>
+        <span class="section-title">{{ t('hotkeys.section.global') }}</span>
       </div>
 
       <!-- Main Window Hotkey -->
       <div class="hotkey-row">
         <div class="hotkey-label">
           <AppWindow :size="16" />
-          <span>Основное окно</span>
+          <span>{{ t('hotkeys.name.main_window') }}</span>
         </div>
         <div class="hotkey-actions">
           <span v-if="hotkeys && !recordingFor" class="hotkey-value">
             {{ formatHotkey(hotkeys.main_window) }}
           </span>
-          <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+          <span v-else-if="!hotkeys" class="hotkey-value placeholder">{{ t('hotkeys.loading') }}</span>
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'main_window' && currentRecording" class="hotkey-value recording">
@@ -344,14 +337,14 @@ onUnmounted(async () => {
             :class="{ recording: recordingFor === 'main_window' }"
           >
             <Keyboard :size="14" />
-            {{ recordingFor === 'main_window' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+            {{ recordingFor === 'main_window' ? (currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press')) : t('hotkeys.action.change') }}
           </button>
 
           <button
             v-if="recordingFor === 'main_window'"
             @click="cancelRecording"
             class="cancel-btn"
-            title="Отмена (Esc)"
+            :title="t('hotkeys.action.cancel_esc')"
           >
             ✕
           </button>
@@ -359,7 +352,7 @@ onUnmounted(async () => {
           <button
             @click="resetToDefault('main_window')"
             class="reset-btn"
-            title="Сбросить к умолчанию"
+            :title="t('hotkeys.reset_title')"
           >
             <RotateCcw :size="14" />
           </button>
@@ -370,13 +363,13 @@ onUnmounted(async () => {
       <div class="hotkey-row">
         <div class="hotkey-label">
           <Music :size="16" />
-          <span>Звуковая панель</span>
+          <span>{{ t('hotkeys.name.sound_panel') }}</span>
         </div>
         <div class="hotkey-actions">
           <span v-if="hotkeys && !recordingFor" class="hotkey-value">
             {{ formatHotkey(hotkeys.sound_panel) }}
           </span>
-          <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+          <span v-else-if="!hotkeys" class="hotkey-value placeholder">{{ t('hotkeys.loading') }}</span>
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'sound_panel' && currentRecording" class="hotkey-value recording">
@@ -390,14 +383,14 @@ onUnmounted(async () => {
             :class="{ recording: recordingFor === 'sound_panel' }"
           >
             <Keyboard :size="14" />
-            {{ recordingFor === 'sound_panel' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+            {{ recordingFor === 'sound_panel' ? (currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press')) : t('hotkeys.action.change') }}
           </button>
 
           <button
             v-if="recordingFor === 'sound_panel'"
             @click="cancelRecording"
             class="cancel-btn"
-            title="Отмена (Esc)"
+            :title="t('hotkeys.action.cancel_esc')"
           >
             ✕
           </button>
@@ -405,7 +398,7 @@ onUnmounted(async () => {
           <button
             @click="resetToDefault('sound_panel')"
             class="reset-btn"
-            title="Сбросить к умолчанию"
+            :title="t('hotkeys.reset_title')"
           >
             <RotateCcw :size="14" />
           </button>
@@ -416,13 +409,13 @@ onUnmounted(async () => {
       <div class="hotkey-row">
         <div class="hotkey-label">
           <MonitorPlay :size="16" />
-          <span>Управление воспроизведением</span>
+          <span>{{ t('hotkeys.name.playback_control_window') }}</span>
         </div>
         <div class="hotkey-actions">
           <span v-if="hotkeys && !recordingFor" class="hotkey-value">
             {{ formatHotkey(hotkeys.playback_control_window) }}
           </span>
-          <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+          <span v-else-if="!hotkeys" class="hotkey-value placeholder">{{ t('hotkeys.loading') }}</span>
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'playback_control_window' && currentRecording" class="hotkey-value recording">
@@ -436,14 +429,14 @@ onUnmounted(async () => {
             :class="{ recording: recordingFor === 'playback_control_window' }"
           >
             <Keyboard :size="14" />
-            {{ recordingFor === 'playback_control_window' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+            {{ recordingFor === 'playback_control_window' ? (currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press')) : t('hotkeys.action.change') }}
           </button>
 
           <button
             v-if="recordingFor === 'playback_control_window'"
             @click="cancelRecording"
             class="cancel-btn"
-            title="Отмена (Esc)"
+            :title="t('hotkeys.action.cancel_esc')"
           >
             ✕
           </button>
@@ -451,7 +444,7 @@ onUnmounted(async () => {
           <button
             @click="resetToDefault('playback_control_window')"
             class="reset-btn"
-            title="Сбросить к умолчанию"
+            :title="t('hotkeys.reset_title')"
           >
             <RotateCcw :size="14" />
           </button>
@@ -462,13 +455,13 @@ onUnmounted(async () => {
       <div class="hotkey-row">
         <div class="hotkey-label">
           <ScanLine :size="16" />
-          <span>OCR: захват области</span>
+          <span>{{ t('hotkeys.name.ocr_capture') }}</span>
         </div>
         <div class="hotkey-actions">
           <span v-if="hotkeys && !recordingFor" class="hotkey-value">
             {{ formatHotkey(hotkeys.ocr_capture) }}
           </span>
-          <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+          <span v-else-if="!hotkeys" class="hotkey-value placeholder">{{ t('hotkeys.loading') }}</span>
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'ocr_capture' && currentRecording" class="hotkey-value recording">
@@ -480,19 +473,19 @@ onUnmounted(async () => {
             :disabled="recordingFor !== null || isLoading"
             class="record-btn"
             :class="{ recording: recordingFor === 'ocr_capture' }"
-            title="Записать клавишу"
-            aria-label="Записать клавишу"
+            :title="t('hotkeys.action.record_aria')"
+            :aria-label="t('hotkeys.action.record_aria')"
           >
             <Keyboard :size="14" />
-            {{ recordingFor === 'ocr_capture' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+            {{ recordingFor === 'ocr_capture' ? (currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press')) : t('hotkeys.action.change') }}
           </button>
 
           <button
             v-if="recordingFor === 'ocr_capture'"
             @click="cancelRecording"
             class="cancel-btn"
-            title="Отмена (Esc)"
-            aria-label="Отмена записи"
+            :title="t('hotkeys.action.cancel_esc')"
+            :aria-label="t('hotkeys.action.cancel_aria')"
           >
             ✕
           </button>
@@ -500,8 +493,8 @@ onUnmounted(async () => {
           <button
             @click="resetToDefault('ocr_capture')"
             class="reset-btn"
-            title="Сбросить к умолчанию"
-            aria-label="Сбросить к умолчанию"
+            :title="t('hotkeys.reset_title')"
+            :aria-label="t('hotkeys.reset_title')"
           >
             <RotateCcw :size="14" />
           </button>
@@ -513,19 +506,19 @@ onUnmounted(async () => {
     <div class="setting-section" style="margin-top: 1rem;">
       <div class="section-header">
         <AppWindow :size="18" class="section-icon" />
-        <span class="section-title">Основное окно</span>
+        <span class="section-title">{{ t('hotkeys.section.main_window') }}</span>
       </div>
 
       <!-- Minimal Mode Toggle Hotkey (main-window-local, like return focus) -->
       <div class="hotkey-row">
         <div class="hotkey-label">
-          <span>Компактный режим</span>
+          <span>{{ t('hotkeys.name.toggle_minimal_mode') }}</span>
         </div>
         <div class="hotkey-actions">
           <span v-if="hotkeys && !recordingFor" class="hotkey-value">
             {{ formatHotkey(hotkeys.toggle_minimal_mode) }}
           </span>
-          <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+          <span v-else-if="!hotkeys" class="hotkey-value placeholder">{{ t('hotkeys.loading') }}</span>
 
           <div v-if="recordingFor === 'toggle_minimal_mode' && currentRecording" class="hotkey-value recording">
             {{ formatCurrentRecording() }}
@@ -538,14 +531,14 @@ onUnmounted(async () => {
             :class="{ recording: recordingFor === 'toggle_minimal_mode' }"
           >
             <Keyboard :size="14" />
-            {{ recordingFor === 'toggle_minimal_mode' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+            {{ recordingFor === 'toggle_minimal_mode' ? (currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press')) : t('hotkeys.action.change') }}
           </button>
 
           <button
             v-if="recordingFor === 'toggle_minimal_mode'"
             @click="cancelRecording"
             class="cancel-btn"
-            title="Отмена (Esc)"
+            :title="t('hotkeys.action.cancel_esc')"
           >
             ✕
           </button>
@@ -553,7 +546,7 @@ onUnmounted(async () => {
           <button
             @click="resetToDefault('toggle_minimal_mode')"
             class="reset-btn"
-            title="Сбросить к умолчанию"
+            :title="t('hotkeys.reset_title')"
           >
             <RotateCcw :size="14" />
           </button>
@@ -562,13 +555,13 @@ onUnmounted(async () => {
 
       <div class="hotkey-row">
         <div class="hotkey-label">
-          <span>Вернуть фокус в предыдущее окно</span>
+          <span>{{ t('hotkeys.name.return_previous_window') }}</span>
         </div>
         <div class="hotkey-actions">
           <span v-if="hotkeys && !recordingFor" class="hotkey-value">
             {{ formatHotkey(hotkeys.return_previous_window) }}
           </span>
-          <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+          <span v-else-if="!hotkeys" class="hotkey-value placeholder">{{ t('hotkeys.loading') }}</span>
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'return_previous_window' && currentRecording" class="hotkey-value recording">
@@ -580,19 +573,19 @@ onUnmounted(async () => {
             :disabled="recordingFor !== null || isLoading"
             class="record-btn"
             :class="{ recording: recordingFor === 'return_previous_window' }"
-            title="Записать клавишу"
-            aria-label="Записать клавишу"
+            :title="t('hotkeys.action.record_aria')"
+            :aria-label="t('hotkeys.action.record_aria')"
           >
             <Keyboard :size="14" />
-            {{ recordingFor === 'return_previous_window' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+            {{ recordingFor === 'return_previous_window' ? (currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press')) : t('hotkeys.action.change') }}
           </button>
 
           <button
             v-if="recordingFor === 'return_previous_window'"
             @click="cancelRecording"
             class="cancel-btn"
-            title="Отмена (Esc)"
-            aria-label="Отмена записи"
+            :title="t('hotkeys.action.cancel_esc')"
+            :aria-label="t('hotkeys.action.cancel_aria')"
           >
             ✕
           </button>
@@ -600,8 +593,8 @@ onUnmounted(async () => {
           <button
             @click="resetToDefault('return_previous_window')"
             class="reset-btn"
-            title="Сбросить к умолчанию"
-            aria-label="Сбросить к умолчанию"
+            :title="t('hotkeys.reset_title')"
+            :aria-label="t('hotkeys.reset_title')"
           >
             <RotateCcw :size="14" />
           </button>
@@ -613,22 +606,22 @@ onUnmounted(async () => {
     <div class="setting-section" style="margin-top: 1rem;">
       <div class="section-header">
         <SquarePen :size="18" class="section-icon" />
-        <span class="section-title">Редактор</span>
+        <span class="section-title">{{ t('hotkeys.section.editor') }}</span>
       </div>
 
       <p class="section-note">
-        Эти сочетания клавиш работают только внутри редактора и вкладок.
+        {{ t('hotkeys.editor_note') }}
       </p>
 
       <div class="hotkey-row">
         <div class="hotkey-label">
-          <span>Редактировать слово</span>
+          <span>{{ t('hotkeys.name.edit_word') }}</span>
         </div>
         <div class="hotkey-actions">
           <span v-if="hotkeys && !recordingFor" class="hotkey-value">
             {{ formatHotkey(hotkeys.editor.edit_word) }}
           </span>
-          <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+          <span v-else-if="!hotkeys" class="hotkey-value placeholder">{{ t('hotkeys.loading') }}</span>
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'edit_word' && currentRecording" class="hotkey-value recording">
@@ -640,19 +633,19 @@ onUnmounted(async () => {
             :disabled="recordingFor !== null || isLoading"
             class="record-btn"
             :class="{ recording: recordingFor === 'edit_word' }"
-            title="Записать клавишу"
-            aria-label="Записать клавишу"
+            :title="t('hotkeys.action.record_aria')"
+            :aria-label="t('hotkeys.action.record_aria')"
           >
             <Keyboard :size="14" />
-            {{ recordingFor === 'edit_word' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+            {{ recordingFor === 'edit_word' ? (currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press')) : t('hotkeys.action.change') }}
           </button>
 
           <button
             v-if="recordingFor === 'edit_word'"
             @click="cancelRecording"
             class="cancel-btn"
-            title="Отмена (Esc)"
-            aria-label="Отмена записи"
+            :title="t('hotkeys.action.cancel_esc')"
+            :aria-label="t('hotkeys.action.cancel_aria')"
           >
             ✕
           </button>
@@ -660,8 +653,8 @@ onUnmounted(async () => {
           <button
             @click="resetEditorToDefault('edit_word')"
             class="reset-btn"
-            title="Сбросить к умолчанию"
-            aria-label="Сбросить к умолчанию"
+            :title="t('hotkeys.reset_title')"
+            :aria-label="t('hotkeys.reset_title')"
           >
             <RotateCcw :size="14" />
           </button>
@@ -670,13 +663,13 @@ onUnmounted(async () => {
 
       <div class="hotkey-row">
         <div class="hotkey-label">
-          <span>Отправить/продолжить</span>
+          <span>{{ t('hotkeys.name.submit_continue') }}</span>
         </div>
         <div class="hotkey-actions">
           <span v-if="hotkeys && !recordingFor" class="hotkey-value">
             {{ formatHotkey(hotkeys.editor.submit_continue) }}
           </span>
-          <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+          <span v-else-if="!hotkeys" class="hotkey-value placeholder">{{ t('hotkeys.loading') }}</span>
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'submit_continue' && currentRecording" class="hotkey-value recording">
@@ -688,19 +681,19 @@ onUnmounted(async () => {
             :disabled="recordingFor !== null || isLoading"
             class="record-btn"
             :class="{ recording: recordingFor === 'submit_continue' }"
-            title="Записать клавишу"
-            aria-label="Записать клавишу"
+            :title="t('hotkeys.action.record_aria')"
+            :aria-label="t('hotkeys.action.record_aria')"
           >
             <Keyboard :size="14" />
-            {{ recordingFor === 'submit_continue' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+            {{ recordingFor === 'submit_continue' ? (currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press')) : t('hotkeys.action.change') }}
           </button>
 
           <button
             v-if="recordingFor === 'submit_continue'"
             @click="cancelRecording"
             class="cancel-btn"
-            title="Отмена (Esc)"
-            aria-label="Отмена записи"
+            :title="t('hotkeys.action.cancel_esc')"
+            :aria-label="t('hotkeys.action.cancel_aria')"
           >
             ✕
           </button>
@@ -708,8 +701,8 @@ onUnmounted(async () => {
           <button
             @click="resetEditorToDefault('submit_continue')"
             class="reset-btn"
-            title="Сбросить к умолчанию"
-            aria-label="Сбросить к умолчанию"
+            :title="t('hotkeys.reset_title')"
+            :aria-label="t('hotkeys.reset_title')"
           >
             <RotateCcw :size="14" />
           </button>
@@ -718,13 +711,13 @@ onUnmounted(async () => {
 
       <div class="hotkey-row">
         <div class="hotkey-label">
-          <span>Отправить с сохранением текста</span>
+          <span>{{ t('hotkeys.name.submit_keep_text') }}</span>
         </div>
         <div class="hotkey-actions">
           <span v-if="hotkeys && !recordingFor" class="hotkey-value">
             {{ formatHotkey(hotkeys.editor.submit_keep_text) }}
           </span>
-          <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+          <span v-else-if="!hotkeys" class="hotkey-value placeholder">{{ t('hotkeys.loading') }}</span>
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'submit_keep_text' && currentRecording" class="hotkey-value recording">
@@ -736,19 +729,19 @@ onUnmounted(async () => {
             :disabled="recordingFor !== null || isLoading"
             class="record-btn"
             :class="{ recording: recordingFor === 'submit_keep_text' }"
-            title="Записать клавишу"
-            aria-label="Записать клавишу"
+            :title="t('hotkeys.action.record_aria')"
+            :aria-label="t('hotkeys.action.record_aria')"
           >
             <Keyboard :size="14" />
-            {{ recordingFor === 'submit_keep_text' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+            {{ recordingFor === 'submit_keep_text' ? (currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press')) : t('hotkeys.action.change') }}
           </button>
 
           <button
             v-if="recordingFor === 'submit_keep_text'"
             @click="cancelRecording"
             class="cancel-btn"
-            title="Отмена (Esc)"
-            aria-label="Отмена записи"
+            :title="t('hotkeys.action.cancel_esc')"
+            :aria-label="t('hotkeys.action.cancel_aria')"
           >
             ✕
           </button>
@@ -756,8 +749,8 @@ onUnmounted(async () => {
           <button
             @click="resetEditorToDefault('submit_keep_text')"
             class="reset-btn"
-            title="Сбросить к умолчанию"
-            aria-label="Сбросить к умолчанию"
+            :title="t('hotkeys.reset_title')"
+            :aria-label="t('hotkeys.reset_title')"
           >
             <RotateCcw :size="14" />
           </button>
@@ -766,13 +759,13 @@ onUnmounted(async () => {
 
       <div class="hotkey-row">
         <div class="hotkey-label">
-          <span>Отправить с сохранением текста и без смены фокуса</span>
+          <span>{{ t('hotkeys.name.submit_keep_focus') }}</span>
         </div>
         <div class="hotkey-actions">
           <span v-if="hotkeys && !recordingFor" class="hotkey-value">
             {{ formatHotkey(hotkeys.editor.submit_keep_focus) }}
           </span>
-          <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+          <span v-else-if="!hotkeys" class="hotkey-value placeholder">{{ t('hotkeys.loading') }}</span>
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'submit_keep_focus' && currentRecording" class="hotkey-value recording">
@@ -784,19 +777,19 @@ onUnmounted(async () => {
             :disabled="recordingFor !== null || isLoading"
             class="record-btn"
             :class="{ recording: recordingFor === 'submit_keep_focus' }"
-            title="Записать клавишу"
-            aria-label="Записать клавишу"
+            :title="t('hotkeys.action.record_aria')"
+            :aria-label="t('hotkeys.action.record_aria')"
           >
             <Keyboard :size="14" />
-            {{ recordingFor === 'submit_keep_focus' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+            {{ recordingFor === 'submit_keep_focus' ? (currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press')) : t('hotkeys.action.change') }}
           </button>
 
           <button
             v-if="recordingFor === 'submit_keep_focus'"
             @click="cancelRecording"
             class="cancel-btn"
-            title="Отмена (Esc)"
-            aria-label="Отмена записи"
+            :title="t('hotkeys.action.cancel_esc')"
+            :aria-label="t('hotkeys.action.cancel_aria')"
           >
             ✕
           </button>
@@ -804,8 +797,8 @@ onUnmounted(async () => {
           <button
             @click="resetEditorToDefault('submit_keep_focus')"
             class="reset-btn"
-            title="Сбросить к умолчанию"
-            aria-label="Сбросить к умолчанию"
+            :title="t('hotkeys.reset_title')"
+            :aria-label="t('hotkeys.reset_title')"
           >
             <RotateCcw :size="14" />
           </button>
@@ -814,13 +807,13 @@ onUnmounted(async () => {
 
       <div class="hotkey-row">
         <div class="hotkey-label">
-          <span>Следующая ошибка правописания</span>
+          <span>{{ t('hotkeys.name.next_spelling_error') }}</span>
         </div>
         <div class="hotkey-actions">
           <span v-if="hotkeys && !recordingFor" class="hotkey-value">
             {{ formatHotkey(hotkeys.editor.next_spelling_error) }}
           </span>
-          <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+          <span v-else-if="!hotkeys" class="hotkey-value placeholder">{{ t('hotkeys.loading') }}</span>
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'next_spelling_error' && currentRecording" class="hotkey-value recording">
@@ -832,19 +825,19 @@ onUnmounted(async () => {
             :disabled="recordingFor !== null || isLoading"
             class="record-btn"
             :class="{ recording: recordingFor === 'next_spelling_error' }"
-            title="Записать клавишу"
-            aria-label="Записать клавишу"
+            :title="t('hotkeys.action.record_aria')"
+            :aria-label="t('hotkeys.action.record_aria')"
           >
             <Keyboard :size="14" />
-            {{ recordingFor === 'next_spelling_error' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+            {{ recordingFor === 'next_spelling_error' ? (currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press')) : t('hotkeys.action.change') }}
           </button>
 
           <button
             v-if="recordingFor === 'next_spelling_error'"
             @click="cancelRecording"
             class="cancel-btn"
-            title="Отмена (Esc)"
-            aria-label="Отмена записи"
+            :title="t('hotkeys.action.cancel_esc')"
+            :aria-label="t('hotkeys.action.cancel_aria')"
           >
             ✕
           </button>
@@ -852,8 +845,8 @@ onUnmounted(async () => {
           <button
             @click="resetEditorToDefault('next_spelling_error')"
             class="reset-btn"
-            title="Сбросить к умолчанию"
-            aria-label="Сбросить к умолчанию"
+            :title="t('hotkeys.reset_title')"
+            :aria-label="t('hotkeys.reset_title')"
           >
             <RotateCcw :size="14" />
           </button>
@@ -862,13 +855,13 @@ onUnmounted(async () => {
 
       <div class="hotkey-row">
         <div class="hotkey-label">
-          <span>Предыдущая ошибка правописания</span>
+          <span>{{ t('hotkeys.name.previous_spelling_error') }}</span>
         </div>
         <div class="hotkey-actions">
           <span v-if="hotkeys && !recordingFor" class="hotkey-value">
             {{ formatHotkey(hotkeys.editor.previous_spelling_error) }}
           </span>
-          <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+          <span v-else-if="!hotkeys" class="hotkey-value placeholder">{{ t('hotkeys.loading') }}</span>
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'previous_spelling_error' && currentRecording" class="hotkey-value recording">
@@ -880,19 +873,19 @@ onUnmounted(async () => {
             :disabled="recordingFor !== null || isLoading"
             class="record-btn"
             :class="{ recording: recordingFor === 'previous_spelling_error' }"
-            title="Записать клавишу"
-            aria-label="Записать клавишу"
+            :title="t('hotkeys.action.record_aria')"
+            :aria-label="t('hotkeys.action.record_aria')"
           >
             <Keyboard :size="14" />
-            {{ recordingFor === 'previous_spelling_error' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+            {{ recordingFor === 'previous_spelling_error' ? (currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press')) : t('hotkeys.action.change') }}
           </button>
 
           <button
             v-if="recordingFor === 'previous_spelling_error'"
             @click="cancelRecording"
             class="cancel-btn"
-            title="Отмена (Esc)"
-            aria-label="Отмена записи"
+            :title="t('hotkeys.action.cancel_esc')"
+            :aria-label="t('hotkeys.action.cancel_aria')"
           >
             ✕
           </button>
@@ -900,8 +893,8 @@ onUnmounted(async () => {
           <button
             @click="resetEditorToDefault('previous_spelling_error')"
             class="reset-btn"
-            title="Сбросить к умолчанию"
-            aria-label="Сбросить к умолчанию"
+            :title="t('hotkeys.reset_title')"
+            :aria-label="t('hotkeys.reset_title')"
           >
             <RotateCcw :size="14" />
           </button>
@@ -910,13 +903,13 @@ onUnmounted(async () => {
 
       <div class="hotkey-row">
         <div class="hotkey-label">
-          <span>Следующая вкладка</span>
+          <span>{{ t('hotkeys.name.next_tab') }}</span>
         </div>
         <div class="hotkey-actions">
           <span v-if="hotkeys && !recordingFor" class="hotkey-value">
             {{ formatHotkey(hotkeys.editor.next_tab) }}
           </span>
-          <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+          <span v-else-if="!hotkeys" class="hotkey-value placeholder">{{ t('hotkeys.loading') }}</span>
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'next_tab' && currentRecording" class="hotkey-value recording">
@@ -928,19 +921,19 @@ onUnmounted(async () => {
             :disabled="recordingFor !== null || isLoading"
             class="record-btn"
             :class="{ recording: recordingFor === 'next_tab' }"
-            title="Записать клавишу"
-            aria-label="Записать клавишу"
+            :title="t('hotkeys.action.record_aria')"
+            :aria-label="t('hotkeys.action.record_aria')"
           >
             <Keyboard :size="14" />
-            {{ recordingFor === 'next_tab' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+            {{ recordingFor === 'next_tab' ? (currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press')) : t('hotkeys.action.change') }}
           </button>
 
           <button
             v-if="recordingFor === 'next_tab'"
             @click="cancelRecording"
             class="cancel-btn"
-            title="Отмена (Esc)"
-            aria-label="Отмена записи"
+            :title="t('hotkeys.action.cancel_esc')"
+            :aria-label="t('hotkeys.action.cancel_aria')"
           >
             ✕
           </button>
@@ -948,8 +941,8 @@ onUnmounted(async () => {
           <button
             @click="resetEditorToDefault('next_tab')"
             class="reset-btn"
-            title="Сбросить к умолчанию"
-            aria-label="Сбросить к умолчанию"
+            :title="t('hotkeys.reset_title')"
+            :aria-label="t('hotkeys.reset_title')"
           >
             <RotateCcw :size="14" />
           </button>
@@ -958,13 +951,13 @@ onUnmounted(async () => {
 
       <div class="hotkey-row">
         <div class="hotkey-label">
-          <span>Предыдущая вкладка</span>
+          <span>{{ t('hotkeys.name.previous_tab') }}</span>
         </div>
         <div class="hotkey-actions">
           <span v-if="hotkeys && !recordingFor" class="hotkey-value">
             {{ formatHotkey(hotkeys.editor.previous_tab) }}
           </span>
-          <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+          <span v-else-if="!hotkeys" class="hotkey-value placeholder">{{ t('hotkeys.loading') }}</span>
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'previous_tab' && currentRecording" class="hotkey-value recording">
@@ -976,19 +969,19 @@ onUnmounted(async () => {
             :disabled="recordingFor !== null || isLoading"
             class="record-btn"
             :class="{ recording: recordingFor === 'previous_tab' }"
-            title="Записать клавишу"
-            aria-label="Записать клавишу"
+            :title="t('hotkeys.action.record_aria')"
+            :aria-label="t('hotkeys.action.record_aria')"
           >
             <Keyboard :size="14" />
-            {{ recordingFor === 'previous_tab' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+            {{ recordingFor === 'previous_tab' ? (currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press')) : t('hotkeys.action.change') }}
           </button>
 
           <button
             v-if="recordingFor === 'previous_tab'"
             @click="cancelRecording"
             class="cancel-btn"
-            title="Отмена (Esc)"
-            aria-label="Отмена записи"
+            :title="t('hotkeys.action.cancel_esc')"
+            :aria-label="t('hotkeys.action.cancel_aria')"
           >
             ✕
           </button>
@@ -996,8 +989,8 @@ onUnmounted(async () => {
           <button
             @click="resetEditorToDefault('previous_tab')"
             class="reset-btn"
-            title="Сбросить к умолчанию"
-            aria-label="Сбросить к умолчанию"
+            :title="t('hotkeys.reset_title')"
+            :aria-label="t('hotkeys.reset_title')"
           >
             <RotateCcw :size="14" />
           </button>
@@ -1006,13 +999,13 @@ onUnmounted(async () => {
 
       <div class="hotkey-row">
         <div class="hotkey-label">
-          <span>Сменить маршрут</span>
+          <span>{{ t('hotkeys.name.cycle_route') }}</span>
         </div>
         <div class="hotkey-actions">
           <span v-if="hotkeys && !recordingFor" class="hotkey-value">
             {{ formatHotkey(hotkeys.editor.cycle_route) }}
           </span>
-          <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+          <span v-else-if="!hotkeys" class="hotkey-value placeholder">{{ t('hotkeys.loading') }}</span>
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'cycle_route' && currentRecording" class="hotkey-value recording">
@@ -1024,19 +1017,19 @@ onUnmounted(async () => {
             :disabled="recordingFor !== null || isLoading"
             class="record-btn"
             :class="{ recording: recordingFor === 'cycle_route' }"
-            title="Записать клавишу"
-            aria-label="Записать клавишу"
+            :title="t('hotkeys.action.record_aria')"
+            :aria-label="t('hotkeys.action.record_aria')"
           >
             <Keyboard :size="14" />
-            {{ recordingFor === 'cycle_route' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+            {{ recordingFor === 'cycle_route' ? (currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press')) : t('hotkeys.action.change') }}
           </button>
 
           <button
             v-if="recordingFor === 'cycle_route'"
             @click="cancelRecording"
             class="cancel-btn"
-            title="Отмена (Esc)"
-            aria-label="Отмена записи"
+            :title="t('hotkeys.action.cancel_esc')"
+            :aria-label="t('hotkeys.action.cancel_aria')"
           >
             ✕
           </button>
@@ -1044,8 +1037,8 @@ onUnmounted(async () => {
           <button
             @click="resetEditorToDefault('cycle_route')"
             class="reset-btn"
-            title="Сбросить к умолчанию"
-            aria-label="Сбросить к умолчанию"
+            :title="t('hotkeys.reset_title')"
+            :aria-label="t('hotkeys.reset_title')"
           >
             <RotateCcw :size="14" />
           </button>
@@ -1054,13 +1047,13 @@ onUnmounted(async () => {
 
       <div class="hotkey-row">
         <div class="hotkey-label">
-          <span>Передача набора текста</span>
+          <span>{{ t('hotkeys.name.toggle_typing') }}</span>
         </div>
         <div class="hotkey-actions">
           <span v-if="hotkeys && !recordingFor" class="hotkey-value">
             {{ formatHotkey(hotkeys.editor.toggle_typing) }}
           </span>
-          <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+          <span v-else-if="!hotkeys" class="hotkey-value placeholder">{{ t('hotkeys.loading') }}</span>
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'toggle_typing' && currentRecording" class="hotkey-value recording">
@@ -1072,19 +1065,19 @@ onUnmounted(async () => {
             :disabled="recordingFor !== null || isLoading"
             class="record-btn"
             :class="{ recording: recordingFor === 'toggle_typing' }"
-            title="Записать клавишу"
-            aria-label="Записать клавишу"
+            :title="t('hotkeys.action.record_aria')"
+            :aria-label="t('hotkeys.action.record_aria')"
           >
             <Keyboard :size="14" />
-            {{ recordingFor === 'toggle_typing' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+            {{ recordingFor === 'toggle_typing' ? (currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press')) : t('hotkeys.action.change') }}
           </button>
 
           <button
             v-if="recordingFor === 'toggle_typing'"
             @click="cancelRecording"
             class="cancel-btn"
-            title="Отмена (Esc)"
-            aria-label="Отмена записи"
+            :title="t('hotkeys.action.cancel_esc')"
+            :aria-label="t('hotkeys.action.cancel_aria')"
           >
             ✕
           </button>
@@ -1092,8 +1085,8 @@ onUnmounted(async () => {
           <button
             @click="resetEditorToDefault('toggle_typing')"
             class="reset-btn"
-            title="Сбросить к умолчанию"
-            aria-label="Сбросить к умолчанию"
+            :title="t('hotkeys.reset_title')"
+            :aria-label="t('hotkeys.reset_title')"
           >
             <RotateCcw :size="14" />
           </button>
@@ -1102,13 +1095,13 @@ onUnmounted(async () => {
 
       <div class="hotkey-row">
         <div class="hotkey-label">
-          <span>Режим быстрого редактора</span>
+          <span>{{ t('hotkeys.name.cycle_quick_mode') }}</span>
         </div>
         <div class="hotkey-actions">
           <span v-if="hotkeys && !recordingFor" class="hotkey-value">
             {{ formatHotkey(hotkeys.editor.cycle_quick_mode) }}
           </span>
-          <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+          <span v-else-if="!hotkeys" class="hotkey-value placeholder">{{ t('hotkeys.loading') }}</span>
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'cycle_quick_mode' && currentRecording" class="hotkey-value recording">
@@ -1120,19 +1113,19 @@ onUnmounted(async () => {
             :disabled="recordingFor !== null || isLoading"
             class="record-btn"
             :class="{ recording: recordingFor === 'cycle_quick_mode' }"
-            title="Записать клавишу"
-            aria-label="Записать клавишу"
+            :title="t('hotkeys.action.record_aria')"
+            :aria-label="t('hotkeys.action.record_aria')"
           >
             <Keyboard :size="14" />
-            {{ recordingFor === 'cycle_quick_mode' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+            {{ recordingFor === 'cycle_quick_mode' ? (currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press')) : t('hotkeys.action.change') }}
           </button>
 
           <button
             v-if="recordingFor === 'cycle_quick_mode'"
             @click="cancelRecording"
             class="cancel-btn"
-            title="Отмена (Esc)"
-            aria-label="Отмена записи"
+            :title="t('hotkeys.action.cancel_esc')"
+            :aria-label="t('hotkeys.action.cancel_aria')"
           >
             ✕
           </button>
@@ -1140,8 +1133,8 @@ onUnmounted(async () => {
           <button
             @click="resetEditorToDefault('cycle_quick_mode')"
             class="reset-btn"
-            title="Сбросить к умолчанию"
-            aria-label="Сбросить к умолчанию"
+            :title="t('hotkeys.reset_title')"
+            :aria-label="t('hotkeys.reset_title')"
           >
             <RotateCcw :size="14" />
           </button>
@@ -1150,13 +1143,13 @@ onUnmounted(async () => {
 
       <div class="hotkey-row">
         <div class="hotkey-label">
-          <span>История фраз</span>
+          <span>{{ t('hotkeys.name.toggle_history') }}</span>
         </div>
         <div class="hotkey-actions">
           <span v-if="hotkeys && !recordingFor" class="hotkey-value">
             {{ formatHotkey(hotkeys.editor.toggle_history) }}
           </span>
-          <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+          <span v-else-if="!hotkeys" class="hotkey-value placeholder">{{ t('hotkeys.loading') }}</span>
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'toggle_history' && currentRecording" class="hotkey-value recording">
@@ -1168,19 +1161,19 @@ onUnmounted(async () => {
             :disabled="recordingFor !== null || isLoading"
             class="record-btn"
             :class="{ recording: recordingFor === 'toggle_history' }"
-            title="Записать клавишу"
-            aria-label="Записать клавишу"
+            :title="t('hotkeys.action.record_aria')"
+            :aria-label="t('hotkeys.action.record_aria')"
           >
             <Keyboard :size="14" />
-            {{ recordingFor === 'toggle_history' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+            {{ recordingFor === 'toggle_history' ? (currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press')) : t('hotkeys.action.change') }}
           </button>
 
           <button
             v-if="recordingFor === 'toggle_history'"
             @click="cancelRecording"
             class="cancel-btn"
-            title="Отмена (Esc)"
-            aria-label="Отмена записи"
+            :title="t('hotkeys.action.cancel_esc')"
+            :aria-label="t('hotkeys.action.cancel_aria')"
           >
             ✕
           </button>
@@ -1188,8 +1181,8 @@ onUnmounted(async () => {
           <button
             @click="resetEditorToDefault('toggle_history')"
             class="reset-btn"
-            title="Сбросить к умолчанию"
-            aria-label="Сбросить к умолчанию"
+            :title="t('hotkeys.reset_title')"
+            :aria-label="t('hotkeys.reset_title')"
           >
             <RotateCcw :size="14" />
           </button>
@@ -1198,13 +1191,13 @@ onUnmounted(async () => {
 
       <div class="hotkey-row">
         <div class="hotkey-label">
-          <span>Расставить ударения</span>
+          <span>{{ t('hotkeys.name.accent_homographs') }}</span>
         </div>
         <div class="hotkey-actions">
           <span v-if="hotkeys && !recordingFor" class="hotkey-value">
             {{ formatHotkey(hotkeys.editor.accent_homographs) }}
           </span>
-          <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+          <span v-else-if="!hotkeys" class="hotkey-value placeholder">{{ t('hotkeys.loading') }}</span>
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'accent_homographs' && currentRecording" class="hotkey-value recording">
@@ -1216,19 +1209,19 @@ onUnmounted(async () => {
             :disabled="recordingFor !== null || isLoading"
             class="record-btn"
             :class="{ recording: recordingFor === 'accent_homographs' }"
-            title="Записать клавишу"
-            aria-label="Записать клавишу"
+            :title="t('hotkeys.action.record_aria')"
+            :aria-label="t('hotkeys.action.record_aria')"
           >
             <Keyboard :size="14" />
-            {{ recordingFor === 'accent_homographs' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+            {{ recordingFor === 'accent_homographs' ? (currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press')) : t('hotkeys.action.change') }}
           </button>
 
           <button
             v-if="recordingFor === 'accent_homographs'"
             @click="cancelRecording"
             class="cancel-btn"
-            title="Отмена (Esc)"
-            aria-label="Отмена записи"
+            :title="t('hotkeys.action.cancel_esc')"
+            :aria-label="t('hotkeys.action.cancel_aria')"
           >
             ✕
           </button>
@@ -1236,8 +1229,8 @@ onUnmounted(async () => {
           <button
             @click="resetEditorToDefault('accent_homographs')"
             class="reset-btn"
-            title="Сбросить к умолчанию"
-            aria-label="Сбросить к умолчанию"
+            :title="t('hotkeys.reset_title')"
+            :aria-label="t('hotkeys.reset_title')"
           >
             <RotateCcw :size="14" />
           </button>
@@ -1245,16 +1238,16 @@ onUnmounted(async () => {
       </div>
 
       <div class="hotkey-subgroup">
-        <div class="subgroup-title">Входящие</div>
+        <div class="subgroup-title">{{ t('hotkeys.subgroup.incoming') }}</div>
         <div class="hotkey-row">
           <div class="hotkey-label">
-            <span>Подтвердить отправку следующего входящего</span>
+            <span>{{ t('hotkeys.name.approve_next_incoming') }}</span>
           </div>
           <div class="hotkey-actions">
             <span v-if="hotkeys && !recordingFor" class="hotkey-value">
               {{ formatHotkey(hotkeys.editor.approve_next_incoming) }}
             </span>
-            <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+            <span v-else-if="!hotkeys" class="hotkey-value placeholder">{{ t('hotkeys.loading') }}</span>
 
             <!-- Recording state -->
             <div v-if="recordingFor === 'approve_next_incoming' && currentRecording" class="hotkey-value recording">
@@ -1266,19 +1259,19 @@ onUnmounted(async () => {
               :disabled="recordingFor !== null || isLoading"
               class="record-btn"
               :class="{ recording: recordingFor === 'approve_next_incoming' }"
-              title="Записать клавишу"
-              aria-label="Записать клавишу"
+              :title="t('hotkeys.action.record_aria')"
+              :aria-label="t('hotkeys.action.record_aria')"
             >
               <Keyboard :size="14" />
-              {{ recordingFor === 'approve_next_incoming' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+              {{ recordingFor === 'approve_next_incoming' ? (currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press')) : t('hotkeys.action.change') }}
             </button>
 
             <button
               v-if="recordingFor === 'approve_next_incoming'"
               @click="cancelRecording"
               class="cancel-btn"
-              title="Отмена (Esc)"
-              aria-label="Отмена записи"
+              :title="t('hotkeys.action.cancel_esc')"
+              :aria-label="t('hotkeys.action.cancel_aria')"
             >
               ✕
             </button>
@@ -1286,8 +1279,8 @@ onUnmounted(async () => {
             <button
               @click="resetEditorToDefault('approve_next_incoming')"
               class="reset-btn"
-              title="Сбросить к умолчанию"
-              aria-label="Сбросить к умолчанию"
+              :title="t('hotkeys.reset_title')"
+              :aria-label="t('hotkeys.reset_title')"
             >
               <RotateCcw :size="14" />
             </button>
@@ -1296,13 +1289,13 @@ onUnmounted(async () => {
 
         <div class="hotkey-row">
           <div class="hotkey-label">
-            <span>Редактировать следующий входящий</span>
+            <span>{{ t('hotkeys.name.edit_next_incoming') }}</span>
           </div>
           <div class="hotkey-actions">
             <span v-if="hotkeys && !recordingFor" class="hotkey-value">
               {{ formatHotkey(hotkeys.editor.edit_next_incoming) }}
             </span>
-            <span v-else-if="!hotkeys" class="hotkey-value placeholder">Загрузка...</span>
+            <span v-else-if="!hotkeys" class="hotkey-value placeholder">{{ t('hotkeys.loading') }}</span>
 
             <!-- Recording state -->
             <div v-if="recordingFor === 'edit_next_incoming' && currentRecording" class="hotkey-value recording">
@@ -1314,19 +1307,19 @@ onUnmounted(async () => {
               :disabled="recordingFor !== null || isLoading"
               class="record-btn"
               :class="{ recording: recordingFor === 'edit_next_incoming' }"
-              title="Записать клавишу"
-              aria-label="Записать клавишу"
+              :title="t('hotkeys.action.record_aria')"
+              :aria-label="t('hotkeys.action.record_aria')"
             >
               <Keyboard :size="14" />
-              {{ recordingFor === 'edit_next_incoming' ? (currentRecording?.key ? 'Отпустите' : 'Нажмите') : 'Изменить' }}
+              {{ recordingFor === 'edit_next_incoming' ? (currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press')) : t('hotkeys.action.change') }}
             </button>
 
             <button
               v-if="recordingFor === 'edit_next_incoming'"
               @click="cancelRecording"
               class="cancel-btn"
-              title="Отмена (Esc)"
-              aria-label="Отмена записи"
+              :title="t('hotkeys.action.cancel_esc')"
+              :aria-label="t('hotkeys.action.cancel_aria')"
             >
               ✕
             </button>
@@ -1334,8 +1327,8 @@ onUnmounted(async () => {
             <button
               @click="resetEditorToDefault('edit_next_incoming')"
               class="reset-btn"
-              title="Сбросить к умолчанию"
-              aria-label="Сбросить к умолчанию"
+              :title="t('hotkeys.reset_title')"
+              :aria-label="t('hotkeys.reset_title')"
             >
               <RotateCcw :size="14" />
             </button>

@@ -45,6 +45,24 @@ pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std:
     let telegram_state = app.state::<TelegramState>();
     let soundpanel_state = app.state::<SoundPanelState>();
 
+    // Initialize locale runtime: bundled resource locales first, config locales as fallback
+    let resource_path = match app.path().resource_dir() {
+        Ok(dir) => Some(dir.join("locales")),
+        Err(e) => {
+            warn!(error = %e, "resource_dir() failed, no resource locale directory");
+            None
+        }
+    };
+    let config_path = settings_manager.config_dir().join("locales");
+    let catalog = crate::localization::LocaleCatalog::load(
+        resource_path.as_deref(),
+        Some(config_path.as_path()),
+    );
+    app.manage(crate::commands::localization::LocalizationState::new(
+        catalog,
+        &settings_manager.get_ui_language(),
+    ));
+
     info!(tts_provider = ?settings.tts.provider, hotkey_enabled = settings.hotkey_enabled, "Settings loaded");
 
     let windows = windows_manager.load()?;
@@ -539,7 +557,43 @@ fn init_windows(
         let _ = pb_window.set_theme(Some(tauri_theme));
     }
 
+    // Set the application-controlled native window titles from the startup
+    // localization snapshot so every window matches the selected language.
+    apply_localized_window_titles(app);
+
     Ok(())
+}
+
+/// Set native titles for the app-controlled windows using the localization
+/// snapshot captured at startup. A key missing from the snapshot falls back
+/// to the static title declared for the window in `tauri.conf.json`.
+fn apply_localized_window_titles(app: &App) {
+    let snapshot = app
+        .state::<crate::commands::localization::LocalizationState>()
+        .snapshot();
+    let title_text = |key: &str, fallback: &str| {
+        snapshot
+            .messages
+            .get(key)
+            .cloned()
+            .unwrap_or_else(|| fallback.to_string())
+    };
+
+    let configured: [(&str, &str, &str); 4] = [
+        ("main", "window.main", "TTSBard"),
+        ("playback-control", "window.playback", "Управление"),
+        ("soundpanel", "window.soundpanel", ""),
+        ("ocr-selection", "window.ocr_selection", ""),
+    ];
+
+    for (label, key, fallback) in configured {
+        if let Some(window) = app.get_webview_window(label) {
+            let title = title_text(key, fallback);
+            if let Err(error) = window.set_title(&title) {
+                warn!(label, error = %error, "Failed to set localized window title");
+            }
+        }
+    }
 }
 
 const MIN_VISIBLE_WINDOW_WIDTH: i32 = 160;
@@ -732,6 +786,17 @@ pub(crate) fn show_main_window(app_handle: &AppHandle, action: &str) {
 fn init_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     let app_handle = app.handle().clone();
 
+    let localization_state =
+        app.state::<crate::commands::localization::LocalizationState>();
+    let snapshot = localization_state.snapshot();
+    let tray_text = |key: &str, fallback: &str| {
+        snapshot
+            .messages
+            .get(key)
+            .cloned()
+            .unwrap_or_else(|| fallback.to_string())
+    };
+
     // Load icon.png (512x512) for tray
     let png_bytes = include_bytes!("../icons/icon.png");
     let decoded_image = image::load_from_memory(png_bytes)
@@ -753,7 +818,7 @@ fn init_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     let show_main = MenuItem::with_id(
         &app_handle,
         "show_main",
-        "Показать главное окно",
+        tray_text("tray.show_main", "Show main window"),
         true,
         None as Option<&str>,
     )
@@ -761,7 +826,7 @@ fn init_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     let sp_toggle = MenuItem::with_id(
         &app_handle,
         "toggle_soundpanel",
-        "Саундпад",
+        tray_text("tray.soundpanel", "Sound panel"),
         true,
         None as Option<&str>,
     )
@@ -769,15 +834,21 @@ fn init_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     let pc_toggle = MenuItem::with_id(
         &app_handle,
         "toggle_playback",
-        "Управление воспроизведением",
+        tray_text("tray.playback", "Playback"),
         true,
         None as Option<&str>,
     )
     .map_err(|e| format!("Failed to create 'toggle_playback' menu item: {}", e))?;
     let separator = PredefinedMenuItem::separator(&app_handle)
         .map_err(|e| format!("Failed to create separator: {}", e))?;
-    let quit_item = MenuItem::with_id(&app_handle, "quit", "Выход", true, None as Option<&str>)
-        .map_err(|e| format!("Failed to create 'quit' menu item: {}", e))?;
+    let quit_item = MenuItem::with_id(
+        &app_handle,
+        "quit",
+        tray_text("tray.quit", "Quit"),
+        true,
+        None as Option<&str>,
+    )
+    .map_err(|e| format!("Failed to create 'quit' menu item: {}", e))?;
 
     let menu = Menu::with_items(
         &app_handle,

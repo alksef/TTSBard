@@ -326,6 +326,7 @@ export type Theme = 'dark' | 'light'
 export interface GeneralSettingsDto {
   hotkey_enabled: boolean
   theme?: Theme
+  ui_language: string
   show_playback_on_start: boolean
   start_compact: boolean
   hide_on_minimize: boolean

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest'
 import type { JobDto } from '../../src-playback/speechQueue'
 
 vi.stubGlobal('window', globalThis)
@@ -54,6 +54,13 @@ import {
   computeIncomingCount,
   ACTIVE_EXTERNAL_JOB_STATUSES,
 } from './useIncomingTexts'
+import { i18n } from '../i18n'
+import ruCatalog from '../../locales/ru.json'
+
+beforeAll(() => {
+  i18n.global.setLocaleMessage('ru', (ruCatalog as { messages: Record<string, string> }).messages)
+  ;(i18n.global.locale as unknown as { value: string }).value = 'ru'
+})
 
 function makeJob(overrides: Partial<JobDto> = {}): JobDto {
   return {

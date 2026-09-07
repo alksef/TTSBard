@@ -166,6 +166,7 @@
   "general": {
     "hotkey_enabled": true,
     "theme": "dark",
+    "ui_language": "ru",
     "show_playback_on_start": false,
     "start_compact": false,
     "hide_on_minimize": true

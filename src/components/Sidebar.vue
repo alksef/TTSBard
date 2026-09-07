@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onMounted, ref, watch, h } from 'vue'
+import { onMounted, ref, watch, h, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { APP_VERSION } from '../version'
 import { debugError } from '../utils/debug'
+import { t } from '../i18n'
 import {
   Volume2,
   Speech,
@@ -40,7 +41,6 @@ interface SidebarButton {
 }
 
 interface SidebarGroup {
-  title?: string
   buttons: SidebarButton[]
 }
 
@@ -79,39 +79,37 @@ watch(isCollapsed, (newValue) => {
   localStorage.setItem(STORAGE_KEY, String(newValue))
 })
 
-// Sidebar groups structure
-const sidebarGroups: SidebarGroup[] = [
+// Sidebar groups structure (labels react to the active locale)
+const sidebarGroups = computed<SidebarGroup[]>(() => [
   {
-    title: 'ГЛАВНОЕ',
     buttons: [
-      { id: 'input', label: 'Текст', icon: Pencil },
-      { id: 'tts', label: 'TTS', icon: Speech },
-      { id: 'audio', label: 'Аудио', icon: Volume2 }
+      { id: 'input', label: t('nav.input'), icon: Pencil },
+      { id: 'tts', label: t('nav.tts'), icon: Speech },
+      { id: 'audio', label: t('nav.audio'), icon: Volume2 }
     ]
   },
   {
     buttons: [
-      { id: 'preprocessor', label: 'Быстрая вставка', icon: ClipboardPenLine }
-    ]
-  },
-  {
-    title: 'ИНТЕГРАЦИЯ',
-    buttons: [
-      { id: 'webview', label: 'WebView', icon: Globe },
-      { id: 'twitch', label: 'Twitch Chat', icon: TwitchIcon },
-      { id: 'vtube-studio', label: 'VTube Studio', icon: Tv },
-      { id: 'ocr', label: 'OCR', icon: ScanText },
-      { id: 'input-server', label: 'Входящий сервер', icon: Inbox }
+      { id: 'preprocessor', label: t('nav.preprocessor'), icon: ClipboardPenLine }
     ]
   },
   {
     buttons: [
-      { id: 'hotkeys', label: 'Горячие клавиши', icon: Keyboard },
-      { id: 'intercept', label: 'Перехват клавиш', icon: Crosshair },
-      { id: 'settings', label: 'Настройки', icon: Settings }
+      { id: 'webview', label: t('nav.webview'), icon: Globe },
+      { id: 'twitch', label: t('nav.twitch'), icon: TwitchIcon },
+      { id: 'vtube-studio', label: t('nav.vtube-studio'), icon: Tv },
+      { id: 'ocr', label: t('nav.ocr'), icon: ScanText },
+      { id: 'input-server', label: t('nav.input-server'), icon: Inbox }
+    ]
+  },
+  {
+    buttons: [
+      { id: 'hotkeys', label: t('nav.hotkeys'), icon: Keyboard },
+      { id: 'intercept', label: t('nav.intercept'), icon: Crosshair },
+      { id: 'settings', label: t('nav.settings'), icon: Settings }
     ]
   }
-]
+])
 
 function toggleCollapse() {
   isCollapsed.value = !isCollapsed.value
@@ -127,7 +125,8 @@ function toggleCollapse() {
     <button
       class="collapse-toggle-floating"
       @click="toggleCollapse"
-      :title="isCollapsed ? 'Развернуть' : 'Свернуть'"
+      :title="isCollapsed ? t('shell.sidebar.expand') : t('shell.sidebar.collapse')"
+      :aria-label="isCollapsed ? t('shell.sidebar.expand') : t('shell.sidebar.collapse')"
     >
       <ChevronLeft v-if="!isCollapsed" :size="18" />
       <ChevronRight v-else :size="18" />
@@ -162,10 +161,11 @@ function toggleCollapse() {
       <button
         class="sidebar-button quit-button"
         @click="quitApp"
-        :title="isCollapsed ? 'Выход' : undefined"
+        :title="isCollapsed ? t('nav.quit') : undefined"
+        :aria-label="t('nav.quit')"
       >
         <LogOut :size="20" class="sidebar-icon" />
-        <span v-if="!isCollapsed" class="sidebar-button-label">Выход</span>
+        <span v-if="!isCollapsed" class="sidebar-button-label">{{ t('nav.quit') }}</span>
       </button>
     </div>
   </aside>

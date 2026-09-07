@@ -3,9 +3,11 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { open, confirm } from '@tauri-apps/plugin-dialog'
 import type { SoundBinding, SoundSets, SoundSet } from '../types'
+import { t } from '../i18n'
 import { debugLog, debugError } from '../utils/debug'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
 import { registerSoundPanelTabListeners } from '../playback/listeners'
+import { presentCommandError } from '../ipc/commandError'
 
 export function useSoundPanel() {
   const bindings = ref<SoundBinding[]>([])
@@ -57,7 +59,7 @@ export function useSoundPanel() {
       activeSetId.value = id
       await loadBindings()
     } catch (e) {
-      showError('Ошибка переключения набора: ' + (e as Error).message)
+      showError(presentCommandError(e, t('soundpanel.error.switch_set')))
     }
   }
 
@@ -79,7 +81,7 @@ export function useSoundPanel() {
       bindings.value = []
       showAddSetDialog.value = false
     } catch (e) {
-      showError('Ошибка создания набора: ' + (e as Error).message)
+      showError(presentCommandError(e, t('soundpanel.error.add_set')))
     }
   }
 
@@ -105,7 +107,7 @@ export function useSoundPanel() {
       await invoke('sp_rename_set', { id, name })
       await loadSets()
     } catch (e) {
-      showError('Ошибка переименования: ' + (e as Error).message)
+      showError(presentCommandError(e, t('soundpanel.error.rename_set')))
     }
   }
 
@@ -120,9 +122,9 @@ export function useSoundPanel() {
 
   async function removeSet(id: string) {
     const set = sets.value.find(s => s.id === id)
-    const name = set ? `"${set.name}"` : id
-    const confirmedResult = await confirm(`Удалить набор ${name}? Аудиофайлы останутся.`, {
-      title: 'Удалить набор',
+    const name = set ? set.name : id
+    const confirmedResult = await confirm(t('soundpanel.remove_set.message', { name }), {
+      title: t('soundpanel.remove_set.title'),
       kind: 'warning'
     })
     if (!confirmedResult) return
@@ -131,7 +133,7 @@ export function useSoundPanel() {
       await loadSets()
       await loadBindings()
     } catch (e) {
-      showError('Ошибка удаления набора: ' + (e as Error).message)
+      showError(presentCommandError(e, t('soundpanel.error.remove_set')))
     }
   }
 
@@ -141,7 +143,7 @@ export function useSoundPanel() {
       const loaded = await invoke<SoundBinding[]>('sp_get_bindings')
       bindings.value = loaded
     } catch (e) {
-      showError('Ошибка загрузки привязок: ' + (e as Error).message)
+      showError(presentCommandError(e, t('soundpanel.error.load_bindings')))
     } finally {
       isLoading.value = false
     }
@@ -149,7 +151,7 @@ export function useSoundPanel() {
 
   async function addBinding() {
     if (!newKey.value || !newDescription.value || !newFilePath.value) {
-      showError('Заполните все поля')
+      showError(t('soundpanel.error.fill_all_fields'))
       return
     }
 
@@ -164,15 +166,15 @@ export function useSoundPanel() {
       bindings.value.sort((a, b) => a.key.localeCompare(b.key))
       closeAddDialog()
     } catch (e) {
-      showError('Ошибка добавления: ' + (e as Error).message)
+      showError(presentCommandError(e, t('soundpanel.error.add_binding')))
     } finally {
       isSaving.value = false
     }
   }
 
   async function removeBinding(key: string) {
-    const confirmedResult = await confirm(`Удалить привязку для клавиши ${key}?`, {
-      title: 'Подтверждение удаления',
+    const confirmedResult = await confirm(t('soundpanel.remove_binding.message', { key }), {
+      title: t('soundpanel.remove_binding.title'),
       kind: 'warning'
     })
     if (!confirmedResult) return
@@ -180,20 +182,20 @@ export function useSoundPanel() {
       await invoke('sp_remove_binding', { key })
       bindings.value = bindings.value.filter(b => b.key !== key)
     } catch (e) {
-      showError('Ошибка удаления: ' + (e as Error).message)
+      showError(presentCommandError(e, t('soundpanel.error.remove_binding')))
     }
   }
 
   async function testSound() {
     if (!newFilePath.value) {
-      showError('Выберите файл')
+      showError(t('soundpanel.error.select_file'))
       return
     }
     try {
       isTesting.value = true
       await invoke('sp_test_sound', { filePath: newFilePath.value })
     } catch (e) {
-      showError('Ошибка воспроизведения: ' + (e as Error).message)
+      showError(presentCommandError(e, t('soundpanel.error.test_sound')))
     } finally {
       isTesting.value = false
     }
@@ -203,11 +205,11 @@ export function useSoundPanel() {
     try {
       debugLog('[browseFile] Opening file dialog...')
       const filePath = await open({
-        title: 'Выберите аудиофайл',
+        title: t('soundpanel.file_picker.title'),
         multiple: false,
         filters: [
           {
-            name: 'Аудиофайлы',
+            name: t('soundpanel.file_picker.filter'),
             extensions: ['mp3', 'wav', 'ogg', 'flac']
           }
         ]
@@ -218,7 +220,7 @@ export function useSoundPanel() {
       }
     } catch (e) {
       debugError('[browseFile] Error:', e)
-      showError('Ошибка выбора файла: ' + (e as Error).message)
+      showError(presentCommandError(e, t('soundpanel.error.browse_file')))
     }
   }
 
@@ -241,7 +243,7 @@ export function useSoundPanel() {
       await invoke('sp_set_stay_visible', { enabled: newValue })
     } catch (e) {
       stayVisible.value = !newValue
-      showError('Ошибка сохранения настройки: ' + (e as Error).message)
+      showError(presentCommandError(e, t('soundpanel.error.save_setting')))
     }
   }
 
@@ -258,7 +260,7 @@ export function useSoundPanel() {
       stayVisible.value = await invoke<boolean>('sp_get_stay_visible')
     } catch (e) {
       debugError('[SoundPanelTab] Failed to load stay_visible:', e)
-      showError('Не удалось загрузить настройку видимости панели')
+      showError(t('soundpanel.error.load_visibility'))
     }
 
     try {

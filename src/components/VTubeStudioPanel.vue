@@ -1,10 +1,12 @@
 ﻿<script setup lang="ts">
 import { Download, Play, RefreshCw, RotateCw, Square } from 'lucide-vue-next'
-import { useVTubeStudio } from '../composables/useVTubeStudio'
+import { useVTubeStudio, SAVED_HOTKEY_TYPE } from '../composables/useVTubeStudio'
+import { t } from '../i18n'
 
 const {
   settings,
   errorMessage,
+  errorMessageType,
   portError,
   currentStatus,
   busy,
@@ -48,41 +50,37 @@ const {
 
 <template>
   <div class="vtube-panel">
-    <div v-if="errorMessage" class="message-box" :class="{
-      error: errorMessage.includes('Failed') || errorMessage.includes('failed') || errorMessage.includes('Error') || errorMessage.includes('Ошибка'),
-      success: errorMessage.includes('saved') || errorMessage.includes('сохранен') || errorMessage.includes('Сохранено') || errorMessage.includes('Подключено к') || errorMessage.includes('Connected') || errorMessage.includes('Restarted') || errorMessage.includes('Disconnected'),
-      info: errorMessage.includes('Отключено') || errorMessage.includes('disconnect') || errorMessage.includes('Stopped') || errorMessage.includes('Disconnected') || errorMessage.includes('Тест действия выполнен')
-    }">
+    <div v-if="errorMessage" class="message-box" :class="errorMessageType">
       {{ errorMessage }}
     </div>
 
     <section class="settings-section">
       <div class="section-header server-header">
-        <h2>Подключение</h2>
+        <h2>{{ t('vtube.connection') }}</h2>
         <div class="server-status">
           <span class="status-indicator" :class="{
             running: currentStatus === 'Connected',
             connecting: currentStatus === 'Connecting',
             error: currentStatus === 'Error'
           }">
-            {{ currentStatus === 'Connected' ? 'Подключено' :
-               currentStatus === 'Connecting' ? 'Подключение...' :
-               currentStatus === 'Error' ? 'Ошибка' :
-               'Отключено' }}
+            {{ currentStatus === 'Connected' ? t('vtube.status.connected') :
+               currentStatus === 'Connecting' ? t('vtube.status.connecting') :
+               currentStatus === 'Error' ? t('vtube.status.error') :
+               t('vtube.status.disconnected') }}
           </span>
           <template v-if="currentStatus === 'Connected'">
-            <button @click="restartVTubeStudio" class="status-button refresh" title="Перезапустить" aria-label="Перезапустить">
+            <button @click="restartVTubeStudio" class="status-button refresh" :title="t('vtube.restart')" :aria-label="t('vtube.restart')">
               <RotateCw :size="14" />
             </button>
-            <button @click="stopVTubeStudio" class="status-button stop" title="Отключиться" aria-label="Отключиться">
+            <button @click="stopVTubeStudio" class="status-button stop" :title="t('vtube.disconnect')" :aria-label="t('vtube.disconnect')">
               <Square :size="14" />
             </button>
           </template>
           <template v-else>
-            <button @click="startVTubeStudio" class="status-button start" :disabled="currentStatus === 'Connecting'" :class="{ disabled: currentStatus === 'Connecting' }" title="Подключиться" aria-label="Подключиться">
+            <button @click="startVTubeStudio" class="status-button start" :disabled="currentStatus === 'Connecting'" :class="{ disabled: currentStatus === 'Connecting' }" :title="t('vtube.connect')" :aria-label="t('vtube.connect')">
               <Play :size="14" />
             </button>
-            <button class="status-button stop disabled" title="Отключиться" aria-label="Отключиться" disabled>
+            <button class="status-button stop disabled" :title="t('vtube.disconnect')" :aria-label="t('vtube.disconnect')" disabled>
               <Square :size="14" />
             </button>
           </template>
@@ -92,12 +90,12 @@ const {
       <div class="setting-row">
         <label class="checkbox-label">
           <input type="checkbox" v-model="settings.start_on_boot" @change="saveStartOnBoot" />
-          <span>Запускать при старте приложения</span>
+          <span>{{ t('vtube.start_on_boot') }}</span>
         </label>
       </div>
 
       <div class="setting-row port-setting-row">
-        <label>Порт:</label>
+        <label>{{ t('vtube.port') }}</label>
         <div class="address-inputs">
           <input
             type="number"
@@ -109,7 +107,7 @@ const {
             placeholder="8001"
           />
           <button @click="save" class="save-button-inline" :disabled="busy" :class="{ disabled: busy }">
-            Сохранить
+            {{ t('common.save') }}
           </button>
         </div>
       </div>
@@ -117,20 +115,20 @@ const {
     </section>
 
     <section class="settings-section">
-      <h2>Действие при наборе</h2>
+      <h2>{{ t('vtube.action.title') }}</h2>
 
       <div class="setting-row typing-action-row">
-        <label>Способ:</label>
+        <label>{{ t('vtube.action.mode_label') }}</label>
         <select v-model="typingMode" class="text-input typing-mode-select" :disabled="busy || !canEditTypingAction">
-          <option value="Event">Параметр VTS</option>
-          <option value="Hotkeys">Горячие клавиши</option>
-          <option value="Item">Предмет сцены</option>
+          <option value="Event">{{ t('vtube.action.mode.event') }}</option>
+          <option value="Hotkeys">{{ t('vtube.action.mode.hotkeys') }}</option>
+          <option value="Item">{{ t('vtube.action.mode.item') }}</option>
         </select>
       </div>
 
       <template v-if="typingMode === 'Event'">
         <div class="setting-row typing-action-row">
-          <label>Имя входного параметра VTS:</label>
+          <label>{{ t('vtube.action.param_label') }}</label>
           <input
             type="text"
             v-model="eventName"
@@ -140,9 +138,7 @@ const {
           />
         </div>
         <p class="info-hint">
-          Входной параметр <code>INPUT {{ eventName.trim() || 'TTSBardTyping' }}</code> сопоставьте с <code>OUTPUT</code>
-          модели (напр. <code>ParamTyping</code>) в VTS Parameter Setup.
-          Диапазон <code>0..1</code>, smoothing <code>0</code> для дискретного индикатора.
+          {{ t('vtube.action.event_hint_1') }} <code>INPUT {{ eventName.trim() || 'TTSBardTyping' }}</code> {{ t('vtube.action.event_hint_2') }} <code>OUTPUT</code> {{ t('vtube.action.event_hint_3') }} <code>ParamTyping</code> {{ t('vtube.action.event_hint_4') }} <code>0..1</code>{{ t('vtube.action.event_hint_5') }} <code>0</code> {{ t('vtube.action.event_hint_6') }}
         </p>
       </template>
 
@@ -153,33 +149,33 @@ const {
             class="save-button-inline secondary"
             :disabled="!canLoadHotkeys"
             :class="{ disabled: !canLoadHotkeys }"
-            :title="!canLoadHotkeys && currentStatus !== 'Connected' ? 'Подключитесь к VTube Studio для загрузки hotkeys' : 'Загрузить список горячих клавиш текущей модели'"
-            aria-label="Загрузить Hotkey"
+            :title="!canLoadHotkeys && currentStatus !== 'Connected' ? t('vtube.action.hotkeys_title_connect') : t('vtube.action.hotkeys_title')"
+            :aria-label="t('vtube.action.load_hotkeys')"
           >
             <Download :size="14" class="icon-left" />
-            Загрузить Hotkey
+            {{ t('vtube.action.load_hotkeys') }}
           </button>
         </div>
 
-        <div v-if="hotkeysLoading" class="hotkey-status loading">Загрузка списка горячих клавиш...</div>
+        <div v-if="hotkeysLoading" class="hotkey-status loading">{{ t('vtube.action.hotkeys_loading') }}</div>
         <div v-if="hotkeysError" class="hotkey-status error">{{ hotkeysError }}</div>
 
         <div class="setting-row typing-action-row">
-          <label>Начало набора:</label>
+          <label>{{ t('vtube.action.start_label') }}</label>
           <select v-model="startHotkeyId" class="text-input" :disabled="busy || !canEditTypingAction">
-            <option value="" disabled>— выберите —</option>
+            <option value="" disabled>{{ t('vtube.select_placeholder') }}</option>
             <option v-for="h in hotkeys" :key="h.hotkeyID" :value="h.hotkeyID">
-              {{ h.name }}<template v-if="h.type !== 'Сохранённая'"> ({{ h.type }})</template>
+              {{ h.name }}<template v-if="h.type !== SAVED_HOTKEY_TYPE"> ({{ h.type }})</template>
             </option>
           </select>
         </div>
 
         <div class="setting-row typing-action-row">
-          <label>Окончание набора:</label>
+          <label>{{ t('vtube.action.stop_label') }}</label>
           <select v-model="stopHotkeyId" class="text-input" :disabled="busy || !canEditTypingAction">
-            <option value="" disabled>— выберите —</option>
+            <option value="" disabled>{{ t('vtube.select_placeholder') }}</option>
             <option v-for="h in hotkeys" :key="h.hotkeyID" :value="h.hotkeyID">
-              {{ h.name }}<template v-if="h.type !== 'Сохранённая'"> ({{ h.type }})</template>
+              {{ h.name }}<template v-if="h.type !== SAVED_HOTKEY_TYPE"> ({{ h.type }})</template>
             </option>
           </select>
         </div>
@@ -192,34 +188,34 @@ const {
             class="save-button-inline secondary"
             :disabled="!canLoadSceneItems"
             :class="{ disabled: !canLoadSceneItems }"
-            :title="currentStatus !== 'Connected' ? 'Подключитесь к VTube Studio для загрузки предметов сцены' : 'Обновить предметы текущей сцены и проверить сохранённый предмет'"
-            aria-label="Обновить предметы сцены"
+            :title="currentStatus !== 'Connected' ? t('vtube.action.items_title_connect') : t('vtube.action.items_title')"
+            :aria-label="t('vtube.action.refresh_items')"
           >
             <RefreshCw :size="14" class="icon-left" />
-            Обновить предметы
+            {{ t('vtube.action.refresh_items') }}
           </button>
         </div>
 
-        <div v-if="sceneItemsLoading" class="hotkey-status loading">Загрузка предметов текущей сцены...</div>
+        <div v-if="sceneItemsLoading" class="hotkey-status loading">{{ t('vtube.action.items_loading') }}</div>
         <div v-if="sceneItemsError" class="hotkey-status error">{{ sceneItemsError }}</div>
 
         <div class="setting-row typing-action-row item-selection-row">
-          <label>Предмет:</label>
+          <label>{{ t('vtube.action.item_label') }}</label>
           <select v-model="itemFileName" class="text-input item-select" :disabled="busy || !canEditTypingAction">
-            <option value="" disabled>— выберите —</option>
+            <option value="" disabled>{{ t('vtube.select_placeholder') }}</option>
             <option v-if="itemFileName && !selectedSceneItem" :value="itemFileName">
-              {{ itemFileName }} — нет в текущей сцене
+              {{ t('vtube.action.item_missing', { name: itemFileName }) }}
             </option>
             <option v-for="item in sceneItems" :key="`${item.fileName}:${item.itemType}`" :value="item.fileName">
-              {{ item.fileName }} · {{ item.itemType }}<template v-if="item.duplicateCount > 1"> · {{ item.duplicateCount }} экз.</template>
+              {{ item.fileName }} · {{ item.itemType }}<template v-if="item.duplicateCount > 1"> · {{ t('vtube.action.item_copies', { count: item.duplicateCount }) }}</template>
             </option>
           </select>
         </div>
         <div v-if="itemFileName" class="item-metadata">
-          <span>Файл: <code>{{ itemFileName }}</code></span>
-          <span>Тип: <code>{{ itemType || 'неизвестен' }}</code></span>
+          <span>{{ t('vtube.action.file') }} <code>{{ itemFileName }}</code></span>
+          <span>{{ t('vtube.action.type') }} <code>{{ itemType || t('vtube.unknown_type') }}</code></span>
           <span v-if="selectedSceneItem && selectedSceneItem.duplicateCount > 1" class="duplicate-warning">
-            Оставьте в сцене один экземпляр.
+            {{ t('vtube.action.duplicate_warning') }}
           </span>
         </div>
       </template>
@@ -229,7 +225,7 @@ const {
       </div>
 
       <p v-if="currentStatus !== 'Connected'" class="info-hint" role="status">
-        Подключитесь к VTube Studio, чтобы настроить действие.
+        {{ t('vtube.action.connect_hint') }}
       </p>
 
       <div class="setting-row button-row">
@@ -238,18 +234,18 @@ const {
           class="save-button-inline"
           :disabled="!canSubmitTypingAction"
           :class="{ disabled: !canSubmitTypingAction }"
-          title="Сохранить выбранное действие набора"
-          aria-label="Сохранить действие"
+          :title="t('vtube.action.save_title')"
+          :aria-label="t('vtube.action.save')"
         >
-          Сохранить действие
+          {{ t('vtube.action.save') }}
         </button>
       </div>
     </section>
 
     <section class="settings-section">
-      <h2>Тест действия</h2>
+      <h2>{{ t('vtube.test.title') }}</h2>
       <div class="setting-row test-parameters-row">
-        <label>Таймаут, мс:</label>
+        <label>{{ t('vtube.test.timeout_label') }}</label>
         <input
           type="number"
           v-model.number="typingTimeout"
@@ -258,7 +254,7 @@ const {
           :min="100"
           :max="5000"
         />
-        <label>Повторы:</label>
+        <label>{{ t('vtube.test.repeats_label') }}</label>
         <input
           type="number"
           v-model.number="typingRepeats"
@@ -276,86 +272,74 @@ const {
           class="save-button-inline"
           :disabled="!canTestAction"
           :class="{ disabled: !canTestAction }"
-          title="Запустить сохранённое действие набора: старт → пауза → стоп"
-          aria-label="Проверить"
+          :title="t('vtube.test.run_title')"
+          :aria-label="t('vtube.test.run')"
         >
-          Проверить
+          {{ t('vtube.test.run') }}
         </button>
       </div>
       <p class="info-hint">
-        <strong>Запускает сохранённое действие.</strong>
+        <strong>{{ t('vtube.test.hint_title') }}</strong>
       </p>
       <p class="info-hint">
-        Каждый повтор отправляет старт, ждёт таймаут, затем отправляет стоп.
-        Между повторами — пауза той же длительности.
+        {{ t('vtube.test.hint_repeats') }}
       </p>
     </section>
 
     <section class="settings-section info-section">
-      <h2>Статус набора</h2>
+      <h2>{{ t('vtube.status.title') }}</h2>
       <div class="info-card">
         <div class="info-row">
-          <span class="info-label">Способ</span>
-          <code class="info-code">{{ savedTypingAction.outputMode === 'Event' ? 'Параметр VTS' : savedTypingAction.outputMode === 'Hotkeys' ? 'Горячие клавиши' : 'Предмет сцены' }}</code>
+          <span class="info-label">{{ t('vtube.info.mode') }}</span>
+          <code class="info-code">{{ savedTypingAction.outputMode === 'Event' ? t('vtube.action.mode.event') : savedTypingAction.outputMode === 'Hotkeys' ? t('vtube.action.mode.hotkeys') : t('vtube.action.mode.item') }}</code>
         </div>
         <div v-if="savedTypingAction.outputMode === 'Event'" class="info-row">
-          <span class="info-label">Входной параметр</span>
-          <code class="info-code">{{ savedTypingAction.parameterName || '(не задано)' }}</code>
+          <span class="info-label">{{ t('vtube.info.param') }}</span>
+          <code class="info-code">{{ savedTypingAction.parameterName || t('vtube.not_set_parameter') }}</code>
         </div>
         <template v-else-if="savedTypingAction.outputMode === 'Hotkeys'">
           <div class="info-row">
-            <span class="info-label">Начало набора</span>
-            <code class="info-code">{{ savedTypingAction.startHotkeyName || savedTypingAction.startHotkeyId || '(не задан)' }}</code>
+            <span class="info-label">{{ t('vtube.info.start') }}</span>
+            <code class="info-code">{{ savedTypingAction.startHotkeyName || savedTypingAction.startHotkeyId || t('vtube.not_set') }}</code>
           </div>
           <div class="info-row">
-            <span class="info-label">Окончание набора</span>
-            <code class="info-code">{{ savedTypingAction.stopHotkeyName || savedTypingAction.stopHotkeyId || '(не задан)' }}</code>
+            <span class="info-label">{{ t('vtube.info.stop') }}</span>
+            <code class="info-code">{{ savedTypingAction.stopHotkeyName || savedTypingAction.stopHotkeyId || t('vtube.not_set') }}</code>
           </div>
         </template>
         <template v-else>
           <div class="info-row">
-            <span class="info-label">Предмет</span>
-            <code class="info-code">{{ savedTypingAction.itemFileName || '(не задан)' }}</code>
+            <span class="info-label">{{ t('vtube.info.item') }}</span>
+            <code class="info-code">{{ savedTypingAction.itemFileName || t('vtube.not_set') }}</code>
           </div>
           <div class="info-row">
-            <span class="info-label">Тип</span>
-            <code class="info-code">{{ savedTypingAction.itemType || '(неизвестен)' }}</code>
+            <span class="info-label">{{ t('vtube.info.type') }}</span>
+            <code class="info-code">{{ savedTypingAction.itemType || t('vtube.unknown_type') }}</code>
           </div>
           <div class="info-row">
-            <span class="info-label">Состояние</span>
+            <span class="info-label">{{ t('vtube.info.state') }}</span>
             <code class="info-code">{{ itemStatus.status }}</code>
           </div>
         </template>
         <template v-if="savedTypingAction.outputMode === 'Event'">
           <div class="info-row">
             <span class="info-label">1</span>
-            <span class="info-desc">начало набора</span>
+            <span class="info-desc">{{ t('vtube.info.start') }}</span>
           </div>
           <div class="info-row">
             <span class="info-label">0</span>
-            <span class="info-desc">окончание набора</span>
+            <span class="info-desc">{{ t('vtube.info.stop') }}</span>
           </div>
         </template>
       </div>
-      <p class="info-hint">
-        Интервал бездействия настраивается в <em>Настройки → Редактор</em>.
-        Начало набора передаётся сразу; задержка отсчитывается после последней правки.
-      </p>
+      <p class="info-hint">{{ t('vtube.status.hint_prefix') }}<em>{{ t('vtube.status.hint_em') }}</em>{{ t('vtube.status.hint_suffix') }}</p>
     </section>
 
     <section class="settings-section help-section">
-      <h2>Помощь</h2>
-      <p class="help-text">
-        Включите <strong>Plugin API</strong> в VTube Studio. При первом подключении откроется окно подтверждения разрешений.
-      </p>
-      <p class="help-text">
-        Для режима <strong>Параметр VTS</strong> привяжите указанное имя входного параметра к нужному выражению модели. После сохранения настройте <code>INPUT → OUTPUT</code> mapping в VTS Parameter Setup.
-        Для режима <strong>Горячие клавиши</strong> выберите стартовый и стоповый Hotkey текущей модели после подключения.
-        Для режима <strong>Предмет сцены</strong> заранее загрузите один PNG, JPG, GIF или animation-folder и выберите его после обновления списка.
-      </p>
-      <p class="help-text">
-        <strong>Тест действия</strong> запускает сохранённое действие в активной сессии для проверки.
-      </p>
+      <h2>{{ t('vtube.help.title') }}</h2>
+      <p class="help-text">{{ t('vtube.help.plugin_api') }}</p>
+      <p class="help-text">{{ t('vtube.help.mode_param_prefix') }}<strong>{{ t('vtube.action.mode.event') }}</strong>{{ t('vtube.help.mode_param_mid') }}<code>INPUT → OUTPUT</code>{{ t('vtube.help.mode_param_suffix') }}<strong>{{ t('vtube.action.mode.hotkeys') }}</strong>{{ t('vtube.help.mode_hotkeys_suffix') }}<strong>{{ t('vtube.action.mode.item') }}</strong>{{ t('vtube.help.mode_item_suffix') }}</p>
+      <p class="help-text"><strong>{{ t('vtube.test.title') }}</strong>{{ t('vtube.help.test_suffix') }}</p>
     </section>
   </div>
 </template>

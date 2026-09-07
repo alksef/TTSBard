@@ -3,6 +3,8 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useErrorHandler } from './useErrorHandler'
 import { debugError, debugWarn } from '../utils/debug'
+import { presentCommandError } from '../ipc/commandError'
+import { t } from '../i18n'
 import type { HomographAccentorPackDto, HomographAccentorPackStatus } from '../types/settings'
 
 export type RuAccentRuntimeStatus = HomographAccentorPackStatus
@@ -40,7 +42,10 @@ function packLabelFor(modelId: string): string {
 
 const READY_POLL_INTERVAL_MS = 100
 const READY_TIMEOUT_MS = 30_000
-const BACKEND_NOT_READY_MESSAGE = 'Бэкенд ещё не готов — повторите попытку позже'
+
+function backendNotReadyMessage(): string {
+  return t('settings.editor.error.accentor_backend_not_ready')
+}
 
 let initPromise: Promise<void> | null = null
 let unlisteners: (() => void)[] = []
@@ -98,7 +103,8 @@ function applyStatus(modelId: string, status: RuAccentRuntimeStatus): void {
 function applyError(modelId: string, message: string): void {
   applyStatus(modelId, 'failed')
   reportedErrors.add(modelId)
-  showError(message)
+  debugWarn('[useRuAccentRuntime] Runtime error for model:', modelId, message)
+  showError(presentCommandError(message, t('settings.editor.error.accentor_load')))
 }
 
 async function refreshPacks(): Promise<HomographAccentorPackDto[]> {
@@ -107,7 +113,7 @@ async function refreshPacks(): Promise<HomographAccentorPackDto[]> {
   if (token !== initToken) return []
   if (!ready) {
     debugError('[useRuAccentRuntime] Backend readiness timeout; skipping pack list refresh')
-    throw new Error(BACKEND_NOT_READY_MESSAGE)
+    throw new Error(backendNotReadyMessage())
   }
   const refreshGeneration = ++refreshToken
   const startVersions = { ...versionByModel }
@@ -129,7 +135,7 @@ async function rescanPacks(): Promise<HomographAccentorPackDto[]> {
   if (initGeneration !== initToken) return []
   if (!ready) {
     debugError('[useRuAccentRuntime] Backend readiness timeout; skipping pack rescan')
-    throw new Error(BACKEND_NOT_READY_MESSAGE)
+    throw new Error(backendNotReadyMessage())
   }
   const refreshGeneration = ++refreshToken
   const startVersions = { ...versionByModel }
@@ -162,7 +168,7 @@ async function load(modelId: string): Promise<void> {
   if (initGeneration !== initToken) return
   if (!ready) {
     debugError('[useRuAccentRuntime] Backend readiness timeout; skipping model load:', modelId)
-    showError(BACKEND_NOT_READY_MESSAGE)
+    showError(backendNotReadyMessage())
     return
   }
   reportedErrors.delete(modelId)
@@ -172,7 +178,7 @@ async function load(modelId: string): Promise<void> {
     if (!reportedErrors.has(modelId)) {
       reportedErrors.add(modelId)
       applyStatus(modelId, 'failed')
-      showError(e instanceof Error ? e.message : String(e))
+      showError(presentCommandError(e, t('settings.editor.error.accentor_load')))
     }
     debugError('[useRuAccentRuntime] Failed to load model:', e)
   }

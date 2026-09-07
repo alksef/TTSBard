@@ -1,3 +1,5 @@
+import { t } from '../../i18n'
+
 export type EditorRoute = 'everywhere' | 'no_twitch' | 'voice_only' | 'twitch_only'
 
 export interface DecodedRoute {
@@ -30,13 +32,13 @@ function isTwitchOnlyBoundary(text: string): boolean {
 export interface RouteMeta {
   id: EditorRoute
   /** Короткое имя для selector-кнопки: «Везде», «Без Twitch», «Только голос», «Только Twitch». */
-  label: string
+  readonly label: string
   /** Полная расшифровка для tooltip/aria: «Голос + WebView + Twitch» и т.д. */
-  description: string
+  readonly description: string
   /** Обучающий shortcut: 'без префикса' | '!' | '!!' | '!t'. */
-  shortcut: string
+  readonly shortcut: string
   /** Иконки destinations в порядке [голос, webview, twitch] для compact mode. */
-  destinations: ReadonlyArray<'voice' | 'webview' | 'twitch'>
+  readonly destinations: ReadonlyArray<'voice' | 'webview' | 'twitch'>
 }
 
 export const ROUTE_ORDER: readonly EditorRoute[] = [
@@ -46,33 +48,28 @@ export const ROUTE_ORDER: readonly EditorRoute[] = [
   'twitch_only',
 ]
 
+function defineRouteMeta(
+  id: EditorRoute,
+  destinations: ReadonlyArray<'voice' | 'webview' | 'twitch'>,
+): RouteMeta {
+  return {
+    id,
+    get label() {
+      return t(`editor.route.${id}.label`)
+    },
+    get description() {
+      return t(`editor.route.${id}.description`)
+    },
+    get shortcut() {
+      return t(`editor.route.${id}.shortcut`)
+    },
+    destinations,
+  }
+}
+
 export const ROUTE_META: Record<EditorRoute, RouteMeta> = {
-  everywhere: {
-    id: 'everywhere',
-    label: 'Везде',
-    description: 'Голос + WebView + Twitch',
-    shortcut: 'без префикса',
-    destinations: ['voice', 'webview', 'twitch'],
-  },
-  no_twitch: {
-    id: 'no_twitch',
-    label: 'Без Twitch',
-    description: 'Голос + WebView',
-    shortcut: '!',
-    destinations: ['voice', 'webview'],
-  },
-  voice_only: {
-    id: 'voice_only',
-    label: 'Только голос',
-    description: 'Только голос',
-    shortcut: '!!',
-    destinations: ['voice'],
-  },
-  twitch_only: {
-    id: 'twitch_only',
-    label: 'Только Twitch',
-    description: 'Только Twitch',
-    shortcut: '!t',
-    destinations: ['twitch'],
-  },
+  everywhere: defineRouteMeta('everywhere', ['voice', 'webview', 'twitch']),
+  no_twitch: defineRouteMeta('no_twitch', ['voice', 'webview']),
+  voice_only: defineRouteMeta('voice_only', ['voice']),
+  twitch_only: defineRouteMeta('twitch_only', ['twitch']),
 }

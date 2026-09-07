@@ -801,6 +801,39 @@ fn default_theme() -> Theme {
     Theme::Dark
 }
 
+// ==================== UI Language ====================
+
+/// Legacy default for a persisted settings file that predates `ui_language`.
+/// Distinct from `AppSettings::default()` ("en"): an old file without the field
+/// keeps the previous behavior (Russian UI), while a fresh install starts in
+/// English.
+fn default_ui_language() -> String {
+    "ru".to_string()
+}
+
+/// True if `tag` is a locale tag the catalog can load: the exact rule shared
+/// with `crate::localization` so a persisted tag always names a catalog file.
+/// Rejects empty segments (`en--BR`, `-en`), single-letter or numeric primaries
+/// that cannot name a catalog file, and any path/separator or non-ASCII input.
+fn is_valid_ui_language(tag: &str) -> bool {
+    crate::localization::is_valid_locale_code(tag)
+}
+
+/// Forgiving deserializer for `ui_language`: a present-but-invalid value (non-
+/// string, empty, path characters, non-ASCII) normalizes to `"en"` so a bad
+/// value never discards the rest of the settings. A missing field is handled by
+/// `#[serde(default = "default_ui_language")]` and yields `"ru"`.
+fn deserialize_ui_language<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(match value {
+        serde_json::Value::String(value) if is_valid_ui_language(&value) => value,
+        _ => "en".to_string(),
+    })
+}
+
 // ==================== Editor Settings ====================
 
 /// Spell check source
@@ -1250,6 +1283,14 @@ pub struct AppSettings {
     pub editor: EditorSettings,
     #[serde(default = "default_theme")]
     pub theme: Theme,
+    /// Язык интерфейса: простой ASCII-тег (`en`, `ru`, `pt-BR`, `zh-Hant`).
+    /// Отсутствующее в старом файле поле даёт `ru`; некорректное значение
+    /// нормализуется к `en`.
+    #[serde(
+        default = "default_ui_language",
+        deserialize_with = "deserialize_ui_language"
+    )]
+    pub ui_language: String,
     pub twitch: TwitchSettings,
     #[serde(default)]
     pub webview: WebViewSettings,
@@ -1289,6 +1330,7 @@ impl Default for AppSettings {
             hotkey_enabled: true,
             editor: EditorSettings::default(),
             theme: Theme::Dark,
+            ui_language: "en".to_string(),
             twitch: TwitchSettings::default(),
             webview: WebViewSettings::default(),
             input_server: InputServerSettings::default(),
@@ -1406,6 +1448,12 @@ impl SettingsManager {
         self.config_dir.join("settings.json")
     }
 
+    /// Read-only access to the config directory (for locale catalog integration).
+    #[allow(dead_code)] // Ready for integration when the locale catalog lands
+    pub fn config_dir(&self) -> &Path {
+        &self.config_dir
+    }
+
     /// Load settings from disk (internal method)
     fn load_from_disk(config_dir: &Path) -> Result<AppSettings> {
         let path = config_dir.join("settings.json");
@@ -1466,9 +1514,18 @@ impl SettingsManager {
                 );
             }
 
+            // Migrate old settings missing the `ui_language` field: an absent
+            // field deserializes to the legacy default "ru" via
+            // #[serde(default)], but the canonical field must be written back
+            // so the file stays consistent. All other settings are preserved.
+            let needs_ui_language_migration = json_value.get("ui_language").is_none();
+            if needs_ui_language_migration {
+                info!("Migrating ui_language from legacy default");
+            }
+
             // Persist the migrated canonical file at most once: a single atomic
-            // write covers both the hotkey and the incoming migrations.
-            if needs_hotkey_migration || needs_incoming_migration {
+            // write covers the hotkey, incoming and ui_language migrations.
+            if needs_hotkey_migration || needs_incoming_migration || needs_ui_language_migration {
                 // Save migrated settings
                 let content = serde_json::to_string_pretty(&settings)?;
                 let _guard = persistence::config_write_lock().lock();
@@ -2024,6 +2081,24 @@ impl SettingsManager {
     /// Set theme
     pub fn set_theme(&self, theme: Theme) -> Result<()> {
         self.update_field("/theme", &theme)
+    }
+
+    // ========== UI Language Settings ==========
+
+    /// Get the persisted UI language tag.
+    pub fn get_ui_language(&self) -> String {
+        self.cache.read().ui_language.clone()
+    }
+
+    /// Set the UI language tag.
+    ///
+    /// Rejects invalid input (empty, non-ASCII, or containing path/separator
+    /// characters) without touching cache or disk.
+    pub fn set_ui_language(&self, language: String) -> Result<()> {
+        if !is_valid_ui_language(&language) {
+            return Err(anyhow::anyhow!("Invalid UI language tag: {:?}", language));
+        }
+        self.update_field("/ui_language", &language)
     }
 
     // ========== Editor Settings ==========
@@ -3085,6 +3160,218 @@ mod tests {
                 .expect("round-trip deserialize");
         assert!(round.hide_on_minimize);
         assert!(round.show_playback_on_start);
+    }
+
+    // ==================== UI Language tests ====================
+
+    /// Fresh default must be English ("en").
+    #[test]
+    fn ui_language_default_is_en() {
+        assert_eq!(AppSettings::default().ui_language, "en");
+    }
+
+    /// An old settings.json missing `ui_language` deserializes to "ru".
+    #[test]
+    fn ui_language_deserializes_missing_field_to_ru() {
+        let mut value = serde_json::to_value(AppSettings::default()).unwrap();
+        value
+            .as_object_mut()
+            .expect("default settings must be an object")
+            .remove("ui_language");
+        let settings: AppSettings =
+            serde_json::from_value(value).expect("missing ui_language must deserialize");
+        assert_eq!(settings.ui_language, "ru");
+    }
+
+    /// Explicit valid tags survive a serde round-trip.
+    #[test]
+    fn ui_language_round_trips_explicit_tags() {
+        for tag in ["en", "ru", "de", "pt-BR", "zh-Hant"] {
+            let settings = AppSettings {
+                ui_language: tag.to_string(),
+                ..AppSettings::default()
+            };
+            let json = serde_json::to_string(&settings).unwrap();
+            let back: AppSettings = serde_json::from_str(&json).unwrap();
+            assert_eq!(back.ui_language, tag, "round-trip failed for {}", tag);
+        }
+    }
+
+    /// A present-but-invalid value normalizes to "en" without discarding
+    /// unrelated settings.
+    #[test]
+    fn ui_language_invalid_normalizes_to_en_without_resetting_other_settings() {
+        let mut value = serde_json::to_value(AppSettings::default()).unwrap();
+        let obj = value.as_object_mut().unwrap();
+        obj.insert("ui_language".into(), serde_json::json!("bad/../tag\\"));
+        obj.insert("hide_on_minimize".into(), serde_json::json!(true));
+        obj.insert("show_playback_on_start".into(), serde_json::json!(true));
+
+        let settings: AppSettings = serde_json::from_value(value).unwrap();
+        assert_eq!(settings.ui_language, "en");
+        assert!(settings.hide_on_minimize, "unrelated setting must survive");
+        assert!(settings.show_playback_on_start, "unrelated setting must survive");
+    }
+
+    /// Old file missing `ui_language` gets the canonical field written back to
+    /// disk while preserving other settings.
+    #[test]
+    fn ui_language_migration_writes_canonical_field_to_disk() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-ui-lang-migration-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mut value = serde_json::to_value(AppSettings::default()).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("ui_language");
+        std::fs::write(
+            dir.join("settings.json"),
+            serde_json::to_string_pretty(&value).unwrap(),
+        )
+        .unwrap();
+
+        let manager = SettingsManager::with_config_dir(dir.clone()).unwrap();
+        assert_eq!(manager.get_ui_language(), "ru");
+
+        let raw = std::fs::read_to_string(dir.join("settings.json")).unwrap();
+        let disk: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(
+            disk.get("ui_language"),
+            Some(&serde_json::json!("ru")),
+            "canonical ui_language must be written back"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// set_ui_language persists a valid tag and rejects invalid input without
+    /// mutating the cache.
+    #[test]
+    fn set_ui_language_persists_and_rejects_invalid() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-ui-lang-set-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let manager = SettingsManager::with_config_dir(dir.clone()).unwrap();
+
+        assert_eq!(manager.get_ui_language(), "en");
+
+        manager.set_ui_language("pt-BR".to_string()).unwrap();
+        assert_eq!(manager.get_ui_language(), "pt-BR");
+
+        let disk: AppSettings =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap())
+                .unwrap();
+        assert_eq!(disk.ui_language, "pt-BR", "disk and cache must agree");
+
+        let result = manager.set_ui_language("bad/../tag".to_string());
+        assert!(result.is_err(), "invalid tag must be rejected");
+        assert_eq!(manager.get_ui_language(), "pt-BR", "cache must be unchanged");
+
+        let result = manager.set_ui_language(String::new());
+        assert!(result.is_err(), "empty tag must be rejected");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// set_ui_language follows the catalog tag rule: tags with empty segments or
+    /// tags that cannot name a catalog file are rejected without persisting.
+    #[test]
+    fn set_ui_language_rejects_empty_segments_and_uncatalogable_tags() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-ui-lang-tags-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let manager = SettingsManager::with_config_dir(dir.clone()).unwrap();
+
+        for tag in ["en--BR", "-en", "en-", "a", "en_US", "en/a"] {
+            let result = manager.set_ui_language(tag.to_string());
+            assert!(result.is_err(), "tag {tag:?} must be rejected");
+            assert_eq!(
+                manager.get_ui_language(),
+                "en",
+                "cache must stay 'en' after rejecting {tag:?}"
+            );
+        }
+
+        manager.set_ui_language("pt-BR".to_string()).unwrap();
+        assert_eq!(manager.get_ui_language(), "pt-BR");
+        manager.set_ui_language("zh-Hant".to_string()).unwrap();
+        assert_eq!(manager.get_ui_language(), "zh-Hant");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A persist failure must leave both cache and disk consistent (no partial
+    /// update).
+    #[test]
+    fn set_ui_language_persist_error_preserves_cache_and_disk() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let config_dir = std::env::temp_dir().join(format!(
+            "ttsbard-ui-lang-persist-err-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let settings_path = config_dir.join("settings.json");
+        let default_settings = AppSettings::default();
+        std::fs::write(
+            &settings_path,
+            serde_json::to_string_pretty(&default_settings).unwrap(),
+        )
+        .unwrap();
+        let cache = Arc::new(RwLock::new(default_settings));
+        let manager = SettingsManager {
+            config_dir: config_dir.clone(),
+            cache: Arc::clone(&cache),
+        };
+
+        manager.set_ui_language("de".to_string()).unwrap();
+        assert_eq!(manager.get_ui_language(), "de");
+
+        let bad_config_dir = config_dir.join("nonexistent_subdir");
+        let bad_manager = SettingsManager {
+            config_dir: bad_config_dir,
+            cache,
+        };
+        let result = bad_manager.set_ui_language("fr".to_string());
+        assert!(result.is_err(), "persist to nonexistent dir must fail");
+        assert_eq!(
+            bad_manager.get_ui_language(),
+            "de",
+            "cache must retain previous value after persist error"
+        );
+
+        let disk: AppSettings =
+            serde_json::from_str(&std::fs::read_to_string(&settings_path).unwrap()).unwrap();
+        assert_eq!(disk.ui_language, "de", "disk must retain previous value");
+
+        let _ = std::fs::remove_dir_all(&config_dir);
     }
 
     /// Backward-compat: old settings.json without `boundary_cleanup_enabled`

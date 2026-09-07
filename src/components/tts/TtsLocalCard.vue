@@ -2,6 +2,7 @@
 import { ref, watch } from 'vue';
 import { HardDrive } from 'lucide-vue-next';
 import ProviderCard from '../shared/ProviderCard.vue';
+import { t } from '../../i18n';
 
 interface Props {
   active?: boolean;
@@ -29,8 +30,6 @@ watch(() => props.url, (newUrl) => {
   inputUrl.value = newUrl;
 });
 
-const localTtsDescription = 'Обратная совместимость с TTSVoiceWizard.';
-
 function handleUrlKeydown(event: KeyboardEvent) {
   if (event.key === 'Enter') {
     handleSave();
@@ -44,7 +43,7 @@ function handleSave() {
 
 <template>
   <ProviderCard
-    title="Локальный сервер"
+    :title="t('tts.local.title')"
     :icon="HardDrive"
     :active="active"
     :expanded="expanded"
@@ -52,7 +51,7 @@ function handleSave() {
     @toggle="$emit('toggle')"
   >
     <div class="card-content-inner">
-      <div class="card-subtitle">{{ localTtsDescription }}</div>
+      <div class="card-subtitle">{{ t('tts.local.desc') }}</div>
       <div class="setting-group">
         <div class="local-url-row">
           <label>URL:</label>
@@ -63,7 +62,7 @@ function handleSave() {
             placeholder="http://127.0.0.1:8124"
             class="local-url-input"
           />
-          <button @click="handleSave" class="save-url-button">Сохранить</button>
+          <button @click="handleSave" class="save-url-button">{{ t('common.save') }}</button>
         </div>
       </div>
     </div>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Check, X } from 'lucide-vue-next';
+import { t } from '../../i18n';
 
 export interface TestResult {
   success: boolean;
@@ -21,9 +22,10 @@ defineProps<Props>();
       <Check v-if="result.success" :size="16" />
       <X v-else :size="16" />
       <span v-if="result.success">
-        Соединение успешно <span v-if="result.latency_ms">{{ result.latency_ms }}мс</span>
+        <template v-if="result.latency_ms">{{ t('common.connection_success_latency', { latency_ms: result.latency_ms }) }}</template>
+        <template v-else>{{ t('common.connection_success') }}</template>
       </span>
-      <span v-else>{{ result.error || 'Ошибка соединения' }}</span>
+      <span v-else>{{ result.error || t('common.connection_failed') }}</span>
     </div>
   </Transition>
 </template>

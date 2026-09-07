@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, watch } from 'vue';
 import { Check, AlertTriangle, Shield, X } from 'lucide-vue-next';
+import { t } from '../../i18n';
 
 interface Props {
   message: string;
@@ -75,7 +76,7 @@ const icon = computed(() => {
     <div v-if="message" class="status-message" :class="type">
       <component :is="icon" :size="16" />
       <span>{{ message }}</span>
-      <button v-if="dismissible" class="status-close" @click="dismiss" title="Закрыть">
+      <button v-if="dismissible" class="status-close" @click="dismiss" :title="t('common.close')">
         <X :size="14" />
       </button>
     </div>

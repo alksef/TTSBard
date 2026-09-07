@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { Check, Pencil, X, SkipForward } from 'lucide-vue-next'
 import { statusLabel, type JobDto } from '../../../src-playback/speechQueue'
 import type { IncomingTextItem } from '../../composables/useIncomingTexts'
+import { t } from '../../i18n'
 
 const rootRef = ref<HTMLElement | null>(null)
 
@@ -37,26 +38,26 @@ function onAutoPlayChange(event: Event) {
 </script>
 
 <template>
-  <div ref="rootRef" class="incoming-tab" tabindex="-1" aria-label="Входящие" :class="{ compact }">
+  <div ref="rootRef" class="incoming-tab" tabindex="-1" :aria-label="t('editor.incoming.title')" :class="{ compact }">
     <div class="incoming-toolbar">
-      <label class="autoplay-toggle" title="Озвучивать новые входящие тексты автоматически">
+      <label class="autoplay-toggle" :title="t('editor.incoming.autoplay_tooltip')">
         <input
           type="checkbox"
           :checked="autoPlay"
-          :aria-label="autoPlay ? 'Отключить автовоспроизведение' : 'Включить автовоспроизведение'"
+          :aria-label="autoPlay ? t('editor.incoming.autoplay_aria_off') : t('editor.incoming.autoplay_aria_on')"
           @change="onAutoPlayChange"
         />
-        <span>Автовоспроизведение</span>
+        <span>{{ t('editor.incoming.autoplay_label') }}</span>
       </label>
     </div>
 
     <p v-if="!autoPlay" class="autoplay-hint">
-      Автовоспроизведение выключено — новые тексты ждут вашего решения.
+      {{ t('editor.incoming.autoplay_off_hint') }}
     </p>
 
     <div v-if="loadError" class="incoming-error">{{ loadError }}</div>
 
-    <div v-else-if="!hasItems" class="incoming-empty">Нет входящих</div>
+    <div v-else-if="!hasItems" class="incoming-empty">{{ t('editor.incoming.empty') }}</div>
 
     <div v-else class="incoming-list">
       <div
@@ -69,8 +70,8 @@ function onAutoPlayChange(event: Event) {
           <button
             class="incoming-btn approve"
             :disabled="busyIds.has(item.id)"
-            title="Озвучить"
-            aria-label="Озвучить"
+            :title="t('editor.incoming.approve')"
+            :aria-label="t('editor.incoming.approve')"
             @click="emit('approve', item.id)"
           >
             <Check :size="14" />
@@ -78,8 +79,8 @@ function onAutoPlayChange(event: Event) {
           <button
             class="incoming-btn edit"
             :disabled="busyIds.has(item.id)"
-            title="Редактировать"
-            aria-label="Редактировать"
+            :title="t('editor.incoming.edit')"
+            :aria-label="t('editor.incoming.edit')"
             @click="emit('edit', item.id)"
           >
             <Pencil :size="14" />
@@ -87,8 +88,8 @@ function onAutoPlayChange(event: Event) {
           <button
             class="incoming-btn discard"
             :disabled="busyIds.has(item.id)"
-            title="Отклонить"
-            aria-label="Отклонить"
+            :title="t('editor.incoming.discard')"
+            :aria-label="t('editor.incoming.discard')"
             @click="emit('discard', item.id)"
           >
             <X :size="14" />
@@ -107,8 +108,8 @@ function onAutoPlayChange(event: Event) {
           v-if="job.status === 'failed'"
           class="incoming-btn skip"
           :disabled="busyIds.has(job.job_id)"
-          title="Пропустить"
-          aria-label="Пропустить"
+          :title="t('editor.incoming.skip')"
+          :aria-label="t('editor.incoming.skip')"
           @click="emit('skip', job.job_id)"
         >
           <SkipForward :size="14" />

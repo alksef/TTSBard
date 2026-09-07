@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { LogOut, RefreshCw } from 'lucide-vue-next';
+import { t } from '../../i18n';
 
 interface TelegramStatus {
   first_name?: string;
@@ -36,7 +37,7 @@ const props = withDefaults(defineProps<Props>(), {
   reconnecting: false,
   proxyMode: 'none',
   proxyModes: () => [
-    { value: 'none', label: 'Нет' },
+    { value: 'none', label: '' },
     { value: 'socks5', label: 'SOCKS5' },
     { value: 'mtproxy', label: 'MTProxy' }
   ],
@@ -54,6 +55,13 @@ const proxyModeLabel = computed(() => {
   return '';
 });
 
+const proxyModeOptions = computed(() =>
+  props.proxyModes.map((mode) => ({
+    ...mode,
+    label: mode.value === 'none' ? t('tts.proxy.none') : mode.label,
+  })),
+);
+
 function handleProxyChange(event: Event) {
   const target = event.target as HTMLSelectElement;
   emit('proxy-mode-change', target.value);
@@ -67,12 +75,12 @@ function handleProxyChange(event: Event) {
       <div class="error-banner-content">
         <div class="error-icon">⚠</div>
         <div class="error-text">
-          <p class="error-title">Ошибка подключения Telegram</p>
+          <p class="error-title">{{ t('tts.silero.error.title') }}</p>
           <p class="error-message">{{ errorMessage }}</p>
         </div>
       </div>
       <button class="fix-button" @click="$emit('connect')">
-        Исправить
+        {{ t('tts.silero.error.fix') }}
       </button>
     </div>
 
@@ -81,25 +89,25 @@ function handleProxyChange(event: Event) {
       <div v-if="connected" class="status-connected">
         <div class="status-indicator connected"></div>
         <div class="status-info">
-          <p class="status-text">Подключено к Telegram</p>
+          <p class="status-text">{{ t('tts.silero.connected') }}</p>
           <p v-if="telegramStatus" class="status-details">
             {{ telegramStatus.first_name }} {{ telegramStatus.last_name }}
             <span v-if="telegramStatus.username">@{{ telegramStatus.username }}</span>
           </p>
-          <p v-if="proxyModeLabel" class="status-proxy">через {{ proxyModeLabel }}</p>
+          <p v-if="proxyModeLabel" class="status-proxy">{{ t('tts.silero.connected_via', { mode: proxyModeLabel }) }}</p>
           <p v-if="currentProxyStatus?.proxy_url" class="status-details">
             {{ currentProxyStatus.proxy_url }}
           </p>
         </div>
-        <button class="status-signout-button" @click="$emit('disconnect')" title="Выйти">
+        <button class="status-signout-button" @click="$emit('disconnect')" :title="t('tts.silero.sign_out')" :aria-label="t('tts.silero.sign_out')">
           <LogOut :size="16" />
         </button>
       </div>
       <div v-else class="status-disconnected">
         <div class="status-indicator disconnected"></div>
         <div class="status-info">
-          <p class="status-text">Не подключено</p>
-          <p class="status-details">Авторизуйтесь для использования silero TTS</p>
+          <p class="status-text">{{ t('tts.silero.not_connected') }}</p>
+          <p class="status-details">{{ t('tts.silero.not_connected_hint') }}</p>
         </div>
       </div>
     </div>
@@ -109,14 +117,14 @@ function handleProxyChange(event: Event) {
       <div class="proxy-settings-row">
         <div class="proxy-select-row">
           <div class="form-field">
-            <label>Прокси:</label>
+            <label>{{ t('tts.proxy') }}:</label>
             <select
               :value="proxyMode"
               @change="handleProxyChange"
               class="network-select"
             >
               <option
-                v-for="mode in proxyModes"
+                v-for="mode in proxyModeOptions"
                 :key="mode.value"
                 :value="mode.value"
               >
@@ -130,11 +138,11 @@ function handleProxyChange(event: Event) {
           @click="$emit('reconnect')"
           :disabled="reconnecting"
           class="reconnect-button-fixed"
-          title="Переподключить Telegram"
+          :title="t('tts.silero.reconnect')"
         >
           <RefreshCw v-if="reconnecting" :size="14" class="spin-icon" />
           <RefreshCw v-else :size="14" />
-          {{ reconnecting ? 'Переподключение...' : 'Переподключить' }}
+          {{ reconnecting ? t('tts.silero.reconnecting') : t('tts.silero.reconnect') }}
         </button>
       </div>
     </div>
@@ -145,18 +153,18 @@ function handleProxyChange(event: Event) {
         class="telegram-connect-button"
         @click="$emit('connect')"
       >
-        Подключить Telegram
+        {{ t('tts.silero.connect_telegram') }}
       </button>
     </div>
 
     <!-- Info Section -->
     <div v-if="!connected" class="telegram-info">
-      <p class="info-title">Информация:</p>
+      <p class="info-title">{{ t('tts.silero.info.title') }}</p>
       <ul class="info-list">
-        <li>Для работы silero TTS необходима авторизация через Telegram</li>
-        <li>Получите API credentials на <a href="https://my.telegram.org/apps" target="_blank" rel="noopener noreferrer">my.telegram.org</a></li>
-        <li>Убедитесь, что в боте <strong>@sileroBot</strong> включены голосовые сообщения</li>
-        <li>TTS работает через отправку сообщений в бота и получение голосового ответа</li>
+        <li>{{ t('tts.silero.info.line1') }}</li>
+        <li>{{ t('tts.silero.info.line2_prefix') }}<a href="https://my.telegram.org/apps" target="_blank" rel="noopener noreferrer">my.telegram.org</a></li>
+        <li>{{ t('tts.silero.info.line3_prefix') }}<strong>@sileroBot</strong>{{ t('tts.silero.info.line3_suffix') }}</li>
+        <li>{{ t('tts.silero.info.line4') }}</li>
       </ul>
     </div>
   </div>

@@ -4,8 +4,8 @@ import { Search, X, Trash2, ChevronDown, ChevronRight, Play } from 'lucide-vue-n
 import { listen } from '@tauri-apps/api/event'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
 import { usePhraseHistory, type PhraseEntry } from '../composables/usePhraseHistory'
-import { relativeTime } from '../utils/time'
 import { debugError } from '../utils/debug'
+import { locale, t } from '../i18n'
 
 const props = defineProps<{
   expanded?: boolean
@@ -63,7 +63,7 @@ async function loadPhrases() {
   } catch (e) {
     if (generation !== loadGeneration) return
     debugError('[PhraseHistory] Failed to load phrases:', e)
-    loadError.value = 'Ошибка загрузки истории'
+    loadError.value = t('history.error.load')
   }
 }
 
@@ -99,19 +99,19 @@ async function removePhrase(id: string) {
     await loadPhrases()
   } catch (e) {
     debugError('[PhraseHistory] Failed to remove phrase:', e)
-    loadError.value = 'Не удалось удалить фразу'
+    loadError.value = t('history.error.remove')
   }
 }
 
 async function clearAll() {
-  if (!confirm('Удалить всю историю фраз?')) return
+  if (!confirm(t('history.confirm_clear'))) return
   try {
     await clear()
     phrases.value = []
     loadError.value = ''
   } catch (e) {
     debugError('[PhraseHistory] Failed to clear phrases:', e)
-    loadError.value = 'Не удалось очистить историю'
+    loadError.value = t('history.error.clear')
   }
 }
 
@@ -163,6 +163,32 @@ onUnmounted(() => {
   }
   listenerScope.dispose()
 })
+
+function formatPhraseTime(tsSec: number): string {
+  const diffSec = Date.now() / 1000 - tsSec
+  if (diffSec < 60) {
+    return new Intl.RelativeTimeFormat(locale.value, { numeric: 'auto' }).format(0, 'second')
+  }
+  if (diffSec < 3600) {
+    return new Intl.RelativeTimeFormat(locale.value, { numeric: 'auto' }).format(
+      -Math.floor(diffSec / 60),
+      'minute',
+    )
+  }
+  if (diffSec < 86400) {
+    return new Intl.RelativeTimeFormat(locale.value, { numeric: 'auto' }).format(
+      -Math.floor(diffSec / 3600),
+      'hour',
+    )
+  }
+  if (diffSec < 604800) {
+    return new Intl.RelativeTimeFormat(locale.value, { numeric: 'auto' }).format(
+      -Math.floor(diffSec / 86400),
+      'day',
+    )
+  }
+  return new Date(tsSec * 1000).toLocaleDateString(locale.value)
+}
 </script>
 
 <template>
@@ -170,7 +196,7 @@ onUnmounted(() => {
     <button v-if="!hideToggle" class="toggle-button" @click="toggleExpand">
       <ChevronDown v-if="isExpanded" :size="16" />
       <ChevronRight v-else :size="16" />
-      <span>История фраз</span>
+      <span>{{ t('history.title') }}</span>
     </button>
 
     <div v-if="isExpanded" class="phrase-panel">
@@ -180,21 +206,21 @@ onUnmounted(() => {
           <input
             v-model="filter"
             type="text"
-            placeholder="Поиск..."
+            :placeholder="t('history.search_placeholder')"
             class="filter-input"
           />
         </div>
-        <button class="clear-button" @click="clearAll" title="Очистить историю">
+        <button class="clear-button" @click="clearAll" :title="t('history.clear_title')">
           <Trash2 :size="14" />
         </button>
       </div>
 
-      <div v-if="isLoading" class="loading">Загрузка...</div>
+      <div v-if="isLoading" class="loading">{{ t('history.loading') }}</div>
 
       <div v-else-if="loadError" class="error">{{ loadError }}</div>
 
       <div v-else-if="phrases.length === 0" class="empty">
-        {{ filter ? 'Ничего не найдено' : 'История пуста' }}
+        {{ filter ? t('history.empty.no_results') : t('history.empty.empty') }}
       </div>
 
       <div v-else class="phrase-list">
@@ -208,7 +234,7 @@ onUnmounted(() => {
             <div class="phrase-text">{{ phrase.provider_text }}</div>
             <div class="phrase-meta">
               <span class="phrase-count">{{ phrase.count }}</span>
-              <span class="phrase-time">{{ relativeTime(phrase.last_used) }}</span>
+              <span class="phrase-time">{{ formatPhraseTime(phrase.last_used) }}</span>
             </div>
             <div v-if="phrase.provider || phrase.voice" class="phrase-meta-secondary">
               <template v-if="phrase.provider">{{ phrase.provider }}</template>
@@ -216,36 +242,36 @@ onUnmounted(() => {
               <template v-if="phrase.voice">{{ phrase.voice }}</template>
             </div>
             <div v-if="cacheErrors[phrase.id]" class="cache-error-pill">
-              Аудиокеш недоступен
+              {{ t('history.cache_unavailable') }}
             </div>
           </div>
           <button
             class="phrase-action-btn phrase-play-btn"
             :class="{ replaying: replayingId === phrase.id }"
             @click.stop="replayPhrase(phrase)"
-            title="Воспроизвести из кеша"
-            aria-label="Воспроизвести из кеша"
+            :title="t('history.replay_title')"
+            :aria-label="t('history.replay_title')"
           >
             <Play :size="12" />
           </button>
           <button
             class="phrase-action-btn"
             @click.stop="replacePhraseAction(phrase)"
-            title="Заменить текущий текст"
+            :title="t('history.replace_title')"
           >
             ↻
           </button>
           <button
             class="phrase-action-btn"
             @click.stop="appendPhrase(phrase)"
-            title="Добавить в конец"
+            :title="t('history.append_title')"
           >
             +
           </button>
           <button
             class="remove-phrase"
             @click.stop="removePhrase(phrase.id)"
-            title="Удалить"
+            :title="t('history.remove_title')"
           >
             <X :size="12" />
           </button>

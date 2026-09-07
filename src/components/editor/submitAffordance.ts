@@ -1,3 +1,4 @@
+import { t } from '../../i18n'
 import type { QuickEditorMode } from '../../types/settings'
 
 const QUICK_MODE_CYCLE: readonly QuickEditorMode[] = [
@@ -15,22 +16,22 @@ export function nextQuickMode(mode: QuickEditorMode): QuickEditorMode {
 export function enterOutcomeLabel(mode: QuickEditorMode): string {
   switch (mode) {
     case 'disabled':
-      return 'остаться'
+      return t('editor.submit.outcome.stay')
     case 'collapse':
-      return 'скрыть окно'
+      return t('editor.submit.outcome.hide_window')
     case 'return_focus':
-      return 'вернуть фокус'
+      return t('editor.submit.outcome.return_focus')
   }
 }
 
 export function enterOutcomeLabelCompact(mode: QuickEditorMode): string {
   switch (mode) {
     case 'disabled':
-      return 'остаться'
+      return t('editor.submit.outcome.stay')
     case 'collapse':
-      return 'скрыть'
+      return t('editor.submit.outcome.hide_compact')
     case 'return_focus':
-      return 'вернуть фокус'
+      return t('editor.submit.outcome.return_focus')
   }
 }
 
@@ -83,4 +84,3 @@ export function resolveKeepText(
       return { keepText: setting, applyQuickPolicy: true }
   }
 }
-

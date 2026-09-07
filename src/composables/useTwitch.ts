@@ -4,8 +4,11 @@ import { listen } from '@tauri-apps/api/event'
 import { useTwitchSettings } from './useAppSettings'
 import { debugLog, debugError } from '../utils/debug'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
+import { t } from '../i18n'
 
 export type TwitchStatus = 'Disconnected' | 'Connecting' | 'Connected' | 'Error'
+
+type UiMessageKind = 'success' | 'info' | 'error'
 
 interface RustEnumDisconnected {
   Disconnected?: null
@@ -78,6 +81,7 @@ export function useTwitch() {
   })
 
   const errorMessage = ref<string | null>(null)
+  const errorMessageType = ref<UiMessageKind>('info')
   let errorTimeout: number | null = null
   const currentStatus = ref<TwitchStatus>('Disconnected')
   const listenerScope = createAsyncCleanupScope()
@@ -89,12 +93,13 @@ export function useTwitch() {
     currentStatus.value = status
     isConnected.value = status === 'Connected'
     if (status === 'Error') {
-      showError('Ошибка подключения к Twitch')
+      showError(t('twitch.error.connect_twitch'))
     }
   }
 
-  function showError(message: string) {
+  function showError(message: string, type: UiMessageKind = 'error') {
     errorMessage.value = message
+    errorMessageType.value = type
     if (errorTimeout !== null) {
       clearTimeout(errorTimeout)
     }
@@ -107,10 +112,10 @@ export function useTwitch() {
   async function restartTwitch() {
     try {
       const result = await invoke<string>('restart_twitch')
-      showError(result)
+      showError(result, 'success')
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : String(e)
-      showError('Failed to restart: ' + errorMsg)
+      showError(t('twitch.error.restart', { detail: errorMsg }))
     }
   }
 
@@ -126,30 +131,30 @@ export function useTwitch() {
   async function save() {
     try {
       const result = await invoke<string>('save_twitch_settings', { settings: settings.value })
-      showError(result)
+      showError(result, 'success')
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : String(e)
-      showError('Failed to save settings: ' + errorMsg)
+      showError(t('twitch.error.save', { detail: errorMsg }))
     }
   }
 
   async function startTwitch() {
     try {
       const result = await invoke<string>('connect_twitch')
-      showError(result)
+      showError(result, 'success')
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : String(e)
-      showError('Failed to connect: ' + errorMsg)
+      showError(t('twitch.error.connect', { detail: errorMsg }))
     }
   }
 
   async function stopTwitch() {
     try {
       const result = await invoke<string>('disconnect_twitch')
-      showError(result)
+      showError(result, 'info')
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : String(e)
-      showError('Failed to disconnect: ' + errorMsg)
+      showError(t('twitch.error.disconnect', { detail: errorMsg }))
     }
   }
 
@@ -164,10 +169,10 @@ export function useTwitch() {
   async function sendTestMessage() {
     try {
       const result = await invoke<string>('send_twitch_test_message')
-      showError(result)
+      showError(result, 'info')
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : String(e)
-      showError('Failed to send test message: ' + errorMsg)
+      showError(t('twitch.error.test', { detail: errorMsg }))
     }
   }
 
@@ -202,6 +207,7 @@ export function useTwitch() {
   return {
     settings,
     errorMessage,
+    errorMessageType,
     currentStatus,
     showToken,
     isConnected,

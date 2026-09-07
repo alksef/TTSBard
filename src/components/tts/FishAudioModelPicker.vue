@@ -5,6 +5,8 @@ import type { VoiceModel } from '../../types/settings';
 import { Search, Loader2 } from 'lucide-vue-next';
 import { fetchFishImage } from '../../composables/useFishImage';
 import { debugError } from '../../utils/debug';
+import { t } from '../../i18n';
+import { presentCommandError } from '../../ipc/commandError';
 
 interface Props {
   apiKey?: string;
@@ -64,7 +66,7 @@ async function fetchModels(page: number = 1) {
   const generation = ++requestGeneration;
   if (!props.apiKey) {
     if (generation === requestGeneration) {
-      error.value = 'API ключ не установлен';
+      error.value = t('tts.fish.api_key_missing');
       loading.value = false;
     }
     return;
@@ -101,7 +103,7 @@ async function fetchModels(page: number = 1) {
     void loadImages(generation, fetchedModels);
   } catch (e) {
     if (generation !== requestGeneration) return;
-    error.value = e as string;
+    error.value = presentCommandError(e, t('tts.fish.picker.load_error'));
     debugError('Failed to fetch models:', e);
   } finally {
     if (generation === requestGeneration) loading.value = false;
@@ -134,8 +136,8 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
   <div class="modal-overlay" @click.self="handleClose">
     <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="fish-model-picker-title">
       <div class="modal-header">
-        <h2 id="fish-model-picker-title">Добавить голос</h2>
-        <button type="button" @click="handleClose" class="close-button" aria-label="Закрыть выбор голоса">&times;</button>
+        <h2 id="fish-model-picker-title">{{ t('tts.add_voice') }}</h2>
+        <button type="button" @click="handleClose" class="close-button" :aria-label="t('tts.fish.picker.close_aria')">&times;</button>
       </div>
 
       <div class="modal-body">
@@ -145,11 +147,11 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
           <input
             v-model="searchQuery"
             type="text"
-            placeholder="Поиск по названию..."
+            :placeholder="t('tts.fish.picker.search_placeholder')"
             class="search-input"
             @keyup.enter="handleSearch"
           />
-          <button type="button" @click="handleSearch" class="search-button">Поиск</button>
+          <button type="button" @click="handleSearch" class="search-button">{{ t('tts.fish.picker.search') }}</button>
         </div>
 
         <!-- Models list -->
@@ -159,15 +161,15 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
 
         <div v-else-if="loading && models.length === 0" class="loading-container">
           <Loader2 :size="32" class="spinner" />
-          <p>Загрузка голосов...</p>
+          <p>{{ t('tts.fish.picker.loading') }}</p>
         </div>
 
         <div v-else-if="!hasSearched" class="empty-state">
-          <p>Введите запрос и нажмите "Поиск" для загрузки</p>
+          <p>{{ t('tts.fish.picker.search_hint') }}</p>
         </div>
 
         <div v-else-if="models.length === 0" class="empty-state">
-          <p>Голоса не найдены</p>
+          <p>{{ t('tts.fish.picker.no_results') }}</p>
         </div>
 
         <div v-else class="models-list">
@@ -177,7 +179,7 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
             type="button"
             @click="selectModel(model)"
             class="model-item"
-            :aria-label="`Выбрать голос ${model.title}`"
+            :aria-label="t('tts.fish.picker.select_voice', { name: model.title })"
           >
             <div v-if="getModelImageUrl(model)" class="model-cover">
               <img :src="getModelImageUrl(model)" :alt="model.title" />
@@ -199,7 +201,7 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
                   {{ model.languages.join(', ') }}
                 </span>
                 <span v-if="model.author_nickname" class="model-author">
-                  by {{ model.author_nickname }}
+                  {{ t('tts.fish.picker.by_author', { name: model.author_nickname }) }}
                 </span>
               </div>
             </div>
@@ -208,7 +210,7 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
           <!-- Load more -->
           <div v-if="hasMore && !loading" class="load-more-container">
             <button @click.stop="loadMore" class="load-more-button">
-              Загрузить ещё
+              {{ t('tts.fish.picker.load_more') }}
             </button>
           </div>
 

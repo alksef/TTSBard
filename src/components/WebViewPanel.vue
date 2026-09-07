@@ -2,22 +2,14 @@
 import { computed } from 'vue'
 import { Copy, RotateCw, Play, Square, AlertTriangle, Globe } from 'lucide-vue-next'
 import { useWebView } from '../composables/useWebView'
+import { t } from '../i18n'
 
-// Toast kind by keyword sniffing, case-insensitive so «Не удалось…» matches
-// the lowercase «не удалось» keyword (the old inline check was case-sensitive
-// and styled real errors as neutral).
-const messageBoxClass = computed(() => {
-  const m = (errorMessage.value ?? '').toLowerCase()
-  if (['failed', 'error', 'ошибка', 'не удалось'].some(k => m.includes(k))) return 'error'
-  if (['запущен', 'перезапущен', 'сохранен', 'successful', 'saved', 'отправлено', 'обновлены', 'токен скопирован', 'upnp включён', 'перезапускается'].some(k => m.includes(k))) return 'success'
-  if (['тест', 'testing', 'остан', 'url скопирован', 'upnp выключен'].some(k => m.includes(k))) return 'info'
-  if (['f5', 'obs', 'перезапустите сервер'].some(k => m.includes(k))) return 'warning'
-  return ''
-})
+const messageBoxClass = computed(() => (errorMessage.value ? errorMessageType.value : ''))
 
 const {
   settings,
   errorMessage,
+  errorMessageType,
   testMessage,
   displayUrl,
   serverStatus,
@@ -51,24 +43,24 @@ const {
 
     <section class="settings-section">
       <div class="section-header server-header">
-        <h2>Сервер</h2>
+        <h2>{{ t('webview.server') }}</h2>
         <div class="server-status">
           <span class="status-indicator" :class="{ running: serverStatus.state === 'running' }">
-            {{ serverStatus.state === 'running' ? 'Запущен' : serverStatus.state === 'starting' ? 'Запускается' : serverStatus.state === 'error' ? 'Ошибка' : 'Остановлен' }}
+            {{ serverStatus.state === 'running' ? t('webview.status.running') : serverStatus.state === 'starting' ? t('webview.status.starting') : serverStatus.state === 'error' ? t('webview.status.error') : t('webview.status.stopped') }}
           </span>
           <template v-if="serverStatus.state === 'running' || serverStatus.state === 'starting'">
-            <button @click="restartServer" class="status-button restart" title="Перезапустить">
+            <button @click="restartServer" class="status-button restart" :title="t('webview.restart')" :aria-label="t('webview.restart')">
               <RotateCw :size="14" />
             </button>
-            <button @click="stopServer" class="status-button stop" title="Остановить">
+            <button @click="stopServer" class="status-button stop" :title="t('webview.stop')" :aria-label="t('webview.stop')">
               <Square :size="14" />
             </button>
           </template>
           <template v-else>
-            <button @click="startServer" class="status-button start" :disabled="!isPortValid" :class="{ disabled: !isPortValid }" title="Запустить">
+            <button @click="startServer" class="status-button start" :disabled="!isPortValid" :class="{ disabled: !isPortValid }" :title="t('webview.start')" :aria-label="t('webview.start')">
               <Play :size="14" />
             </button>
-            <button @click="stopServer" class="status-button stop disabled" title="Остановить" disabled>
+            <button @click="stopServer" class="status-button stop disabled" :title="t('webview.stop')" :aria-label="t('webview.stop')" disabled>
               <Square :size="14" />
             </button>
           </template>
@@ -78,16 +70,16 @@ const {
       <div class="setting-row">
         <label class="checkbox-label">
           <input type="checkbox" v-model="settings.start_on_boot" @change="saveStartOnBoot" />
-          <span>Запускать при старте приложения</span>
+          <span>{{ t('webview.start_on_boot') }}</span>
         </label>
       </div>
 
       <div class="setting-row" style="margin-bottom: 8px;">
-        <label>Адрес:</label>
+        <label>{{ t('webview.address') }}:</label>
         <div class="address-inputs">
           <select v-model="settings.bind_address" class="address-bind" :disabled="serverStatus.state === 'running' || serverStatus.state === 'starting'">
-            <option value="0.0.0.0">0.0.0.0 (all interfaces)</option>
-            <option value="127.0.0.1">127.0.0.1 (local only)</option>
+            <option value="0.0.0.0">0.0.0.0 ({{ t('webview.bind.all_interfaces') }})</option>
+            <option value="127.0.0.1">127.0.0.1 ({{ t('webview.bind.local_only') }})</option>
           </select>
           <input
             type="number"
@@ -99,9 +91,9 @@ const {
             :disabled="serverStatus.state === 'running' || serverStatus.state === 'starting'"
             placeholder="10100"
           />
-          <button @click="saveServerSettings" class="save-button-inline" :disabled="serverStatus.state === 'running' || serverStatus.state === 'starting'">Сохранить</button>
+          <button @click="saveServerSettings" class="save-button-inline" :disabled="serverStatus.state === 'running' || serverStatus.state === 'starting'">{{ t('common.save') }}</button>
         </div>
-        <span v-if="!isPortValid" class="error-text">Порт должен быть от 1024 до 65535</span>
+        <span v-if="!isPortValid" class="error-text">{{ t('webview.port_error') }}</span>
       </div>
     </section>
 
@@ -110,7 +102,7 @@ const {
       <div class="setting-row" style="margin-bottom: 8px;">
         <div class="url-display">
           <label class="url-code">{{ displayUrl }}</label>
-          <button @click="copyUrl" class="icon-button" title="Копировать URL">
+          <button @click="copyUrl" class="icon-button" :title="t('webview.copy_url')" :aria-label="t('webview.copy_url')">
             <Copy :size="16" />
           </button>
         </div>
@@ -118,51 +110,51 @@ const {
     </section>
 
     <section class="settings-section">
-      <h2>Шаблоны</h2>
+      <h2>{{ t('webview.templates.title') }}</h2>
       <div class="setting-row">
         <button @click="openTemplateFolder" class="action-button">
-          Открыть папку
+          {{ t('webview.templates.open_folder') }}
         </button>
         <button @click="reloadTemplates" class="action-button secondary">
-          Обновить
+          {{ t('webview.templates.reload') }}
         </button>
       </div>
-      <span class="setting-warning"><AlertTriangle :size="14" /> После изменения шаблонов нажмите «Обновить», затем перезагрузите страницу в OBS/браузере</span>
+      <span class="setting-warning"><AlertTriangle :size="14" /> {{ t('webview.templates.hint') }}</span>
     </section>
 
     <section class="settings-section">
-      <h2>Тест</h2>
+      <h2>{{ t('webview.test.title') }}</h2>
       <div class="setting-row" style="margin-bottom: 8px;">
         <input
           type="text"
           v-model="testMessage"
-          placeholder="Текст для отправки..."
+          :placeholder="t('webview.test.placeholder')"
           class="test-input"
           @keyup.enter="sendTest"
         />
         <button @click="sendTest" class="test-button" :disabled="serverStatus.state !== 'running' || !testMessage">
-          Отправить
+          {{ t('webview.test.send') }}
         </button>
       </div>
     </section>
 
     <section class="settings-section" :class="{ 'section-disabled': !isUpnpAvailable }">
-      <h2>Внешнее подключение</h2>
+      <h2>{{ t('webview.external.title') }}</h2>
 
       <!-- Warning for local address -->
       <div v-if="!isUpnpAvailable" class="external-access-warning">
         <AlertTriangle :size="14" />
-        <span>Внешнее подключение недоступно при локальном адресе сервера (127.0.0.1). Выберите 0.0.0.0 для доступа из сети.</span>
+        <span>{{ t('webview.external.local_only_warning') }}</span>
       </div>
 
       <!-- External URL display (shows full URL with token if available) -->
       <div class="setting-row setting-row-full" v-if="hasToken">
         <div class="url-display url-display-full">
           <label class="url-code url-code-wide">{{ externalDisplay }}</label>
-          <button @click="copyExternalUrl" class="icon-button" title="Копировать внешний URL" :disabled="!isUpnpAvailable || !externalDisplay">
+          <button @click="copyExternalUrl" class="icon-button" :title="t('webview.external.copy_url')" :aria-label="t('webview.external.copy_url')" :disabled="!isUpnpAvailable || !externalDisplay">
             <Copy :size="16" />
           </button>
-          <button @click="showExternalUrl" class="icon-button" title="Обновить внешний IP" :disabled="!isUpnpAvailable">
+          <button @click="showExternalUrl" class="icon-button" :title="t('webview.external.refresh_ip')" :aria-label="t('webview.external.refresh_ip')" :disabled="!isUpnpAvailable">
             <Globe :size="16" />
           </button>
         </div>
@@ -170,23 +162,23 @@ const {
 
       <!-- Token access -->
       <div class="setting-row">
-        <label>Токен доступа:</label>
+        <label>{{ t('webview.token.label') }}</label>
         <div class="url-display url-display-expand">
-          <label class="url-code url-code-expand">{{ settings.access_token || 'Не сгенерирован' }}</label>
-          <button @click="copyToken" class="icon-button" title="Копировать токен" :disabled="!hasToken || !isUpnpAvailable">
+          <label class="url-code url-code-expand">{{ settings.access_token || t('webview.token.not_generated') }}</label>
+          <button @click="copyToken" class="icon-button" :title="t('webview.token.copy')" :aria-label="t('webview.token.copy')" :disabled="!hasToken || !isUpnpAvailable">
             <Copy :size="16" />
           </button>
         </div>
-        <button @click="regenerateAccessToken" class="icon-button danger-button" title="Перегенерировать токен доступа" :disabled="!isUpnpAvailable">
+        <button @click="regenerateAccessToken" class="icon-button danger-button" :title="t('webview.token.regenerate')" :aria-label="t('webview.token.regenerate')" :disabled="!isUpnpAvailable">
           <RotateCw :size="16" />
         </button>
       </div>
 
       <!-- UPnP status -->
       <div class="setting-row" style="margin-bottom: 8px;">
-        <label class="checkbox-label" :class="{ disabled: !isUpnpAvailable }" title="UPnP автоматически открывает порт на роутере для внешнего доступа. Доступно только при 0.0.0.0">
+        <label class="checkbox-label" :class="{ disabled: !isUpnpAvailable }" :title="t('webview.upnp.tooltip')">
           <input type="checkbox" v-model="settings.upnp_enabled" @change="saveUpnpEnabled" :disabled="!isUpnpAvailable" />
-          <span>Включить UPnP (автоматический проброс порта)</span>
+          <span>{{ t('webview.upnp.enable') }}</span>
         </label>
       </div>
     </section>

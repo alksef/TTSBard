@@ -11,8 +11,17 @@ import type {
   VTubeStudioTypingActionDto,
   VTubeStudioTypingMode,
 } from '../types/settings'
+import { t } from '../i18n'
+import { presentCommandError } from '../ipc/commandError'
 
 export type VTubeStatus = 'Disconnected' | 'Connecting' | 'Connected' | 'Error'
+
+// Marker used for in-memory hotkey rows fabricated from a saved typing action
+// (whose real VTS type is unknown until the hotkeys are loaded). It is never
+// rendered in the UI; the panel compares against it to suppress the type suffix.
+export const SAVED_HOTKEY_TYPE = '__saved__'
+
+type UiMessageKind = 'success' | 'info' | 'error'
 
 interface RustEnumDisconnected {
   Disconnected?: null
@@ -96,6 +105,7 @@ export function useVTubeStudio() {
   })
 
   const errorMessage = ref<string | null>(null)
+  const errorMessageType = ref<UiMessageKind>('info')
   const portError = ref<string | null>(null)
   let errorTimeout: number | null = null
   const currentStatus = ref<VTubeStatus>('Disconnected')
@@ -131,7 +141,7 @@ export function useVTubeStudio() {
   const typingTimeoutError = computed(() => {
     const v = typingTimeout.value
     if (!Number.isFinite(v) || !Number.isInteger(v) || v < 100 || v > 5000) {
-      return 'Допустимо 100–5000 мс'
+      return t('vtube.test.timeout_range')
     }
     return null
   })
@@ -139,7 +149,7 @@ export function useVTubeStudio() {
   const typingRepeatsError = computed(() => {
     const v = typingRepeats.value
     if (!Number.isFinite(v) || !Number.isInteger(v) || v < 1 || v > 10) {
-      return 'Допустимо 1–10'
+      return t('vtube.test.repeats_range')
     }
     return null
   })
@@ -167,13 +177,16 @@ export function useVTubeStudio() {
     const status = itemStatus.value
     switch (status.status) {
       case 'Missing':
-        return `Предмет ${status.fileName || '(не задан)'} не найден. Загрузите его в сцену VTube Studio и нажмите «Обновить».`
+        return t('vtube.status.item.missing', { name: status.fileName || t('vtube.not_set') })
       case 'Ambiguous':
-        return `Найдено экземпляров ${status.fileName}: ${status.matchCount}. Оставьте один экземпляр и нажмите «Обновить».`
+        return t('vtube.status.item.ambiguous', { name: status.fileName, count: status.matchCount })
       case 'Unsupported':
-        return `Предмет ${status.fileName} имеет неподдерживаемый тип ${status.vtsType}. Выберите PNG, JPG, GIF или animation-folder.`
+        return t('vtube.status.item.unsupported', { name: status.fileName, type: status.vtsType })
       case 'Error':
-        return `Не удалось проверить предмет ${status.fileName || '(не задан)'}. Проверьте VTube Studio и нажмите «Обновить». ${status.message}`
+        return t('vtube.status.item.error', {
+          name: status.fileName || t('vtube.not_set'),
+          message: status.message,
+        })
       default:
         return null
     }
@@ -194,7 +207,7 @@ export function useVTubeStudio() {
   function validatePort(): boolean {
     const raw = settings.value.port
     if (!isValidPort(raw)) {
-      portError.value = 'Порт должен быть от 1024 до 65535'
+      portError.value = t('vtube.port_error')
       return false
     }
     portError.value = null
@@ -204,12 +217,13 @@ export function useVTubeStudio() {
   function handleStatusChange(status: VTubeStatus) {
     currentStatus.value = status
     if (status === 'Error') {
-      showError('Ошибка подключения к VTube Studio')
+      showError(t('vtube.error.connection'))
     }
   }
 
-  function showError(message: string) {
+  function showError(message: string, type: UiMessageKind = 'error') {
     errorMessage.value = message
+    errorMessageType.value = type
     if (errorTimeout !== null) {
       clearTimeout(errorTimeout)
     }
@@ -231,10 +245,10 @@ export function useVTubeStudio() {
     if (normalized.outputMode === 'Hotkeys') {
       const savedHotkeys: VtsHotkeyInfoDto[] = []
       if (normalized.startHotkeyId && normalized.startHotkeyName) {
-        savedHotkeys.push({ hotkeyID: normalized.startHotkeyId, name: normalized.startHotkeyName, type: 'Сохранённая', description: '' })
+        savedHotkeys.push({ hotkeyID: normalized.startHotkeyId, name: normalized.startHotkeyName, type: SAVED_HOTKEY_TYPE, description: '' })
       }
       if (normalized.stopHotkeyId && normalized.stopHotkeyName && normalized.stopHotkeyId !== normalized.startHotkeyId) {
-        savedHotkeys.push({ hotkeyID: normalized.stopHotkeyId, name: normalized.stopHotkeyName, type: 'Сохранённая', description: '' })
+        savedHotkeys.push({ hotkeyID: normalized.stopHotkeyId, name: normalized.stopHotkeyName, type: SAVED_HOTKEY_TYPE, description: '' })
       }
       hotkeys.value = savedHotkeys
     }
@@ -297,12 +311,11 @@ export function useVTubeStudio() {
         startOnBoot: settings.value.start_on_boot,
       })
       if (!isStaleOp(gen)) {
-        showError(result)
+        showError(result, 'success')
       }
     } catch (e) {
       if (!isStaleOp(gen)) {
-        const errorMsg = e instanceof Error ? e.message : String(e)
-        showError(errorMsg)
+        showError(presentCommandError(e, t('vtube.error.save_settings')))
       }
     } finally {
       endOperation()
@@ -317,13 +330,12 @@ export function useVTubeStudio() {
       const result = await invoke<string>('connect_vtube_studio')
       if (!isStaleOp(gen)) {
         currentStatus.value = 'Connected'
-        showError(result)
+        showError(result, 'success')
       }
     } catch (e) {
       if (!isStaleOp(gen)) {
-        const errorMsg = e instanceof Error ? e.message : String(e)
         currentStatus.value = 'Error'
-        showError('Failed to connect: ' + errorMsg)
+        showError(presentCommandError(e, t('vtube.error.connect')))
       }
     } finally {
       endOperation()
@@ -337,12 +349,11 @@ export function useVTubeStudio() {
       const result = await invoke<string>('disconnect_vtube_studio')
       if (!isStaleOp(gen)) {
         currentStatus.value = 'Disconnected'
-        showError(result)
+        showError(result, 'info')
       }
     } catch (e) {
       if (!isStaleOp(gen)) {
-        const errorMsg = e instanceof Error ? e.message : String(e)
-        showError('Failed to disconnect: ' + errorMsg)
+        showError(presentCommandError(e, t('vtube.error.disconnect')))
       }
     } finally {
       endOperation()
@@ -357,13 +368,12 @@ export function useVTubeStudio() {
       const result = await invoke<string>('restart_vtube_studio')
       if (!isStaleOp(gen)) {
         currentStatus.value = 'Connected'
-        showError(result)
+        showError(result, 'success')
       }
     } catch (e) {
       if (!isStaleOp(gen)) {
-        const errorMsg = e instanceof Error ? e.message : String(e)
         currentStatus.value = 'Error'
-        showError('Failed to restart: ' + errorMsg)
+        showError(presentCommandError(e, t('vtube.error.restart')))
       }
     } finally {
       endOperation()
@@ -381,12 +391,11 @@ export function useVTubeStudio() {
         repeatCount: typingRepeats.value,
       })
       if (!isStaleOp(gen)) {
-        showError(result)
+        showError(result, 'info')
       }
     } catch (e) {
       if (!isStaleOp(gen)) {
-        const errorMsg = e instanceof Error ? e.message : String(e)
-        showError(errorMsg)
+        showError(presentCommandError(e, t('vtube.error.test')))
       }
     } finally {
       endOperation()
@@ -430,7 +439,7 @@ export function useVTubeStudio() {
         }
       }
     } catch (e) {
-      if (generation === hotkeyLoadGeneration) hotkeysError.value = e instanceof Error ? e.message : String(e)
+      if (generation === hotkeyLoadGeneration) hotkeysError.value = presentCommandError(e, t('vtube.error.load_hotkeys'))
     } finally {
       if (generation === hotkeyLoadGeneration) hotkeysLoading.value = false
     }
@@ -450,7 +459,7 @@ export function useVTubeStudio() {
       }
     } catch (e) {
       if (generation === sceneItemLoadGeneration) {
-        sceneItemsError.value = e instanceof Error ? e.message : String(e)
+        sceneItemsError.value = presentCommandError(e, t('vtube.error.load_scene_items'))
       }
     } finally {
       if (generation === sceneItemLoadGeneration) sceneItemsLoading.value = false
@@ -463,22 +472,22 @@ export function useVTubeStudio() {
     try {
       itemStatus.value = await invoke<VTubeStudioItemStatus>('refresh_vtube_studio_item')
     } catch (e) {
-      sceneItemsError.value = e instanceof Error ? e.message : String(e)
+      sceneItemsError.value = presentCommandError(e, t('vtube.error.refresh_item'))
     }
   }
 
   async function saveTypingAction() {
     if (busy.value) return
     if (!canEditTypingAction.value) {
-      showError('Подключитесь к VTube Studio, чтобы сохранить действие набора.')
+      showError(t('vtube.action.save_disconnected'))
       return
     }
     if (!canSaveTypingAction.value) {
       showError(typingMode.value === 'Event'
-        ? 'Имя параметра не может быть пустым'
+        ? t('vtube.action.param_empty')
         : typingMode.value === 'Hotkeys'
-          ? 'ID горячих клавиш не могут быть пустыми'
-          : 'Выберите один поддерживаемый экземпляр предмета')
+          ? t('vtube.action.hotkeys_empty')
+          : t('vtube.action.item_invalid'))
       return
     }
     const gen = startOperation()
@@ -509,10 +518,10 @@ export function useVTubeStudio() {
           itemFileName: typingMode.value === 'Item' ? itemFileName.value : savedTypingAction.value.itemFileName,
           itemType: typingMode.value === 'Item' ? itemType.value : savedTypingAction.value.itemType,
         }
-        showError(result)
+        showError(result, 'success')
       }
     } catch (e) {
-      if (!isStaleOp(gen)) showError(e instanceof Error ? e.message : String(e))
+      if (!isStaleOp(gen)) showError(presentCommandError(e, t('vtube.error.save_action')))
     } finally { endOperation() }
   }
 
@@ -573,6 +582,7 @@ export function useVTubeStudio() {
   return {
     settings,
     errorMessage,
+    errorMessageType,
     portError,
     currentStatus,
     busy,

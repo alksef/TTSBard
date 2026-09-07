@@ -4,6 +4,7 @@ import { Cloud } from 'lucide-vue-next';
 import ProviderCard from '../shared/ProviderCard.vue';
 import InputWithToggle from '../shared/InputWithToggle.vue';
 import VoiceSelector from './VoiceSelector.vue';
+import { t } from '../../i18n';
 
 interface Props {
   active?: boolean;
@@ -69,14 +70,14 @@ function handleProxyToggle(event: Event) {
       <!-- API Key -->
       <div class="setting-group">
         <div class="openai-form-row">
-          <label>Ключ API:</label>
+          <label>{{ t('tts.api_key') }}:</label>
           <InputWithToggle
             v-model="localApiKey"
             type="password"
             placeholder="sk-..."
             class="openai-input-wide"
           />
-          <button @click="handleSaveApiKey" class="save-settings-button">Сохранить</button>
+          <button @click="handleSaveApiKey" class="save-settings-button">{{ t('common.save') }}</button>
         </div>
       </div>
 
@@ -86,7 +87,7 @@ function handleProxyToggle(event: Event) {
           :voices="voices"
           :selected-voice-id="voice"
           :loading="loading"
-          label="Голос"
+          :label="t('tts.voice')"
           @voice-change="handleVoiceChange"
         />
       </div>
@@ -102,7 +103,7 @@ function handleProxyToggle(event: Event) {
             class="proxy-checkbox"
           />
           <label for="openai-use-proxy" class="proxy-checkbox-label">
-            Использовать SOCKS5
+            {{ t('tts.use_socks5') }}
           </label>
         </div>
       </div>

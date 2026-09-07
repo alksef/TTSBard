@@ -20,6 +20,7 @@ import { useIncomingTexts } from '../composables/useIncomingTexts'
 import StatusMessage from './shared/StatusMessage.vue'
 import { useTypingBurst, type TypingConsumer } from '../composables/useTypingBurst'
 import { acceptClear, applyAiResponse } from './inputAcceptance'
+import { presentCommandError } from '../ipc/commandError'
 import { submitSpeech } from '../ipc/speech'
 import { deliverTwitchMessage } from '../ipc/twitchDelivery'
 import { matchesEditorHotkey } from './editor/keymapArbitration'
@@ -34,6 +35,7 @@ import { effectiveRoute, applyRouteToText, routeSubmit } from './editor/routeRes
 import { useTwitchRuntimeStatus } from '../composables/useTwitchRuntimeStatus'
 import { useRuAccentRuntime } from '../composables/useRuAccentRuntime'
 import { useInputServerRuntimeStatus } from '../composables/useInputServerRuntimeStatus'
+import { t } from '../i18n'
 
 const { showError } = useErrorHandler()
 const { tabs, activeId, active, create: createTab, close: closeTab, select: selectTab, next: nextTab, previous: previousTab, rename: renameTab, init: initTabs, flushSave: flushTabsSave } = useEditorTabs()
@@ -58,7 +60,7 @@ const { state: inputServerState } = useInputServerRuntimeStatus()
 
 const inputServerRunning = computed(() => inputServerState.value === 'running')
 
-const incomingTabTitle = computed(() => `Входящие (${incomingCount.value})`)
+const incomingTabTitle = computed(() => t('editor.incoming.title_count', { count: incomingCount.value }))
 
 const text = computed<string>({
   get: () => active.value.text,
@@ -226,20 +228,20 @@ function cycleRoute() {
 const speakLabel = computed(() => {
   switch (submitState.value) {
     case 'submitting':
-      return 'Отправляется…'
+      return t('editor.submit.sending')
     case 'accepted':
-      return 'Принято'
+      return t('editor.submit.accepted')
     default:
-      return isTwitchOnly.value ? 'Отправить' : 'Озвучить'
+      return isTwitchOnly.value ? t('editor.submit.send') : t('editor.submit.speak')
   }
 })
 
 const speakTitle = computed(() => {
-  if (submitState.value === 'submitting') return 'Отправляется… (Enter)'
+  if (submitState.value === 'submitting') return t('editor.submit.sending_enter')
   // Twitch-only: the button label stays short; the hover tooltip carries the
   // full semantics of the route.
-  if (isTwitchOnly.value) return 'Отправить текст в Twitch, без озвучки (Enter)'
-  return 'Озвучить (Enter)'
+  if (isTwitchOnly.value) return t('editor.submit.twitch_title')
+  return t('editor.submit.speak_enter')
 })
 
 // Quick-editor mode indicator next to the speak button: reflects what happens
@@ -249,12 +251,12 @@ const quickModeIndicator = computed(() => {
     case 'collapse':
       return {
         icon: ArrowDownToLine,
-        title: 'Быстрый редактор: после отправки окно скроется (Enter)',
+        title: t('editor.quick.collapse_hint'),
       }
     case 'return_focus':
       return {
         icon: Undo2,
-        title: 'Быстрый редактор: после отправки фокус вернётся в предыдущее окно (Enter)',
+        title: t('editor.quick.return_focus_hint'),
       }
     default:
       return null
@@ -264,9 +266,9 @@ const quickModeIndicator = computed(() => {
 const speakAriaLabel = computed(() => {
   const outcome = enterOutcomeLabel(quickEditorMode.value)
   const binding = submitContinueBinding.value
-  const second = binding ? `, ${binding} — отправить и продолжить` : ''
-  const action = isTwitchOnly.value ? 'Отправить текст в Twitch' : 'Озвучить текст'
-  return `${action}. Enter — ${outcome}${second}`
+  const second = binding ? `, ${binding} — ${t('editor.submit.continue_binding')}` : ''
+  const action = isTwitchOnly.value ? t('editor.submit.twitch_action') : t('editor.submit.speak_action')
+  return `${action}. ${t('editor.submit.enter_outcome', { outcome })}${second}`
 })
 
 const aiEditorEnabled = computed(() => editorSettings.value?.ai ?? false)
@@ -327,7 +329,7 @@ const typingEnabledOverride = ref<boolean | null>(null)
 const typingEnabled = computed(() => typingEnabledOverride.value ?? editorSettings.value?.typing_enabled ?? true)
 
 const typingToggleTitle = computed(() =>
-  `Передавать набор текста (WebView, VTube Studio) — ${typingEnabled.value ? 'включено' : 'выключено'}`,
+  t('editor.typing.toggle_title', { state: typingEnabled.value ? t('editor.typing.on') : t('editor.typing.off') }),
 )
 
 watch(() => editorSettings.value?.typing_enabled, (val) => {
@@ -519,7 +521,7 @@ async function completeText() {
     tabs.value = applyAiResponse(tabs.value, senderTabId, sourceText, activeId.value, composed)
   } catch (e) {
     debugError('[InputPanel] AI completion failed:', e)
-    showError('Не удалось дописать текст')
+    showError(t('editor.error.ai_complete'))
   } finally {
     if (token === completionIntent) isCompleting.value = false
   }
@@ -537,7 +539,7 @@ async function checkGrammar() {
     debugLog('[InputPanel] Grammar check done')
   } catch (e) {
     debugError('[InputPanel] Grammar check failed:', e)
-    showError('Не удалось проверить грамматику')
+    showError(t('editor.error.ai_grammar'))
   } finally {
     if (token === grammarIntent) isCheckingGrammar.value = false
   }
@@ -557,7 +559,7 @@ async function previewHomographs() {
     focusEditor()
   } catch (e) {
     debugError('[InputPanel] Homograph preview failed:', e)
-    showError(e as string)
+    showError(presentCommandError(e, t('editor.error.accent_preview')))
   } finally {
     isAccenting.value = false
   }
@@ -582,15 +584,15 @@ async function saveAudio() {
   try {
     const filePath = await save({
       defaultPath: `tts_export.${ext}`,
-      filters: [{ name: 'Audio', extensions: [ext] }],
+      filters: [{ name: t('editor.save_audio.filter'), extensions: [ext] }],
     })
     if (!filePath) return
 
     await invoke('speak_text_raw_export', { text: currentText, path: filePath })
-    saveStatusMessage.value = 'Аудио сохранено'
+    saveStatusMessage.value = t('editor.save_audio.saved')
   } catch (e) {
     debugError('[InputPanel] Save audio failed:', e)
-    showError(e as string)
+    showError(presentCommandError(e, t('editor.error.save_audio')))
   }
 }
 
@@ -679,7 +681,7 @@ async function handleSubmit(intent: SubmitKeepIntent) {
     }
   } catch (e) {
     debugError('[InputPanel] Failed to speak:', e)
-    showError(e instanceof Error ? e.message : String(e))
+    showError(presentCommandError(e, t('editor.error.submit')))
     lastSubmitOutcome.value = 'error'
   } finally {
     isSpeakingInFlight.value = false
@@ -723,7 +725,7 @@ function appendPhrase(newText: string) {
 function replacePhrase(newText: string) {
   const currentText = text.value
   if (currentText.trim() && currentText !== newText) {
-    if (!confirm('Заменить текущий текст на выбранную фразу?')) return
+    if (!confirm(t('history.replace_confirm'))) return
   }
   text.value = newText
 }
@@ -752,8 +754,8 @@ const resizeStartHeight = ref(0)
 const resizeHandleDisabled = computed(() => isMinimalMode.value && showHistory.value)
 
 const resizeHandleTitle = computed(() => {
-  if (resizeHandleDisabled.value) return 'История фраз открыта — изменение высоты недоступно'
-  return isMinimalMode.value ? 'Изменить высоту окна' : 'Изменить высоту редактора'
+  if (resizeHandleDisabled.value) return t('editor.resize.history_open')
+  return isMinimalMode.value ? t('editor.resize.window_height') : t('editor.resize.editor_height')
 })
 
 // Ownership of the shared appDrivenResize guard. A compact drag pairs its
@@ -1059,7 +1061,7 @@ defineExpose({ focusEditor })
           <TtsEditor
             ref="editorRef"
             v-model="text"
-            :placeholder="'Введите текст для озвучивания...'"
+            :placeholder="t('editor.placeholder')"
             :replacements="replacementsRecord"
             :usernames="usernamesRecord"
             :editor-height-px="editorHeightPx"
@@ -1103,11 +1105,11 @@ defineExpose({ focusEditor })
           class="action-btn history-btn"
           :class="{ active: showHistory }"
           @click="toggleHistory"
-          title="История фраз"
-          :aria-label="showHistory ? 'Скрыть историю фраз' : 'Показать историю фраз'"
+          :title="t('history.title')"
+          :aria-label="showHistory ? t('history.toggle_hide') : t('history.toggle_show')"
         >
           <Clock v-if="isMinimalMode" :size="14" />
-          <template v-else>История фраз</template>
+          <template v-else>{{ t('history.title') }}</template>
         </button>
         <button
           v-if="!isMinimalMode"
@@ -1115,8 +1117,8 @@ defineExpose({ focusEditor })
           :class="{ loading: isCorrecting || isCompleting || isCheckingGrammar }"
           :disabled="isCorrecting || isCompleting || isCheckingGrammar || !text.trim() || !isAiButtonEnabled"
           @click="correctText"
-          title="Корректировать текст с помощью AI"
-          aria-label="AI корректировка текста"
+          :title="t('editor.ai_correct.title')"
+          :aria-label="t('editor.ai_correct.aria')"
         >
           AI
         </button>

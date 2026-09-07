@@ -1,3 +1,5 @@
+import { t } from '../i18n'
+
 /**
  * Fixed safe user-facing reasons for the `ocr-one-shot-failed` event. These
  * mirror the allowlist in `src-tauri/src/commands/ocr.rs`; nothing else is
@@ -26,7 +28,7 @@ export interface OcrFailureNotification {
 
 interface OcrFailurePresentation {
   severity: OcrFailureSeverity
-  message: string
+  messageKey: string
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -42,41 +44,41 @@ export function isOcrFailureReason(value: unknown): value is OcrFailureReason {
 
 /**
  * Fixed presentation for every allowlisted reason: an empty recognition is a
- * warning, every other category is an error. Messages are concise, fixed,
- * Russian and never interpolate the reason or any backend detail.
+ * warning, every other category is an error. Messages are concise, fixed and
+ * localized; they never interpolate the reason or any backend detail.
  */
 const PRESENTATION_BY_REASON: Record<OcrFailureReason, OcrFailurePresentation> = {
   emptyResult: {
     severity: 'warning',
-    message: 'Текст в выбранной области не найден',
+    messageKey: 'ocr.failure.empty_result',
   },
   noMonitors: {
     severity: 'error',
-    message: 'Не найдено ни одного монитора для захвата экрана',
+    messageKey: 'ocr.failure.no_monitors',
   },
   captureFailed: {
     severity: 'error',
-    message: 'Не удалось захватить изображение экрана',
+    messageKey: 'ocr.failure.capture_failed',
   },
   overlayOpenFailed: {
     severity: 'error',
-    message: 'Не удалось открыть окно выбора области',
+    messageKey: 'ocr.failure.overlay_open_failed',
   },
   overlayHideFailed: {
     severity: 'error',
-    message: 'Не удалось закрыть окно выбора области',
+    messageKey: 'ocr.failure.overlay_hide_failed',
   },
   runtimeUnavailable: {
     severity: 'error',
-    message: 'Распознавание текста сейчас недоступно',
+    messageKey: 'ocr.failure.runtime_unavailable',
   },
   recognitionFailed: {
     severity: 'error',
-    message: 'Не удалось распознать текст в выбранной области',
+    messageKey: 'ocr.failure.recognition_failed',
   },
   intakeFailed: {
     severity: 'error',
-    message: 'Не удалось передать распознанный текст во входящие',
+    messageKey: 'ocr.failure.intake_failed',
   },
 }
 
@@ -93,6 +95,6 @@ export function convertOcrOneShotFailure(
   if (!isRecord(raw)) return null
   const reason = raw.reason
   if (!isOcrFailureReason(reason)) return null
-  const { severity, message } = PRESENTATION_BY_REASON[reason]
-  return { reason, severity, message }
+  const { severity, messageKey } = PRESENTATION_BY_REASON[reason]
+  return { reason, severity, message: t(messageKey) }
 }

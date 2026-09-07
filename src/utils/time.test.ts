@@ -1,8 +1,23 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest'
 import { relativeTime } from './time'
+import { i18n } from '../i18n'
+import enCatalog from '../../locales/en.json'
+import ruCatalog from '../../locales/ru.json'
+
+function activate(localeCode: 'en' | 'ru') {
+  ;(i18n.global.locale as unknown as { value: string }).value = localeCode
+}
 
 describe('relativeTime', () => {
+  beforeAll(() => {
+    const enMessages = (enCatalog as { messages: Record<string, string> }).messages
+    const ruMessages = (ruCatalog as { messages: Record<string, string> }).messages
+    i18n.global.setLocaleMessage('en', enMessages)
+    i18n.global.setLocaleMessage('ru', ruMessages)
+  })
+
   afterEach(() => {
+    activate('en')
     vi.restoreAllMocks()
   })
 
@@ -10,7 +25,16 @@ describe('relativeTime', () => {
     vi.spyOn(Date, 'now').mockReturnValue(timestamp * 1000)
   }
 
-  it('returns "сейчас" for less than 60 seconds', () => {
+  it('returns the localized "just now" in English for less than 60 seconds', () => {
+    activate('en')
+    setNow(1000)
+    expect(relativeTime(950)).toBe('Just now')
+    expect(relativeTime(941)).toBe('Just now')
+    expect(relativeTime(1000)).toBe('Just now')
+  })
+
+  it('returns the localized "just now" in Russian for less than 60 seconds', () => {
+    activate('ru')
     setNow(1000)
     expect(relativeTime(950)).toBe('сейчас')
     expect(relativeTime(941)).toBe('сейчас')

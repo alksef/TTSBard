@@ -1,6 +1,8 @@
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { debugLog, debugError } from '../utils/debug'
+import { presentCommandError } from '../ipc/commandError'
+import { t } from '../i18n'
 import type { VoiceCode, AppSettingsDto } from '../types/settings'
 
 export type TelegramAuthState = 'idle' | 'loading' | 'code_required' | 'password_required' | 'connected' | 'error'
@@ -85,16 +87,8 @@ export function useTelegramAuth() {
 
       return status.value
     } catch (error) {
-      // If client is not initialized, treat as not connected (not an error)
-      const errorMsg = error as string
-      if (errorMsg.includes('не инициализирован') || errorMsg.includes('not initialized')) {
-        status.value = null
-        state.value = 'idle'
-        return null
-      }
-
       debugError('Failed to get Telegram status:', error)
-      errorMessage.value = errorMsg
+      errorMessage.value = presentCommandError(error, t('tts.silero.error.status_failed'))
       state.value = 'error'
       return null
     } finally {
@@ -128,7 +122,7 @@ export function useTelegramAuth() {
     } catch (error) {
       if (opId !== operationId.value) return false
       debugError('Failed to request code:', error)
-      errorMessage.value = error as string
+      errorMessage.value = presentCommandError(error, t('tts.telegram.auth.error.code_request_failed'))
       state.value = 'error'
       return false
     } finally {
@@ -167,18 +161,18 @@ export function useTelegramAuth() {
       }
 
       if (result === 'RestartRequired') {
-        errorMessage.value = 'Сессия устарела. Пожалуйста, запросите код заново.'
+        errorMessage.value = t('tts.silero.error.session_expired')
         state.value = 'idle'
         return false
       }
 
-      errorMessage.value = 'Неожиданный ответ от сервера'
+      errorMessage.value = t('tts.silero.error.unexpected_response')
       state.value = 'error'
       return false
     } catch (error) {
       if (opId !== operationId.value) return false
       debugError('Failed to sign in:', error)
-      errorMessage.value = error as string
+      errorMessage.value = presentCommandError(error, t('tts.telegram.auth.error.sign_in_failed'))
       state.value = 'error'
       return false
     } finally {
@@ -210,18 +204,17 @@ export function useTelegramAuth() {
       }
 
       if (result === 'RestartRequired') {
-        errorMessage.value = 'Сессия устарела. Пожалуйста, запросите код заново.'
+        errorMessage.value = t('tts.silero.error.session_expired')
         state.value = 'idle'
         return false
       }
 
-      errorMessage.value = 'Неожиданный ответ от сервера'
+      errorMessage.value = t('tts.silero.error.unexpected_response')
       state.value = 'error'
       return false
     } catch (error) {
       if (opId !== operationId.value) return false
-      const errStr: string = error instanceof Error ? error.message : String(error)
-      errorMessage.value = errStr
+      errorMessage.value = presentCommandError(error, t('tts.telegram.auth.error.password_check_failed'))
       state.value = 'password_required'
       return false
     } finally {
@@ -245,7 +238,7 @@ export function useTelegramAuth() {
       return true
     } catch (error) {
       debugError('Failed to sign out:', error)
-      errorMessage.value = error as string
+      errorMessage.value = presentCommandError(error, t('tts.silero.error.sign_out_failed'))
       state.value = 'error'
       return false
     } finally {
@@ -264,13 +257,13 @@ export function useTelegramAuth() {
 
       if (!result.success) {
         debugError('[TELEGRAM TTS] Synthesis failed:', result.error)
-        errorMessage.value = result.error || 'Unknown error'
+        errorMessage.value = result.error || t('tts.silero.error.unknown')
       }
 
       return result
     } catch (error) {
       debugError('[TELEGRAM TTS] Exception during synthesis:', error)
-      errorMessage.value = error as string
+      errorMessage.value = presentCommandError(error, t('tts.silero.error.synthesis_failed'))
       return {
         success: false,
         error: error as string,
@@ -293,13 +286,13 @@ export function useTelegramAuth() {
       } else {
         // Таймаут или не удалось получить информацию
         currentVoice.value = null
-        errorMessage.value = 'Не удалось получить информацию о голосе. Проверьте подключение к боту.'
+        errorMessage.value = t('tts.silero.error.voice_info_failed')
       }
 
       return voice
     } catch (error) {
       debugError('[TELEGRAM VOICE] Exception during refresh:', error)
-      errorMessage.value = error as string
+      errorMessage.value = presentCommandError(error, t('tts.silero.error.voice_info_failed'))
       currentVoice.value = null
       return null
     }
@@ -322,14 +315,14 @@ export function useTelegramAuth() {
       if (limitsData) {
         limits.value = limitsData
       } else {
-        limitsError.value = 'Не удалось получить информацию о лимитах'
+        limitsError.value = t('tts.silero.error.limits_failed')
       }
 
       return limitsData
     } catch (error) {
       if (opId !== limitsOpId.value) return null
       debugError('[TELEGRAM LIMITS] Exception during refresh:', error)
-      limitsError.value = error instanceof Error ? error.message : String(error)
+      limitsError.value = presentCommandError(error, t('tts.silero.error.limits_failed'))
       return null
     } finally {
       if (opId === limitsOpId.value) {
@@ -429,15 +422,15 @@ export function useTelegramAuth() {
 
           debugLog('[TELEGRAM VOICES] Voice added successfully')
         } else {
-          throw new Error('Не удалось получить информацию о голосе')
+          throw new Error(t('tts.silero.error.voice_info_unavailable'))
         }
       } else {
         // Бот вернул false - значит неверный код голоса
-        throw new Error('Указан неверный голос. Проверьте код и попробуйте снова.')
+        throw new Error(t('tts.silero.error.invalid_voice_code'))
       }
     } catch (error) {
       debugError('[TELEGRAM VOICES] Failed to add voice code:', error)
-      voiceError.value = error as string
+      voiceError.value = presentCommandError(error, t('tts.silero.add_voice.error'))
       throw error
     } finally {
       voiceLoading.value = false
@@ -470,11 +463,11 @@ export function useTelegramAuth() {
         await refreshVoice()
         debugLog('[TELEGRAM VOICES] Voice selected successfully')
       } else {
-        throw new Error('Не удалось выбрать голос')
+        throw new Error(t('tts.silero.error.voice_select_failed'))
       }
     } catch (error) {
       debugError('[TELEGRAM VOICES] Failed to select voice:', error)
-      voiceError.value = error as string
+      voiceError.value = presentCommandError(error, t('tts.silero.error.voice_select_failed'))
       throw error
     } finally {
       voiceLoading.value = false

@@ -2,6 +2,7 @@ import { linter, type Diagnostic } from '@codemirror/lint'
 import type { EditorView } from '@codemirror/view'
 import type { SpellResult } from '../../types/spell'
 import { debugError } from '../../utils/debug'
+import { t } from '../../i18n'
 
 const WORD_RE = /[a-zа-яё][a-zа-яё-]*/giu
 
@@ -52,7 +53,7 @@ export function createSpellLinter(checkWords: SpellCheckFn, enabled: () => boole
         to,
         severity: 'warning',
         source: SPELLCHECK_SOURCE,
-        message: `«${m[0]}» — нет в словаре`,
+        message: t('editor.spell.word_missing', { word: m[0] }),
         actions: r.suggestions.slice(0, 5).map(s => ({
           name: s,
           apply: (v: EditorView, f: number, t: number) =>

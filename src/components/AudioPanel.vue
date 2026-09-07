@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { Volume2, Sliders } from 'lucide-vue-next';
+import { t } from '../i18n';
 import AudioDevicesTab from './audio/AudioDevicesTab.vue';
 import AudioEffectsTab from './audio/AudioEffectsTab.vue';
 
@@ -21,15 +22,15 @@ function onEffectsDirty(dirty: boolean) {
           @click="activeTab = 'devices'"
         >
           <Volume2 :size="18" />
-          <span>Устройства</span>
+          <span>{{ t('audio.tabs.devices') }}</span>
         </button>
         <button
           :class="{ active: activeTab === 'effects_dsp' }"
-          :aria-label="effectsDirty ? 'Эффекты и DSP (есть несохранённые изменения)' : 'Эффекты и DSP'"
+          :aria-label="effectsDirty ? t('audio.tabs.effects_dsp.dirty') : t('audio.tabs.effects_dsp')"
           @click="activeTab = 'effects_dsp'"
         >
           <Sliders :size="18" />
-          <span>Эффекты и DSP</span>
+          <span>{{ t('audio.tabs.effects_dsp') }}</span>
           <span v-if="effectsDirty" class="dirty-dot" aria-hidden="true">*</span>
         </button>
       </div>

@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event'
 import { normalizeCommandError } from '../ipc/commandError'
 import { debugError } from '../utils/debug'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
+import { t } from '../i18n'
 
 export interface InputServerSettings {
   start_on_boot: boolean
@@ -11,6 +12,8 @@ export interface InputServerSettings {
 }
 
 export type InputServerRuntimeState = 'stopped' | 'starting' | 'running' | 'error'
+
+export type UiMessageKind = 'success' | 'info' | 'error'
 
 export interface InputServerStatus {
   state: InputServerRuntimeState
@@ -45,6 +48,7 @@ export function useInputServer() {
   const status = ref<InputServerStatus>({ state: 'stopped' })
   const loading = ref(false)
   const message = ref<string | null>(null)
+  const messageType = ref<UiMessageKind>('info')
   const startPending = ref(false)
   const stopPending = ref(false)
 
@@ -70,13 +74,13 @@ export function useInputServer() {
   const statusLabel = computed(() => {
     switch (status.value.state) {
       case 'starting':
-        return 'Запускается'
+        return t('input_server.status.starting')
       case 'running':
-        return 'Запущен'
+        return t('input_server.status.running')
       case 'error':
-        return 'Ошибка'
+        return t('input_server.status.error')
       default:
-        return 'Остановлен'
+        return t('input_server.status.stopped')
     }
   })
 
@@ -88,8 +92,9 @@ export function useInputServer() {
     () => `http://${INPUT_SERVER_HOST}:${settings.value.port}${INPUT_SERVER_PATH}`,
   )
 
-  function showMessage(text: string) {
+  function showMessage(text: string, type: UiMessageKind = 'info') {
     message.value = text
+    messageType.value = type
     if (messageTimeout !== null) clearTimeout(messageTimeout)
     messageTimeout = window.setTimeout(() => {
       message.value = null
@@ -122,7 +127,7 @@ export function useInputServer() {
 
   async function saveSettings(): Promise<void> {
     if (!isPortValid.value) {
-      showMessage('Порт должен быть от 1024 до 65535')
+      showMessage(t('input_server.port_error'), 'error')
       return
     }
     loading.value = true
@@ -130,12 +135,12 @@ export function useInputServer() {
       await invoke('save_input_server_settings', { settings: settings.value })
       if (disposed) return
       confirmedSettings = { ...settings.value }
-      showMessage('Настройки сохранены')
+      showMessage(t('input_server.saved'), 'success')
     } catch (e) {
       if (disposed) return
       settings.value = { ...confirmedSettings }
       const errorMessage = e instanceof Error ? e.message : String(e)
-      showMessage('Не удалось сохранить настройки: ' + errorMessage)
+      showMessage(t('input_server.error.save', { detail: errorMessage }), 'error')
     } finally {
       if (!disposed) loading.value = false
     }
@@ -149,11 +154,11 @@ export function useInputServer() {
       if (disposed) return
       // Runtime truth is owned by the backend: wait for the
       // `input-server-status-changed` event instead of claiming a state here.
-      showMessage('Сервер запускается...')
+      showMessage(t('input_server.starting'), 'success')
     } catch (e) {
       if (disposed) return
       const errorMessage = e instanceof Error ? e.message : String(e)
-      showMessage('Не удалось запустить сервер: ' + errorMessage)
+      showMessage(t('input_server.error.start', { detail: errorMessage }), 'error')
     } finally {
       if (!disposed) startPending.value = false
     }
@@ -167,11 +172,11 @@ export function useInputServer() {
       if (disposed) return
       // Runtime truth is owned by the backend: wait for the
       // `input-server-status-changed` event instead of claiming a state here.
-      showMessage('Сервер останавливается...')
+      showMessage(t('input_server.stopping'), 'info')
     } catch (e) {
       if (disposed) return
       const errorMessage = e instanceof Error ? e.message : String(e)
-      showMessage('Не удалось остановить сервер: ' + errorMessage)
+      showMessage(t('input_server.error.stop', { detail: errorMessage }), 'error')
     } finally {
       if (!disposed) stopPending.value = false
     }
@@ -198,9 +203,9 @@ export function useInputServer() {
   async function copyEndpoint(): Promise<void> {
     try {
       await navigator.clipboard.writeText(endpoint.value)
-      showMessage('Адрес скопирован')
+      showMessage(t('input_server.endpoint_copied'), 'success')
     } catch {
-      showMessage('Не удалось скопировать адрес')
+      showMessage(t('input_server.error.copy'), 'error')
     }
   }
 
@@ -235,6 +240,7 @@ export function useInputServer() {
     status,
     loading,
     message,
+    messageType,
     testText,
     testResult,
     testError,

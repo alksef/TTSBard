@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { Lightbulb } from 'lucide-vue-next'
 import { debugLog, debugError } from '../utils/debug'
+import { t } from '../i18n'
 
 // Reactive state
 const replacements = ref('')
@@ -60,7 +61,7 @@ async function testPreprocessing() {
     testOutput.value = result
   } catch (error) {
     debugError('Failed to test preprocessing:', error)
-    testOutput.value = 'Error: ' + error
+    testOutput.value = t('preprocessor.error.test', { detail: String(error) })
   }
 }
 
@@ -87,20 +88,20 @@ onMounted(async () => {
 <template>
   <div class="preprocessor-panel">
     <div v-if="isLoading" class="loading">
-      Загрузка...
+      {{ t('preprocessor.loading') }}
     </div>
 
     <div v-else class="panel-content">
       <!-- Info Banner -->
       <div class="info-banner">
-        <p><span class="icon-wrapper"><Lightbulb :size="14" /></span> В режиме перехвата текст заменяется <strong>мгновенно</strong> при нажатии пробела после <code>\ключ</code> или <code>%юзернейм</code></p>
+        <p><span class="icon-wrapper"><Lightbulb :size="14" /></span> {{ t('preprocessor.info.prefix') }}<strong>{{ t('preprocessor.info.instantly') }}</strong>{{ t('preprocessor.info.middle') }}<code>\{{ t('preprocessor.example.key') }}</code>{{ t('preprocessor.info.or') }}<code>%{{ t('preprocessor.example.username') }}</code></p>
       </div>
 
       <!-- Replacements Section -->
       <section class="section">
-        <h3>Список замен</h3>
+        <h3>{{ t('preprocessor.replacements.title') }}</h3>
         <p class="hint">
-          Используйте <code>\ключ</code> для замены. Формат: <code>ключ значение</code> (через пробел)
+          {{ t('preprocessor.replacements.hint_prefix') }}<code>\{{ t('preprocessor.example.key') }}</code>{{ t('preprocessor.replacements.hint_middle') }}<code>{{ t('preprocessor.example.key') }} {{ t('preprocessor.example.value') }}</code>{{ t('preprocessor.replacements.hint_suffix') }}
         </p>
         <textarea
           v-model="replacements"
@@ -110,15 +111,15 @@ onMounted(async () => {
           rows="10"
         ></textarea>
         <p class="status">
-          Сохраняется при потере фокуса
+          {{ t('preprocessor.save_on_blur') }}
         </p>
       </section>
 
       <!-- Usernames Section -->
       <section class="section">
-        <h3>Список юзернеймов</h3>
+        <h3>{{ t('preprocessor.usernames.title') }}</h3>
         <p class="hint">
-          Используйте <code>%юзернейм</code> для замены. Формат: <code>ключ значение</code> (через пробел)
+          {{ t('preprocessor.usernames.hint_prefix') }}<code>%{{ t('preprocessor.example.username') }}</code>{{ t('preprocessor.usernames.hint_middle') }}<code>{{ t('preprocessor.example.key') }} {{ t('preprocessor.example.value') }}</code>{{ t('preprocessor.usernames.hint_suffix') }}
         </p>
         <textarea
           v-model="usernames"
@@ -128,29 +129,29 @@ onMounted(async () => {
           rows="10"
         ></textarea>
         <p class="status">
-          Сохраняется при потере фокуса
+          {{ t('preprocessor.save_on_blur') }}
         </p>
       </section>
 
       <!-- Test Section -->
       <section class="section test-section">
-        <h3>Проверка</h3>
+        <h3>{{ t('preprocessor.test.title') }}</h3>
         <div class="test-inputs">
           <div class="input-group">
-            <label>Входной текст:</label>
+            <label>{{ t('preprocessor.test.input') }}</label>
             <input
               v-model="testInput"
               type="text"
               class="test-input"
-placeholder="Введите текст для проверки..."
+              :placeholder="t('preprocessor.test.placeholder')"
             />
           </div>
           <button @click="testPreprocessing" class="test-button">
-            Проверить
+            {{ t('preprocessor.test.run') }}
           </button>
           <div class="output-group">
-            <label>Результат:</label>
-            <div class="test-output">{{ testOutput || 'Нажмите "Проверить"' }}</div>
+            <label>{{ t('preprocessor.test.output') }}</label>
+            <div class="test-output">{{ testOutput || t('preprocessor.test.empty') }}</div>
           </div>
         </div>
       </section>

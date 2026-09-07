@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, type Component } from 'vue'
 import { Volume2, Globe, Twitch, Star, ChevronDown } from 'lucide-vue-next'
 import { ROUTE_ORDER, ROUTE_META } from './routeDecode'
 import type { EditorRoute } from './routeDecode'
+import { t } from '../../i18n'
 
 const props = defineProps<{
   route: EditorRoute
@@ -29,7 +30,11 @@ const currentMeta = computed(() => ROUTE_META[props.route])
 
 const buttonAriaLabel = computed(() => {
   const m = currentMeta.value
-  return `${m.label} — ${m.description} (префикс: ${m.shortcut})`
+  return t('editor.route.button_aria', {
+    label: m.label,
+    description: m.description,
+    shortcut: m.shortcut,
+  })
 })
 
 const options = computed(() => ROUTE_ORDER.map((id, index) => {
@@ -43,7 +48,11 @@ const options = computed(() => ROUTE_ORDER.map((id, index) => {
     isDefault,
     isCurrent: id === props.route,
     disabled,
-    title: disabled ? 'Twitch не подключён' : isDefault ? 'по умолчанию' : undefined,
+    title: disabled
+      ? t('editor.route.option_title_twitch_off')
+      : isDefault
+        ? t('editor.route.option_title_default')
+        : undefined,
   }
 }))
 
@@ -151,7 +160,7 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
       <ChevronDown :size="14" class="chevron" :class="{ 'chevron-open': open }" />
     </button>
 
-    <ul v-if="open" class="route-dropdown" role="listbox" aria-label="Маршрут фразы">
+    <ul v-if="open" class="route-dropdown" role="listbox" :aria-label="t('editor.route.listbox_aria')">
       <li
         v-for="opt in options"
         :id="`route-option-${opt.index}`"
@@ -175,8 +184,8 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
           class="option-star"
           :class="{ 'is-default': opt.isDefault }"
           :disabled="opt.disabled"
-          :title="opt.isDefault ? 'по умолчанию' : 'сделать по умолчанию'"
-          :aria-label="opt.isDefault ? 'Маршрут по умолчанию' : 'Сделать маршрутом по умолчанию'"
+          :title="opt.isDefault ? t('editor.route.star_title_default') : t('editor.route.star_title_set')"
+          :aria-label="opt.isDefault ? t('editor.route.star_aria_default') : t('editor.route.star_aria_set')"
           tabindex="-1"
           @click.stop="onStarClick(opt.id, opt.disabled)"
         >

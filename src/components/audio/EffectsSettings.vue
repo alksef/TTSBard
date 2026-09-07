@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, nextTick } from 'vue';
+import { ref, nextTick, computed } from 'vue';
+import { t } from '../../i18n';
 
 interface EffectsDraft {
   enabled: boolean;
@@ -27,11 +28,11 @@ const effectTabs = ['transform', 'boundaries', 'noise'] as const;
 type EffectTab = typeof effectTabs[number];
 const activeEffectTab = ref<EffectTab>('transform');
 
-const tabLabels: Record<EffectTab, string> = {
-  transform: 'Преобразование',
-  boundaries: 'Границы фраз',
-  noise: 'Шумы',
-};
+const tabLabels = computed<Record<EffectTab, string>>(() => ({
+  transform: t('audio.effects.tab.transform'),
+  boundaries: t('audio.effects.tab.boundaries'),
+  noise: t('audio.effects.tab.noise'),
+}));
 
 function isEffectEnabled(tab: EffectTab): boolean {
   switch (tab) {
@@ -45,8 +46,8 @@ function isEffectEnabled(tab: EffectTab): boolean {
 }
 
 function getTabAriaLabel(tab: EffectTab): string {
-  const label = tabLabels[tab];
-  const status = isEffectEnabled(tab) ? 'включен' : 'выключен';
+  const label = tabLabels.value[tab];
+  const status = isEffectEnabled(tab) ? t('audio.enabled') : t('audio.disabled');
   return `${label} (${status})`;
 }
 
@@ -74,7 +75,7 @@ function handleEffectTabKey(e: KeyboardEvent) {
 
 <template>
   <div class="setting-section">
-    <div class="effects-tabs" role="tablist" aria-label="Эффекты">
+    <div class="effects-tabs" role="tablist" :aria-label="t('audio.effects.title')">
       <button
         v-for="tab in effectTabs"
         :key="tab"
@@ -100,7 +101,7 @@ function handleEffectTabKey(e: KeyboardEvent) {
       v-show="activeEffectTab === 'transform'"
     >
       <div class="section-header">
-        <span class="section-title">Преобразование голоса</span>
+        <span class="section-title">{{ t('audio.effects.section.transform') }}</span>
         <label class="toggle-switch">
           <input
             type="checkbox"
@@ -112,7 +113,7 @@ function handleEffectTabKey(e: KeyboardEvent) {
       </div>
 
       <div class="setting-row slider-row" :class="{ disabled: !draftEffects.enabled }">
-        <label>Высота</label>
+        <label>{{ t('audio.effects.pitch') }}</label>
         <div class="slider-group">
           <div class="volume-control">
             <input type="range" min="-100" max="100" step="1" v-model.number="draftEffects.pitch" @input="emit('mark-dirty')" :disabled="!draftEffects.enabled" />
@@ -133,7 +134,7 @@ function handleEffectTabKey(e: KeyboardEvent) {
       </div>
 
       <div class="setting-row slider-row" :class="{ disabled: !draftEffects.enabled }">
-        <label>Темп</label>
+        <label>{{ t('audio.effects.tempo') }}</label>
         <div class="slider-group">
           <div class="volume-control">
             <input type="range" min="-100" max="100" step="1" v-model.number="draftEffects.speed" @input="emit('mark-dirty')" :disabled="!draftEffects.enabled" />
@@ -150,18 +151,18 @@ function handleEffectTabKey(e: KeyboardEvent) {
       </div>
 
       <div class="setting-row slider-row" :class="{ disabled: !draftEffects.enabled }">
-        <label>Громкость</label>
+        <label>{{ t('audio.effects.volume') }}</label>
         <div class="slider-group">
           <div class="volume-control">
             <input type="range" min="0" max="200" step="1" v-model.number="draftEffects.volume" @input="emit('mark-dirty')" :disabled="!draftEffects.enabled" />
             <span class="volume-value">{{ draftEffects.volume }}%</span>
           </div>
           <div class="slider-marks">
-            <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 0 }" :disabled="!draftEffects.enabled" @click="emit('set-effect-value', 'volume', 0)" style="left: 0%" aria-label="Без звука, 0%" title="Без звука, 0%">0</button>
+            <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 0 }" :disabled="!draftEffects.enabled" @click="emit('set-effect-value', 'volume', 0)" style="left: 0%" :aria-label="t('audio.effects.volume.aria_mute')" :title="t('audio.effects.volume.aria_mute')">0</button>
             <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 25 }" :disabled="!draftEffects.enabled" @click="emit('set-effect-value', 'volume', 25)" style="left: 12.5%">25</button>
             <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 50 }" :disabled="!draftEffects.enabled" @click="emit('set-effect-value', 'volume', 50)" style="left: 25%">50</button>
             <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 75 }" :disabled="!draftEffects.enabled" @click="emit('set-effect-value', 'volume', 75)" style="left: 37.5%">75</button>
-            <button type="button" class="mark-btn mark-btn--default" :class="{ active: draftEffects.volume === 100 }" :disabled="!draftEffects.enabled" @click="emit('set-effect-value', 'volume', 100)" style="left: 50%" aria-label="Нормальная громкость, 100%" title="Нормальная громкость, 100%">100</button>
+            <button type="button" class="mark-btn mark-btn--default" :class="{ active: draftEffects.volume === 100 }" :disabled="!draftEffects.enabled" @click="emit('set-effect-value', 'volume', 100)" style="left: 50%" :aria-label="t('audio.effects.volume.aria_normal')" :title="t('audio.effects.volume.aria_normal')">100</button>
             <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 125 }" :disabled="!draftEffects.enabled" @click="emit('set-effect-value', 'volume', 125)" style="left: 62.5%">125</button>
             <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 150 }" :disabled="!draftEffects.enabled" @click="emit('set-effect-value', 'volume', 150)" style="left: 75%">150</button>
             <button type="button" class="mark-btn" :class="{ active: draftEffects.volume === 175 }" :disabled="!draftEffects.enabled" @click="emit('set-effect-value', 'volume', 175)" style="left: 87.5%">175</button>
@@ -171,7 +172,7 @@ function handleEffectTabKey(e: KeyboardEvent) {
       </div>
 
       <div class="setting-row" :class="{ disabled: !draftEffects.enabled }">
-        <label class="setting-label">Сохранять тембр голоса</label>
+        <label class="setting-label">{{ t('audio.effects.formant') }}</label>
         <label class="toggle-switch">
           <input
             type="checkbox"
@@ -191,7 +192,7 @@ function handleEffectTabKey(e: KeyboardEvent) {
       v-show="activeEffectTab === 'boundaries'"
     >
       <div class="section-header">
-        <span class="section-title">Обработка границ фраз</span>
+        <span class="section-title">{{ t('audio.effects.section.boundaries') }}</span>
         <label class="toggle-switch">
           <input
             type="checkbox"
@@ -201,7 +202,7 @@ function handleEffectTabKey(e: KeyboardEvent) {
           <span class="toggle-slider"></span>
         </label>
       </div>
-      <div class="model-hint">Исправление резких начал и концов фраз</div>
+      <div class="model-hint">{{ t('audio.effects.boundaries.hint') }}</div>
     </div>
 
     <div
@@ -211,7 +212,7 @@ function handleEffectTabKey(e: KeyboardEvent) {
       v-show="activeEffectTab === 'noise'"
     >
       <div class="section-header">
-        <span class="section-title">Очистка шума (DeepFilterNet)</span>
+        <span class="section-title">{{ t('audio.effects.section.noise') }}</span>
         <label class="toggle-switch">
           <input
             type="checkbox"
@@ -223,7 +224,7 @@ function handleEffectTabKey(e: KeyboardEvent) {
       </div>
 
       <div class="setting-row slider-row" :class="{ disabled: !draftEffects.enhance_enabled }">
-        <label>Глубина очистки</label>
+        <label>{{ t('audio.effects.atten.label') }}</label>
         <div class="slider-group">
           <div class="volume-control">
             <input type="range" min="5" max="30" step="1" v-model.number="draftEffects.enhance_atten_db" @input="emit('mark-dirty')" :disabled="!draftEffects.enhance_enabled" />
@@ -231,14 +232,14 @@ function handleEffectTabKey(e: KeyboardEvent) {
           </div>
           <div class="slider-marks">
             <button type="button" class="mark-btn" :class="{ active: draftEffects.enhance_atten_db === 5 }" :disabled="!draftEffects.enhance_enabled" @click="emit('set-enhance-atten-db', 5)" style="left: 0%">5</button>
-            <button type="button" class="mark-btn mark-btn--default" :class="{ active: draftEffects.enhance_atten_db === 12 }" :disabled="!draftEffects.enhance_enabled" @click="emit('set-enhance-atten-db', 12)" style="left: 28%" title="Значение по умолчанию, 12 dB" aria-label="Значение по умолчанию, 12 dB">12</button>
+            <button type="button" class="mark-btn mark-btn--default" :class="{ active: draftEffects.enhance_atten_db === 12 }" :disabled="!draftEffects.enhance_enabled" @click="emit('set-enhance-atten-db', 12)" style="left: 28%" :title="t('audio.effects.atten.aria_default')" :aria-label="t('audio.effects.atten.aria_default')">12</button>
             <button type="button" class="mark-btn" :class="{ active: draftEffects.enhance_atten_db === 20 }" :disabled="!draftEffects.enhance_enabled" @click="emit('set-enhance-atten-db', 20)" style="left: 60%">20</button>
             <button type="button" class="mark-btn" :class="{ active: draftEffects.enhance_atten_db === 30 }" :disabled="!draftEffects.enhance_enabled" @click="emit('set-enhance-atten-db', 30)" style="left: 100%">30</button>
           </div>
         </div>
       </div>
 
-      <div class="model-hint">Чрезмерное подавление может вызвать артефакты речи</div>
+      <div class="model-hint">{{ t('audio.effects.noise.hint') }}</div>
     </div>
   </div>
 </template>

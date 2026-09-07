@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { open, confirm } from '@tauri-apps/plugin-dialog'
+import { t } from '../src/i18n'
 import { createAsyncCleanupScope } from '../src/utils/asyncCleanup'
 import { registerSoundPanelAppListeners, installSoundPanelKeydown } from '../src/playback/listeners'
 
@@ -216,8 +217,8 @@ async function onRemoveSet() {
   if (sets.value.length <= 1) return
   const set = sets.value.find(s => s.id === activeSetId.value)
   const name = set ? set.name : ''
-  const confirmedResult = await confirm(`Удалить слой "${name}"? Аудиофайлы останутся.`, {
-    title: 'Удалить слой',
+  const confirmedResult = await confirm(t('soundpanel.remove_set.message', { name }), {
+    title: t('soundpanel.remove_set.title'),
     kind: 'warning'
   })
   if (!confirmedResult) return
@@ -231,7 +232,7 @@ async function onRemoveSet() {
 }
 
 function showNoBinding(key: string) {
-  noBindingMessage.value = `Клавиша ${key} не привязана`
+  noBindingMessage.value = t('soundpanel.no_binding', { key })
 
   if (messageTimeout !== null) {
     clearTimeout(messageTimeout)
@@ -271,7 +272,9 @@ function bindingDesc(key: string): string {
 
 function bindingTitle(key: string): string {
   const b = bindings.value.find(x => x.key === key)
-  return b ? `${key} — ${b.description}` : `${key} (свободно)`
+  return b
+    ? t('soundpanel.binding.assigned', { key, description: b.description })
+    : t('soundpanel.binding.free', { key })
 }
 
 function onKeyActivate(key: string) {
@@ -332,11 +335,11 @@ function openConfigDialog(key: string) {
 async function pickFile() {
   try {
     const result = await open({
-      title: 'Выберите аудиофайл',
+      title: t('soundpanel.file_picker.title'),
       multiple: false,
       filters: [
         {
-          name: 'Аудиофайлы',
+          name: t('soundpanel.file_picker.filter'),
           extensions: ['mp3', 'wav', 'ogg', 'flac']
         }
       ]
@@ -588,16 +591,16 @@ onMounted(async () => {
         <span
           v-if="stayVisible"
           class="persistent-mode-label"
-          title="Панель остаётся видимой после выбора звука"
-          aria-label="Панель закреплена: автоматическое скрытие при потере фокуса приостановлено"
-        >панель закреплена</span>
+          :title="t('soundpanel.pin.tooltip')"
+          :aria-label="t('soundpanel.pin.aria')"
+        >{{ t('soundpanel.pin.label') }}</span>
       </div>
       <div v-if="sets.length > 0" class="set-selector">
         <button
           v-if="sets.length > 1"
           class="set-arrow"
           @click="cycleSet('prev')"
-          title="Предыдущий слой (PageUp)"
+          :title="t('soundpanel.set.prev')"
         >&#9664;</button>
         <div
           ref="setDropdownRef"
@@ -610,12 +613,12 @@ onMounted(async () => {
             role="combobox"
             aria-haspopup="listbox"
             :aria-expanded="showSetMenu"
-            :title="`${activeSetName} (F1–F12 / PageUp / PageDown)`"
+            :title="t('soundpanel.set.select_title', { name: activeSetName })"
             @click="showSetMenu = !showSetMenu"
           >
             <span class="set-select-label">{{ activeSetName }}</span>
           </button>
-          <div v-if="showSetMenu" class="set-menu" role="listbox" aria-label="Слои SoundPanel">
+          <div v-if="showSetMenu" class="set-menu" role="listbox" :aria-label="t('soundpanel.set.menu_aria')">
             <button
               v-for="s in sets"
               :key="s.id"
@@ -633,19 +636,19 @@ onMounted(async () => {
           v-if="sets.length > 1"
           class="set-arrow"
           @click="cycleSet('next')"
-          title="Следующий слой (PageDown)"
+          :title="t('soundpanel.set.next')"
         >&#9654;</button>
         <template v-if="mode === 'config'">
           <button
             class="set-arrow"
             @click="onAddSet"
-            title="Добавить слой"
+            :title="t('soundpanel.set.add')"
           >+</button>
           <button
             v-if="sets.length > 1"
             class="set-arrow"
             @click="onRemoveSet"
-            title="Удалить слой"
+            :title="t('soundpanel.set.remove')"
           >&#215;</button>
         </template>
       </div>
@@ -654,8 +657,8 @@ onMounted(async () => {
           class="mode-toggle"
           :class="{ 'mode-config': mode === 'config' }"
           @click="toggleMode"
-          :title="mode === 'runtime' ? 'runtime (Ctrl+B — настройки)' : 'config (Ctrl+B — воспроизведение)'"
-          :aria-label="mode === 'runtime' ? 'runtime (Ctrl+B — настройки)' : 'config (Ctrl+B — воспроизведение)'"
+          :title="mode === 'runtime' ? t('soundpanel.mode.runtime_title') : t('soundpanel.mode.config_title')"
+          :aria-label="mode === 'runtime' ? t('soundpanel.mode.runtime_title') : t('soundpanel.mode.config_title')"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.28z"/>
@@ -666,8 +669,8 @@ onMounted(async () => {
           class="mode-toggle pin-toggle"
           :class="{ 'panel-pinned': stayVisible }"
           @click="toggleStayVisible"
-          :title="stayVisible ? 'Панель закреплена — не скрывается автоматически' : 'Панель не закреплена — скрывается после выбора, Escape или потери фокуса'"
-          :aria-label="stayVisible ? 'Панель закреплена — не скрывается автоматически' : 'Панель не закреплена — скрывается после выбора, Escape или потери фокуса'"
+          :title="stayVisible ? t('soundpanel.pin_toggle.pinned') : t('soundpanel.pin_toggle.unpinned')"
+          :aria-label="stayVisible ? t('soundpanel.pin_toggle.pinned') : t('soundpanel.pin_toggle.unpinned')"
         >
           <svg v-if="stayVisible" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 17v5M5 17h14M15 4.5V2H9v2.5a2 2 0 01-.4 1.2L7 8h10l-1.6-2.3a2 2 0 01-.4-1.2zM6 8l-1 9h14l-1-9"/>
@@ -677,7 +680,7 @@ onMounted(async () => {
             <line x1="2" y1="2" x2="22" y2="22"/>
           </svg>
         </button>
-        <button class="close-btn" @click="closeWindow" title="Закрыть (Esc)" aria-label="Закрыть">
+        <button class="close-btn" @click="closeWindow" :title="t('soundpanel.close.title')" :aria-label="t('common.close')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18" />
             <line x1="6" y1="6" x2="18" y2="18" />
@@ -713,9 +716,9 @@ onMounted(async () => {
         </div>
 
         <div v-else class="hint-message">
-          <div>Нет привязок звуков</div>
+          <div>{{ t('soundpanel.empty.title') }}</div>
           <div class="hint-sub">
-            Переключитесь в режим настроек (Ctrl+B) и нажмите клавишу, чтобы добавить звук
+            {{ t('soundpanel.empty.hint') }}
           </div>
         </div>
 
@@ -724,13 +727,13 @@ onMounted(async () => {
 
     <div v-if="showAddSetDialog" class="config-dialog-overlay">
       <div class="config-dialog">
-        <div class="config-dialog-title">Новый слой</div>
+        <div class="config-dialog-title">{{ t('soundpanel.add_set.title') }}</div>
         <input
           ref="addSetInput"
           v-model="newSetName"
           type="text"
           class="config-input"
-          placeholder="Имя слоя"
+          :placeholder="t('soundpanel.add_set.name_placeholder')"
           @keydown.enter="confirmAddSet"
         />
         <div class="config-actions">
@@ -738,32 +741,32 @@ onMounted(async () => {
             class="config-save"
             :disabled="!newSetName.trim() || isAddingSet"
             @click="confirmAddSet"
-          >{{ isAddingSet ? 'Добавление…' : 'Добавить' }}</button>
-          <button class="config-cancel" @click="showAddSetDialog = false">Отмена</button>
+          >{{ isAddingSet ? t('soundpanel.add_set.adding') : t('soundpanel.add_set.add') }}</button>
+          <button class="config-cancel" @click="showAddSetDialog = false">{{ t('common.cancel') }}</button>
         </div>
       </div>
     </div>
 
     <div v-if="showConfigDialog" class="config-dialog-overlay">
       <div class="config-dialog">
-        <div class="config-dialog-title">Настройка: {{ configKey }}</div>
+        <div class="config-dialog-title">{{ t('soundpanel.config.title', { key: configKey }) }}</div>
         <input
           v-model="configDescription"
           type="text"
           class="config-input"
-          placeholder="Описание"
+          :placeholder="t('soundpanel.config.description_placeholder')"
         />
         <div class="config-file-row">
-          <span class="config-file-path">{{ configFilePath || 'Файл не выбран' }}</span>
-          <button class="config-browse" @click="pickFile">Обзор…</button>
+          <span class="config-file-path">{{ configFilePath || t('soundpanel.config.no_file') }}</span>
+          <button class="config-browse" @click="pickFile">{{ t('soundpanel.config.browse') }}</button>
         </div>
         <div class="config-actions">
           <button
             class="config-save"
             :disabled="!configDescription || !configFilePath"
             @click="saveConfigBinding"
-          >Сохранить</button>
-          <button class="config-cancel" @click="showConfigDialog = false">Отмена</button>
+          >{{ t('common.save') }}</button>
+          <button class="config-cancel" @click="showConfigDialog = false">{{ t('common.cancel') }}</button>
         </div>
       </div>
     </div>

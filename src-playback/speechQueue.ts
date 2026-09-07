@@ -1,3 +1,5 @@
+import { t } from '../src/i18n'
+
 export type JobStatus =
   | 'queued'
   | 'generating'
@@ -27,18 +29,8 @@ export interface SpeechQueueStateDto {
 
 export type PlaybackStatus = 'Idle' | 'Playing' | 'Paused' | 'Stopped'
 
-const JOB_STATUS_LABELS: Record<JobStatus, string> = {
-  queued: 'Ожидание',
-  generating: 'Генерация',
-  ready: 'Готово',
-  playing: 'Проигрывается',
-  completed: 'Завершено',
-  failed: 'Ошибка',
-  cancelled: 'Отменено',
-}
-
 export function statusLabel(status: JobStatus): string {
-  return JOB_STATUS_LABELS[status] ?? status
+  return t(`playback.status.${status}`)
 }
 
 export function effectiveStatus(
@@ -46,7 +38,7 @@ export function effectiveStatus(
   playbackStatus: PlaybackStatus,
 ): string {
   if (jobStatus === 'playing' && playbackStatus === 'Paused') {
-    return 'Пауза'
+    return t('playback.status.paused')
   }
   return statusLabel(jobStatus)
 }
@@ -364,32 +356,7 @@ export function activityActions(row: ActivityRow): ActivityActions {
 }
 
 export function activityStatusLabel(status: ActivityStatus): string {
-  switch (status) {
-    case 'queued':
-      return 'Ожидание'
-    case 'generating':
-      return 'Генерация'
-    case 'ready':
-      return 'Готово'
-    case 'playing':
-      return 'Проигрывается'
-    case 'paused':
-      return 'Пауза'
-    case 'stopped':
-      return 'Остановлено'
-    case 'completed':
-      return 'Завершено'
-    case 'replay_queued':
-      return 'Ожидает повтора'
-    case 'failed':
-      return 'Ошибка'
-    case 'cancelled':
-      return 'Отменено'
-    case 'idle':
-      return 'Ожидает'
-    default:
-      return status
-  }
+  return t(`playback.status.${status}`)
 }
 
 export function jsonEquals(a: unknown, b: unknown): boolean {

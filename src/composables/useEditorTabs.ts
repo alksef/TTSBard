@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { ROUTE_ORDER } from '../components/editor/routeDecode'
 import type { EditorRoute } from '../components/editor/routeDecode'
 import { useErrorHandler } from './useErrorHandler'
+import { t } from '../i18n'
 
 export interface EditorTab {
   id: string
@@ -34,8 +35,12 @@ function genId(): string {
   return `tab-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
+function defaultTabTitle(number: number): string {
+  return t('editor.tab.default_title', { number })
+}
+
 export function useEditorTabs() {
-  const tabs = ref<EditorTab[]>([{ id: genId(), title: 'Текст 1', text: '' }])
+  const tabs = ref<EditorTab[]>([{ id: genId(), title: defaultTabTitle(1), text: '' }])
   const activeId = ref<string>(tabs.value[0].id)
   const isHydrated = ref(false)
   const lastSaveError = ref<string | null>(null)
@@ -60,7 +65,7 @@ export function useEditorTabs() {
 
   function create(): string {
     const n = tabs.value.length + 1
-    const tab: EditorTab = { id: genId(), title: `Текст ${n}`, text: '' }
+    const tab: EditorTab = { id: genId(), title: defaultTabTitle(n), text: '' }
     tabs.value.push(tab)
     activeId.value = tab.id
     return tab.id
@@ -80,7 +85,7 @@ export function useEditorTabs() {
     tabs.value.splice(idx, 1)
 
     if (tabs.value.length === 0) {
-      const tab: EditorTab = { id: genId(), title: 'Текст 1', text: '' }
+      const tab: EditorTab = { id: genId(), title: defaultTabTitle(1), text: '' }
       tabs.value.push(tab)
       activeId.value = tab.id
       return
@@ -178,7 +183,7 @@ export function useEditorTabs() {
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
       lastSaveError.value = message
-      showError('Не удалось сохранить вкладки: ' + message)
+      showError(t('editor.tabs.save_error', { detail: message }))
     } finally {
       inFlight = null
       if (pendingSnapshot) {

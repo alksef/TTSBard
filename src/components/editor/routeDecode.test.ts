@@ -1,6 +1,13 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll } from 'vitest'
 import { decodeRoutePrefix, ROUTE_ORDER, ROUTE_META } from './routeDecode'
 import type { EditorRoute } from './routeDecode'
+import { i18n } from '../../i18n'
+import ruCatalog from '../../../locales/ru.json'
+
+beforeAll(() => {
+  i18n.global.setLocaleMessage('ru', (ruCatalog as { messages: Record<string, string> }).messages)
+  ;(i18n.global.locale as unknown as { value: string }).value = 'ru'
+})
 
 const ALL_ROUTES: EditorRoute[] = ['everywhere', 'no_twitch', 'voice_only', 'twitch_only']
 

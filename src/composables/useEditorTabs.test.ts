@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest'
 
 const { mockInvoke } = vi.hoisted(() => ({
   mockInvoke: vi.fn(),
@@ -9,6 +9,13 @@ vi.mock('@tauri-apps/api/core', () => ({
 }))
 
 import { cycleTabId, useEditorTabs } from './useEditorTabs'
+import { i18n } from '../i18n'
+import ruCatalog from '../../locales/ru.json'
+
+beforeAll(() => {
+  i18n.global.setLocaleMessage('ru', (ruCatalog as { messages: Record<string, string> }).messages)
+  ;(i18n.global.locale as unknown as { value: string }).value = 'ru'
+})
 
 let uuidCounter = 0
 

@@ -7,6 +7,7 @@ import TelegramConnectionStatus from './TelegramConnectionStatus.vue';
 import type { VoiceCode } from '../../types/settings';
 import type { CurrentVoice, Limits } from '../../composables/useTelegramAuth';
 import { parseLimitsResetTimestamp, formatLimitCounter } from '../../utils/sileroLimits';
+import { t } from '../../i18n';
 
 interface Props {
   active?: boolean;
@@ -55,7 +56,7 @@ const props = withDefaults(defineProps<Props>(), {
   reconnecting: false,
   proxyMode: 'none',
   proxyModes: () => [
-    { value: 'none', label: 'Нет' },
+    { value: 'none', label: '' },
     { value: 'socks5', label: 'SOCKS5' },
     { value: 'mtproxy', label: 'MTProxy' }
   ],
@@ -82,7 +83,7 @@ const limitsResetFormatted = computed(() => {
 
 const limitsTooltip = computed(() => {
   if (!props.limits?.reset_timestamp) return ''
-  return `Сброс: ${props.limits.reset_timestamp}`
+  return t('tts.silero.limits.reset_tooltip', { timestamp: props.limits.reset_timestamp })
 })
 
 const showAddVoiceDialog = ref(false);
@@ -115,7 +116,7 @@ async function handleAddVoice() {
   // Проверка на дубликаты
   const duplicate = props.savedVoices?.find(v => v.id.toLowerCase() === code);
   if (duplicate) {
-    duplicateError.value = `Голос "${code}" уже есть в списке`;
+    duplicateError.value = t('tts.silero.add_voice.duplicate', { code });
     return;
   }
 
@@ -136,14 +137,14 @@ async function handleAddVoice() {
       duplicateError.value = null;
     } else {
       // Ошибка - показываем и не закрываем диалог
-      addVoiceError.value = error || 'Ошибка добавления голоса';
+      addVoiceError.value = error || t('tts.silero.add_voice.error');
     }
   });
 }
 
 async function handleRemoveVoice(voiceId: string) {
-  const confirmed = await confirm(`Удалить голос "${voiceId}"?`, {
-    title: 'Подтверждение удаления',
+  const confirmed = await confirm(t('tts.remove_voice.message', { name: voiceId }), {
+    title: t('tts.remove_voice.title'),
     kind: 'warning'
   });
 
@@ -183,20 +184,20 @@ function handleSelectVoice(voiceId: string) {
 
     <div v-if="connected && limits" class="limits-row">
       <span class="limits-counters">
-        Символы: {{ limitsVoicesFormatted }}
+        {{ t('tts.silero.limits.characters') }} {{ limitsVoicesFormatted }}
         <template v-if="limitsResetFormatted">
-          · <span :title="limitsTooltip">обновится {{ limitsResetFormatted }}</span>
+          · <span :title="limitsTooltip">{{ t('tts.silero.limits.will_reset', { when: limitsResetFormatted }) }}</span>
         </template>
         <template v-else-if="limits.reset_timestamp">
-          · <span :title="limitsTooltip">обновится —</span>
+          · <span :title="limitsTooltip">{{ t('tts.silero.limits.will_reset_dash') }}</span>
         </template>
-        <span v-if="limitsError" class="limits-stale-cue" title="Ошибка обновления">⚠</span>
+        <span v-if="limitsError" class="limits-stale-cue" :title="t('tts.silero.limits.stale')">⚠</span>
       </span>
       <button
         class="limits-refresh"
         :disabled="limitsLoading"
-        :title="limitsError || 'Обновить лимиты'"
-        :aria-label="limitsError || 'Обновить лимиты'"
+        :title="limitsError || t('tts.silero.limits.refresh')"
+        :aria-label="limitsError || t('tts.silero.limits.refresh')"
         @click="$emit('refresh-limits')"
       >
         <Loader2 v-if="limitsLoading" :size="14" class="spinner" />
@@ -205,11 +206,11 @@ function handleSelectVoice(voiceId: string) {
     </div>
 
     <div v-else-if="connected && !limits && !limitsLoading" class="limits-row limits-row-unavailable">
-      <span class="limits-counters">Символы: —</span>
+      <span class="limits-counters">{{ t('tts.silero.limits.characters') }} —</span>
       <button
         class="limits-refresh"
-        :title="limitsError || 'Загрузить лимиты'"
-        :aria-label="limitsError || 'Загрузить лимиты'"
+        :title="limitsError || t('tts.silero.limits.load')"
+        :aria-label="limitsError || t('tts.silero.limits.load')"
         @click="$emit('refresh-limits')"
       >
         <RefreshCw :size="14" />
@@ -218,7 +219,7 @@ function handleSelectVoice(voiceId: string) {
 
     <div v-else-if="connected && limitsLoading && !limits" class="limits-row limits-row-loading">
       <Loader2 :size="14" class="spinner" />
-      <span class="limits-counters">Загрузка лимитов...</span>
+      <span class="limits-counters">{{ t('tts.silero.limits.loading') }}</span>
     </div>
 
     <!-- Voice Management Section (shown when connected) -->
@@ -226,21 +227,21 @@ function handleSelectVoice(voiceId: string) {
       <!-- Saved Voices List -->
       <div class="saved-voices-section">
         <div class="voice-header">
-          <label>Голоса</label>
+          <label>{{ t('tts.voices') }}</label>
           <div class="voice-header-buttons">
             <button
               @click="$emit('refresh-voice')"
               :disabled="voiceLoading"
               class="add-button"
-              title="Обновить текущий голос"
+              :title="t('tts.silero.refresh_voice')"
             >
               <Loader2 v-if="voiceLoading" :size="16" class="spinner" />
               <RefreshCw v-else :size="16" />
-              <span>Обновить текущий голос</span>
+              <span>{{ t('tts.silero.refresh_voice') }}</span>
             </button>
             <button @click="handleOpenAddVoiceDialog" class="add-button">
               <Plus :size="16" />
-              <span>Добавить</span>
+              <span>{{ t('tts.add') }}</span>
             </button>
           </div>
         </div>
@@ -258,14 +259,15 @@ function handleSelectVoice(voiceId: string) {
             <button
               @click.stop="handleRemoveVoice(voice.id)"
               class="remove-button"
-              title="Удалить"
+              :title="t('tts.delete')"
+              :aria-label="t('tts.delete')"
             >
               <Trash2 :size="14" />
             </button>
           </div>
         </div>
         <div v-else class="empty-voices">
-          Нет добавленных голосов
+          {{ t('tts.no_voices_added') }}
         </div>
       </div>
     </div>
@@ -273,10 +275,10 @@ function handleSelectVoice(voiceId: string) {
     <!-- Add Voice Dialog -->
     <div v-if="showAddVoiceDialog" class="dialog-overlay" @click.self="handleCloseAddVoiceDialog">
       <div class="dialog">
-        <h3>Добавить голос</h3>
+        <h3>{{ t('tts.add_voice') }}</h3>
         <input
           v-model="voiceCodeInput"
-          placeholder="Код голоса (например: hamster_clerk)"
+          :placeholder="t('tts.silero.add_voice.code_placeholder')"
           @keyup.enter="handleAddVoice"
           class="voice-input"
           ref="voiceInput"
@@ -284,7 +286,7 @@ function handleSelectVoice(voiceId: string) {
         />
         <input
           v-model="voiceDescriptionInput"
-          placeholder="Описание (необязательно)"
+          :placeholder="t('tts.silero.add_voice.desc_placeholder')"
           @keyup.enter="handleAddVoice"
           class="voice-input"
           :class="{ 'has-error': duplicateError || addVoiceError }"
@@ -299,7 +301,7 @@ function handleSelectVoice(voiceId: string) {
         </div>
         <div class="dialog-buttons">
           <button @click="handleCloseAddVoiceDialog" class="cancel-button">
-            Отмена
+            {{ t('common.cancel') }}
           </button>
           <button
             @click="handleAddVoice"
@@ -307,7 +309,7 @@ function handleSelectVoice(voiceId: string) {
             class="add-button-confirm"
           >
             <Loader2 v-if="isAddingVoice" :size="16" class="spinner" />
-            {{ isAddingVoice ? 'Добавление...' : 'Добавить' }}
+            {{ isAddingVoice ? t('tts.adding') : t('tts.add') }}
           </button>
         </div>
       </div>

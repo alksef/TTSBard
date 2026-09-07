@@ -2,20 +2,14 @@
 import { computed } from 'vue'
 import { Copy, AlertTriangle, Play, Square, Info } from 'lucide-vue-next'
 import { useInputServer } from '../composables/useInputServer'
-
-const messageBoxClass = computed(() => {
-  const m = (message.value ?? '').toLowerCase()
-  if (['failed', 'error', 'ошибка', 'не удалось'].some(k => m.includes(k))) return 'error'
-  if (['запускается', 'сохранен', 'скопирован', 'очеред'].some(k => m.includes(k))) return 'success'
-  if (['останавливается'].some(k => m.includes(k))) return 'info'
-  return ''
-})
+import { t } from '../i18n'
 
 const {
   settings,
   status,
   loading,
   message,
+  messageType,
   testText,
   testResult,
   testError,
@@ -34,6 +28,8 @@ const {
   sendTest,
   copyEndpoint,
 } = useInputServer()
+
+const messageBoxClass = computed(() => (message.value ? messageType.value : ''))
 </script>
 
 <template>
@@ -44,7 +40,7 @@ const {
 
     <section class="settings-section">
       <div class="section-header server-header">
-        <h2>Сервер</h2>
+        <h2>{{ t('input_server.server') }}</h2>
         <div class="server-status">
           <span
             class="status-indicator"
@@ -60,8 +56,8 @@ const {
             <button
               class="status-button stop"
               :disabled="stopPending"
-              title="Остановить"
-              aria-label="Остановить"
+              :title="t('input_server.stop')"
+              :aria-label="t('input_server.stop')"
               @click="stopInputServer"
             >
               <Square :size="14" />
@@ -72,16 +68,16 @@ const {
               class="status-button start"
               :class="{ disabled: !isPortValid }"
               :disabled="!isPortValid || startPending"
-              title="Запустить"
-              aria-label="Запустить"
+              :title="t('input_server.start')"
+              :aria-label="t('input_server.start')"
               @click="startInputServer"
             >
               <Play :size="14" />
             </button>
             <button
               class="status-button stop disabled"
-              title="Остановить"
-              aria-label="Остановить"
+              :title="t('input_server.stop')"
+              :aria-label="t('input_server.stop')"
               disabled
             >
               <Square :size="14" />
@@ -103,12 +99,12 @@ const {
             :disabled="loading"
             @change="saveSettings"
           />
-          <span>Запускать при старте приложения</span>
+          <span>{{ t('input_server.start_on_boot') }}</span>
         </label>
       </div>
 
       <div class="setting-row">
-        <label>Порт:</label>
+        <label>{{ t('input_server.port') }}:</label>
         <div class="address-inputs">
           <input
             type="number"
@@ -121,17 +117,17 @@ const {
             placeholder="10101"
           />
           <button class="save-button-inline" :disabled="loading" @click="saveSettings">
-            Сохранить
+            {{ t('common.save') }}
           </button>
         </div>
-        <span v-if="!isPortValid" class="error-text">Порт должен быть от 1024 до 65535</span>
+        <span v-if="!isPortValid" class="error-text">{{ t('input_server.port_error') }}</span>
       </div>
     </section>
 
     <div class="info-callout">
       <Info :size="16" class="info-icon" />
       <span>
-        Используется активный TTS-провайдер/пайплайн; доставка только аудио — текст не отправляется в WebView или Twitch.
+        {{ t('input_server.info_callout') }}
       </span>
     </div>
 
@@ -142,24 +138,24 @@ const {
           <label class="url-code url-code-wide">{{ endpoint }}</label>
           <button
             class="icon-button"
-            title="Копировать адрес"
-            aria-label="Копировать адрес"
+            :title="t('input_server.copy_endpoint')"
+            :aria-label="t('input_server.copy_endpoint')"
             @click="copyEndpoint"
           >
             <Copy :size="16" />
           </button>
         </div>
       </div>
-      <p class="format-hint">Формат: POST JSON <code class="inline-code">{"text":"реплика"}</code></p>
+      <p class="format-hint">{{ t('input_server.format_hint') }} <code class="inline-code">{"text":"реплика"}</code></p>
     </section>
 
     <section class="settings-section">
-      <h2>Тест</h2>
+      <h2>{{ t('input_server.test.title') }}</h2>
       <div class="setting-row">
         <input
           type="text"
           v-model="testText"
-          placeholder="Текст для отправки..."
+          :placeholder="t('input_server.test.placeholder')"
           class="test-input"
           @keyup.enter="sendTest"
         />
@@ -168,12 +164,12 @@ const {
           :disabled="!testText.trim() || testPending"
           @click="sendTest"
         >
-          {{ testPending ? 'Отправка...' : 'Отправить' }}
+          {{ testPending ? t('input_server.test.sending') : t('input_server.test.send') }}
         </button>
       </div>
       <div v-if="testResult" class="test-result" :class="testResult.status">
-        <template v-if="testResult.status === 'queued'">Поставлен в очередь воспроизведения</template>
-        <template v-else>Добавлен во «Входящие»</template>
+        <template v-if="testResult.status === 'queued'">{{ t('input_server.test.queued') }}</template>
+        <template v-else>{{ t('input_server.test.pending_review') }}</template>
       </div>
       <div v-else-if="testError" class="test-result error">{{ testError }}</div>
     </section>

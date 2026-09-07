@@ -6,13 +6,25 @@ import { useEditorSettings } from '../../composables/useAppSettings';
 import { useRuAccentRuntime } from '../../composables/useRuAccentRuntime';
 import type { HomographAccentorPackDto, QuickEditorMode } from '../../types/settings';
 import { normalizeTypingTimeout } from '../../utils/validateTypingTimeout';
+import { t } from '../../i18n';
+import { presentCommandError } from '../../ipc/commandError';
 import EditorFontSettings from './EditorFontSettings.vue';
 
 const editorSettings = useEditorSettings();
 
+type MessageSeverity = 'error' | 'success' | 'warning' | 'info';
+
 const emit = defineEmits<{
-  (e: 'show-message', message: string): void;
+  (e: 'show-message', message: string, severity?: MessageSeverity): void;
 }>();
+
+function emitSaved() {
+  emit('show-message', t('settings.editor.saved'), 'success');
+}
+
+function emitError(key: string, error: unknown) {
+  emit('show-message', presentCommandError(error, t(key)), 'error');
+}
 
 const quickEditorMode = computed<QuickEditorMode>(() => editorSettings.value?.quick ?? 'disabled');
 
@@ -32,11 +44,11 @@ onUnmounted(() => {
   typingTimeoutInput.value = editorSettings.value?.typing_idle_timeout_ms ?? 800
 })
 
-const quickModeOptions: { value: QuickEditorMode; label: string }[] = [
-  { value: 'disabled', label: 'Отключено' },
-  { value: 'collapse', label: 'Сворачивать' },
-  { value: 'return_focus', label: 'Возвращать фокус предыдущему окну' },
-]
+const quickModeOptions = computed<{ value: QuickEditorMode; label: string }[]>(() => [
+  { value: 'disabled', label: t('settings.editor.quick.options.disabled') },
+  { value: 'collapse', label: t('settings.editor.quick.options.collapse') },
+  { value: 'return_focus', label: t('settings.editor.quick.options.return_focus') },
+])
 
 async function onTypingTimeoutChange() {
   const raw = typingTimeoutInput.value
@@ -48,10 +60,9 @@ async function onTypingTimeoutChange() {
   typingTimeoutInput.value = normalized
   try {
     await invoke('set_editor_typing_idle_timeout_ms', { ms: normalized })
-    emit('show-message', 'Настройка сохранена')
+    emitSaved()
   } catch (e) {
-    const errorMessage = e instanceof Error ? e.message : String(e)
-    emit('show-message', 'Ошибка сохранения задержки набора: ' + errorMessage)
+    emitError('settings.editor.error.typing_timeout', e)
     typingTimeoutInput.value = editorSettings.value?.typing_idle_timeout_ms ?? 800
   }
 }
@@ -59,10 +70,9 @@ async function onTypingTimeoutChange() {
 async function setQuickMode(mode: QuickEditorMode) {
   try {
     await invoke('set_editor_quick', { value: mode });
-    emit('show-message', 'Настройка сохранена');
+    emitSaved();
   } catch (e) {
-    const errorMessage = e instanceof Error ? e.message : String(e);
-    emit('show-message', 'Ошибка переключения быстрого редактора: ' + errorMessage);
+    emitError('settings.editor.error.quick_mode', e);
   }
 }
 
@@ -70,10 +80,9 @@ async function toggleSpellcheck() {
   try {
     const newValue = !(editorSettings.value?.spellcheck_enabled ?? true)
     await invoke('set_editor_spellcheck_enabled', { value: newValue })
-    emit('show-message', 'Настройка сохранена')
+    emitSaved()
   } catch (e) {
-    const errorMessage = e instanceof Error ? e.message : String(e)
-    emit('show-message', 'Ошибка переключения орфографии: ' + errorMessage)
+    emitError('settings.editor.error.spellcheck', e)
   }
 }
 
@@ -81,10 +90,9 @@ async function toggleKeepText() {
   try {
     const newValue = !(editorSettings.value?.keep_text_after_send ?? false)
     await invoke('set_editor_keep_text', { enabled: newValue })
-    emit('show-message', 'Настройка сохранена')
+    emitSaved()
   } catch (e) {
-    const errorMessage = e instanceof Error ? e.message : String(e)
-    emit('show-message', 'Ошибка переключения сохранения текста: ' + errorMessage)
+    emitError('settings.editor.error.keep_text', e)
   }
 }
 
@@ -133,13 +141,13 @@ const accentorSelectedMissing = computed(() => {
 const accentorStatusText = computed(() => {
   switch (accentorRuntimeStatus.value) {
     case 'not_loaded':
-      return 'Не загружена'
+      return t('settings.editor.accentor.status.not_loaded')
     case 'loading':
-      return 'Загружается'
+      return t('settings.editor.accentor.status.loading')
     case 'ready':
-      return 'Готова'
+      return t('settings.editor.accentor.status.ready')
     case 'failed':
-      return 'Ошибка загрузки'
+      return t('settings.editor.accentor.status.failed')
     default:
       return ''
   }
@@ -148,13 +156,13 @@ const accentorStatusText = computed(() => {
 const accentorLoadTitle = computed(() => {
   switch (accentorRuntimeStatus.value) {
     case 'loading':
-      return 'Модель RUAccent загружается'
+      return t('settings.editor.accentor.load.loading')
     case 'ready':
-      return 'Модель RUAccent загружена'
+      return t('settings.editor.accentor.load.ready')
     case 'failed':
-      return 'Повторить загрузку модели RUAccent'
+      return t('settings.editor.accentor.load.retry')
     default:
-      return 'Загрузить модель RUAccent'
+      return t('settings.editor.accentor.load.default')
   }
 })
 
@@ -162,8 +170,7 @@ async function loadAccentorPacks() {
   try {
     accentorPacks.value = await refreshPacks()
   } catch (e) {
-    const errorMessage = e instanceof Error ? e.message : String(e)
-    emit('show-message', 'Ошибка загрузки моделей RUAccent: ' + errorMessage)
+    emitError('settings.editor.error.accentor_load_models', e)
   }
 }
 
@@ -173,8 +180,7 @@ async function rescanAccentorPacks() {
   try {
     accentorPacks.value = await rescanPacks()
   } catch (e) {
-    const errorMessage = e instanceof Error ? e.message : String(e)
-    emit('show-message', 'Ошибка обновления списка моделей RUAccent: ' + errorMessage)
+    emitError('settings.editor.error.accentor_rescan', e)
   } finally {
     accentorRescanPending.value = false
   }
@@ -188,11 +194,10 @@ onMounted(async () => {
 async function saveAccentor(enabled: boolean, packId: string | null) {
   try {
     await invoke('set_editor_homograph_accentor', { enabled, accentorPackId: packId })
-    emit('show-message', 'Настройка сохранена')
+    emitSaved()
     await loadAccentorPacks()
   } catch (e) {
-    const errorMessage = e instanceof Error ? e.message : String(e)
-    emit('show-message', 'Ошибка сохранения ударений: ' + errorMessage)
+    emitError('settings.editor.error.accentor_save', e)
     syncAccentorFromSettings()
   }
 }
@@ -229,10 +234,9 @@ async function toggleLoadOnStart() {
   try {
     const next = !(homographAccentor.value?.load_on_start ?? false)
     await invoke('set_editor_homograph_accentor_load_on_start', { loadOnStart: next })
-    emit('show-message', 'Настройка сохранена')
+    emitSaved()
   } catch (e) {
-    const errorMessage = e instanceof Error ? e.message : String(e)
-    emit('show-message', 'Ошибка сохранения автозагрузки: ' + errorMessage)
+    emitError('settings.editor.error.accentor_autoload', e)
   }
 }
 
@@ -247,8 +251,8 @@ watch(editorSettings, (newSettings) => {
 
     <section class="settings-section">
       <div class="card-header">
-        <h3 class="card-title">Быстрый редактор</h3>
-        <p class="card-desc">Реакция на Enter, Esc</p>
+        <h3 class="card-title">{{ t('settings.editor.quick.title') }}</h3>
+        <p class="card-desc">{{ t('settings.editor.quick.desc') }}</p>
       </div>
       <div class="setting-row" v-for="opt in quickModeOptions" :key="opt.value">
         <label class="setting-label radio-label">
@@ -262,7 +266,7 @@ watch(editorSettings, (newSettings) => {
           <span>{{ opt.label }}</span>
         </label>
         <span v-if="opt.value === 'return_focus'" class="setting-hint">
-          Работает только если окно было вызвано по горячей клавише
+          {{ t('settings.editor.quick.return_focus.hint') }}
         </span>
       </div>
       <div class="setting-row">
@@ -273,10 +277,10 @@ watch(editorSettings, (newSettings) => {
             class="checkbox-input"
             @change="toggleKeepText"
           />
-          <span>Не очищать текст после отправки</span>
+          <span>{{ t('settings.editor.keep_text_after_send') }}</span>
         </label>
         <span class="setting-hint">
-          Отправленный текст остаётся в редакторе для правки или повторной отправки (Alt+Enter инвертирует разово)
+          {{ t('settings.editor.keep_text_after_send.hint') }}
         </span>
       </div>
     </section>
@@ -290,21 +294,21 @@ watch(editorSettings, (newSettings) => {
             class="checkbox-input"
             @change="toggleSpellcheck"
           />
-          <span>Проверка орфографии (офлайн)</span>
+          <span>{{ t('settings.editor.spellcheck') }}</span>
         </label>
         <span class="setting-hint">
-          Подчёркивает ошибки и предлагает варианты исправления. Работает без сети (локальный словарь)
+          {{ t('settings.editor.spellcheck.hint') }}
         </span>
       </div>
     </section>
 
     <section class="settings-section">
       <div class="card-header">
-        <h3 class="card-title">Статус набора</h3>
-        <p class="card-desc">Через сколько мс без правок завершать набор для VTube Studio и WebView</p>
+        <h3 class="card-title">{{ t('settings.editor.typing.title') }}</h3>
+        <p class="card-desc">{{ t('settings.editor.typing.desc') }}</p>
       </div>
       <div class="setting-row typing-row">
-        <label class="setting-label">Задержка (мс):</label>
+        <label class="setting-label">{{ t('settings.editor.typing.label') }}</label>
         <input
           type="number"
           v-model="typingTimeoutInput"
@@ -315,21 +319,21 @@ watch(editorSettings, (newSettings) => {
           :step="100"
         />
         <span class="setting-hint typing-hint">
-          Начало набора передаётся сразу, задержка отсчитывается после последней пользовательской правки.
+          {{ t('settings.editor.typing.hint') }}
         </span>
       </div>
     </section>
 
     <section class="settings-section">
       <div class="card-header">
-        <h3 class="card-title">Омографы и ударения</h3>
+        <h3 class="card-title">{{ t('settings.editor.accentor.title') }}</h3>
         <p class="card-desc">
-          Локальная модель RUAccent расставляет ударения и выбирает вариант омографа по контексту. Работает с провайдерами Silero и Piper.
+          {{ t('settings.editor.accentor.desc') }}
         </p>
       </div>
 
       <div class="setting-row accentor-select-row">
-        <label class="setting-label" for="accentor-select">Модель RUAccent:</label>
+        <label class="setting-label" for="accentor-select">{{ t('settings.editor.accentor.model_label') }}</label>
         <select
           id="accentor-select"
           class="accentor-select"
@@ -337,15 +341,15 @@ watch(editorSettings, (newSettings) => {
           :disabled="noPacks || accentorRuntimeStatus === 'loading'"
           @change="onPackSelect"
         >
-          <option v-if="noPacks && !accentorInMemory" value="" disabled>Модели не найдены</option>
+          <option v-if="noPacks && !accentorInMemory" value="" disabled>{{ t('settings.editor.accentor.options.no_models') }}</option>
           <template v-else-if="!noPacks">
-            <option value="" disabled>Выберите модель</option>
+            <option value="" disabled>{{ t('settings.editor.accentor.options.choose') }}</option>
             <option v-for="pack in accentorPacks" :key="pack.id" :value="pack.id">
               {{ formatAccentorPackLabel(pack) }}
             </option>
           </template>
           <option v-if="accentorInMemory" :value="selectedPackId" disabled>
-            {{ packLabelFor(selectedPackId) }} (в памяти)
+            {{ t('settings.editor.accentor.in_memory', { name: packLabelFor(selectedPackId) }) }}
           </option>
         </select>
         <button
@@ -371,8 +375,8 @@ watch(editorSettings, (newSettings) => {
           class="accentor-rescan-btn"
           :disabled="accentorRescanPending"
           @click="rescanAccentorPacks"
-          title="Обновить список моделей"
-          aria-label="Обновить список моделей"
+          :title="t('settings.editor.accentor.rescan')"
+          :aria-label="t('settings.editor.accentor.rescan')"
         >
           <ListRestart :size="16" :class="{ 'accentor-spin': accentorRescanPending }" />
         </button>
@@ -383,10 +387,10 @@ watch(editorSettings, (newSettings) => {
         role="status"
         aria-live="polite"
       >
-        Статус: {{ accentorStatusText }}
+        {{ t('settings.editor.accentor.status_prefix') }}{{ accentorStatusText }}
       </span>
       <p v-if="noPacks" class="setting-hint accentor-empty" role="status" aria-live="polite">
-        Модели RUAccent не найдены. Поместите файлы моделей в:
+        {{ t('settings.editor.accentor.no_models.empty') }}
         <code>%APPDATA%\ttsbard\models\ruaccent</code>
       </p>
       <div class="setting-row accentor-load-on-start-row">
@@ -398,10 +402,10 @@ watch(editorSettings, (newSettings) => {
             class="checkbox-input"
             @change="toggleLoadOnStart"
           />
-          <span>Загружать при запуске</span>
+          <span>{{ t('settings.editor.accentor.load_on_start') }}</span>
         </label>
         <span class="setting-hint">
-          (может немного увеличить время запуска приложения)
+          {{ t('settings.editor.accentor.load_on_start.hint') }}
         </span>
       </div>
       <div class="setting-row accentor-enable-row">
@@ -413,10 +417,10 @@ watch(editorSettings, (newSettings) => {
             class="checkbox-input"
             @change="toggleAccentor"
           />
-          <span>Автоматически расставлять ударения</span>
+          <span>{{ t('settings.editor.accentor.enabled') }}</span>
         </label>
         <span class="setting-hint">
-          Применять к каждому сообщению перед синтезом; также разрешает омографы.
+          {{ t('settings.editor.accentor.enabled.hint') }}
         </span>
       </div>
     </section>

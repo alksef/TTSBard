@@ -4,6 +4,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { RefreshCw, Loader, Volume2, VolumeX, Mic, Info, Play } from 'lucide-vue-next';
 import { useAudioSettings } from '../../composables/useAppSettings';
 import { debugLog, debugError } from '../../utils/debug';
+import { t } from '../../i18n';
+import { presentCommandError } from '../../ipc/commandError';
 
 interface DeviceInfo {
   id: string;
@@ -47,7 +49,7 @@ async function loadDevices(force = false) {
     isDataLoaded.value = true;
   } catch (error) {
     debugError('Failed to load devices:', error);
-    errorMessage.value = 'Failed to load audio devices';
+    errorMessage.value = presentCommandError(error, t('audio.error.load_devices'));
   }
 }
 
@@ -67,7 +69,7 @@ async function setSpeakerDevice(deviceId: string | null) {
     audioSettings.value.speaker_device = deviceId;
   } catch (error) {
     debugError('Failed to set speaker device:', error);
-    errorMessage.value = error as string;
+    errorMessage.value = presentCommandError(error, t('audio.error.set_speaker_device'));
   }
 }
 
@@ -77,7 +79,7 @@ async function setSpeakerEnabled(enabled: boolean) {
     audioSettings.value.speaker_enabled = enabled;
   } catch (error) {
     debugError('Failed to set speaker enabled:', error);
-    errorMessage.value = error as string;
+    errorMessage.value = presentCommandError(error, t('audio.error.set_speaker_enabled'));
   }
 }
 
@@ -87,7 +89,7 @@ async function setSpeakerVolume(volume: number) {
     audioSettings.value.speaker_volume = volume;
   } catch (error) {
     debugError('Failed to set speaker volume:', error);
-    errorMessage.value = error as string;
+    errorMessage.value = presentCommandError(error, t('audio.error.set_speaker_volume'));
   }
 }
 
@@ -98,7 +100,7 @@ async function setVirtualMicDevice(deviceId: string | null) {
     audioSettings.value.virtual_mic_device = deviceId;
   } catch (error) {
     debugError('Failed to set virtual mic device:', error);
-    errorMessage.value = error as string;
+    errorMessage.value = presentCommandError(error, t('audio.error.set_virtual_mic_device'));
   }
 }
 
@@ -111,7 +113,7 @@ async function enableVirtualMic() {
     }
 
     if (!deviceId) {
-      errorMessage.value = 'Нет доступных виртуальных устройств';
+      errorMessage.value = t('audio.error.no_virtual_mic');
       return;
     }
 
@@ -120,7 +122,7 @@ async function enableVirtualMic() {
     audioSettings.value.virtual_mic_device = deviceId;
   } catch (error) {
     debugError('Failed to enable virtual mic:', error);
-    errorMessage.value = error as string;
+    errorMessage.value = presentCommandError(error, t('audio.error.enable_virtual_mic'));
   }
 }
 
@@ -130,7 +132,7 @@ async function disableVirtualMic() {
     audioSettings.value.virtual_mic_device = null;
   } catch (error) {
     debugError('Failed to disable virtual mic:', error);
-    errorMessage.value = error as string;
+    errorMessage.value = presentCommandError(error, t('audio.error.disable_virtual_mic'));
   }
 }
 
@@ -140,7 +142,7 @@ async function setVirtualMicVolume(volume: number) {
     audioSettings.value.virtual_mic_volume = volume;
   } catch (error) {
     debugError('Failed to set virtual mic volume:', error);
-    errorMessage.value = error as string;
+    errorMessage.value = presentCommandError(error, t('audio.error.set_virtual_mic_volume'));
   }
 }
 
@@ -155,7 +157,7 @@ async function testSpeaker() {
     });
   } catch (error) {
     debugError('Failed to test speaker:', error);
-    errorMessage.value = error as string;
+    errorMessage.value = presentCommandError(error, t('audio.error.test_speaker'));
   } finally {
     isTestingSpeaker.value = false;
   }
@@ -172,7 +174,7 @@ async function testVirtualMic() {
     });
   } catch (error) {
     debugError('Failed to test virtual mic:', error);
-    errorMessage.value = error as string;
+    errorMessage.value = presentCommandError(error, t('audio.error.test_virtual_mic'));
   } finally {
     isTestingVirtualMic.value = false;
   }
@@ -180,7 +182,7 @@ async function testVirtualMic() {
 
 function getDeviceDisplayName(device: DeviceInfo): string {
   if (device.is_default) {
-    return `${device.name} (по умолчанию)`;
+    return `${device.name}${t('audio.default_device.suffix')}`;
   }
   return device.name;
 }
@@ -217,44 +219,44 @@ watch(audioSettingsFromComposable, (newSettings) => {
   <div>
     <div v-if="errorMessage" class="error-box">
       {{ errorMessage }}
-      <button @click="errorMessage = ''" class="close-btn">&times;</button>
+      <button @click="errorMessage = ''" class="close-btn" :aria-label="t('audio.close')" :title="t('audio.close')">&times;</button>
     </div>
 
     <div v-if="isLoading" class="loading">
-      Loading audio devices...
+      {{ t('audio.loading') }}
     </div>
 
     <div v-else class="audio-settings">
       <div class="setting-section">
         <div class="section-header">
           <Volume2 class="section-icon" :size="20" />
-          <span class="section-title">Динамик</span>
+          <span class="section-title">{{ t('audio.speaker.title') }}</span>
           <div class="toggle-buttons">
             <button
               @click="setSpeakerEnabled(true)"
               :class="{ active: audioSettings.speaker_enabled }"
               class="toggle-btn"
             >
-              <Volume2 :size="14" /> Вкл
+              <Volume2 :size="14" /> {{ t('audio.on') }}
             </button>
             <button
               @click="setSpeakerEnabled(false)"
               :class="{ active: !audioSettings.speaker_enabled }"
               class="toggle-btn"
             >
-              <VolumeX :size="14" /> Выкл
+              <VolumeX :size="14" /> {{ t('audio.off') }}
             </button>
           </div>
         </div>
 
         <div class="setting-row" :class="{ disabled: !audioSettings.speaker_enabled }">
-          <label>Устройство</label>
+          <label>{{ t('audio.device') }}</label>
           <div class="input-with-action">
             <select
               :disabled="!audioSettings.speaker_enabled"
               @change="setSpeakerDevice(($event.target as HTMLSelectElement).value || null)"
             >
-              <option value="">(по умолчанию)</option>
+              <option value="">{{ t('audio.device.default') }}</option>
               <option
                 v-for="device in outputDevices"
                 :key="device.id"
@@ -268,7 +270,8 @@ watch(audioSettingsFromComposable, (newSettings) => {
               @click="testSpeaker"
               :disabled="!audioSettings.speaker_enabled || isTestingSpeaker"
               class="test-btn"
-              title="Тест воспроизведения"
+              :title="t('audio.test_playback')"
+              :aria-label="t('audio.test_playback')"
             >
               <Loader v-if="isTestingSpeaker" :size="16" class="spinner" />
               <Play v-else :size="16" />
@@ -277,7 +280,7 @@ watch(audioSettingsFromComposable, (newSettings) => {
         </div>
 
         <div class="setting-row" :class="{ disabled: !audioSettings.speaker_enabled }">
-          <label>Громкость</label>
+          <label>{{ t('audio.volume') }}</label>
           <div class="volume-control">
             <input
               type="range"
@@ -295,33 +298,33 @@ watch(audioSettingsFromComposable, (newSettings) => {
       <div class="setting-section">
         <div class="section-header">
           <Mic class="section-icon" :size="20" />
-          <span class="section-title">Виртуальный микрофон</span>
+          <span class="section-title">{{ t('audio.mic.title') }}</span>
           <div class="toggle-buttons">
             <button
               @click="enableVirtualMic()"
               :class="{ active: !!audioSettings.virtual_mic_device }"
               class="toggle-btn"
             >
-              <Mic :size="14" /> Вкл
+              <Mic :size="14" /> {{ t('audio.on') }}
             </button>
             <button
               @click="disableVirtualMic()"
               :class="{ active: !audioSettings.virtual_mic_device }"
               class="toggle-btn"
             >
-              <Mic :size="14" /> Выкл
+              <Mic :size="14" /> {{ t('audio.off') }}
             </button>
           </div>
         </div>
 
         <div class="setting-row" :class="{ disabled: !audioSettings.virtual_mic_device }">
-          <label>Устройство</label>
+          <label>{{ t('audio.device') }}</label>
           <div class="input-with-action">
             <select
               :disabled="!audioSettings.virtual_mic_device"
               @change="setVirtualMicDevice(($event.target as HTMLSelectElement).value || null)"
             >
-              <option value="">(не выбрано)</option>
+              <option value="">{{ t('audio.mic.none') }}</option>
               <option
                 v-for="device in virtualMicDevices"
                 :key="device.id"
@@ -335,7 +338,8 @@ watch(audioSettingsFromComposable, (newSettings) => {
               @click="testVirtualMic"
               :disabled="!audioSettings.virtual_mic_device || isTestingVirtualMic"
               class="test-btn"
-              title="Тест воспроизведения"
+              :title="t('audio.test_playback')"
+              :aria-label="t('audio.test_playback')"
             >
               <Loader v-if="isTestingVirtualMic" :size="16" class="spinner" />
               <Play v-else :size="16" />
@@ -344,7 +348,7 @@ watch(audioSettingsFromComposable, (newSettings) => {
         </div>
 
         <div class="setting-row" :class="{ disabled: !audioSettings.virtual_mic_device }">
-          <label>Громкость</label>
+          <label>{{ t('audio.volume') }}</label>
           <div class="volume-control">
             <input
               type="range"
@@ -359,7 +363,7 @@ watch(audioSettingsFromComposable, (newSettings) => {
         </div>
 
         <div v-if="virtualMicDevices.length === 0" class="info-box">
-          <Info :size="16" /> Virtual audio devices not found. Install VB-Cable or VoiceMeeter to use virtual mic.
+          <Info :size="16" /> {{ t('audio.mic.not_found_info') }}
         </div>
       </div>
     </div>
@@ -370,7 +374,8 @@ watch(audioSettingsFromComposable, (newSettings) => {
         :disabled="isRefreshing"
         class="refresh-btn"
         :class="{ refreshing: isRefreshing }"
-        title="Обновить список устройств"
+        :title="t('audio.refresh_devices')"
+        :aria-label="t('audio.refresh_devices')"
       >
         <RefreshCw v-if="!isRefreshing" :size="18" />
         <Loader v-else :size="18" class="spinner" />

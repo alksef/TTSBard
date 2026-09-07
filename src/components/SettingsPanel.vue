@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { Settings, Network, Type, Sparkles, Palette } from 'lucide-vue-next'
+import { t } from '../i18n'
 import SettingsGeneral from './settings/SettingsGeneral.vue'
 import SettingsInterface from './settings/SettingsInterface.vue'
 import SettingsEditor from './settings/SettingsEditor.vue'
@@ -10,12 +11,19 @@ import SettingsAiPanel from './SettingsAiPanel.vue'
 type TabType = 'general' | 'interface' | 'editor' | 'network' | 'ai'
 const activeTab = ref<TabType>('general')
 
+// Explicit notification severity. Legacy children that emit a message without a
+// severity render as neutral info; severity is never inferred from translated
+// substrings.
+type MessageSeverity = 'error' | 'success' | 'warning' | 'info'
+const messageSeverity = ref<MessageSeverity>('info')
+
 // Error/Info Message Display
 const errorMessage = ref<string | null>(null)
 let errorTimeout: number | null = null
 
-function showErrorMessage(message: string) {
+function showErrorMessage(message: string, severity: MessageSeverity = 'info') {
   errorMessage.value = message
+  messageSeverity.value = severity
 
   if (errorTimeout !== null) {
     clearTimeout(errorTimeout)
@@ -27,19 +35,15 @@ function showErrorMessage(message: string) {
   }, 3000)
 }
 
-function handleMessage(message: string) {
-  showErrorMessage(message)
+function handleMessage(message: string, severity: MessageSeverity = 'info') {
+  showErrorMessage(message, severity)
 }
 </script>
 
 <template>
   <div class="settings-panel">
     <!-- Error/Info Message Display -->
-    <div v-if="errorMessage" class="message-box" :class="{
-      error: errorMessage.includes('Ошибка') || errorMessage.includes('ошибка') || errorMessage.includes('Failed'),
-      success: errorMessage.includes('сохранен') || errorMessage.includes('сохранена') || errorMessage.includes('Saved'),
-      warning: errorMessage.includes('Перезапустите') || errorMessage.includes('перезапустите')
-    }">
+    <div v-if="errorMessage" class="message-box" :class="messageSeverity">
       {{ errorMessage }}
     </div>
 
@@ -47,23 +51,23 @@ function handleMessage(message: string) {
     <div class="settings-tabs">
       <button :class="{ active: activeTab === 'general' }" @click="activeTab = 'general'">
         <Settings :size="18" />
-        <span>Общие</span>
+        <span>{{ t('settings.tabs.general') }}</span>
       </button>
       <button :class="{ active: activeTab === 'interface' }" @click="activeTab = 'interface'">
         <Palette :size="18" />
-        <span>Интерфейс</span>
+        <span>{{ t('settings.tabs.interface') }}</span>
       </button>
       <button :class="{ active: activeTab === 'editor' }" @click="activeTab = 'editor'">
         <Type :size="18" />
-        <span>Редактор</span>
+        <span>{{ t('settings.tabs.editor') }}</span>
       </button>
       <button :class="{ active: activeTab === 'network' }" @click="activeTab = 'network'">
         <Network :size="18" />
-        <span>Сеть</span>
+        <span>{{ t('settings.tabs.network') }}</span>
       </button>
       <button :class="{ active: activeTab === 'ai' }" @click="activeTab = 'ai'">
         <Sparkles :size="18" />
-        <span>AI</span>
+        <span>{{ t('settings.tabs.ai') }}</span>
       </button>
     </div>
 

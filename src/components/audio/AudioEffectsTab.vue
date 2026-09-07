@@ -3,6 +3,7 @@ import { ref, computed, watch, nextTick } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useAudioSettings, useAudioEffectsSettings, useDspSettings } from '../../composables/useAppSettings';
+import { t } from '../../i18n';
 import DspSettings from './DspSettings.vue';
 import EffectsSettings from './EffectsSettings.vue';
 import AudioPreviewBar from './AudioPreviewBar.vue';
@@ -219,7 +220,7 @@ function setEnhanceAttenDb(value: number) {
 async function pickFile() {
   try {
     const result = await open({
-      filters: [{ name: 'Аудиофайлы', extensions: ['wav', 'mp3'] }],
+      filters: [{ name: t('audio.files.dialog_filter'), extensions: ['wav', 'mp3'] }],
       multiple: false,
     });
     if (result && typeof result === 'string') {
@@ -229,14 +230,14 @@ async function pickFile() {
       previewError.value = '';
     }
   } catch (e) {
-    previewError.value = 'Не удалось открыть диалог выбора файла';
+    previewError.value = t('audio.preview.error.dialog');
   }
 }
 
 async function replaceFile() {
   try {
     const result = await open({
-      filters: [{ name: 'Аудиофайлы', extensions: ['wav', 'mp3'] }],
+      filters: [{ name: t('audio.files.dialog_filter'), extensions: ['wav', 'mp3'] }],
       multiple: false,
     });
     if (result && typeof result === 'string') {
@@ -246,7 +247,7 @@ async function replaceFile() {
       previewError.value = '';
     }
   } catch (e) {
-    previewError.value = 'Не удалось открыть диалог выбора файла';
+    previewError.value = t('audio.preview.error.dialog');
   }
 }
 
@@ -374,7 +375,7 @@ watch(dspSettingsFromComposable, (newDsp) => {
     />
 
     <div class="secondary-tab-row">
-      <div class="secondary-tabs" role="tablist" aria-label="Вторичные вкладки">
+      <div class="secondary-tabs" role="tablist" :aria-label="t('audio.tabs.secondary_label')">
         <button
           id="tab-effects"
           role="tab"
@@ -385,7 +386,7 @@ watch(dspSettingsFromComposable, (newDsp) => {
           @click="activeSection = 'effects'"
           @keydown="handleSecondaryTabKey"
         >
-          Эффекты
+          {{ t('audio.effects.title') }}
         </button>
         <button
           id="tab-dsp"
@@ -397,12 +398,12 @@ watch(dspSettingsFromComposable, (newDsp) => {
           @click="activeSection = 'dsp'"
           @keydown="handleSecondaryTabKey"
         >
-          DSP
+          {{ t('dsp.title') }}
         </button>
       </div>
-      <div v-if="isDirty || dspDirty" class="dirty-chip" role="status" aria-label="Изменения не сохранены">
+      <div v-if="isDirty || dspDirty" class="dirty-chip" role="status" :aria-label="t('audio.unsaved_changes')">
         <span class="dirty-chip-marker" aria-hidden="true">*</span>
-        <span>Изменения не сохранены</span>
+        <span>{{ t('audio.unsaved_changes') }}</span>
       </div>
     </div>
 
@@ -441,16 +442,16 @@ watch(dspSettingsFromComposable, (newDsp) => {
 
     <div class="save-section">
       <div class="save-status-area">
-        <span v-if="saveStatus === 'saving'" class="save-status">Сохранение…</span>
-        <span v-else-if="saveStatus === 'saved'" class="save-status saved">Сохранено</span>
+        <span v-if="saveStatus === 'saving'" class="save-status">{{ t('audio.save.saving') }}</span>
+        <span v-else-if="saveStatus === 'saved'" class="save-status saved">{{ t('audio.save.saved') }}</span>
         <span v-else-if="saveStatus === 'error'" class="save-status error">{{ saveError }}</span>
       </div>
       <button @click="cancelAll" :disabled="(!isDirty && !dspDirty) || saveStatus === 'saving'" class="cancel-btn">
-        Отменить
+        {{ t('common.cancel') }}
       </button>
       <button @click="saveAll" :disabled="(!isDirty && !dspDirty) || saveStatus === 'saving'" class="save-btn">
-        <span v-if="saveStatus === 'saving'">Сохранение...</span>
-        <span v-else>Сохранить</span>
+        <span v-if="saveStatus === 'saving'">{{ t('audio.save.saving') }}</span>
+        <span v-else>{{ t('audio.save') }}</span>
       </button>
     </div>
   </div>

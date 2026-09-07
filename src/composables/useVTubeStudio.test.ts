@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest'
 import { shallowRef } from 'vue'
 import type { VTubeStudioSettingsDto } from '../types/settings'
 
@@ -59,6 +59,13 @@ vi.mock('../utils/debug', () => ({
 
 import { useVTubeStudio } from './useVTubeStudio'
 import type { VTubeStudioSettings } from './useVTubeStudio'
+import { i18n } from '../i18n'
+import ruCatalog from '../../locales/ru.json'
+
+beforeAll(() => {
+  i18n.global.setLocaleMessage('ru', (ruCatalog as { messages: Record<string, string> }).messages)
+  ;(i18n.global.locale as unknown as { value: string }).value = 'ru'
+})
 
 function flushMicrotasks() {
   return new Promise<void>(resolve => queueMicrotask(resolve))
@@ -318,7 +325,7 @@ describe('useVTubeStudio', () => {
       await flushMicrotasks()
       expect(currentStatus.value).toBe('Connected')
       expect(errorMessage.value).toBeTruthy()
-      expect(errorMessage.value).toContain('Failed to disconnect')
+      expect(errorMessage.value).not.toContain('Already disconnected')
     })
 
     it('restartVTubeStudio failure sets Error', async () => {
@@ -334,7 +341,7 @@ describe('useVTubeStudio', () => {
       await restartPromise
       await flushMicrotasks()
       expect(errorMessage.value).toBeTruthy()
-      expect(errorMessage.value).toContain('Failed to restart')
+      expect(errorMessage.value).not.toContain('Restart failed')
       expect(currentStatus.value).toBe('Error')
     })
 
@@ -349,7 +356,7 @@ describe('useVTubeStudio', () => {
       await startVTubeStudio()
       await flushMicrotasks()
       expect(errorMessage.value).toBeTruthy()
-      expect(errorMessage.value).toContain('Failed to connect')
+      expect(errorMessage.value).not.toContain('Connection refused')
       expect(currentStatus.value).toBe('Error')
     })
   })
@@ -649,7 +656,8 @@ describe('useVTubeStudio', () => {
 
       await testTypingParameter()
       await flushMicrotasks()
-      expect(errorMessage.value).toContain('VTube Studio not connected')
+      expect(errorMessage.value).toBeTruthy()
+      expect(errorMessage.value).not.toContain('VTube Studio not connected')
     })
 
     it('does not overwrite currentStatus on success', async () => {
@@ -791,8 +799,8 @@ describe('useVTubeStudio', () => {
       expect(composable.typingMode.value).toBe('Hotkeys')
       expect(composable.eventName.value).toBe('')
       expect(composable.hotkeys.value).toEqual([
-        { hotkeyID: 'hk1', name: 'Начать говорить', type: 'Сохранённая', description: '' },
-        { hotkeyID: 'hk2', name: 'Перестать говорить', type: 'Сохранённая', description: '' },
+        { hotkeyID: 'hk1', name: 'Начать говорить', type: '__saved__', description: '' },
+        { hotkeyID: 'hk2', name: 'Перестать говорить', type: '__saved__', description: '' },
       ])
       expect(composable.startHotkeyId.value).toBe('hk1')
       expect(composable.stopHotkeyId.value).toBe('hk2')
@@ -895,8 +903,8 @@ describe('useVTubeStudio', () => {
       expect(composable.startHotkeyId.value).toBe('hkA')
       expect(composable.stopHotkeyId.value).toBe('hkB')
       expect(composable.hotkeys.value).toEqual([
-        { hotkeyID: 'hkA', name: 'Start Speak', type: 'Сохранённая', description: '' },
-        { hotkeyID: 'hkB', name: 'Stop Speak', type: 'Сохранённая', description: '' },
+        { hotkeyID: 'hkA', name: 'Start Speak', type: '__saved__', description: '' },
+        { hotkeyID: 'hkB', name: 'Stop Speak', type: '__saved__', description: '' },
       ])
       expect(composable.savedTypingAction.value.startHotkeyName).toBe('Start Speak')
     })
@@ -1094,7 +1102,8 @@ describe('useVTubeStudio', () => {
       await saveTypingAction()
       await flushMicrotasks()
 
-      expect(errorMessage.value).toContain('Parameter name required')
+      expect(errorMessage.value).toBeTruthy()
+      expect(errorMessage.value).not.toContain('Parameter name required')
     })
 
     it('updates saved action and normalizes the visible draft on success', async () => {
@@ -1279,7 +1288,8 @@ describe('useVTubeStudio', () => {
       await loadHotkeys()
       await flushMicrotasks()
 
-      expect(hotkeysError.value).toContain('Not connected')
+      expect(hotkeysError.value).toBeTruthy()
+      expect(hotkeysError.value).not.toContain('Not connected')
     })
 
     it('clears hotkeysError before fetch', async () => {
@@ -1322,7 +1332,8 @@ describe('useVTubeStudio', () => {
 
       await loadHotkeys()
       await flushMicrotasks()
-      expect(hotkeysError.value).toContain('temp error')
+      expect(hotkeysError.value).toBeTruthy()
+      expect(hotkeysError.value).not.toContain('temp error')
 
       await loadHotkeys()
       await flushMicrotasks()

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import './dsp-shared.css';
+import { t } from '../../i18n';
 
 defineProps<{
   eq: {
@@ -38,14 +39,14 @@ const emit = defineEmits<{
         </label>
       </div>
       <div class="setting-row" :class="{ disabled: !eq.enabled }">
-        <label>Частота</label>
+        <label>{{ t('dsp.eq.frequency') }}</label>
         <div class="volume-control">
           <input type="range" min="10" max="500" step="1" v-model.number="eq.low_cut_hz" @input="emit('mark-dirty')" :disabled="!eq.enabled" />
           <span class="volume-value">{{ eq.low_cut_hz }} Hz</span>
         </div>
       </div>
       <div class="setting-row" :class="{ disabled: !eq.enabled }">
-        <label>Крутизна</label>
+        <label>{{ t('dsp.eq.slope') }}</label>
         <div class="volume-control">
           <input type="range" min="6" max="48" step="6" v-model.number="eq.low_cut_slope_db" @input="emit('mark-dirty')" :disabled="!eq.enabled" />
           <span class="volume-value">{{ eq.low_cut_slope_db }} dB/oct</span>
@@ -54,21 +55,21 @@ const emit = defineEmits<{
 
       <div v-for="(band, i) in eq.bands" :key="i" class="dsp-band-block">
         <div class="setting-row" :class="{ disabled: !eq.enabled }">
-          <label class="setting-label">Полоса {{ i + 1 }}</label>
+          <label class="setting-label">{{ t('dsp.eq.band', { index: i + 1 }) }}</label>
           <label class="toggle-switch">
             <input type="checkbox" v-model="band.enabled" @change="emit('mark-dirty')" :disabled="!eq.enabled" />
             <span class="toggle-slider"></span>
           </label>
         </div>
         <div class="setting-row" :class="{ disabled: !eq.enabled }">
-          <label>Частота</label>
+          <label>{{ t('dsp.eq.frequency') }}</label>
           <div class="volume-control">
             <input type="range" min="20" max="20000" step="1" v-model.number="band.frequency_hz" @input="emit('mark-dirty')" :disabled="!eq.enabled" />
             <span class="volume-value">{{ band.frequency_hz }} Hz</span>
           </div>
         </div>
         <div class="setting-row" :class="{ disabled: !eq.enabled }">
-          <label>Усиление</label>
+          <label>{{ t('dsp.eq.gain') }}</label>
           <div class="volume-control">
             <input type="range" min="-24" max="24" step="0.1" v-model.number="band.gain_db" @input="emit('mark-dirty')" :disabled="!eq.enabled" />
             <span class="volume-value">{{ band.gain_db.toFixed(1) }} dB</span>
@@ -91,14 +92,14 @@ const emit = defineEmits<{
         </label>
       </div>
       <div class="setting-row" :class="{ disabled: !eq.enabled }">
-        <label>Частота</label>
+        <label>{{ t('dsp.eq.frequency') }}</label>
         <div class="volume-control">
           <input type="range" min="1000" max="20000" step="100" v-model.number="eq.high_shelf_hz" @input="emit('mark-dirty')" :disabled="!eq.enabled" />
           <span class="volume-value">{{ eq.high_shelf_hz }} Hz</span>
         </div>
       </div>
       <div class="setting-row" :class="{ disabled: !eq.enabled }">
-        <label>Усиление</label>
+        <label>{{ t('dsp.eq.gain') }}</label>
         <div class="volume-control">
           <input type="range" min="-24" max="24" step="0.1" v-model.number="eq.high_shelf_gain_db" @input="emit('mark-dirty')" :disabled="!eq.enabled" />
           <span class="volume-value">{{ eq.high_shelf_gain_db.toFixed(1) }} dB</span>

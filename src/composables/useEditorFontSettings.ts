@@ -9,6 +9,7 @@ import {
 } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useEditorSettings } from './useAppSettings'
+import { t } from '../i18n'
 import type { EditorFontFamily, EditorSettingsDto } from '../types/settings'
 import {
   type EditorFontOption,
@@ -19,7 +20,16 @@ import {
   toEditorFontFamily,
 } from '../utils/editorFont'
 
-const INVALID_SIZE_MESSAGE = 'Размер шрифта должен быть целым числом от 12 до 32 px'
+function errorMessage(key: string, error: unknown): string {
+  const detail = error instanceof Error ? error.message : String(error)
+  return t(key, { detail })
+}
+
+function specialFontLabel(id: string): string {
+  if (id === 'default') return t('settings.editor.font.default')
+  if (id === 'system') return t('settings.editor.font.system')
+  return id
+}
 
 export interface UseEditorFontSettingsReturn {
   fontOptions: ComputedRef<readonly EditorFontOption[]>
@@ -31,10 +41,6 @@ export interface UseEditorFontSettingsReturn {
   previewFontSize: ComputedRef<number>
   onFamilyChange: (value: EditorFontFamily) => Promise<void>
   onSizeChange: (raw: unknown) => Promise<void>
-}
-
-function errorMessage(prefix: string, error: unknown): string {
-  return prefix + (error instanceof Error ? error.message : String(error))
 }
 
 export function useEditorFontSettings(
@@ -121,7 +127,7 @@ export function useEditorFontSettings(
     } catch (error) {
       if (disposed) return
       family.value = confirmedFamily.value
-      saveError.value = errorMessage('Ошибка сохранения шрифта: ', error)
+      saveError.value = errorMessage('settings.editor.font.error.family', error)
     } finally {
       if (!disposed) {
         saving.value = false
@@ -135,7 +141,7 @@ export function useEditorFontSettings(
     const parsed = parseEditorFontSize(raw)
     if (parsed === null) {
       sizeInput.value = confirmedSize.value
-      saveError.value = INVALID_SIZE_MESSAGE
+      saveError.value = t('settings.editor.font.error.invalid_size')
       return
     }
     if (parsed === confirmedSize.value) {
@@ -157,7 +163,7 @@ export function useEditorFontSettings(
     } catch (error) {
       if (disposed) return
       sizeInput.value = confirmedSize.value
-      saveError.value = errorMessage('Ошибка сохранения размера шрифта: ', error)
+      saveError.value = errorMessage('settings.editor.font.error.size', error)
     } finally {
       if (!disposed) {
         saving.value = false
@@ -167,7 +173,10 @@ export function useEditorFontSettings(
   }
 
   const fontOptions = computed<readonly EditorFontOption[]>(() => {
-    const special = EDITOR_FONT_OPTIONS.slice(0, 2)
+    const special = EDITOR_FONT_OPTIONS.slice(0, 2).map((option) => ({
+      ...option,
+      label: specialFontLabel(option.id),
+    }))
     const catalog = systemFontFamilies.value
       .filter((name) => name !== 'default' && name !== 'system')
       .map((name) => ({ id: name, label: name, cssStack: editorFontCssStack(name) }))

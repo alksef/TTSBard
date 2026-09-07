@@ -11,6 +11,7 @@ mod history;
 mod hotkeys;
 mod input_server;
 pub mod ipc;
+mod localization;
 mod ocr;
 pub mod playback;
 mod playback_window;
@@ -555,6 +556,9 @@ pub fn run() {
             // Logging commands
             get_logging_settings,
             save_logging_settings,
+            // Localization commands
+            commands::localization::get_localization,
+            commands::localization::set_ui_language,
             // Proxy commands
             commands::proxy::test_proxy,
             commands::proxy::get_proxy_settings,

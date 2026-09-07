@@ -24,6 +24,13 @@ function isCommandErrorDto(value: unknown): value is CommandErrorDto {
     && typeof candidate.retryable === 'boolean'
 }
 
+export function presentCommandError(error: unknown, fallback: string): string {
+  if (typeof error === 'string') return fallback
+  if (error instanceof Error) return fallback
+  if (isCommandErrorDto(error)) return fallback
+  return fallback
+}
+
 export function normalizeCommandError(value: unknown): IpcCommandError {
   if (isCommandErrorDto(value)) return new IpcCommandError(value)
 
