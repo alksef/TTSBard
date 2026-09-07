@@ -1039,7 +1039,17 @@ async fn read_bounded_error_body(mut response: reqwest::Response) -> Vec<u8> {
     body
 }
 
+/// Cached `reqwest::Client` keyed by the settings that determine how it is
+/// built. The client is a cheap `Arc` clone, so reusing it preserves the
+/// underlying connection pool for both synthesis and catalog pagination.
 #[derive(Clone, Debug)]
+struct ClientCacheEntry {
+    proxy_url: Option<String>,
+    timeout_secs: u64,
+    client: Client,
+}
+
+#[derive(Debug)]
 pub struct ElevenLabsTts {
     api_key: String,
     voice_id: String,
@@ -1052,6 +1062,31 @@ pub struct ElevenLabsTts {
     proxy_url: Option<String>,
     timeout_secs: u64,
     event_tx: Option<EventSender>,
+    client_cache: std::sync::Mutex<Option<ClientCacheEntry>>,
+}
+
+impl Clone for ElevenLabsTts {
+    fn clone(&self) -> Self {
+        let client_cache = self
+            .client_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        Self {
+            api_key: self.api_key.clone(),
+            voice_id: self.voice_id.clone(),
+            model_id: self.model_id.clone(),
+            output_format: self.output_format.clone(),
+            stability: self.stability,
+            similarity_boost: self.similarity_boost,
+            style: self.style,
+            use_speaker_boost: self.use_speaker_boost,
+            proxy_url: self.proxy_url.clone(),
+            timeout_secs: self.timeout_secs,
+            event_tx: self.event_tx.clone(),
+            client_cache: std::sync::Mutex::new(client_cache),
+        }
+    }
 }
 
 impl ElevenLabsTts {
@@ -1068,6 +1103,7 @@ impl ElevenLabsTts {
             proxy_url: None,
             timeout_secs: DEFAULT_TTS_TIMEOUT_SECS,
             event_tx: None,
+            client_cache: std::sync::Mutex::new(None),
         }
     }
 
@@ -1112,12 +1148,39 @@ impl ElevenLabsTts {
         &self.voice_id
     }
 
-    fn build_client(&self) -> Result<Client, String> {
-        let timeout = Duration::from_secs(self.timeout_secs);
-        proxy_utils::build_client_with_proxy(self.proxy_url.as_deref(), timeout)
+    /// Return the cached HTTP client, rebuilding it only when the proxy URL or
+    /// timeout changed. A build error is never cached so the next call retries.
+    fn cached_client(&self) -> Result<Client, String> {
+        let key_proxy = self.proxy_url.clone();
+        let key_timeout = self.timeout_secs;
+        {
+            let cache = self
+                .client_cache
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(entry) = cache.as_ref() {
+                if entry.proxy_url == key_proxy && entry.timeout_secs == key_timeout {
+                    return Ok(entry.client.clone());
+                }
+            }
+        }
+        let client = proxy_utils::build_client_with_proxy(
+            self.proxy_url.as_deref(),
+            Duration::from_secs(self.timeout_secs),
+        )?;
+        *self
+            .client_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(ClientCacheEntry {
+            proxy_url: key_proxy,
+            timeout_secs: key_timeout,
+            client: client.clone(),
+        });
+        Ok(client)
     }
 
     async fn fetch_voices_page(
+        client: &Client,
         api_key: &str,
         proxy_url: Option<&str>,
         voice_type: &str,
@@ -1125,7 +1188,6 @@ impl ElevenLabsTts {
         token: Option<&str>,
     ) -> Result<VoicesResponse, String> {
         let timeout = Duration::from_secs(30);
-        let client = proxy_utils::build_client_with_proxy(proxy_url, timeout)?;
 
         let url = voices_url(voice_type, token)?;
 
@@ -1191,6 +1253,7 @@ impl ElevenLabsTts {
     /// Follows `has_more` / `next_page_token`, caps total pages, rejects
     /// repeated tokens and tags every voice with the partition's classification.
     async fn fetch_voice_partition(
+        client: &Client,
         api_key: &str,
         proxy_url: Option<&str>,
         voice_type: &str,
@@ -1203,6 +1266,7 @@ impl ElevenLabsTts {
 
         loop {
             let page = Self::fetch_voices_page(
+                client,
                 api_key,
                 proxy_url,
                 voice_type,
@@ -1237,24 +1301,29 @@ impl ElevenLabsTts {
         api_key: &str,
         proxy_url: Option<&str>,
     ) -> Result<Vec<ElevenLabsVoice>, String> {
-        let default_voices = Self::fetch_voice_partition(
-            api_key,
-            proxy_url,
-            "default",
-            Some(ElevenLabsVoiceClassification::Default),
-        )
-        .await?;
+        let client = proxy_utils::build_client_with_proxy(proxy_url, Duration::from_secs(30))?;
 
-        let personal_voices =
-            Self::fetch_voice_partition(api_key, proxy_url, "non-community", None).await?;
+        let (default_voices, personal_voices, library_voices) = tokio::join!(
+            Self::fetch_voice_partition(
+                &client,
+                api_key,
+                proxy_url,
+                "default",
+                Some(ElevenLabsVoiceClassification::Default),
+            ),
+            Self::fetch_voice_partition(&client, api_key, proxy_url, "non-community", None),
+            Self::fetch_voice_partition(
+                &client,
+                api_key,
+                proxy_url,
+                "community",
+                Some(ElevenLabsVoiceClassification::Library),
+            ),
+        );
 
-        let library_voices = Self::fetch_voice_partition(
-            api_key,
-            proxy_url,
-            "community",
-            Some(ElevenLabsVoiceClassification::Library),
-        )
-        .await?;
+        let default_voices = default_voices?;
+        let personal_voices = personal_voices?;
+        let library_voices = library_voices?;
 
         Ok(merge_voice_partitions(
             default_voices,
@@ -1348,7 +1417,7 @@ impl TtsEngine for ElevenLabsTts {
             return Err("ElevenLabs API key is not configured.".to_string());
         }
 
-        let client = self.build_client()?;
+        let client = self.cached_client()?;
         let url = tts_url(&self.voice_id, &self.output_format)?;
 
         let request = ElevenLabsTtsRequest {
@@ -1401,7 +1470,7 @@ impl TtsEngine for ElevenLabsTts {
         let started = Instant::now();
         let response = client
             .post(url)
-            .header("xi-api-key", &self.api_key)
+            .header("xi-api-key", self.api_key.trim())
             .header("Content-Type", "application/json")
             .json(&request)
             .send()

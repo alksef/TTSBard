@@ -1552,11 +1552,23 @@ impl AppSettings {
 /// This implementation uses RwLock for efficient read-heavy workloads.
 /// Settings are loaded once into memory and cached, with cache invalidation
 /// only when settings are modified.
-#[derive(Clone)]
 pub struct SettingsManager {
     config_dir: PathBuf,
     /// In-memory cache of settings protected by RwLock for read-heavy access
     cache: Arc<RwLock<AppSettings>>,
+    /// In-memory cache of the ElevenLabs catalog so repeated reads never hit
+    /// the disk. `None` until first loaded (or after an API-key change).
+    elevenlabs_catalog_cache: Arc<std::sync::RwLock<Option<ElevenLabsCatalogCache>>>,
+}
+
+impl Clone for SettingsManager {
+    fn clone(&self) -> Self {
+        Self {
+            config_dir: self.config_dir.clone(),
+            cache: Arc::clone(&self.cache),
+            elevenlabs_catalog_cache: Arc::clone(&self.elevenlabs_catalog_cache),
+        }
+    }
 }
 
 impl SettingsManager {
@@ -1574,6 +1586,7 @@ impl SettingsManager {
         Ok(Self {
             config_dir,
             cache: Arc::new(RwLock::new(settings)),
+            elevenlabs_catalog_cache: Arc::new(std::sync::RwLock::new(None)),
         })
     }
 
@@ -1585,6 +1598,7 @@ impl SettingsManager {
         Ok(Self {
             config_dir,
             cache: Arc::new(RwLock::new(settings)),
+            elevenlabs_catalog_cache: Arc::new(std::sync::RwLock::new(None)),
         })
     }
 
@@ -2027,9 +2041,23 @@ impl SettingsManager {
     /// Read the persisted ElevenLabs catalog cache (voices + models).
     ///
     /// Missing or corrupt cache safely yields an empty catalog; the caller
-    /// never receives a startup-breaking error.
+    /// never receives a startup-breaking error. The result is cached in memory
+    /// so repeated reads do not touch the disk.
     fn get_elevenlabs_catalog(&self) -> ElevenLabsCatalogCache {
-        ElevenLabsCatalogCache::load_from_disk(&self.elevenlabs_catalog_path())
+        if let Some(cache) = self
+            .elevenlabs_catalog_cache
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+        {
+            return cache;
+        }
+        let cache = ElevenLabsCatalogCache::load_from_disk(&self.elevenlabs_catalog_path());
+        *self
+            .elevenlabs_catalog_cache
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(cache.clone());
+        cache
     }
 
     /// Atomically replace the voices portion of the catalog cache, preserving
@@ -2043,7 +2071,12 @@ impl SettingsManager {
         let content =
             serde_json::to_string_pretty(&cache).context("Failed to serialize ElevenLabs catalog")?;
         persistence::write_json_atomically(&path, &content)
-            .context("Failed to write ElevenLabs catalog file")
+            .context("Failed to write ElevenLabs catalog file")?;
+        *self
+            .elevenlabs_catalog_cache
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(cache);
+        Ok(())
     }
 
     /// Atomically replace the models portion of the catalog cache, preserving
@@ -2057,7 +2090,12 @@ impl SettingsManager {
         let content =
             serde_json::to_string_pretty(&cache).context("Failed to serialize ElevenLabs catalog")?;
         persistence::write_json_atomically(&path, &content)
-            .context("Failed to write ElevenLabs catalog file")
+            .context("Failed to write ElevenLabs catalog file")?;
+        *self
+            .elevenlabs_catalog_cache
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(cache);
+        Ok(())
     }
 
     /// Persist only the ElevenLabs API key, trimmed of surrounding whitespace.
@@ -2105,6 +2143,10 @@ impl SettingsManager {
             .context("Failed to serialize empty ElevenLabs catalog")?;
         persistence::write_json_atomically(&catalog_path, &empty_content)
             .context("Failed to write empty ElevenLabs catalog file")?;
+        *self
+            .elevenlabs_catalog_cache
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
 
         Ok(true)
     }
@@ -3289,6 +3331,108 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Once loaded, the catalog is served from memory: mutating the file on
+    /// disk after the first read must not change what subsequent reads return.
+    #[test]
+    fn elevenlabs_catalog_is_cached_after_first_read() {
+        let (manager, dir) = elevenlabs_tmp_manager("cached-read");
+
+        let initial = ElevenLabsCatalogCache {
+            version: ELEVENLABS_CATALOG_CURRENT_VERSION,
+            voices: vec![el_voice("v1")],
+            models: vec![el_model("m1", true, false)],
+        };
+        std::fs::write(
+            dir.join("elevenlabs-catalog.json"),
+            serde_json::to_string_pretty(&initial).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(manager.get_elevenlabs_voices(), vec![el_voice("v1")]);
+        assert_eq!(
+            manager.get_elevenlabs_models(),
+            vec![el_model("m1", true, false)]
+        );
+
+        // Mutate the file directly, bypassing the manager's setters.
+        let changed = ElevenLabsCatalogCache {
+            version: ELEVENLABS_CATALOG_CURRENT_VERSION,
+            voices: vec![el_voice("v2")],
+            models: vec![],
+        };
+        std::fs::write(
+            dir.join("elevenlabs-catalog.json"),
+            serde_json::to_string_pretty(&changed).unwrap(),
+        )
+        .unwrap();
+
+        // The second read is served from the in-memory cache, not the disk.
+        assert_eq!(manager.get_elevenlabs_voices(), vec![el_voice("v1")]);
+        assert_eq!(
+            manager.get_elevenlabs_models(),
+            vec![el_model("m1", true, false)]
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Catalog mutations performed through a cloned manager are immediately
+    /// visible through the original manager: the catalog cache is shared across
+    /// clones, matching the settings-cache sharing semantics.
+    #[test]
+    fn elevenlabs_catalog_cache_is_shared_with_cloned_managers() {
+        let (manager, dir) = elevenlabs_tmp_manager("clone-shared");
+
+        // Prime the catalog through the original manager.
+        manager.set_elevenlabs_voices(vec![el_voice("v1")]).unwrap();
+        manager
+            .set_elevenlabs_models(vec![el_model("m1", true, false)])
+            .unwrap();
+
+        // Mutate both portions through a clone.
+        let clone = manager.clone();
+        clone
+            .set_elevenlabs_voices(vec![el_voice("v2"), el_voice("v3")])
+            .unwrap();
+        clone
+            .set_elevenlabs_models(vec![el_model("m2", false, true)])
+            .unwrap();
+
+        // The original observes the new catalog without restarting.
+        assert_eq!(
+            manager.get_elevenlabs_voices(),
+            vec![el_voice("v2"), el_voice("v3")]
+        );
+        assert_eq!(
+            manager.get_elevenlabs_models(),
+            vec![el_model("m2", false, true)]
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// API-key invalidation performed through a clone after the original has
+    /// primed its catalog must be observed by the original as an empty catalog.
+    #[test]
+    fn elevenlabs_api_key_invalidation_through_clone_is_observed_by_original() {
+        let (manager, dir) = elevenlabs_tmp_manager("clone-invalidate");
+
+        manager.set_elevenlabs_voices(vec![el_voice("v1")]).unwrap();
+        manager
+            .set_elevenlabs_models(vec![el_model("m1", true, true)])
+            .unwrap();
+        assert_eq!(manager.get_elevenlabs_voices(), vec![el_voice("v1")]);
+
+        let clone = manager.clone();
+        let changed = clone.set_elevenlabs_api_key("new-key".to_string()).unwrap();
+        assert!(changed, "a new key must report changed");
+
+        assert!(manager.get_elevenlabs_voices().is_empty());
+        assert!(manager.get_elevenlabs_models().is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// A changed (normalized) API key clears catalogs and selection.
     #[test]
     fn elevenlabs_api_key_change_invalidates_catalogs_and_selection() {
@@ -3475,10 +3619,12 @@ mod tests {
         let manager_a = SettingsManager {
             config_dir: config_dir.clone(),
             cache: Arc::new(RwLock::new(default_settings.clone())),
+            elevenlabs_catalog_cache: Arc::new(std::sync::RwLock::new(None)),
         };
         let manager_b = SettingsManager {
             config_dir: config_dir.clone(),
             cache: Arc::new(RwLock::new(default_settings)),
+            elevenlabs_catalog_cache: Arc::new(std::sync::RwLock::new(None)),
         };
 
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
@@ -3530,6 +3676,7 @@ mod tests {
         let manager = SettingsManager {
             config_dir: config_dir.clone(),
             cache: Arc::new(RwLock::new(default_settings.clone())),
+            elevenlabs_catalog_cache: Arc::new(std::sync::RwLock::new(None)),
         };
         assert!(manager.get_openai_api_key().is_none());
 
@@ -3650,6 +3797,7 @@ mod tests {
         let manager = SettingsManager {
             config_dir: config_dir.clone(),
             cache: Arc::clone(&cache),
+            elevenlabs_catalog_cache: Arc::new(std::sync::RwLock::new(None)),
         };
 
         manager.set_openai_voice("nova".to_string()).unwrap();
@@ -3659,6 +3807,7 @@ mod tests {
         let bad_manager = SettingsManager {
             config_dir: bad_config_dir,
             cache,
+            elevenlabs_catalog_cache: Arc::new(std::sync::RwLock::new(None)),
         };
         let result = bad_manager.set_openai_voice("alloy".to_string());
         assert!(result.is_err(), "persist to nonexistent dir must fail");
@@ -3703,6 +3852,7 @@ mod tests {
         let bad_manager = SettingsManager {
             config_dir: bad_config_dir,
             cache: Arc::clone(&cache),
+            elevenlabs_catalog_cache: Arc::new(std::sync::RwLock::new(None)),
         };
 
         let result = bad_manager.set_webview_section(false, 9999, "127.0.0.1".to_string(), true);
@@ -4169,6 +4319,7 @@ mod tests {
         let manager = SettingsManager {
             config_dir: config_dir.clone(),
             cache: Arc::clone(&cache),
+            elevenlabs_catalog_cache: Arc::new(std::sync::RwLock::new(None)),
         };
 
         manager.set_ui_language("de".to_string()).unwrap();
@@ -4178,6 +4329,7 @@ mod tests {
         let bad_manager = SettingsManager {
             config_dir: bad_config_dir,
             cache,
+            elevenlabs_catalog_cache: Arc::new(std::sync::RwLock::new(None)),
         };
         let result = bad_manager.set_ui_language("fr".to_string());
         assert!(result.is_err(), "persist to nonexistent dir must fail");
