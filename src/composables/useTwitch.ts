@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event'
 import { useTwitchSettings } from './useAppSettings'
 import { debugLog, debugError } from '../utils/debug'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
+import { normalizeCommandError } from '../ipc/commandError'
 import { t } from '../i18n'
 
 export type TwitchStatus = 'Disconnected' | 'Connecting' | 'Connected' | 'Error'
@@ -131,7 +132,7 @@ export function useTwitch() {
       const result = await invoke<string>('restart_twitch')
       showActionResult(result, 'success')
     } catch (e) {
-      const errorMsg = e instanceof Error ? e.message : String(e)
+      const errorMsg = normalizeCommandError(e).message
       showError(t('twitch.error.restart', { detail: errorMsg }))
     }
   }
@@ -150,7 +151,7 @@ export function useTwitch() {
       const result = await invoke<string>('save_twitch_settings', { settings: settings.value })
       showActionResult(result, 'success')
     } catch (e) {
-      const errorMsg = e instanceof Error ? e.message : String(e)
+      const errorMsg = normalizeCommandError(e).message
       showError(t('twitch.error.save', { detail: errorMsg }))
     }
   }
@@ -160,7 +161,7 @@ export function useTwitch() {
       const result = await invoke<string>('connect_twitch')
       showActionResult(result, 'success')
     } catch (e) {
-      const errorMsg = e instanceof Error ? e.message : String(e)
+      const errorMsg = normalizeCommandError(e).message
       showError(t('twitch.error.connect', { detail: errorMsg }))
     }
   }
@@ -170,7 +171,7 @@ export function useTwitch() {
       const result = await invoke<string>('disconnect_twitch')
       showActionResult(result, 'info')
     } catch (e) {
-      const errorMsg = e instanceof Error ? e.message : String(e)
+      const errorMsg = normalizeCommandError(e).message
       showError(t('twitch.error.disconnect', { detail: errorMsg }))
     }
   }
@@ -188,7 +189,7 @@ export function useTwitch() {
       const result = await invoke<string>('send_twitch_test_message')
       showActionResult(result, 'info')
     } catch (e) {
-      const errorMsg = e instanceof Error ? e.message : String(e)
+      const errorMsg = normalizeCommandError(e).message
       showError(t('twitch.error.test', { detail: errorMsg }))
     }
   }

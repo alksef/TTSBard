@@ -161,4 +161,18 @@ describe('useTwitch action result localization', () => {
     })
     expect(mockDebugError).toHaveBeenCalledWith('[Twitch] Unknown action code:', 'bogus_code')
   })
+
+  it('shows the DTO message in the detail, not [object Object]', async () => {
+    const twitch = await setupAndMount()
+    mockInvoke.mockRejectedValueOnce({
+      code: 'twitch.unavailable',
+      message: 'Twitch is not connected',
+      retryable: true,
+    })
+
+    await twitch.startTwitch()
+
+    expect(twitch.errorMessage.value).toContain('Twitch is not connected')
+    expect(twitch.errorMessage.value).not.toContain('[object Object]')
+  })
 })

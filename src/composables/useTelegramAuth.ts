@@ -1,7 +1,7 @@
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { debugLog, debugError } from '../utils/debug'
-import { presentCommandError } from '../ipc/commandError'
+import { LocalizedError, presentCommandError, normalizeCommandError } from '../ipc/commandError'
 import { t } from '../i18n'
 import type { VoiceCode, AppSettingsDto } from '../types/settings'
 
@@ -88,6 +88,12 @@ export function useTelegramAuth() {
       return status.value
     } catch (error) {
       debugError('Failed to get Telegram status:', error)
+      const message = normalizeCommandError(error).message
+      if (message.includes('не инициализирован') || message.includes('not initialized')) {
+        status.value = null
+        state.value = 'idle'
+        return null
+      }
       errorMessage.value = presentCommandError(error, t('tts.silero.error.status_failed'))
       state.value = 'error'
       return null
@@ -422,11 +428,11 @@ export function useTelegramAuth() {
 
           debugLog('[TELEGRAM VOICES] Voice added successfully')
         } else {
-          throw new Error(t('tts.silero.error.voice_info_unavailable'))
+          throw new LocalizedError(t('tts.silero.error.voice_info_unavailable'))
         }
       } else {
         // Бот вернул false - значит неверный код голоса
-        throw new Error(t('tts.silero.error.invalid_voice_code'))
+        throw new LocalizedError(t('tts.silero.error.invalid_voice_code'))
       }
     } catch (error) {
       debugError('[TELEGRAM VOICES] Failed to add voice code:', error)
@@ -463,7 +469,7 @@ export function useTelegramAuth() {
         await refreshVoice()
         debugLog('[TELEGRAM VOICES] Voice selected successfully')
       } else {
-        throw new Error(t('tts.silero.error.voice_select_failed'))
+        throw new LocalizedError(t('tts.silero.error.voice_select_failed'))
       }
     } catch (error) {
       debugError('[TELEGRAM VOICES] Failed to select voice:', error)

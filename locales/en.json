@@ -980,6 +980,18 @@
     "tts.telegram.auth.error.password_required": "Enter the 2FA password",
     "tts.telegram.auth.error.code_request_failed": "Could not request the confirmation code. Try again.",
     "tts.telegram.auth.error.password_check_failed": "Could not verify the 2FA password.",
-    "tts.telegram.auth.error.sign_in_failed": "Could not sign in. Check the code and try again."
+    "tts.telegram.auth.error.sign_in_failed": "Could not sign in. Check the code and try again.",
+    "errors.speech.snapshot_unavailable": "Synthesis service unavailable",
+    "errors.speech.empty_text": "Text is empty",
+    "errors.speech.queue_full": "Queue is full",
+    "errors.speech.queue_rejected": "Request rejected by queue",
+    "errors.speech.twitch_only_route": "Route available for Twitch only",
+    "errors.twitch.empty_text": "Twitch message must not be empty",
+    "errors.twitch.unavailable": "Twitch is not connected",
+    "errors.twitch.send_failed": "Failed to send Twitch message",
+    "errors.input_server.blank_text": "Text is blank",
+    "errors.input_server.inbox_full": "Incoming inbox is full",
+    "errors.input_server.unknown_item": "Unknown item id",
+    "errors.input_server.too_long": "Text is too long"
   }
 }

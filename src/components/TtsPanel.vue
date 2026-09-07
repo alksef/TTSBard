@@ -16,7 +16,7 @@ import type {
 import { decideElevenLabsFirstLoad } from './tts/elevenLabsCardState';
 import { debugLog, debugError } from '../utils/debug';
 import { t } from '../i18n';
-import { presentCommandError } from '../ipc/commandError';
+import { LocalizedError, presentCommandError } from '../ipc/commandError';
 import { TELEGRAM_AUTH_KEY, type UseTelegramAuthReturn } from '../composables/useTelegramAuth';
 import TelegramAuthModal from './TelegramAuthModal.vue';
 import StatusMessage from './shared/StatusMessage.vue';
@@ -343,7 +343,7 @@ async function saveFishAudioSettings(data: FishAudioConnectionSettingsInput): Pr
 
   if (!data.apiKey.trim()) {
     showError(t('tts.error.api_key_required'));
-    throw new Error(t('tts.error.api_key_required'));
+    throw new LocalizedError(t('tts.error.api_key_required'));
   }
 
   try {
@@ -420,7 +420,7 @@ async function saveElevenLabsApiKey(key: string): Promise<void> {
 
   if (!key.trim()) {
     showError(t('tts.error.api_key_required'));
-    throw new Error(t('tts.error.api_key_required'));
+    throw new LocalizedError(t('tts.error.api_key_required'));
   }
 
   try {

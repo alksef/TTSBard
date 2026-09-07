@@ -174,24 +174,24 @@ describe('useTelegramAuth', () => {
       expect(canInit.value).toBe(true)
     })
 
-    it('sets state to error on not-initialized rejection', async () => {
-      mockInvoke.mockRejectedValueOnce('клиент не инициализирован')
+    it('sets state to idle on not-initialized rejection', async () => {
+      mockInvoke.mockRejectedValueOnce('Клиент не инициализирован')
 
       const { getStatus, state, status } = useTelegramAuth()
       const result = await getStatus()
 
       expect(result).toBeNull()
-      expect(state.value).toBe('error')
+      expect(state.value).toBe('idle')
       expect(status.value).toBeNull()
     })
 
-    it('sets state to error when rejection contains "not initialized"', async () => {
+    it('sets state to idle when rejection contains "not initialized"', async () => {
       mockInvoke.mockRejectedValueOnce('Error: client not initialized')
 
       const { getStatus, state } = useTelegramAuth()
       await getStatus()
 
-      expect(state.value).toBe('error')
+      expect(state.value).toBe('idle')
     })
 
     it('sets state to error on unexpected error', async () => {
@@ -652,7 +652,7 @@ describe('useTelegramAuth', () => {
     it('preserves previous limits value on error', async () => {
       mockInvoke
         .mockResolvedValueOnce({ voices: '17/666', gifs: '5/50' })
-        .mockRejectedValueOnce(new Error('limits fetch failed'))
+        .mockRejectedValueOnce('limits fetch failed')
 
       const { refreshLimits, limits, limitsError } = useTelegramAuth()
 
@@ -690,7 +690,7 @@ describe('useTelegramAuth', () => {
     })
 
     it('preserves limits on rejection and preserves null if no prior value', async () => {
-      mockInvoke.mockRejectedValueOnce(new Error('network error'))
+      mockInvoke.mockRejectedValueOnce('network error')
 
       const { refreshLimits, limits, limitsError } = useTelegramAuth()
       await refreshLimits()
@@ -851,7 +851,7 @@ describe('useTelegramAuth', () => {
     const cases: FallbackCase[] = [
       {
         name: 'getStatus',
-        rawMessage: 'клиент не инициализирован',
+        rawMessage: 'Ошибка сети при проверке статуса',
         invoke: (auth) => auth.getStatus(),
         read: (auth) => auth.errorMessage.value,
         expected: {

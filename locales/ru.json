@@ -980,6 +980,18 @@
     "tts.telegram.auth.error.password_required": "Введите пароль 2FA",
     "tts.telegram.auth.error.code_request_failed": "Не удалось запросить код подтверждения. Попробуйте снова.",
     "tts.telegram.auth.error.password_check_failed": "Не удалось проверить пароль 2FA.",
-    "tts.telegram.auth.error.sign_in_failed": "Не удалось войти. Проверьте код и попробуйте снова."
+    "tts.telegram.auth.error.sign_in_failed": "Не удалось войти. Проверьте код и попробуйте снова.",
+    "errors.speech.snapshot_unavailable": "Сервис синтеза недоступен",
+    "errors.speech.empty_text": "Текст пуст",
+    "errors.speech.queue_full": "Очередь заполнена",
+    "errors.speech.queue_rejected": "Запрос отклонён очередью",
+    "errors.speech.twitch_only_route": "Маршрут доступен только для Twitch",
+    "errors.twitch.empty_text": "Сообщение Twitch не должно быть пустым",
+    "errors.twitch.unavailable": "Twitch не подключён",
+    "errors.twitch.send_failed": "Не удалось отправить сообщение Twitch",
+    "errors.input_server.blank_text": "Пустой текст",
+    "errors.input_server.inbox_full": "Входящая очередь заполнена",
+    "errors.input_server.unknown_item": "Неизвестный идентификатор",
+    "errors.input_server.too_long": "Текст слишком длинный"
   }
 }
