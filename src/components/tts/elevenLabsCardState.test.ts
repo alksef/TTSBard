@@ -3,22 +3,17 @@ import { i18n } from '../../i18n'
 import enCatalog from '../../../locales/en.json'
 import ruCatalog from '../../../locales/ru.json'
 import {
-  completeElevenLabsCatalogRefresh,
-  createElevenLabsCatalogState,
-  decideElevenLabsFirstLoad,
   effectiveElevenLabsSpeakerBoost,
   effectiveElevenLabsStyle,
   elevenLabsModelKey,
   elevenLabsModelLabel,
   elevenLabsVoiceKey,
   elevenLabsVoiceLabel,
-  failElevenLabsCatalogRefresh,
   findElevenLabsModel,
   isElevenLabsGenerationDirty,
   modelSupportsSpeakerBoost,
   modelSupportsStyle,
   normalizeElevenLabsGenerationForm,
-  startElevenLabsCatalogRefresh,
   type ElevenLabsGenerationForm,
 } from './elevenLabsCardState'
 import type { ElevenLabsModel, ElevenLabsVoice } from '../../types/settings'
@@ -71,78 +66,6 @@ afterEach(() => {
   activate('en')
 })
 
-describe('ElevenLabs independent catalog refresh state', () => {
-  it('replaces the model catalog and clears the error on success', () => {
-    const next = completeElevenLabsCatalogRefresh(
-      createElevenLabsCatalogState<ElevenLabsModel>(),
-      [model('m1')],
-    )
-
-    expect(next.loading).toBe(false)
-    expect(next.error).toBeNull()
-    expect(next.items).toEqual([model('m1')])
-  })
-
-  it('replaces the voice catalog and clears the error on success', () => {
-    const next = completeElevenLabsCatalogRefresh(
-      createElevenLabsCatalogState<ElevenLabsVoice>(),
-      [voice('a', 'A')],
-    )
-
-    expect(next.loading).toBe(false)
-    expect(next.error).toBeNull()
-    expect(next.items).toEqual([voice('a', 'A')])
-  })
-
-  it('preserves the previous models and surfaces an inline error on failure', () => {
-    const withCatalog = completeElevenLabsCatalogRefresh(
-      createElevenLabsCatalogState<ElevenLabsModel>(),
-      [model('m1')],
-    )
-    const failed = failElevenLabsCatalogRefresh(withCatalog, 'network down')
-
-    expect(failed.loading).toBe(false)
-    expect(failed.error).toBe('network down')
-    expect(failed.items).toEqual([model('m1')])
-  })
-
-  it('preserves the previous voices and surfaces an inline error on failure', () => {
-    const withCatalog = completeElevenLabsCatalogRefresh(
-      createElevenLabsCatalogState<ElevenLabsVoice>(),
-      [voice('a', 'A')],
-    )
-    const failed = failElevenLabsCatalogRefresh(withCatalog, 'network down')
-
-    expect(failed.loading).toBe(false)
-    expect(failed.error).toBe('network down')
-    expect(failed.items).toEqual([voice('a', 'A')])
-  })
-
-  it('suppresses an overlapping refresh while one is in flight', () => {
-    const started = startElevenLabsCatalogRefresh(createElevenLabsCatalogState<ElevenLabsModel>())
-    expect(started.loading).toBe(true)
-
-    const overlapping = startElevenLabsCatalogRefresh(started)
-    expect(overlapping).toBe(started)
-  })
-
-  it('keeps model and voice refresh states fully independent', () => {
-    const models = failElevenLabsCatalogRefresh(
-      createElevenLabsCatalogState<ElevenLabsModel>(),
-      'model error',
-    )
-    const voices = completeElevenLabsCatalogRefresh(
-      createElevenLabsCatalogState<ElevenLabsVoice>(),
-      [voice('a', 'A')],
-    )
-
-    expect(models.error).toBe('model error')
-    expect(models.items).toEqual([])
-    expect(voices.error).toBeNull()
-    expect(voices.items).toEqual([voice('a', 'A')])
-  })
-})
-
 describe('ElevenLabs generation dirty comparison', () => {
   it('is not dirty when the normalized form matches the saved props', () => {
     const saved = form()
@@ -190,25 +113,6 @@ describe('ElevenLabs generation dirty comparison', () => {
   it('ignores sub-epsilon float differences', () => {
     const saved = form({ stability: 0.5 })
     expect(isElevenLabsGenerationDirty(form({ stability: 0.5000000001 }), saved, model('m1'))).toBe(false)
-  })
-})
-
-describe('ElevenLabs first-load decision', () => {
-  it('loads both catalogs when the key changed', () => {
-    expect(decideElevenLabsFirstLoad({ keyChanged: true, modelsEmpty: false, voicesEmpty: false }))
-      .toEqual({ loadModels: true, loadVoices: true })
-  })
-
-  it('loads only empty catalogs when the key is unchanged', () => {
-    expect(decideElevenLabsFirstLoad({ keyChanged: false, modelsEmpty: true, voicesEmpty: false }))
-      .toEqual({ loadModels: true, loadVoices: false })
-    expect(decideElevenLabsFirstLoad({ keyChanged: false, modelsEmpty: false, voicesEmpty: true }))
-      .toEqual({ loadModels: false, loadVoices: true })
-  })
-
-  it('loads nothing when the key is unchanged and both catalogs are populated', () => {
-    expect(decideElevenLabsFirstLoad({ keyChanged: false, modelsEmpty: false, voicesEmpty: false }))
-      .toEqual({ loadModels: false, loadVoices: false })
   })
 })
 

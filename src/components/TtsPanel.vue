@@ -13,7 +13,6 @@ import type {
   TtsProviderInfoDto,
   VoiceModel,
 } from '../types/settings';
-import { decideElevenLabsFirstLoad } from './tts/elevenLabsCardState';
 import { debugLog, debugError } from '../utils/debug';
 import { t } from '../i18n';
 import { LocalizedError, presentCommandError } from '../ipc/commandError';
@@ -467,15 +466,14 @@ async function saveElevenLabsGenerationSettings(data: ElevenLabsGenerationSettin
 }
 
 async function firstLoadElevenLabsCatalogs(keyChanged: boolean): Promise<void> {
-  const decision = decideElevenLabsFirstLoad({
-    keyChanged,
-    modelsEmpty: elevenLabsModels.value.length === 0,
-    voicesEmpty: elevenLabsVoices.value.length === 0,
-  });
+  const modelsEmpty = elevenLabsModels.value.length === 0;
+  const voicesEmpty = elevenLabsVoices.value.length === 0;
+  const loadModels = keyChanged || modelsEmpty;
+  const loadVoices = keyChanged || voicesEmpty;
 
   const tasks: Promise<void>[] = [];
-  if (decision.loadModels) tasks.push(refreshElevenLabsModels());
-  if (decision.loadVoices) tasks.push(refreshElevenLabsVoices());
+  if (loadModels) tasks.push(refreshElevenLabsModels());
+  if (loadVoices) tasks.push(refreshElevenLabsVoices());
   if (tasks.length === 0) return;
 
   elevenLabsFirstLoadLoading.value = true;
