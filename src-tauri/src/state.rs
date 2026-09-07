@@ -527,6 +527,7 @@ impl AppState {
     }
 
     /// Publish an ElevenLabs form submission as a single runtime config update.
+    #[allow(clippy::too_many_arguments)] // Mirrors the persisted ElevenLabs settings field set.
     pub fn set_elevenlabs_connection_settings(
         &self,
         api_key: String,

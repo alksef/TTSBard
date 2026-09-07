@@ -290,7 +290,7 @@ fn load_dir(
         }
     }
 
-    packs.sort_by(|a, b| a.locale.to_ascii_lowercase().cmp(&b.locale.to_ascii_lowercase()));
+    packs.sort_by_key(|a| a.locale.to_ascii_lowercase());
     packs
 }
 
