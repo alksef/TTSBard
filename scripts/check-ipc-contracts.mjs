@@ -178,6 +178,7 @@ function allowedDynamic(item, allowlist) {
 export function collectInventory(root) {
   const frontendFiles = ['src', 'src-playback', 'src-soundpanel']
     .flatMap((directory) => sourceFiles(root, directory))
+    .filter((path) => !path.endsWith('.test.ts'))
   const backendFiles = sourceFiles(root, 'src-tauri/src')
   const frontendConstants = stringConstants(frontendFiles, root, 'typescript')
   const backendConstants = stringConstants(backendFiles, root, 'rust')

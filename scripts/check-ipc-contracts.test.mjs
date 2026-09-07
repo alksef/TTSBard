@@ -16,6 +16,10 @@ test('repository IPC consumers match registered backend contracts', () => {
   assert.ok(inventory.frontendInvokes.length > 0)
   assert.ok(inventory.backendEvents.length > 0)
   assert.ok(inventory.frontendListens.length > 0)
+  const testFiles = (items) => items.filter(({ file }) => file.endsWith('.test.ts'))
+  assert.deepEqual(testFiles(inventory.frontendInvokes), [])
+  assert.deepEqual(testFiles(inventory.frontendListens), [])
+  assert.deepEqual(testFiles(inventory.dynamicExpressions), [])
   assert.ok(inventory.frontendInvokes.some(({ name, file }) =>
     name === 'cancel_speech_job' && file.startsWith('src-playback/')))
   assert.ok(inventory.frontendListens.some(({ name, file }) =>
