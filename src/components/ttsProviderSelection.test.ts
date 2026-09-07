@@ -29,6 +29,15 @@ describe('TTS provider selection adapters', () => {
     expect(invokeMock).toHaveBeenCalledWith('set_tts_provider', { provider: 'fish' })
   })
 
+  it('selects ElevenLabs through the built-in selection adapter', async () => {
+    invokeMock.mockResolvedValue(undefined)
+
+    await selectBuiltinTtsProvider('elevenlabs')
+
+    expect(invokeMock).toHaveBeenCalledTimes(1)
+    expect(invokeMock).toHaveBeenCalledWith('set_tts_provider', { provider: 'elevenlabs' })
+  })
+
   it('selects Piper without a separate prepare or rollback command', async () => {
     invokeMock.mockResolvedValue(undefined)
 

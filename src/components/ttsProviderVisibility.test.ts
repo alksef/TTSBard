@@ -10,7 +10,7 @@ import {
 
 describe('TTS provider visibility rules', () => {
   it('keeps stable built-in provider ids in a fixed order', () => {
-    expect(BUILTIN_PROVIDER_IDS).toEqual(['silero', 'openai', 'fish', 'local-http'])
+    expect(BUILTIN_PROVIDER_IDS).toEqual(['silero', 'openai', 'fish', 'elevenlabs', 'local-http'])
   })
 
   it('derives legacy visible ids as Silero + configured + active, omitting unselected Piper models', () => {
@@ -29,6 +29,16 @@ describe('TTS provider visibility rules', () => {
         piperIds: ['local-piper:amy', 'local-piper:giga'],
       }),
     ).toEqual(['silero', 'local-piper:amy'])
+  })
+
+  it('includes a configured ElevenLabs provider in legacy-derived visibility', () => {
+    expect(
+      deriveLegacyVisibleIds({
+        activeProviderId: null,
+        configuredIds: ['openai', 'elevenlabs'],
+        piperIds: [],
+      }),
+    ).toEqual(['silero', 'openai', 'elevenlabs'])
   })
 
   it('keeps Silero visible even without configured providers', () => {

@@ -35,6 +35,37 @@
       "sample_rate": 44100,
       "use_proxy": true
     },
+    "elevenlabs": {
+      "api_key": "el-test-key",
+      "voice_id": "el-voice-1",
+      "voices": [
+        {
+          "voice_id": "el-voice-1",
+          "name": "Eleven Voice",
+          "category": "premade",
+          "labels": [
+            "american",
+            "female"
+          ],
+          "preview_url": "https://example.com/preview.mp3"
+        }
+      ],
+      "models": [
+        {
+          "model_id": "eleven_flash_v2_5",
+          "name": "Flash v2.5",
+          "can_use_style": true,
+          "can_use_speaker_boost": true
+        }
+      ],
+      "model_id": "eleven_flash_v2_5",
+      "output_format": "mp3_44100_128",
+      "stability": 0.5,
+      "similarity_boost": 0.75,
+      "style": 0.0,
+      "use_speaker_boost": true,
+      "use_proxy": false
+    },
     "telegram": {
       "api_id": 12345,
       "proxy_mode": "none",

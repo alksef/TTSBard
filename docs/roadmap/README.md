@@ -67,6 +67,7 @@ related_tasks: []
 
 ### TTS-провайдеры
 
+- [ROADMAP-097 — ElevenLabs как TTS-провайдер](./completed/097-elevenlabs-tts-provider.md)
 - [ROADMAP-086 — управляемая видимость провайдеров в панели TTS](./completed/086-tts-provider-panel-visibility.md)
 
 ### Надёжность и ревью

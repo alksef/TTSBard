@@ -5,8 +5,8 @@ use crate::stress::packs::RuAccentPackDescriptor;
 use crate::stress::runtime::RuAccentRuntimeSlot;
 use crate::telegram::TelegramClient;
 use crate::tts::{
-    fish::FishTts, local_http_server::LocalHttpServerTts, openai::OpenAiTts,
-    piper::runtime::LocalModelTts, piper::scanner::discover_piper_models,
+    elevenlabs::ElevenLabsTts, fish::FishTts, local_http_server::LocalHttpServerTts,
+    openai::OpenAiTts, piper::runtime::LocalModelTts, piper::scanner::discover_piper_models,
     registry::TtsProviderEntry, registry::TtsProviderRegistry, silero::SileroTts, TtsProvider,
     TtsProviderType,
 };
@@ -50,6 +50,15 @@ pub struct TtsConfig {
     pub fish_format: String,
     pub fish_temperature: f32,
     pub fish_sample_rate: u32,
+    pub elevenlabs_api_key: Option<String>,
+    pub elevenlabs_voice_id: String,
+    pub elevenlabs_model_id: String,
+    pub elevenlabs_output_format: String,
+    pub elevenlabs_stability: f32,
+    pub elevenlabs_similarity_boost: f32,
+    pub elevenlabs_style: f32,
+    pub elevenlabs_use_speaker_boost: bool,
+    pub elevenlabs_proxy_url: Option<String>,
     pub local_url: String,
 }
 
@@ -66,6 +75,15 @@ impl Default for TtsConfig {
             fish_format: "mp3".to_string(),
             fish_temperature: 0.7,
             fish_sample_rate: 44100,
+            elevenlabs_api_key: None,
+            elevenlabs_voice_id: String::new(),
+            elevenlabs_model_id: String::new(),
+            elevenlabs_output_format: crate::tts::elevenlabs::DEFAULT_OUTPUT_FORMAT.to_string(),
+            elevenlabs_stability: crate::tts::elevenlabs::DEFAULT_STABILITY,
+            elevenlabs_similarity_boost: crate::tts::elevenlabs::DEFAULT_SIMILARITY_BOOST,
+            elevenlabs_style: crate::tts::elevenlabs::DEFAULT_STYLE,
+            elevenlabs_use_speaker_boost: crate::tts::elevenlabs::DEFAULT_USE_SPEAKER_BOOST,
+            elevenlabs_proxy_url: None,
             local_url: "http://127.0.0.1:8124".to_string(),
         }
     }
@@ -469,6 +487,109 @@ impl AppState {
         self.tts_config.write().fish_sample_rate = sample_rate;
     }
 
+    // ========== ElevenLabs TTS ==========
+
+    pub fn init_elevenlabs_tts(&self, api_key: String) {
+        let mut tts = ElevenLabsTts::new(api_key);
+        let config = self.tts_config.read();
+        tts.set_voice_id(config.elevenlabs_voice_id.clone());
+        tts.set_model_id(config.elevenlabs_model_id.clone());
+        tts.set_output_format(config.elevenlabs_output_format.clone());
+        tts.set_stability(config.elevenlabs_stability);
+        tts.set_similarity_boost(config.elevenlabs_similarity_boost);
+        tts.set_style(config.elevenlabs_style);
+        tts.set_use_speaker_boost(config.elevenlabs_use_speaker_boost);
+        if let Some(proxy_url) = &config.elevenlabs_proxy_url {
+            tts.set_proxy(Some(proxy_url.clone()));
+        }
+        drop(config);
+
+        if let Some(event_tx) = self.get_event_sender() {
+            tts = tts.with_event_tx(event_tx);
+        }
+
+        let mut registry = self.tts_registry.lock();
+        registry.add_or_replace(TtsProviderEntry {
+            id: "elevenlabs".to_string(),
+            display_name: "ElevenLabs TTS".to_string(),
+            provider: TtsProvider::ElevenLabs(tts),
+        });
+        info!("ElevenLabs TTS provider registered");
+    }
+
+    #[allow(dead_code)]
+    pub fn get_elevenlabs_api_key(&self) -> Option<String> {
+        self.tts_config.read().elevenlabs_api_key.clone()
+    }
+
+    pub fn set_elevenlabs_api_key(&self, key: Option<String>) {
+        self.tts_config.write().elevenlabs_api_key = key;
+    }
+
+    /// Publish an ElevenLabs form submission as a single runtime config update.
+    pub fn set_elevenlabs_connection_settings(
+        &self,
+        api_key: String,
+        model_id: String,
+        output_format: String,
+        stability: f32,
+        similarity_boost: f32,
+        style: f32,
+        use_speaker_boost: bool,
+    ) {
+        let mut config = self.tts_config.write();
+        config.elevenlabs_api_key = Some(api_key);
+        config.elevenlabs_model_id = model_id;
+        config.elevenlabs_output_format = output_format;
+        config.elevenlabs_stability = stability;
+        config.elevenlabs_similarity_boost = similarity_boost;
+        config.elevenlabs_style = style;
+        config.elevenlabs_use_speaker_boost = use_speaker_boost;
+    }
+
+    pub fn set_elevenlabs_voice_id(&self, voice_id: String) {
+        let mut registry = self.tts_registry.lock();
+        if let Some(entry) = registry.get_mut("elevenlabs") {
+            if let TtsProvider::ElevenLabs(ref mut tts) = &mut entry.provider {
+                tts.set_voice_id(voice_id.clone());
+            }
+        }
+        drop(registry);
+        self.tts_config.write().elevenlabs_voice_id = voice_id;
+    }
+
+    pub fn set_elevenlabs_model_settings(
+        &self,
+        model_id: String,
+        style: f32,
+        use_speaker_boost: bool,
+    ) {
+        let mut registry = self.tts_registry.lock();
+        if let Some(entry) = registry.get_mut("elevenlabs") {
+            if let TtsProvider::ElevenLabs(ref mut tts) = &mut entry.provider {
+                tts.set_model_id(model_id.clone());
+                tts.set_style(style);
+                tts.set_use_speaker_boost(use_speaker_boost);
+            }
+        }
+        drop(registry);
+        let mut config = self.tts_config.write();
+        config.elevenlabs_model_id = model_id;
+        config.elevenlabs_style = style;
+        config.elevenlabs_use_speaker_boost = use_speaker_boost;
+    }
+
+    pub fn set_elevenlabs_proxy(&self, proxy_url: Option<String>) {
+        let mut registry = self.tts_registry.lock();
+        if let Some(entry) = registry.get_mut("elevenlabs") {
+            if let TtsProvider::ElevenLabs(ref mut tts) = &mut entry.provider {
+                tts.set_proxy(proxy_url.clone());
+            }
+        }
+        drop(registry);
+        self.tts_config.write().elevenlabs_proxy_url = proxy_url;
+    }
+
     /// Set OpenAI voice (simplified with unified TtsConfig)
     pub fn set_openai_voice(&self, voice: String) {
         let mut registry = self.tts_registry.lock();
@@ -762,6 +883,7 @@ pub(crate) fn builtin_type_for_id(id: &str) -> Option<TtsProviderType> {
         "silero" => Some(TtsProviderType::Silero),
         "local-http" => Some(TtsProviderType::Local),
         "fish" => Some(TtsProviderType::Fish),
+        "elevenlabs" => Some(TtsProviderType::ElevenLabs),
         _ => None,
     }
 }
@@ -817,6 +939,14 @@ mod tests {
     #[test]
     fn builtin_type_for_id_fish() {
         assert_eq!(builtin_type_for_id("fish"), Some(TtsProviderType::Fish));
+    }
+
+    #[test]
+    fn builtin_type_for_id_elevenlabs() {
+        assert_eq!(
+            builtin_type_for_id("elevenlabs"),
+            Some(TtsProviderType::ElevenLabs)
+        );
     }
 
     #[test]

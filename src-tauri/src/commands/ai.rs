@@ -6,7 +6,8 @@ use crate::commands::telegram::TelegramState;
 use crate::config::SettingsManager;
 use crate::secret_log;
 use crate::state::AppState;
-use crate::tts::{TtsProviderType, VoiceModel};
+use crate::tts::elevenlabs::ElevenLabsModel;
+use crate::tts::{ElevenLabsVoice, TtsProviderType, VoiceModel};
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 use tracing::{debug, error, info, warn};
@@ -19,6 +20,18 @@ pub struct FishAudioConnectionSettingsInput {
     pub format: String,
     pub temperature: f32,
     pub sample_rate: u32,
+}
+
+/// The fields submitted by the ElevenLabs generation-settings form.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ElevenLabsGenerationSettingsInput {
+    pub model_id: String,
+    pub output_format: String,
+    pub stability: f32,
+    pub similarity_boost: f32,
+    pub style: f32,
+    pub use_speaker_boost: bool,
 }
 
 /// Set AI provider
@@ -627,6 +640,56 @@ pub async fn set_tts_provider(
             }
             "fish"
         }
+        TtsProviderType::ElevenLabs => {
+            info!("Initializing ElevenLabs TTS");
+            let settings = settings_manager
+                .load()
+                .map_err(|e| format!("Failed to load settings: {}", e))?;
+            let el = &settings.tts.elevenlabs;
+            let key = el
+                .api_key
+                .clone()
+                .filter(|k| !k.is_empty())
+                .ok_or_else(|| "ElevenLabs API key is not configured.".to_string())?;
+            let models = settings_manager.get_elevenlabs_models();
+            if el.model_id.trim().is_empty()
+                || !models.iter().any(|model| model.model_id == el.model_id)
+            {
+                return Err(
+                    "ElevenLabs model is not selected. Please refresh the model catalog."
+                        .to_string(),
+                );
+            }
+            let voices = settings_manager.get_elevenlabs_voices();
+            if el.voice_id.trim().is_empty()
+                || !voices.iter().any(|voice| voice.voice_id == el.voice_id)
+            {
+                return Err(
+                    "ElevenLabs voice is not selected. Please refresh the voice catalog."
+                        .to_string(),
+                );
+            }
+
+            state.set_elevenlabs_connection_settings(
+                key.clone(),
+                el.model_id.clone(),
+                el.output_format.clone(),
+                el.stability,
+                el.similarity_boost,
+                el.style,
+                el.use_speaker_boost,
+            );
+            state.set_elevenlabs_voice_id(el.voice_id.clone());
+            let proxy_url = if el.use_proxy {
+                settings.tts.network.proxy.proxy_url.clone()
+            } else {
+                None
+            };
+            state.set_elevenlabs_proxy(proxy_url);
+            state.init_elevenlabs_tts(key);
+            debug!("ElevenLabs TTS initialized");
+            "elevenlabs"
+        }
     };
 
     super::select_tts_provider_by_id(concrete_id.to_string(), app_handle, state, settings_manager)
@@ -1118,4 +1181,309 @@ pub fn apply_fish_audio_proxy_settings(
 #[tauri::command]
 pub fn has_api_key(settings_manager: State<'_, SettingsManager>) -> bool {
     settings_manager.get_openai_api_key().is_some()
+}
+
+// ============================================================================
+// ElevenLabs TTS commands
+// ============================================================================
+
+/// Get the ElevenLabs API key (if set).
+#[tauri::command]
+pub fn get_elevenlabs_api_key(settings_manager: State<'_, SettingsManager>) -> Option<String> {
+    settings_manager.get_elevenlabs_api_key()
+}
+
+/// Persist only the ElevenLabs API key and publish it to runtime.
+///
+/// The key is trimmed of surrounding whitespace before persistence. Returns
+/// `true` when the normalized key changed (the cached catalogs and the selected
+/// voice/model are cleared so data from a previous account cannot be reused) and
+/// `false` when it is unchanged. No API calls are performed here.
+#[tauri::command]
+pub async fn save_elevenlabs_api_key(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    settings_manager: State<'_, SettingsManager>,
+    key: String,
+) -> Result<bool, String> {
+    if key.trim().is_empty() {
+        return Err("ElevenLabs API key cannot be empty.".to_string());
+    }
+
+    let changed = super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_elevenlabs_api_key(key)
+    })
+    .await?;
+
+    if changed {
+        let trimmed = settings_manager
+            .get_elevenlabs_api_key()
+            .filter(|k| !k.is_empty())
+            .ok_or_else(|| "ElevenLabs API key is not configured.".to_string())?;
+        state.set_elevenlabs_api_key(Some(trimmed.clone()));
+        state.set_elevenlabs_voice_id(String::new());
+        state.set_elevenlabs_model_settings(String::new(), 0.0, false);
+        state.init_elevenlabs_tts(trimmed);
+    }
+    super::emit_settings_changed(&app_handle);
+    Ok(changed)
+}
+
+/// Atomically validate, persist and apply the ElevenLabs generation settings.
+///
+/// The model must exist in the cached model catalog; unsupported style and
+/// speaker-boost values are normalized safely. No API calls are performed here.
+#[tauri::command]
+pub async fn save_elevenlabs_generation_settings(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    settings_manager: State<'_, SettingsManager>,
+    settings: ElevenLabsGenerationSettingsInput,
+) -> Result<(), String> {
+    let ElevenLabsGenerationSettingsInput {
+        model_id,
+        output_format,
+        stability,
+        similarity_boost,
+        style,
+        use_speaker_boost,
+    } = settings;
+
+    let api_key = settings_manager
+        .get_elevenlabs_api_key()
+        .filter(|k| !k.is_empty())
+        .ok_or_else(|| "ElevenLabs API key is not configured.".to_string())?;
+
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_elevenlabs_generation_settings(
+            model_id,
+            output_format,
+            stability,
+            similarity_boost,
+            style,
+            use_speaker_boost,
+        )
+    })
+    .await?;
+
+    let el = settings_manager.get_elevenlabs_settings();
+    state.set_elevenlabs_connection_settings(
+        api_key.clone(),
+        el.model_id.clone(),
+        el.output_format.clone(),
+        el.stability,
+        el.similarity_boost,
+        el.style,
+        el.use_speaker_boost,
+    );
+    state.init_elevenlabs_tts(api_key);
+    super::emit_settings_changed(&app_handle);
+    Ok(())
+}
+
+/// Get the selected ElevenLabs voice ID.
+#[tauri::command]
+pub fn get_elevenlabs_voice_id(settings_manager: State<'_, SettingsManager>) -> String {
+    settings_manager.get_elevenlabs_voice_id()
+}
+
+/// Set the selected ElevenLabs voice ID as an immediate setting. The selected
+/// voice must exist in the cached voice catalog.
+#[tauri::command]
+pub async fn set_elevenlabs_voice_id(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    settings_manager: State<'_, SettingsManager>,
+    voice_id: String,
+) -> Result<(), String> {
+    let voice_id = voice_id.trim().to_string();
+    if voice_id.is_empty() {
+        return Err("ElevenLabs voice ID cannot be empty.".to_string());
+    }
+    let voices = settings_manager.get_elevenlabs_voices();
+    if !voices.iter().any(|voice| voice.voice_id == voice_id) {
+        return Err("ElevenLabs voice is not available in the cached catalog.".to_string());
+    }
+
+    let voice_id_for_persist = voice_id.clone();
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_elevenlabs_voice_id(voice_id_for_persist)
+    })
+    .await?;
+
+    state.set_elevenlabs_voice_id(voice_id);
+    super::emit_settings_changed(&app_handle);
+    Ok(())
+}
+
+/// Get the cached ElevenLabs voice catalog.
+#[tauri::command]
+pub fn get_elevenlabs_voices(settings_manager: State<'_, SettingsManager>) -> Vec<ElevenLabsVoice> {
+    settings_manager.get_elevenlabs_voices()
+}
+
+/// Get the cached ElevenLabs model catalog.
+#[tauri::command]
+pub fn get_elevenlabs_models(settings_manager: State<'_, SettingsManager>) -> Vec<ElevenLabsModel> {
+    settings_manager.get_elevenlabs_models()
+}
+
+/// Refresh the ElevenLabs voice catalog through the paginated `GET /v2/voices`.
+///
+/// Persists and returns only the voice catalog. A still-valid selection is
+/// preserved; otherwise the first returned voice is selected and persisted.
+/// Actionable mapped errors and request IDs are preserved.
+#[tauri::command]
+pub async fn refresh_elevenlabs_voices(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<Vec<ElevenLabsVoice>, String> {
+    let api_key = settings_manager
+        .get_elevenlabs_api_key()
+        .filter(|k| !k.is_empty())
+        .ok_or_else(|| "ElevenLabs API key is not configured.".to_string())?;
+
+    let proxy_url = if settings_manager.get_elevenlabs_use_proxy() {
+        settings_manager
+            .get_socks5_proxy_url()
+            .filter(|url| !url.is_empty())
+    } else {
+        None
+    };
+
+    let voices = crate::tts::elevenlabs::ElevenLabsTts::list_voices(&api_key, proxy_url.as_deref())
+        .await
+        .map_err(|e| format!("Could not load ElevenLabs voices: {}", e))?;
+
+    let previous_voice_id = settings_manager.get_elevenlabs_voice_id();
+    let selected_voice_id =
+        crate::tts::elevenlabs::select_voice_after_refresh(&previous_voice_id, &voices);
+
+    let voices_for_persist = voices.clone();
+    let selected_for_persist = selected_voice_id.clone();
+    let previous_for_persist = previous_voice_id.clone();
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_elevenlabs_voices(voices_for_persist)?;
+        if selected_for_persist != previous_for_persist {
+            mgr.set_elevenlabs_voice_id(selected_for_persist)?;
+        }
+        Ok(())
+    })
+    .await?;
+
+    let saved_voice_id = settings_manager.get_elevenlabs_voice_id();
+    state.set_elevenlabs_voice_id(saved_voice_id);
+    super::emit_settings_changed(&app_handle);
+
+    Ok(voices)
+}
+
+/// Refresh the ElevenLabs model catalog through the authenticated `GET /v1/models`.
+///
+/// Persists and returns only the model catalog. The selected model is preserved
+/// when still present; otherwise the first usable model is selected and persisted
+/// while its style / speaker-boost capabilities are normalized. Actionable mapped
+/// errors and request IDs are preserved.
+#[tauri::command]
+pub async fn refresh_elevenlabs_models(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<Vec<ElevenLabsModel>, String> {
+    let api_key = settings_manager
+        .get_elevenlabs_api_key()
+        .filter(|k| !k.is_empty())
+        .ok_or_else(|| "ElevenLabs API key is not configured.".to_string())?;
+
+    let proxy_url = if settings_manager.get_elevenlabs_use_proxy() {
+        settings_manager
+            .get_socks5_proxy_url()
+            .filter(|url| !url.is_empty())
+    } else {
+        None
+    };
+
+    let models = crate::tts::elevenlabs::ElevenLabsTts::list_models(&api_key, proxy_url.as_deref())
+        .await
+        .map_err(|e| format!("Could not load ElevenLabs models: {}", e))?;
+
+    let previous_model_id = settings_manager.get_elevenlabs_model_id();
+    let selected_model_id =
+        crate::tts::elevenlabs::select_model_after_refresh(&previous_model_id, &models)?;
+
+    let el = settings_manager.get_elevenlabs_settings();
+    let selected = models
+        .iter()
+        .find(|model| model.model_id == selected_model_id);
+    let style = if selected.is_some_and(|model| model.can_use_style) {
+        el.style
+    } else {
+        0.0
+    };
+    let use_speaker_boost = if selected.is_some_and(|model| model.can_use_speaker_boost) {
+        el.use_speaker_boost
+    } else {
+        false
+    };
+
+    let models_for_persist = models.clone();
+    let selected_for_persist = selected_model_id.clone();
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_elevenlabs_models(models_for_persist)?;
+        mgr.set_elevenlabs_model_selection(selected_for_persist, style, use_speaker_boost)
+    })
+    .await?;
+
+    state.set_elevenlabs_model_settings(selected_model_id, style, use_speaker_boost);
+    super::emit_settings_changed(&app_handle);
+
+    Ok(models)
+}
+
+/// Set the ElevenLabs use-proxy flag.
+#[tauri::command]
+pub async fn set_elevenlabs_use_proxy(
+    app_handle: AppHandle,
+    enabled: bool,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<(), String> {
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_elevenlabs_use_proxy(enabled)
+    })
+    .await?;
+
+    super::emit_settings_changed(&app_handle);
+    Ok(())
+}
+
+/// Apply the unified proxy setting to the active ElevenLabs provider runtime.
+#[tauri::command]
+pub fn apply_elevenlabs_proxy_settings(
+    state: State<'_, AppState>,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<(), String> {
+    let settings = settings_manager
+        .load()
+        .map_err(|e| format!("Failed to load settings: {}", e))?;
+
+    let proxy_url = if settings.tts.elevenlabs.use_proxy {
+        settings.tts.network.proxy.proxy_url.clone()
+    } else {
+        None
+    };
+
+    state.set_elevenlabs_proxy(proxy_url);
+
+    Ok(())
+}
+
+/// Get the full ElevenLabs settings for the settings card, combining persisted
+/// settings with the cached voice/model catalogs (without persisting them into
+/// `settings.json`).
+#[tauri::command]
+pub fn get_elevenlabs_settings(
+    settings_manager: State<'_, SettingsManager>,
+) -> crate::config::dto::ElevenLabsSettingsDto {
+    settings_manager.get_elevenlabs_settings_dto()
 }

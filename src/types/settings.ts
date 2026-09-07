@@ -54,12 +54,13 @@ export interface HotkeySettingsDto {
 // ============================================================================
 
 // Rust enum uses #[serde(rename_all = "lowercase")]
-// So JSON returns: "openai", "silero", "local", "fish"
+// So JSON returns: "openai", "silero", "local", "fish", "elevenlabs"
 export const TtsProviderType = {
   OpenAi: 'openai',
   Silero: 'silero',
   Local: 'local',
-  Fish: 'fish'
+  Fish: 'fish',
+  ElevenLabs: 'elevenlabs'
 } as const
 
 export type TtsProviderType = (typeof TtsProviderType)[keyof typeof TtsProviderType]
@@ -102,6 +103,51 @@ export interface FishAudioConnectionSettingsInput {
   format: string
   temperature: number
   sampleRate: number
+}
+
+/// Голосовой дескриптор ElevenLabs
+export type ElevenLabsVoiceClassification = 'default' | 'library'
+
+export interface ElevenLabsVoice {
+  voice_id: string
+  name: string
+  category: string | null
+  labels: string[]
+  preview_url: string | null
+  /** `default`/`library` for the two displayed partitions; `null`/absent for an unmarked personal/workspace voice. */
+  classification?: ElevenLabsVoiceClassification | null
+}
+
+/** Дескриптор модели ElevenLabs (account-backed catalog entry). */
+export interface ElevenLabsModel {
+  model_id: string
+  name: string
+  can_use_style: boolean
+  can_use_speaker_boost: boolean
+}
+
+export interface ElevenLabsSettingsDto {
+  api_key: string | null
+  voice_id: string
+  voices: ElevenLabsVoice[]
+  models: ElevenLabsModel[]
+  model_id: string
+  output_format: string
+  stability: number
+  similarity_boost: number
+  style: number
+  use_speaker_boost: boolean
+  use_proxy: boolean
+}
+
+/** Atomic payload for `save_elevenlabs_generation_settings`. */
+export interface ElevenLabsGenerationSettingsInput {
+  modelId: string
+  outputFormat: string
+  stability: number
+  similarityBoost: number
+  style: number
+  useSpeakerBoost: boolean
 }
 
 export interface TelegramTtsSettingsDto {
@@ -150,6 +196,7 @@ export interface TtsSettingsDto {
   openai: OpenAiSettingsDto
   local: LocalTtsSettingsDto
   fish: FishAudioSettingsDto
+  elevenlabs: ElevenLabsSettingsDto
   telegram: TelegramTtsSettingsDto
   network: NetworkSettingsDto
 }

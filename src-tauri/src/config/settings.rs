@@ -17,6 +17,7 @@ use super::hotkeys::HotkeySettings;
 use super::validation::{validate_port, validate_volume};
 use crate::input_server::{IncomingSettings, InputServerSettings};
 use crate::ocr::settings::OcrSettings;
+use crate::tts::elevenlabs::{ElevenLabsModel, ElevenLabsVoice};
 use crate::tts::TtsProviderType;
 use tracing::{info, warn};
 
@@ -359,6 +360,8 @@ pub struct TtsSettings {
     pub local: LocalTtsSettings,
     #[serde(default)]
     pub fish: FishAudioSettings,
+    #[serde(default)]
+    pub elevenlabs: ElevenLabsSettings,
     pub telegram: TelegramTtsSettings,
     #[serde(default)]
     pub network: NetworkSettings,
@@ -381,6 +384,7 @@ impl Default for TtsSettings {
             openai: OpenAiSettings::default(),
             local: LocalTtsSettings::default(),
             fish: FishAudioSettings::default(),
+            elevenlabs: ElevenLabsSettings::default(),
             telegram: TelegramTtsSettings::default(),
             network: NetworkSettings::default(),
             provider_id: None,
@@ -640,6 +644,147 @@ impl Default for FishAudioSettings {
             temperature: 0.7,
             sample_rate: 44100,
             use_proxy: false,
+        }
+    }
+}
+
+// ==================== ElevenLabs Settings ====================
+
+/// Настройки ElevenLabs TTS
+///
+/// `#[serde(default)]` на структуре гарантирует безопасную миграцию старого
+/// `settings.json` без секции ElevenLabs. Каталоги голосов и моделей хранятся
+/// отдельно в `elevenlabs-catalog.json` и здесь не присутствуют.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ElevenLabsSettings {
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub voice_id: String,
+    #[serde(default = "default_elevenlabs_model_id")]
+    pub model_id: String,
+    #[serde(default = "default_elevenlabs_output_format")]
+    pub output_format: String,
+    /// Параметры генерации в диапазоне 0.0..=1.0.
+    #[serde(default = "default_elevenlabs_stability")]
+    pub stability: f32,
+    #[serde(default = "default_elevenlabs_similarity_boost")]
+    pub similarity_boost: f32,
+    #[serde(default = "default_elevenlabs_style")]
+    pub style: f32,
+    #[serde(default = "default_elevenlabs_use_speaker_boost")]
+    pub use_speaker_boost: bool,
+    #[serde(default)]
+    pub use_proxy: bool,
+}
+
+fn default_elevenlabs_model_id() -> String {
+    String::new()
+}
+
+fn default_elevenlabs_output_format() -> String {
+    crate::tts::elevenlabs::DEFAULT_OUTPUT_FORMAT.to_string()
+}
+
+fn default_elevenlabs_stability() -> f32 {
+    crate::tts::elevenlabs::DEFAULT_STABILITY
+}
+
+fn default_elevenlabs_similarity_boost() -> f32 {
+    crate::tts::elevenlabs::DEFAULT_SIMILARITY_BOOST
+}
+
+fn default_elevenlabs_style() -> f32 {
+    crate::tts::elevenlabs::DEFAULT_STYLE
+}
+
+fn default_elevenlabs_use_speaker_boost() -> bool {
+    crate::tts::elevenlabs::DEFAULT_USE_SPEAKER_BOOST
+}
+
+impl Default for ElevenLabsSettings {
+    fn default() -> Self {
+        Self {
+            api_key: None,
+            voice_id: String::new(),
+            model_id: default_elevenlabs_model_id(),
+            output_format: default_elevenlabs_output_format(),
+            stability: default_elevenlabs_stability(),
+            similarity_boost: default_elevenlabs_similarity_boost(),
+            style: default_elevenlabs_style(),
+            use_speaker_boost: default_elevenlabs_use_speaker_boost(),
+            use_proxy: false,
+        }
+    }
+}
+
+/// Current on-disk format version of the ElevenLabs catalog cache.
+///
+/// Bump only when the serialized shape of [`ElevenLabsCatalogCache`] changes in
+/// a way old data cannot be migrated in place. Unsupported versions on disk are
+/// ignored and replaced with an empty current-version cache.
+const ELEVENLABS_CATALOG_CURRENT_VERSION: u32 = 1;
+
+/// Versioned on-disk cache for the ElevenLabs voice and model catalogs.
+///
+/// Stored at `<config_dir>/elevenlabs-catalog.json` and kept separate from
+/// `settings.json`: the catalogs are account data that is refreshed independently
+/// and must never be persisted into the main settings file.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ElevenLabsCatalogCache {
+    #[serde(default = "default_elevenlabs_catalog_version")]
+    pub version: u32,
+    #[serde(default)]
+    pub voices: Vec<ElevenLabsVoice>,
+    #[serde(default)]
+    pub models: Vec<ElevenLabsModel>,
+}
+
+/// Missing `version` in an old cache file means it predates versioning, which
+/// started at the current version.
+fn default_elevenlabs_catalog_version() -> u32 {
+    ELEVENLABS_CATALOG_CURRENT_VERSION
+}
+
+impl Default for ElevenLabsCatalogCache {
+    fn default() -> Self {
+        Self {
+            version: ELEVENLABS_CATALOG_CURRENT_VERSION,
+            voices: Vec::new(),
+            models: Vec::new(),
+        }
+    }
+}
+
+impl ElevenLabsCatalogCache {
+    /// Parse the catalog file, safely returning an empty current-version cache
+    /// when the file is missing, corrupt, or carries an unsupported format
+    /// version so application startup is never blocked.
+    fn load_from_disk(path: &Path) -> Self {
+        if !path.exists() {
+            return Self::default();
+        }
+        let content = match fs::read_to_string(path) {
+            Ok(content) => content,
+            Err(e) => {
+                warn!(error = %e, "elevenlabs-catalog.json unreadable, using empty catalog");
+                return Self::default();
+            }
+        };
+        match serde_json::from_str::<Self>(&content) {
+            Ok(cache) if cache.version == ELEVENLABS_CATALOG_CURRENT_VERSION => cache,
+            Ok(cache) => {
+                warn!(
+                    version = cache.version,
+                    current = ELEVENLABS_CATALOG_CURRENT_VERSION,
+                    "elevenlabs-catalog.json has unsupported version, using empty catalog"
+                );
+                Self::default()
+            }
+            Err(e) => {
+                warn!(error = %e, "elevenlabs-catalog.json corrupt, using empty catalog");
+                Self::default()
+            }
         }
     }
 }
@@ -1448,6 +1593,11 @@ impl SettingsManager {
         self.config_dir.join("settings.json")
     }
 
+    /// Get the path to the ElevenLabs catalog cache file.
+    fn elevenlabs_catalog_path(&self) -> PathBuf {
+        self.config_dir.join("elevenlabs-catalog.json")
+    }
+
     /// Read-only access to the config directory (for locale catalog integration).
     #[allow(dead_code)] // Ready for integration when the locale catalog lands
     pub fn config_dir(&self) -> &Path {
@@ -1870,6 +2020,200 @@ impl SettingsManager {
 
     pub fn get_fish_audio_use_proxy(&self) -> bool {
         self.cache.read().tts.fish.use_proxy
+    }
+
+    // ========== ElevenLabs Settings ==========
+
+    /// Read the persisted ElevenLabs catalog cache (voices + models).
+    ///
+    /// Missing or corrupt cache safely yields an empty catalog; the caller
+    /// never receives a startup-breaking error.
+    fn get_elevenlabs_catalog(&self) -> ElevenLabsCatalogCache {
+        ElevenLabsCatalogCache::load_from_disk(&self.elevenlabs_catalog_path())
+    }
+
+    /// Atomically replace the voices portion of the catalog cache, preserving
+    /// the current models. Only the catalog file is rewritten — `settings.json`
+    /// is untouched. A failed write leaves the previous catalog file intact.
+    pub fn set_elevenlabs_voices(&self, voices: Vec<ElevenLabsVoice>) -> Result<()> {
+        let path = self.elevenlabs_catalog_path();
+        let _guard = persistence::config_write_lock().lock();
+        let mut cache = ElevenLabsCatalogCache::load_from_disk(&path);
+        cache.voices = voices;
+        let content =
+            serde_json::to_string_pretty(&cache).context("Failed to serialize ElevenLabs catalog")?;
+        persistence::write_json_atomically(&path, &content)
+            .context("Failed to write ElevenLabs catalog file")
+    }
+
+    /// Atomically replace the models portion of the catalog cache, preserving
+    /// the current voices. Only the catalog file is rewritten — `settings.json`
+    /// is untouched. A failed write leaves the previous catalog file intact.
+    pub fn set_elevenlabs_models(&self, models: Vec<ElevenLabsModel>) -> Result<()> {
+        let path = self.elevenlabs_catalog_path();
+        let _guard = persistence::config_write_lock().lock();
+        let mut cache = ElevenLabsCatalogCache::load_from_disk(&path);
+        cache.models = models;
+        let content =
+            serde_json::to_string_pretty(&cache).context("Failed to serialize ElevenLabs catalog")?;
+        persistence::write_json_atomically(&path, &content)
+            .context("Failed to write ElevenLabs catalog file")
+    }
+
+    /// Persist only the ElevenLabs API key, trimmed of surrounding whitespace.
+    ///
+    /// Returns `Ok(true)` when the normalized key changed (and the cached
+    /// catalogs plus `voice_id`/`model_id` were cleared so data from a previous
+    /// account cannot be reused) and `Ok(false)` when the normalized key is
+    /// unchanged (preserving the cached catalogs and selection).
+    pub fn set_elevenlabs_api_key(&self, key: String) -> Result<bool> {
+        let trimmed = key.trim().to_string();
+        let settings_path = self.settings_path();
+        let catalog_path = self.elevenlabs_catalog_path();
+        let _guard = persistence::config_write_lock().lock();
+
+        let mut settings = if settings_path.exists() {
+            let content = fs::read_to_string(&settings_path)
+                .context("Failed to read settings file")?;
+            serde_json::from_str::<AppSettings>(&content).context("Failed to parse settings JSON")?
+        } else {
+            AppSettings::default()
+        };
+
+        let current = settings
+            .tts
+            .elevenlabs
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .map(str::to_string);
+        if current.as_deref() == Some(trimmed.as_str()) {
+            return Ok(false);
+        }
+
+        settings.tts.elevenlabs.api_key = Some(trimmed);
+        settings.tts.elevenlabs.voice_id.clear();
+        settings.tts.elevenlabs.model_id.clear();
+
+        let content =
+            serde_json::to_string_pretty(&settings).context("Failed to serialize settings")?;
+        persistence::write_json_atomically(&settings_path, &content)
+            .context("Failed to write settings file")?;
+        *self.cache.write() = settings;
+
+        let empty_content = serde_json::to_string_pretty(&ElevenLabsCatalogCache::default())
+            .context("Failed to serialize empty ElevenLabs catalog")?;
+        persistence::write_json_atomically(&catalog_path, &empty_content)
+            .context("Failed to write empty ElevenLabs catalog file")?;
+
+        Ok(true)
+    }
+
+    /// Atomically validate, persist and normalize the ElevenLabs generation
+    /// settings. The model must exist in the cached model catalog; unsupported
+    /// style / speaker-boost values are normalized to safe defaults.
+    pub fn set_elevenlabs_generation_settings(
+        &self,
+        model_id: String,
+        output_format: String,
+        stability: f32,
+        similarity_boost: f32,
+        style: f32,
+        use_speaker_boost: bool,
+    ) -> Result<()> {
+        crate::tts::elevenlabs::validate_connection_settings(
+            &output_format,
+            stability,
+            similarity_boost,
+            style,
+        )
+        .map_err(anyhow::Error::msg)?;
+
+        let catalog = self.get_elevenlabs_catalog();
+        let model = catalog
+            .models
+            .iter()
+            .find(|m| m.model_id == model_id)
+            .ok_or_else(|| anyhow::anyhow!("ElevenLabs model is not available in the cached catalog."))?;
+        let style = if model.can_use_style { style } else { 0.0 };
+        let use_speaker_boost = if model.can_use_speaker_boost {
+            use_speaker_boost
+        } else {
+            false
+        };
+
+        self.update_settings_atomically(move |settings| {
+            let el = &mut settings.tts.elevenlabs;
+            el.model_id = model_id;
+            el.output_format = output_format;
+            el.stability = stability;
+            el.similarity_boost = similarity_boost;
+            el.style = style;
+            el.use_speaker_boost = use_speaker_boost;
+        })
+    }
+
+    /// Atomically persist the selected model and its normalized capability
+    /// flags. Used by the model refresh to preserve/fall back the selection.
+    pub fn set_elevenlabs_model_selection(
+        &self,
+        model_id: String,
+        style: f32,
+        use_speaker_boost: bool,
+    ) -> Result<()> {
+        self.update_settings_atomically(move |settings| {
+            let el = &mut settings.tts.elevenlabs;
+            el.model_id = model_id;
+            el.style = style;
+            el.use_speaker_boost = use_speaker_boost;
+        })
+    }
+
+    pub fn get_elevenlabs_api_key(&self) -> Option<String> {
+        self.cache.read().tts.elevenlabs.api_key.clone()
+    }
+
+    pub fn set_elevenlabs_voice_id(&self, voice_id: String) -> Result<()> {
+        self.update_field("/tts/elevenlabs/voice_id", &voice_id)
+    }
+
+    pub fn get_elevenlabs_voice_id(&self) -> String {
+        self.cache.read().tts.elevenlabs.voice_id.clone()
+    }
+
+    pub fn get_elevenlabs_voices(&self) -> Vec<ElevenLabsVoice> {
+        self.get_elevenlabs_catalog().voices
+    }
+
+    pub fn get_elevenlabs_models(&self) -> Vec<ElevenLabsModel> {
+        self.get_elevenlabs_catalog().models
+    }
+
+    pub fn get_elevenlabs_model_id(&self) -> String {
+        self.cache.read().tts.elevenlabs.model_id.clone()
+    }
+
+    pub fn set_elevenlabs_use_proxy(&self, enabled: bool) -> Result<()> {
+        self.update_field("/tts/elevenlabs/use_proxy", &enabled)
+    }
+
+    pub fn get_elevenlabs_use_proxy(&self) -> bool {
+        self.cache.read().tts.elevenlabs.use_proxy
+    }
+
+    pub fn get_elevenlabs_settings(&self) -> ElevenLabsSettings {
+        self.cache.read().tts.elevenlabs.clone()
+    }
+
+    /// Combined view for the UI: persisted settings plus the cached catalogs,
+    /// without persisting the catalogs into `settings.json`.
+    pub fn get_elevenlabs_settings_dto(&self) -> crate::config::dto::ElevenLabsSettingsDto {
+        let mut dto: crate::config::dto::ElevenLabsSettingsDto =
+            self.cache.read().tts.elevenlabs.clone().into();
+        let catalog = self.get_elevenlabs_catalog();
+        dto.voices = catalog.voices.into_iter().map(Into::into).collect();
+        dto.models = catalog.models.into_iter().map(Into::into).collect();
+        dto
     }
 
     // ========== Hotkey Settings ==========
@@ -2636,6 +2980,478 @@ mod tests {
     }
 
     #[test]
+    fn elevenlabs_settings_deserializes_from_empty_with_correct_defaults() {
+        let el: ElevenLabsSettings = serde_json::from_str("{}").unwrap();
+        assert!(el.api_key.is_none());
+        assert!(el.voice_id.is_empty());
+        assert!(el.model_id.is_empty());
+        assert_eq!(el.output_format, "mp3_44100_128");
+        assert_eq!(el.stability, 0.5);
+        assert_eq!(el.similarity_boost, 0.75);
+        assert_eq!(el.style, 0.0);
+        assert!(el.use_speaker_boost);
+        assert!(!el.use_proxy);
+    }
+
+    /// Old settings.json with `voices`/`models` inside `elevenlabs` must still
+    /// deserialize (unknown fields are ignored) without migrating their values.
+    #[test]
+    fn elevenlabs_settings_ignores_legacy_voices_and_models() {
+        let json = r#"{
+            "api_key": "el-key",
+            "voice_id": "voice-abc",
+            "voices": [{ "voice_id": "voice-abc", "name": "Voice" }],
+            "models": [{ "model_id": "eleven_multilingual_v2", "name": "Multilingual v2" }],
+            "model_id": "eleven_multilingual_v2"
+        }"#;
+        let el: ElevenLabsSettings = serde_json::from_str(json)
+            .expect("legacy ElevenLabsSettings with voices/models must deserialize");
+        assert_eq!(el.api_key.as_deref(), Some("el-key"));
+        assert_eq!(el.voice_id, "voice-abc");
+        assert_eq!(el.model_id, "eleven_multilingual_v2");
+    }
+
+    #[test]
+    fn tts_settings_deserializes_without_elevenlabs_field() {
+        let json = r#"{
+            "provider": "openai",
+            "openai": { "api_key": null, "voice": "alloy", "proxy_host": null, "proxy_port": null, "use_proxy": false },
+            "local": { "url": "http://127.0.0.1:8124" },
+            "telegram": { "api_id": null, "proxy_mode": "none", "voices": [], "current_voice_id": "" }
+        }"#;
+        let settings: TtsSettings = serde_json::from_str(json).unwrap();
+        assert!(settings.elevenlabs.api_key.is_none());
+        assert!(settings.elevenlabs.model_id.is_empty());
+        assert_eq!(settings.elevenlabs.output_format, "mp3_44100_128");
+    }
+
+    #[test]
+    fn elevenlabs_settings_round_trip() {
+        let original = ElevenLabsSettings {
+            api_key: Some("el-key".to_string()),
+            voice_id: "voice-abc".to_string(),
+            model_id: "eleven_multilingual_v2".to_string(),
+            output_format: "mp3_44100_96".to_string(),
+            stability: 0.3,
+            similarity_boost: 0.8,
+            style: 0.1,
+            use_speaker_boost: false,
+            use_proxy: true,
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let back: ElevenLabsSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, original);
+    }
+
+    /// `ElevenLabsSettings` must never serialize `voices`/`models` into
+    /// `settings.json`.
+    #[test]
+    fn elevenlabs_settings_serializes_without_catalogs() {
+        let settings = ElevenLabsSettings::default();
+        let json = serde_json::to_value(&settings).unwrap();
+        assert!(json.get("voices").is_none());
+        assert!(json.get("models").is_none());
+    }
+
+    // ==================== ElevenLabs catalog cache ====================
+
+    fn el_voice(id: &str) -> ElevenLabsVoice {
+        ElevenLabsVoice {
+            voice_id: id.to_string(),
+            name: id.to_string(),
+            category: None,
+            labels: vec![],
+            preview_url: None,
+            classification: None,
+        }
+    }
+
+    fn el_model(id: &str, style: bool, speaker_boost: bool) -> ElevenLabsModel {
+        ElevenLabsModel {
+            model_id: id.to_string(),
+            name: id.to_string(),
+            can_use_style: style,
+            can_use_speaker_boost: speaker_boost,
+        }
+    }
+
+    fn elevenlabs_tmp_manager(label: &str) -> (SettingsManager, PathBuf) {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-elevenlabs-{}-{}-{}",
+            label,
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let manager = SettingsManager::with_config_dir(dir.clone()).unwrap();
+        (manager, dir)
+    }
+
+    fn read_catalog_file(dir: &Path) -> ElevenLabsCatalogCache {
+        let path = dir.join("elevenlabs-catalog.json");
+        ElevenLabsCatalogCache::load_from_disk(&path)
+    }
+
+    /// Missing catalog file yields an empty cache without error.
+    #[test]
+    fn elevenlabs_catalog_missing_yields_empty() {
+        let (manager, dir) = elevenlabs_tmp_manager("missing");
+        assert!(manager.get_elevenlabs_catalog().voices.is_empty());
+        assert!(manager.get_elevenlabs_catalog().models.is_empty());
+        assert!(manager.get_elevenlabs_voices().is_empty());
+        assert!(manager.get_elevenlabs_models().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Corrupt catalog file yields an empty cache without making startup fail.
+    #[test]
+    fn elevenlabs_catalog_corrupt_yields_empty() {
+        let (manager, dir) = elevenlabs_tmp_manager("corrupt");
+        std::fs::write(dir.join("elevenlabs-catalog.json"), "{{{not json").unwrap();
+        assert!(manager.get_elevenlabs_catalog().voices.is_empty());
+        assert!(manager.get_elevenlabs_catalog().models.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A missing cache file yields an empty cache carrying the current version,
+    /// so a later write starts from the canonical format.
+    #[test]
+    fn elevenlabs_catalog_missing_yields_empty_with_current_version() {
+        let (manager, dir) = elevenlabs_tmp_manager("missing-version");
+        let cache = manager.get_elevenlabs_catalog();
+        assert!(cache.voices.is_empty());
+        assert!(cache.models.is_empty());
+        assert_eq!(cache.version, ELEVENLABS_CATALOG_CURRENT_VERSION);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A freshly written catalog cache is stamped with the current version on
+    /// disk, regardless of which setter produced it.
+    #[test]
+    fn elevenlabs_catalog_newly_written_contains_current_version() {
+        let (manager, dir) = elevenlabs_tmp_manager("write-version");
+
+        manager.set_elevenlabs_voices(vec![el_voice("v1")]).unwrap();
+        let cache = read_catalog_file(&dir);
+        assert_eq!(cache.voices, vec![el_voice("v1")]);
+        assert_eq!(cache.version, ELEVENLABS_CATALOG_CURRENT_VERSION);
+
+        manager
+            .set_elevenlabs_models(vec![el_model("m1", true, false)])
+            .unwrap();
+        let cache = read_catalog_file(&dir);
+        assert_eq!(cache.models, vec![el_model("m1", true, false)]);
+        assert_eq!(cache.version, ELEVENLABS_CATALOG_CURRENT_VERSION);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An on-disk cache stamped with an unsupported version (the historical
+    /// derived-default `0` or any future version) is ignored: its payload is
+    /// discarded and an empty current-version cache is returned, exactly as for
+    /// corrupt content.
+    #[test]
+    fn elevenlabs_catalog_unsupported_version_is_ignored() {
+        let (manager, dir) = elevenlabs_tmp_manager("unsupported-version");
+
+        for unsupported in [0u32, ELEVENLABS_CATALOG_CURRENT_VERSION + 1, 999] {
+            let legacy = ElevenLabsCatalogCache {
+                version: unsupported,
+                voices: vec![el_voice("v1")],
+                models: vec![el_model("m1", true, false)],
+            };
+            std::fs::write(
+                dir.join("elevenlabs-catalog.json"),
+                serde_json::to_string_pretty(&legacy).unwrap(),
+            )
+            .unwrap();
+
+            let cache = manager.get_elevenlabs_catalog();
+            assert!(
+                cache.voices.is_empty(),
+                "voices of version {unsupported} cache must be discarded"
+            );
+            assert!(
+                cache.models.is_empty(),
+                "models of version {unsupported} cache must be discarded"
+            );
+            assert_eq!(
+                cache.version,
+                ELEVENLABS_CATALOG_CURRENT_VERSION,
+                "fallback must carry the current version"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn elevenlabs_catalog_deserializes_voices_without_classification_field() {
+        let json = r#"{
+            "version": 1,
+            "voices": [
+                { "voice_id": "v1", "name": "Voice", "category": null, "labels": [], "preview_url": null }
+            ],
+            "models": []
+        }"#;
+        let cache: ElevenLabsCatalogCache =
+            serde_json::from_str(json).expect("legacy catalog without classification must deserialize");
+        assert_eq!(cache.version, ELEVENLABS_CATALOG_CURRENT_VERSION);
+        assert_eq!(cache.voices.len(), 1);
+        assert_eq!(cache.voices[0].voice_id, "v1");
+        assert!(cache.voices[0].classification.is_none());
+    }
+
+    #[test]
+    fn elevenlabs_catalog_round_trips_classification() {
+        use crate::tts::elevenlabs::ElevenLabsVoiceClassification;
+
+        let mut voice = el_voice("v1");
+        voice.classification = Some(ElevenLabsVoiceClassification::Library);
+        let cache = ElevenLabsCatalogCache {
+            version: ELEVENLABS_CATALOG_CURRENT_VERSION,
+            voices: vec![voice],
+            models: vec![],
+        };
+        let json = serde_json::to_string(&cache).unwrap();
+        let back: ElevenLabsCatalogCache = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.voices[0].classification, Some(ElevenLabsVoiceClassification::Library));
+
+        let default = ElevenLabsCatalogCache {
+            version: ELEVENLABS_CATALOG_CURRENT_VERSION,
+            voices: vec![{
+                let mut v = el_voice("v2");
+                v.classification = Some(ElevenLabsVoiceClassification::Default);
+                v
+            }],
+            models: vec![],
+        };
+        let back: ElevenLabsCatalogCache =
+            serde_json::from_str(&serde_json::to_string(&default).unwrap()).unwrap();
+        assert_eq!(back.voices[0].classification, Some(ElevenLabsVoiceClassification::Default));
+    }
+
+    /// Setting voices must not affect models and vice versa.
+    #[test]
+    fn elevenlabs_catalog_persists_voices_and_models_independently() {
+        let (manager, dir) = elevenlabs_tmp_manager("independent");
+
+        manager.set_elevenlabs_voices(vec![el_voice("v1")]).unwrap();
+        assert_eq!(manager.get_elevenlabs_voices(), vec![el_voice("v1")]);
+        assert!(manager.get_elevenlabs_models().is_empty());
+
+        manager
+            .set_elevenlabs_models(vec![el_model("m1", true, false)])
+            .unwrap();
+        assert_eq!(manager.get_elevenlabs_voices(), vec![el_voice("v1")]);
+        assert_eq!(
+            manager.get_elevenlabs_models(),
+            vec![el_model("m1", true, false)]
+        );
+
+        // Replacing voices keeps the models intact.
+        manager
+            .set_elevenlabs_voices(vec![el_voice("v2"), el_voice("v3")])
+            .unwrap();
+        assert_eq!(manager.get_elevenlabs_voices(), vec![el_voice("v2"), el_voice("v3")]);
+        assert_eq!(
+            manager.get_elevenlabs_models(),
+            vec![el_model("m1", true, false)]
+        );
+
+        // The catalog file (not settings.json) holds the data.
+        assert_eq!(
+            read_catalog_file(&dir).voices,
+            vec![el_voice("v2"), el_voice("v3")]
+        );
+        assert_eq!(read_catalog_file(&dir).models, vec![el_model("m1", true, false)]);
+
+        let settings_json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap())
+                .unwrap();
+        let elevenlabs = settings_json
+            .pointer("/tts/elevenlabs")
+            .and_then(|v| v.as_object())
+            .expect("elevenlabs object must exist in settings.json");
+        assert!(
+            !elevenlabs.contains_key("voices"),
+            "settings.json must not contain the voices catalog"
+        );
+        assert!(
+            !elevenlabs.contains_key("models"),
+            "settings.json must not contain the models catalog"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A changed (normalized) API key clears catalogs and selection.
+    #[test]
+    fn elevenlabs_api_key_change_invalidates_catalogs_and_selection() {
+        let (manager, dir) = elevenlabs_tmp_manager("key-change");
+
+        manager.set_elevenlabs_voices(vec![el_voice("v1")]).unwrap();
+        manager
+            .set_elevenlabs_models(vec![el_model("m1", true, true)])
+            .unwrap();
+        manager.set_elevenlabs_voice_id("v1".to_string()).unwrap();
+        manager
+            .set_elevenlabs_model_selection("m1".to_string(), 0.5, true)
+            .unwrap();
+
+        let changed = manager.set_elevenlabs_api_key("  new-key  ".to_string()).unwrap();
+        assert!(changed, "a new key must report changed");
+
+        assert_eq!(manager.get_elevenlabs_api_key().as_deref(), Some("new-key"));
+        assert!(manager.get_elevenlabs_voices().is_empty());
+        assert!(manager.get_elevenlabs_models().is_empty());
+        assert_eq!(manager.get_elevenlabs_voice_id(), "");
+        assert_eq!(manager.get_elevenlabs_model_id(), "");
+
+        // settings.json must not carry catalogs.
+        let settings: AppSettings =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap())
+                .unwrap();
+        assert!(settings.tts.elevenlabs.voice_id.is_empty());
+        assert!(settings.tts.elevenlabs.model_id.is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An unchanged (normalized) key preserves catalogs and selection.
+    #[test]
+    fn elevenlabs_api_key_unchanged_preserves_catalogs_and_selection() {
+        let (manager, dir) = elevenlabs_tmp_manager("key-unchanged");
+
+        manager.set_elevenlabs_api_key("stable-key".to_string()).unwrap();
+        manager.set_elevenlabs_voices(vec![el_voice("v1")]).unwrap();
+        manager
+            .set_elevenlabs_models(vec![el_model("m1", true, true)])
+            .unwrap();
+        manager.set_elevenlabs_voice_id("v1".to_string()).unwrap();
+        manager
+            .set_elevenlabs_model_selection("m1".to_string(), 0.5, true)
+            .unwrap();
+
+        // Same key with surrounding whitespace must be treated as unchanged.
+        let changed = manager.set_elevenlabs_api_key("  stable-key  ".to_string()).unwrap();
+        assert!(!changed, "an identical trimmed key must report unchanged");
+
+        assert_eq!(manager.get_elevenlabs_voices(), vec![el_voice("v1")]);
+        assert_eq!(manager.get_elevenlabs_models(), vec![el_model("m1", true, true)]);
+        assert_eq!(manager.get_elevenlabs_voice_id(), "v1");
+        assert_eq!(manager.get_elevenlabs_model_id(), "m1");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Generation settings require a model present in the cached catalog.
+    #[test]
+    fn elevenlabs_generation_settings_require_known_model() {
+        let (manager, dir) = elevenlabs_tmp_manager("gen-unknown-model");
+
+        let result = manager.set_elevenlabs_generation_settings(
+            "missing-model".to_string(),
+            "mp3_44100_128".to_string(),
+            0.5,
+            0.75,
+            0.0,
+            true,
+        );
+        assert!(result.is_err(), "unknown model must be rejected");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Generation settings normalize style / speaker boost when the selected
+    /// model does not support them.
+    #[test]
+    fn elevenlabs_generation_settings_normalize_capabilities() {
+        let (manager, dir) = elevenlabs_tmp_manager("gen-normalize");
+
+        manager
+            .set_elevenlabs_models(vec![el_model("m1", false, false)])
+            .unwrap();
+
+        manager
+            .set_elevenlabs_generation_settings(
+                "m1".to_string(),
+                "mp3_44100_128".to_string(),
+                0.5,
+                0.75,
+                0.4,
+                true,
+            )
+            .unwrap();
+
+        let el = manager.get_elevenlabs_settings();
+        assert_eq!(el.model_id, "m1");
+        assert_eq!(el.output_format, "mp3_44100_128");
+        assert_eq!(el.stability, 0.5);
+        assert_eq!(el.similarity_boost, 0.75);
+        assert_eq!(el.style, 0.0, "unsupported style must normalize to 0");
+        assert!(!el.use_speaker_boost, "unsupported speaker boost must normalize to false");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A supported model keeps the submitted style / speaker boost values.
+    #[test]
+    fn elevenlabs_generation_settings_keep_supported_capabilities() {
+        let (manager, dir) = elevenlabs_tmp_manager("gen-supported");
+
+        manager
+            .set_elevenlabs_models(vec![el_model("m1", true, true)])
+            .unwrap();
+
+        manager
+            .set_elevenlabs_generation_settings(
+                "m1".to_string(),
+                "mp3_44100_96".to_string(),
+                0.1,
+                0.9,
+                0.4,
+                true,
+            )
+            .unwrap();
+
+        let el = manager.get_elevenlabs_settings();
+        assert_eq!(el.style, 0.4);
+        assert!(el.use_speaker_boost);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The combined DTO exposes persisted settings plus cached catalogs.
+    #[test]
+    fn elevenlabs_settings_dto_combines_cached_catalogs() {
+        let (manager, dir) = elevenlabs_tmp_manager("dto-combine");
+
+        manager
+            .set_elevenlabs_models(vec![el_model("m1", true, false)])
+            .unwrap();
+        manager.set_elevenlabs_voices(vec![el_voice("v1")]).unwrap();
+        manager.set_elevenlabs_voice_id("v1".to_string()).unwrap();
+        manager
+            .set_elevenlabs_model_selection("m1".to_string(), 0.0, false)
+            .unwrap();
+
+        let dto = manager.get_elevenlabs_settings_dto();
+        assert_eq!(dto.voice_id, "v1");
+        assert_eq!(dto.model_id, "m1");
+        assert_eq!(dto.voices.len(), 1);
+        assert_eq!(dto.voices[0].voice_id, "v1");
+        assert_eq!(dto.models.len(), 1);
+        assert_eq!(dto.models[0].model_id, "m1");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn concurrent_updates_preserve_both_fields() {
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -3210,7 +4026,10 @@ mod tests {
         let settings: AppSettings = serde_json::from_value(value).unwrap();
         assert_eq!(settings.ui_language, "en");
         assert!(settings.hide_on_minimize, "unrelated setting must survive");
-        assert!(settings.show_playback_on_start, "unrelated setting must survive");
+        assert!(
+            settings.show_playback_on_start,
+            "unrelated setting must survive"
+        );
     }
 
     /// Old file missing `ui_language` gets the canonical field written back to
@@ -3229,10 +4048,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
 
         let mut value = serde_json::to_value(AppSettings::default()).unwrap();
-        value
-            .as_object_mut()
-            .unwrap()
-            .remove("ui_language");
+        value.as_object_mut().unwrap().remove("ui_language");
         std::fs::write(
             dir.join("settings.json"),
             serde_json::to_string_pretty(&value).unwrap(),
@@ -3281,7 +4097,11 @@ mod tests {
 
         let result = manager.set_ui_language("bad/../tag".to_string());
         assert!(result.is_err(), "invalid tag must be rejected");
-        assert_eq!(manager.get_ui_language(), "pt-BR", "cache must be unchanged");
+        assert_eq!(
+            manager.get_ui_language(),
+            "pt-BR",
+            "cache must be unchanged"
+        );
 
         let result = manager.set_ui_language(String::new());
         assert!(result.is_err(), "empty tag must be rejected");

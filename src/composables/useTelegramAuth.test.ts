@@ -55,6 +55,7 @@ function mockSettings(): AppSettingsDto {
       openai: { api_key: null, voice: 'alloy', proxy_host: null, proxy_port: null, use_proxy: false },
       local: { url: '' },
       fish: { api_key: null, voices: [], reference_id: '', format: 'wav', temperature: 0.7, sample_rate: 44100, use_proxy: false },
+      elevenlabs: { api_key: null, voice_id: '', voices: [], models: [], model_id: '', output_format: 'mp3_44100_128', stability: 0.5, similarity_boost: 0.75, style: 0, use_speaker_boost: true, use_proxy: false },
       telegram: { api_id: null, proxy_mode: 'none', voices: [], current_voice_id: '', synthesis_response_timeout_ms: 10000, download_retry_delay_ms: 1000 },
       network: { proxy: { proxy_url: null }, mtproxy: { host: null, port: 443, secret: null, dc_id: null } },
     },

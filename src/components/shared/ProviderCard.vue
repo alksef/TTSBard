@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { Component } from 'vue';
+import { restoreProviderRadioState } from './providerCardState';
 
 interface Props {
   title: string;
@@ -38,10 +39,10 @@ function handleExpandClick() {
   }
 }
 
-function handleRadioChange() {
-  if (!props.disabled) {
-    emit('select');
-  }
+function handleRadioChange(event: Event) {
+  if (props.disabled) return;
+  emit('select');
+  restoreProviderRadioState(event.currentTarget as HTMLInputElement, props.active);
 }
 </script>
 

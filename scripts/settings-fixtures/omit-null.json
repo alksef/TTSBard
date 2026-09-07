@@ -31,6 +31,27 @@
       "sample_rate": 0,
       "use_proxy": false
     },
+    "elevenlabs": {
+      "api_key": null,
+      "voice_id": "",
+      "voices": [
+        {
+          "voice_id": "el-voice-omit",
+          "name": "Omit Eleven Voice",
+          "category": null,
+          "labels": [],
+          "preview_url": null
+        }
+      ],
+      "models": [],
+      "model_id": "",
+      "output_format": "",
+      "stability": 0.0,
+      "similarity_boost": 0.0,
+      "style": 0.0,
+      "use_speaker_boost": false,
+      "use_proxy": false
+    },
     "telegram": {
       "api_id": null,
       "proxy_mode": "none",

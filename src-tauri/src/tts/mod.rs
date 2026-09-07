@@ -1,3 +1,4 @@
+pub mod elevenlabs;
 pub mod engine;
 pub mod fish;
 pub mod local_http_server;
@@ -9,6 +10,8 @@ pub mod silero;
 
 // Реэкспорт VoiceModel для использования в других модулях
 pub use fish::VoiceModel;
+// Реэкспорт ElevenLabsVoice для использования в других модулях
+pub use elevenlabs::ElevenLabsVoice;
 
 use crate::tts::engine::TtsEngine;
 use std::sync::Arc;
@@ -25,6 +28,7 @@ pub enum TtsProviderType {
     Silero,
     Local,
     Fish,
+    ElevenLabs,
 }
 
 #[derive(Clone, Debug)]
@@ -33,6 +37,7 @@ pub enum TtsProvider {
     Silero(silero::SileroTts),
     Local(local_http_server::LocalHttpServerTts),
     Fish(fish::FishTts),
+    ElevenLabs(elevenlabs::ElevenLabsTts),
     Piper(Arc<LocalModelTts>),
 }
 
@@ -50,6 +55,7 @@ impl TtsProvider {
             TtsProvider::Local(tts) => tts.synthesize(text).await,
             TtsProvider::Silero(tts) => tts.synthesize(text).await,
             TtsProvider::Fish(tts) => tts.synthesize(text).await.map_err(|e| e.to_string()),
+            TtsProvider::ElevenLabs(tts) => tts.synthesize(text).await,
             TtsProvider::Piper(tts) => tts.synthesize(text).await,
         }
     }
@@ -60,6 +66,7 @@ impl TtsProvider {
             TtsProvider::Silero(_) => "silero",
             TtsProvider::Local(_) => "local",
             TtsProvider::Fish(_) => "fish",
+            TtsProvider::ElevenLabs(_) => "elevenlabs",
             TtsProvider::Piper(_) => "piper",
         }
     }
@@ -68,6 +75,7 @@ impl TtsProvider {
         match self {
             TtsProvider::OpenAi(tts) => tts.voice(),
             TtsProvider::Fish(tts) => tts.reference_id(),
+            TtsProvider::ElevenLabs(tts) => tts.voice_id(),
             TtsProvider::Silero(tts) => tts.captured_speaker().unwrap_or(""),
             TtsProvider::Local(_) => "local",
             TtsProvider::Piper(_) => "piper",
@@ -78,6 +86,7 @@ impl TtsProvider {
         match self {
             TtsProvider::OpenAi(tts) => tts.voice(),
             TtsProvider::Fish(tts) => tts.reference_id(),
+            TtsProvider::ElevenLabs(tts) => tts.voice_id(),
             TtsProvider::Silero(tts) => tts.captured_speaker().unwrap_or(""),
             TtsProvider::Local(_) | TtsProvider::Piper(_) => registry_id,
         }
@@ -144,6 +153,20 @@ mod tests {
         assert_eq!(a.voice_identity(), "ref-aaa");
         assert_eq!(b.voice_identity(), "ref-bbb");
         assert_ne!(a.voice_identity(), b.voice_identity());
+    }
+
+    #[test]
+    fn elevenlabs_provider_kind_and_voice_identity() {
+        let mut tts = elevenlabs::ElevenLabsTts::new("el-key".into());
+        tts.set_voice_id("21m00Tcm4TlvDq8ikWAM".to_string());
+        let provider = TtsProvider::ElevenLabs(tts);
+
+        assert_eq!(provider.provider_kind_str(), "elevenlabs");
+        assert_eq!(provider.voice_identity(), "21m00Tcm4TlvDq8ikWAM");
+        assert_eq!(
+            provider.voice_identity_or_registry("elevenlabs"),
+            "21m00Tcm4TlvDq8ikWAM"
+        );
     }
 
     #[test]

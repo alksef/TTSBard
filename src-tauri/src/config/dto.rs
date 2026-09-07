@@ -5,9 +5,9 @@
 
 use crate::config::settings::AudioEffectsSettings;
 use crate::config::settings::{
-    FishAudioSettings, LocalTtsSettings, MtProxySettings, NetworkSettings, OpenAiSettings,
-    ProxyMode, ProxySettings, ProxyType, Socks5Settings, TelegramTtsSettings, TtsSettings,
-    VTubeStudioTypingMode,
+    ElevenLabsSettings, FishAudioSettings, LocalTtsSettings, MtProxySettings, NetworkSettings,
+    OpenAiSettings, ProxyMode, ProxySettings, ProxyType, Socks5Settings, TelegramTtsSettings,
+    TtsSettings, VTubeStudioTypingMode,
 };
 use crate::config::windows::{
     GlobalSettings, MainWindowSettings, PlaybackWindowSettings, SoundPanelWindowSettings,
@@ -19,6 +19,7 @@ use crate::config::{
 };
 use crate::ocr::settings::OcrSettings;
 use crate::soundpanel::SoundBinding;
+use crate::tts::elevenlabs::{ElevenLabsModel, ElevenLabsVoice, ElevenLabsVoiceClassification};
 use crate::tts::TtsProviderType;
 use crate::tts::VoiceModel;
 use crate::webview::WebViewSettings;
@@ -332,6 +333,177 @@ impl From<FishAudioSettingsDto> for FishAudioSettings {
     }
 }
 
+/// ElevenLabs voice descriptor DTO
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ElevenLabsVoiceDto {
+    pub voice_id: String,
+    pub name: String,
+    #[serde(default)]
+    pub category: Option<String>,
+    #[serde(default)]
+    pub labels: Vec<String>,
+    #[serde(default)]
+    pub preview_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub classification: Option<ElevenLabsVoiceClassification>,
+}
+
+impl From<ElevenLabsVoice> for ElevenLabsVoiceDto {
+    fn from(v: ElevenLabsVoice) -> Self {
+        Self {
+            voice_id: v.voice_id,
+            name: v.name,
+            category: v.category,
+            labels: v.labels,
+            preview_url: v.preview_url,
+            classification: v.classification,
+        }
+    }
+}
+
+impl From<ElevenLabsVoiceDto> for ElevenLabsVoice {
+    fn from(dto: ElevenLabsVoiceDto) -> Self {
+        Self {
+            voice_id: dto.voice_id,
+            name: dto.name,
+            category: dto.category,
+            labels: dto.labels,
+            preview_url: dto.preview_url,
+            classification: dto.classification,
+        }
+    }
+}
+
+/// ElevenLabs model descriptor DTO
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ElevenLabsModelDto {
+    pub model_id: String,
+    pub name: String,
+    #[serde(default)]
+    pub can_use_style: bool,
+    #[serde(default)]
+    pub can_use_speaker_boost: bool,
+}
+
+impl From<ElevenLabsModel> for ElevenLabsModelDto {
+    fn from(m: ElevenLabsModel) -> Self {
+        Self {
+            model_id: m.model_id,
+            name: m.name,
+            can_use_style: m.can_use_style,
+            can_use_speaker_boost: m.can_use_speaker_boost,
+        }
+    }
+}
+
+impl From<ElevenLabsModelDto> for ElevenLabsModel {
+    fn from(dto: ElevenLabsModelDto) -> Self {
+        Self {
+            model_id: dto.model_id,
+            name: dto.name,
+            can_use_style: dto.can_use_style,
+            can_use_speaker_boost: dto.can_use_speaker_boost,
+        }
+    }
+}
+
+/// ElevenLabs TTS settings DTO
+///
+/// `Default` mirrors `ElevenLabsSettings::default()` so a `TtsSettingsDto`
+/// without an `elevenlabs` section (legacy/imported state) deserializes to
+/// valid provider defaults instead of empty/disabled values.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ElevenLabsSettingsDto {
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub voice_id: String,
+    #[serde(default)]
+    pub voices: Vec<ElevenLabsVoiceDto>,
+    #[serde(default)]
+    pub models: Vec<ElevenLabsModelDto>,
+    #[serde(default = "dto_default_elevenlabs_model_id")]
+    pub model_id: String,
+    #[serde(default = "dto_default_elevenlabs_output_format")]
+    pub output_format: String,
+    #[serde(default = "dto_default_elevenlabs_stability")]
+    pub stability: f32,
+    #[serde(default = "dto_default_elevenlabs_similarity_boost")]
+    pub similarity_boost: f32,
+    #[serde(default = "dto_default_elevenlabs_style")]
+    pub style: f32,
+    #[serde(default = "dto_default_elevenlabs_use_speaker_boost")]
+    pub use_speaker_boost: bool,
+    #[serde(default)]
+    pub use_proxy: bool,
+}
+
+fn dto_default_elevenlabs_model_id() -> String {
+    String::new()
+}
+
+fn dto_default_elevenlabs_output_format() -> String {
+    crate::tts::elevenlabs::DEFAULT_OUTPUT_FORMAT.to_string()
+}
+
+fn dto_default_elevenlabs_stability() -> f32 {
+    crate::tts::elevenlabs::DEFAULT_STABILITY
+}
+
+fn dto_default_elevenlabs_similarity_boost() -> f32 {
+    crate::tts::elevenlabs::DEFAULT_SIMILARITY_BOOST
+}
+
+fn dto_default_elevenlabs_style() -> f32 {
+    crate::tts::elevenlabs::DEFAULT_STYLE
+}
+
+fn dto_default_elevenlabs_use_speaker_boost() -> bool {
+    crate::tts::elevenlabs::DEFAULT_USE_SPEAKER_BOOST
+}
+
+impl Default for ElevenLabsSettingsDto {
+    fn default() -> Self {
+        ElevenLabsSettings::default().into()
+    }
+}
+
+impl From<ElevenLabsSettings> for ElevenLabsSettingsDto {
+    fn from(s: ElevenLabsSettings) -> Self {
+        Self {
+            api_key: s.api_key,
+            voice_id: s.voice_id,
+            // Catalogs live in the separate `elevenlabs-catalog.json` cache and
+            // are injected by `SettingsManager::get_elevenlabs_settings_dto`.
+            voices: Vec::new(),
+            models: Vec::new(),
+            model_id: s.model_id,
+            output_format: s.output_format,
+            stability: s.stability,
+            similarity_boost: s.similarity_boost,
+            style: s.style,
+            use_speaker_boost: s.use_speaker_boost,
+            use_proxy: s.use_proxy,
+        }
+    }
+}
+
+impl From<ElevenLabsSettingsDto> for ElevenLabsSettings {
+    fn from(dto: ElevenLabsSettingsDto) -> Self {
+        Self {
+            api_key: dto.api_key,
+            voice_id: dto.voice_id,
+            model_id: dto.model_id,
+            output_format: dto.output_format,
+            stability: dto.stability,
+            similarity_boost: dto.similarity_boost,
+            style: dto.style,
+            use_speaker_boost: dto.use_speaker_boost,
+            use_proxy: dto.use_proxy,
+        }
+    }
+}
+
 /// Telegram TTS settings DTO
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelegramTtsSettingsDto {
@@ -394,6 +566,8 @@ pub struct TtsSettingsDto {
     pub local: LocalTtsSettingsDto,
     #[serde(default)]
     pub fish: FishAudioSettingsDto,
+    #[serde(default)]
+    pub elevenlabs: ElevenLabsSettingsDto,
     pub telegram: TelegramTtsSettingsDto,
     pub network: NetworkSettingsDto,
     #[serde(default)]
@@ -413,6 +587,7 @@ impl From<TtsSettings> for TtsSettingsDto {
             openai: s.openai.into(),
             local: s.local.into(),
             fish: s.fish.into(),
+            elevenlabs: s.elevenlabs.into(),
             telegram: s.telegram.into(),
             network: s.network.into(),
             provider_id: s.provider_id,
@@ -429,6 +604,7 @@ impl From<TtsSettingsDto> for TtsSettings {
             openai: dto.openai.into(),
             local: dto.local.into(),
             fish: dto.fish.into(),
+            elevenlabs: dto.elevenlabs.into(),
             telegram: dto.telegram.into(),
             network: dto.network.into(),
             provider_id: dto.provider_id,
@@ -1482,6 +1658,31 @@ mod tests {
                 sample_rate: 44100,
                 use_proxy: true,
             },
+            elevenlabs: ElevenLabsSettingsDto {
+                api_key: Some("el-test-key".into()),
+                voice_id: "el-voice-1".into(),
+                voices: vec![ElevenLabsVoiceDto {
+                    voice_id: "el-voice-1".into(),
+                    name: "Eleven Voice".into(),
+                    category: Some("premade".into()),
+                    labels: vec!["american".into(), "female".into()],
+                    preview_url: Some("https://example.com/preview.mp3".into()),
+                    classification: None,
+                }],
+                models: vec![ElevenLabsModelDto {
+                    model_id: "eleven_flash_v2_5".into(),
+                    name: "Flash v2.5".into(),
+                    can_use_style: true,
+                    can_use_speaker_boost: true,
+                }],
+                model_id: "eleven_flash_v2_5".into(),
+                output_format: "mp3_44100_128".into(),
+                stability: 0.5,
+                similarity_boost: 0.75,
+                style: 0.0,
+                use_speaker_boost: true,
+                use_proxy: false,
+            },
             telegram: TelegramTtsSettingsDto {
                 api_id: Some(12345),
                 proxy_mode: "none".to_string(),
@@ -1858,6 +2059,26 @@ mod tests {
                     author_nickname: None,
                 }],
                 ..Default::default()
+            },
+            elevenlabs: ElevenLabsSettingsDto {
+                api_key: None,
+                voice_id: String::new(),
+                voices: vec![ElevenLabsVoiceDto {
+                    voice_id: "el-voice-omit".into(),
+                    name: "Omit Eleven Voice".into(),
+                    category: None,
+                    labels: vec![],
+                    preview_url: None,
+                    classification: None,
+                }],
+                models: vec![],
+                model_id: String::new(),
+                output_format: String::new(),
+                stability: 0.0,
+                similarity_boost: 0.0,
+                style: 0.0,
+                use_speaker_boost: false,
+                use_proxy: false,
             },
             telegram: TelegramTtsSettingsDto {
                 api_id: None,
@@ -2301,6 +2522,97 @@ mod tests {
         );
         let back: TtsSettings = dto.into();
         assert_eq!(back.visible_provider_ids, settings.visible_provider_ids);
+    }
+
+    /// `ElevenLabsSettingsDto::default()` mirrors `ElevenLabsSettings::default()`
+    /// so code paths that construct a DTO without explicit values stay valid.
+    #[test]
+    fn elevenlabs_settings_dto_default_matches_domain_defaults() {
+        let dto = ElevenLabsSettingsDto::default();
+        assert!(dto.model_id.is_empty());
+        assert!(dto.models.is_empty());
+        assert_eq!(dto.output_format, "mp3_44100_128");
+        assert_eq!(dto.stability, 0.5);
+        assert_eq!(dto.similarity_boost, 0.75);
+        assert_eq!(dto.style, 0.0);
+        assert!(dto.use_speaker_boost);
+        assert!(!dto.use_proxy);
+        assert_eq!(ElevenLabsSettings::from(dto), ElevenLabsSettings::default());
+    }
+
+    /// Backward-compat: an `ElevenLabsVoiceDto` JSON without the classification
+    /// field still deserializes, yielding an unmarked (None) voice.
+    #[test]
+    fn elevenlabs_voice_dto_deserializes_without_classification_field() {
+        let json = r#"{"voice_id":"v1","name":"Voice","category":null,"labels":[],"preview_url":null}"#;
+        let dto: ElevenLabsVoiceDto =
+            serde_json::from_str(json).expect("voice DTO without classification must deserialize");
+        assert!(dto.classification.is_none());
+
+        let voice: ElevenLabsVoice = dto.into();
+        assert!(voice.classification.is_none());
+    }
+
+    #[test]
+    fn elevenlabs_voice_dto_round_trips_each_classification() {
+        for (raw, expected) in [
+            ("default", Some(ElevenLabsVoiceClassification::Default)),
+            ("library", Some(ElevenLabsVoiceClassification::Library)),
+        ] {
+            let json = format!(
+                r#"{{"voice_id":"v1","name":"Voice","category":null,"labels":[],"preview_url":null,"classification":{}}}"#,
+                serde_json::to_string(raw).unwrap()
+            );
+            let dto: ElevenLabsVoiceDto = serde_json::from_str(&json).unwrap();
+            assert_eq!(dto.classification, expected);
+            let back = serde_json::to_value(&dto).unwrap();
+            assert_eq!(back["classification"], serde_json::json!(raw));
+        }
+
+        let dto = ElevenLabsVoiceDto {
+            voice_id: "v1".into(),
+            name: "Voice".into(),
+            category: None,
+            labels: vec![],
+            preview_url: None,
+            classification: None,
+        };
+        let value = serde_json::to_value(&dto).unwrap();
+        assert!(value.get("classification").is_none());
+        let back: ElevenLabsVoiceDto = serde_json::from_value(value).unwrap();
+        assert!(back.classification.is_none());
+    }
+
+    /// Legacy/imported state: a TtsSettingsDto JSON without an `elevenlabs`
+    /// section deserializes to provider defaults, and converting to the domain
+    /// `TtsSettings` keeps them valid.
+    #[test]
+    fn tts_settings_dto_without_elevenlabs_yields_provider_defaults() {
+        let json = r#"{
+            "provider": "openai",
+            "openai": { "api_key": null, "voice": "alloy", "proxy_host": null, "proxy_port": null, "use_proxy": false },
+            "local": { "url": "http://127.0.0.1:8124" },
+            "telegram": { "api_id": null, "proxy_mode": "none", "voices": [], "current_voice_id": "" },
+            "network": { "proxy": { "proxy_url": null }, "mtproxy": { "host": null, "port": 8888, "secret": null, "dc_id": null } }
+        }"#;
+        let dto: TtsSettingsDto =
+            serde_json::from_str(json).expect("TtsSettingsDto without elevenlabs must deserialize");
+        assert_eq!(
+            ElevenLabsSettings::from(dto.elevenlabs.clone()),
+            ElevenLabsSettings::default()
+        );
+
+        let settings: TtsSettings = dto.into();
+        assert_eq!(settings.elevenlabs, ElevenLabsSettings::default());
+    }
+
+    /// A present-but-empty `elevenlabs` object also yields valid provider
+    /// defaults through the DTO field-level serde defaults.
+    #[test]
+    fn elevenlabs_settings_dto_empty_object_yields_provider_defaults() {
+        let dto: ElevenLabsSettingsDto =
+            serde_json::from_str("{}").expect("empty elevenlabs DTO must deserialize");
+        assert_eq!(ElevenLabsSettings::from(dto), ElevenLabsSettings::default());
     }
 
     /// Regenerates all fixture files. Excluded from standard test runs.

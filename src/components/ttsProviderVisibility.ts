@@ -8,6 +8,7 @@ export const BUILTIN_PROVIDER_ID_BY_TYPE: Record<TtsProviderType, string> = {
   silero: 'silero',
   openai: 'openai',
   fish: 'fish',
+  elevenlabs: 'elevenlabs',
   local: 'local-http',
 }
 
@@ -16,6 +17,7 @@ export const BUILTIN_PROVIDER_IDS: readonly string[] = [
   BUILTIN_PROVIDER_ID_BY_TYPE.silero,
   BUILTIN_PROVIDER_ID_BY_TYPE.openai,
   BUILTIN_PROVIDER_ID_BY_TYPE.fish,
+  BUILTIN_PROVIDER_ID_BY_TYPE.elevenlabs,
   BUILTIN_PROVIDER_ID_BY_TYPE.local,
 ]
 

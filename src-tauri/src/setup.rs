@@ -242,7 +242,7 @@ pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std:
     }
 
     // Initialize TTS provider
-    init_tts_provider(&app_state, &telegram_state, settings.clone());
+    init_tts_provider(&app_state, &telegram_state, settings.clone(), &settings_manager);
 
     // Register discovered Piper providers (no ONNX session created yet)
     app_state.register_piper_providers();
@@ -404,7 +404,12 @@ pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std:
 }
 
 /// Initialize TTS provider based on settings
-fn init_tts_provider(app_state: &AppState, telegram_state: &TelegramState, settings: AppSettings) {
+fn init_tts_provider(
+    app_state: &AppState,
+    telegram_state: &TelegramState,
+    settings: AppSettings,
+    settings_manager: &SettingsManager,
+) {
     info!(provider = ?settings.tts.provider, "Initializing TTS provider");
     app_state.set_tts_provider_type(settings.tts.provider);
 
@@ -421,6 +426,31 @@ fn init_tts_provider(app_state: &AppState, telegram_state: &TelegramState, setti
         app_state.set_fish_audio_temperature(settings.tts.fish.temperature);
         app_state.set_fish_audio_sample_rate(settings.tts.fish.sample_rate);
         info!("Fish Audio API key loaded for UI");
+    }
+
+    // Always load ElevenLabs API key if available (for UI display). The provider
+    // itself is registered after the active provider below so the startup
+    // fallback selection never prefers a non-active ElevenLabs entry.
+    if let Some(ref api_key) = settings.tts.elevenlabs.api_key {
+        if !api_key.is_empty() {
+            app_state.set_elevenlabs_api_key(Some(api_key.clone()));
+            app_state.set_elevenlabs_connection_settings(
+                api_key.clone(),
+                settings.tts.elevenlabs.model_id.clone(),
+                settings.tts.elevenlabs.output_format.clone(),
+                settings.tts.elevenlabs.stability,
+                settings.tts.elevenlabs.similarity_boost,
+                settings.tts.elevenlabs.style,
+                settings.tts.elevenlabs.use_speaker_boost,
+            );
+            app_state.set_elevenlabs_voice_id(settings.tts.elevenlabs.voice_id.clone());
+            if settings.tts.elevenlabs.use_proxy {
+                if let Some(ref proxy_url) = settings.tts.network.proxy.proxy_url {
+                    app_state.set_elevenlabs_proxy(Some(proxy_url.clone()));
+                }
+            }
+            info!("ElevenLabs API key loaded for UI");
+        }
     }
 
     match settings.tts.provider {
@@ -472,6 +502,39 @@ fn init_tts_provider(app_state: &AppState, telegram_state: &TelegramState, setti
                 }
             } else {
                 warn!("Fish Audio selected but no API key found");
+            }
+        }
+        TtsProviderType::ElevenLabs => {
+            let models = settings_manager.get_elevenlabs_models();
+            let voices = settings_manager.get_elevenlabs_voices();
+            let has_model = !settings.tts.elevenlabs.model_id.trim().is_empty()
+                && models
+                    .iter()
+                    .any(|model| model.model_id == settings.tts.elevenlabs.model_id);
+            let has_voice = !settings.tts.elevenlabs.voice_id.trim().is_empty()
+                && voices
+                    .iter()
+                    .any(|voice| voice.voice_id == settings.tts.elevenlabs.voice_id);
+            match &settings.tts.elevenlabs.api_key {
+                Some(key) if !key.is_empty() && has_model && has_voice => {
+                    app_state.init_elevenlabs_tts(key.clone());
+                    info!("ElevenLabs TTS initialized as active provider");
+                }
+                _ => {
+                    warn!("ElevenLabs selected but its API key, model or voice is unavailable");
+                }
+            }
+        }
+    }
+
+    // Register ElevenLabs when a key exists but it is not the active provider,
+    // so the card is available for later selection without shifting the startup
+    // fallback order.
+    if settings.tts.provider != TtsProviderType::ElevenLabs {
+        if let Some(ref api_key) = settings.tts.elevenlabs.api_key {
+            if !api_key.is_empty() {
+                app_state.init_elevenlabs_tts(api_key.clone());
+                info!("ElevenLabs TTS provider registered (inactive)");
             }
         }
     }

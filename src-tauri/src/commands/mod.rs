@@ -238,6 +238,13 @@ pub async fn get_all_app_settings(
     });
     settings.notifications = app_state.take_notifications();
 
+    // The generic `ElevenLabsSettings -> ElevenLabsSettingsDto` conversion inside
+    // `from_all_sources` intentionally leaves `voices`/`models` empty: the cached
+    // catalogs live separately in `elevenlabs-catalog.json`. Take the canonical
+    // combined view (persisted settings plus cache) instead, or every UI reload
+    // would erase the refreshed catalogs.
+    settings.tts.elevenlabs = settings_manager.get_elevenlabs_settings_dto();
+
     // Populate runtime TTS provider info from the registry
     {
         let registry = app_state.tts_registry.lock();
@@ -250,6 +257,7 @@ pub async fn get_all_app_settings(
                     TtsProvider::Silero(_) => ("silero", None),
                     TtsProvider::Local(_) => ("local-http", None),
                     TtsProvider::Fish(_) => ("fish", None),
+                    TtsProvider::ElevenLabs(_) => ("elevenlabs", None),
                     TtsProvider::Piper(tts) => (
                         "piper",
                         Some(if tts.is_loaded() {
