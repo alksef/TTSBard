@@ -67,9 +67,9 @@ pub async fn save_twitch_settings(
     // Отправить событие для перезапуска клиента только если есть изменения
     if enabled_changed || credentials_changed {
         state.send_twitch_event(crate::events::TwitchEvent::Restart);
-        Ok("Настройки сохранены. Переподключение...".to_string())
+        Ok("saved_reconnecting".to_string())
     } else {
-        Ok("Настройки сохранены.".to_string())
+        Ok("saved".to_string())
     }
 }
 
@@ -95,7 +95,7 @@ pub async fn connect_twitch(state: State<'_, AppState>) -> Result<String, String
     // Отправляем событие подключения
     state.send_twitch_event(crate::events::TwitchEvent::Restart);
 
-    Ok("Подключение к Twitch...".to_string())
+    Ok("connecting".to_string())
 }
 
 /// Отключиться от Twitch
@@ -111,7 +111,7 @@ pub async fn disconnect_twitch(state: State<'_, AppState>) -> Result<String, Str
     // Отправляем событие отключения
     state.send_twitch_event(crate::events::TwitchEvent::Stop);
 
-    Ok("Отключено от Twitch".to_string())
+    Ok("disconnected".to_string())
 }
 
 /// Получить текущий статус подключения Twitch
@@ -142,7 +142,7 @@ pub async fn send_twitch_test_message(state: State<'_, AppState>) -> Result<Stri
     state.send_twitch_event(crate::events::TwitchEvent::SendMessage(
         "test message".to_string(),
     ));
-    Ok("Тестовое сообщение отправлено".to_string())
+    Ok("test_sent".to_string())
 }
 
 /// Перезапустить Twitch клиент
@@ -150,7 +150,7 @@ pub async fn send_twitch_test_message(state: State<'_, AppState>) -> Result<Stri
 pub async fn restart_twitch(state: State<'_, AppState>) -> Result<String, String> {
     tracing::info!("Restart command received");
     state.send_twitch_event(crate::events::TwitchEvent::Restart);
-    Ok("Перезапуск Twitch...".to_string())
+    Ok("restarting".to_string())
 }
 
 /// Successful Twitch-only delivery result.

@@ -26,6 +26,12 @@ export type WebViewServerStatus =
   | { state: 'running' }
   | { state: 'error'; message: string }
 
+const WEBVIEW_ACTION_KEYS: Record<string, string> = {
+  saved_restarting: 'webview.action.saved_restarting',
+  saved: 'webview.action.saved',
+  reloaded: 'webview.action.reloaded',
+}
+
 export function useWebView() {
   const webviewSettingsFromComposable = useWebViewSettings()
 
@@ -108,12 +114,20 @@ export function useWebView() {
     }, 3000)
   }
 
+  function showActionResult(result: string, type: UiMessageKind) {
+    const key = WEBVIEW_ACTION_KEYS[result]
+    if (!key) {
+      debugError('[WebView] Unknown action code:', result)
+    }
+    showError(t(key ?? 'webview.action.saved'), type)
+  }
+
   async function save() {
     try {
       debugLog('[WebView] Saving settings:', { enabled: settings.value.enabled, port: settings.value.port, bind_address: settings.value.bind_address, has_token: !!settings.value.access_token, upnp_enabled: settings.value.upnp_enabled, start_on_boot: settings.value.start_on_boot })
       const result = await invoke<string>('save_webview_settings', { settings: settings.value })
       debugLog('[WebView] Save result:', result)
-      showError(result, 'success')
+      showActionResult(result, 'success')
     } catch (e) {
       debugError('[WebView] Save failed:', e)
       showError(presentCommandError(e, t('webview.error.save_settings')))
@@ -151,7 +165,7 @@ export function useWebView() {
     try {
       debugLog('[WebView] Saving server settings')
       const result = await invoke<string>('save_webview_settings', { settings: settings.value })
-      showError(result, 'success')
+      showActionResult(result, 'success')
     } catch (e) {
       debugError('[WebView] Failed to save server settings:', e)
       showError(presentCommandError(e, t('webview.error.save_server_settings')))
@@ -273,7 +287,7 @@ export function useWebView() {
   async function reloadTemplates() {
     try {
       const message = await invoke<string>('reload_templates')
-      showError(message, 'success')
+      showActionResult(message, 'success')
     } catch (e) {
       showError(presentCommandError(e, t('webview.error.reload_templates')))
     }

@@ -52,6 +52,15 @@ function isRustEnumError(obj: unknown): obj is RustEnumError {
   return typeof obj === 'object' && obj !== null && 'Error' in obj
 }
 
+const TWITCH_ACTION_KEYS: Record<string, string> = {
+  saved_reconnecting: 'twitch.action.saved_reconnecting',
+  saved: 'twitch.action.saved',
+  connecting: 'twitch.action.connecting',
+  disconnected: 'twitch.action.disconnected',
+  test_sent: 'twitch.action.test_sent',
+  restarting: 'twitch.action.restarting',
+}
+
 function convertStatusFromRust(status: RustTwitchStatus): TwitchStatus {
   if (typeof status === 'string') {
     const validStatuses: TwitchStatus[] = ['Disconnected', 'Connecting', 'Connected', 'Error']
@@ -109,10 +118,18 @@ export function useTwitch() {
     }, 3000)
   }
 
+  function showActionResult(result: string, type: UiMessageKind) {
+    const key = TWITCH_ACTION_KEYS[result]
+    if (!key) {
+      debugError('[Twitch] Unknown action code:', result)
+    }
+    showError(t(key ?? 'twitch.action.saved'), type)
+  }
+
   async function restartTwitch() {
     try {
       const result = await invoke<string>('restart_twitch')
-      showError(result, 'success')
+      showActionResult(result, 'success')
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : String(e)
       showError(t('twitch.error.restart', { detail: errorMsg }))
@@ -131,7 +148,7 @@ export function useTwitch() {
   async function save() {
     try {
       const result = await invoke<string>('save_twitch_settings', { settings: settings.value })
-      showError(result, 'success')
+      showActionResult(result, 'success')
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : String(e)
       showError(t('twitch.error.save', { detail: errorMsg }))
@@ -141,7 +158,7 @@ export function useTwitch() {
   async function startTwitch() {
     try {
       const result = await invoke<string>('connect_twitch')
-      showError(result, 'success')
+      showActionResult(result, 'success')
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : String(e)
       showError(t('twitch.error.connect', { detail: errorMsg }))
@@ -151,7 +168,7 @@ export function useTwitch() {
   async function stopTwitch() {
     try {
       const result = await invoke<string>('disconnect_twitch')
-      showError(result, 'info')
+      showActionResult(result, 'info')
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : String(e)
       showError(t('twitch.error.disconnect', { detail: errorMsg }))
@@ -169,7 +186,7 @@ export function useTwitch() {
   async function sendTestMessage() {
     try {
       const result = await invoke<string>('send_twitch_test_message')
-      showError(result, 'info')
+      showActionResult(result, 'info')
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : String(e)
       showError(t('twitch.error.test', { detail: errorMsg }))

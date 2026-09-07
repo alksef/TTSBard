@@ -638,3 +638,64 @@ describe('useWebView runtime error localization', () => {
     })
   }
 })
+
+describe('useWebView action result localization', () => {
+  beforeEach(() => {
+    resetHarness()
+  })
+
+  interface ActionCase {
+    name: string
+    code: string
+    trigger: (webview: WebViewComposable) => Promise<void>
+    expected: Record<'ru' | 'en', string>
+  }
+
+  const actionCases: ActionCase[] = [
+    {
+      name: 'save',
+      code: 'saved',
+      trigger: async (webview) => { await webview.save() },
+      expected: { ru: 'Настройки сохранены.', en: 'Settings saved.' },
+    },
+    {
+      name: 'save restarting',
+      code: 'saved_restarting',
+      trigger: async (webview) => { await webview.save() },
+      expected: { ru: 'Настройки сохранены. Сервер перезапускается...', en: 'Settings saved. Restarting server...' },
+    },
+    {
+      name: 'reloadTemplates',
+      code: 'reloaded',
+      trigger: async (webview) => { await webview.reloadTemplates() },
+      expected: { ru: 'Шаблоны обновлены!', en: 'Templates reloaded!' },
+    },
+  ]
+
+  for (const testCase of actionCases) {
+    for (const locale of ['ru', 'en'] as const) {
+      it(`maps "${testCase.code}" to the ${locale} catalog message in ${testCase.name}`, async () => {
+        mockWebViewSettingsRef.value = makeSettings({ bind_address: '0.0.0.0' })
+        const webview = await setupAndMount()
+        mockInvoke.mockResolvedValueOnce(testCase.code)
+
+        await withLocale(locale, async () => {
+          await testCase.trigger(webview)
+          expect(webview.errorMessage.value).toBe(testCase.expected[locale])
+        })
+      })
+    }
+  }
+
+  it('falls back to webview.action.saved and logs debug on unknown code', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ bind_address: '0.0.0.0' })
+    const webview = await setupAndMount()
+    mockInvoke.mockResolvedValueOnce('bogus_code')
+
+    await withLocale('en', async () => {
+      await webview.save()
+      expect(webview.errorMessage.value).toBe('Settings saved.')
+    })
+    expect(mockDebugError).toHaveBeenCalledWith('[WebView] Unknown action code:', 'bogus_code')
+  })
+})

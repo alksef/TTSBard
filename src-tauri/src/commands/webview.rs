@@ -132,9 +132,9 @@ pub async fn save_webview_settings(
             .webview
             .send_event(crate::events::AppEvent::RestartWebViewServer);
         tracing::debug!("RestartWebViewServer event sent successfully");
-        Ok("Настройки сохранены. Сервер перезапускается...".to_string())
+        Ok("saved_restarting".to_string())
     } else {
-        Ok("Настройки сохранены.".to_string())
+        Ok("saved".to_string())
     }
 }
 
@@ -222,7 +222,7 @@ pub async fn reload_templates(state: State<'_, AppState>) -> Result<String, Stri
     state
         .webview
         .send_event(crate::events::AppEvent::ReloadWebViewTemplates);
-    Ok("Шаблоны обновлены!".to_string())
+    Ok("reloaded".to_string())
 }
 
 // ==================== Security Commands ====================
