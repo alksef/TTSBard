@@ -103,6 +103,56 @@ describe('useEditorTabs', () => {
     })
   })
 
+  describe('hydration followed by creation', () => {
+    it('does not duplicate an existing default title after hydration', async () => {
+      mockInvoke.mockResolvedValueOnce({
+        active_id: 'uuid-0',
+        tabs: [
+          { id: 'uuid-0', title: 'Текст 1', text: '' },
+          { id: 'uuid-1', title: 'Текст 2', text: '' },
+        ],
+      })
+      const { init, create, tabs } = useEditorTabs()
+      await init()
+      create()
+      expect(tabs.value.map(t => t.title)).toEqual(['Текст 1', 'Текст 2', 'Текст 3'])
+    })
+
+    it('allocates past non-contiguous default titles after hydration', async () => {
+      mockInvoke.mockResolvedValueOnce({
+        active_id: 'uuid-0',
+        tabs: [
+          { id: 'uuid-0', title: 'Текст 1', text: '' },
+          { id: 'uuid-1', title: 'Текст 5', text: '' },
+        ],
+      })
+      const { init, create, tabs } = useEditorTabs()
+      await init()
+      create()
+      expect(tabs.value.map(t => t.title)).toEqual(['Текст 1', 'Текст 5', 'Текст 6'])
+    })
+
+    it('ignores renamed tabs when allocating the next default title', async () => {
+      mockInvoke.mockResolvedValueOnce({
+        active_id: 'uuid-0',
+        tabs: [
+          { id: 'uuid-0', title: 'Текст 1', text: '' },
+          { id: 'uuid-1', title: 'Chapter 2', text: '' },
+          { id: 'uuid-2', title: 'My Script', text: '' },
+        ],
+      })
+      const { init, create, tabs } = useEditorTabs()
+      await init()
+      create()
+      expect(tabs.value.map(t => t.title)).toEqual([
+        'Текст 1',
+        'Chapter 2',
+        'My Script',
+        'Текст 2',
+      ])
+    })
+  })
+
   describe('create', () => {
     it('adds a new tab and sets it active', () => {
       const { create, tabs, activeId } = useEditorTabs()
@@ -193,6 +243,28 @@ describe('useEditorTabs', () => {
       close('uuid-0')
       expect(tabs.value.length).toBe(1)
       expect(tabs.value[0].title).toBe('Текст 1')
+    })
+
+    it('restarts numbering from 1 after closing all tabs', () => {
+      const { create, close, tabs } = useEditorTabs()
+      const firstId = tabs.value[0].id // uuid-0 'Текст 1'
+      const secondId = create() // uuid-1 'Текст 2'
+      close(firstId)
+      expect(tabs.value).toHaveLength(1)
+      expect(tabs.value[0].title).toBe('Текст 2')
+      close(secondId)
+      expect(tabs.value).toHaveLength(1)
+      expect(tabs.value[0].title).toBe('Текст 1')
+    })
+
+    it('does not duplicate default titles after closing a non-last tab', () => {
+      const { create, close, tabs } = useEditorTabs()
+      const firstId = tabs.value[0].id // uuid-0 'Текст 1'
+      create() // uuid-1 'Текст 2'
+      close(firstId)
+      expect(tabs.value.map(t => t.title)).toEqual(['Текст 2'])
+      create() // must be 'Текст 3', not another 'Текст 2'
+      expect(tabs.value.map(t => t.title)).toEqual(['Текст 2', 'Текст 3'])
     })
 
     it('does nothing for nonexistent id', () => {

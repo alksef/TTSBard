@@ -39,6 +39,22 @@ function defaultTabTitle(number: number): string {
   return t('editor.tab.default_title', { number })
 }
 
+function defaultTitleNumber(title: string): number | null {
+  const match = title.match(/(\d+)$/)
+  if (!match) return null
+  const number = Number.parseInt(match[1], 10)
+  return defaultTabTitle(number) === title ? number : null
+}
+
+function nextDefaultTitleNumber(tabs: EditorTab[]): number {
+  let max = 0
+  for (const tab of tabs) {
+    const number = defaultTitleNumber(tab.title)
+    if (number !== null && number > max) max = number
+  }
+  return max + 1
+}
+
 export function useEditorTabs() {
   const tabs = ref<EditorTab[]>([{ id: genId(), title: defaultTabTitle(1), text: '' }])
   const activeId = ref<string>(tabs.value[0].id)
@@ -64,7 +80,7 @@ export function useEditorTabs() {
   })
 
   function create(): string {
-    const n = tabs.value.length + 1
+    const n = nextDefaultTitleNumber(tabs.value)
     const tab: EditorTab = { id: genId(), title: defaultTabTitle(n), text: '' }
     tabs.value.push(tab)
     activeId.value = tab.id
