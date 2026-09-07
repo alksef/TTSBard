@@ -1088,7 +1088,11 @@ function dismissStatus() {
       />
 
       <!-- Piper Runtime Providers -->
-      <div v-if="piperBlockVisible" class="piper-block">
+      <div
+        v-if="piperBlockVisible"
+        class="piper-block"
+        :class="{ active: activePiperId !== null }"
+      >
         <div class="piper-block-title">{{ t('tts.piper.title') }}</div>
         <div class="piper-block-subtitle">{{ t('tts.piper.local_models') }}</div>
         <label
@@ -1218,7 +1222,13 @@ function dismissStatus() {
   padding: 12px;
   border: 1px solid var(--color-border, rgba(128, 128, 128, 0.3));
   border-radius: 10px;
-  background: var(--color-surface, transparent);
+  background: var(--color-bg-field);
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.piper-block.active {
+  border-color: var(--card-active-border);
+  background: var(--card-active-bg);
 }
 
 .piper-block-title {
@@ -1244,7 +1254,7 @@ function dismissStatus() {
 }
 
 .piper-row:hover {
-  background: var(--color-background-hover, rgba(128, 128, 128, 0.12));
+  background: var(--color-bg-field-hover);
   border-radius: 6px;
 }
 
