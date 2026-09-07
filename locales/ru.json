@@ -955,7 +955,7 @@
     "tts.telegram.auth.disable": "Отключить",
     "tts.telegram.auth.connected_title": "Подключено!",
     "tts.telegram.auth.success_info": "Теперь вы можете использовать Silero TTS для озвучивания текста.",
-    "tts.telegram.auth.success_hint": "Убедитесь, что в боте @SileroBot включены голосовые сообщения.",
+    "tts.telegram.auth.success_hint": "Убедитесь, что в боте {'@'}SileroBot включены голосовые сообщения.",
     "tts.telegram.auth.disconnect": "Отключить",
     "tts.telegram.auth.close": "Закрыть",
     "tts.telegram.auth.loading": "Подключение к Telegram...",
