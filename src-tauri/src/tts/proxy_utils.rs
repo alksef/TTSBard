@@ -3,6 +3,28 @@ use reqwest::Client;
 use std::time::Duration;
 use tracing::{error, info};
 
+/// Coarse classification of a transport-level `reqwest::Error`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransportErrorKind {
+    Timeout,
+    Connect,
+    Other,
+}
+
+/// Classify a transport-level `reqwest::Error` into a coarse category.
+///
+/// The classification mirrors the historical timeout / connect branching used
+/// across TTS providers so call-sites can share one match.
+pub fn classify_transport_error(error: &reqwest::Error) -> TransportErrorKind {
+    if error.is_timeout() {
+        TransportErrorKind::Timeout
+    } else if error.is_connect() {
+        TransportErrorKind::Connect
+    } else {
+        TransportErrorKind::Other
+    }
+}
+
 /// Parse proxy URL and create appropriate reqwest::Proxy.
 ///
 /// Supports schemes: socks5, socks5h, socks4, socks4a, http, https.

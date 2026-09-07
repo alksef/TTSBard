@@ -17,6 +17,7 @@ import { useTelegramAuth } from './useTelegramAuth'
 import type { TelegramStatus } from './useTelegramAuth'
 import type { AppSettingsDto } from '../types/settings'
 import { i18n } from '../i18n'
+import { withLocale } from '../test-utils/i18n'
 import ruCatalog from '../../locales/ru.json'
 import enCatalog from '../../locales/en.json'
 
@@ -25,16 +26,6 @@ beforeAll(() => {
   i18n.global.setLocaleMessage('en', (enCatalog as { messages: Record<string, string> }).messages)
   ;(i18n.global.locale as unknown as { value: string }).value = 'ru'
 })
-
-async function withLocale(code: 'ru' | 'en', fn: () => Promise<void> | void) {
-  const previous = (i18n.global.locale as unknown as { value: string }).value
-  ;(i18n.global.locale as unknown as { value: string }).value = code
-  try {
-    await fn()
-  } finally {
-    ;(i18n.global.locale as unknown as { value: string }).value = previous
-  }
-}
 
 function mockUser(): TelegramStatus {
   return {

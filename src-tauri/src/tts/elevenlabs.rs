@@ -213,12 +213,13 @@ fn log_elevenlabs_http_transport_error(operation: &str, elapsed: Duration, error
     if !elevenlabs_http_logging_enabled() {
         return;
     }
+    let kind = proxy_utils::classify_transport_error(error);
     debug!(
         target: "elevenlabs_http",
         operation,
         elapsed_ms = elapsed.as_millis(),
-        is_timeout = error.is_timeout(),
-        is_connect = error.is_connect(),
+        is_timeout = matches!(kind, proxy_utils::TransportErrorKind::Timeout),
+        is_connect = matches!(kind, proxy_utils::TransportErrorKind::Connect),
         status = error.status().map(|status| status.as_u16()).unwrap_or(0),
         url = %error.url().map(safe_elevenlabs_url_for_log).unwrap_or_else(|| "-".to_string()),
         "ElevenLabs HTTP transport error",
@@ -1477,12 +1478,16 @@ impl TtsEngine for ElevenLabsTts {
             .await
             .map_err(|e| {
                 log_elevenlabs_http_transport_error("synthesis", started.elapsed(), &e);
-                if e.is_timeout() {
-                    format!("ElevenLabs timeout ({}s)", self.timeout_secs)
-                } else if e.is_connect() {
-                    format!("ElevenLabs connection failed: {}", e)
-                } else {
-                    format!("Failed to send ElevenLabs TTS request: {}", e)
+                match proxy_utils::classify_transport_error(&e) {
+                    proxy_utils::TransportErrorKind::Timeout => {
+                        format!("ElevenLabs timeout ({}s)", self.timeout_secs)
+                    }
+                    proxy_utils::TransportErrorKind::Connect => {
+                        format!("ElevenLabs connection failed: {}", e)
+                    }
+                    proxy_utils::TransportErrorKind::Other => {
+                        format!("Failed to send ElevenLabs TTS request: {}", e)
+                    }
                 }
             })?;
 

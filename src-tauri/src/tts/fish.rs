@@ -139,12 +139,16 @@ impl FishTts {
         let client = proxy_utils::build_client_with_proxy(proxy_url, timeout)?;
 
         let response = client.get(image_url).send().await.map_err(|e| {
-            if e.is_timeout() {
-                format!("Image request timed out after {}s", timeout.as_secs())
-            } else if e.is_connect() {
-                format!("Failed to connect to image server: {}", e)
-            } else {
-                format!("Failed to fetch image: {}", e)
+            match proxy_utils::classify_transport_error(&e) {
+                proxy_utils::TransportErrorKind::Timeout => {
+                    format!("Image request timed out after {}s", timeout.as_secs())
+                }
+                proxy_utils::TransportErrorKind::Connect => {
+                    format!("Failed to connect to image server: {}", e)
+                }
+                proxy_utils::TransportErrorKind::Other => {
+                    format!("Failed to fetch image: {}", e)
+                }
             }
         })?;
 
@@ -268,12 +272,16 @@ impl TtsEngine for FishTts {
             .send()
             .await
             .map_err(|e| {
-                if e.is_timeout() {
-                    format!("Fish Audio timeout ({}s)", self.timeout_secs)
-                } else if e.is_connect() {
-                    format!("Fish Audio connection failed: {}", e)
-                } else {
-                    format!("Failed to send TTS request: {}", e)
+                match proxy_utils::classify_transport_error(&e) {
+                    proxy_utils::TransportErrorKind::Timeout => {
+                        format!("Fish Audio timeout ({}s)", self.timeout_secs)
+                    }
+                    proxy_utils::TransportErrorKind::Connect => {
+                        format!("Fish Audio connection failed: {}", e)
+                    }
+                    proxy_utils::TransportErrorKind::Other => {
+                        format!("Failed to send TTS request: {}", e)
+                    }
                 }
             })?;
 

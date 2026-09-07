@@ -1,6 +1,7 @@
 use crate::events::EventSender;
 use crate::secret_log;
 use crate::tts::engine::TtsEngine;
+use crate::tts::proxy_utils;
 use async_trait::async_trait;
 use reqwest::Client;
 use std::time::{Duration, Instant};
@@ -89,21 +90,25 @@ impl TtsEngine for LocalHttpServerTts {
                 server_url = %self.server_url,
                 "LocalHttpServerTTS request failed"
             );
-            if e.is_timeout() {
-                format!(
-                    "Local HTTP TTS timeout ({}s). Server at {} may be slow or unavailable.",
-                    self.timeout_secs, self.server_url
-                )
-            } else if e.is_connect() {
-                format!(
-                    "Local HTTP TTS connection failed to {}. Check if the TTS server is running.",
-                    self.server_url
-                )
-            } else {
-                format!(
-                    "Failed to send HTTP TTS request to {}: {}",
-                    self.server_url, e
-                )
+            match proxy_utils::classify_transport_error(&e) {
+                proxy_utils::TransportErrorKind::Timeout => {
+                    format!(
+                        "Local HTTP TTS timeout ({}s). Server at {} may be slow or unavailable.",
+                        self.timeout_secs, self.server_url
+                    )
+                }
+                proxy_utils::TransportErrorKind::Connect => {
+                    format!(
+                        "Local HTTP TTS connection failed to {}. Check if the TTS server is running.",
+                        self.server_url
+                    )
+                }
+                proxy_utils::TransportErrorKind::Other => {
+                    format!(
+                        "Failed to send HTTP TTS request to {}: {}",
+                        self.server_url, e
+                    )
+                }
             }
         })?;
 

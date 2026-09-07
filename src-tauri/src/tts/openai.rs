@@ -98,31 +98,35 @@ impl TtsEngine for OpenAiTts {
             .await
             .map_err(|e| {
                 let elapsed = start_time.elapsed();
-                if e.is_timeout() {
-                    error!(
-                        error = %e,
-                        elapsed_secs = elapsed.as_secs_f64(),
-                        timeout_secs = self.timeout_secs,
-                        "Request timeout"
-                    );
-                    format!(
-                        "OpenAI timeout ({}s). Check internet or proxy settings.",
-                        self.timeout_secs
-                    )
-                } else if e.is_connect() {
-                    error!(
-                        error = %e,
-                        elapsed_secs = elapsed.as_secs_f64(),
-                        "Connection failed"
-                    );
-                    format!("OpenAI connection failed: {}", e)
-                } else {
-                    error!(
-                        error = %e,
-                        elapsed_secs = elapsed.as_secs_f64(),
-                        "Failed to send TTS request"
-                    );
-                    format!("Failed to send TTS request: {}", e)
+                match proxy_utils::classify_transport_error(&e) {
+                    proxy_utils::TransportErrorKind::Timeout => {
+                        error!(
+                            error = %e,
+                            elapsed_secs = elapsed.as_secs_f64(),
+                            timeout_secs = self.timeout_secs,
+                            "Request timeout"
+                        );
+                        format!(
+                            "OpenAI timeout ({}s). Check internet or proxy settings.",
+                            self.timeout_secs
+                        )
+                    }
+                    proxy_utils::TransportErrorKind::Connect => {
+                        error!(
+                            error = %e,
+                            elapsed_secs = elapsed.as_secs_f64(),
+                            "Connection failed"
+                        );
+                        format!("OpenAI connection failed: {}", e)
+                    }
+                    proxy_utils::TransportErrorKind::Other => {
+                        error!(
+                            error = %e,
+                            elapsed_secs = elapsed.as_secs_f64(),
+                            "Failed to send TTS request"
+                        );
+                        format!("Failed to send TTS request: {}", e)
+                    }
                 }
             })?;
 

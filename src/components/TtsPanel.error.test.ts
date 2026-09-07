@@ -1,15 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { presentCommandError } from '../ipc/commandError'
-import { i18n, t } from '../i18n'
-function withLocale(code: 'ru' | 'en', fn: () => void) {
-  const previous = (i18n.global.locale as unknown as { value: string }).value
-  ;(i18n.global.locale as unknown as { value: string }).value = code
-  try {
-    fn()
-  } finally {
-    ;(i18n.global.locale as unknown as { value: string }).value = previous
-  }
-}
+import { t } from '../i18n'
+import { withLocale } from '../test-utils/i18n'
 
 const ttsErrorKeys = [
   'tts.error.save_api_key',
