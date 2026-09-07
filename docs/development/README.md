@@ -137,5 +137,7 @@ Copy-Item scripts/build.local.example.psd1 scripts/build.local.psd1
   устройство CI, теги и нативные зависимости.
 - [Локальный ONNX Runtime для Piper](./debug-piper-onnx-runtime.md) — подготовка
   debug-сборки.
+- [HTTP-диагностика ElevenLabs](./debug-elevenlabs-logging.md) — безопасное
+  debug-only логирование запросов и ответов без API-ключа и текста синтеза.
 - [Смешанная CRT в debug-сборке Windows](./windows-debug-crt.md) — диагностика
   и проверка Windows runtime.

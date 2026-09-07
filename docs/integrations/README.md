@@ -30,6 +30,6 @@ WebView/SSE — исходящий текстовый поток. Входящи
 ## Синтез речи
 
 Настройка [TTS-провайдеров](../user/tts.md), включая
-Silero/Telegram и Piper, находится в пользовательском руководстве.
+Silero/Telegram, ElevenLabs и Piper, находится в пользовательском руководстве.
 [Тайминги Silero](../user/silero-settings.md) и
 [модели RUAccent](../user/ruaccent.md) описаны отдельно.
