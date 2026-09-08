@@ -220,8 +220,8 @@ function toggleCollapse() {
   width: 34px;
   height: 34px;
   border: 1px solid var(--color-border-strong);
-  background:
-    linear-gradient(135deg, var(--color-bg-elevated), var(--color-bg));
+  background-color: transparent;
+  background-image: linear-gradient(135deg, var(--color-bg-handle-top), var(--color-bg-handle-bottom));
   color: var(--color-text-secondary);
   cursor: pointer;
   padding: 0;
@@ -239,7 +239,8 @@ function toggleCollapse() {
 
 .collapse-toggle-floating:hover {
   color: var(--color-text-primary);
-  background: var(--sidebar-btn-hover-bg);
+  background-color: var(--sidebar-btn-hover-bg);
+  background-image: none;
   border-color: var(--card-active-border);
   box-shadow:
     0 6px 24px rgba(0, 0, 0, 0.3),

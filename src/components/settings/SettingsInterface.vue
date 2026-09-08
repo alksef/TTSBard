@@ -224,7 +224,7 @@ watch(
           />
           <span>{{ t('settings.interface.use_custom_color') }}</span>
         </label>
-        <span class="setting-hint">{{ t('settings.interface.use_custom_color.hint') }}</span>
+        <span class="setting-hint">{{ t('settings.interface.use_custom_color.main_hint') }}</span>
       </div>
 
       <div class="appearance-grid" style="margin-bottom: 0.5rem">
@@ -296,7 +296,7 @@ watch(
           />
           <span>{{ t('settings.interface.use_custom_color') }}</span>
         </label>
-        <span class="setting-hint">{{ t('settings.interface.use_custom_color.hint') }}</span>
+        <span class="setting-hint">{{ t('settings.interface.use_custom_color.linked_hint') }}</span>
       </div>
 
       <div class="appearance-grid">
@@ -356,7 +356,7 @@ watch(
           />
           <span>{{ t('settings.interface.use_custom_color') }}</span>
         </label>
-        <span class="setting-hint">{{ t('settings.interface.use_custom_color.hint') }}</span>
+        <span class="setting-hint">{{ t('settings.interface.use_custom_color.linked_hint') }}</span>
       </div>
 
       <div class="appearance-grid">

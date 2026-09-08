@@ -182,12 +182,18 @@ const appStyle = computed(() => {
     : theme === 'light'
       ? '#fafcff'
       : '#090b0f'
+  const surfaceTint = main?.custom_background ? '20%' : '0%'
+  const surfaceTintElevated = main?.custom_background ? '35%' : '0%'
+  const surfaceTintHandle = main?.custom_background ? '40%' : '0%'
   const { r, g, b } = hexToRgb(baseColor)
   return {
     background: `var(--app-gradient-line), var(--app-gradient-glow), rgba(${r}, ${g}, ${b}, ${opacity})`,
     '--main-window-rgb': `${r}, ${g}, ${b}`,
     '--main-window-surface-opacity': `${opacity * 100}%`,
     '--main-window-opacity': `${opacity * 100}%`,
+    '--main-window-surface-tint': surfaceTint,
+    '--main-window-surface-tint-elevated': surfaceTintElevated,
+    '--main-window-surface-tint-handle': surfaceTintHandle,
   }
 })
 
@@ -465,17 +471,64 @@ onUnmounted(() => {
 
 <style scoped>
 .app-container {
-  --color-bg: color-mix(in srgb, rgb(var(--rgb-bg)) var(--main-window-surface-opacity), transparent);
-  --color-bg-elevated: color-mix(in srgb, rgb(var(--rgb-bg-elevated)) var(--main-window-surface-opacity), transparent);
-  --color-bg-panel: color-mix(in srgb, rgba(var(--rgb-bg-elevated), 0.86) var(--main-window-surface-opacity), transparent);
-  --color-bg-panel-strong: color-mix(in srgb, rgba(var(--rgb-bg-elevated), 0.94) var(--main-window-surface-opacity), transparent);
-  --color-bg-field: color-mix(in srgb, rgba(var(--rgb-contrast), 0.05) var(--main-window-surface-opacity), transparent);
-  --color-bg-field-hover: color-mix(in srgb, rgba(var(--rgb-contrast), 0.08) var(--main-window-surface-opacity), transparent);
-  --input-bg-strong: color-mix(in srgb, rgba(var(--rgb-contrast), 0.16) var(--main-window-surface-opacity), transparent);
-  --select-bg: color-mix(in srgb, color-mix(in srgb, rgb(var(--rgb-bg-elevated)), black 10%) var(--main-window-surface-opacity), transparent);
-  --select-bg-hover: color-mix(in srgb, color-mix(in srgb, rgb(var(--rgb-bg-elevated)), black 5%) var(--main-window-surface-opacity), transparent);
-  --sidebar-bg-top: color-mix(in srgb, rgba(var(--rgb-bg-elevated), 0.98) var(--main-window-surface-opacity), transparent);
-  --sidebar-bg-bottom: color-mix(in srgb, rgba(var(--rgb-bg), 0.96) var(--main-window-surface-opacity), transparent);
+  --main-surface-elevated: color-mix(
+    in srgb,
+    rgb(var(--rgb-bg-elevated)) calc(100% - var(--main-window-surface-tint-elevated)),
+    rgb(var(--main-window-rgb)) var(--main-window-surface-tint-elevated)
+  );
+  --main-surface-base: color-mix(
+    in srgb,
+    rgb(var(--rgb-bg)) calc(100% - var(--main-window-surface-tint)),
+    rgb(var(--main-window-rgb)) var(--main-window-surface-tint)
+  );
+  --main-surface-field: color-mix(
+    in srgb,
+    rgba(var(--rgb-contrast), 0.05) calc(100% - var(--main-window-surface-tint)),
+    rgb(var(--main-window-rgb)) var(--main-window-surface-tint)
+  );
+  --main-surface-field-hover: color-mix(
+    in srgb,
+    rgba(var(--rgb-contrast), 0.08) calc(100% - var(--main-window-surface-tint)),
+    rgb(var(--main-window-rgb)) var(--main-window-surface-tint)
+  );
+  --main-surface-input: color-mix(
+    in srgb,
+    rgba(var(--rgb-contrast), 0.16) calc(100% - var(--main-window-surface-tint)),
+    rgb(var(--main-window-rgb)) var(--main-window-surface-tint)
+  );
+  --main-surface-select: color-mix(
+    in srgb,
+    color-mix(in srgb, rgb(var(--rgb-bg-elevated)), black 10%) calc(100% - var(--main-window-surface-tint-elevated)),
+    rgb(var(--main-window-rgb)) var(--main-window-surface-tint-elevated)
+  );
+  --main-surface-select-hover: color-mix(
+    in srgb,
+    color-mix(in srgb, rgb(var(--rgb-bg-elevated)), black 5%) calc(100% - var(--main-window-surface-tint-elevated)),
+    rgb(var(--main-window-rgb)) var(--main-window-surface-tint-elevated)
+  );
+  --main-surface-handle-top: color-mix(
+    in srgb,
+    rgb(var(--rgb-bg-elevated)) calc(100% - var(--main-window-surface-tint-handle)),
+    rgb(var(--main-window-rgb)) var(--main-window-surface-tint-handle)
+  );
+  --main-surface-handle-bottom: color-mix(
+    in srgb,
+    rgb(var(--rgb-bg)) calc(100% - var(--main-window-surface-tint-handle)),
+    rgb(var(--main-window-rgb)) var(--main-window-surface-tint-handle)
+  );
+  --color-bg: color-mix(in srgb, var(--main-surface-base) var(--main-window-surface-opacity), transparent);
+  --color-bg-elevated: color-mix(in srgb, var(--main-surface-elevated) var(--main-window-surface-opacity), transparent);
+  --color-bg-panel: color-mix(in srgb, color-mix(in srgb, var(--main-surface-elevated) 86%, transparent) var(--main-window-surface-opacity), transparent);
+  --color-bg-panel-strong: color-mix(in srgb, color-mix(in srgb, var(--main-surface-elevated) 94%, transparent) var(--main-window-surface-opacity), transparent);
+  --color-bg-field: color-mix(in srgb, var(--main-surface-field) var(--main-window-surface-opacity), transparent);
+  --color-bg-field-hover: color-mix(in srgb, var(--main-surface-field-hover) var(--main-window-surface-opacity), transparent);
+  --input-bg-strong: color-mix(in srgb, var(--main-surface-input) var(--main-window-surface-opacity), transparent);
+  --select-bg: color-mix(in srgb, var(--main-surface-select) var(--main-window-surface-opacity), transparent);
+  --select-bg-hover: color-mix(in srgb, var(--main-surface-select-hover) var(--main-window-surface-opacity), transparent);
+  --sidebar-bg-top: color-mix(in srgb, color-mix(in srgb, var(--main-surface-elevated) 98%, transparent) var(--main-window-surface-opacity), transparent);
+  --sidebar-bg-bottom: color-mix(in srgb, color-mix(in srgb, var(--main-surface-base) 96%, transparent) var(--main-window-surface-opacity), transparent);
+  --color-bg-handle-top: color-mix(in srgb, var(--main-surface-handle-top) var(--main-window-surface-opacity), transparent);
+  --color-bg-handle-bottom: color-mix(in srgb, var(--main-surface-handle-bottom) var(--main-window-surface-opacity), transparent);
   position: relative;
   display: flex;
   flex-direction: column;
@@ -490,10 +543,22 @@ onUnmounted(() => {
 }
 
 :global([data-theme='light'] .app-container) {
-  --input-bg-strong: color-mix(in srgb, rgb(var(--rgb-bg-elevated)) var(--main-window-surface-opacity), transparent);
-  --color-bg-field: color-mix(in srgb, rgba(var(--rgb-accent), 0.04) var(--main-window-surface-opacity), transparent);
-  --color-bg-field-hover: color-mix(in srgb, rgba(var(--rgb-accent), 0.08) var(--main-window-surface-opacity), transparent);
-  --color-bg-panel: color-mix(in srgb, rgba(var(--rgb-bg-elevated), 0.88) var(--main-window-surface-opacity), transparent);
+  --main-surface-input: color-mix(
+    in srgb,
+    rgb(var(--rgb-bg-elevated)) calc(100% - var(--main-window-surface-tint)),
+    rgb(var(--main-window-rgb)) var(--main-window-surface-tint)
+  );
+  --main-surface-field: color-mix(
+    in srgb,
+    rgba(var(--rgb-accent), 0.04) calc(100% - var(--main-window-surface-tint)),
+    rgb(var(--main-window-rgb)) var(--main-window-surface-tint)
+  );
+  --main-surface-field-hover: color-mix(
+    in srgb,
+    rgba(var(--rgb-accent), 0.08) calc(100% - var(--main-window-surface-tint)),
+    rgb(var(--main-window-rgb)) var(--main-window-surface-tint)
+  );
+  --color-bg-panel: color-mix(in srgb, color-mix(in srgb, var(--main-surface-elevated) 88%, transparent) var(--main-window-surface-opacity), transparent);
 }
 
 .app-container.minimal-mode {
