@@ -4,8 +4,6 @@ on:
   push:
     tags:
       - 'v*'
-  pull_request:
-    branches: [master, main]
   workflow_dispatch:
 
 permissions: read-all
@@ -14,7 +12,54 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  wait-for-ci:
+    name: Wait for successful CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Wait for CI on the tagged commit
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          deadline=$((SECONDS + 1800))
+
+          while (( SECONDS < deadline )); do
+            run_id=$(gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&event=push&per_page=20" \
+              --jq '.workflow_runs | map(select(.head_branch == "master" or .head_branch == "main")) | sort_by(.created_at) | last | .id // empty')
+
+            if [[ -z "$run_id" ]]; then
+              echo "CI for ${GITHUB_SHA} has not appeared yet; waiting..."
+              sleep 15
+              continue
+            fi
+
+            status=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" --jq '.status')
+            conclusion=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" --jq '.conclusion // empty')
+            url=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" --jq '.html_url')
+
+            if [[ "$status" != "completed" ]]; then
+              echo "CI is ${status}: ${url}"
+              sleep 15
+              continue
+            fi
+
+            if [[ "$conclusion" == "success" ]]; then
+              echo "CI succeeded: ${url}"
+              exit 0
+            fi
+
+            echo "CI concluded with '${conclusion}': ${url}"
+            exit 1
+          done
+
+          echo "Timed out waiting for CI for ${GITHUB_SHA}"
+          exit 1
+
   build:
+    needs: wait-for-ci
     strategy:
       fail-fast: false
       matrix:
@@ -78,9 +123,6 @@ jobs:
           "LIBCLANG_PATH=$($libclang.DirectoryName)" >> $env:GITHUB_ENV
           Write-Host "Using $($libclang.FullName)"
 
-      - name: Run frontend tests
-        run: npm test
-
       - name: Prepare Piper test data
         shell: pwsh
         run: |
@@ -101,12 +143,6 @@ jobs:
             throw 'compiled espeak-ng-data is missing en_dict'
           }
           "PIPER_ESPEAKNG_DATA_DIRECTORY=$($espeakData.FullName)" >> $env:GITHUB_ENV
-
-      - name: Run Rust tests
-        shell: pwsh
-        env:
-          TAURI_CONFIG: '{"bundle":{"resources":null}}'
-        run: .\scripts\cargo.ps1 test --manifest-path src-tauri/Cargo.toml --locked
 
       - name: Build application
         run: .\scripts\build.ps1 -Mode release
