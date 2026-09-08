@@ -87,7 +87,10 @@
     "resources": {
       "resources/dict": "resources/dict",
       "resources/espeak-ng-data": "espeak-ng-data",
-      "locales": "locales"
+      "locales": "locales",
+      "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
+      "vendor/signalsmith-stretch/LICENSE.txt": "third-party/licenses/signalsmith-stretch-LICENSE.txt",
+      "vendor/signalsmith-linear/LICENSE.txt": "third-party/licenses/signalsmith-linear-LICENSE.txt"
     }
   }
 }

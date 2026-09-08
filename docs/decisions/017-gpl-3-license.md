@@ -32,5 +32,12 @@
   `bundle.licenseFile`.
 - Новая dependency или bundled resource проверяется не только по manifest
   metadata, но и по фактически включённому native/model содержимому.
-- Полный third-party notice и проверка release bundle ведутся отдельно в
-  [TASK-119](../tasks/119-third-party-license-notices.md).
+- Непосредственно включённые и vendored сторонние assets (русский словарь,
+  eSpeak NG, Signalsmith Stretch/Linear) описываются точечным
+  `THIRD_PARTY_NOTICES.md` с их provenance, copyright и license files. Это
+  перечень прямых assets, а не полный реестр транзитивных зависимостей; его
+  актуальность проверяет `scripts/check-third-party-notices.ps1` без обращения к
+  сети.
+- Notice и license texts прямых bundled/vendor assets включаются в release
+  bundle; их hashes, pinned revisions и resource mappings проверяет
+  `scripts/check-third-party-notices.ps1`.

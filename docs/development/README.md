@@ -67,6 +67,25 @@ HTML-якоря; содержимое fenced code blocks не считается
 ./scripts/tests/test-check-docs-task-lifecycle.ps1
 ```
 
+### Third-party notices
+
+Непосредственно включённые и vendored сторонние компоненты описывает
+[`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md): русский
+Hunspell-словарь, eSpeak NG и Signalsmith Stretch/Linear. Это точечный перечень
+прямых assets, а не сгенерированный реестр всех транзитивных Rust/npm
+зависимостей.
+
+Проверка запускается отдельно:
+
+```powershell
+./scripts/check-third-party-notices.ps1
+```
+
+Она сверяет SHA-256 словаря, наличие notice/license files, pinned revisions
+(LibreOffice, piper-rs, eSpeak NG), точные Tauri resource mappings и сохранение
+`bundle.licenseFile`. Проверка не обращается к сети и не валидирует полный
+dependency inventory — только перечисленные прямые assets.
+
 ## Сборка приложения на Windows
 
 ```powershell

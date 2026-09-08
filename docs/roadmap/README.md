@@ -45,7 +45,7 @@ related_tasks: []
 
 ## Активные направления
 
-Пока нет активных направлений.
+Нет активных направлений.
 
 ## Завершённые направления
 
@@ -144,6 +144,7 @@ related_tasks: []
 
 ### Архитектура, AI и документация
 
+- [ROADMAP-099 — Notices непосредственно включённых сторонних компонентов](./completed/099-bundled-third-party-notices.md)
 - [ROADMAP-098 — Снижение стоимости безопасных AI-изменений](./completed/098-ai-ready-remediation.md)
 - [ROADMAP-083 — модели RUAccent и UI загрузки](./completed/083-ruaccent-omograph-model-selection.md)
 - [ROADMAP-082 — нативный RUAccent runtime через ruaccent-rs](./completed/082-native-ruaccent-rs-runtime.md)
