@@ -3,7 +3,7 @@ id: ROADMAP-059
 status: completed
 created: 2026-07-30
 updated: 2026-07-30
-related_tasks: [TASK-117]
+related_tasks: []
 ---
 
 # ROADMAP-059 — Владение integration state и атомарность settings
@@ -19,7 +19,7 @@ related_tasks: [TASK-117]
 - сохранение WebView section вызывает несколько независимо пишущих field
   setters, поэтому поздняя ошибка способна оставить частично сохранённый config
   при неизменённом runtime;
-- TASK-117 описывает преимущественно поля `AppState` и не охватывает все
+- прежний общий backlog декомпозиции описывал преимущественно поля `AppState` и не охватывал все
   подтверждённые integration seams.
 
 TTS provider selection уже получил отдельный сериализованный owner flow в
@@ -78,9 +78,9 @@ review-021 remediation и не входит в этот roadmap.
 5. Разделение transport/parsing/download выполнять только там, где оно требуется
    для owner API, а не как общий rewrite Telegram module.
 
-### P2 — Reconciliation TASK-117
+### P2 — Reconciliation AppState backlog
 
-1. Обновить TASK-117: перечислить фактические public-state seams и отделить
+1. Актуализировать backlog: перечислить фактические public-state seams и отделить
    AppState decomposition от integration service encapsulation.
 2. Удалить завершённые TTS owner пункты либо зафиксировать их как исходный
    контекст, не как будущую работу.
@@ -115,7 +115,7 @@ P1. P3 состоит из независимых service-scoped tasks и мож
   `with_client`); устранены два lock-through-await (`telegram_select_voice`,
   `reconnect_telegram`); `client` → `pub(crate)` по контракту DECISION-018.
   Коммиты: `89d2536`, `dcd244e`, `e054dd3`. ROADMAP-041 invariants зелёные.
-- **P2 (done)** — TASK-117 актуализирован: AppState decomposition отделён от
+- **P2 (done)** — AppState backlog актуализирован: decomposition отделён от
   integration encapsulation, Telegram/WebView owner work зафиксирован как
   завершённый контекст.
 - **P3 (done — rescoped)** — Аудит Twitch / WebView / VTube Studio показал
@@ -132,7 +132,7 @@ P1. P3 состоит из независимых service-scoped tasks и мож
 - Telegram command adapters не раскрывают и не изменяют client/auth state
   напрямую;
 - Telegram retry, cancel, restart и stale-result tests остаются зелёными;
-- TASK-117 соответствует фактическим owner seams и не предлагает уже
+- AppState backlog соответствует фактическим owner seams и не предлагает уже
   завершённую TTS работу;
 - settings/status locks integration-сервисов либо приватны с owner-API (Telegram),
   либо зафиксированы как допустимый Arc-контракт с явным правилом доступа
@@ -149,7 +149,7 @@ ROADMAP-059 закрыт полностью:
 - **P1** — Telegram owner-API (`current_client`/`set_client`/`clear_client`/
   `swap_client`/`with_client`), устранены два lock-through-await, `client` →
   `pub(crate)` (`dcd244e`, `e054dd3`). ROADMAP-041 invariants зелёные.
-- **P2** — TASK-117 reconciled: AppState decomposition отделён от integration
+- **P2** — AppState backlog reconciled: decomposition отделён от integration
   encapsulation (`88b3b12`).
 - **P3** — Twitch/WebView/VTube settings-локи зафиксированы как допустимый контракт
   (DECISION-019): owner-API не нужен (это кэш настроек, не lifecycle-state).

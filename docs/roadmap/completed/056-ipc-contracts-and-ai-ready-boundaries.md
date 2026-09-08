@@ -3,7 +3,7 @@ id: ROADMAP-056
 status: completed
 created: 2026-07-29
 updated: 2026-07-30
-related_tasks: [TASK-117]
+related_tasks: []
 ---
 
 # ROADMAP-056 — IPC-контракты и AI-ready границы

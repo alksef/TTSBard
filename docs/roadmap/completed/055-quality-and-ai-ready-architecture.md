@@ -3,7 +3,7 @@ id: ROADMAP-055
 status: completed
 created: 2026-07-29
 updated: 2026-07-30
-related_tasks: [TASK-117]
+related_tasks: []
 ---
 
 # ROADMAP-055 — Качество и AI-ready foundation

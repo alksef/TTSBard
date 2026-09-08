@@ -69,6 +69,14 @@ jobs:
         run: |
           npm run check:ipc
           npm run test:ipc
+      - name: Check settings and speech contracts
+        run: |
+          npm run check:settings
+          npm run test:settings
+          npm run check:speech-contract
+          npm run test:speech-contract
+      - name: Run frontend tests
+        run: npm test
       - name: Type check
         run: npm run build
 

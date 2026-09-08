@@ -35,6 +35,19 @@ npm run build
 Проверки выбираются по риску изменения. `npm run build` уже выполняет
 `vue-tsc --noEmit`; Rust-тесты по возможности сначала запускаются точечно.
 
+Для focused Rust proof найдите colocated test по имени инварианты и передайте
+module/test-name filter через Windows-обёртку. Например:
+
+```powershell
+rg -n "failed.*queue|fn .*failed" src-tauri/src/speech_queue.rs
+./scripts/cargo.ps1 test --manifest-path src-tauri/Cargo.toml `
+  speech_queue::tests::next_actionable_skips_failed_and_selects_next_queued
+```
+
+После focused test выполняется более широкий gate, соответствующий риску
+изменения. Полный каталог тестов отдельно не поддерживается: source of truth —
+имена colocated tests в профильном модуле.
+
 Структура документации проверяется отдельно:
 
 ```powershell

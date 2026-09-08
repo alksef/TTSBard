@@ -234,7 +234,7 @@ Frontend сначала подписывается на `webview-server-status-c
 | Изменение | Начальная точка |
 |---|---|
 | Новый frontend action | соответствующий composable и command в `commands/` |
-| Новый TTS provider | `tts/engine.rs`, реализация provider, `tts/registry.rs` |
+| Новый TTS provider | backend contract/implementation/registry в `tts/`; `config/` DTO и persistence; command + регистрация в `lib.rs`; frontend type, card/selection/visibility metadata и локализация; затем IPC/settings checks, frontend и Rust tests |
 | Изменение аудиопайплайна | `audio/`, `playback.rs`, связанные roadmap/decision |
 | Новое внутреннее событие | `events.rs` и исчерпывающий routing в `event_loop.rs` |
 | Новая настройка | schema/validation/persistence в `config/`, затем UI |
