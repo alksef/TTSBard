@@ -242,7 +242,12 @@ pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std:
     }
 
     // Initialize TTS provider
-    init_tts_provider(&app_state, &telegram_state, settings.clone(), &settings_manager);
+    init_tts_provider(
+        &app_state,
+        &telegram_state,
+        settings.clone(),
+        &settings_manager,
+    );
 
     // Register discovered Piper providers (no ONNX session created yet)
     app_state.register_piper_providers();
@@ -522,7 +527,9 @@ fn init_tts_provider(
                     if models.is_empty() || voices.is_empty() {
                         warn!("ElevenLabs catalog cache is unavailable; keeping persisted model/voice selection");
                     } else if !has_model || !has_voice {
-                        warn!("ElevenLabs selected model or voice is missing from the cached catalog");
+                        warn!(
+                            "ElevenLabs selected model or voice is missing from the cached catalog"
+                        );
                     }
                 }
                 _ => {
@@ -854,8 +861,7 @@ pub(crate) fn show_main_window(app_handle: &AppHandle, action: &str) {
 fn init_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     let app_handle = app.handle().clone();
 
-    let localization_state =
-        app.state::<crate::commands::localization::LocalizationState>();
+    let localization_state = app.state::<crate::commands::localization::LocalizationState>();
     let snapshot = localization_state.snapshot();
     let tray_text = |key: &str, fallback: &str| {
         snapshot

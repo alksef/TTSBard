@@ -67,10 +67,7 @@ impl LocalizationState {
     /// falls back to `en` exactly like [`LocaleCatalog::snapshot`].
     pub fn new(catalog: LocaleCatalog, requested_locale: &str) -> Self {
         let current = catalog.snapshot(requested_locale);
-        Self {
-            catalog,
-            current,
-        }
+        Self { catalog, current }
     }
 
     /// Whether a locale is available in the loaded catalog.
@@ -134,7 +131,10 @@ mod tests {
         assert_eq!(snap.revision, 0);
         assert_eq!(snap.requested_locale, "en");
         assert_eq!(snap.locale, "en");
-        assert_eq!(snap.messages.get("common.save").map(String::as_str), Some("Save"));
+        assert_eq!(
+            snap.messages.get("common.save").map(String::as_str),
+            Some("Save")
+        );
     }
 
     #[test]
@@ -153,7 +153,10 @@ mod tests {
         assert_eq!(snap.revision, 0);
         assert_eq!(snap.requested_locale, "en");
         assert_eq!(snap.locale, "en");
-        assert_eq!(snap.messages.get("common.save").map(String::as_str), Some("Save"));
+        assert_eq!(
+            snap.messages.get("common.save").map(String::as_str),
+            Some("Save")
+        );
     }
 
     #[test]
@@ -233,20 +236,52 @@ mod tests {
         assert_eq!(snap.requested_locale, "de");
         assert_eq!(snap.locale, "de");
         assert_eq!(snap.revision, 0);
-        assert!(snap.languages.iter().any(|l| l.locale == "de" && l.name == "Deutsch"));
+        assert!(snap
+            .languages
+            .iter()
+            .any(|l| l.locale == "de" && l.name == "Deutsch"));
 
         // All startup tray labels and window titles resolve for the pack.
-        assert_eq!(snap.messages.get("tray.show_main").map(String::as_str), Some("Hauptfenster anzeigen"));
-        assert_eq!(snap.messages.get("tray.soundpanel").map(String::as_str), Some("Soundpanel"));
-        assert_eq!(snap.messages.get("tray.playback").map(String::as_str), Some("Wiedergabe"));
-        assert_eq!(snap.messages.get("tray.quit").map(String::as_str), Some("Beenden"));
-        assert_eq!(snap.messages.get("window.soundpanel").map(String::as_str), Some("Soundpanel"));
-        assert_eq!(snap.messages.get("window.playback").map(String::as_str), Some("Wiedergabe"));
-        assert_eq!(snap.messages.get("window.ocr_selection").map(String::as_str), Some("OCR-Auswahl"));
+        assert_eq!(
+            snap.messages.get("tray.show_main").map(String::as_str),
+            Some("Hauptfenster anzeigen")
+        );
+        assert_eq!(
+            snap.messages.get("tray.soundpanel").map(String::as_str),
+            Some("Soundpanel")
+        );
+        assert_eq!(
+            snap.messages.get("tray.playback").map(String::as_str),
+            Some("Wiedergabe")
+        );
+        assert_eq!(
+            snap.messages.get("tray.quit").map(String::as_str),
+            Some("Beenden")
+        );
+        assert_eq!(
+            snap.messages.get("window.soundpanel").map(String::as_str),
+            Some("Soundpanel")
+        );
+        assert_eq!(
+            snap.messages.get("window.playback").map(String::as_str),
+            Some("Wiedergabe")
+        );
+        assert_eq!(
+            snap.messages
+                .get("window.ocr_selection")
+                .map(String::as_str),
+            Some("OCR-Auswahl")
+        );
 
         // Missing keys independently fall back to embedded English.
-        assert_eq!(snap.messages.get("common.close").map(String::as_str), Some("Close"));
-        assert_eq!(snap.messages.get("common.cancel").map(String::as_str), Some("Cancel"));
+        assert_eq!(
+            snap.messages.get("common.close").map(String::as_str),
+            Some("Close")
+        );
+        assert_eq!(
+            snap.messages.get("common.cancel").map(String::as_str),
+            Some("Cancel")
+        );
 
         // Restart-only: file edits never change the running snapshot.
         write_pack(
@@ -264,14 +299,14 @@ mod tests {
         );
 
         // An unavailable persisted preference keeps English for the run.
-        let en_state = LocalizationState::new(
-            LocaleCatalog::load(None, Some(dir.as_path())),
-            "fr",
-        );
+        let en_state = LocalizationState::new(LocaleCatalog::load(None, Some(dir.as_path())), "fr");
         let en_snap = en_state.snapshot();
         assert_eq!(en_snap.requested_locale, "fr");
         assert_eq!(en_snap.locale, "en");
-        assert_eq!(en_snap.messages.get("tray.quit").map(String::as_str), Some("Quit"));
+        assert_eq!(
+            en_snap.messages.get("tray.quit").map(String::as_str),
+            Some("Quit")
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }

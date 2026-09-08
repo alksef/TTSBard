@@ -23,10 +23,32 @@ const BUILTIN_RU_JSON: &str = include_str!("../../locales/ru.json");
 
 /// HTML event-handler attribute names that make a message executable HTML.
 const HTML_EVENT_HANDLERS: &[&str] = &[
-    "onabort", "onblur", "oncanplay", "onchange", "onclick", "oncontextmenu", "oncopy", "oncut",
-    "ondblclick", "ondragstart", "onerror", "onfocus", "oninput", "onkeydown", "onkeypress",
-    "onkeyup", "onload", "onmousedown", "onmouseover", "onmouseout", "onmouseup", "onpaste",
-    "onreset", "onscroll", "onselect", "onsubmit",
+    "onabort",
+    "onblur",
+    "oncanplay",
+    "onchange",
+    "onclick",
+    "oncontextmenu",
+    "oncopy",
+    "oncut",
+    "ondblclick",
+    "ondragstart",
+    "onerror",
+    "onfocus",
+    "oninput",
+    "onkeydown",
+    "onkeypress",
+    "onkeyup",
+    "onload",
+    "onmousedown",
+    "onmouseover",
+    "onmouseout",
+    "onmouseup",
+    "onpaste",
+    "onreset",
+    "onscroll",
+    "onselect",
+    "onsubmit",
 ];
 
 /// A single loaded language pack.
@@ -108,10 +130,11 @@ impl LocaleCatalog {
     /// directory is scanned exactly once; discovered packs are read now and
     /// never re-read later.
     pub fn load(resource_locales_dir: Option<&Path>, config_locales_dir: Option<&Path>) -> Self {
-        let en_pack = parse_pack(BUILTIN_EN_JSON, "en", None).expect("embedded en.json must be valid");
+        let en_pack =
+            parse_pack(BUILTIN_EN_JSON, "en", None).expect("embedded en.json must be valid");
         let en_messages = en_pack.pack.messages.clone();
-        let ru_pack =
-            parse_pack(BUILTIN_RU_JSON, "ru", Some(&en_messages)).expect("embedded ru.json must be valid");
+        let ru_pack = parse_pack(BUILTIN_RU_JSON, "ru", Some(&en_messages))
+            .expect("embedded ru.json must be valid");
         let builtins = vec![en_pack.pack, ru_pack.pack];
 
         let mut diagnostics = Vec::new();
@@ -141,7 +164,9 @@ impl LocaleCatalog {
 
         let mut diagnostics = self.diagnostics.clone();
         if !self.is_locale_available(&requested) {
-            diagnostics.push(format!("requested locale {requested:?} is not available; using 'en'"));
+            diagnostics.push(format!(
+                "requested locale {requested:?} is not available; using 'en'"
+            ));
         }
 
         LocaleSnapshot {
@@ -244,7 +269,10 @@ fn load_dir(
         // fresh install; it simply contributes no packs and no diagnostic.
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
         Err(e) => {
-            diagnostics.push(format!("cannot read locales directory {}: {e}", dir.display()));
+            diagnostics.push(format!(
+                "cannot read locales directory {}: {e}",
+                dir.display()
+            ));
             return Vec::new();
         }
     };
@@ -265,7 +293,10 @@ fn load_dir(
             continue;
         };
         if !is_valid_locale_code(stem) {
-            diagnostics.push(format!("{}: file name is not a valid locale code", path.display()));
+            diagnostics.push(format!(
+                "{}: file name is not a valid locale code",
+                path.display()
+            ));
             continue;
         }
 
@@ -301,7 +332,9 @@ fn read_bounded(path: &Path) -> Result<String, String> {
         .map_err(|e| format!("cannot stat: {e}"))?
         .len();
     if len > MAX_FILE_BYTES {
-        return Err(format!("file too large ({len} bytes, limit {MAX_FILE_BYTES})"));
+        return Err(format!(
+            "file too large ({len} bytes, limit {MAX_FILE_BYTES})"
+        ));
     }
     let mut buffer = String::new();
     file.take(MAX_FILE_BYTES + 1)
@@ -323,7 +356,8 @@ fn parse_pack(
     expected_locale: &str,
     en_messages: Option<&BTreeMap<String, String>>,
 ) -> Result<LoadResult, String> {
-    let value: serde_json::Value = serde_json::from_str(raw).map_err(|e| format!("invalid JSON: {e}"))?;
+    let value: serde_json::Value =
+        serde_json::from_str(raw).map_err(|e| format!("invalid JSON: {e}"))?;
     let object = value
         .as_object()
         .ok_or_else(|| "pack must be a JSON object".to_string())?;
@@ -331,7 +365,9 @@ fn parse_pack(
     match object.get("schemaVersion").and_then(|v| v.as_u64()) {
         Some(SCHEMA_VERSION) => {}
         Some(other) => {
-            return Err(format!("unsupported schemaVersion {other} (expected {SCHEMA_VERSION})"))
+            return Err(format!(
+                "unsupported schemaVersion {other} (expected {SCHEMA_VERSION})"
+            ))
         }
         None => return Err("missing or non-integer schemaVersion".to_string()),
     }
@@ -344,7 +380,9 @@ fn parse_pack(
         return Err(format!("invalid locale code {locale:?}"));
     }
     if locale != expected_locale {
-        return Err(format!("locale {locale:?} does not match file name {expected_locale:?}"));
+        return Err(format!(
+            "locale {locale:?} does not match file name {expected_locale:?}"
+        ));
     }
 
     let name = object
@@ -612,7 +650,10 @@ mod tests {
     fn pack_json(locale: &str, name: &str, messages: &[(&str, &str)]) -> String {
         let mut map = serde_json::Map::new();
         for (key, value) in messages {
-            map.insert((*key).to_string(), serde_json::Value::String((*value).to_string()));
+            map.insert(
+                (*key).to_string(),
+                serde_json::Value::String((*value).to_string()),
+            );
         }
         serde_json::json!({
             "schemaVersion": 1,
@@ -689,7 +730,10 @@ mod tests {
         assert_eq!(de.get("settings.language"), Some("Sprache"));
         assert_eq!(de.get("window.playback"), Some("Wiedergabe"));
 
-        assert!(de.languages().iter().any(|l| l.locale() == "de" && l.name() == "Deutsch"));
+        assert!(de
+            .languages()
+            .iter()
+            .any(|l| l.locale() == "de" && l.name() == "Deutsch"));
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -700,7 +744,11 @@ mod tests {
         write_locale(
             &dir,
             "de.json",
-            &pack_json("de", "Deutsch", &[("common.save", "Speichern"), ("tray.quit", "Beenden")]),
+            &pack_json(
+                "de",
+                "Deutsch",
+                &[("common.save", "Speichern"), ("tray.quit", "Beenden")],
+            ),
         );
         let catalog = LocaleCatalog::load(Some(dir.as_path()), None);
 
@@ -756,7 +804,11 @@ mod tests {
         write_locale(
             &dir,
             "de.json",
-            &pack_json("de", "Deutsch", &[("common.save", "Speichern"), ("some.legacy.key", "Alt")]),
+            &pack_json(
+                "de",
+                "Deutsch",
+                &[("common.save", "Speichern"), ("some.legacy.key", "Alt")],
+            ),
         );
         let catalog = LocaleCatalog::load(Some(dir.as_path()), None);
 
@@ -778,7 +830,10 @@ mod tests {
         let de = catalog.snapshot("de");
         assert_eq!(de.requested_locale(), "de");
         assert_eq!(de.locale(), "en");
-        assert!(catalog.diagnostics().iter().any(|d| d.contains("invalid JSON")));
+        assert!(catalog
+            .diagnostics()
+            .iter()
+            .any(|d| d.contains("invalid JSON")));
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -794,7 +849,10 @@ mod tests {
         let catalog = LocaleCatalog::load(Some(dir.as_path()), None);
 
         assert!(!catalog.is_locale_available("de"));
-        assert!(catalog.diagnostics().iter().any(|d| d.contains("schemaVersion")));
+        assert!(catalog
+            .diagnostics()
+            .iter()
+            .any(|d| d.contains("schemaVersion")));
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -811,7 +869,10 @@ mod tests {
 
         assert!(!catalog.is_locale_available("de"));
         assert!(!catalog.is_locale_available("fr"));
-        assert!(catalog.diagnostics().iter().any(|d| d.contains("does not match")));
+        assert!(catalog
+            .diagnostics()
+            .iter()
+            .any(|d| d.contains("does not match")));
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -825,7 +886,10 @@ mod tests {
             &pack_json(
                 "de",
                 "Deutsch",
-                &[("common.save", "Speichern"), ("common.close", "Schließen {count}")],
+                &[
+                    ("common.save", "Speichern"),
+                    ("common.close", "Schließen {count}"),
+                ],
             ),
         );
         let catalog = LocaleCatalog::load(Some(dir.as_path()), None);
@@ -833,7 +897,10 @@ mod tests {
         let de = catalog.snapshot("de");
         assert_eq!(de.get("common.save"), Some("Speichern"));
         assert_eq!(de.get("common.close"), Some("Close"));
-        assert!(catalog.diagnostics().iter().any(|d| d.contains("placeholder")));
+        assert!(catalog
+            .diagnostics()
+            .iter()
+            .any(|d| d.contains("placeholder")));
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -846,7 +913,10 @@ mod tests {
         let catalog = LocaleCatalog::load(Some(dir.as_path()), None);
 
         assert!(!catalog.is_locale_available("de"));
-        assert!(catalog.diagnostics().iter().any(|d| d.contains("too large")));
+        assert!(catalog
+            .diagnostics()
+            .iter()
+            .any(|d| d.contains("too large")));
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -864,11 +934,19 @@ mod tests {
     #[test]
     fn changes_after_catalog_load_ignored() {
         let dir = temp_dir("reload");
-        write_locale(&dir, "de.json", &pack_json("de", "Deutsch", &[("common.save", "Speichern")]));
+        write_locale(
+            &dir,
+            "de.json",
+            &pack_json("de", "Deutsch", &[("common.save", "Speichern")]),
+        );
         let catalog = LocaleCatalog::load(Some(dir.as_path()), None);
         assert_eq!(catalog.snapshot("de").get("common.save"), Some("Speichern"));
 
-        write_locale(&dir, "de.json", &pack_json("de", "Deutsch", &[("common.save", "Neu")]));
+        write_locale(
+            &dir,
+            "de.json",
+            &pack_json("de", "Deutsch", &[("common.save", "Neu")]),
+        );
         assert_eq!(catalog.snapshot("de").get("common.save"), Some("Speichern"));
 
         std::fs::remove_dir_all(&dir).ok();
@@ -877,8 +955,16 @@ mod tests {
     #[test]
     fn discovered_locales_sorted_builtins_available() {
         let dir = temp_dir("sorted");
-        write_locale(&dir, "de.json", &pack_json("de", "Deutsch", &[("common.save", "Speichern")]));
-        write_locale(&dir, "fr.json", &pack_json("fr", "Français", &[("common.save", "Enregistrer")]));
+        write_locale(
+            &dir,
+            "de.json",
+            &pack_json("de", "Deutsch", &[("common.save", "Speichern")]),
+        );
+        write_locale(
+            &dir,
+            "fr.json",
+            &pack_json("fr", "Français", &[("common.save", "Enregistrer")]),
+        );
         let catalog = LocaleCatalog::load(Some(dir.as_path()), None);
 
         let languages = catalog.languages();
@@ -900,7 +986,10 @@ mod tests {
 
         let de = catalog.snapshot("de");
         assert_eq!(de.get("common.save"), Some("Save"));
-        assert!(catalog.diagnostics().iter().any(|d| d.contains("not a string")));
+        assert!(catalog
+            .diagnostics()
+            .iter()
+            .any(|d| d.contains("not a string")));
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -914,7 +1003,10 @@ mod tests {
             &pack_json(
                 "de",
                 "Deutsch",
-                &[("common.save", "<script>alert(1)</script>"), ("common.cancel", "Abbrechen")],
+                &[
+                    ("common.save", "<script>alert(1)</script>"),
+                    ("common.cancel", "Abbrechen"),
+                ],
             ),
         );
         let catalog = LocaleCatalog::load(Some(dir.as_path()), None);
@@ -951,10 +1043,19 @@ mod tests {
 
     #[test]
     fn placeholder_extraction_ignores_literal_braces() {
-        assert_eq!(extract_placeholders("You have {count} items"), vec!["count"]);
+        assert_eq!(
+            extract_placeholders("You have {count} items"),
+            vec!["count"]
+        );
         assert_eq!(extract_placeholders("{{template}} {name}"), vec!["name"]);
-        assert_eq!(extract_placeholders("no placeholders { count }"), Vec::<String>::new());
-        assert_eq!(extract_placeholders("unclosed {brace"), Vec::<String>::new());
+        assert_eq!(
+            extract_placeholders("no placeholders { count }"),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            extract_placeholders("unclosed {brace"),
+            Vec::<String>::new()
+        );
         assert_eq!(extract_placeholders("100% and $5 {total}"), vec!["total"]);
     }
 
@@ -1028,11 +1129,17 @@ mod tests {
         assert!(!de.messages().contains_key("some.future.key"));
         assert_eq!(de.get("tray.quit"), Some("Beenden"));
         assert!(
-            catalog.diagnostics().iter().any(|d| d.contains("missing {detail}")),
+            catalog
+                .diagnostics()
+                .iter()
+                .any(|d| d.contains("missing {detail}")),
             "missing placeholder must be reported"
         );
         assert!(
-            catalog.diagnostics().iter().any(|d| d.contains("extra {count}")),
+            catalog
+                .diagnostics()
+                .iter()
+                .any(|d| d.contains("extra {count}")),
             "extra placeholder must be reported"
         );
 
@@ -1093,7 +1200,10 @@ mod tests {
         // non-NotFound error, so a diagnostic must be retained.
         let catalog = LocaleCatalog::load(Some(file.as_path()), None);
         assert!(
-            catalog.diagnostics().iter().any(|d| d.contains("cannot read locales directory")),
+            catalog
+                .diagnostics()
+                .iter()
+                .any(|d| d.contains("cannot read locales directory")),
             "an existing but unreadable path must keep a diagnostic, got {:?}",
             catalog.diagnostics()
         );
@@ -1141,7 +1251,11 @@ mod tests {
             );
         }
 
-        assert_eq!(en.len(), ru.len(), "builtin ru must cover every English key");
+        assert_eq!(
+            en.len(),
+            ru.len(),
+            "builtin ru must cover every English key"
+        );
         for (key, value) in &ru {
             let en_value = en
                 .get(key)
@@ -1182,10 +1296,26 @@ mod tests {
             assert!(is_valid_locale_code(valid), "{valid} must be accepted");
         }
         for invalid in [
-            "", "-", "en-", "-en", "en--BR", "a", "en_US", "e", "1en", "en/a", "en\\a",
-            ".en", "en.", "abcdefghi", "ab-abcdefghi",
+            "",
+            "-",
+            "en-",
+            "-en",
+            "en--BR",
+            "a",
+            "en_US",
+            "e",
+            "1en",
+            "en/a",
+            "en\\a",
+            ".en",
+            "en.",
+            "abcdefghi",
+            "ab-abcdefghi",
         ] {
-            assert!(!is_valid_locale_code(invalid), "{invalid:?} must be rejected");
+            assert!(
+                !is_valid_locale_code(invalid),
+                "{invalid:?} must be rejected"
+            );
         }
     }
 

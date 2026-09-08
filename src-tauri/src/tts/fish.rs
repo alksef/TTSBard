@@ -271,17 +271,15 @@ impl TtsEngine for FishTts {
             .json(&request)
             .send()
             .await
-            .map_err(|e| {
-                match proxy_utils::classify_transport_error(&e) {
-                    proxy_utils::TransportErrorKind::Timeout => {
-                        format!("Fish Audio timeout ({}s)", self.timeout_secs)
-                    }
-                    proxy_utils::TransportErrorKind::Connect => {
-                        format!("Fish Audio connection failed: {}", e)
-                    }
-                    proxy_utils::TransportErrorKind::Other => {
-                        format!("Failed to send TTS request: {}", e)
-                    }
+            .map_err(|e| match proxy_utils::classify_transport_error(&e) {
+                proxy_utils::TransportErrorKind::Timeout => {
+                    format!("Fish Audio timeout ({}s)", self.timeout_secs)
+                }
+                proxy_utils::TransportErrorKind::Connect => {
+                    format!("Fish Audio connection failed: {}", e)
+                }
+                proxy_utils::TransportErrorKind::Other => {
+                    format!("Failed to send TTS request: {}", e)
                 }
             })?;
 

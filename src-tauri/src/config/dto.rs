@@ -2544,7 +2544,8 @@ mod tests {
     /// field still deserializes, yielding an unmarked (None) voice.
     #[test]
     fn elevenlabs_voice_dto_deserializes_without_classification_field() {
-        let json = r#"{"voice_id":"v1","name":"Voice","category":null,"labels":[],"preview_url":null}"#;
+        let json =
+            r#"{"voice_id":"v1","name":"Voice","category":null,"labels":[],"preview_url":null}"#;
         let dto: ElevenLabsVoiceDto =
             serde_json::from_str(json).expect("voice DTO without classification must deserialize");
         assert!(dto.classification.is_none());

@@ -2068,8 +2068,8 @@ impl SettingsManager {
         let _guard = persistence::config_write_lock().lock();
         let mut cache = ElevenLabsCatalogCache::load_from_disk(&path);
         cache.voices = voices;
-        let content =
-            serde_json::to_string_pretty(&cache).context("Failed to serialize ElevenLabs catalog")?;
+        let content = serde_json::to_string_pretty(&cache)
+            .context("Failed to serialize ElevenLabs catalog")?;
         persistence::write_json_atomically(&path, &content)
             .context("Failed to write ElevenLabs catalog file")?;
         *self
@@ -2087,8 +2087,8 @@ impl SettingsManager {
         let _guard = persistence::config_write_lock().lock();
         let mut cache = ElevenLabsCatalogCache::load_from_disk(&path);
         cache.models = models;
-        let content =
-            serde_json::to_string_pretty(&cache).context("Failed to serialize ElevenLabs catalog")?;
+        let content = serde_json::to_string_pretty(&cache)
+            .context("Failed to serialize ElevenLabs catalog")?;
         persistence::write_json_atomically(&path, &content)
             .context("Failed to write ElevenLabs catalog file")?;
         *self
@@ -2111,9 +2111,10 @@ impl SettingsManager {
         let _guard = persistence::config_write_lock().lock();
 
         let mut settings = if settings_path.exists() {
-            let content = fs::read_to_string(&settings_path)
-                .context("Failed to read settings file")?;
-            serde_json::from_str::<AppSettings>(&content).context("Failed to parse settings JSON")?
+            let content =
+                fs::read_to_string(&settings_path).context("Failed to read settings file")?;
+            serde_json::from_str::<AppSettings>(&content)
+                .context("Failed to parse settings JSON")?
         } else {
             AppSettings::default()
         };
@@ -2176,7 +2177,9 @@ impl SettingsManager {
             .models
             .iter()
             .find(|m| m.model_id == model_id)
-            .ok_or_else(|| anyhow::anyhow!("ElevenLabs model is not available in the cached catalog."))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!("ElevenLabs model is not available in the cached catalog.")
+            })?;
         let style = if model.can_use_style { style } else { 0.0 };
         let use_speaker_boost = if model.can_use_speaker_boost {
             use_speaker_boost
@@ -3222,8 +3225,7 @@ mod tests {
                 "models of version {unsupported} cache must be discarded"
             );
             assert_eq!(
-                cache.version,
-                ELEVENLABS_CATALOG_CURRENT_VERSION,
+                cache.version, ELEVENLABS_CATALOG_CURRENT_VERSION,
                 "fallback must carry the current version"
             );
         }
@@ -3240,8 +3242,8 @@ mod tests {
             ],
             "models": []
         }"#;
-        let cache: ElevenLabsCatalogCache =
-            serde_json::from_str(json).expect("legacy catalog without classification must deserialize");
+        let cache: ElevenLabsCatalogCache = serde_json::from_str(json)
+            .expect("legacy catalog without classification must deserialize");
         assert_eq!(cache.version, ELEVENLABS_CATALOG_CURRENT_VERSION);
         assert_eq!(cache.voices.len(), 1);
         assert_eq!(cache.voices[0].voice_id, "v1");
@@ -3261,7 +3263,10 @@ mod tests {
         };
         let json = serde_json::to_string(&cache).unwrap();
         let back: ElevenLabsCatalogCache = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.voices[0].classification, Some(ElevenLabsVoiceClassification::Library));
+        assert_eq!(
+            back.voices[0].classification,
+            Some(ElevenLabsVoiceClassification::Library)
+        );
 
         let default = ElevenLabsCatalogCache {
             version: ELEVENLABS_CATALOG_CURRENT_VERSION,
@@ -3274,7 +3279,10 @@ mod tests {
         };
         let back: ElevenLabsCatalogCache =
             serde_json::from_str(&serde_json::to_string(&default).unwrap()).unwrap();
-        assert_eq!(back.voices[0].classification, Some(ElevenLabsVoiceClassification::Default));
+        assert_eq!(
+            back.voices[0].classification,
+            Some(ElevenLabsVoiceClassification::Default)
+        );
     }
 
     /// Setting voices must not affect models and vice versa.
@@ -3299,7 +3307,10 @@ mod tests {
         manager
             .set_elevenlabs_voices(vec![el_voice("v2"), el_voice("v3")])
             .unwrap();
-        assert_eq!(manager.get_elevenlabs_voices(), vec![el_voice("v2"), el_voice("v3")]);
+        assert_eq!(
+            manager.get_elevenlabs_voices(),
+            vec![el_voice("v2"), el_voice("v3")]
+        );
         assert_eq!(
             manager.get_elevenlabs_models(),
             vec![el_model("m1", true, false)]
@@ -3310,7 +3321,10 @@ mod tests {
             read_catalog_file(&dir).voices,
             vec![el_voice("v2"), el_voice("v3")]
         );
-        assert_eq!(read_catalog_file(&dir).models, vec![el_model("m1", true, false)]);
+        assert_eq!(
+            read_catalog_file(&dir).models,
+            vec![el_model("m1", true, false)]
+        );
 
         let settings_json: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap())
@@ -3447,7 +3461,9 @@ mod tests {
             .set_elevenlabs_model_selection("m1".to_string(), 0.5, true)
             .unwrap();
 
-        let changed = manager.set_elevenlabs_api_key("  new-key  ".to_string()).unwrap();
+        let changed = manager
+            .set_elevenlabs_api_key("  new-key  ".to_string())
+            .unwrap();
         assert!(changed, "a new key must report changed");
 
         assert_eq!(manager.get_elevenlabs_api_key().as_deref(), Some("new-key"));
@@ -3471,7 +3487,9 @@ mod tests {
     fn elevenlabs_api_key_unchanged_preserves_catalogs_and_selection() {
         let (manager, dir) = elevenlabs_tmp_manager("key-unchanged");
 
-        manager.set_elevenlabs_api_key("stable-key".to_string()).unwrap();
+        manager
+            .set_elevenlabs_api_key("stable-key".to_string())
+            .unwrap();
         manager.set_elevenlabs_voices(vec![el_voice("v1")]).unwrap();
         manager
             .set_elevenlabs_models(vec![el_model("m1", true, true)])
@@ -3482,11 +3500,16 @@ mod tests {
             .unwrap();
 
         // Same key with surrounding whitespace must be treated as unchanged.
-        let changed = manager.set_elevenlabs_api_key("  stable-key  ".to_string()).unwrap();
+        let changed = manager
+            .set_elevenlabs_api_key("  stable-key  ".to_string())
+            .unwrap();
         assert!(!changed, "an identical trimmed key must report unchanged");
 
         assert_eq!(manager.get_elevenlabs_voices(), vec![el_voice("v1")]);
-        assert_eq!(manager.get_elevenlabs_models(), vec![el_model("m1", true, true)]);
+        assert_eq!(
+            manager.get_elevenlabs_models(),
+            vec![el_model("m1", true, true)]
+        );
         assert_eq!(manager.get_elevenlabs_voice_id(), "v1");
         assert_eq!(manager.get_elevenlabs_model_id(), "m1");
 
@@ -3538,7 +3561,10 @@ mod tests {
         assert_eq!(el.stability, 0.5);
         assert_eq!(el.similarity_boost, 0.75);
         assert_eq!(el.style, 0.0, "unsupported style must normalize to 0");
-        assert!(!el.use_speaker_boost, "unsupported speaker boost must normalize to false");
+        assert!(
+            !el.use_speaker_boost,
+            "unsupported speaker boost must normalize to false"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
