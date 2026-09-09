@@ -33,17 +33,18 @@ import { decodeRoutePrefix, ROUTE_ORDER } from './editor/routeDecode'
 import type { EditorRoute } from './editor/routeDecode'
 import { effectiveRoute, applyRouteToText, routeSubmit } from './editor/routeResolution'
 import { useTwitchRuntimeStatus } from '../composables/useTwitchRuntimeStatus'
+import { useWebViewRuntimeStatus } from '../composables/useWebViewRuntimeStatus'
 import { useRuAccentRuntime } from '../composables/useRuAccentRuntime'
 import { useInputServerRuntimeStatus } from '../composables/useInputServerRuntimeStatus'
 import { t } from '../i18n'
 
 const { showError } = useErrorHandler()
-const { tabs, activeId, active, create: createTab, close: closeTab, select: selectTab, next: nextTab, previous: previousTab, rename: renameTab, init: initTabs, flushSave: flushTabsSave } = useEditorTabs()
+const { tabs, activeId, active, create: createTab, close: closeTab, select: selectTab, next: nextTab, previous: previousTab, rename: renameTab, openIncomingEdit, init: initTabs, flushSave: flushTabsSave } = useEditorTabs()
 
 const {
   pendingItems: incomingPendingItems,
   externalJobs: incomingExternalJobs,
-  autoPlay: incomingAutoPlay,
+  settings: incomingSettings,
   busyIds: incomingBusyIds,
   loadError: incomingLoadError,
   count: incomingCount,
@@ -52,6 +53,7 @@ const {
   discard: discardIncoming,
   skipExternalJob,
   setAutoPlay: setIncomingAutoPlay,
+  setRoute: setIncomingRoute,
 } = useIncomingTexts()
 
 const showIncomingTab = ref(false)
@@ -100,12 +102,7 @@ async function onSelectPinned() {
 async function onEditIncoming(id: string) {
   const textToEdit = await editIncoming(id)
   if (textToEdit === null) return
-  const newId = createTab()
-  const tab = tabs.value.find(t => t.id === newId)
-  if (tab) {
-    tab.text = textToEdit
-    tab.route = 'voice_only'
-  }
+  openIncomingEdit(textToEdit)
   showIncomingTab.value = false
   await nextTick()
   focusEditor()
@@ -187,6 +184,9 @@ const accentorRuntimeStatus = ruaccentStatusFor(accentorPackId)
 const accentorReady = computed(() => accentorRuntimeStatus.value === 'ready')
 
 const { isConnected: twitchConnected } = useTwitchRuntimeStatus()
+
+const { state: webviewRuntimeState } = useWebViewRuntimeStatus()
+const webviewConnected = computed(() => webviewRuntimeState.value === 'running')
 
 const defaultRouteFromSettings = computed<EditorRoute>(() => editorSettings.value?.default_route ?? 'everywhere')
 
@@ -1047,7 +1047,10 @@ defineExpose({ focusEditor })
           v-if="showIncomingTab"
           :pending-items="incomingPendingItems"
           :external-jobs="incomingExternalJobs"
-          :auto-play="incomingAutoPlay"
+          :auto-play="incomingSettings.auto_play"
+          :route="incomingSettings.route"
+          :twitch-connected="twitchConnected"
+          :webview-connected="webviewConnected"
           :busy-ids="incomingBusyIds"
           :compact="isMinimalMode"
           :load-error="incomingLoadError"
@@ -1056,6 +1059,7 @@ defineExpose({ focusEditor })
           @edit="onEditIncoming"
           @skip="skipExternalJob"
           @toggle-auto-play="setIncomingAutoPlay"
+          @route-change="setIncomingRoute"
         />
         <template v-else>
           <TtsEditor

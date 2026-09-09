@@ -20,6 +20,9 @@ pub struct EditorTab {
     /// Current route of the tab (opaque string; the frontend validates it).
     #[serde(default)]
     pub route: Option<String>,
+    /// Stable purpose of the tab (opaque optional string; the frontend validates it).
+    #[serde(default)]
+    pub purpose: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -121,12 +124,14 @@ mod tests {
                     title: "Текст 1".into(),
                     text: "привет".into(),
                     route: None,
+                    purpose: None,
                 },
                 EditorTab {
                     id: "id-2".into(),
                     title: "Текст 2".into(),
                     text: "мир".into(),
                     route: None,
+                    purpose: None,
                 },
             ],
         };
@@ -151,6 +156,7 @@ mod tests {
                 title: format!("T{i}"),
                 text: String::new(),
                 route: None,
+                purpose: None,
             })
             .collect();
         mgr.save_all(TabsData {
@@ -174,6 +180,7 @@ mod tests {
                 title: "T".into(),
                 text: huge,
                 route: None,
+                purpose: None,
             }],
         })
         .unwrap();
@@ -193,12 +200,14 @@ mod tests {
                     title: "A".into(),
                     text: String::new(),
                     route: None,
+                    purpose: None,
                 },
                 EditorTab {
                     id: "b".into(),
                     title: "B".into(),
                     text: String::new(),
                     route: None,
+                    purpose: None,
                 },
             ],
         })
@@ -227,6 +236,7 @@ mod tests {
                         title: format!("Tab {}", i),
                         text: format!("Text content {}", i),
                         route: None,
+                        purpose: None,
                     }],
                 };
                 mgr_clone.save_all(data).unwrap();
@@ -258,6 +268,7 @@ mod tests {
                 title: "A".into(),
                 text: "first".into(),
                 route: None,
+                purpose: None,
             }],
         };
         mgr.save_all(first).unwrap();
@@ -275,6 +286,7 @@ mod tests {
                 title: "B".into(),
                 text: "second".into(),
                 route: None,
+                purpose: None,
             }],
         };
         let result = mgr.save_all(second);
@@ -300,6 +312,13 @@ mod tests {
     }
 
     #[test]
+    fn editor_tab_deserializes_without_purpose() {
+        let json = r#"{"id":"a","title":"A","text":"hello"}"#;
+        let tab: EditorTab = serde_json::from_str(json).expect("must deserialize without purpose");
+        assert_eq!(tab.purpose, None);
+    }
+
+    #[test]
     fn editor_tab_route_round_trip() {
         let (mgr, path) = manager_in_tmp();
         let data = TabsData {
@@ -309,6 +328,7 @@ mod tests {
                 title: "Текст".into(),
                 text: "привет".into(),
                 route: Some("twitch_only".into()),
+                purpose: None,
             }],
         };
         mgr.save_all(data).unwrap();
@@ -317,6 +337,35 @@ mod tests {
         let loaded = mgr2.load_all();
         assert_eq!(loaded.tabs.len(), 1);
         assert_eq!(loaded.tabs[0].route.as_deref(), Some("twitch_only"));
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn editor_tab_purpose_round_trip() {
+        let (mgr, path) = manager_in_tmp();
+        let data = TabsData {
+            active_id: "id-1".into(),
+            tabs: vec![EditorTab {
+                id: "id-1".into(),
+                title: "Входящий текст".into(),
+                text: "привет".into(),
+                route: None,
+                purpose: Some("incoming_edit".into()),
+            }],
+        };
+        mgr.save_all(data).unwrap();
+
+        // Serialization must carry the purpose through to JSON.
+        let serialized = serde_json::to_string(&mgr.load_all()).unwrap();
+        let parsed: TabsData = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(parsed.tabs[0].purpose.as_deref(), Some("incoming_edit"));
+
+        // A fresh manager reading the same file must hydrate the purpose.
+        let mgr2 = TabManager::new(path.clone());
+        let loaded = mgr2.load_all();
+        assert_eq!(loaded.tabs.len(), 1);
+        assert_eq!(loaded.tabs[0].purpose.as_deref(), Some("incoming_edit"));
 
         let _ = fs::remove_file(&path);
     }

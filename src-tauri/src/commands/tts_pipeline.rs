@@ -355,8 +355,9 @@ async fn native_stress_blocking(
 ///
 /// - Editor delivery preserves the current prefix parsing, prefix removal and
 ///   mismatch protection.
-/// - `AudioOnly` treats the complete submitted string as content; a leading `!`
-///   is literal text and is never stripped or interpreted as a route.
+/// - `AudioOnly` and `Incoming` treat the complete submitted string as content;
+///   a leading `!` is literal text and is never stripped or interpreted as a
+///   route.
 fn resolve_speech_content(snapshot: &Snapshot, original_text: &str) -> Result<String, String> {
     match &snapshot.delivery {
         DeliveryPolicy::Editor {
@@ -374,7 +375,9 @@ fn resolve_speech_content(snapshot: &Snapshot, original_text: &str) -> Result<St
             }
             Ok(prefix_result.text)
         }
-        DeliveryPolicy::AudioOnly => Ok(original_text.to_string()),
+        DeliveryPolicy::AudioOnly | DeliveryPolicy::Incoming { .. } => {
+            Ok(original_text.to_string())
+        }
     }
 }
 

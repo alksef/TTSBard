@@ -3,6 +3,8 @@ import { computed, ref } from 'vue'
 import { Check, Pencil, X, SkipForward } from 'lucide-vue-next'
 import { statusLabel, type JobDto } from '../../../src-playback/speechQueue'
 import type { IncomingTextItem } from '../../composables/useIncomingTexts'
+import type { IncomingRoute } from './incomingRoute'
+import IncomingRouteSelector from './IncomingRouteSelector.vue'
 import { t } from '../../i18n'
 
 const rootRef = ref<HTMLElement | null>(null)
@@ -17,6 +19,9 @@ const props = defineProps<{
   pendingItems: IncomingTextItem[]
   externalJobs: JobDto[]
   autoPlay: boolean
+  route: IncomingRoute
+  twitchConnected: boolean
+  webviewConnected: boolean
   busyIds: ReadonlySet<string>
   compact: boolean
   loadError: string | null
@@ -27,6 +32,7 @@ const emit = defineEmits<{
   discard: [id: string]
   edit: [id: string]
   'toggle-auto-play': [value: boolean]
+  'route-change': [route: IncomingRoute]
   skip: [job_id: string]
 }>()
 
@@ -49,6 +55,13 @@ function onAutoPlayChange(event: Event) {
         />
         <span>{{ t('editor.incoming.autoplay_label') }}</span>
       </label>
+      <IncomingRouteSelector
+        :route="route"
+        :compact="compact"
+        :twitch-connected="twitchConnected"
+        :webview-connected="webviewConnected"
+        @select="emit('route-change', $event)"
+      />
     </div>
 
     <p v-if="!autoPlay" class="autoplay-hint">
@@ -141,7 +154,10 @@ function onAutoPlayChange(event: Event) {
 .incoming-toolbar {
   display: flex;
   align-items: center;
+  gap: 0.5rem;
   flex-shrink: 0;
+  flex-wrap: nowrap;
+  min-width: 0;
   padding: 0.35rem 0.25rem;
   border-bottom: 1px solid var(--color-border-weak);
 }

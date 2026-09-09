@@ -5,5 +5,3 @@
 implementation plans и не задания AI-агентам.
 
 ## В работе
-
-- [ROADMAP-100 — Согласованные поверхности пользовательского фона](./100-custom-background-surface-tinting.md)

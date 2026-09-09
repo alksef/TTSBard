@@ -530,4 +530,111 @@ describe('useEditorTabs', () => {
       expect(mockInvoke).toHaveBeenCalledTimes(2)
     })
   })
+
+  describe('purpose', () => {
+    it('sanitizes unknown purpose values to undefined on init', async () => {
+      mockInvoke.mockResolvedValueOnce({
+        active_id: 'uuid-0',
+        tabs: [
+          { id: 'uuid-0', title: 'A', text: '', purpose: 'incoming_edit' },
+          { id: 'uuid-1', title: 'B', text: '', purpose: 'something_else' },
+          { id: 'uuid-2', title: 'C', text: '' },
+        ],
+      })
+      const { tabs, init } = useEditorTabs()
+      await init()
+      expect(tabs.value.map(t => t.purpose)).toEqual(['incoming_edit', undefined, undefined])
+    })
+
+    it('keeps backward compatibility with snapshots without purpose', async () => {
+      mockInvoke.mockResolvedValueOnce({
+        active_id: 'uuid-0',
+        tabs: [
+          { id: 'uuid-0', title: 'A', text: '' },
+          { id: 'uuid-1', title: 'B', text: '' },
+        ],
+      })
+      const { tabs, init } = useEditorTabs()
+      await init()
+      expect(tabs.value.every(t => t.purpose === undefined)).toBe(true)
+    })
+
+    it('includes purpose in the persisted snapshot', async () => {
+      mockInvoke.mockResolvedValueOnce(backendTabs)
+      const { init, openIncomingEdit, flushSave } = useEditorTabs()
+      await init()
+      mockInvoke.mockClear()
+
+      openIncomingEdit('hello')
+      await flushSave()
+
+      const call = mockInvoke.mock.calls.find(([cmd]) => cmd === 'save_tabs')
+      expect(call).toBeDefined()
+      const data = (call as unknown[])[1] as { data: { tabs: Array<{ purpose?: string }> } }
+      expect(data.data.tabs.some(t => t.purpose === 'incoming_edit')).toBe(true)
+    })
+  })
+
+  describe('openIncomingEdit', () => {
+    it('creates a purpose-tagged tab with a localized title and activates it', () => {
+      const { tabs, activeId, openIncomingEdit } = useEditorTabs()
+      const id = openIncomingEdit('external text')
+
+      expect(tabs.value).toHaveLength(2)
+      const tab = tabs.value.find(t => t.id === id)
+      expect(tab).toMatchObject({
+        title: 'Входящий текст',
+        text: 'external text',
+        purpose: 'incoming_edit',
+      })
+      expect(tab?.route).toBeUndefined()
+      expect(activeId.value).toBe(id)
+    })
+
+    it('reuses the existing incoming-edit tab and replaces its text', () => {
+      const { tabs, openIncomingEdit } = useEditorTabs()
+      const first = openIncomingEdit('one')
+      const second = openIncomingEdit('two')
+
+      expect(second).toBe(first)
+      expect(tabs.value.filter(t => t.purpose === 'incoming_edit')).toHaveLength(1)
+      expect(tabs.value.find(t => t.id === first)?.text).toBe('two')
+    })
+
+    it('reuses a renamed incoming-edit tab by purpose, preserving the user title', () => {
+      const { tabs, rename, openIncomingEdit } = useEditorTabs()
+      const id = openIncomingEdit('one')
+      rename(id, 'My Script')
+      openIncomingEdit('two')
+
+      const tab = tabs.value.find(t => t.id === id)
+      expect(tab?.title).toBe('My Script')
+      expect(tab?.text).toBe('two')
+      expect(tabs.value.filter(t => t.purpose === 'incoming_edit')).toHaveLength(1)
+    })
+
+    it('recreates the incoming-edit tab after it was closed', () => {
+      const { tabs, close, openIncomingEdit } = useEditorTabs()
+      const first = openIncomingEdit('one')
+      close(first)
+      expect(tabs.value.filter(t => t.purpose === 'incoming_edit')).toHaveLength(0)
+
+      const second = openIncomingEdit('two')
+      expect(second).not.toBe(first)
+      expect(tabs.value.filter(t => t.purpose === 'incoming_edit')).toHaveLength(1)
+      expect(tabs.value.find(t => t.id === second)?.text).toBe('two')
+    })
+
+    it('does not reuse a plain tab with a matching title', () => {
+      const { tabs, create, openIncomingEdit } = useEditorTabs()
+      create()
+      // Rename the plain tab to the incoming title without tagging it.
+      const plain = tabs.value[tabs.value.length - 1]
+      plain.title = 'Входящий текст'
+
+      const id = openIncomingEdit('text')
+      expect(id).not.toBe(plain.id)
+      expect(tabs.value.filter(t => t.purpose === 'incoming_edit')).toHaveLength(1)
+    })
+  })
 })

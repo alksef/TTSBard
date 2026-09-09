@@ -5,7 +5,7 @@ use crate::input_server::{
     IncomingSettings, IncomingTextItem, InputServerError, InputServerSettings, InputServerStatus,
 };
 use crate::ipc::CommandError;
-use crate::speech_queue::{DeliveryPolicy, SubmissionSource};
+use crate::speech_queue::SubmissionSource;
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -79,8 +79,8 @@ fn emit_incoming_changed(app_handle: &AppHandle, state: &AppState) {
 /// leading `!`) is submitted/stored unchanged except for the outer trim. The
 /// producer `source` is preserved end to end: auto-play submits the speech job
 /// with that source, manual review stores it on the pending item, and approval
-/// resubmits with the stored source. Server and OCR producers always use
-/// `DeliveryPolicy::AudioOnly`.
+/// resubmits with the stored source. Server and OCR producers use the delivery
+/// policy derived from the current `incoming.route`.
 pub async fn accept_external_text(
     app_handle: &AppHandle,
     state: &AppState,
@@ -90,15 +90,15 @@ pub async fn accept_external_text(
 ) -> Result<InputServerAccepted, CommandError> {
     let text = normalize_external_text(&text)?;
 
-    let auto_play = state.input_server.incoming.read().await.auto_play;
-    if auto_play {
+    let incoming = state.input_server.incoming.read().await.clone();
+    if incoming.auto_play {
         let job = submit_speech_job(
             app_handle,
             state,
             queue,
             text,
             source,
-            DeliveryPolicy::AudioOnly,
+            incoming.route.delivery_policy(),
         )?;
         Ok(InputServerAccepted::Queued { job_id: job.job_id })
     } else {
@@ -192,12 +192,16 @@ pub async fn save_incoming_settings(
         .try_state::<SettingsManager>()
         .ok_or_else(|| "SettingsManager not available".to_string())?;
     let auto_play = settings.auto_play;
+    let route = settings.route;
     super::persist_blocking(settings_manager.inner(), move |mgr| {
-        mgr.set_incoming_auto_play(auto_play)
+        mgr.set_incoming_section(auto_play, route)
     })
     .await?;
 
-    state.input_server.incoming.write().await.auto_play = settings.auto_play;
+    // Persist succeeded: publish the full snapshot (auto_play + route) as one
+    // update. On a failed save the `?` above returns early, so runtime state is
+    // never mutated.
+    *state.input_server.incoming.write().await = settings;
 
     super::emit_settings_changed(&app_handle);
 
@@ -233,6 +237,10 @@ pub async fn approve_incoming_text(
     state: State<'_, AppState>,
     queue: State<'_, SpeechQueueState>,
 ) -> Result<InputServerAccepted, CommandError> {
+    // Read the current route at approval time, before the atomic consume. The
+    // route is a snapshot; a later change must not affect this job.
+    let route = state.input_server.incoming.read().await.route;
+
     // Submit and remove atomically under the inbox lock so a concurrent
     // approval of the same item can never enqueue a second speech job. The job
     // inherits the producer source stored on the pending item.
@@ -245,7 +253,7 @@ pub async fn approve_incoming_text(
                 queue.inner(),
                 item.text.clone(),
                 item.source,
-                DeliveryPolicy::AudioOnly,
+                route.delivery_policy(),
             )
         })
         .map_err(|error| match error {

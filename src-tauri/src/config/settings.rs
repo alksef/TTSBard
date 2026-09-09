@@ -15,7 +15,7 @@ use super::persistence;
 
 use super::hotkeys::HotkeySettings;
 use super::validation::{validate_port, validate_volume};
-use crate::input_server::{IncomingSettings, InputServerSettings};
+use crate::input_server::{IncomingRoute, IncomingSettings, InputServerSettings};
 use crate::ocr::settings::OcrSettings;
 use crate::tts::elevenlabs::{ElevenLabsModel, ElevenLabsVoice};
 use crate::tts::TtsProviderType;
@@ -2331,13 +2331,16 @@ impl SettingsManager {
 
     // ========== Incoming Settings ==========
 
-    /// Atomically persist the source-neutral Incoming auto-play policy.
+    /// Atomically persist the source-neutral Incoming policy (`auto_play` and
+    /// delivery route) as one section update.
     ///
     /// One load → mutate → save cycle that never touches the input-server
-    /// section (or any other settings).
-    pub fn set_incoming_auto_play(&self, auto_play: bool) -> Result<()> {
+    /// section (or any other settings). Used by `save_incoming_settings` so a
+    /// route change and an auto-play change land in a single durable write.
+    pub fn set_incoming_section(&self, auto_play: bool, route: IncomingRoute) -> Result<()> {
         self.update_settings_atomically(move |app_settings| {
             app_settings.incoming.auto_play = auto_play;
+            app_settings.incoming.route = route;
         })
     }
 
@@ -5860,10 +5863,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// The source-neutral Incoming setter persists `incoming.auto_play` without
-    /// touching the input-server section (or any other settings).
+    /// The source-neutral Incoming setter persists `incoming.auto_play` and
+    /// `incoming.route` together without touching the input-server section (or
+    /// any other settings).
     #[test]
-    fn set_incoming_auto_play_preserves_unrelated_settings() {
+    fn set_incoming_section_preserves_unrelated_settings() {
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -5879,10 +5883,13 @@ mod tests {
         manager.set_input_server_section(true, 20202).unwrap();
         manager.set_speaker_volume(33).unwrap();
 
-        manager.set_incoming_auto_play(false).unwrap();
+        manager
+            .set_incoming_section(false, IncomingRoute::AudioTwitch)
+            .unwrap();
 
         let after = manager.load().unwrap();
         assert!(!after.incoming.auto_play);
+        assert_eq!(after.incoming.route, IncomingRoute::AudioTwitch);
         assert!(after.input_server.start_on_boot, "server section preserved");
         assert_eq!(after.input_server.port, 20202, "server port preserved");
         assert_eq!(
@@ -5892,6 +5899,7 @@ mod tests {
 
         let disk = read_disk_value(&dir);
         assert_eq!(disk["incoming"]["auto_play"], serde_json::json!(false));
+        assert_eq!(disk["incoming"]["route"], serde_json::json!("audio_twitch"));
         assert!(
             disk["input_server"].get("auto_play").is_none(),
             "server section must never carry auto_play after a section save"
@@ -5901,9 +5909,10 @@ mod tests {
     }
 
     /// Saving the input-server section no longer mutates the Incoming policy:
-    /// `auto_play` keeps whatever the source-neutral `incoming` section holds.
+    /// `auto_play` and `route` keep whatever the source-neutral `incoming`
+    /// section holds.
     #[test]
-    fn set_input_server_section_does_not_mutate_incoming_auto_play() {
+    fn set_input_server_section_does_not_mutate_incoming_policy() {
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -5916,7 +5925,9 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let manager = SettingsManager::with_config_dir(dir.clone()).unwrap();
 
-        manager.set_incoming_auto_play(false).unwrap();
+        manager
+            .set_incoming_section(false, IncomingRoute::AudioTwitch)
+            .unwrap();
 
         manager.set_input_server_section(true, 20202).unwrap();
 
@@ -5925,10 +5936,49 @@ mod tests {
             !after.incoming.auto_play,
             "input-server save must not flip auto-play"
         );
+        assert_eq!(
+            after.incoming.route,
+            IncomingRoute::AudioTwitch,
+            "input-server save must not change the incoming route"
+        );
         assert!(after.input_server.start_on_boot);
         assert_eq!(after.input_server.port, 20202);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ==================== Incoming route tests ====================
+
+    /// An `incoming` section that predates the route field (only `auto_play`)
+    /// deserializes with `route = AudioOnly`.
+    #[test]
+    fn incoming_route_missing_field_defaults_to_audio_only() {
+        let mut value = serde_json::to_value(AppSettings::default()).unwrap();
+        value["incoming"].as_object_mut().unwrap().remove("route");
+        value["incoming"]["auto_play"] = serde_json::json!(false);
+        let settings: AppSettings = serde_json::from_value(value).unwrap();
+        assert!(!settings.incoming.auto_play);
+        assert_eq!(settings.incoming.route, IncomingRoute::AudioOnly);
+    }
+
+    /// An unknown persisted route value normalizes to audio-only at the whole
+    /// `AppSettings` boundary.
+    #[test]
+    fn incoming_unknown_route_normalizes_to_audio_only() {
+        let mut value = serde_json::to_value(AppSettings::default()).unwrap();
+        value["incoming"]["route"] = serde_json::json!("nonsense");
+        let settings: AppSettings = serde_json::from_value(value).unwrap();
+        assert_eq!(settings.incoming.route, IncomingRoute::AudioOnly);
+    }
+
+    /// The default Incoming policy is audio-only.
+    #[test]
+    fn incoming_default_route_is_audio_only() {
+        assert_eq!(IncomingSettings::default().route, IncomingRoute::AudioOnly);
+        assert_eq!(
+            AppSettings::default().incoming.route,
+            IncomingRoute::AudioOnly
+        );
     }
 
     // ==================== OCR settings tests ====================

@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, type Component } from 'vue'
-import { Volume2, Globe, Twitch, Star, ChevronDown } from 'lucide-vue-next'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { Star, ChevronDown } from 'lucide-vue-next'
 import { ROUTE_ORDER, ROUTE_META } from './routeDecode'
 import type { EditorRoute } from './routeDecode'
+import { destinationIcons } from './destinationIcons'
 import { t } from '../../i18n'
 
 const props = defineProps<{
@@ -19,12 +20,6 @@ const emit = defineEmits<{
 
 const open = ref(false)
 const activeIndex = ref(0)
-
-const destinationIcons: Record<'voice' | 'webview' | 'twitch', Component> = {
-  voice: Volume2,
-  webview: Globe,
-  twitch: Twitch,
-}
 
 const currentMeta = computed(() => ROUTE_META[props.route])
 

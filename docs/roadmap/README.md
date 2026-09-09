@@ -45,7 +45,6 @@ related_tasks: []
 
 ## Активные направления
 
-- [ROADMAP-100 — Согласованные поверхности пользовательского фона](./active/100-custom-background-surface-tinting.md)
 
 ## Завершённые направления
 
@@ -58,10 +57,12 @@ related_tasks: []
 
 ### Окна и запуск приложения
 
+- [ROADMAP-100 — Согласованные поверхности пользовательского фона](./completed/100-custom-background-surface-tinting.md)
 - [ROADMAP-092 — Одна копия приложения и понятное сворачивание окна](./completed/092-single-instance-and-window-lifecycle.md)
 
 ### Интеграции
 
+- [ROADMAP-101 — Маршрутизация входящих и единая вкладка редактирования](./completed/101-incoming-routing-and-edit-buffer.md)
 - [ROADMAP-095 — Устойчивое переподключение Twitch IRC](./completed/095-twitch-irc-reconnect-resilience.md)
 - [ROADMAP-087 — входной сервер текста для audio-only озвучивания](./completed/087-external-text-input-server.md)
 

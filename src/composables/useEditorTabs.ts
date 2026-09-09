@@ -5,11 +5,15 @@ import type { EditorRoute } from '../components/editor/routeDecode'
 import { useErrorHandler } from './useErrorHandler'
 import { t } from '../i18n'
 
+/** Stable identity for a tab created by a specific feature. */
+export type EditorTabPurpose = 'incoming_edit'
+
 export interface EditorTab {
   id: string
   title: string
   text: string
   route?: EditorRoute
+  purpose?: EditorTabPurpose
 }
 
 interface TabsSnapshot {
@@ -133,6 +137,29 @@ export function useEditorTabs() {
     if (t) t.title = title
   }
 
+  /**
+   * Opens (or reuses) the single incoming-edit tab. Reuse is keyed by the
+   * stable `purpose` field, never by the mutable title: a renamed tab is still
+   * reused, and a closed tab is recreated on the next call.
+   */
+  function openIncomingEdit(text: string): string {
+    const existing = tabs.value.find(t => t.purpose === 'incoming_edit')
+    if (existing) {
+      existing.text = text
+      activeId.value = existing.id
+      return existing.id
+    }
+    const tab: EditorTab = {
+      id: genId(),
+      title: t('editor.incoming.edit_title'),
+      text,
+      purpose: 'incoming_edit',
+    }
+    tabs.value.push(tab)
+    activeId.value = tab.id
+    return tab.id
+  }
+
   const VALID_ROUTES = new Set<string>(ROUTE_ORDER)
 
   function sanitizeRoute(route: unknown): EditorRoute | undefined {
@@ -141,12 +168,20 @@ export function useEditorTabs() {
       : undefined
   }
 
+  function sanitizePurpose(purpose: unknown): EditorTabPurpose | undefined {
+    return purpose === 'incoming_edit' ? 'incoming_edit' : undefined
+  }
+
   async function init() {
     if (isHydrated.value) return
     try {
       const data = await invoke<{ active_id: string; tabs: EditorTab[] }>('get_tabs')
       if (data.tabs && data.tabs.length > 0) {
-        tabs.value = data.tabs.map(t => ({ ...t, route: sanitizeRoute(t.route) }))
+        tabs.value = data.tabs.map(t => ({
+          ...t,
+          route: sanitizeRoute(t.route),
+          purpose: sanitizePurpose(t.purpose),
+        }))
         const activeExists = data.tabs.some(t => t.id === data.active_id)
         activeId.value = activeExists ? data.active_id : data.tabs[0].id
       }
@@ -165,7 +200,13 @@ export function useEditorTabs() {
   function captureSnapshot(): TabsSnapshot {
     return {
       active_id: activeId.value,
-      tabs: tabs.value.map(t => ({ id: t.id, title: t.title, text: t.text, route: t.route })),
+      tabs: tabs.value.map(t => ({
+        id: t.id,
+        title: t.title,
+        text: t.text,
+        route: t.route,
+        purpose: t.purpose,
+      })),
     }
   }
 
@@ -228,5 +269,5 @@ export function useEditorTabs() {
   watch(tabs, scheduleSave, { deep: true })
   watch(activeId, scheduleSave)
 
-  return { tabs, activeId, active, create, close, select, next, previous, rename, init, flushSave, lastSaveError }
+  return { tabs, activeId, active, create, close, select, next, previous, rename, openIncomingEdit, init, flushSave, lastSaveError }
 }

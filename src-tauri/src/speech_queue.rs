@@ -39,12 +39,27 @@ pub enum DeliveryPolicy {
         skip_twitch: bool,
         skip_webview: bool,
     },
+    /// Source-neutral incoming delivery: audio is inherent and the flags
+    /// control WebView/Twitch. Unlike [`DeliveryPolicy::Editor`], the text is
+    /// never parsed for route prefixes — the complete submitted string is the
+    /// content.
+    Incoming {
+        skip_twitch: bool,
+        skip_webview: bool,
+    },
     AudioOnly,
 }
 
 impl DeliveryPolicy {
     pub fn editor(skip_twitch: bool, skip_webview: bool) -> Self {
         DeliveryPolicy::Editor {
+            skip_twitch,
+            skip_webview,
+        }
+    }
+
+    pub fn incoming(skip_twitch: bool, skip_webview: bool) -> Self {
+        DeliveryPolicy::Incoming {
             skip_twitch,
             skip_webview,
         }
@@ -57,6 +72,7 @@ impl DeliveryPolicy {
     pub fn skip_twitch(&self) -> bool {
         match self {
             DeliveryPolicy::Editor { skip_twitch, .. } => *skip_twitch,
+            DeliveryPolicy::Incoming { skip_twitch, .. } => *skip_twitch,
             DeliveryPolicy::AudioOnly => true,
         }
     }
@@ -64,6 +80,7 @@ impl DeliveryPolicy {
     pub fn skip_webview(&self) -> bool {
         match self {
             DeliveryPolicy::Editor { skip_webview, .. } => *skip_webview,
+            DeliveryPolicy::Incoming { skip_webview, .. } => *skip_webview,
             DeliveryPolicy::AudioOnly => true,
         }
     }

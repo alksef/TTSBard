@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::speech_queue::SubmissionSource;
+use crate::speech_queue::{DeliveryPolicy, SubmissionSource};
 
 pub mod server;
 pub mod service;
@@ -10,17 +10,91 @@ pub use service::InputServerService;
 /// Maximum number of pending items kept in the review inbox.
 pub const INBOX_CAPACITY: usize = 100;
 
+/// Persisted delivery route for source-neutral Incoming text.
+///
+/// Serialized as stable snake_case strings. Deserialization normalizes any
+/// missing or unknown persisted value to [`IncomingRoute::AudioOnly`], so
+/// legacy or corrupted settings never start publishing incoming text to
+/// WebView/Twitch by accident.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum IncomingRoute {
+    #[default]
+    AudioOnly,
+    AudioWebview,
+    AudioTwitch,
+    Everywhere,
+}
+
+impl IncomingRoute {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "audio_only" => Some(IncomingRoute::AudioOnly),
+            "audio_webview" => Some(IncomingRoute::AudioWebview),
+            "audio_twitch" => Some(IncomingRoute::AudioTwitch),
+            "everywhere" => Some(IncomingRoute::Everywhere),
+            _ => None,
+        }
+    }
+
+    /// Map the route to the delivery flags carried by the speech job.
+    ///
+    /// Audio is inherent to every incoming route; only the WebView/Twitch
+    /// integrations vary. The resulting [`DeliveryPolicy::Incoming`] is
+    /// resolved verbatim by the TTS pipeline: no route prefix is ever added to
+    /// or stripped from the incoming text.
+    pub fn delivery_policy(&self) -> DeliveryPolicy {
+        match self {
+            IncomingRoute::AudioOnly => DeliveryPolicy::incoming(true, true),
+            IncomingRoute::AudioWebview => DeliveryPolicy::incoming(true, false),
+            IncomingRoute::AudioTwitch => DeliveryPolicy::incoming(false, true),
+            IncomingRoute::Everywhere => DeliveryPolicy::incoming(false, false),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for IncomingRoute {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct IncomingRouteVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for IncomingRouteVisitor {
+            type Value = IncomingRoute;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str(
+                    "an incoming route string ('audio_only', 'audio_webview', 'audio_twitch', 'everywhere')",
+                )
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(IncomingRoute::from_str(v).unwrap_or(IncomingRoute::AudioOnly))
+            }
+        }
+
+        deserializer.deserialize_str(IncomingRouteVisitor)
+    }
+}
+
 /// Source-neutral Incoming text policy, persisted under the top-level
 /// `incoming` settings section.
 ///
 /// Decides whether externally submitted text (Input Server and OCR alike) is
 /// submitted to the speech queue immediately or first lands in the
-/// pending-review inbox. It is deliberately not owned by the Input Server
-/// settings so any producer can share the same runtime policy.
+/// pending-review inbox, and which delivery route applies. It is deliberately
+/// not owned by the Input Server settings so any producer can share the same
+/// runtime policy.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IncomingSettings {
     #[serde(default = "default_auto_play")]
     pub auto_play: bool,
+    #[serde(default)]
+    pub route: IncomingRoute,
 }
 
 /// Desired settings for the external text input server.
@@ -45,6 +119,7 @@ impl Default for IncomingSettings {
     fn default() -> Self {
         Self {
             auto_play: default_auto_play(),
+            route: IncomingRoute::default(),
         }
     }
 }
@@ -124,7 +199,7 @@ pub enum InputServerError {
 
 #[cfg(test)]
 mod tests {
-    use super::{IncomingSettings, InputServerSettings};
+    use super::{IncomingRoute, IncomingSettings, InputServerSettings};
 
     #[test]
     fn incoming_settings_default_auto_play_is_true() {
@@ -136,11 +211,97 @@ mod tests {
     #[test]
     fn incoming_settings_round_trip() {
         assert_eq!(
-            serde_json::to_value(IncomingSettings { auto_play: false }).unwrap(),
-            serde_json::json!({ "auto_play": false })
+            serde_json::to_value(IncomingSettings {
+                auto_play: false,
+                route: IncomingRoute::default(),
+            })
+            .unwrap(),
+            serde_json::json!({ "auto_play": false, "route": "audio_only" })
         );
         let parsed: IncomingSettings = serde_json::from_str(r#"{"auto_play": false}"#).unwrap();
         assert!(!parsed.auto_play);
+        assert_eq!(parsed.route, IncomingRoute::AudioOnly);
+    }
+
+    #[test]
+    fn incoming_route_serializes_to_stable_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&IncomingRoute::AudioOnly).unwrap(),
+            "\"audio_only\""
+        );
+        assert_eq!(
+            serde_json::to_string(&IncomingRoute::AudioWebview).unwrap(),
+            "\"audio_webview\""
+        );
+        assert_eq!(
+            serde_json::to_string(&IncomingRoute::AudioTwitch).unwrap(),
+            "\"audio_twitch\""
+        );
+        assert_eq!(
+            serde_json::to_string(&IncomingRoute::Everywhere).unwrap(),
+            "\"everywhere\""
+        );
+    }
+
+    #[test]
+    fn incoming_route_deserializes_all_four_values() {
+        assert_eq!(
+            serde_json::from_str::<IncomingRoute>("\"audio_only\"").unwrap(),
+            IncomingRoute::AudioOnly
+        );
+        assert_eq!(
+            serde_json::from_str::<IncomingRoute>("\"audio_webview\"").unwrap(),
+            IncomingRoute::AudioWebview
+        );
+        assert_eq!(
+            serde_json::from_str::<IncomingRoute>("\"audio_twitch\"").unwrap(),
+            IncomingRoute::AudioTwitch
+        );
+        assert_eq!(
+            serde_json::from_str::<IncomingRoute>("\"everywhere\"").unwrap(),
+            IncomingRoute::Everywhere
+        );
+    }
+
+    #[test]
+    fn incoming_route_unknown_value_normalizes_to_audio_only() {
+        for raw in ["\"bogus\"", "\"twitch_only\"", "\"\""] {
+            let parsed: IncomingRoute = serde_json::from_str(raw).unwrap();
+            assert_eq!(parsed, IncomingRoute::AudioOnly, "raw: {raw}");
+        }
+    }
+
+    #[test]
+    fn incoming_settings_missing_route_defaults_to_audio_only() {
+        let parsed: IncomingSettings = serde_json::from_str(r#"{"auto_play": true}"#).unwrap();
+        assert!(parsed.auto_play);
+        assert_eq!(parsed.route, IncomingRoute::AudioOnly);
+    }
+
+    #[test]
+    fn incoming_settings_unknown_route_defaults_to_audio_only() {
+        let parsed: IncomingSettings =
+            serde_json::from_str(r#"{"auto_play": true, "route": "nope"}"#).unwrap();
+        assert_eq!(parsed.route, IncomingRoute::AudioOnly);
+    }
+
+    #[test]
+    fn incoming_route_maps_to_delivery_flags() {
+        let audio_only = IncomingRoute::AudioOnly.delivery_policy();
+        assert!(audio_only.skip_twitch());
+        assert!(audio_only.skip_webview());
+
+        let audio_webview = IncomingRoute::AudioWebview.delivery_policy();
+        assert!(audio_webview.skip_twitch());
+        assert!(!audio_webview.skip_webview());
+
+        let audio_twitch = IncomingRoute::AudioTwitch.delivery_policy();
+        assert!(!audio_twitch.skip_twitch());
+        assert!(audio_twitch.skip_webview());
+
+        let everywhere = IncomingRoute::Everywhere.delivery_policy();
+        assert!(!everywhere.skip_twitch());
+        assert!(!everywhere.skip_webview());
     }
 
     #[test]

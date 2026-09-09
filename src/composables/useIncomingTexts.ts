@@ -11,10 +11,22 @@ import { debugError } from '../utils/debug'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
 import { normalizeCommandError } from '../ipc/commandError'
 import { t } from '../i18n'
+import { sanitizeIncomingRoute, type IncomingRoute } from '../components/editor/incomingRoute'
+
+export type { IncomingRoute } from '../components/editor/incomingRoute'
 
 /** Source-neutral Incoming policy persisted under the top-level `incoming` section. */
 export interface IncomingSettings {
   auto_play: boolean
+  route: IncomingRoute
+}
+
+function sanitizeIncomingSettings(value: unknown): IncomingSettings {
+  const record = value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+  return {
+    auto_play: typeof record.auto_play === 'boolean' ? record.auto_play : true,
+    route: sanitizeIncomingRoute(record.route),
+  }
 }
 
 export type IncomingTextSource = 'server' | 'ocr'
@@ -88,12 +100,13 @@ const SETTINGS_CHANGED_EVENT = 'settings-changed'
 export function useIncomingTexts() {
   const pendingItems = ref<IncomingTextItem[]>([])
   const externalJobs = ref<JobDto[]>([])
-  const autoPlay = ref(true)
+  const settings = ref<IncomingSettings>({ auto_play: true, route: 'audio_only' })
   const busyIds = ref<ReadonlySet<string>>(new Set())
   const loadError = ref<string | null>(null)
 
   const { showError } = useErrorHandler()
 
+  const autoPlay = computed(() => settings.value.auto_play)
   const count = computed(() => computeIncomingCount(pendingItems.value, externalJobs.value))
 
   const listenerScope = createAsyncCleanupScope()
@@ -103,6 +116,27 @@ export function useIncomingTexts() {
   // `runtimeStatusSource`'s `eventArrived` flag — one per channel.
   let pendingItemsEventArrived = false
   let externalJobsEventArrived = false
+  // Settings guard: every refresh claims a monotonically increasing token, and
+  // a result may apply only while it is the latest request. This makes the
+  // event-triggered refresh win over any snapshot started before it, and stops
+  // an older overlapping `get_incoming_settings` response from overwriting a
+  // newer one that resolved first. Local optimistic writes and the serialized
+  // save queue are guarded separately below.
+  let settingsRefreshToken = 0
+  let localSettingsWrites = 0
+  // Serialized save queue: only one backend write is in flight at a time, and
+  // newer intents coalesce into a single pending snapshot. This guarantees
+  // writes cannot complete out of order and the durable state always ends on
+  // the latest user intent.
+  let saveInFlight: Promise<void> | null = null
+  let pendingSave: IncomingSettings | null = null
+  let lastPersistedSettings: IncomingSettings = { ...settings.value }
+  let saveIdleWaiters: Array<() => void> = []
+  // Global edit-in-flight guard: the backend take removes the item from the
+  // inbox before returning it, so at most one take may be in flight at a time.
+  // A later edit while one is running is refused (returns null) instead of
+  // removing a second item and discarding the first take's result.
+  let editInFlight = false
 
   function isBusy(id: string): boolean {
     return busyIds.value.has(id)
@@ -150,32 +184,84 @@ export function useIncomingTexts() {
     }
   }
 
-  async function refreshAutoPlay(): Promise<void> {
+  async function refreshSettings(): Promise<void> {
+    const token = ++settingsRefreshToken
+    const writesAtStart = localSettingsWrites
     try {
-      const settings = await invoke<IncomingSettings>('get_incoming_settings')
-      if (disposed) return
-      autoPlay.value = settings.auto_play
+      const payload = await invoke<unknown>('get_incoming_settings')
+      if (disposed || token !== settingsRefreshToken) return
+      if (writesAtStart !== localSettingsWrites) return
+      if (saveInFlight || pendingSave) return
+      settings.value = sanitizeIncomingSettings(payload)
+      lastPersistedSettings = settings.value
     } catch (e) {
       if (disposed) return
-      debugError('[IncomingTexts] Failed to load auto-play setting:', e)
+      debugError('[IncomingTexts] Failed to load incoming settings:', e)
     }
   }
 
-  async function setAutoPlay(value: boolean): Promise<void> {
-    if (value === autoPlay.value) return
-    const previous = autoPlay.value
-    autoPlay.value = value
+  function enqueueSave(snapshot: IncomingSettings): Promise<void> {
+    pendingSave = snapshot
+    localSettingsWrites++
+    pumpSave()
+    return waitForSaveIdle()
+  }
+
+  function pumpSave(): void {
+    if (saveInFlight) return
+    const next = pendingSave
+    if (!next) return
+    pendingSave = null
+    saveInFlight = runSave(next)
+  }
+
+  async function runSave(snapshot: IncomingSettings): Promise<void> {
     try {
-      await invoke('save_incoming_settings', {
-        settings: { auto_play: value },
-      })
-      if (disposed) return
+      await invoke('save_incoming_settings', { settings: snapshot })
+      if (!disposed) lastPersistedSettings = snapshot
     } catch (e) {
       if (disposed) return
-      autoPlay.value = previous
-      debugError('[IncomingTexts] Failed to save auto-play setting:', e)
-      showError(t('editor.incoming.error.autoplay_save'))
+      // An older intent failing while a newer one is pending must not roll the
+      // newer intent back; only the latest failure is rolled back and surfaced.
+      if (!pendingSave) {
+        settings.value = { ...lastPersistedSettings }
+        debugError('[IncomingTexts] Failed to save incoming settings:', e)
+        showError(t('editor.incoming.error.save'))
+      } else {
+        debugError('[IncomingTexts] Failed to save incoming settings:', e)
+      }
+    } finally {
+      saveInFlight = null
+      if (!disposed && pendingSave) {
+        pumpSave()
+      } else {
+        pendingSave = null
+        const waiters = saveIdleWaiters
+        saveIdleWaiters = []
+        waiters.forEach((resolve) => resolve())
+      }
     }
+  }
+
+  function waitForSaveIdle(): Promise<void> {
+    if (!saveInFlight && !pendingSave) return Promise.resolve()
+    return new Promise((resolve) => { saveIdleWaiters.push(resolve) })
+  }
+
+  async function saveSettings(next: IncomingSettings): Promise<void> {
+    if (disposed) return
+    settings.value = next
+    await enqueueSave(next)
+  }
+
+  async function setAutoPlay(value: boolean): Promise<void> {
+    if (value === settings.value.auto_play) return
+    await saveSettings({ auto_play: value, route: settings.value.route })
+  }
+
+  async function setRoute(route: IncomingRoute): Promise<void> {
+    if (route === settings.value.route) return
+    await saveSettings({ auto_play: settings.value.auto_play, route })
   }
 
   async function approve(id: string): Promise<void> {
@@ -198,6 +284,10 @@ export function useIncomingTexts() {
   /** Takes the item for editing and returns its text, or null on failure. */
   async function edit(id: string): Promise<string | null> {
     if (isBusy(id)) return null
+    // A destructive take is already in flight: refusing keeps that take the
+    // only one, so its item is the only one removed from the inbox.
+    if (editInFlight) return null
+    editInFlight = true
     markBusy(id)
     try {
       const item = await invoke<IncomingTextItem>('take_incoming_text_for_edit', {
@@ -213,6 +303,7 @@ export function useIncomingTexts() {
       )
       return null
     } finally {
+      editInFlight = false
       markIdle(id)
     }
   }
@@ -270,13 +361,15 @@ export function useIncomingTexts() {
     )
     await listenerScope.track(
       listen(SETTINGS_CHANGED_EVENT, () => {
-        void refreshAutoPlay()
+        // The triggered refresh claims the next token, so any snapshot started
+        // before the event is already stale and cannot apply.
+        void refreshSettings()
       }),
     )
     // Listeners first, then snapshots: either ordering observes the latest state.
     await refreshPendingItems()
     await refreshExternalJobs()
-    await refreshAutoPlay()
+    await refreshSettings()
   })
 
   onUnmounted(() => {
@@ -287,6 +380,7 @@ export function useIncomingTexts() {
   return {
     pendingItems,
     externalJobs,
+    settings,
     autoPlay,
     busyIds,
     loadError,
@@ -297,8 +391,9 @@ export function useIncomingTexts() {
     discard,
     skipExternalJob,
     setAutoPlay,
+    setRoute,
     refreshPendingItems,
     refreshExternalJobs,
-    refreshAutoPlay,
+    refreshSettings,
   }
 }

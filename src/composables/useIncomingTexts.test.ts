@@ -283,7 +283,7 @@ describe('useIncomingTexts', () => {
     await setAutoPlay(false)
 
     expect(mocks.mockInvoke).toHaveBeenCalledWith('save_incoming_settings', {
-      settings: { auto_play: false },
+      settings: { auto_play: false, route: 'audio_only' },
     })
     expect(autoPlay.value).toBe(false)
     expect(mocks.mockInvoke.mock.calls.some(([cmd]) => cmd === 'get_input_server_settings')).toBe(false)
@@ -401,7 +401,7 @@ describe('useIncomingTexts', () => {
     await expect(setAutoPlay(false)).resolves.toBeUndefined()
 
     expect(mocks.mockInvoke).toHaveBeenCalledWith('save_incoming_settings', {
-      settings: { auto_play: false },
+      settings: { auto_play: false, route: 'audio_only' },
     })
     expect(autoPlay.value).toBe(false)
   })
@@ -633,5 +633,284 @@ describe('useIncomingTexts', () => {
     await pending
 
     expect(pendingItems.value).toEqual([])
+  })
+
+  it('defaults route to audio_only for an old backend returning only auto_play', async () => {
+    const { settings } = await setupAndMount(async (cmd: string) => {
+      if (cmd === 'list_incoming_texts') return []
+      if (cmd === 'get_speech_queue_state') return { jobs: [] }
+      if (cmd === 'get_incoming_settings') return { auto_play: false }
+      return undefined
+    })
+
+    expect(settings.value).toEqual({ auto_play: false, route: 'audio_only' })
+  })
+
+  it('normalizes an invalid IPC route to audio_only without trusting the payload', async () => {
+    for (const bad of [undefined, null, 42, 'twitch_only', 'no_twitch', 'AUDIO_TWITCH']) {
+      const { settings } = await setupAndMount(async (cmd: string) => {
+        if (cmd === 'list_incoming_texts') return []
+        if (cmd === 'get_speech_queue_state') return { jobs: [] }
+        if (cmd === 'get_incoming_settings') return { auto_play: true, route: bad }
+        return undefined
+      })
+
+      expect(settings.value.route).toBe('audio_only')
+    }
+  })
+
+  it('loads every valid incoming route from the backend', async () => {
+    const routes = ['audio_only', 'audio_webview', 'audio_twitch', 'everywhere'] as const
+    for (const route of routes) {
+      const { settings } = await setupAndMount(async (cmd: string) => {
+        if (cmd === 'list_incoming_texts') return []
+        if (cmd === 'get_speech_queue_state') return { jobs: [] }
+        if (cmd === 'get_incoming_settings') return { auto_play: true, route }
+        return undefined
+      })
+
+      expect(settings.value.route).toBe(route)
+    }
+  })
+
+  it('setRoute preserves auto_play and persists the complete snapshot', async () => {
+    const { settings, setRoute } = await setupAndMount()
+
+    mocks.mockInvoke.mockClear()
+    await setRoute('everywhere')
+
+    expect(mocks.mockInvoke).toHaveBeenCalledWith('save_incoming_settings', {
+      settings: { auto_play: true, route: 'everywhere' },
+    })
+    expect(settings.value).toEqual({ auto_play: true, route: 'everywhere' })
+  })
+
+  it('setAutoPlay preserves the current route', async () => {
+    const { settings, setAutoPlay } = await setupAndMount(async (cmd: string) => {
+      if (cmd === 'list_incoming_texts') return []
+      if (cmd === 'get_speech_queue_state') return { jobs: [] }
+      if (cmd === 'get_incoming_settings') return { auto_play: true, route: 'audio_twitch' }
+      return undefined
+    })
+
+    await setAutoPlay(false)
+
+    expect(settings.value).toEqual({ auto_play: false, route: 'audio_twitch' })
+  })
+
+  it('reverts the complete snapshot when a route save is rejected', async () => {
+    const { settings, setRoute } = await setupAndMount()
+
+    mocks.mockInvoke.mockRejectedValueOnce(new Error('backend down'))
+
+    await setRoute('everywhere')
+
+    expect(settings.value).toEqual({ auto_play: true, route: 'audio_only' })
+    expect(mocks.mockShowError).toHaveBeenCalled()
+  })
+
+  it('reverts the complete snapshot when an auto_play save is rejected', async () => {
+    const { settings, setAutoPlay } = await setupAndMount(async (cmd: string) => {
+      if (cmd === 'list_incoming_texts') return []
+      if (cmd === 'get_speech_queue_state') return { jobs: [] }
+      if (cmd === 'get_incoming_settings') return { auto_play: true, route: 'audio_webview' }
+      return undefined
+    })
+
+    mocks.mockInvoke.mockRejectedValueOnce(new Error('backend down'))
+
+    await setAutoPlay(false)
+
+    expect(settings.value).toEqual({ auto_play: true, route: 'audio_webview' })
+    expect(mocks.mockShowError).toHaveBeenCalled()
+  })
+
+  it('ignores a stale settings snapshot when a local route change happens during refresh', async () => {
+    const { settings, setRoute, refreshSettings } = await setupAndMount()
+
+    mocks.mockInvoke.mockClear()
+    let resolveGet!: (value: unknown) => void
+    mocks.mockInvoke.mockImplementationOnce((cmd: string) => {
+      if (cmd === 'get_incoming_settings') {
+        return new Promise((resolve) => { resolveGet = resolve })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const refresh = refreshSettings()
+    await setRoute('everywhere')
+    resolveGet({ auto_play: true, route: 'audio_only' })
+    await refresh
+
+    expect(settings.value).toEqual({ auto_play: true, route: 'everywhere' })
+  })
+
+  it('keeps the newer settings when overlapping refreshes resolve out of order', async () => {
+    const { settings, refreshSettings } = await setupAndMount()
+
+    const responses: Array<(value: unknown) => void> = []
+    mocks.mockInvoke.mockClear()
+    mocks.mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_incoming_settings') {
+        return new Promise((resolve) => { responses.push(resolve) })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const older = refreshSettings()
+    const newer = refreshSettings()
+    expect(responses).toHaveLength(2)
+
+    // Resolve the newer response first, then the older one: the older payload
+    // must not overwrite the settings the newer refresh already applied.
+    responses[1]({ auto_play: false, route: 'everywhere' })
+    await newer
+    expect(settings.value).toEqual({ auto_play: false, route: 'everywhere' })
+
+    responses[0]({ auto_play: true, route: 'audio_only' })
+    await older
+    expect(settings.value).toEqual({ auto_play: false, route: 'everywhere' })
+  })
+
+  it('returns null for an edit of any other item while a take is in flight, without a second backend take', async () => {
+    const { edit } = await setupAndMount()
+
+    let resolveEdit!: (value: unknown) => void
+    mocks.mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'take_incoming_text_for_edit') {
+        return new Promise((resolve) => { resolveEdit = resolve })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const first = edit('item-a')
+    await Promise.resolve()
+
+    // A different id is not per-item busy, but the destructive take is already
+    // running: the call must be refused without invoking the backend.
+    const second = await edit('item-b')
+    expect(second).toBeNull()
+
+    const takeCalls = mocks.mockInvoke.mock.calls.filter(
+      ([cmd]) => cmd === 'take_incoming_text_for_edit',
+    )
+    expect(takeCalls).toHaveLength(1)
+
+    // The refused call must not disturb the accepted request's result.
+    resolveEdit({ id: 'item-a', text: 'first text' })
+    expect(await first).toBe('first text')
+  })
+
+  it('releases the edit guard on rejection so a later edit is allowed', async () => {
+    const { edit } = await setupAndMount()
+
+    mocks.mockInvoke.mockRejectedValueOnce(new Error('backend down'))
+    expect(await edit('item-a')).toBeNull()
+
+    mocks.mockInvoke.mockResolvedValueOnce({ id: 'item-b', text: 'recovered text' })
+    expect(await edit('item-b')).toBe('recovered text')
+
+    const takeCalls = mocks.mockInvoke.mock.calls.filter(
+      ([cmd]) => cmd === 'take_incoming_text_for_edit',
+    )
+    expect(takeCalls).toHaveLength(2)
+  })
+
+  describe('serialized incoming settings saves', () => {
+    function deferred() {
+      let resolve!: () => void
+      let reject!: (e: unknown) => void
+      const promise = new Promise<void>((res, rej) => { resolve = res; reject = rej })
+      return { promise, resolve, reject }
+    }
+
+    it('writes rapid toggle+route changes in order with complete snapshots and ends on the latest intent', async () => {
+      const { settings, setAutoPlay, setRoute } = await setupAndMount()
+
+      const saves: Array<{ auto_play: boolean; route: string }> = []
+      const first = deferred()
+      const second = deferred()
+
+      mocks.mockInvoke.mockClear()
+      mocks.mockInvoke.mockImplementation(
+        async (cmd: string, args?: { settings?: { auto_play: boolean; route: string } }) => {
+          if (cmd === 'save_incoming_settings') {
+            saves.push({ ...args!.settings! })
+            return saves.length === 1 ? first.promise : second.promise
+          }
+          return undefined
+        },
+      )
+
+      const p1 = setAutoPlay(false)
+      const p2 = setRoute('everywhere')
+
+      // The first write is dispatched immediately; the second is coalesced and
+      // must not start while the first is in flight.
+      await vi.waitFor(() => expect(saves).toHaveLength(1))
+      expect(saves[0]).toEqual({ auto_play: false, route: 'audio_only' })
+
+      first.resolve()
+      await vi.waitFor(() => expect(saves).toHaveLength(2))
+      expect(saves[1]).toEqual({ auto_play: false, route: 'everywhere' })
+
+      second.resolve()
+      await Promise.all([p1, p2])
+
+      // Durable final state equals the latest user intent.
+      expect(settings.value).toEqual({ auto_play: false, route: 'everywhere' })
+    })
+
+    it('does not roll back a newer intent when an older write fails', async () => {
+      const { settings, setAutoPlay, setRoute } = await setupAndMount()
+
+      const first = deferred()
+      mocks.mockInvoke.mockClear()
+      mocks.mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'save_incoming_settings') {
+          const saveCalls = mocks.mockInvoke.mock.calls.filter(
+            ([c]) => c === 'save_incoming_settings',
+          ).length
+          if (saveCalls === 1) return first.promise
+          return undefined
+        }
+        return undefined
+      })
+
+      const p1 = setAutoPlay(false)
+      await vi.waitFor(() => expect(mocks.mockInvoke).toHaveBeenCalledTimes(1))
+      const p2 = setRoute('everywhere')
+
+      // The older write fails while the newer intent is already queued.
+      first.reject(new Error('backend down'))
+      await vi.waitFor(() => expect(mocks.mockInvoke).toHaveBeenCalledTimes(2))
+
+      await Promise.all([p1, p2])
+
+      expect(settings.value).toEqual({ auto_play: false, route: 'everywhere' })
+      expect(mocks.mockShowError).not.toHaveBeenCalled()
+    })
+
+    it('rolls back to the last persisted snapshot when the latest write fails', async () => {
+      const { settings, setAutoPlay, setRoute } = await setupAndMount()
+
+      mocks.mockInvoke.mockClear()
+      mocks.mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'save_incoming_settings') {
+          const saveCalls = mocks.mockInvoke.mock.calls.filter(
+            ([c]) => c === 'save_incoming_settings',
+          ).length
+          if (saveCalls === 1) return undefined
+          return Promise.reject(new Error('backend down'))
+        }
+        return undefined
+      })
+
+      await setAutoPlay(false)
+      await setRoute('everywhere')
+
+      expect(settings.value).toEqual({ auto_play: false, route: 'audio_only' })
+      expect(mocks.mockShowError).toHaveBeenCalledWith('Не удалось сохранить настройки входящих')
+    })
   })
 })
