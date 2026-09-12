@@ -312,6 +312,9 @@ watch(editorSettings, (newSettings) => {
     </section>
 
     <section class="settings-section">
+      <div class="card-header">
+        <h3 class="card-title">{{ t('settings.editor.proofing.title') }}</h3>
+      </div>
       <div class="setting-row">
         <label class="setting-label checkbox-label">
           <input

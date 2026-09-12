@@ -45,6 +45,7 @@ related_tasks: []
 
 ## Завершённые направления
 
+- [ROADMAP-103 — Сгруппированные панели настроек](./completed/103-grouped-general-settings.md)
 - [ROADMAP-096 — Английский интерфейс и внешние языковые пакеты](./completed/096-interface-localization-and-language-packs.md)
 
 ### Ввод текста и OCR

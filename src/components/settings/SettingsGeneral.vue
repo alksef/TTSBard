@@ -179,9 +179,11 @@ watch(loggingSettings, (newSettings) => {
 
 <template>
   <div class="settings-general">
-    <section class="settings-section">
+    <!-- Language -->
+    <section class="settings-group">
+      <h3 class="settings-group-title">{{ t('general.groups.language') }}</h3>
       <div class="setting-row">
-        <label class="setting-label" for="ui-language">{{ t('settings.language') }}</label>
+        <label class="sr-only" for="ui-language">{{ t('settings.language') }}</label>
         <select
           id="ui-language"
           class="level-select language-select"
@@ -199,24 +201,10 @@ watch(loggingSettings, (newSettings) => {
       </div>
     </section>
 
-    <!-- Start in compact mode -->
-    <section class="settings-section">
-      <div class="setting-row">
-        <label class="setting-label checkbox-label">
-          <input
-            :checked="startCompact"
-            @change="toggleStartCompact"
-            type="checkbox"
-            class="checkbox-input"
-          />
-          <span>{{ t('general.start_compact.label') }}</span>
-        </label>
-        <span class="setting-hint">{{ t('general.start_compact.hint') }}</span>
-      </div>
-    </section>
+    <!-- Window behavior -->
+    <section class="settings-group">
+      <h3 class="settings-group-title">{{ t('general.groups.window') }}</h3>
 
-    <!-- Exclude from Capture -->
-    <section class="settings-section">
       <div class="setting-row">
         <label class="setting-label checkbox-label">
           <input
@@ -229,10 +217,20 @@ watch(loggingSettings, (newSettings) => {
         </label>
         <span class="setting-hint">{{ t('general.show_playback.hint') }}</span>
       </div>
-    </section>
 
-    <!-- Hide on minimize -->
-    <section class="settings-section">
+      <div class="setting-row">
+        <label class="setting-label checkbox-label">
+          <input
+            :checked="startCompact"
+            @change="toggleStartCompact"
+            type="checkbox"
+            class="checkbox-input"
+          />
+          <span>{{ t('general.start_compact.label') }}</span>
+        </label>
+        <span class="setting-hint">{{ t('general.start_compact.hint') }}</span>
+      </div>
+
       <div class="setting-row">
         <label class="setting-label checkbox-label">
           <input
@@ -246,10 +244,7 @@ watch(loggingSettings, (newSettings) => {
         </label>
         <span class="setting-hint">{{ t('general.hide_on_minimize.hint') }}</span>
       </div>
-    </section>
 
-    <!-- Exclude from Capture -->
-    <section class="settings-section">
       <div class="setting-row">
         <label class="setting-label checkbox-label">
           <input
@@ -265,9 +260,11 @@ watch(loggingSettings, (newSettings) => {
       </div>
     </section>
 
-    <!-- Logging Settings -->
-    <section class="settings-section">
-      <div class="setting-row">
+    <!-- Diagnostics -->
+    <section class="settings-group">
+      <h3 class="settings-group-title">{{ t('general.groups.diagnostics') }}</h3>
+
+      <div class="setting-row logging-controls-row">
         <label class="setting-label checkbox-label">
           <input
             :checked="loggingEnabled"
@@ -277,10 +274,8 @@ watch(loggingSettings, (newSettings) => {
           />
           <span>{{ t('general.logging.enabled') }}</span>
         </label>
-      </div>
 
-      <div v-if="loggingEnabled" class="setting-group">
-        <div class="setting-row logging-level-row">
+        <div v-if="loggingEnabled" class="logging-level-control">
           <label>{{ t('general.logging.level.label') }}</label>
           <select
             :value="loggingLevel"
@@ -300,13 +295,11 @@ watch(loggingSettings, (newSettings) => {
       </span>
     </section>
 
-    <!-- Application Folder -->
-    <section class="settings-section">
-      <div class="setting-row folder-row">
-        <div class="folder-text">
-          <span class="setting-label folder-label">{{ t('general.folder.label') }}</span>
-          <span class="folder-path">%APPDATA%\ttsbard</span>
-        </div>
+    <!-- Settings and models folder -->
+    <section class="settings-group">
+      <span class="setting-label folder-label">{{ t('general.folder.label') }}</span>
+      <div class="folder-inline-row">
+        <span class="folder-path">%APPDATA%\ttsbard</span>
         <button
           type="button"
           class="folder-button"
@@ -327,15 +320,34 @@ watch(loggingSettings, (newSettings) => {
 .settings-general {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 1rem;
 }
 
-.settings-section {
-  padding: 12px 16px;
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.settings-group {
+  padding: 16px 18px;
   background: var(--color-bg-field);
   border: 1px solid var(--color-border);
   border-radius: 12px;
   backdrop-filter: blur(8px);
+}
+
+.settings-group-title {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
 }
 
 .setting-row {
@@ -397,14 +409,23 @@ watch(loggingSettings, (newSettings) => {
   color: var(--warning-text-bright);
 }
 
-.setting-group {
-  margin-top: 1rem;
-  padding-left: 0;
+.logging-controls-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem 1rem;
 }
 
-.setting-group label {
+.logging-level-control {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.logging-level-control label {
   display: inline-block;
-  margin-right: 0.6rem;
+  margin-right: 0;
+  min-width: 0;
   font-size: 0.9rem;
   font-weight: 500;
   color: var(--color-text-primary);
@@ -424,18 +445,7 @@ watch(loggingSettings, (newSettings) => {
   min-width: 140px;
 }
 
-.logging-level-row {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-}
-
-.logging-level-row label {
-  margin-right: 0;
-  min-width: 0;
-}
-
-.logging-level-row .level-select {
+.logging-level-control .level-select {
   width: 180px;
   flex: 0 0 auto;
 }
@@ -461,26 +471,22 @@ watch(loggingSettings, (newSettings) => {
   background: var(--select-bg-hover);
 }
 
-.folder-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem 1rem;
-}
-
-.folder-text {
-  flex: 1 1 0;
-  min-width: 0;
-}
-
 .folder-label {
   display: block;
   cursor: default;
 }
 
+.folder-inline-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  margin-top: 0.4rem;
+}
+
 .folder-path {
-  display: block;
-  margin-top: 0.2rem;
+  flex: 0 1 auto;
+  min-width: 0;
   font-family: var(--font-mono);
   font-size: 0.85rem;
   color: var(--color-text-muted);
@@ -518,5 +524,41 @@ watch(loggingSettings, (newSettings) => {
 .folder-button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+@media (max-width: 520px) {
+  .settings-group {
+    padding: 14px 14px;
+  }
+
+  .language-select {
+    width: 100%;
+  }
+
+  .logging-controls-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .logging-level-control {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.4rem;
+  }
+
+  .logging-level-control .level-select {
+    width: 100%;
+    min-width: 0;
+    flex: 1 1 100%;
+  }
+
+  .folder-inline-row {
+    align-items: flex-start;
+  }
+
+  .folder-button {
+    justify-content: center;
+  }
 }
 </style>

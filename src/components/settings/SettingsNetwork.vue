@@ -581,11 +581,10 @@ onUnmounted(() => {
 }
 
 .settings-section h2 {
-  margin: 0 0 1rem;
-  font-size: 1.1rem;
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
   font-weight: 700;
   color: var(--color-text-primary);
-  letter-spacing: 0.01em;
 }
 
 .network-content {

@@ -91,6 +91,7 @@ function onSizeInput(event: Event): void {
     class="settings-section editor-font-settings"
     :class="{ 'is-popup-open': open }"
   >
+    <h3 class="card-title">{{ t('settings.editor.font.title') }}</h3>
     <div class="font-controls-row">
       <div class="font-field font-family-field">
         <label class="font-field-label" for="editor-font-family">{{ t('settings.editor.font.label_family') }}</label>
@@ -187,6 +188,13 @@ function onSizeInput(event: Event): void {
    nearby setting sections below and is never covered or clipped. */
 .editor-font-settings.is-popup-open {
   z-index: 40;
+}
+
+.card-title {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
 }
 
 .font-controls-row {
