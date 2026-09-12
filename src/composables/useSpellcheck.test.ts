@@ -27,6 +27,7 @@ function createSettings(overrides?: Partial<AppSettingsDto['editor']>): AppSetti
     quick: 'disabled',
     ai: false,
     ai_completion: false,
+    autocomplete_enabled: true,
     spellcheck_enabled: false,
     spellcheck_source: 'online',
     editor_height: 200,

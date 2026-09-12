@@ -8,20 +8,15 @@ import {
   closeCompletion,
   completionStatus,
   selectedCompletionIndex,
-  type CompletionSource,
-  type CompletionContext,
-  type Completion,
 } from '@codemirror/autocomplete'
 import { invoke } from '@tauri-apps/api/core'
 import { forEachDiagnostic } from '@codemirror/lint'
-import type { Suggestion } from '../../composables/useInputHistory'
-import type { PhraseSuggestion } from '../../composables/useTextCompletion'
 import { useEditorSettings, useHotkeysSettings } from '../../composables/useAppSettings'
 import { createSpellLinter } from './spellLinter'
 import { SPELLCHECK_SOURCE } from './spellLinter'
 import { useSpellcheck } from '../../composables/useSpellcheck'
 import { useSpellContextMenu } from './spellContextMenu'
-import { debounceAsync } from '../../utils/debounce'
+import { createCompletionSources } from './completionSources'
 import { matchesEditorHotkey, shouldEnterSubmit, shouldEscapeSubmit } from './keymapArbitration'
 import { editorFontCssStack, toEditorFontFamily, parseEditorFontSize, EDITOR_FONT_SIZE_DEFAULT } from '../../utils/editorFont'
 import SpellContextMenu from './SpellContextMenu.vue'
@@ -172,142 +167,13 @@ const ttsTheme = EditorView.theme({
   },
 })
 
-const AI_COMPLETION_DEBOUNCE_MS = 700
-const AI_MIN_CONTEXT_LENGTH = 8
-const AI_MIN_CONTEXT_WORDS = 2
-
-const debouncedAiComplete = debounceAsync(
-  async (context: string): Promise<string | null> => {
-    try {
-      return await invoke<string>('get_ai_completion', { context })
-    } catch {
-      return null
-    }
-  },
-  AI_COMPLETION_DEBOUNCE_MS
-)
-
-const hybridSource: CompletionSource = async (context: CompletionContext) => {
-  const word = context.matchBefore(/[\wа-яёА-ЯЁ]*/)
-  if (!word || (word.from === word.to && !context.explicit)) return null
-
-  const query = word.text
-  if (!query) return null
-
-  const cursorPos = context.pos
-  const options: Completion[] = []
-
-  try {
-    const words = await invoke<Suggestion[]>('get_history_suggestions', {
-      query: query.toLowerCase(),
-      limit: 5,
-    })
-    for (const w of words) {
-      options.push({
-        label: w.word,
-        type: 'keyword',
-        detail: `(${w.count})`,
-      })
-    }
-  } catch {
-    // layer 0 failed
-  }
-
-  const doc = context.state.doc.toString()
-  const beforeCursor = doc.slice(0, cursorPos)
-  const contextWords = beforeCursor.trim().split(/\s+/).slice(-3).join(' ')
-
-  if (contextWords) {
-    try {
-      const phrases = await invoke<PhraseSuggestion[]>(
-        'get_phrase_completion',
-        { context: contextWords, limit: 3 }
-      )
-      for (const p of phrases) {
-        if (!options.some((o) => o.label === p.text)) {
-          const insertText = p.text + ' '
-          options.push({
-            label: p.text,
-            type: 'text',
-            detail: `→${p.count}`,
-            apply: (view: EditorView) => {
-              view.dispatch({
-                changes: { from: cursorPos, insert: insertText },
-                selection: { anchor: cursorPos + insertText.length },
-              })
-            },
-          })
-        }
-      }
-    } catch {
-      // layer 1 failed
-    }
-  }
-
-  const aiEnabled = editorSettings.value?.ai_completion ?? false
-  const meetsAiThreshold =
-    contextWords &&
-    contextWords.split(/\s+/).length >= AI_MIN_CONTEXT_WORDS &&
-    beforeCursor.trim().length >= AI_MIN_CONTEXT_LENGTH
-  if (aiEnabled && meetsAiThreshold) {
-    const aiResult = await debouncedAiComplete(beforeCursor)
-    if (aiResult) {
-      const words = aiResult.split(/\s+/).slice(0, 3).join(' ')
-      if (words) {
-        const insertText = words + ' '
-        options.push({
-          label: `✨ ${words}`,
-          type: 'class',
-          detail: 'AI',
-          apply: (view: EditorView) => {
-            view.dispatch({
-              changes: { from: cursorPos, insert: insertText },
-              selection: { anchor: cursorPos + insertText.length },
-            })
-          },
-        })
-      }
-    }
-  }
-
-  if (options.length === 0) return null
-
-  return {
-    from: word.from,
-    options,
-    validFor: /^[\wа-яёА-ЯЁ]*$/,
-  }
-}
-
-const presetSource: CompletionSource = (context: CompletionContext) => {
-  const before = context.matchBefore(/\\[^\s\\]*|%[^\s%]*/)
-  if (!before) return null
-
-  const prefix = before.text
-  const isUsername = prefix.startsWith('%')
-  const keyPart = prefix.slice(1).toLowerCase()
-  const map: Record<string, string> = isUsername ? usr.value : rep.value
-
-  const entries = Object.entries(map).filter(([k]) =>
-    k.toLowerCase().startsWith(keyPart)
-  )
-  if (entries.length === 0) return null
-
-  return {
-    from: before.from,
-    options: entries.map(([k, v]) => ({
-      label: isUsername ? `%${k}` : `\\${k}`,
-      detail: `→ ${v}`,
-      apply: (view: EditorView, _completion: Completion, from: number, to: number) => {
-        const insert = v + ' '
-        view.dispatch({
-          changes: { from, to, insert },
-          selection: { anchor: from + insert.length },
-        })
-      },
-    })),
-  }
-}
+const { hybridSource, presetSource } = createCompletionSources({
+  invoke,
+  isAutocompleteEnabled: () => editorSettings.value?.autocomplete_enabled ?? true,
+  isAiCompletionEnabled: () => editorSettings.value?.ai_completion ?? false,
+  getReplacements: () => rep.value,
+  getUsernames: () => usr.value,
+})
 
 function createKeymap() {
   const baseBindings = keymap.of([
@@ -554,6 +420,10 @@ watch(() => props.modelValue, (newVal) => {
 
 watch(available, (val) => {
   if (!val) closeMenu()
+})
+
+watch(() => editorSettings.value?.autocomplete_enabled, (enabled) => {
+  if (enabled === false && view.value) closeCompletion(view.value)
 })
 
 watch([editorFontFamily, editorFontSize], () => {

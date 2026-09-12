@@ -32,6 +32,12 @@ const spellcheckEnabled = computed(() => editorSettings.value?.spellcheck_enable
 
 const keepTextAfterSend = computed(() => editorSettings.value?.keep_text_after_send ?? false)
 
+const autocompleteEnabled = ref(editorSettings.value?.autocomplete_enabled ?? true)
+
+const autocompletePending = ref(false)
+
+const confirmedAutocompleteEnabled = ref(editorSettings.value?.autocomplete_enabled ?? true)
+
 const typingTimeoutInput = ref(editorSettings.value?.typing_idle_timeout_ms ?? 800)
 
 watch(() => editorSettings.value?.typing_idle_timeout_ms, (newVal) => {
@@ -93,6 +99,22 @@ async function toggleKeepText() {
     emitSaved()
   } catch (e) {
     emitError('settings.editor.error.keep_text', e)
+  }
+}
+
+async function saveAutocompleteEnabled() {
+  if (autocompletePending.value) return
+  autocompletePending.value = true
+  const requested = autocompleteEnabled.value
+  try {
+    await invoke('set_editor_autocomplete_enabled', { enabled: requested })
+    confirmedAutocompleteEnabled.value = requested
+    emitSaved()
+  } catch (e) {
+    autocompleteEnabled.value = confirmedAutocompleteEnabled.value
+    emitError('settings.editor.error.autocomplete', e)
+  } finally {
+    autocompletePending.value = false
   }
 }
 
@@ -242,6 +264,10 @@ async function toggleLoadOnStart() {
 
 watch(editorSettings, (newSettings) => {
   if (!newSettings) return;
+  if (autocompletePending.value) return;
+  const persisted = newSettings.autocomplete_enabled ?? true;
+  autocompleteEnabled.value = persisted;
+  confirmedAutocompleteEnabled.value = persisted;
 }, { immediate: true });
 </script>
 
@@ -298,6 +324,21 @@ watch(editorSettings, (newSettings) => {
         </label>
         <span class="setting-hint">
           {{ t('settings.editor.spellcheck.hint') }}
+        </span>
+      </div>
+      <div class="setting-row">
+        <label class="setting-label checkbox-label">
+          <input
+            v-model="autocompleteEnabled"
+            type="checkbox"
+            class="checkbox-input"
+            :disabled="autocompletePending"
+            @change="saveAutocompleteEnabled"
+          />
+          <span>{{ t('settings.editor.autocomplete_enabled') }}</span>
+        </label>
+        <span class="setting-hint">
+          {{ t('settings.editor.autocomplete_enabled.hint') }}
         </span>
       </div>
     </section>

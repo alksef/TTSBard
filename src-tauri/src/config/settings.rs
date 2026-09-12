@@ -1196,6 +1196,8 @@ pub struct EditorSettings {
     pub ai: bool,
     #[serde(default)]
     pub ai_completion: bool,
+    #[serde(default = "default_true")]
+    pub autocomplete_enabled: bool,
     #[serde(default)]
     pub spellcheck_enabled: bool,
     #[serde(default)]
@@ -1270,6 +1272,7 @@ impl Default for EditorSettings {
             quick: QuickEditorMode::Disabled,
             ai: false,
             ai_completion: false,
+            autocomplete_enabled: true,
             spellcheck_enabled: true,
             spellcheck_source: SpellSource::Offline,
             editor_height: 340,
@@ -2523,6 +2526,16 @@ impl SettingsManager {
     /// Get AI completion in editor enabled state
     pub fn get_editor_ai_completion(&self) -> bool {
         self.cache.read().editor.ai_completion
+    }
+
+    /// Set editor autocomplete suggestions enabled state
+    pub fn set_editor_autocomplete_enabled(&self, enabled: bool) -> Result<()> {
+        self.update_field("/editor/autocomplete_enabled", &enabled)
+    }
+
+    /// Get editor autocomplete suggestions enabled state
+    pub fn get_editor_autocomplete_enabled(&self) -> bool {
+        self.cache.read().editor.autocomplete_enabled
     }
 
     /// Set spellcheck enabled state
@@ -4739,6 +4752,34 @@ mod tests {
         let settings: EditorSettings =
             serde_json::from_str(json).expect("must deserialize without typing_enabled");
         assert!(settings.typing_enabled);
+    }
+
+    /// EditorSettings default has autocomplete_enabled == true.
+    #[test]
+    fn editor_settings_default_autocomplete_enabled_is_true() {
+        assert!(EditorSettings::default().autocomplete_enabled);
+    }
+
+    /// Backward-compat: EditorSettings without autocomplete_enabled field defaults to true.
+    #[test]
+    fn editor_settings_deserializes_without_autocomplete_enabled() {
+        let json = r#"{"quick":false,"ai":false,"ai_completion":false,"spellcheck_enabled":true,"spellcheck_source":"offline","editor_height":340,"typing_idle_timeout_ms":800,"typing_enabled":true}"#;
+        let settings: EditorSettings =
+            serde_json::from_str(json).expect("must deserialize without autocomplete_enabled");
+        assert!(settings.autocomplete_enabled);
+    }
+
+    /// EditorSettings: autocomplete_enabled round-trip.
+    #[test]
+    fn editor_settings_autocomplete_enabled_round_trip() {
+        let original = EditorSettings {
+            autocomplete_enabled: false,
+            ..EditorSettings::default()
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let back: EditorSettings = serde_json::from_str(&json).expect("round-trip deserialization");
+        assert!(!back.autocomplete_enabled);
+        assert!(json.contains(r#""autocomplete_enabled":false"#));
     }
 
     /// EditorSettings default has keep_text_after_send == false.

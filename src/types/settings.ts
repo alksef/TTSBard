@@ -426,6 +426,7 @@ export interface EditorSettingsDto {
   quick: QuickEditorMode
   ai: boolean
   ai_completion: boolean
+  autocomplete_enabled: boolean
   spellcheck_enabled: boolean
   spellcheck_source: 'online' | 'offline'
   editor_height: number

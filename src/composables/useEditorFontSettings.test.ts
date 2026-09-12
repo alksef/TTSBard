@@ -22,6 +22,7 @@ function createSettings(overrides?: Partial<EditorSettingsDto>): EditorSettingsD
     quick: 'disabled',
     ai: false,
     ai_completion: false,
+    autocomplete_enabled: true,
     spellcheck_enabled: true,
     spellcheck_source: 'offline',
     editor_height: 340,

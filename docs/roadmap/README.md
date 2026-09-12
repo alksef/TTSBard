@@ -43,9 +43,6 @@ related_tasks: []
 
 Формат и соответствие каталога статусу проверяет `scripts/check-docs.ps1`.
 
-## Активные направления
-
-
 ## Завершённые направления
 
 - [ROADMAP-096 — Английский интерфейс и внешние языковые пакеты](./completed/096-interface-localization-and-language-packs.md)
@@ -80,6 +77,7 @@ related_tasks: []
 
 ### Редактор и история
 
+- [ROADMAP-102 — Чистый список и управляемая видимость автодополнения](./completed/102-editor-autocomplete-visibility.md)
 - [ROADMAP-094 — Полный системный каталог шрифтов редактора](./completed/094-system-font-catalog.md)
 - [ROADMAP-093 — Шрифт и размер текста редактора](./completed/093-editor-font-settings.md)
 
