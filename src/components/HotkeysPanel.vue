@@ -1541,7 +1541,6 @@ onUnmounted(async () => {
   font-size: 0.8rem;
   font-weight: 600;
   letter-spacing: 0.03em;
-  text-transform: uppercase;
   color: var(--color-text-muted);
 }
 </style>
