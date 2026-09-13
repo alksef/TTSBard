@@ -13,9 +13,9 @@ describe('deliverTwitchMessage IPC contract', () => {
   })
 
   it('uses the stable command name and preserves the sent shape', async () => {
-    mockInvoke.mockResolvedValue({ status: 'sent' })
+    mockInvoke.mockResolvedValue({ status: 'sent', parts: 1 })
 
-    await expect(deliverTwitchMessage('hello')).resolves.toEqual({ status: 'sent' })
+    await expect(deliverTwitchMessage('hello')).resolves.toEqual({ status: 'sent', parts: 1 })
     expect(mockInvoke).toHaveBeenCalledWith(DELIVER_TWITCH_MESSAGE_COMMAND, { text: 'hello' })
   })
 
@@ -48,6 +48,7 @@ describe('deliverTwitchMessage IPC contract', () => {
 
   it('knows the too-long typed error code', () => {
     expect(isKnownTwitchErrorCode('twitch.too_long')).toBe(true)
+    expect(isKnownTwitchErrorCode('twitch.partial_delivery')).toBe(true)
     expect(isKnownTwitchErrorCode('twitch.nope')).toBe(false)
   })
 })

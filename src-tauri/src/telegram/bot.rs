@@ -74,21 +74,30 @@ const LIMIT_REJECTION_TEXT: &str = "Превышен лимит озвучки S
 /// User-facing error for any other strictly-correlated Silero bot text rejection.
 const GENERIC_REJECTION_TEXT: &str = "Silero отклонил запрос.";
 
+/// User-facing error when the Silero bot rejects the text as longer than the
+/// per-request limit. Deliberately numberless: the bot's exact limit may
+/// change (observed payloads live in the classifier tests).
+const TEXT_TOO_LONG_REJECTION_TEXT: &str = "Длина текста превышает допустимый лимит Silero.";
+
 /// Classified kind of a correlated text rejection from the Silero synthesis bot.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum RejectionKind {
     /// Bot replied with the known "превысит/превышает … лимит … озвучки" limit message.
     LimitExceeded,
+    /// Bot replied with the known "длина текста … превышает … символов"
+    /// overlength message.
+    TextTooLong,
     /// Any other non-empty correlated text reply from the bot.
     Generic,
 }
 
 /// Pure classifier: determine the `RejectionKind` of a correlated text reply
 /// from the Silero bot by checking for known Russian markers in the
-/// Unicode-lowercased text.  Recognises two ordered layouts:
+/// Unicode-lowercased text.  Recognises three ordered layouts:
 ///
 /// 1. New: `лимит` → `озвучк` → `исчерпан`
 /// 2. Old: `превысит`/`превыша` → `лимит` → `озвучк`
+/// 3. Length: `длина текста` → `превыша` → `символ`
 ///
 /// Uses the stem `озвучк` to cover `озвучки` and `озвучку`.
 /// Text/link material may appear between markers.
@@ -114,6 +123,21 @@ fn classify_rejection(text: &str) -> RejectionKind {
         if let Some(rest) = rest.find("лимит").map(|p| &rest[p + "лимит".len()..]) {
             if rest.find("озвучк").is_some() {
                 return RejectionKind::LimitExceeded;
+            }
+        }
+    }
+
+    // Length pattern: длина текста → превыша → символ
+    // (наблюдаемый ответ: «Длина текста 1350 символов превышает максимально
+    // возможные 500 символов.»). Числа не парсим: лимит известен отдельно.
+    if let Some(rest) = lower
+        .find("длина текста")
+        .map(|p| &lower[p + "длина текста".len()..])
+    {
+        if let Some(rest) = rest.find("превыша").map(|p| &rest[p + "превыша".len()..])
+        {
+            if rest.find("символ").is_some() {
+                return RejectionKind::TextTooLong;
             }
         }
     }
@@ -177,6 +201,7 @@ impl SileroTtsBot {
                 warn!("Silero bot rejected the request");
                 let msg = match kind {
                     RejectionKind::LimitExceeded => LIMIT_REJECTION_TEXT,
+                    RejectionKind::TextTooLong => TEXT_TOO_LONG_REJECTION_TEXT,
                     RejectionKind::Generic => GENERIC_REJECTION_TEXT,
                 };
                 Err(msg.to_string())
@@ -815,7 +840,8 @@ fn is_matching_text_reply(
 ///     accepted as either limit or generic **iff** `reply_to`
 ///     exactly matches `sent_msg_id`.
 ///   - Incoming, exact bot peer, newer msg_id, non-empty **known limit**
-///     text with `reply_to == None` → accepted as `LimitExceeded`.
+///     text (daily quota or length) with `reply_to == None` → accepted as
+///     `LimitExceeded`/`TextTooLong`.
 ///   - Reply-less generic text → rejected.
 ///   - Explicit wrong `reply_to` even for known limit text → rejected.
 ///   - Outgoing, wrong peer, stale msg_id, empty text → rejected.
@@ -849,8 +875,13 @@ fn is_synthesis_text_rejection(
         return true;
     }
 
-    // Without reply_to — only accept known limit text
-    if reply_to_msg_id.is_none() && classify_rejection(text) == RejectionKind::LimitExceeded {
+    // Without reply_to — only accept known limit texts (daily quota or length)
+    if reply_to_msg_id.is_none()
+        && matches!(
+            classify_rejection(text),
+            RejectionKind::LimitExceeded | RejectionKind::TextTooLong
+        )
+    {
         return true;
     }
 
@@ -2869,6 +2900,59 @@ mod tests {
         );
     }
 
+    // ── classify_rejection: length pattern (длина текста → превыша → символ) ──
+
+    const OBSERVED_TOO_LONG: &str =
+        "Длина текста 1350 символов превышает максимально возможные 500 символов.";
+
+    #[test]
+    fn classify_text_too_long_observed_bot_payload() {
+        // Точный наблюдаемый ответ @silero_voice_bot (2026-09-13).
+        assert_eq!(
+            classify_rejection(OBSERVED_TOO_LONG),
+            RejectionKind::TextTooLong
+        );
+    }
+
+    #[test]
+    fn classify_text_too_long_case_insensitive() {
+        assert_eq!(
+            classify_rejection(
+                "ДЛИНА ТЕКСТА 499 СИМВОЛОВ ПРЕВЫШАЕТ МАКСИМАЛЬНО ВОЗМОЖНЫЕ 500 СИМВОЛОВ."
+            ),
+            RejectionKind::TextTooLong
+        );
+    }
+
+    #[test]
+    fn classify_text_too_long_singular_number_form() {
+        // Единственное число «символ» и числа только после «превышает»:
+        // упорядоченность маркеров сохранена.
+        assert_eq!(
+            classify_rejection("Длина текста превышает максимально возможные 501 символ."),
+            RejectionKind::TextTooLong
+        );
+    }
+
+    #[test]
+    fn classify_text_too_long_requires_all_three_markers() {
+        // Нет «превыша».
+        assert_eq!(
+            classify_rejection("Длина текста 500 символов"),
+            RejectionKind::Generic
+        );
+        // Нет «длина текста»: старые шаблоны тоже не срабатывают (без «лимит»).
+        assert_eq!(
+            classify_rejection("текст превышает 500 символов"),
+            RejectionKind::Generic
+        );
+        // «символ» до «длина текста», после «превыша» маркера нет.
+        assert_eq!(
+            classify_rejection("символов длина текста превышает"),
+            RejectionKind::Generic
+        );
+    }
+
     // ── is_synthesis_text_rejection: reply-less and wrong-reply rules ──
 
     const NEW_LIMIT: &str = "Лимит на озвучку исчерпан. Через сутки можно попробовать снова.";
@@ -2886,6 +2970,27 @@ mod tests {
     #[test]
     fn text_rejection_rejects_wrong_reply_even_for_known_limit() {
         assert!(!rej(false, 43, Some(BOT_ID), Some(99), NEW_LIMIT));
+    }
+
+    #[test]
+    fn text_rejection_accepts_text_too_long_with_reply() {
+        assert!(rej(
+            false,
+            43,
+            Some(BOT_ID),
+            Some(SENT_ID),
+            OBSERVED_TOO_LONG
+        ));
+    }
+
+    #[test]
+    fn text_rejection_accepts_replyless_text_too_long() {
+        assert!(rej(false, 43, Some(BOT_ID), None, OBSERVED_TOO_LONG));
+    }
+
+    #[test]
+    fn text_rejection_rejects_wrong_reply_even_for_text_too_long() {
+        assert!(!rej(false, 43, Some(BOT_ID), Some(99), OBSERVED_TOO_LONG));
     }
 
     // ── is_matching_limits_response ────────────────────────────────────

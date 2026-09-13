@@ -344,21 +344,58 @@ async fn run_twitch_client_core<F, Fut>(
                             TwitchEvent::SendMessage(text) => {
                                 debug!(text_len = text.chars().count(), "SendMessage event received");
                                 if let Some(client) = twitch_client.clone() {
-                                    // Enqueue выполняется прямо в control loop, поэтому
-                                    // последовательные SendMessage попадают в outgoing queue
-                                    // в порядке их чтения (FIFO). Внутри enqueue — только
-                                    // короткие await mutex'ов; pacing и send completion не
+                                    // Общая политика длины Twitch (ROADMAP-106):
+                                    // событие и команда deliver_twitch_message
+                                    // планируют части одним планировщиком, поэтому
+                                    // ни один путь не отправляет сообщение сверх
+                                    // символьного или wire-байтового лимита.
+                                    // Enqueue выполняется прямо в control loop,
+                                    // поэтому последовательные части (и события)
+                                    // попадают в outgoing queue в порядке чтения
+                                    // (FIFO); внутри enqueue — только короткие
+                                    // await mutex'ов, pacing и send completion не
                                     // блокируют supervisor.
-                                    match client.enqueue(&text).await {
-                                        Ok(completion) => {
-                                            tokio::spawn(async move {
-                                                match completion.wait().await {
-                                                    Ok(()) => debug!("Message sent successfully"),
-                                                    Err(failure) => log_send_failure(&failure),
+                                    let clean =
+                                        crate::twitch::clean_irc_text(&text);
+                                    let channel =
+                                        client.channel_name().to_string();
+                                    match crate::twitch::plan_message_parts(
+                                        &clean, &channel,
+                                    ) {
+                                        Ok(parts) => {
+                                            for part in parts {
+                                                match client.enqueue(&part).await {
+                                                    Ok(completion) => {
+                                                        tokio::spawn(async move {
+                                                            match completion
+                                                                .wait()
+                                                                .await
+                                                            {
+                                                                Ok(()) => debug!(
+                                                                    "Message part sent successfully"
+                                                                ),
+                                                                Err(failure) => {
+                                                                    log_send_failure(&failure)
+                                                                }
+                                                            }
+                                                        });
+                                                    }
+                                                    Err(failure) => {
+                                                        log_send_failure(&failure)
+                                                    }
                                                 }
-                                            });
+                                            }
                                         }
-                                        Err(failure) => log_send_failure(&failure),
+                                        Err(plan_error) => {
+                                            // Слово длиннее лимита части: текст
+                                            // нельзя доставить без разрезания
+                                            // слова — сообщение отбрасывается
+                                            // целиком (без частичной отправки).
+                                            error!(
+                                                error = ?plan_error,
+                                                "Twitch message word exceeds the delivery limit; message dropped"
+                                            );
+                                        }
                                     }
                                 } else {
                                     debug!("Cannot send message - no active client");

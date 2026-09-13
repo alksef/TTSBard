@@ -189,7 +189,7 @@ describe('useTwitch test message delivery', () => {
   function mockStatus(status: unknown) {
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === 'get_twitch_status') return status
-      if (cmd === 'deliver_twitch_message') return { status: 'sent' }
+      if (cmd === 'deliver_twitch_message') return { status: 'sent', parts: 1 }
       return undefined
     })
   }
@@ -267,7 +267,53 @@ describe('useTwitch test message delivery', () => {
 
     await twitch.sendTestMessage()
 
-    expect(mockShowError).toHaveBeenCalledWith('Сообщение Twitch превышает лимит 500 символов')
+    expect(mockShowError).toHaveBeenCalledWith('Слово в сообщении Twitch не помещается в лимит доставки')
+    // Ошибка не очищает введённый текст.
+    expect(twitch.testMessage.value).toBe('длинный текст')
+  })
+
+  it('reports a multi-part delivery through the panel toast', async () => {
+    const twitch = await mountWithStatus({ Connected: null })
+    twitch.testMessage.value = 'длинный текст'
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_twitch_status') return { Connected: null }
+      if (cmd === 'deliver_twitch_message') return { status: 'sent', parts: 3 }
+      return undefined
+    })
+
+    await twitch.sendTestMessage()
+
+    // Многочастная доставка не молчалива: реальный исход виден пользователю
+    // тем же panel-local toast, что и у действий настроек.
+    expect(twitch.errorMessage.value).toBe(
+      'Передано Twitch-клиенту: 3 сообщений; появление в чате не подтверждается',
+    )
+    expect(twitch.errorMessageType.value).toBe('success')
+    expect(mockShowError).not.toHaveBeenCalled()
+    expect(twitch.isSendingTest.value).toBe(false)
+  })
+
+  it('routes a partial delivery error to the shared toast', async () => {
+    const twitch = await mountWithStatus({ Connected: null })
+    twitch.testMessage.value = 'длинный текст'
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_twitch_status') return { Connected: null }
+      if (cmd === 'deliver_twitch_message') {
+        throw {
+          code: 'twitch.partial_delivery',
+          message: 'Twitch delivery stopped at message 2 of 3: Twitch not connected',
+          retryable: false,
+        }
+      }
+      return undefined
+    })
+
+    await twitch.sendTestMessage()
+
+    expect(mockShowError).toHaveBeenCalledWith(
+      'Доставка Twitch остановлена: доставлены не все части сообщения',
+    )
+    expect(twitch.isSendingTest.value).toBe(false)
     // Ошибка не очищает введённый текст.
     expect(twitch.testMessage.value).toBe('длинный текст')
   })

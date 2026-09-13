@@ -1,8 +1,14 @@
 mod client;
+mod limits;
 pub mod service;
 
-pub(crate) use client::{clean_irc_text, MAX_MESSAGE_BYTES, OUTGOING_QUEUE_CAPACITY};
+pub(crate) use client::{clean_irc_text, OUTGOING_QUEUE_CAPACITY};
 pub use client::{SendFailure, TwitchClient, TwitchStatus};
+pub(crate) use limits::{plan_message_parts, PlanError, MAX_MESSAGE_CHARS};
+/// Тестам командного слоя нужны символы планировщика для проверки инвариантов
+/// частей; в production-коде их использует только сам `twitch::limits`.
+#[cfg(test)]
+pub(crate) use limits::{wire_frame_len, MAX_WIRE_BYTES};
 pub use service::TwitchService;
 
 use serde::{Deserialize, Serialize};

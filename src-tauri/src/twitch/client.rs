@@ -17,10 +17,6 @@ const SEND_TIMEOUT: Duration = Duration::from_secs(10);
 /// Ёмкость исходящей очереди (сообщений). Переполнение => SendFailure::QueueFull.
 pub(crate) const OUTGOING_QUEUE_CAPACITY: usize = 20;
 
-/// Максимальная длина исходящего сообщения в байтах после очистки (IRC wire
-/// budget). Лимит в символах и разбиение длинного текста — политика ROADMAP-106.
-pub(crate) const MAX_MESSAGE_BYTES: usize = 500;
-
 /// Минимальный интервал между отправками: 20 сообщений / 30 сек для обычного
 /// аккаунта; удовлетворяет и лимиту 1 сообщение/сек.
 const MIN_SEND_INTERVAL: Duration = Duration::from_millis(1500);
@@ -85,22 +81,6 @@ pub(crate) fn clean_irc_text(text: &str) -> String {
         .collect();
 
     clean.trim().to_string()
-}
-
-/// Sanitize text for IRC to prevent injection attacks
-fn sanitize_irc_text(text: &str) -> String {
-    let clean = clean_irc_text(text);
-    if clean.len() > MAX_MESSAGE_BYTES {
-        // Срез по байтовому индексу: отступаем к границе символа, иначе
-        // мультибайтный текст паникует на не-char-boundary.
-        let mut end = MAX_MESSAGE_BYTES;
-        while !clean.is_char_boundary(end) {
-            end -= 1;
-        }
-        clean[..end].trim().to_string()
-    } else {
-        clean
-    }
 }
 
 /// StaticLoginCredentials ожидает токен без префикса `oauth:`.
@@ -308,6 +288,13 @@ impl TwitchClient {
         self
     }
 
+    /// Имя целевого канала из настроек. Регистр не нормализован (JOIN использует
+    /// нижний регистр), но для планирования частей значима только длина в байтах,
+    /// которая от регистра не зависит (см. `twitch::limits`).
+    pub(crate) fn channel_name(&self) -> &str {
+        &self.settings.channel
+    }
+
     /// Запускает подключение: создаёт библиотечный клиент, входит в один канал
     /// и запускает consumer-задачу, отображающую события в статус.
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
@@ -473,7 +460,7 @@ impl TwitchClient {
             return Err(SendFailure::NotConnected);
         }
 
-        let clean_text = sanitize_irc_text(text);
+        let clean_text = clean_irc_text(text);
         debug!(
             text_len = clean_text.chars().count(),
             "Queuing outgoing message"
@@ -537,7 +524,7 @@ mod tests {
     #[test]
     fn test_irc_crlf_injection_prevention() {
         // CRLF injection
-        let result = sanitize_irc_text("Hello\r\nPRIVMSG #test :injected");
+        let result = clean_irc_text("Hello\r\nPRIVMSG #test :injected");
         assert_eq!(result, "Hello PRIVMSG #test :injected");
         assert!(!result.contains('\r'));
         assert!(!result.contains('\n'));
@@ -546,45 +533,48 @@ mod tests {
     #[test]
     fn test_irc_null_byte_prevention() {
         // Null byte
-        let result = sanitize_irc_text("Test\0Null");
+        let result = clean_irc_text("Test\0Null");
         assert_eq!(result, "TestNull");
     }
 
     #[test]
-    fn test_irc_length_limit() {
-        // Length limit
+    fn enqueue_cleaning_does_not_truncate_long_text() {
+        // Политика длины живёт в планировщике (twitch::limits), транспорт
+        // только чистит: длинный текст не обрезается молча (ROADMAP-106).
         let long = "a".repeat(600);
-        let result = sanitize_irc_text(&long);
-        assert!(result.len() <= 500);
+        assert_eq!(clean_irc_text(&long).len(), 600);
+        let cyr = "я".repeat(600);
+        assert_eq!(clean_irc_text(&cyr).chars().count(), 600);
     }
 
     #[test]
-    fn test_irc_length_limit_multibyte_no_panic() {
-        let long = "я".repeat(600); // 1200 байт, все границы чётные
-        let result = sanitize_irc_text(&long);
-        assert!(result.len() <= 500);
-        assert_eq!(result.chars().count(), result.len() / 2);
+    fn channel_name_returns_settings_channel() {
+        let client = TwitchClient::new(TwitchSettings {
+            channel: "TestChannel".to_string(),
+            ..TwitchSettings::default()
+        });
+        assert_eq!(client.channel_name(), "TestChannel");
     }
 
     #[test]
     fn test_irc_control_characters_removed() {
         // Control characters
-        let result = sanitize_irc_text("Test\x01\x02Text");
+        let result = clean_irc_text("Test\x01\x02Text");
         assert_eq!(result, "TestText");
     }
 
     #[test]
     fn test_irc_unicode_support() {
         // Unicode / Cyrillic support
-        let result = sanitize_irc_text("тест");
+        let result = clean_irc_text("тест");
         assert_eq!(result, "тест");
         assert!(!result.is_empty());
 
-        let result2 = sanitize_irc_text("Hello тест 世界");
+        let result2 = clean_irc_text("Hello тест 世界");
         assert_eq!(result2, "Hello тест 世界");
 
         // Mixed with control characters
-        let result3 = sanitize_irc_text("тест\r\nпривет");
+        let result3 = clean_irc_text("тест\r\nпривет");
         assert_eq!(result3, "тест привет");
         assert!(!result3.contains('\r'));
         assert!(!result3.contains('\n'));

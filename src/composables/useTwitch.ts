@@ -199,8 +199,14 @@ export function useTwitch() {
     const request = ++testSendRequest
     isSendingTest.value = true
     try {
-      await deliverTwitchMessage(testMessage.value)
+      const result = await deliverTwitchMessage(testMessage.value)
       if (request !== testSendRequest) return
+      // Одночастная доставка молчалива; если текст ушёл несколькими
+      // сообщениями (ROADMAP-106), пользователь должен видеть реальный
+      // исход — тот же panel-local toast, что и у действий настроек.
+      if (result.parts > 1) {
+        showError(t('twitch.test.sent_parts', { count: result.parts }), 'success')
+      }
     } catch (e) {
       if (request !== testSendRequest) return
       showGlobalError(presentCommandError(e, t('twitch.test.error')))
