@@ -7,6 +7,7 @@ export const TWITCH_ERROR_META = {
   'twitch.empty_text': { retryable: false },
   'twitch.unavailable': { retryable: true },
   'twitch.send_failed': { retryable: true },
+  'twitch.queue_full': { retryable: true },
 } as const
 
 export type TwitchErrorCode = keyof typeof TWITCH_ERROR_META
@@ -17,8 +18,12 @@ export interface TwitchCommandErrorDto {
   retryable: boolean
 }
 
+/**
+ * `sent` means the message was handed to the local IRC connection,
+ * NOT that it is confirmed visible in the chat.
+ */
 export interface DeliveredTwitchMessage {
-  status: 'delivered'
+  status: 'sent'
 }
 
 export function isKnownTwitchErrorCode(code: string): code is TwitchErrorCode {

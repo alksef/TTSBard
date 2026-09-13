@@ -1008,6 +1008,7 @@
     "errors.twitch.empty_text": "Twitch message must not be empty",
     "errors.twitch.unavailable": "Twitch is not connected",
     "errors.twitch.send_failed": "Failed to send Twitch message",
+    "errors.twitch.queue_full": "Twitch outgoing queue is full",
     "errors.input_server.blank_text": "Text is blank",
     "errors.input_server.inbox_full": "Incoming inbox is full",
     "errors.input_server.unknown_item": "Unknown item id",

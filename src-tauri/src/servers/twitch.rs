@@ -6,15 +6,16 @@
 use crate::config::TwitchSettings as ConfigTwitchSettings;
 use crate::events::{TwitchConnectionStatus, TwitchEvent};
 use crate::state::AppState;
-use crate::twitch::{TwitchClient, TwitchStatus};
+use crate::twitch::{SendFailure, TwitchClient, TwitchStatus, OUTGOING_QUEUE_CAPACITY};
 use std::future::Future;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
+use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::broadcast::Receiver;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 const RECONNECT_BASE_DELAY_MS: u64 = 500;
 const RECONNECT_MAX_DELAY_MS: u64 = 30_000;
@@ -34,6 +35,40 @@ fn bound_reconnect_jitter_ms(jitter_ms: i64) -> u64 {
 
 fn is_reconnect_retryable(status: &TwitchStatus) -> bool {
     matches!(status, TwitchStatus::TransportFailure(_))
+}
+
+/// Решение по ошибке чтения broadcast-канала управляющих событий:
+/// переполнение (Lagged) теряет только пропущенные события и продолжает loop,
+/// закрытый канал (Closed) окончательно завершает supervisor.
+#[derive(Debug, PartialEq, Eq)]
+enum RecvErrorAction {
+    Continue(u64),
+    Break,
+}
+
+fn classify_recv_error(err: RecvError) -> RecvErrorAction {
+    match err {
+        RecvError::Lagged(skipped) => RecvErrorAction::Continue(skipped),
+        RecvError::Closed => RecvErrorAction::Break,
+    }
+}
+
+/// Логирует typed-отказ отправки безопасным сообщением (без текста/token).
+fn log_send_failure(failure: &SendFailure) {
+    match failure {
+        SendFailure::QueueFull => {
+            warn!(
+                capacity = OUTGOING_QUEUE_CAPACITY,
+                "Twitch outgoing queue full; message dropped"
+            );
+        }
+        SendFailure::NotConnected => {
+            debug!("Cannot send message - not connected");
+        }
+        SendFailure::Send(e) => {
+            error!(error = %e, "Failed to send message");
+        }
+    }
 }
 
 struct PendingAttempt {
@@ -165,7 +200,12 @@ async fn run_twitch_client_core<F, Fut>(
                         failed_client.stop().await;
 
                         let delay = schedule_retry(&mut retry_deadline, &mut retry_attempt);
-                        info!(?delay, attempt = retry_attempt, "Scheduling Twitch reconnect");
+                        info!(
+                            ?delay,
+                            attempt = retry_attempt,
+                            generation = attempt_generation,
+                            "Scheduling Twitch reconnect"
+                        );
                         last_status = TwitchConnectionStatus::Connecting;
                         update_status(last_status.clone());
                         continue;
@@ -303,20 +343,22 @@ async fn run_twitch_client_core<F, Fut>(
                             }
                             TwitchEvent::SendMessage(text) => {
                                 debug!(text_len = text.chars().count(), "SendMessage event received");
-                                if let Some(client) = &twitch_client {
-                                    let send_result = client
-                                        .send_message(&text)
-                                        .await
-                                        .map_err(|e| e.to_string());
-                                    match send_result {
-                                        Ok(_) => debug!("Message sent successfully"),
-                                        Err(error_message) => {
-                                            error!(error = %error_message, "Failed to send message");
-                                            if !is_reconnect_retryable(&client.status().await) {
-                                                last_status = TwitchConnectionStatus::Error(error_message);
-                                                update_status(last_status.clone());
-                                            }
+                                if let Some(client) = twitch_client.clone() {
+                                    // Enqueue выполняется прямо в control loop, поэтому
+                                    // последовательные SendMessage попадают в outgoing queue
+                                    // в порядке их чтения (FIFO). Внутри enqueue — только
+                                    // короткие await mutex'ов; pacing и send completion не
+                                    // блокируют supervisor.
+                                    match client.enqueue(&text).await {
+                                        Ok(completion) => {
+                                            tokio::spawn(async move {
+                                                match completion.wait().await {
+                                                    Ok(()) => debug!("Message sent successfully"),
+                                                    Err(failure) => log_send_failure(&failure),
+                                                }
+                                            });
                                         }
+                                        Err(failure) => log_send_failure(&failure),
                                     }
                                 } else {
                                     debug!("Cannot send message - no active client");
@@ -324,10 +366,15 @@ async fn run_twitch_client_core<F, Fut>(
                             }
                         }
                     }
-                    Err(e) => {
-                        error!(error = %e, "Event channel error");
-                        break;
-                    }
+                    Err(e) => match classify_recv_error(e) {
+                        RecvErrorAction::Continue(skipped) => {
+                            warn!(skipped, "Twitch event receiver lagged; dropped events");
+                        }
+                        RecvErrorAction::Break => {
+                            error!("Twitch event channel closed");
+                            break;
+                        }
+                    },
                 }
             }
             res = async { (&mut pending.as_mut().unwrap().handle).await }, if pending.is_some() => {
@@ -376,7 +423,12 @@ async fn run_twitch_client_core<F, Fut>(
                     Err(e) => {
                         error!(error = %e, "Twitch reconnect attempt failed");
                         let delay = schedule_retry(&mut retry_deadline, &mut retry_attempt);
-                        info!(?delay, attempt = retry_attempt, "Scheduling next Twitch reconnect");
+                        info!(
+                            ?delay,
+                            attempt = retry_attempt,
+                            generation = attempt_generation,
+                            "Scheduling next Twitch reconnect"
+                        );
                     }
                 }
             }
@@ -387,8 +439,8 @@ async fn run_twitch_client_core<F, Fut>(
 #[cfg(test)]
 mod tests {
     use super::{
-        bound_reconnect_jitter_ms, is_reconnect_retryable, reconnect_base_delay_ms,
-        run_twitch_client_core,
+        bound_reconnect_jitter_ms, classify_recv_error, is_reconnect_retryable,
+        reconnect_base_delay_ms, run_twitch_client_core, RecvErrorAction,
     };
     use crate::events::{TwitchConnectionStatus, TwitchEvent};
     use crate::state::AppState;
@@ -955,5 +1007,53 @@ mod tests {
         assert!(!is_reconnect_retryable(&TwitchStatus::Disconnected));
         assert!(!is_reconnect_retryable(&TwitchStatus::Connecting));
         assert!(!is_reconnect_retryable(&TwitchStatus::Connected));
+    }
+
+    #[test]
+    fn recv_error_closed_breaks_loop() {
+        assert_eq!(
+            classify_recv_error(tokio::sync::broadcast::error::RecvError::Closed),
+            RecvErrorAction::Break
+        );
+    }
+
+    #[test]
+    fn recv_error_lagged_continues_loop_with_skipped_count() {
+        assert_eq!(
+            classify_recv_error(tokio::sync::broadcast::error::RecvError::Lagged(3)),
+            RecvErrorAction::Continue(3)
+        );
+    }
+
+    #[tokio::test]
+    async fn broadcast_receiver_recovers_after_lag() {
+        let (tx, mut rx) = broadcast::channel::<TwitchEvent>(1);
+
+        // Переполняем канал малой ёмкости, пока receiver не читает: события
+        // перезаписываются и следующий recv обязан сообщить о потере, а не
+        // вернуть закрытие канала.
+        tx.send(TwitchEvent::Stop).unwrap();
+        tx.send(TwitchEvent::Stop).unwrap();
+        tx.send(TwitchEvent::SendMessage("latest".to_string()))
+            .unwrap();
+
+        match rx.recv().await {
+            Err(e) => match classify_recv_error(e) {
+                RecvErrorAction::Continue(skipped) => {
+                    assert!(skipped > 0, "lag must report skipped events");
+                }
+                RecvErrorAction::Break => panic!("lag must not be classified as Break"),
+            },
+            Ok(_) => panic!("receiver must observe lag after overflow"),
+        }
+
+        let next = rx
+            .recv()
+            .await
+            .expect("receiver must recover and receive the next event after lag");
+        match next {
+            TwitchEvent::SendMessage(text) => assert_eq!(text, "latest"),
+            other => panic!("next event after lag must be the latest send, got {other:?}"),
+        }
     }
 }

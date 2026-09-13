@@ -1008,6 +1008,7 @@
     "errors.twitch.empty_text": "Сообщение Twitch не должно быть пустым",
     "errors.twitch.unavailable": "Twitch не подключён",
     "errors.twitch.send_failed": "Не удалось отправить сообщение Twitch",
+    "errors.twitch.queue_full": "Очередь отправки Twitch переполнена",
     "errors.input_server.blank_text": "Пустой текст",
     "errors.input_server.inbox_full": "Входящая очередь заполнена",
     "errors.input_server.unknown_item": "Неизвестный идентификатор",

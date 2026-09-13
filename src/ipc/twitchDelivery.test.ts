@@ -12,10 +12,10 @@ describe('deliverTwitchMessage IPC contract', () => {
     mockInvoke.mockReset()
   })
 
-  it('uses the stable command name and preserves the delivered shape', async () => {
-    mockInvoke.mockResolvedValue({ status: 'delivered' })
+  it('uses the stable command name and preserves the sent shape', async () => {
+    mockInvoke.mockResolvedValue({ status: 'sent' })
 
-    await expect(deliverTwitchMessage('hello')).resolves.toEqual({ status: 'delivered' })
+    await expect(deliverTwitchMessage('hello')).resolves.toEqual({ status: 'sent' })
     expect(mockInvoke).toHaveBeenCalledWith(DELIVER_TWITCH_MESSAGE_COMMAND, { text: 'hello' })
   })
 

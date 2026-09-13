@@ -23,6 +23,7 @@ pub mod twitch_delivery {
         pub const EMPTY_TEXT: &str = "twitch.empty_text";
         pub const UNAVAILABLE: &str = "twitch.unavailable";
         pub const SEND_FAILED: &str = "twitch.send_failed";
+        pub const QUEUE_FULL: &str = "twitch.queue_full";
     }
 }
 
@@ -82,6 +83,10 @@ pub const TWITCH_DELIVERY_ERRORS: &[TwitchDeliveryErrorDef] = &[
     },
     TwitchDeliveryErrorDef {
         code: twitch_delivery::error_code::SEND_FAILED,
+        retryable: true,
+    },
+    TwitchDeliveryErrorDef {
+        code: twitch_delivery::error_code::QUEUE_FULL,
         retryable: true,
     },
 ];
@@ -240,8 +245,8 @@ mod tests {
         assert_eq!(codes.len(), sorted.len(), "duplicate error codes");
         assert_eq!(
             codes.len(),
-            3,
-            "expected exactly 3 deliver_twitch_message error codes"
+            4,
+            "expected exactly 4 deliver_twitch_message error codes"
         );
     }
 
@@ -257,6 +262,7 @@ mod tests {
         assert!(!def(twitch_delivery::error_code::EMPTY_TEXT).retryable);
         assert!(def(twitch_delivery::error_code::UNAVAILABLE).retryable);
         assert!(def(twitch_delivery::error_code::SEND_FAILED).retryable);
+        assert!(def(twitch_delivery::error_code::QUEUE_FULL).retryable);
     }
 
     #[test]

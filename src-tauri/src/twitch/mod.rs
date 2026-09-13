@@ -1,7 +1,8 @@
 mod client;
 pub mod service;
 
-pub use client::{TwitchClient, TwitchStatus};
+pub(crate) use client::OUTGOING_QUEUE_CAPACITY;
+pub use client::{SendFailure, TwitchClient, TwitchStatus};
 pub use service::TwitchService;
 
 use serde::{Deserialize, Serialize};
@@ -16,17 +17,6 @@ pub struct TwitchSettings {
     pub token: String,
     pub channel: String,
     pub start_on_boot: bool,
-}
-
-impl TwitchSettings {
-    /// Возвращает токен с префиксом oauth: для IRC
-    pub fn irc_token(&self) -> String {
-        if self.token.starts_with("oauth:") {
-            self.token.clone()
-        } else {
-            format!("oauth:{}", self.token)
-        }
-    }
 }
 
 // Convert from config::settings::TwitchSettings

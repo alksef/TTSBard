@@ -91,9 +91,8 @@ grammers-tl-types = { git = "https://github.com/alksef/grammers-mtproxy", branch
 # Time utilities
 chrono = "0.4"
 
-# Twitch IRC TLS
-tokio-native-tls = "0.3"
-native-tls = "0.2"
+# Twitch IRC client (ROADMAP-104): transport + protocol lifecycle owned by the library
+twitch-irc = { version = "=6.1.1", default-features = false, features = ["transport-tcp", "transport-tcp-native-tls"] }
 
 # Thread safety and rate limiting
 parking_lot = "0.12"

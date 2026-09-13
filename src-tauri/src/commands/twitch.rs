@@ -2,6 +2,7 @@ use crate::config::{SettingsManager, TwitchSettings};
 use crate::events::TwitchConnectionStatus;
 use crate::ipc::{self, twitch_delivery, CommandError};
 use crate::state::AppState;
+use crate::twitch::SendFailure;
 use serde::Serialize;
 use tauri::{Manager, State};
 
@@ -163,6 +164,9 @@ pub struct DeliveredTwitchMessage {
 ///
 /// This is the tracked Twitch-only route: it does not create a speech job,
 /// does not write to phrase history and does not trigger WebView.
+///
+/// A `sent` result means the message was handed to the local IRC connection,
+/// NOT that it is confirmed visible in the chat.
 #[tauri::command]
 pub async fn deliver_twitch_message(
     state: State<'_, AppState>,
@@ -199,14 +203,25 @@ pub async fn deliver_twitch_message(
 
     let client = client.expect("client presence checked above");
     match client.send_message(&text).await {
-        Ok(()) => Ok(DeliveredTwitchMessage {
-            status: "delivered",
-        }),
-        Err(e) => Err(CommandError::new(
-            twitch_delivery::error_code::SEND_FAILED,
-            e.to_string(),
-            ipc::twitch_delivery_error_code_to_retryable(twitch_delivery::error_code::SEND_FAILED),
-        )),
+        Ok(()) => Ok(DeliveredTwitchMessage { status: "sent" }),
+        Err(failure) => {
+            let (code, message) = match &failure {
+                SendFailure::NotConnected => (
+                    twitch_delivery::error_code::UNAVAILABLE,
+                    "Twitch is not connected".to_string(),
+                ),
+                SendFailure::QueueFull => (
+                    twitch_delivery::error_code::QUEUE_FULL,
+                    "Twitch outgoing queue is full".to_string(),
+                ),
+                SendFailure::Send(e) => (twitch_delivery::error_code::SEND_FAILED, e.clone()),
+            };
+            Err(CommandError::new(
+                code,
+                message,
+                ipc::twitch_delivery_error_code_to_retryable(code),
+            ))
+        }
     }
 }
 
