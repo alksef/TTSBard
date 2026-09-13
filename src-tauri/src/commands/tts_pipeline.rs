@@ -872,7 +872,10 @@ mod tests {
         let input = r"У меня 5 \fruit";
         let delivery = resolve_delivery_text(&snapshot, input).unwrap();
         assert_eq!(delivery, "У меня 5 яблок");
-        assert!(delivery.contains('5'), "digits must stay in delivery: {delivery}");
+        assert!(
+            delivery.contains('5'),
+            "digits must stay in delivery: {delivery}"
+        );
         assert!(!delivery.contains("пять"));
 
         let tts = preprocess_text_with_preprocessor(input, Some(&preprocessor));
@@ -927,12 +930,18 @@ mod tests {
         assert_eq!(resolve_delivery_text(&both, r"!!\fruit").unwrap(), "яблок");
 
         let skip_twitch = snapshot_with_preprocessor(true, false, false, preprocessor.clone());
-        assert_eq!(resolve_delivery_text(&skip_twitch, r"!\fruit").unwrap(), "яблок");
+        assert_eq!(
+            resolve_delivery_text(&skip_twitch, r"!\fruit").unwrap(),
+            "яблок"
+        );
 
         let mut incoming = snapshot_with_preprocessor(false, false, false, preprocessor.clone());
         incoming.source = SubmissionSource::Server;
         incoming.delivery = DeliveryPolicy::AudioOnly;
-        assert_eq!(resolve_delivery_text(&incoming, r"!\fruit").unwrap(), "!яблок");
+        assert_eq!(
+            resolve_delivery_text(&incoming, r"!\fruit").unwrap(),
+            "!яблок"
+        );
     }
 
     /// ai_correct_text_with_settings with ai_enabled=false returns unchanged text.
