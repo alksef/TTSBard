@@ -1,7 +1,7 @@
 mod client;
 pub mod service;
 
-pub(crate) use client::OUTGOING_QUEUE_CAPACITY;
+pub(crate) use client::{clean_irc_text, MAX_MESSAGE_BYTES, OUTGOING_QUEUE_CAPACITY};
 pub use client::{SendFailure, TwitchClient, TwitchStatus};
 pub use service::TwitchService;
 

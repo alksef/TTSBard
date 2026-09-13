@@ -8,6 +8,7 @@ export const TWITCH_ERROR_META = {
   'twitch.unavailable': { retryable: true },
   'twitch.send_failed': { retryable: true },
   'twitch.queue_full': { retryable: true },
+  'twitch.too_long': { retryable: false },
 } as const
 
 export type TwitchErrorCode = keyof typeof TWITCH_ERROR_META

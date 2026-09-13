@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
 import { IpcCommandError } from './commandError'
-import { DELIVER_TWITCH_MESSAGE_COMMAND, deliverTwitchMessage } from './twitchDelivery'
+import { DELIVER_TWITCH_MESSAGE_COMMAND, deliverTwitchMessage, isKnownTwitchErrorCode } from './twitchDelivery'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 
@@ -44,5 +44,10 @@ describe('deliverTwitchMessage IPC contract', () => {
       message: 'backend unavailable',
       retryable: false,
     })
+  })
+
+  it('knows the too-long typed error code', () => {
+    expect(isKnownTwitchErrorCode('twitch.too_long')).toBe(true)
+    expect(isKnownTwitchErrorCode('twitch.nope')).toBe(false)
   })
 })

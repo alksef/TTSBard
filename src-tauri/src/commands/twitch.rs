@@ -137,15 +137,6 @@ pub async fn test_twitch_connection(settings: TwitchSettings) -> Result<String, 
     Ok("Настройки валидны. Попробуйте подключиться.".to_string())
 }
 
-/// Отправить тестовое сообщение в Twitch чат
-#[tauri::command]
-pub async fn send_twitch_test_message(state: State<'_, AppState>) -> Result<String, String> {
-    state.send_twitch_event(crate::events::TwitchEvent::SendMessage(
-        "test message".to_string(),
-    ));
-    Ok("test_sent".to_string())
-}
-
 /// Перезапустить Twitch клиент
 #[tauri::command]
 pub async fn restart_twitch(state: State<'_, AppState>) -> Result<String, String> {
@@ -160,6 +151,35 @@ pub struct DeliveredTwitchMessage {
     pub status: &'static str,
 }
 
+/// Валидирует текст доставки Twitch: возвращает очищенный текст либо
+/// typed-отказ. Длина измеряется в байтах после очистки — это фактический
+/// лимит доставки (см. `sanitize_irc_text` в twitch::client); политика
+/// символов и разбиения длинного текста — ROADMAP-106, здесь только отказ
+/// вместо молчаливой обрезки.
+fn validate_delivery_text(text: &str) -> Result<String, CommandError> {
+    let clean = crate::twitch::clean_irc_text(text);
+    let code = if clean.is_empty() {
+        twitch_delivery::error_code::EMPTY_TEXT
+    } else if clean.len() > crate::twitch::MAX_MESSAGE_BYTES {
+        twitch_delivery::error_code::TOO_LONG
+    } else {
+        return Ok(clean);
+    };
+    let message = if code == twitch_delivery::error_code::EMPTY_TEXT {
+        "Twitch message must not be empty".to_string()
+    } else {
+        format!(
+            "Twitch message exceeds {} bytes",
+            crate::twitch::MAX_MESSAGE_BYTES
+        )
+    };
+    Err(CommandError::new(
+        code,
+        message,
+        ipc::twitch_delivery_error_code_to_retryable(code),
+    ))
+}
+
 /// Deliver a pre-processed message directly to the connected Twitch client.
 ///
 /// This is the tracked Twitch-only route: it does not create a speech job,
@@ -172,13 +192,7 @@ pub async fn deliver_twitch_message(
     state: State<'_, AppState>,
     text: String,
 ) -> Result<DeliveredTwitchMessage, CommandError> {
-    if text.trim().is_empty() {
-        return Err(CommandError::new(
-            twitch_delivery::error_code::EMPTY_TEXT,
-            "Twitch message must not be empty".to_string(),
-            ipc::twitch_delivery_error_code_to_retryable(twitch_delivery::error_code::EMPTY_TEXT),
-        ));
-    }
+    let clean_text = validate_delivery_text(&text)?;
 
     let settings_enabled = {
         let settings = state.twitch.settings.read().await;
@@ -202,7 +216,7 @@ pub async fn deliver_twitch_message(
     }
 
     let client = client.expect("client presence checked above");
-    match client.send_message(&text).await {
+    match client.send_message(&clean_text).await {
         Ok(()) => Ok(DeliveredTwitchMessage { status: "sent" }),
         Err(failure) => {
             let (code, message) = match &failure {
@@ -235,5 +249,45 @@ mod tests {
             twitch_delivery::DELIVER_COMMAND,
             stringify!(deliver_twitch_message)
         );
+    }
+
+    #[test]
+    fn delivery_validation_rejects_empty_and_whitespace_text() {
+        for text in ["", "   ", "\t\r\n", "\x01\x02 "] {
+            let err = validate_delivery_text(text).unwrap_err();
+            assert_eq!(err.code, "twitch.empty_text");
+            assert!(!err.retryable);
+        }
+    }
+
+    #[test]
+    fn delivery_validation_preserves_user_unicode_text() {
+        let clean = validate_delivery_text("  привет 🌑 世界  ").unwrap();
+        assert_eq!(clean, "привет 🌑 世界");
+    }
+
+    #[test]
+    fn delivery_validation_accepts_exactly_max_bytes() {
+        // 250 кириллических символов = ровно 500 байт.
+        let text = "я".repeat(250);
+        let clean = validate_delivery_text(&text).unwrap();
+        assert_eq!(clean.len(), crate::twitch::MAX_MESSAGE_BYTES);
+    }
+
+    #[test]
+    fn delivery_validation_rejects_over_limit_with_typed_code() {
+        // 251 кириллический символ = 502 байта: отказ вместо молчаливой обрезки.
+        let text = "я".repeat(251);
+        let err = validate_delivery_text(&text).unwrap_err();
+        assert_eq!(err.code, "twitch.too_long");
+        assert!(!err.retryable);
+        assert_eq!(err.message, "Twitch message exceeds 500 bytes");
+    }
+
+    #[test]
+    fn delivery_validation_measures_after_crlf_cleanup() {
+        // \r удаляется, \n становится пробелом: замер по очищенному тексту.
+        let clean = validate_delivery_text("a\r\nb").unwrap();
+        assert_eq!(clean, "a b");
     }
 }

@@ -4,7 +4,9 @@ import { listen } from '@tauri-apps/api/event'
 import { useTwitchSettings } from './useAppSettings'
 import { debugLog, debugError } from '../utils/debug'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
-import { normalizeCommandError } from '../ipc/commandError'
+import { normalizeCommandError, presentCommandError } from '../ipc/commandError'
+import { deliverTwitchMessage } from '../ipc/twitchDelivery'
+import { useErrorHandler } from './useErrorHandler'
 import { t } from '../i18n'
 
 export type TwitchStatus = 'Disconnected' | 'Connecting' | 'Connected' | 'Error'
@@ -58,7 +60,6 @@ const TWITCH_ACTION_KEYS: Record<string, string> = {
   saved: 'twitch.action.saved',
   connecting: 'twitch.action.connecting',
   disconnected: 'twitch.action.disconnected',
-  test_sent: 'twitch.action.test_sent',
   restarting: 'twitch.action.restarting',
 }
 
@@ -81,6 +82,7 @@ function convertStatusFromRust(status: RustTwitchStatus): TwitchStatus {
 
 export function useTwitch() {
   const twitchSettingsFromComposable = useTwitchSettings()
+  const { showError: showGlobalError } = useErrorHandler()
 
   const settings = ref<TwitchSettings>({
     enabled: false,
@@ -98,6 +100,11 @@ export function useTwitch() {
   const showToken = ref(false)
 
   const isConnected = ref(false)
+
+  const testMessage = ref('')
+  const isSendingTest = ref(false)
+
+  let testSendRequest = 0
 
   function handleStatusChange(status: TwitchStatus) {
     currentStatus.value = status
@@ -185,12 +192,22 @@ export function useTwitch() {
   }
 
   async function sendTestMessage() {
+    if (isSendingTest.value) return
+    if (!testMessage.value.trim()) return
+    if (!isConnected.value) return
+
+    const request = ++testSendRequest
+    isSendingTest.value = true
     try {
-      const result = await invoke<string>('send_twitch_test_message')
-      showActionResult(result, 'info')
+      await deliverTwitchMessage(testMessage.value)
+      if (request !== testSendRequest) return
     } catch (e) {
-      const errorMsg = normalizeCommandError(e).message
-      showError(t('twitch.error.test', { detail: errorMsg }))
+      if (request !== testSendRequest) return
+      showGlobalError(presentCommandError(e, t('twitch.test.error')))
+    } finally {
+      if (request === testSendRequest) {
+        isSendingTest.value = false
+      }
     }
   }
 
@@ -216,6 +233,8 @@ export function useTwitch() {
   }, { immediate: true })
 
   onUnmounted(() => {
+    // Панель демонтирована: отправка в полёте не должна писать в state.
+    testSendRequest++
     listenerScope.dispose()
     if (errorTimeout !== null) {
       clearTimeout(errorTimeout)
@@ -234,6 +253,8 @@ export function useTwitch() {
     startTwitch,
     save,
     saveStartOnBoot,
+    testMessage,
+    isSendingTest,
     sendTestMessage,
     showError,
   }

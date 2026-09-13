@@ -505,7 +505,6 @@ pub fn run() {
             commands::twitch::get_twitch_settings,
             commands::twitch::save_twitch_settings,
             commands::twitch::test_twitch_connection,
-            commands::twitch::send_twitch_test_message,
             commands::twitch::deliver_twitch_message,
             commands::twitch::connect_twitch,
             commands::twitch::disconnect_twitch,

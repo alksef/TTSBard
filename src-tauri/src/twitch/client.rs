@@ -17,6 +17,10 @@ const SEND_TIMEOUT: Duration = Duration::from_secs(10);
 /// Ёмкость исходящей очереди (сообщений). Переполнение => SendFailure::QueueFull.
 pub(crate) const OUTGOING_QUEUE_CAPACITY: usize = 20;
 
+/// Максимальная длина исходящего сообщения в байтах после очистки (IRC wire
+/// budget). Лимит в символах и разбиение длинного текста — политика ROADMAP-106.
+pub(crate) const MAX_MESSAGE_BYTES: usize = 500;
+
 /// Минимальный интервал между отправками: 20 сообщений / 30 сек для обычного
 /// аккаунта; удовлетворяет и лимиту 1 сообщение/сек.
 const MIN_SEND_INTERVAL: Duration = Duration::from_millis(1500);
@@ -66,8 +70,11 @@ pub enum TwitchStatus {
     TransportFailure(String),
 }
 
-/// Sanitize text for IRC to prevent injection attacks
-fn sanitize_irc_text(text: &str) -> String {
+/// Очистка текста для IRC БЕЗ обрезки длины: удаление CRLF и control-символов
+/// (кроме пробела и таба) + trim. Командный слой использует её для валидации
+/// длины ДО отправки: превышение лимита становится typed-ошибкой, а не молчаливой
+/// обрезкой.
+pub(crate) fn clean_irc_text(text: &str) -> String {
     // Remove ALL CRLF characters first
     let clean = text.replace('\r', "").replace('\n', " ");
 
@@ -77,18 +84,22 @@ fn sanitize_irc_text(text: &str) -> String {
         .filter(|c| !c.is_control() || *c == ' ' || *c == '\t')
         .collect();
 
-    // Trim and limit to 500 chars BEFORE trimming
-    let clean = clean.trim();
-    if clean.len() > 500 {
+    clean.trim().to_string()
+}
+
+/// Sanitize text for IRC to prevent injection attacks
+fn sanitize_irc_text(text: &str) -> String {
+    let clean = clean_irc_text(text);
+    if clean.len() > MAX_MESSAGE_BYTES {
         // Срез по байтовому индексу: отступаем к границе символа, иначе
         // мультибайтный текст паникует на не-char-boundary.
-        let mut end = 500;
+        let mut end = MAX_MESSAGE_BYTES;
         while !clean.is_char_boundary(end) {
             end -= 1;
         }
         clean[..end].trim().to_string()
     } else {
-        clean.to_string()
+        clean
     }
 }
 
@@ -577,6 +588,24 @@ mod tests {
         assert_eq!(result3, "тест привет");
         assert!(!result3.contains('\r'));
         assert!(!result3.contains('\n'));
+    }
+
+    #[test]
+    fn clean_irc_text_trims_and_strips_control() {
+        assert_eq!(clean_irc_text("  hello\tworld  "), "hello\tworld");
+        assert_eq!(clean_irc_text("\r\n"), "");
+        assert_eq!(clean_irc_text("\x01\x02"), "");
+    }
+
+    #[test]
+    fn clean_irc_text_preserves_unicode() {
+        assert_eq!(clean_irc_text("привет 🌍"), "привет 🌍");
+    }
+
+    #[test]
+    fn clean_irc_text_does_not_truncate_long_text() {
+        let long = "a".repeat(600);
+        assert_eq!(clean_irc_text(&long).len(), 600);
     }
 
     #[test]

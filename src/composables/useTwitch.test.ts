@@ -9,11 +9,13 @@ const {
   listenMock,
   mockDebugLog,
   mockDebugError,
+  mockShowError,
 } = vi.hoisted(() => ({
   mockInvoke: vi.fn(),
   listenMock: vi.fn(async () => vi.fn()),
   mockDebugLog: vi.fn(),
   mockDebugError: vi.fn(),
+  mockShowError: vi.fn(),
 }))
 
 let capturedOnMountedCbs: Array<() => void> = []
@@ -44,6 +46,10 @@ vi.mock('../utils/debug', () => ({
 let mockTwitchSettingsRef = shallowRef<TwitchSettings | undefined>(undefined)
 vi.mock('./useAppSettings', () => ({
   useTwitchSettings: vi.fn(() => mockTwitchSettingsRef),
+}))
+
+vi.mock('./useErrorHandler', () => ({
+  useErrorHandler: () => ({ showError: mockShowError }),
 }))
 
 import { useTwitch } from './useTwitch'
@@ -129,12 +135,6 @@ describe('useTwitch action result localization', () => {
       trigger: async (twitch) => { await twitch.stopTwitch() },
       expected: { ru: 'Отключено от Twitch', en: 'Disconnected from Twitch' },
     },
-    {
-      name: 'sendTestMessage',
-      code: 'test_sent',
-      trigger: async (twitch) => { await twitch.sendTestMessage() },
-      expected: { ru: 'Тестовое сообщение отправлено', en: 'Test message sent' },
-    },
   ]
 
   for (const testCase of actionCases) {
@@ -174,5 +174,172 @@ describe('useTwitch action result localization', () => {
 
     expect(twitch.errorMessage.value).toContain('Twitch is not connected')
     expect(twitch.errorMessage.value).not.toContain('[object Object]')
+  })
+})
+
+describe('useTwitch test message delivery', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    capturedOnMountedCbs = []
+    capturedOnUnmountedCbs = []
+    mockTwitchSettingsRef.value = undefined
+    listenMock.mockImplementation(async () => vi.fn())
+  })
+
+  function mockStatus(status: unknown) {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_twitch_status') return status
+      if (cmd === 'deliver_twitch_message') return { status: 'sent' }
+      return undefined
+    })
+  }
+
+  async function mountWithStatus(status: unknown) {
+    mockStatus(status)
+    const composable = useTwitch()
+    const onMounted = capturedOnMountedCbs.shift()
+    if (onMounted) {
+      await onMounted()
+    }
+    return composable
+  }
+
+  it('sends the entered unicode text through the delivery command', async () => {
+    const twitch = await mountWithStatus({ Connected: null })
+    twitch.testMessage.value = 'привет 👋'
+
+    await twitch.sendTestMessage()
+
+    expect(mockInvoke).toHaveBeenCalledWith('deliver_twitch_message', { text: 'привет 👋' })
+    expect(mockShowError).not.toHaveBeenCalled()
+    expect(twitch.isSendingTest.value).toBe(false)
+  })
+
+  it('refuses whitespace-only input without invoking the command', async () => {
+    const twitch = await mountWithStatus({ Connected: null })
+    twitch.testMessage.value = '   '
+
+    await twitch.sendTestMessage()
+
+    expect(mockInvoke).not.toHaveBeenCalledWith('deliver_twitch_message', expect.anything())
+    expect(mockShowError).not.toHaveBeenCalled()
+  })
+
+  it('does not send or toast while disconnected', async () => {
+    const twitch = await mountWithStatus({ Disconnected: null })
+    twitch.testMessage.value = 'hi'
+
+    await twitch.sendTestMessage()
+
+    expect(mockInvoke).not.toHaveBeenCalledWith('deliver_twitch_message', expect.anything())
+    expect(mockShowError).not.toHaveBeenCalled()
+  })
+
+  it('routes a typed delivery error to the shared toast, not inline', async () => {
+    const twitch = await mountWithStatus({ Connected: null })
+    twitch.testMessage.value = 'hi'
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_twitch_status') return { Connected: null }
+      if (cmd === 'deliver_twitch_message') {
+        throw { code: 'twitch.unavailable', message: 'Twitch is not connected', retryable: true }
+      }
+      return undefined
+    })
+
+    await twitch.sendTestMessage()
+
+    expect(mockShowError).toHaveBeenCalledWith('Twitch не подключён')
+    expect(twitch.isSendingTest.value).toBe(false)
+    // Ошибка не очищает введённый текст.
+    expect(twitch.testMessage.value).toBe('hi')
+  })
+
+  it('maps the too-long typed error to its localized toast text', async () => {
+    const twitch = await mountWithStatus({ Connected: null })
+    twitch.testMessage.value = 'длинный текст'
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_twitch_status') return { Connected: null }
+      if (cmd === 'deliver_twitch_message') {
+        throw { code: 'twitch.too_long', message: 'Twitch message exceeds 500 bytes', retryable: false }
+      }
+      return undefined
+    })
+
+    await twitch.sendTestMessage()
+
+    expect(mockShowError).toHaveBeenCalledWith('Сообщение Twitch превышает лимит 500 символов')
+    // Ошибка не очищает введённый текст.
+    expect(twitch.testMessage.value).toBe('длинный текст')
+  })
+
+  it('ignores a second send while one is pending', async () => {
+    const twitch = await mountWithStatus({ Connected: null })
+    twitch.testMessage.value = 'hello'
+    let resolveSend: (value: { status: string }) => void = () => {}
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_twitch_status') return { Connected: null }
+      if (cmd === 'deliver_twitch_message') {
+        return new Promise((resolve) => { resolveSend = resolve })
+      }
+      return undefined
+    })
+
+    const first = twitch.sendTestMessage()
+    await twitch.sendTestMessage()
+
+    // Считаем только deliver-вызовы: get_twitch_status из onMounted попадает в ту же историю mockInvoke.
+    const deliverCalls = mockInvoke.mock.calls.filter((call) => call[0] === 'deliver_twitch_message')
+    expect(deliverCalls).toHaveLength(1)
+    expect(twitch.isSendingTest.value).toBe(true)
+
+    resolveSend({ status: 'sent' })
+    await first
+
+    expect(twitch.isSendingTest.value).toBe(false)
+    expect(mockShowError).not.toHaveBeenCalled()
+  })
+
+  it('leaves no stale toast after unmount during a pending send', async () => {
+    const twitch = await mountWithStatus({ Connected: null })
+    twitch.testMessage.value = 'hello'
+    let resolveSend: (value: { status: string }) => void = () => {}
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_twitch_status') return { Connected: null }
+      if (cmd === 'deliver_twitch_message') {
+        return new Promise((resolve) => { resolveSend = resolve })
+      }
+      return undefined
+    })
+
+    const pending = twitch.sendTestMessage()
+    const onUnmounted = capturedOnUnmountedCbs.shift()
+    if (onUnmounted) onUnmounted()
+
+    resolveSend({ status: 'sent' })
+    await pending
+
+    expect(mockShowError).not.toHaveBeenCalled()
+  })
+
+  it('does not toast a rejected send that settles after unmount', async () => {
+    const twitch = await mountWithStatus({ Connected: null })
+    twitch.testMessage.value = 'hello'
+    let rejectSend: (reason?: unknown) => void = () => {}
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_twitch_status') return { Connected: null }
+      if (cmd === 'deliver_twitch_message') {
+        return new Promise((_resolve, reject) => { rejectSend = reject })
+      }
+      return undefined
+    })
+
+    const pending = twitch.sendTestMessage()
+    const onUnmounted = capturedOnUnmountedCbs.shift()
+    if (onUnmounted) onUnmounted()
+
+    rejectSend({ code: 'twitch.unavailable', message: 'Twitch is not connected', retryable: true })
+    await pending
+
+    expect(mockShowError).not.toHaveBeenCalled()
   })
 })

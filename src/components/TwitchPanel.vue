@@ -15,6 +15,8 @@ const {
   startTwitch,
   save,
   saveStartOnBoot,
+  testMessage,
+  isSendingTest,
   sendTestMessage,
 } = useTwitch()
 </script>
@@ -109,13 +111,25 @@ const {
       </div>
 
       <div class="setting-row button-row">
+        <button @click="save" class="save-button-inline">{{ t('common.save') }}</button>
+      </div>
+    </section>
+
+    <section class="settings-section">
+      <h2>{{ t('twitch.test.title') }}</h2>
+      <div class="setting-row" style="margin-bottom: 8px;">
+        <input
+          type="text"
+          v-model="testMessage"
+          :placeholder="t('twitch.test.placeholder')"
+          class="test-input"
+          @keyup.enter="sendTestMessage"
+        />
         <button
           @click="sendTestMessage"
-          class="test-message-button"
-          :disabled="!isConnected"
-          :class="{ disabled: !isConnected }"
-        >{{ t('twitch.send_test') }}</button>
-        <button @click="save" class="save-button-inline">{{ t('common.save') }}</button>
+          class="test-button"
+          :disabled="!isConnected || !testMessage.trim() || isSendingTest"
+        >{{ isSendingTest ? t('twitch.test.sending') : t('twitch.test.send') }}</button>
       </div>
     </section>
 
@@ -336,8 +350,7 @@ h2 {
   border-top: 1px solid var(--color-border);
 }
 
-.save-button-inline,
-.test-message-button {
+.save-button-inline {
   padding: 0.6rem 1.2rem;
   border: none;
   border-radius: 10px;
@@ -356,23 +369,36 @@ h2 {
   filter: brightness(1.06);
 }
 
-.test-message-button {
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: var(--color-text-white);
+.test-input {
+  flex: 1;
+  padding: 0.5rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 10px;
+  font-size: 14px;
+  background: var(--color-bg-field);
+  color: var(--color-text-primary);
 }
 
-.test-message-button:hover:not(.disabled) {
+.test-button {
+  padding: 0.6rem 1.2rem;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
+  color: var(--color-text-white);
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.test-button:hover:not(:disabled) {
   filter: brightness(1.06);
 }
 
-.test-message-button.disabled {
+.test-button:disabled {
   background: var(--btn-disabled-bg);
   cursor: not-allowed;
   opacity: 0.6;
-}
-
-.test-message-button.disabled:hover {
-  background: var(--btn-disabled-bg);
 }
 
 .checkbox-label {

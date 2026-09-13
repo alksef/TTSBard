@@ -24,6 +24,7 @@ pub mod twitch_delivery {
         pub const UNAVAILABLE: &str = "twitch.unavailable";
         pub const SEND_FAILED: &str = "twitch.send_failed";
         pub const QUEUE_FULL: &str = "twitch.queue_full";
+        pub const TOO_LONG: &str = "twitch.too_long";
     }
 }
 
@@ -88,6 +89,10 @@ pub const TWITCH_DELIVERY_ERRORS: &[TwitchDeliveryErrorDef] = &[
     TwitchDeliveryErrorDef {
         code: twitch_delivery::error_code::QUEUE_FULL,
         retryable: true,
+    },
+    TwitchDeliveryErrorDef {
+        code: twitch_delivery::error_code::TOO_LONG,
+        retryable: false,
     },
 ];
 
@@ -245,8 +250,8 @@ mod tests {
         assert_eq!(codes.len(), sorted.len(), "duplicate error codes");
         assert_eq!(
             codes.len(),
-            4,
-            "expected exactly 4 deliver_twitch_message error codes"
+            5,
+            "expected exactly 5 deliver_twitch_message error codes"
         );
     }
 
@@ -263,6 +268,7 @@ mod tests {
         assert!(def(twitch_delivery::error_code::UNAVAILABLE).retryable);
         assert!(def(twitch_delivery::error_code::SEND_FAILED).retryable);
         assert!(def(twitch_delivery::error_code::QUEUE_FULL).retryable);
+        assert!(!def(twitch_delivery::error_code::TOO_LONG).retryable);
     }
 
     #[test]
