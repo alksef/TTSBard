@@ -6,6 +6,9 @@ pub use numbers::process_numbers;
 pub use prefix::parse_prefix;
 pub use replacer::TextPreprocessor;
 
+#[cfg(test)]
+pub(crate) use replacer::ReplacementList;
+
 use anyhow::Result;
 use std::path::PathBuf;
 

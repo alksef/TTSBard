@@ -71,6 +71,7 @@ function makeSettings(overrides: Partial<WebViewSettingsDto> = {}): WebViewSetti
     bind_address: '0.0.0.0',
     access_token: null,
     upnp_enabled: false,
+    send_original_text: true,
     ...overrides,
   }
 }

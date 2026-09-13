@@ -23,6 +23,7 @@ pub struct TwitchSettings {
     pub token: String,
     pub channel: String,
     pub start_on_boot: bool,
+    pub send_original_text: bool,
 }
 
 // Convert from config::settings::TwitchSettings
@@ -34,6 +35,7 @@ impl From<ConfigTwitchSettings> for TwitchSettings {
             token: settings.token,
             channel: settings.channel,
             start_on_boot: settings.start_on_boot,
+            send_original_text: settings.send_original_text,
         }
     }
 }

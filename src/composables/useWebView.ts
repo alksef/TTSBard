@@ -18,6 +18,7 @@ export interface WebViewSettings {
   bind_address: string
   access_token: string | null
   upnp_enabled: boolean
+  send_original_text: boolean
 }
 
 export type WebViewServerStatus =
@@ -38,6 +39,7 @@ export function useWebView() {
   const settings = ref<WebViewSettings>({
     enabled: false,
     start_on_boot: false,
+    send_original_text: true,
     port: 10100,
     bind_address: '0.0.0.0',
     access_token: null,
@@ -158,6 +160,14 @@ export function useWebView() {
       await invoke('save_webview_settings', { settings: settings.value })
     } catch (e) {
       debugError('[WebView] Failed to save start_on_boot:', e)
+    }
+  }
+
+  async function saveSendOriginalText() {
+    try {
+      await invoke('save_webview_settings', { settings: settings.value })
+    } catch (e) {
+      debugError('[WebView] Failed to save send_original_text:', e)
     }
   }
 
@@ -331,6 +341,7 @@ export function useWebView() {
     settings.value = {
       enabled: newSettings.enabled,
       start_on_boot: newSettings.start_on_boot,
+      send_original_text: newSettings.send_original_text,
       port: newSettings.port,
       bind_address: newSettings.bind_address,
       access_token: newSettings.access_token || null,
@@ -378,6 +389,7 @@ export function useWebView() {
     stopServer,
     restartServer,
     saveStartOnBoot,
+    saveSendOriginalText,
     saveServerSettings,
     copyUrl,
     loadToken,

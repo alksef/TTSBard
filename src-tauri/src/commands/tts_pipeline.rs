@@ -16,6 +16,13 @@ use tracing::{debug, error, info, warn};
 pub struct PreparedSpeech {
     pub provider_text: String,
     pub insert_text: String,
+    /// ROADMAP-107: request-local external delivery text — the resolved speech
+    /// content (editor route prefix stripped / incoming literal) with the
+    /// configured replacements and username substitutions applied, but BEFORE
+    /// number conversion, AI correction and stress markers. External channels
+    /// choose between this and `insert_text` at routing time via their
+    /// per-server `send_original_text` setting.
+    pub delivery_text: String,
     pub audio: AudioPcm,
     pub provider_name: String,
     pub voice_name: String,
@@ -26,11 +33,18 @@ pub struct PreparedSpeech {
 
 // ── Snapshot-friendly inner helpers ──
 
-pub(crate) fn preprocess_text_with_preprocessor(
+/// Apply the configured replacements (including username substitutions)
+/// without number conversion.
+///
+/// This is the replacement half of [`preprocess_text_with_preprocessor`],
+/// exposed separately so the external delivery representation can be built
+/// after replacements but before number conversion, AI correction and stress
+/// markup.
+pub(crate) fn apply_replacements_with_preprocessor(
     text: &str,
     preprocessor: Option<&crate::preprocessor::TextPreprocessor>,
 ) -> String {
-    let text = if let Some(p) = preprocessor {
+    if let Some(p) = preprocessor {
         let processed = p.process(text);
         if processed != text {
             debug!(
@@ -42,7 +56,14 @@ pub(crate) fn preprocess_text_with_preprocessor(
         processed
     } else {
         text.to_string()
-    };
+    }
+}
+
+pub(crate) fn preprocess_text_with_preprocessor(
+    text: &str,
+    preprocessor: Option<&crate::preprocessor::TextPreprocessor>,
+) -> String {
+    let text = apply_replacements_with_preprocessor(text, preprocessor);
     crate::preprocessor::process_numbers(&text)
 }
 
@@ -381,13 +402,28 @@ fn resolve_speech_content(snapshot: &Snapshot, original_text: &str) -> Result<St
     }
 }
 
+/// Build the external delivery representation for a submission: resolve the
+/// route content, then apply the configured replacements and username
+/// substitutions only.
+///
+/// Number conversion, AI correction and provider stress markup are deliberately
+/// excluded — they belong to the TTS synthesis representation and must never be
+/// introduced into externally delivered text.
+fn resolve_delivery_text(snapshot: &Snapshot, original_text: &str) -> Result<String, String> {
+    let content = resolve_speech_content(snapshot, original_text)?;
+    Ok(apply_replacements_with_preprocessor(
+        &content,
+        snapshot.preprocessor.as_ref(),
+    ))
+}
+
 pub async fn prepare_speech(
     snapshot: &Snapshot,
     original_text: &str,
 ) -> Result<PreparedSpeech, String> {
-    let text = resolve_speech_content(snapshot, original_text)?;
+    let delivery_text = resolve_delivery_text(snapshot, original_text)?;
 
-    let text = preprocess_text_with_preprocessor(&text, snapshot.preprocessor.as_ref());
+    let text = crate::preprocessor::process_numbers(&delivery_text);
 
     let text = match ai_correct_text_with_settings(
         &text,
@@ -424,6 +460,7 @@ pub async fn prepare_speech(
             return Ok(PreparedSpeech {
                 provider_text,
                 insert_text,
+                delivery_text,
                 audio: pcm,
                 provider_name: snapshot.provider.clone(),
                 voice_name: snapshot.voice.clone(),
@@ -452,6 +489,7 @@ pub async fn prepare_speech(
     Ok(PreparedSpeech {
         provider_text,
         insert_text,
+        delivery_text,
         audio,
         provider_name: snapshot.provider.clone(),
         voice_name: snapshot.voice.clone(),
@@ -777,6 +815,124 @@ mod tests {
             "!hello"
         );
         assert_eq!(resolve_speech_content(&snapshot, "hello").unwrap(), "hello");
+    }
+
+    // ── External delivery representation tests ──
+
+    /// Build a preprocessor from explicit replacement and username pairs.
+    ///
+    /// `ReplacementList` is re-exported to the crate only under `#[cfg(test)]`,
+    /// so the test names it explicitly and mutates it via its public methods.
+    fn make_preprocessor(
+        replacements: &[(&str, &str)],
+        usernames: &[(&str, &str)],
+    ) -> crate::preprocessor::TextPreprocessor {
+        let mut list: crate::preprocessor::ReplacementList = Default::default();
+        for (key, value) in replacements {
+            list.add_replacement(key.to_string(), value.to_string());
+        }
+        for (key, value) in usernames {
+            list.add_username(key.to_string(), value.to_string());
+        }
+        crate::preprocessor::TextPreprocessor::new(list)
+    }
+
+    fn snapshot_with_preprocessor(
+        skip_twitch: bool,
+        skip_webview: bool,
+        ai_enabled: bool,
+        preprocessor: crate::preprocessor::TextPreprocessor,
+    ) -> Snapshot {
+        let mut snapshot = make_snapshot(skip_twitch, skip_webview, ai_enabled);
+        snapshot.preprocessor = Some(preprocessor);
+        snapshot
+    }
+
+    /// Replacement substitutions and username substitutions reach delivery text.
+    #[test]
+    fn delivery_text_applies_replacements_and_usernames() {
+        let snapshot = snapshot_with_preprocessor(
+            false,
+            false,
+            false,
+            make_preprocessor(&[("fruit", "яблок")], &[("john", "Джон")]),
+        );
+
+        let delivery = resolve_delivery_text(&snapshot, r"У меня \fruit от %john").unwrap();
+        assert_eq!(delivery, "У меня яблок от Джон");
+    }
+
+    /// Digits remain digits in external delivery while the TTS representation
+    /// still converts them.
+    #[test]
+    fn delivery_text_keeps_digits_while_tts_converts() {
+        let preprocessor = make_preprocessor(&[("fruit", "яблок")], &[]);
+        let snapshot = snapshot_with_preprocessor(false, false, false, preprocessor.clone());
+
+        let input = r"У меня 5 \fruit";
+        let delivery = resolve_delivery_text(&snapshot, input).unwrap();
+        assert_eq!(delivery, "У меня 5 яблок");
+        assert!(delivery.contains('5'), "digits must stay in delivery: {delivery}");
+        assert!(!delivery.contains("пять"));
+
+        let tts = preprocess_text_with_preprocessor(input, Some(&preprocessor));
+        assert_eq!(tts, "У меня пять яблок");
+        assert!(!tts.contains('5'));
+    }
+
+    /// A replacement value containing digits retains those digits in external
+    /// delivery.
+    #[test]
+    fn delivery_text_preserves_digits_inside_replacements() {
+        let preprocessor = make_preprocessor(&[("count", "5")], &[]);
+        let snapshot = snapshot_with_preprocessor(false, false, false, preprocessor.clone());
+
+        let delivery = resolve_delivery_text(&snapshot, r"\count яблок").unwrap();
+        assert_eq!(delivery, "5 яблок");
+
+        let tts = preprocess_text_with_preprocessor(r"\count яблок", Some(&preprocessor));
+        assert_eq!(tts, "пять яблок");
+    }
+
+    /// Delivery text is built before AI correction and stress markup: an
+    /// AI-enabled snapshot changes nothing and no provider stress rendering
+    /// (combining acute) leaks into the delivered text.
+    #[test]
+    fn delivery_text_excludes_ai_and_stress_markup() {
+        let snapshot = snapshot_with_preprocessor(
+            false,
+            false,
+            true,
+            make_preprocessor(&[("fruit", "яблок")], &[]),
+        );
+
+        let delivery = resolve_delivery_text(&snapshot, r"\fruit зам+ок").unwrap();
+        assert_eq!(delivery, "яблок зам+ок");
+        assert!(
+            !delivery.contains('\u{0301}'),
+            "provider stress markup leaked into delivery: {delivery}"
+        );
+
+        let stress = native_stress(None, "зам+ок").expect("stress builds");
+        assert_eq!(stress.original, "замок");
+    }
+
+    /// Route-prefix stripping remains intact for external delivery, and an
+    /// incoming leading `!` stays literal.
+    #[test]
+    fn delivery_text_preserves_route_prefix_behavior() {
+        let preprocessor = make_preprocessor(&[("fruit", "яблок")], &[]);
+
+        let both = snapshot_with_preprocessor(true, true, false, preprocessor.clone());
+        assert_eq!(resolve_delivery_text(&both, r"!!\fruit").unwrap(), "яблок");
+
+        let skip_twitch = snapshot_with_preprocessor(true, false, false, preprocessor.clone());
+        assert_eq!(resolve_delivery_text(&skip_twitch, r"!\fruit").unwrap(), "яблок");
+
+        let mut incoming = snapshot_with_preprocessor(false, false, false, preprocessor.clone());
+        incoming.source = SubmissionSource::Server;
+        incoming.delivery = DeliveryPolicy::AudioOnly;
+        assert_eq!(resolve_delivery_text(&incoming, r"!\fruit").unwrap(), "!яблок");
     }
 
     /// ai_correct_text_with_settings with ai_enabled=false returns unchanged text.

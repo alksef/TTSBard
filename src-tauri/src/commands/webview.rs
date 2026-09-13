@@ -23,6 +23,7 @@ pub async fn get_webview_settings(state: State<'_, AppState>) -> Result<WebViewS
         bind_address: settings.bind_address.clone(),
         access_token: settings.access_token.clone(),
         upnp_enabled: settings.upnp_enabled,
+        send_original_text: settings.send_original_text,
     })
 }
 
@@ -100,8 +101,15 @@ pub async fn save_webview_settings(
     let port = settings.port;
     let bind_addr = settings.bind_address.clone();
     let upnp_enabled = settings.upnp_enabled;
+    let send_original_text = settings.send_original_text;
     super::persist_blocking(settings_manager.inner(), move |mgr| {
-        mgr.set_webview_section(start_on_boot, port, bind_addr, upnp_enabled)
+        mgr.set_webview_section(
+            start_on_boot,
+            port,
+            bind_addr,
+            upnp_enabled,
+            send_original_text,
+        )
     })
     .await?;
 
@@ -112,6 +120,7 @@ pub async fn save_webview_settings(
     s.port = settings.port;
     s.bind_address = settings.bind_address.clone();
     s.upnp_enabled = settings.upnp_enabled;
+    s.send_original_text = settings.send_original_text;
     drop(s);
 
     super::emit_settings_changed(&app_handle);

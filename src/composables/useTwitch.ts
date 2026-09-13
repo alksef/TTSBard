@@ -37,6 +37,7 @@ export interface TwitchSettings {
   token: string
   channel: string
   start_on_boot: boolean
+  send_original_text: boolean
 }
 
 function isRustEnumDisconnected(obj: unknown): obj is RustEnumDisconnected {
@@ -90,6 +91,7 @@ export function useTwitch() {
     token: '',
     channel: '',
     start_on_boot: false,
+    send_original_text: true,
   })
 
   const errorMessage = ref<string | null>(null)
@@ -191,6 +193,14 @@ export function useTwitch() {
     }
   }
 
+  async function saveSendOriginalText() {
+    try {
+      await invoke('save_twitch_settings', { settings: settings.value })
+    } catch (e) {
+      debugError('[Twitch] Failed to save send_original_text:', e)
+    }
+  }
+
   async function sendTestMessage() {
     if (isSendingTest.value) return
     if (!testMessage.value.trim()) return
@@ -235,6 +245,7 @@ export function useTwitch() {
       token: newSettings.token,
       channel: newSettings.channel,
       start_on_boot: newSettings.start_on_boot,
+      send_original_text: newSettings.send_original_text,
     }
   }, { immediate: true })
 
@@ -259,6 +270,7 @@ export function useTwitch() {
     startTwitch,
     save,
     saveStartOnBoot,
+    saveSendOriginalText,
     testMessage,
     isSendingTest,
     sendTestMessage,

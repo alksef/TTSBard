@@ -223,6 +223,7 @@ export interface WebViewSettingsDto {
   bind_address: string
   access_token: string | null
   upnp_enabled: boolean
+  send_original_text: boolean
 }
 
 // ============================================================================
@@ -235,6 +236,7 @@ export interface TwitchSettingsDto {
   token: string
   channel: string
   start_on_boot: boolean
+  send_original_text: boolean
 }
 
 // ============================================================================

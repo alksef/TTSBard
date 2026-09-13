@@ -637,6 +637,7 @@ pub struct WebViewSettingsDto {
     pub bind_address: String,
     pub access_token: Option<String>,
     pub upnp_enabled: bool,
+    pub send_original_text: bool,
 }
 
 impl From<WebViewSettings> for WebViewSettingsDto {
@@ -648,6 +649,7 @@ impl From<WebViewSettings> for WebViewSettingsDto {
             bind_address: s.bind_address,
             access_token: s.access_token,
             upnp_enabled: s.upnp_enabled,
+            send_original_text: s.send_original_text,
         }
     }
 }
@@ -661,6 +663,7 @@ impl From<WebViewSettingsDto> for WebViewSettings {
             bind_address: dto.bind_address,
             access_token: dto.access_token,
             upnp_enabled: dto.upnp_enabled,
+            send_original_text: dto.send_original_text,
         }
     }
 }
@@ -1720,6 +1723,7 @@ mod tests {
             bind_address: "127.0.0.1".into(),
             access_token: None,
             upnp_enabled: false,
+            send_original_text: true,
         };
 
         let twitch = TwitchSettingsDto {
@@ -1728,6 +1732,7 @@ mod tests {
             token: String::new(),
             channel: String::new(),
             start_on_boot: false,
+            send_original_text: true,
         };
 
         let windows = WindowsSettingsDto {
@@ -2118,6 +2123,7 @@ mod tests {
             bind_address: "0.0.0.0".into(),
             access_token: None,
             upnp_enabled: false,
+            send_original_text: true,
         };
 
         let twitch = TwitchSettingsDto {
@@ -2126,6 +2132,7 @@ mod tests {
             token: String::new(),
             channel: String::new(),
             start_on_boot: false,
+            send_original_text: true,
         };
 
         let windows = WindowsSettingsDto {

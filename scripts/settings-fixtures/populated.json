@@ -102,14 +102,16 @@
     "port": 8080,
     "bind_address": "127.0.0.1",
     "access_token": null,
-    "upnp_enabled": false
+    "upnp_enabled": false,
+    "send_original_text": true
   },
   "twitch": {
     "enabled": false,
     "username": "",
     "token": "",
     "channel": "",
-    "start_on_boot": false
+    "start_on_boot": false,
+    "send_original_text": true
   },
   "windows": {
     "global": {

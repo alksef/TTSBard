@@ -503,6 +503,7 @@ mod tests {
             token: "token".to_string(),
             channel: "channel".to_string(),
             start_on_boot: false,
+            send_original_text: true,
         }
     }
 

@@ -792,7 +792,7 @@ impl ElevenLabsCatalogCache {
 // ==================== Twitch Settings ====================
 
 /// Twitch chat integration settings
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TwitchSettings {
     #[serde(default)]
     pub enabled: bool,
@@ -804,6 +804,28 @@ pub struct TwitchSettings {
     pub channel: String,
     #[serde(default)]
     pub start_on_boot: bool,
+    /// ROADMAP-107: send the user's original text to Twitch instead of the
+    /// TTS-processed representation. Missing field in legacy settings
+    /// deserializes to `true`.
+    #[serde(default = "default_send_original_text")]
+    pub send_original_text: bool,
+}
+
+fn default_send_original_text() -> bool {
+    true
+}
+
+impl Default for TwitchSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            username: String::new(),
+            token: String::new(),
+            channel: String::new(),
+            start_on_boot: false,
+            send_original_text: true,
+        }
+    }
 }
 
 impl TwitchSettings {
@@ -2298,7 +2320,7 @@ impl SettingsManager {
         self.update_field("/webview/upnp_enabled", &enabled)
     }
 
-    /// Atomically replace four mutable fields of the WebView section.
+    /// Atomically replace five mutable fields of the WebView section.
     ///
     /// Preserves `access_token` and `enabled` from the current config.
     /// One load → mutate → save cycle; validated before call.
@@ -2308,12 +2330,14 @@ impl SettingsManager {
         port: u16,
         bind_address: String,
         upnp_enabled: bool,
+        send_original_text: bool,
     ) -> Result<()> {
         self.update_settings_atomically(move |app_settings| {
             app_settings.webview.start_on_boot = start_on_boot;
             app_settings.webview.port = port;
             app_settings.webview.bind_address = bind_address;
             app_settings.webview.upnp_enabled = upnp_enabled;
+            app_settings.webview.send_original_text = send_original_text;
         })
     }
 
@@ -3881,6 +3905,7 @@ mod tests {
         settings.webview.bind_address = "0.0.0.0".to_string();
         settings.webview.start_on_boot = true;
         settings.webview.upnp_enabled = false;
+        settings.webview.send_original_text = false;
         std::fs::write(
             &settings_path,
             serde_json::to_string_pretty(&settings).unwrap(),
@@ -3897,7 +3922,8 @@ mod tests {
             elevenlabs_catalog_cache: Arc::new(std::sync::RwLock::new(None)),
         };
 
-        let result = bad_manager.set_webview_section(false, 9999, "127.0.0.1".to_string(), true);
+        let result =
+            bad_manager.set_webview_section(false, 9999, "127.0.0.1".to_string(), true, true);
         assert!(result.is_err(), "persist to nonexistent dir must fail");
 
         let after_cache = bad_manager.load().unwrap();
@@ -3916,6 +3942,10 @@ mod tests {
         assert!(
             !after_cache.webview.upnp_enabled,
             "cache upnp_enabled must be unchanged"
+        );
+        assert!(
+            !after_cache.webview.send_original_text,
+            "cache send_original_text must be unchanged"
         );
 
         let actual_disk = std::fs::read_to_string(&settings_path).unwrap();
@@ -3951,10 +3981,10 @@ mod tests {
     }
 
     #[test]
-    fn set_webview_section_saves_four_fields_and_keeps_cache_in_sync() {
+    fn set_webview_section_saves_five_fields_and_keeps_cache_in_sync() {
         let (manager, dir) = webview_section_tmp_manager("save-four");
 
-        let result = manager.set_webview_section(false, 9090, "127.0.0.1".to_string(), false);
+        let result = manager.set_webview_section(false, 9090, "127.0.0.1".to_string(), false, true);
         assert!(
             result.is_ok(),
             "set_webview_section failed: {:?}",
@@ -3966,6 +3996,7 @@ mod tests {
         assert_eq!(disk.webview.port, 9090);
         assert_eq!(disk.webview.bind_address, "127.0.0.1");
         assert!(!disk.webview.upnp_enabled);
+        assert!(disk.webview.send_original_text);
 
         let cache = manager.load().unwrap();
         assert_eq!(cache, disk, "in-memory cache and disk must be identical");
@@ -3989,7 +4020,7 @@ mod tests {
         );
 
         manager
-            .set_webview_section(false, 9090, "0.0.0.0".to_string(), true)
+            .set_webview_section(false, 9090, "0.0.0.0".to_string(), true, true)
             .unwrap();
 
         let after = manager.load().unwrap();
@@ -4001,6 +4032,7 @@ mod tests {
         assert!(!after.webview.enabled, "enabled must survive section save");
         assert_eq!(after.webview.port, 9090);
         assert!(after.webview.upnp_enabled);
+        assert!(after.webview.send_original_text);
 
         assert_eq!(read_disk_settings(&dir), after, "disk and cache must agree");
 
@@ -4027,7 +4059,7 @@ mod tests {
         .unwrap();
 
         manager
-            .set_webview_section(false, 9090, "127.0.0.1".to_string(), false)
+            .set_webview_section(false, 9090, "127.0.0.1".to_string(), false, true)
             .unwrap();
 
         let after = read_disk_settings(&dir);
@@ -4045,7 +4077,7 @@ mod tests {
         let (manager, dir) = webview_section_tmp_manager("atomic-write");
 
         manager
-            .set_webview_section(false, 2020, "127.0.0.1".to_string(), false)
+            .set_webview_section(false, 2020, "127.0.0.1".to_string(), false, true)
             .unwrap();
 
         let tmp_files: Vec<_> = std::fs::read_dir(&dir)
@@ -4077,7 +4109,7 @@ mod tests {
             (1024, "0.0.0.0", true),
         ] {
             manager
-                .set_webview_section(true, port, addr.to_string(), upnp)
+                .set_webview_section(true, port, addr.to_string(), upnp, true)
                 .unwrap();
             assert_eq!(
                 manager.load().unwrap(),
@@ -4137,6 +4169,16 @@ mod tests {
         let settings: AppSettings = serde_json::from_str(old_json)
             .expect("old AppSettings (without hide_on_minimize field) must deserialize");
         assert!(!settings.hide_on_minimize);
+    }
+
+    #[test]
+    fn twitch_settings_missing_send_original_text_defaults_to_true() {
+        let parsed: super::TwitchSettings = serde_json::from_str(
+            r#"{"enabled": false, "username": "", "token": "", "channel": "", "start_on_boot": false}"#,
+        )
+        .unwrap();
+        assert!(parsed.send_original_text);
+        assert!(super::TwitchSettings::default().send_original_text);
     }
 
     /// Focused contract for the renamed setting: the legacy experimental

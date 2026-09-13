@@ -84,6 +84,7 @@ pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std:
         bind_address: settings.webview.bind_address.clone(),
         access_token: settings.webview.access_token.clone(),
         upnp_enabled: settings.webview.upnp_enabled,
+        send_original_text: settings.webview.send_original_text,
     };
 
     // Load input server settings into AppState
@@ -1353,21 +1354,23 @@ async fn speech_worker(
 
                 {
                     let text = insert_text.clone();
+                    let delivery_text = prepared.delivery_text.clone();
                     let webview_svc = webview.clone();
                     let twitch_svc = twitch.clone();
                     let skip_twitch = snapshot.delivery.skip_twitch();
                     let skip_webview = snapshot.delivery.skip_webview();
                     let join_handle = tokio::task::spawn_blocking(move || {
-                        route_processed_text_from_handles(
+                        route_external_text_from_handles(
                             &webview_svc,
                             &twitch_svc,
+                            &delivery_text,
                             &text,
                             skip_twitch,
                             skip_webview,
                         );
                     });
                     if let Err(e) = join_handle.await {
-                        warn!(error = %e, "route_processed_text join failed");
+                        warn!(error = %e, "route_external_text join failed");
                     }
                 }
 
@@ -1435,14 +1438,23 @@ async fn speech_worker(
     }
 }
 
-fn route_processed_text_from_handles(
+fn route_external_text_from_handles(
     webview: &crate::webview::service::WebViewService,
     twitch: &crate::twitch::TwitchService,
-    text: &str,
+    delivery_text: &str,
+    insert_text: &str,
     skip_twitch: bool,
     skip_webview: bool,
 ) {
     if !skip_webview {
+        // ROADMAP-107: per-server choice between the user's original text and
+        // the TTS-processed representation, read at delivery time.
+        let send_original = webview.settings.blocking_read().send_original_text;
+        let text = if send_original {
+            delivery_text
+        } else {
+            insert_text
+        };
         webview.send_event(crate::events::AppEvent::TextSentToTts(
             crate::events::RoutedText::broadcast(text.to_string()),
         ));
@@ -1450,7 +1462,13 @@ fn route_processed_text_from_handles(
     if !skip_twitch {
         let settings = twitch.settings.blocking_read();
         if settings.enabled {
+            let send_original = settings.send_original_text;
             drop(settings);
+            let text = if send_original {
+                delivery_text
+            } else {
+                insert_text
+            };
             twitch.send_event(crate::events::TwitchEvent::SendMessage(text.to_string()));
         }
     }
@@ -1479,7 +1497,7 @@ fn missing_piper_notification(model_name: &str) -> String {
 mod tests {
     use super::{
         has_sufficient_visible_area, missing_piper_model_name, missing_piper_notification,
-        route_processed_text_from_handles, PhysicalRect,
+        route_external_text_from_handles, PhysicalRect,
     };
 
     fn rect(x: i32, y: i32, width: u32, height: u32) -> PhysicalRect {
@@ -1570,7 +1588,7 @@ mod tests {
         twitch.settings.blocking_write().enabled = true;
 
         let clean_text = "Привет, мир";
-        route_processed_text_from_handles(&webview, &twitch, clean_text, false, false);
+        route_external_text_from_handles(&webview, &twitch, clean_text, clean_text, false, false);
 
         match webview_rx.try_recv() {
             Ok(AppEvent::TextSentToTts(routed)) => {
@@ -1605,7 +1623,7 @@ mod tests {
         let twitch = crate::twitch::TwitchService::new(twitch_tx);
         twitch.settings.blocking_write().enabled = true;
 
-        route_processed_text_from_handles(&webview, &twitch, "hello", true, true);
+        route_external_text_from_handles(&webview, &twitch, "hello", "hello", true, true);
 
         assert!(
             webview_rx.try_recv().is_err(),
@@ -1615,5 +1633,117 @@ mod tests {
             twitch_rx.try_recv().is_err(),
             "twitch must not receive a skipped message"
         );
+    }
+
+    #[test]
+    fn routed_text_default_sends_original_text_to_both_channels() {
+        use crate::events::{AppEvent, TwitchEvent};
+
+        let webview = crate::webview::service::WebViewService::new();
+        let (webview_tx, mut webview_rx) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
+        webview.set_event_sender(webview_tx);
+
+        let (twitch_tx, mut twitch_rx) = tokio::sync::broadcast::channel::<TwitchEvent>(16);
+        let twitch = crate::twitch::TwitchService::new(twitch_tx);
+        twitch.settings.blocking_write().enabled = true;
+
+        // Сервисы после Task B создаются с send_original_text = true.
+        route_external_text_from_handles(
+            &webview,
+            &twitch,
+            "67 бананов.",
+            "шестьдесят семь бананов.",
+            false,
+            false,
+        );
+
+        match webview_rx.try_recv() {
+            Ok(AppEvent::TextSentToTts(routed)) => {
+                assert_eq!(routed.text, "67 бананов.");
+            }
+            other => panic!("unexpected webview event: {other:?}"),
+        }
+
+        match twitch_rx.try_recv() {
+            Ok(TwitchEvent::SendMessage(text)) => {
+                assert_eq!(text, "67 бананов.");
+            }
+            other => panic!("unexpected twitch event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn routed_text_webview_toggle_off_sends_processed_text_only_to_webview() {
+        use crate::events::{AppEvent, TwitchEvent};
+
+        let webview = crate::webview::service::WebViewService::new();
+        webview.settings.blocking_write().send_original_text = false;
+        let (webview_tx, mut webview_rx) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
+        webview.set_event_sender(webview_tx);
+
+        let (twitch_tx, mut twitch_rx) = tokio::sync::broadcast::channel::<TwitchEvent>(16);
+        let twitch = crate::twitch::TwitchService::new(twitch_tx);
+        twitch.settings.blocking_write().enabled = true;
+
+        route_external_text_from_handles(
+            &webview,
+            &twitch,
+            "67 бананов.",
+            "шестьдесят семь бананов.",
+            false,
+            false,
+        );
+
+        match webview_rx.try_recv() {
+            Ok(AppEvent::TextSentToTts(routed)) => {
+                assert_eq!(routed.text, "шестьдесят семь бананов.");
+            }
+            other => panic!("unexpected webview event: {other:?}"),
+        }
+
+        match twitch_rx.try_recv() {
+            Ok(TwitchEvent::SendMessage(text)) => {
+                // Twitch-галка не тронута — канал получает исходник.
+                assert_eq!(text, "67 бананов.");
+            }
+            other => panic!("unexpected twitch event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn routed_text_twitch_toggle_off_sends_processed_text_only_to_twitch() {
+        use crate::events::{AppEvent, TwitchEvent};
+
+        let webview = crate::webview::service::WebViewService::new();
+        let (webview_tx, mut webview_rx) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
+        webview.set_event_sender(webview_tx);
+
+        let (twitch_tx, mut twitch_rx) = tokio::sync::broadcast::channel::<TwitchEvent>(16);
+        let twitch = crate::twitch::TwitchService::new(twitch_tx);
+        twitch.settings.blocking_write().enabled = true;
+        twitch.settings.blocking_write().send_original_text = false;
+
+        route_external_text_from_handles(
+            &webview,
+            &twitch,
+            "67 бананов.",
+            "шестьдесят семь бананов.",
+            false,
+            false,
+        );
+
+        match webview_rx.try_recv() {
+            Ok(AppEvent::TextSentToTts(routed)) => {
+                assert_eq!(routed.text, "67 бананов.");
+            }
+            other => panic!("unexpected webview event: {other:?}"),
+        }
+
+        match twitch_rx.try_recv() {
+            Ok(TwitchEvent::SendMessage(text)) => {
+                assert_eq!(text, "шестьдесят семь бананов.");
+            }
+            other => panic!("unexpected twitch event: {other:?}"),
+        }
     }
 }

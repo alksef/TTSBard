@@ -21,6 +21,7 @@ const {
   stopServer,
   restartServer,
   saveStartOnBoot,
+  saveSendOriginalText,
   saveServerSettings,
   copyUrl,
   copyToken,
@@ -71,6 +72,13 @@ const {
         <label class="checkbox-label">
           <input type="checkbox" v-model="settings.start_on_boot" @change="saveStartOnBoot" />
           <span>{{ t('webview.start_on_boot') }}</span>
+        </label>
+      </div>
+
+      <div class="setting-row">
+        <label class="checkbox-label">
+          <input type="checkbox" v-model="settings.send_original_text" @change="saveSendOriginalText" />
+          <span>{{ t('webview.send_original_text') }}</span>
         </label>
       </div>
 
@@ -406,6 +414,8 @@ h2 {
 .checkbox-label input[type="checkbox"] {
   width: 18px;
   height: 18px;
+  min-width: 18px;
+  flex-shrink: 0;
   cursor: pointer;
 }
 
