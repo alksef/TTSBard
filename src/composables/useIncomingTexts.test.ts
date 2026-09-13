@@ -304,7 +304,7 @@ describe('useIncomingTexts', () => {
 
   it('edit returns the text for the caller to route into a new tab', async () => {
     const { edit } = await setupAndMount()
-    mocks.mockInvoke.mockResolvedValueOnce({ id: 'item-1', text: 'external text' })
+    mocks.mockInvoke.mockResolvedValueOnce({ id: 'item-1', text: 'external text', source: 'server' })
 
     const text = await edit('item-1')
 
@@ -384,9 +384,109 @@ describe('useIncomingTexts', () => {
     expect(second).toBeNull()
     expect(busyIds.value.has('item-1')).toBe(true)
 
-    resolveEdit({ id: 'item-1', text: 'text' })
+    resolveEdit({ id: 'item-1', text: 'text', source: 'server' })
     expect(await first).toBe('text')
     expect(busyIds.value.has('item-1')).toBe(false)
+  })
+
+  it('exposes a single take-in-flight flag while the take is pending', async () => {
+    const { edit, editInFlight } = await setupAndMount()
+
+    let resolveEdit!: (value: unknown) => void
+    mocks.mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'take_incoming_text_for_edit') {
+        return new Promise((resolve) => { resolveEdit = resolve })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    expect(editInFlight.value).toBe(false)
+    const pending = edit('item-1')
+    await Promise.resolve()
+    expect(editInFlight.value).toBe(true)
+
+    resolveEdit({ id: 'item-1', text: 'ok', source: 'server' })
+    expect(await pending).toBe('ok')
+    expect(editInFlight.value).toBe(false)
+  })
+
+  it('treats a malformed take payload like a command failure without returning untrusted text', async () => {
+    const { edit, editInFlight } = await setupAndMount()
+
+    const malformed: unknown[] = [
+      { id: 'item-1', text: 42, source: 'server' },
+      { id: 'item-1', text: 'x', source: 'editor' },
+      { id: 'item-1' },
+      null,
+      undefined,
+      'not-an-item',
+    ]
+
+    for (const payload of malformed) {
+      mocks.mockShowError.mockClear()
+      mocks.mockInvoke.mockResolvedValueOnce(payload)
+
+      expect(await edit('item-1')).toBeNull()
+      expect(mocks.mockShowError).toHaveBeenCalledWith('Не удалось взять текст для редактирования')
+      expect(editInFlight.value).toBe(false)
+    }
+  })
+
+  it('releases the guard after a malformed payload so a later edit is allowed', async () => {
+    const { edit } = await setupAndMount()
+
+    mocks.mockInvoke.mockResolvedValueOnce({ id: 'item-1', text: 42, source: 'server' })
+    expect(await edit('item-a')).toBeNull()
+
+    mocks.mockInvoke.mockResolvedValueOnce({ id: 'item-b', text: 'recovered', source: 'server' })
+    expect(await edit('item-b')).toBe('recovered')
+
+    const takeCalls = mocks.mockInvoke.mock.calls.filter(
+      ([cmd]) => cmd === 'take_incoming_text_for_edit',
+    )
+    expect(takeCalls).toHaveLength(2)
+  })
+
+  it('ignores a take that resolves after unmount', async () => {
+    defaultInvoke()
+    const { edit, editInFlight } = useIncomingTexts()
+
+    let resolveEdit!: (value: unknown) => void
+    mocks.mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'take_incoming_text_for_edit') {
+        return new Promise((resolve) => { resolveEdit = resolve })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const pending = edit('item-1')
+    await Promise.resolve()
+    capturedOnUnmountedCb?.()
+    resolveEdit({ id: 'item-1', text: 'late text' })
+
+    expect(await pending).toBeNull()
+    expect(editInFlight.value).toBe(false)
+  })
+
+  it('does not surface a take error after unmount', async () => {
+    defaultInvoke()
+    const { edit } = useIncomingTexts()
+
+    let rejectEdit!: (e: unknown) => void
+    mocks.mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'take_incoming_text_for_edit') {
+        return new Promise((_resolve, reject) => { rejectEdit = reject })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const pending = edit('item-1')
+    await Promise.resolve()
+    capturedOnUnmountedCb?.()
+    rejectEdit(new Error('late failure'))
+
+    expect(await pending).toBeNull()
+    expect(mocks.mockShowError).not.toHaveBeenCalled()
   })
 
   it('persists auto-play toggles through the source-neutral incoming settings command', async () => {
@@ -797,7 +897,7 @@ describe('useIncomingTexts', () => {
     expect(takeCalls).toHaveLength(1)
 
     // The refused call must not disturb the accepted request's result.
-    resolveEdit({ id: 'item-a', text: 'first text' })
+    resolveEdit({ id: 'item-a', text: 'first text', source: 'server' })
     expect(await first).toBe('first text')
   })
 
@@ -807,7 +907,7 @@ describe('useIncomingTexts', () => {
     mocks.mockInvoke.mockRejectedValueOnce(new Error('backend down'))
     expect(await edit('item-a')).toBeNull()
 
-    mocks.mockInvoke.mockResolvedValueOnce({ id: 'item-b', text: 'recovered text' })
+    mocks.mockInvoke.mockResolvedValueOnce({ id: 'item-b', text: 'recovered text', source: 'server' })
     expect(await edit('item-b')).toBe('recovered text')
 
     const takeCalls = mocks.mockInvoke.mock.calls.filter(

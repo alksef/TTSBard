@@ -33,6 +33,7 @@ import {
 } from './composables/speechQueueFailureNotifications'
 import { convertOcrOneShotFailure } from './composables/ocrFailureNotifications'
 import { useOcrRuntimeNotifications } from './composables/useOcrRuntimeNotifications'
+import { TWITCH_DELIVERY_FAILED_EVENT, twitchDeliveryFailureLocaleKey } from './ipc/twitchDelivery'
 
 type Panel = 'input' | 'tts' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'input-server' | 'vtube-studio' | 'ocr' | 'settings' | 'hotkeys' | 'intercept'
 
@@ -370,6 +371,25 @@ onMounted(async () => {
     }),
   ).catch((e) => {
     debugError('[App] Failed to listen for OCR one-shot failure events:', e)
+  })
+
+  // Show a global toast when a Twitch delivery failure arrives, even when the
+  // Twitch settings panel is closed. Only a valid `{ code, retryable }` payload
+  // maps to the fixed `errors.twitch.*` message; malformed payloads are
+  // debug-logged and ignored so raw backend text never reaches the UI.
+  void listenerScope.track(
+    listen(TWITCH_DELIVERY_FAILED_EVENT, (event) => {
+      const key = twitchDeliveryFailureLocaleKey(
+        (event as { payload: unknown }).payload,
+      )
+      if (!key) {
+        debugError('[App] Ignoring malformed Twitch delivery failure payload')
+        return
+      }
+      showError(t(key))
+    }),
+  ).catch((e) => {
+    debugError('[App] Failed to listen for Twitch delivery failure events:', e)
   })
 
   // Wait for listener setup before reading snapshot to avoid the gap

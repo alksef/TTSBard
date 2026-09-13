@@ -47,7 +47,12 @@ function defaultTitleNumber(title: string): number | null {
   const match = title.match(/(\d+)$/)
   if (!match) return null
   const number = Number.parseInt(match[1], 10)
-  return defaultTabTitle(number) === title ? number : null
+  // Persisted titles may have been produced under another locale. The locale
+  // is immutable during one app run, so comparing against only the current
+  // translation would miss e.g. `Текст 2` after restarting in English. Reserve
+  // every positive trailing tab number from the snapshot; this conservative
+  // rule prevents duplicate generated titles without hard-coding locales.
+  return Number.isSafeInteger(number) && number > 0 ? number : null
 }
 
 function nextDefaultTitleNumber(tabs: EditorTab[]): number {

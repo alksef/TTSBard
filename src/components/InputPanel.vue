@@ -46,6 +46,7 @@ const {
   externalJobs: incomingExternalJobs,
   settings: incomingSettings,
   busyIds: incomingBusyIds,
+  editInFlight: incomingEditInFlight,
   loadError: incomingLoadError,
   count: incomingCount,
   approve: approveIncoming,
@@ -100,6 +101,9 @@ async function onSelectPinned() {
 }
 
 async function onEditIncoming(id: string) {
+  // Guard hotkey/programmatic paths that bypass the disabled button: never
+  // start a second take while one is in flight.
+  if (incomingEditInFlight.value) return
   const textToEdit = await editIncoming(id)
   if (textToEdit === null) return
   openIncomingEdit(textToEdit)
@@ -1052,6 +1056,7 @@ defineExpose({ focusEditor })
           :twitch-connected="twitchConnected"
           :webview-connected="webviewConnected"
           :busy-ids="incomingBusyIds"
+          :edit-disabled="incomingEditInFlight"
           :compact="isMinimalMode"
           :load-error="incomingLoadError"
           @approve="approveIncoming"

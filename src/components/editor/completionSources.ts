@@ -80,9 +80,10 @@ export function createCompletionSources(deps: CompletionSourcesDeps): {
               label: p.text,
               type: 'text',
               apply: (view: EditorView) => {
+                const applyPos = view.state.selection.main.head
                 view.dispatch({
-                  changes: { from: cursorPos, insert: insertText },
-                  selection: { anchor: cursorPos + insertText.length },
+                  changes: { from: applyPos, insert: insertText },
+                  selection: { anchor: applyPos + insertText.length },
                 })
               },
             })
@@ -110,9 +111,10 @@ export function createCompletionSources(deps: CompletionSourcesDeps): {
             type: 'class',
             detail: 'AI',
             apply: (view: EditorView) => {
+              const applyPos = view.state.selection.main.head
               view.dispatch({
-                changes: { from: cursorPos, insert: insertText },
-                selection: { anchor: cursorPos + insertText.length },
+                changes: { from: applyPos, insert: insertText },
+                selection: { anchor: applyPos + insertText.length },
               })
             },
           })

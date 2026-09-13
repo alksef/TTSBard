@@ -166,7 +166,11 @@ describe('useTelegramAuth', () => {
     })
 
     it('sets state to idle on not-initialized rejection', async () => {
-      mockInvoke.mockRejectedValueOnce('Клиент не инициализирован')
+      mockInvoke.mockRejectedValueOnce({
+        code: 'telegram.not_initialized',
+        message: 'wording may change freely',
+        retryable: false,
+      })
 
       const { getStatus, state, status } = useTelegramAuth()
       const result = await getStatus()
@@ -176,13 +180,13 @@ describe('useTelegramAuth', () => {
       expect(status.value).toBeNull()
     })
 
-    it('sets state to idle when rejection contains "not initialized"', async () => {
+    it('does not derive idle state from a human-readable error substring', async () => {
       mockInvoke.mockRejectedValueOnce('Error: client not initialized')
 
       const { getStatus, state } = useTelegramAuth()
       await getStatus()
 
-      expect(state.value).toBe('idle')
+      expect(state.value).toBe('error')
     })
 
     it('sets state to error on unexpected error', async () => {

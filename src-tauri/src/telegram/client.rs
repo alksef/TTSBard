@@ -532,6 +532,11 @@ impl TelegramClient {
             .map_err(|e| format!("Ошибка проверки авторизации: {}", e))
     }
 
+    /// Проверяет наличие внутреннего клиента без разбора текста ошибки.
+    pub async fn is_initialized(&self) -> bool {
+        self.client.lock().await.is_some()
+    }
+
     /// Запрос кода подтверждения
     pub async fn request_code(&self) -> Result<AuthState, String> {
         let client = {

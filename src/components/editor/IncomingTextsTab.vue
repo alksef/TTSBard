@@ -23,6 +23,7 @@ const props = defineProps<{
   twitchConnected: boolean
   webviewConnected: boolean
   busyIds: ReadonlySet<string>
+  editDisabled?: boolean
   compact: boolean
   loadError: string | null
 }>()
@@ -91,7 +92,7 @@ function onAutoPlayChange(event: Event) {
           </button>
           <button
             class="incoming-btn edit"
-            :disabled="busyIds.has(item.id)"
+            :disabled="editDisabled || busyIds.has(item.id)"
             :title="t('editor.incoming.edit')"
             :aria-label="t('editor.incoming.edit')"
             @click="emit('edit', item.id)"

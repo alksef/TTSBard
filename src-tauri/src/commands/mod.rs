@@ -466,12 +466,6 @@ pub async fn set_editor_autocomplete_enabled(
     Ok(enabled)
 }
 
-/// Get editor autocomplete suggestions enabled state
-#[tauri::command]
-pub fn get_editor_autocomplete_enabled(settings_manager: State<'_, SettingsManager>) -> bool {
-    settings_manager.get_editor_autocomplete_enabled()
-}
-
 /// Set keep-text-after-send state
 #[tauri::command]
 pub async fn set_editor_keep_text(

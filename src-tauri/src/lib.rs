@@ -59,9 +59,9 @@ use commands::telegram::{
 use commands::{
     apply_openai_proxy_settings, close_playback_control_window, close_soundpanel_window,
     disable_virtual_mic, enable_virtual_mic, get_audio_effects, get_audio_settings,
-    get_dsp_settings, get_editor_autocomplete_enabled, get_editor_font_family,
-    get_editor_font_size_px, get_editor_height, get_editor_hotkeys, get_editor_quick,
-    get_editor_spellcheck_enabled, get_editor_spellcheck_source, get_editor_typing_idle_timeout_ms,
+    get_dsp_settings, get_editor_font_family, get_editor_font_size_px, get_editor_height,
+    get_editor_hotkeys, get_editor_quick, get_editor_spellcheck_enabled,
+    get_editor_spellcheck_source, get_editor_typing_idle_timeout_ms,
     get_global_exclude_from_capture, get_hotkey_enabled, get_hotkey_settings, get_local_tts_url,
     get_main_appearance, get_main_compact_dims, get_openai_api_key, get_openai_voice,
     get_output_devices, get_playback_appearance_source, get_show_playback_on_start,
@@ -372,7 +372,6 @@ pub fn run() {
             get_editor_typing_idle_timeout_ms,
             set_editor_typing_enabled,
             set_editor_autocomplete_enabled,
-            get_editor_autocomplete_enabled,
             set_editor_keep_text,
             set_editor_font_family,
             get_editor_font_family,
@@ -504,7 +503,6 @@ pub fn run() {
             // Twitch commands
             commands::twitch::get_twitch_settings,
             commands::twitch::save_twitch_settings,
-            commands::twitch::test_twitch_connection,
             commands::twitch::deliver_twitch_message,
             commands::twitch::connect_twitch,
             commands::twitch::disconnect_twitch,

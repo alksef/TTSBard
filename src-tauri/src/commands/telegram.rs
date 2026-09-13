@@ -1,4 +1,5 @@
 use crate::config::{ProxyMode, SettingsManager};
+use crate::ipc::CommandError;
 use crate::telegram::types::AuthState;
 use crate::telegram::{
     bot::set_speaker, get_current_voice, get_limits, types::VoiceCode, CurrentVoice, Limits,
@@ -8,6 +9,9 @@ use std::sync::Arc;
 use tauri::{AppHandle, State};
 use tokio::sync::{Mutex, RwLock};
 use tracing::info;
+
+const TELEGRAM_NOT_INITIALIZED: &str = "telegram.not_initialized";
+const TELEGRAM_STATUS_FAILED: &str = "telegram.status_failed";
 
 /// Глобальное состояние Telegram клиента.
 ///
@@ -352,13 +356,24 @@ pub async fn telegram_sign_out(
 
 /// Проверка статуса авторизации
 #[tauri::command]
-pub async fn telegram_get_status(state: State<'_, TelegramState>) -> Result<bool, String> {
+pub async fn telegram_get_status(state: State<'_, TelegramState>) -> Result<bool, CommandError> {
     let client = match state.current_client().await {
         Some(c) => c,
         None => return Ok(false), // Неинициализирован = не авторизован
     };
 
-    client.is_authorized().await
+    if !client.is_initialized().await {
+        return Err(CommandError::new(
+            TELEGRAM_NOT_INITIALIZED,
+            "Telegram client is not initialized",
+            false,
+        ));
+    }
+
+    client
+        .is_authorized()
+        .await
+        .map_err(|error| CommandError::new(TELEGRAM_STATUS_FAILED, error, false))
 }
 
 /// Получение информации о пользователе

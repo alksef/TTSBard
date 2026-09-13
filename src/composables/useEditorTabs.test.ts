@@ -132,7 +132,7 @@ describe('useEditorTabs', () => {
       expect(tabs.value.map(t => t.title)).toEqual(['Текст 1', 'Текст 5', 'Текст 6'])
     })
 
-    it('ignores renamed tabs when allocating the next default title', async () => {
+    it('conservatively reserves numeric suffixes from persisted titles', async () => {
       mockInvoke.mockResolvedValueOnce({
         active_id: 'uuid-0',
         tabs: [
@@ -148,8 +148,19 @@ describe('useEditorTabs', () => {
         'Текст 1',
         'Chapter 2',
         'My Script',
-        'Текст 2',
+        'Текст 3',
       ])
+    })
+
+    it('recognizes a default title persisted under another locale', async () => {
+      mockInvoke.mockResolvedValueOnce({
+        active_id: 'uuid-0',
+        tabs: [{ id: 'uuid-0', title: 'Text 4', text: '' }],
+      })
+      const { init, create, tabs } = useEditorTabs()
+      await init()
+      create()
+      expect(tabs.value[tabs.value.length - 1]?.title).toBe('Текст 5')
     })
   })
 

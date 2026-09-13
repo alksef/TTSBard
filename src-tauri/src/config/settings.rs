@@ -2557,11 +2557,6 @@ impl SettingsManager {
         self.update_field("/editor/autocomplete_enabled", &enabled)
     }
 
-    /// Get editor autocomplete suggestions enabled state
-    pub fn get_editor_autocomplete_enabled(&self) -> bool {
-        self.cache.read().editor.autocomplete_enabled
-    }
-
     /// Set spellcheck enabled state
     pub fn set_editor_spellcheck_enabled(&self, enabled: bool) -> Result<()> {
         self.update_field("/editor/spellcheck_enabled", &enabled)

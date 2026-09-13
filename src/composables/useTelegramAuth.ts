@@ -88,8 +88,8 @@ export function useTelegramAuth() {
       return status.value
     } catch (error) {
       debugError('Failed to get Telegram status:', error)
-      const message = normalizeCommandError(error).message
-      if (message.includes('не инициализирован') || message.includes('not initialized')) {
+      const commandError = normalizeCommandError(error)
+      if (commandError.code === 'telegram.not_initialized') {
         status.value = null
         state.value = 'idle'
         return null

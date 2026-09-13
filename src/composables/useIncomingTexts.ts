@@ -135,8 +135,9 @@ export function useIncomingTexts() {
   // Global edit-in-flight guard: the backend take removes the item from the
   // inbox before returning it, so at most one take may be in flight at a time.
   // A later edit while one is running is refused (returns null) instead of
-  // removing a second item and discarding the first take's result.
-  let editInFlight = false
+  // removing a second item and discarding the first take's result. Exposed as a
+  // ref so the UI can disable every incoming Edit action while a take runs.
+  const editInFlight = ref(false)
 
   function isBusy(id: string): boolean {
     return busyIds.value.has(id)
@@ -286,15 +287,25 @@ export function useIncomingTexts() {
     if (isBusy(id)) return null
     // A destructive take is already in flight: refusing keeps that take the
     // only one, so its item is the only one removed from the inbox.
-    if (editInFlight) return null
-    editInFlight = true
+    if (editInFlight.value) return null
+    editInFlight.value = true
     markBusy(id)
     try {
-      const item = await invoke<IncomingTextItem>('take_incoming_text_for_edit', {
+      const item = await invoke<unknown>('take_incoming_text_for_edit', {
         incomingId: id,
       })
+      if (disposed) return null
+      // The take payload is the one untrusted IPC surface here: a contract
+      // drift must never leak undefined/untrusted text into a tab. Treat a
+      // malformed payload exactly like a command failure for the user.
+    if (!isIncomingTextItem(item)) {
+      debugError('[IncomingTexts] Malformed take-for-edit payload')
+        showError(t('editor.incoming.error.take_edit'))
+        return null
+      }
       return item.text
     } catch (e) {
+      if (disposed) return null
       debugError('[IncomingTexts] Failed to take item for edit:', e)
       showError(
         normalizeCommandError(e).code === UNKNOWN_ITEM_CODE
@@ -303,7 +314,7 @@ export function useIncomingTexts() {
       )
       return null
     } finally {
-      editInFlight = false
+      editInFlight.value = false
       markIdle(id)
     }
   }
@@ -383,6 +394,7 @@ export function useIncomingTexts() {
     settings,
     autoPlay,
     busyIds,
+    editInFlight,
     loadError,
     count,
     isBusy,
