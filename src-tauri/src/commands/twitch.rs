@@ -2,7 +2,7 @@ use crate::config::{SettingsManager, TwitchSettings};
 use crate::events::TwitchConnectionStatus;
 use crate::ipc::{self, twitch_delivery, CommandError};
 use crate::state::AppState;
-use crate::twitch::SendFailure;
+use crate::twitch::{SendFailure, TwitchClient};
 use serde::Serialize;
 use tauri::{Manager, State};
 
@@ -124,19 +124,6 @@ pub async fn get_twitch_status(
     Ok(status)
 }
 
-/// Проверить подключение к Twitch
-#[tauri::command]
-pub async fn test_twitch_connection(settings: TwitchSettings) -> Result<String, String> {
-    // Валидация
-    if let Err(e) = settings.is_valid() {
-        return Err(format!("Validation failed: {}", e));
-    }
-
-    // Тестовое подключение (будет реализовано через отдельную функцию)
-    // Для начала просто проверяем валидность
-    Ok("Настройки валидны. Попробуйте подключиться.".to_string())
-}
-
 /// Перезапустить Twitch клиент
 #[tauri::command]
 pub async fn restart_twitch(state: State<'_, AppState>) -> Result<String, String> {
@@ -184,6 +171,13 @@ fn plan_delivery(text: &str, channel: &str) -> Result<Vec<String>, CommandError>
             "Twitch message contains a word that exceeds the IRC wire byte budget".to_string(),
         )),
     }
+}
+
+/// Планирует части по каналу живого клиента: wire-budget зависит от длины
+/// `PRIVMSG #<channel> :…`, а клиент мог быть создан с иным каналом, чем
+/// persisted settings. Источник истины — канал подключённого клиента.
+fn plan_client_delivery(client: &TwitchClient, text: &str) -> Result<Vec<String>, CommandError> {
+    plan_delivery(text, client.channel_name())
 }
 
 /// Маппинг отказа отправки одной части в typed-ошибку команды.
@@ -241,15 +235,7 @@ pub async fn deliver_twitch_message(
     state: State<'_, AppState>,
     text: String,
 ) -> Result<DeliveredTwitchMessage, CommandError> {
-    // Канал нужен планировщику частей: IRC wire budget зависит от длины
-    // `PRIVMSG #<channel> :…` (ROADMAP-106).
-    let channel = {
-        let settings = state.twitch.settings.read().await;
-        settings.channel.clone()
-    };
-    let parts = plan_delivery(&text, &channel)?;
-    let total = parts.len();
-
+    // Одно чтение settings: enabled определяет доступность runtime.
     let settings_enabled = {
         let settings = state.twitch.settings.read().await;
         settings.enabled
@@ -258,6 +244,8 @@ pub async fn deliver_twitch_message(
         state.twitch.connection_status.lock().clone(),
         TwitchConnectionStatus::Connected
     );
+    // Клиент клонируется до планирования: его канал — источник истины для
+    // wire-budget, а блокировка не удерживается во время планирования/отправки.
     let client = {
         let guard = state.twitch.client.read().await;
         guard.clone()
@@ -272,6 +260,8 @@ pub async fn deliver_twitch_message(
     }
 
     let client = client.expect("client presence checked above");
+    let parts = plan_client_delivery(&client, &text)?;
+    let total = parts.len();
     // Части отправляются строго последовательно (await каждой до постановки
     // следующей): порядок FIFO гарантирован, исходящая очередь не
     // переполняется, pacing worker'а соблюдает rate limit Twitch.
@@ -406,5 +396,29 @@ mod tests {
             err.message,
             "Twitch delivery stopped at message 3 of 4: write failed"
         );
+    }
+
+    fn client_with_channel(channel: &str) -> TwitchClient {
+        TwitchClient::new(crate::twitch::TwitchSettings {
+            channel: channel.to_string(),
+            ..crate::twitch::TwitchSettings::default()
+        })
+    }
+
+    #[test]
+    fn delivery_plan_uses_live_client_channel_budget() {
+        // 490 символов: помещаются в wire-budget короткого канала, но не
+        // длинного. Планирование обязано опираться на канал живого клиента,
+        // а не на persisted settings.
+        let text = "a".repeat(490);
+
+        let short = client_with_channel("x");
+        assert!(plan_client_delivery(&short, &text).is_ok());
+
+        let long_channel = "a".repeat(50);
+        let long = client_with_channel(&long_channel);
+        let err = plan_client_delivery(&long, &text).unwrap_err();
+        assert_eq!(err.code, "twitch.too_long");
+        assert!(!err.retryable);
     }
 }

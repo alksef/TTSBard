@@ -389,3 +389,124 @@ describe('useTwitch test message delivery', () => {
     expect(mockShowError).not.toHaveBeenCalled()
   })
 })
+
+describe('useTwitch send_original_text save rollback', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    capturedOnMountedCbs = []
+    capturedOnUnmountedCbs = []
+    mockTwitchSettingsRef.value = undefined
+    listenMock.mockImplementation(async () => vi.fn())
+  })
+
+  interface SaveDeferred {
+    resolve: (value: string) => void
+    reject: (reason?: unknown) => void
+  }
+
+  function queueSaveCalls() {
+    const saves: SaveDeferred[] = []
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_twitch_status') return Promise.resolve({ Disconnected: null })
+      if (cmd === 'save_twitch_settings') {
+        return new Promise<string>((resolve, reject) => { saves.push({ resolve, reject }) })
+      }
+      return Promise.resolve(undefined)
+    })
+    return saves
+  }
+
+  it('advances the persisted baseline on a successful save', async () => {
+    const twitch = await setupAndMount()
+    const saves = queueSaveCalls()
+
+    twitch.settings.value.send_original_text = false
+    const first = twitch.saveSendOriginalText()
+    saves[0].resolve('saved')
+    await first
+
+    expect(twitch.settings.value.send_original_text).toBe(false)
+    expect(twitch.errorMessage.value).toBeNull()
+
+    // A later failure rolls back to the successfully persisted value, proving
+    // the baseline advanced from the initial true.
+    twitch.settings.value.send_original_text = true
+    const second = twitch.saveSendOriginalText()
+    saves[1].reject({ code: 'twitch.unavailable', message: 'later failure', retryable: true })
+    await second
+
+    expect(twitch.settings.value.send_original_text).toBe(false)
+    expect(twitch.errorMessage.value).toContain('later failure')
+  })
+
+  it('rolls the checkbox back to the persisted value and shows the localized save error on failure', async () => {
+    const twitch = await setupAndMount()
+    twitch.settings.value.send_original_text = true
+
+    mockInvoke.mockRejectedValueOnce({
+      code: 'twitch.unavailable',
+      message: 'Twitch is not connected',
+      retryable: true,
+    })
+    twitch.settings.value.send_original_text = false
+
+    await twitch.saveSendOriginalText()
+
+    expect(twitch.settings.value.send_original_text).toBe(true)
+    expect(twitch.errorMessage.value).toContain('Twitch is not connected')
+    expect(twitch.errorMessage.value).not.toContain('[object Object]')
+  })
+
+  it('ignores a stale failure that settles after a newer request', async () => {
+    const twitch = await setupAndMount()
+    const saves = queueSaveCalls()
+
+    twitch.settings.value.send_original_text = false
+    const first = twitch.saveSendOriginalText()
+    twitch.settings.value.send_original_text = true
+    const second = twitch.saveSendOriginalText()
+
+    saves[1].resolve('saved')
+    await second
+    saves[0].reject({ code: 'twitch.unavailable', message: 'stale failure', retryable: true })
+    await first
+
+    expect(twitch.settings.value.send_original_text).toBe(true)
+    expect(twitch.errorMessage.value).toBeNull()
+  })
+
+  it('does not let a stale success advance the baseline used for a later rollback', async () => {
+    const twitch = await setupAndMount()
+    const saves = queueSaveCalls()
+
+    twitch.settings.value.send_original_text = false
+    const first = twitch.saveSendOriginalText()
+    twitch.settings.value.send_original_text = true
+    const second = twitch.saveSendOriginalText()
+
+    saves[0].resolve('saved')
+    await first
+    saves[1].reject({ code: 'twitch.unavailable', message: 'latest failure', retryable: true })
+    await second
+
+    expect(twitch.settings.value.send_original_text).toBe(true)
+    expect(twitch.errorMessage.value).toContain('latest failure')
+  })
+
+  it('suppresses a stale rollback and toast after unmount', async () => {
+    const twitch = await setupAndMount()
+    const saves = queueSaveCalls()
+
+    twitch.settings.value.send_original_text = false
+    const pending = twitch.saveSendOriginalText()
+
+    const onUnmounted = capturedOnUnmountedCbs.shift()
+    if (onUnmounted) onUnmounted()
+
+    saves[0].reject({ code: 'twitch.unavailable', message: 'after unmount', retryable: true })
+    await pending
+
+    expect(twitch.settings.value.send_original_text).toBe(false)
+    expect(twitch.errorMessage.value).toBeNull()
+  })
+})

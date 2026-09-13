@@ -691,3 +691,125 @@ describe('useWebView action result localization', () => {
     expect(mockDebugError).toHaveBeenCalledWith('[WebView] Unknown action code:', 'bogus_code')
   })
 })
+
+describe('useWebView send_original_text save rollback', () => {
+  beforeEach(() => {
+    resetHarness()
+  })
+
+  function queueSaveCalls() {
+    const saves: Deferred[] = []
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_webview_token') return Promise.resolve(null)
+      if (cmd === 'get_local_ip') return Promise.resolve('192.168.1.25')
+      if (cmd === 'save_webview_settings') {
+        const save = deferred()
+        saves.push(save)
+        return save.promise
+      }
+      return Promise.resolve(undefined)
+    })
+    return saves
+  }
+
+  it('advances the persisted baseline on a successful save', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ send_original_text: true })
+    const { settings, saveSendOriginalText, errorMessage } = await setupAndMount()
+    await nextTick()
+    const saves = queueSaveCalls()
+
+    settings.value.send_original_text = false
+    const first = saveSendOriginalText()
+    saves[0].resolve('saved')
+    await first
+
+    expect(settings.value.send_original_text).toBe(false)
+    expect(errorMessage.value).toBeNull()
+
+    // A later failure rolls back to the successfully persisted value, proving
+    // the baseline advanced from the initial true.
+    settings.value.send_original_text = true
+    const second = saveSendOriginalText()
+    saves[1].reject('later failure')
+    await second
+
+    expect(settings.value.send_original_text).toBe(false)
+    expect(errorMessage.value).toBe('Не удалось сохранить настройки')
+  })
+
+  it('rolls the checkbox back to the persisted value and shows the localized save error on failure', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ send_original_text: true })
+    const { settings, saveSendOriginalText, errorMessage } = await setupAndMount()
+    await nextTick()
+
+    mockInvoke.mockRejectedValueOnce('Token required')
+    settings.value.send_original_text = false
+
+    await saveSendOriginalText()
+
+    expect(settings.value.send_original_text).toBe(true)
+    expect(errorMessage.value).toBe('Не удалось сохранить настройки')
+    expect(mockInvoke).toHaveBeenCalledWith('save_webview_settings', {
+      settings: expect.objectContaining({ send_original_text: false }),
+    })
+  })
+
+  it('ignores a stale failure that settles after a newer request', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ send_original_text: true })
+    const { settings, saveSendOriginalText, errorMessage } = await setupAndMount()
+    await nextTick()
+    const saves = queueSaveCalls()
+
+    settings.value.send_original_text = false
+    const first = saveSendOriginalText()
+    settings.value.send_original_text = true
+    const second = saveSendOriginalText()
+
+    saves[1].resolve('saved')
+    await second
+    saves[0].reject('stale failure')
+    await first
+
+    expect(settings.value.send_original_text).toBe(true)
+    expect(errorMessage.value).toBeNull()
+  })
+
+  it('does not let a stale success advance the baseline used for a later rollback', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ send_original_text: true })
+    const { settings, saveSendOriginalText, errorMessage } = await setupAndMount()
+    await nextTick()
+    const saves = queueSaveCalls()
+
+    settings.value.send_original_text = false
+    const first = saveSendOriginalText()
+    settings.value.send_original_text = true
+    const second = saveSendOriginalText()
+
+    saves[0].resolve('saved')
+    await first
+    saves[1].reject('latest failure')
+    await second
+
+    expect(settings.value.send_original_text).toBe(true)
+    expect(errorMessage.value).toBe('Не удалось сохранить настройки')
+  })
+
+  it('suppresses a stale rollback and toast after unmount', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ send_original_text: true })
+    const { settings, saveSendOriginalText, errorMessage } = await setupAndMount()
+    await nextTick()
+    const saves = queueSaveCalls()
+
+    settings.value.send_original_text = false
+    const pending = saveSendOriginalText()
+
+    const unmount = capturedOnUnmountedCbs.shift()
+    unmount?.()
+
+    saves[0].reject('after unmount')
+    await pending
+
+    expect(settings.value.send_original_text).toBe(false)
+    expect(errorMessage.value).toBeNull()
+  })
+})

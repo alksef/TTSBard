@@ -56,6 +56,8 @@ export function useWebView() {
 
   let errorTimeout: number | null = null
   let displayUrlRequest = 0
+  let sendOriginalTextRequest = 0
+  let sendOriginalTextBaseline = settings.value.send_original_text
   const listenerScope = createAsyncCleanupScope()
 
   async function updateDisplayUrl() {
@@ -164,10 +166,18 @@ export function useWebView() {
   }
 
   async function saveSendOriginalText() {
+    const request = ++sendOriginalTextRequest
+    const value = settings.value.send_original_text
+    const settingsSnapshot = { ...settings.value }
     try {
-      await invoke('save_webview_settings', { settings: settings.value })
+      await invoke('save_webview_settings', { settings: settingsSnapshot })
+      if (request !== sendOriginalTextRequest) return
+      sendOriginalTextBaseline = value
     } catch (e) {
+      if (request !== sendOriginalTextRequest) return
       debugError('[WebView] Failed to save send_original_text:', e)
+      settings.value.send_original_text = sendOriginalTextBaseline
+      showError(presentCommandError(e, t('webview.error.save_settings')))
     }
   }
 
@@ -347,6 +357,7 @@ export function useWebView() {
       access_token: newSettings.access_token || null,
       upnp_enabled: newSettings.upnp_enabled || false,
     }
+    sendOriginalTextBaseline = newSettings.send_original_text
   }, { immediate: true, deep: true })
 
   // Keep displayUrl synchronized with live bind_address/port edits and with
@@ -366,6 +377,7 @@ export function useWebView() {
     }
     // Invalidate any pending local-IP lookup so it cannot write after teardown.
     displayUrlRequest++
+    sendOriginalTextRequest++
     listenerScope.dispose()
   })
 

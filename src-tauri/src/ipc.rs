@@ -18,6 +18,7 @@ pub mod speech {
 /// Stable IPC names for the Twitch-only delivery vertical slice.
 pub mod twitch_delivery {
     pub const DELIVER_COMMAND: &str = "deliver_twitch_message";
+    pub const DELIVERY_FAILED_EVENT: &str = "twitch-delivery-failed";
 
     pub mod error_code {
         pub const EMPTY_TEXT: &str = "twitch.empty_text";
@@ -107,6 +108,24 @@ pub fn twitch_delivery_error_code_to_retryable(code: &str) -> bool {
         .find(|d| d.code == code)
         .unwrap_or_else(|| panic!("unknown deliver_twitch_message error code: {code}"))
         .retryable
+}
+
+/// Stable payload for the `twitch-delivery-failed` event. Carries only the
+/// canonical code and its retryability (derived from the exhaustive table) —
+/// never message text, channel, username or token.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TwitchDeliveryFailure {
+    pub code: &'static str,
+    pub retryable: bool,
+}
+
+impl TwitchDeliveryFailure {
+    pub fn new(code: &'static str) -> Self {
+        Self {
+            code,
+            retryable: twitch_delivery_error_code_to_retryable(code),
+        }
+    }
 }
 
 /// Stable error envelope serialized by Tauri command rejections.
@@ -289,6 +308,27 @@ mod tests {
     #[should_panic(expected = "unknown deliver_twitch_message error code")]
     fn twitch_delivery_lookup_rejects_unknown_code() {
         super::twitch_delivery_error_code_to_retryable("nonexistent.code");
+    }
+
+    #[test]
+    fn twitch_delivery_failure_payload_derives_retryability_from_canonical_table() {
+        for def in TWITCH_DELIVERY_ERRORS {
+            let payload = super::TwitchDeliveryFailure::new(def.code);
+            assert_eq!(payload.code, def.code);
+            assert_eq!(payload.retryable, def.retryable);
+        }
+    }
+
+    #[test]
+    fn twitch_delivery_failure_payload_has_stable_wire_shape() {
+        let payload = super::TwitchDeliveryFailure::new(twitch_delivery::error_code::QUEUE_FULL);
+        assert_eq!(
+            serde_json::to_value(payload).unwrap(),
+            serde_json::json!({
+                "code": "twitch.queue_full",
+                "retryable": true
+            })
+        );
     }
 
     /// Regenerates all speech contract fixture files. Excluded from standard test runs.

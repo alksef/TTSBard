@@ -5,6 +5,7 @@
 
 use crate::config::TwitchSettings as ConfigTwitchSettings;
 use crate::events::{TwitchConnectionStatus, TwitchEvent};
+use crate::ipc::{twitch_delivery, TwitchDeliveryFailure};
 use crate::state::AppState;
 use crate::twitch::{SendFailure, TwitchClient, TwitchStatus, OUTGOING_QUEUE_CAPACITY};
 use std::future::Future;
@@ -51,6 +52,90 @@ fn classify_recv_error(err: RecvError) -> RecvErrorAction {
         RecvError::Lagged(skipped) => RecvErrorAction::Continue(skipped),
         RecvError::Closed => RecvErrorAction::Break,
     }
+}
+
+/// Итог попытки поставить запланированные части в исходящую очередь.
+enum EnqueueOutcome<C, E> {
+    /// Все части приняты: `completions` — awaitable handle'ы фактической
+    /// отправки, по одному на часть в порядке постановки (FIFO).
+    Accepted { completions: Vec<C> },
+    /// Постановка остановилась на первой ошибке: `failed_index` — 0-based индекс
+    /// провалившейся части, `error` — причина отказа.
+    Failed { failed_index: usize, error: E },
+}
+
+/// Ставит запланированные части в исходящую очередь строго по порядку и
+/// останавливается на первой ошибке enqueue: успешно поставленные части
+/// остаются в очереди, последующие не предпринимаются. Внутри — только короткие
+/// await mutex'ов; pacing и send completion не ждутся (их наблюдает отдельная
+/// задача агрегации).
+async fn enqueue_parts<F, Fut, C, E>(parts: Vec<String>, mut enqueue: F) -> EnqueueOutcome<C, E>
+where
+    F: FnMut(String) -> Fut,
+    Fut: Future<Output = Result<C, E>>,
+{
+    let mut completions = Vec::new();
+    for (index, part) in parts.into_iter().enumerate() {
+        match enqueue(part).await {
+            Ok(completion) => completions.push(completion),
+            Err(error) => {
+                return EnqueueOutcome::Failed {
+                    failed_index: index,
+                    error,
+                }
+            }
+        }
+    }
+    EnqueueOutcome::Accepted { completions }
+}
+
+/// Маппинг отказа одной части в canonical error code. Retryability здесь не
+/// дублируется: её извлекает `TwitchDeliveryFailure::new` из канонической таблицы.
+fn send_failure_code(failure: &SendFailure) -> &'static str {
+    match failure {
+        SendFailure::NotConnected => twitch_delivery::error_code::UNAVAILABLE,
+        SendFailure::QueueFull => twitch_delivery::error_code::QUEUE_FULL,
+        SendFailure::Send(_) => twitch_delivery::error_code::SEND_FAILED,
+    }
+}
+
+/// Классификация отказа enqueue: провал ПЕРВОЙ части — конкретный код отказа
+/// (ничего не доставлено), провал последующей — partial delivery (часть уже
+/// ушла, повтор всего текста дублировал бы её).
+fn classify_enqueue_failure(failure: &SendFailure, failed_index: usize) -> &'static str {
+    if failed_index == 0 {
+        send_failure_code(failure)
+    } else {
+        twitch_delivery::error_code::PARTIAL_DELIVERY
+    }
+}
+
+/// Классификация отказа планирования частей: слово не помещается в лимит —
+/// единый исход `twitch.too_long`, без частичной отправки.
+fn plan_failure_code(_error: &crate::twitch::PlanError) -> &'static str {
+    twitch_delivery::error_code::TOO_LONG
+}
+
+/// Агрегирует async-завершения частей одного логического сообщения: наблюдает
+/// их строго по порядку и возвращает НЕ БОЛЕЕ одного классифицированного кода
+/// (первый провал завершает наблюдение). Провал первой части — конкретный код
+/// отправки; провал последующей (когда более ранняя завершилась успешно) —
+/// partial delivery. `None` — все части доставлены.
+async fn aggregate_completions<C, W, Fut>(completions: Vec<C>, mut wait: W) -> Option<&'static str>
+where
+    W: FnMut(C) -> Fut,
+    Fut: Future<Output = Result<(), SendFailure>>,
+{
+    for (index, completion) in completions.into_iter().enumerate() {
+        if let Err(failure) = wait(completion).await {
+            return Some(if index == 0 {
+                send_failure_code(&failure)
+            } else {
+                twitch_delivery::error_code::PARTIAL_DELIVERY
+            });
+        }
+    }
+    None
 }
 
 /// Логирует typed-отказ отправки безопасным сообщением (без текста/token).
@@ -134,10 +219,27 @@ pub async fn run_twitch_client(
         }
     };
 
+    let report_delivery_failure = {
+        let app_handle = app_handle.clone();
+        move |payload: &TwitchDeliveryFailure| {
+            if let Err(e) = app_handle.emit(twitch_delivery::DELIVERY_FAILED_EVENT, payload) {
+                error!(error = %e, "Failed to emit Twitch delivery failure event");
+            }
+        }
+    };
+
     let start_attempt =
         |client: TwitchClient| async move { client.start().await.map_err(|e| e.to_string()) };
 
-    run_twitch_client_core(app_state, twitch_rx, shutdown, report_status, start_attempt).await;
+    run_twitch_client_core(
+        app_state,
+        twitch_rx,
+        shutdown,
+        report_status,
+        start_attempt,
+        report_delivery_failure,
+    )
+    .await;
 }
 
 async fn run_twitch_client_core<F, Fut>(
@@ -146,6 +248,7 @@ async fn run_twitch_client_core<F, Fut>(
     shutdown: CancellationToken,
     mut update_status: impl FnMut(TwitchConnectionStatus),
     mut start_attempt: F,
+    report_delivery_failure: impl Fn(&TwitchDeliveryFailure) + Clone + Send + 'static,
 ) where
     F: FnMut(TwitchClient) -> Fut,
     Fut: Future<Output = Result<(), String>> + Send + 'static,
@@ -363,26 +466,49 @@ async fn run_twitch_client_core<F, Fut>(
                                         &clean, &channel,
                                     ) {
                                         Ok(parts) => {
-                                            for part in parts {
-                                                match client.enqueue(&part).await {
-                                                    Ok(completion) => {
-                                                        tokio::spawn(async move {
-                                                            match completion
-                                                                .wait()
-                                                                .await
-                                                            {
-                                                                Ok(()) => debug!(
-                                                                    "Message part sent successfully"
-                                                                ),
-                                                                Err(failure) => {
-                                                                    log_send_failure(&failure)
-                                                                }
-                                                            }
-                                                        });
-                                                    }
-                                                    Err(failure) => {
-                                                        log_send_failure(&failure)
-                                                    }
+                                            let total_parts = parts.len();
+                                            let result = enqueue_parts(parts, |part| {
+                                                let client = client.clone();
+                                                async move { client.enqueue(&part).await }
+                                            })
+                                            .await;
+                                            match result {
+                                                EnqueueOutcome::Accepted { completions } => {
+                                                    let report =
+                                                        report_delivery_failure.clone();
+                                                    tokio::spawn(async move {
+                                                        if let Some(code) =
+                                                            aggregate_completions(
+                                                                completions,
+                                                                |completion| {
+                                                                    completion.wait()
+                                                                },
+                                                            )
+                                                            .await
+                                                        {
+                                                            report(&TwitchDeliveryFailure::new(
+                                                                code,
+                                                            ));
+                                                        }
+                                                    });
+                                                }
+                                                EnqueueOutcome::Failed {
+                                                    failed_index,
+                                                    error,
+                                                } => {
+                                                    warn!(
+                                                        failed_index = failed_index + 1,
+                                                        total_parts,
+                                                        "Twitch message enqueue failed; stopping event delivery"
+                                                    );
+                                                    log_send_failure(&error);
+                                                    let code = classify_enqueue_failure(
+                                                        &error,
+                                                        failed_index,
+                                                    );
+                                                    report_delivery_failure(
+                                                        &TwitchDeliveryFailure::new(code),
+                                                    );
                                                 }
                                             }
                                         }
@@ -395,10 +521,17 @@ async fn run_twitch_client_core<F, Fut>(
                                                 error = ?plan_error,
                                                 "Twitch message word exceeds the delivery limit; message dropped"
                                             );
+                                            let code = plan_failure_code(&plan_error);
+                                            report_delivery_failure(
+                                                &TwitchDeliveryFailure::new(code),
+                                            );
                                         }
                                     }
                                 } else {
                                     debug!("Cannot send message - no active client");
+                                    report_delivery_failure(&TwitchDeliveryFailure::new(
+                                        twitch_delivery::error_code::UNAVAILABLE,
+                                    ));
                                 }
                             }
                         }
@@ -476,12 +609,15 @@ async fn run_twitch_client_core<F, Fut>(
 #[cfg(test)]
 mod tests {
     use super::{
-        bound_reconnect_jitter_ms, classify_recv_error, is_reconnect_retryable,
-        reconnect_base_delay_ms, run_twitch_client_core, RecvErrorAction,
+        aggregate_completions, bound_reconnect_jitter_ms, classify_enqueue_failure,
+        classify_recv_error, enqueue_parts, is_reconnect_retryable, plan_failure_code,
+        reconnect_base_delay_ms, run_twitch_client_core, send_failure_code, EnqueueOutcome,
+        RecvErrorAction,
     };
     use crate::events::{TwitchConnectionStatus, TwitchEvent};
+    use crate::ipc::TwitchDeliveryFailure;
     use crate::state::AppState;
-    use crate::twitch::{TwitchClient, TwitchStatus};
+    use crate::twitch::{SendFailure, TwitchClient, TwitchStatus};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
@@ -495,6 +631,8 @@ mod tests {
             self.0.store(true, Ordering::SeqCst);
         }
     }
+
+    fn no_delivery_failure(_payload: &TwitchDeliveryFailure) {}
 
     fn valid_settings() -> crate::config::TwitchSettings {
         crate::config::TwitchSettings {
@@ -568,6 +706,7 @@ mod tests {
             shutdown.clone(),
             report,
             factory,
+            no_delivery_failure,
         ));
 
         event_tx.send(TwitchEvent::Restart).unwrap();
@@ -626,6 +765,7 @@ mod tests {
             shutdown.clone(),
             report,
             factory,
+            no_delivery_failure,
         ));
 
         event_tx.send(TwitchEvent::Restart).unwrap();
@@ -690,6 +830,7 @@ mod tests {
             shutdown.clone(),
             report,
             factory,
+            no_delivery_failure,
         ));
 
         event_tx.send(TwitchEvent::Restart).unwrap();
@@ -779,6 +920,7 @@ mod tests {
                 let _ = status_tx.send(status);
             },
             factory,
+            no_delivery_failure,
         ));
 
         event_tx.send(TwitchEvent::Restart).unwrap();
@@ -840,6 +982,7 @@ mod tests {
             shutdown.clone(),
             |_status| {},
             factory,
+            no_delivery_failure,
         ));
 
         event_tx.send(TwitchEvent::Restart).unwrap();
@@ -901,6 +1044,7 @@ mod tests {
                 let _ = status_tx.send(status);
             },
             factory,
+            no_delivery_failure,
         ));
 
         event_tx.send(TwitchEvent::Restart).unwrap();
@@ -969,6 +1113,7 @@ mod tests {
             shutdown.clone(),
             report,
             factory,
+            no_delivery_failure,
         ));
 
         event_tx.send(TwitchEvent::Restart).unwrap();
@@ -1093,5 +1238,172 @@ mod tests {
             TwitchEvent::SendMessage(text) => assert_eq!(text, "latest"),
             other => panic!("next event after lag must be the latest send, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn event_enqueue_stops_after_first_failure() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&attempts);
+        let result = enqueue_parts(
+            vec!["one".to_string(), "two".to_string(), "three".to_string()],
+            move |_part| {
+                let attempt = counter.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    if attempt == 1 {
+                        Err(SendFailure::QueueFull)
+                    } else {
+                        Ok(())
+                    }
+                }
+            },
+        )
+        .await;
+
+        assert_eq!(
+            attempts.load(Ordering::SeqCst),
+            2,
+            "no enqueue attempt may follow the first failure"
+        );
+        match result {
+            EnqueueOutcome::Failed {
+                failed_index,
+                error,
+            } => {
+                assert_eq!(failed_index, 1);
+                assert_eq!(error, SendFailure::QueueFull);
+            }
+            EnqueueOutcome::Accepted { .. } => panic!("expected an enqueue failure"),
+        }
+    }
+
+    #[tokio::test]
+    async fn event_enqueue_attempts_every_part_without_failure() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&attempts);
+        let result = enqueue_parts(
+            vec!["one".to_string(), "two".to_string(), "three".to_string()],
+            move |_part| {
+                counter.fetch_add(1, Ordering::SeqCst);
+                async move { Ok::<(), SendFailure>(()) }
+            },
+        )
+        .await;
+
+        assert_eq!(attempts.load(Ordering::SeqCst), 3);
+        match result {
+            EnqueueOutcome::Accepted { completions } => assert_eq!(completions.len(), 3),
+            EnqueueOutcome::Failed { .. } => panic!("expected every part to be accepted"),
+        }
+    }
+
+    #[test]
+    fn send_failure_code_maps_each_failure_to_canonical_code() {
+        assert_eq!(
+            send_failure_code(&SendFailure::NotConnected),
+            "twitch.unavailable"
+        );
+        assert_eq!(
+            send_failure_code(&SendFailure::QueueFull),
+            "twitch.queue_full"
+        );
+        assert_eq!(
+            send_failure_code(&SendFailure::Send("write failed".to_string())),
+            "twitch.send_failed"
+        );
+    }
+
+    #[test]
+    fn classify_enqueue_failure_distinguishes_first_from_later_part() {
+        assert_eq!(
+            classify_enqueue_failure(&SendFailure::QueueFull, 0),
+            "twitch.queue_full"
+        );
+        assert_eq!(
+            classify_enqueue_failure(&SendFailure::NotConnected, 0),
+            "twitch.unavailable"
+        );
+        assert_eq!(
+            classify_enqueue_failure(&SendFailure::Send("write failed".to_string()), 0),
+            "twitch.send_failed"
+        );
+        assert_eq!(
+            classify_enqueue_failure(&SendFailure::QueueFull, 1),
+            "twitch.partial_delivery"
+        );
+        assert_eq!(
+            classify_enqueue_failure(&SendFailure::Send("write failed".to_string()), 2),
+            "twitch.partial_delivery"
+        );
+    }
+
+    #[test]
+    fn plan_failure_classifies_as_too_long() {
+        assert_eq!(
+            plan_failure_code(&crate::twitch::PlanError::WordExceedsCharLimit),
+            "twitch.too_long"
+        );
+        assert_eq!(
+            plan_failure_code(&crate::twitch::PlanError::WordExceedsWireBudget),
+            "twitch.too_long"
+        );
+    }
+
+    #[tokio::test]
+    async fn aggregate_completions_returns_none_when_all_parts_succeed() {
+        let result = aggregate_completions(vec![0usize, 1, 2], |_index| {
+            std::future::ready(Ok::<(), SendFailure>(()))
+        })
+        .await;
+        assert_eq!(result, None);
+    }
+
+    #[tokio::test]
+    async fn aggregate_completions_first_part_failure_is_concrete_code() {
+        let result = aggregate_completions(vec![0usize, 1, 2], |index| {
+            std::future::ready(if index == 0 {
+                Err(SendFailure::Send("write failed".to_string()))
+            } else {
+                Ok(())
+            })
+        })
+        .await;
+        assert_eq!(result, Some("twitch.send_failed"));
+    }
+
+    #[tokio::test]
+    async fn aggregate_completions_later_part_failure_is_partial_delivery() {
+        let result = aggregate_completions(vec![0usize, 1, 2], |index| {
+            std::future::ready(if index == 1 {
+                Err(SendFailure::Send("write failed".to_string()))
+            } else {
+                Ok(())
+            })
+        })
+        .await;
+        assert_eq!(result, Some("twitch.partial_delivery"));
+    }
+
+    #[tokio::test]
+    async fn aggregate_completions_emits_at_most_one_outcome() {
+        let waits = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&waits);
+        let result = aggregate_completions(vec![0usize, 1, 2, 3], {
+            move |index| {
+                counter.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(if index == 1 || index == 2 {
+                    Err(SendFailure::Send("write failed".to_string()))
+                } else {
+                    Ok(())
+                })
+            }
+        })
+        .await;
+
+        assert_eq!(result, Some("twitch.partial_delivery"));
+        assert_eq!(
+            waits.load(Ordering::SeqCst),
+            2,
+            "aggregation must stop observing after the first failure"
+        );
     }
 }

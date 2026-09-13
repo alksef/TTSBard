@@ -1,7 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
 import { IpcCommandError } from './commandError'
-import { DELIVER_TWITCH_MESSAGE_COMMAND, deliverTwitchMessage, isKnownTwitchErrorCode } from './twitchDelivery'
+import {
+  DELIVER_TWITCH_MESSAGE_COMMAND,
+  TWITCH_DELIVERY_FAILED_EVENT,
+  TWITCH_ERROR_META,
+  deliverTwitchMessage,
+  isKnownTwitchErrorCode,
+  isTwitchDeliveryFailureDto,
+  twitchDeliveryFailureLocaleKey,
+} from './twitchDelivery'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 
@@ -50,5 +58,64 @@ describe('deliverTwitchMessage IPC contract', () => {
     expect(isKnownTwitchErrorCode('twitch.too_long')).toBe(true)
     expect(isKnownTwitchErrorCode('twitch.partial_delivery')).toBe(true)
     expect(isKnownTwitchErrorCode('twitch.nope')).toBe(false)
+  })
+})
+
+describe('twitch-delivery-failed payload guard and converter', () => {
+  it('uses the stable event name', () => {
+    expect(TWITCH_DELIVERY_FAILED_EVENT).toBe('twitch-delivery-failed')
+  })
+
+  it('accepts every canonical code/retryable combination', () => {
+    for (const [code, meta] of Object.entries(TWITCH_ERROR_META)) {
+      const payload = { code, retryable: meta.retryable }
+      expect(isTwitchDeliveryFailureDto(payload)).toBe(true)
+      expect(twitchDeliveryFailureLocaleKey(payload)).toBe(`errors.${code}`)
+    }
+  })
+
+  it('rejects an unknown code', () => {
+    const payload = { code: 'twitch.nope', retryable: true }
+    expect(isTwitchDeliveryFailureDto(payload)).toBe(false)
+    expect(twitchDeliveryFailureLocaleKey(payload)).toBeNull()
+  })
+
+  it('rejects wrong retryability for a known code', () => {
+    expect(isTwitchDeliveryFailureDto({ code: 'twitch.queue_full', retryable: false })).toBe(false)
+    expect(isTwitchDeliveryFailureDto({ code: 'twitch.too_long', retryable: true })).toBe(false)
+    expect(twitchDeliveryFailureLocaleKey({ code: 'twitch.queue_full', retryable: false })).toBeNull()
+  })
+
+  it('rejects null, string and array payloads', () => {
+    expect(isTwitchDeliveryFailureDto(null)).toBe(false)
+    expect(isTwitchDeliveryFailureDto('twitch.queue_full')).toBe(false)
+    expect(isTwitchDeliveryFailureDto(['twitch.queue_full', true])).toBe(false)
+    expect(twitchDeliveryFailureLocaleKey(null)).toBeNull()
+    expect(twitchDeliveryFailureLocaleKey('twitch.queue_full')).toBeNull()
+    expect(twitchDeliveryFailureLocaleKey(['twitch.queue_full', true])).toBeNull()
+  })
+
+  it('rejects partial payloads and wrong retryable type', () => {
+    expect(isTwitchDeliveryFailureDto({ code: 'twitch.queue_full' })).toBe(false)
+    expect(isTwitchDeliveryFailureDto({ retryable: true })).toBe(false)
+    expect(isTwitchDeliveryFailureDto({})).toBe(false)
+    expect(isTwitchDeliveryFailureDto({ code: 'twitch.queue_full', retryable: 'yes' })).toBe(false)
+    expect(twitchDeliveryFailureLocaleKey({ code: 'twitch.queue_full' })).toBeNull()
+    expect(twitchDeliveryFailureLocaleKey({})).toBeNull()
+  })
+
+  it('rejects payloads with extra fields', () => {
+    const payload = {
+      code: 'twitch.send_failed',
+      retryable: true,
+      message: 'raw backend text',
+    }
+    expect(isTwitchDeliveryFailureDto(payload)).toBe(false)
+    expect(twitchDeliveryFailureLocaleKey(payload)).toBeNull()
+  })
+
+  it('maps a valid payload to the existing errors.twitch locale key', () => {
+    expect(twitchDeliveryFailureLocaleKey({ code: 'twitch.queue_full', retryable: true }))
+      .toBe('errors.twitch.queue_full')
   })
 })

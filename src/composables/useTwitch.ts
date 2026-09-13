@@ -107,6 +107,8 @@ export function useTwitch() {
   const isSendingTest = ref(false)
 
   let testSendRequest = 0
+  let sendOriginalTextRequest = 0
+  let sendOriginalTextBaseline = settings.value.send_original_text
 
   function handleStatusChange(status: TwitchStatus) {
     currentStatus.value = status
@@ -194,10 +196,19 @@ export function useTwitch() {
   }
 
   async function saveSendOriginalText() {
+    const request = ++sendOriginalTextRequest
+    const value = settings.value.send_original_text
+    const settingsSnapshot = { ...settings.value }
     try {
-      await invoke('save_twitch_settings', { settings: settings.value })
+      await invoke('save_twitch_settings', { settings: settingsSnapshot })
+      if (request !== sendOriginalTextRequest) return
+      sendOriginalTextBaseline = value
     } catch (e) {
+      if (request !== sendOriginalTextRequest) return
       debugError('[Twitch] Failed to save send_original_text:', e)
+      settings.value.send_original_text = sendOriginalTextBaseline
+      const errorMsg = normalizeCommandError(e).message
+      showError(t('twitch.error.save', { detail: errorMsg }))
     }
   }
 
@@ -247,11 +258,13 @@ export function useTwitch() {
       start_on_boot: newSettings.start_on_boot,
       send_original_text: newSettings.send_original_text,
     }
+    sendOriginalTextBaseline = newSettings.send_original_text
   }, { immediate: true })
 
   onUnmounted(() => {
     // Панель демонтирована: отправка в полёте не должна писать в state.
     testSendRequest++
+    sendOriginalTextRequest++
     listenerScope.dispose()
     if (errorTimeout !== null) {
       clearTimeout(errorTimeout)
