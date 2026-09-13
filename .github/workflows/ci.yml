@@ -84,6 +84,8 @@ jobs:
           npm run test:settings
           npm run check:speech-contract
           npm run test:speech-contract
+          npm run check:locales
+          npm run test:locales
       - name: Run frontend tests
         run: npm test
       - name: Type check
@@ -123,3 +125,22 @@ jobs:
         env:
           TAURI_CONFIG: '{"bundle":{"resources":null}}'
         run: .\scripts\cargo.ps1 test --manifest-path src-tauri/Cargo.toml --locked --verbose
+
+  bundle-smoke:
+    name: Tauri bundle smoke
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install dependencies
+        run: npm ci
+      - name: Build Tauri debug app without installers
+        shell: pwsh
+        run: .\scripts\build.ps1 -Mode debug
