@@ -60,6 +60,10 @@ related_tasks: []
 
 ### Интеграции
 
+- [ROADMAP-107 — Текст внешней доставки для WebView и Twitch](./completed/107-original-text-for-external-delivery.md)
+- [ROADMAP-106 — Ограничения длины текста TTS и внешних каналов](./completed/106-provider-text-length-limits.md)
+- [ROADMAP-105 — Пользовательское тестовое сообщение Twitch](./completed/105-twitch-custom-test-message.md)
+- [ROADMAP-104 — Надёжный Twitch-клиент и доставка сообщений](./completed/104-twitch-chat-client-and-delivery-resilience.md)
 - [ROADMAP-101 — Маршрутизация входящих и единая вкладка редактирования](./completed/101-incoming-routing-and-edit-buffer.md)
 - [ROADMAP-095 — Устойчивое переподключение Twitch IRC](./completed/095-twitch-irc-reconnect-resilience.md)
 - [ROADMAP-087 — входной сервер текста для audio-only озвучивания](./completed/087-external-text-input-server.md)

@@ -1,7 +1,7 @@
 # DECISION-022 — Twitch IRC lifecycle принадлежит twitch-irc
 
 **Статус:** `accepted` (ROADMAP-104)
-**Связано:** [ROADMAP-104](../roadmap/active/104-twitch-chat-client-and-delivery-resilience.md)
+**Связано:** [ROADMAP-104](../roadmap/completed/104-twitch-chat-client-and-delivery-resilience.md)
 
 > **TL;DR.** Транспорт и протокольный lifecycle Twitch IRC (TCP/TLS, PING/PONG,
 > RECONNECT, повторный JOIN) отданы библиотеке `twitch-irc`. Приложение сохраняет
