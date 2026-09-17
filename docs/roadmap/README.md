@@ -50,6 +50,7 @@ related_tasks: []
 
 ### Ввод текста и OCR
 
+- [ROADMAP-108 — Локальная веб-форма входящего текста](./completed/108-local-web-input-form.md)
 - [ROADMAP-088 — One-shot OCR выделенной области](./completed/088-one-shot-screen-ocr.md)
 - [ROADMAP-090 — Единое поведение моделей OCR и RUAccent](./completed/090-ocr-ruaccent-model-panel-behavior.md)
 

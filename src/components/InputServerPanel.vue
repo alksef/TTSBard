@@ -22,11 +22,13 @@ const {
   statusLabel,
   statusError,
   endpoint,
+  overlayUrl,
   saveSettings,
   startInputServer,
   stopInputServer,
   sendTest,
   copyEndpoint,
+  copyOverlayUrl,
 } = useInputServer()
 
 const messageBoxClass = computed(() => (message.value ? messageType.value : ''))
@@ -147,6 +149,23 @@ const messageBoxClass = computed(() => (message.value ? messageType.value : ''))
         </div>
       </div>
       <p class="format-hint">{{ t('input_server.format_hint') }} <code class="inline-code">{"text":"реплика"}</code></p>
+    </section>
+
+    <section class="settings-section">
+      <h2>{{ t('input_server.overlay_title') }}</h2>
+      <div class="setting-row">
+        <div class="url-display url-display-full">
+          <label class="url-code url-code-wide">{{ overlayUrl }}</label>
+          <button
+            class="icon-button"
+            :title="t('input_server.copy_overlay')"
+            :aria-label="t('input_server.copy_overlay')"
+            @click="copyOverlayUrl"
+          >
+            <Copy :size="16" />
+          </button>
+        </div>
+      </div>
     </section>
 
     <section class="settings-section">

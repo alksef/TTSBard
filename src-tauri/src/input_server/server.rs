@@ -1,3 +1,5 @@
+use super::overlay::overlay;
+pub use super::overlay::OverlayLanguage;
 use crate::commands::input_server::{error_code, InputServerAccepted};
 use crate::ipc::{speech as speech_contract, CommandError};
 use axum::extract::rejection::JsonRejection;
@@ -48,14 +50,26 @@ struct SpeechRequest {
 
 /// Build the loopback input server router.
 ///
-/// Routes: `GET /health`, `POST /v1/speech`. No CORS middleware; body limited
-/// to [`MAX_BODY_BYTES`]. Every request is gated on an exact loopback
-/// `Host` header (`127.0.0.1:<port>` / `localhost:<port>`) so DNS-rebinding
-/// pages rebinding an attacker domain to 127.0.0.1 are rejected with 403
-/// before any handler or intake runs.
-pub fn build_router(intake: Arc<dyn TextIntake>, port: u16) -> Router {
+/// Routes: `GET /health`, `GET /overlay`, `POST /v1/speech`. No CORS
+/// middleware; body limited to [`MAX_BODY_BYTES`]. Every request is gated on
+/// an exact loopback `Host` header (`127.0.0.1:<port>` / `localhost:<port>`) so
+/// DNS-rebinding pages rebinding an attacker domain to 127.0.0.1 are rejected
+/// with 403 before any handler or intake runs. `overlay_language` is the single
+/// language decision served to the overlay script.
+pub fn build_router(
+    intake: Arc<dyn TextIntake>,
+    port: u16,
+    overlay_language: OverlayLanguage,
+) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route(
+            "/overlay",
+            get(move || {
+                let overlay_language = overlay_language;
+                async move { overlay(overlay_language).await }
+            }),
+        )
         .route("/v1/speech", post(post_speech))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(middleware::from_fn_with_state(port, host_gate))
@@ -172,7 +186,10 @@ mod tests {
 
     fn app(result: Result<InputServerAccepted, CommandError>) -> (Router, Arc<FakeIntake>) {
         let intake = Arc::new(FakeIntake::new(result));
-        (build_router(intake.clone(), TEST_PORT), intake)
+        (
+            build_router(intake.clone(), TEST_PORT, OverlayLanguage::English),
+            intake,
+        )
     }
 
     fn request(method: Method, uri: &str, content_type: Option<&str>, body: Body) -> Request<Body> {
@@ -213,12 +230,21 @@ mod tests {
         (status, value)
     }
 
+    async fn overlay_html(app: Router) -> String {
+        let response = app
+            .oneshot(request(Method::GET, "/overlay", None, Body::empty()))
+            .await
+            .unwrap();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        String::from_utf8(body.to_vec()).unwrap()
+    }
+
     #[tokio::test]
     async fn health_returns_exact_json_with_200() {
         let intake = Arc::new(FakeIntake::new(Ok(InputServerAccepted::Queued {
             job_id: Uuid::nil(),
         })));
-        let app = build_router(intake, TEST_PORT);
+        let app = build_router(intake, TEST_PORT, OverlayLanguage::English);
 
         let response = app
             .oneshot(request(Method::GET, "/health", None, Body::empty()))
@@ -622,6 +648,160 @@ mod tests {
                 Some("application/json"),
                 json_body("hello world"),
                 Some(&format!("[::1]:{TEST_PORT}")),
+            ))
+            .await
+            .unwrap();
+
+        let (status, value) = response_parts(response).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(value["code"], FORBIDDEN_HOST_CODE);
+        assert_eq!(intake.call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn overlay_returns_html_with_utf8_content_type_and_form_landmarks() {
+        let intake = Arc::new(FakeIntake::new(Ok(InputServerAccepted::Queued {
+            job_id: Uuid::nil(),
+        })));
+        let app = build_router(intake, TEST_PORT, OverlayLanguage::English);
+
+        let response = app
+            .oneshot(request(Method::GET, "/overlay", None, Body::empty()))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers()[header::CONTENT_TYPE],
+            "text/html; charset=utf-8"
+        );
+        assert_eq!(
+            response.headers()[header::CONTENT_SECURITY_POLICY],
+            "frame-ancestors 'none'"
+        );
+
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        for landmark in [
+            "<form",
+            "<textarea",
+            "<script",
+            "aria-live",
+            "autofocus",
+            "/v1/speech",
+            "prefers-color-scheme",
+            "isComposing",
+            "const language = 'en'",
+            "language === 'ru'",
+            "Sent",
+            "Отправлено",
+            "10000",
+        ] {
+            assert!(
+                html.contains(landmark),
+                "overlay page must contain {landmark}"
+            );
+        }
+        for absent in ["<h1", "<button"] {
+            assert!(
+                !html.contains(absent),
+                "overlay page must stay minimal without {absent}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn overlay_english_serves_english_marker_without_browser_detection() {
+        let intake = Arc::new(FakeIntake::new(Ok(InputServerAccepted::Queued {
+            job_id: Uuid::nil(),
+        })));
+        let app = build_router(intake, TEST_PORT, OverlayLanguage::English);
+
+        let html = overlay_html(app).await;
+
+        assert!(
+            html.contains("const language = 'en'"),
+            "English router must serve the English language marker"
+        );
+        assert!(
+            !html.contains("navigator.language"),
+            "overlay must not detect the browser language"
+        );
+    }
+
+    #[tokio::test]
+    async fn overlay_russian_serves_russian_marker_without_browser_detection() {
+        let intake = Arc::new(FakeIntake::new(Ok(InputServerAccepted::Queued {
+            job_id: Uuid::nil(),
+        })));
+        let app = build_router(intake, TEST_PORT, OverlayLanguage::Russian);
+
+        let html = overlay_html(app).await;
+
+        assert!(
+            html.contains("const language = 'ru'"),
+            "Russian router must serve the Russian language marker"
+        );
+        assert!(
+            !html.contains("navigator.language"),
+            "overlay must not detect the browser language"
+        );
+    }
+
+    #[tokio::test]
+    async fn overlay_has_no_cors_allow_origin_header() {
+        let intake = Arc::new(FakeIntake::new(Ok(InputServerAccepted::Queued {
+            job_id: Uuid::nil(),
+        })));
+        let app = build_router(intake, TEST_PORT, OverlayLanguage::English);
+
+        let response = app
+            .oneshot(request(Method::GET, "/overlay", None, Body::empty()))
+            .await
+            .unwrap();
+
+        assert!(response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn overlay_with_foreign_host_returns_403() {
+        let (app, intake) = app(Ok(InputServerAccepted::Queued {
+            job_id: Uuid::nil(),
+        }));
+
+        let response = app
+            .oneshot(request_with_host(
+                Method::GET,
+                "/overlay",
+                None,
+                Body::empty(),
+                Some(&format!("evil.example:{TEST_PORT}")),
+            ))
+            .await
+            .unwrap();
+
+        let (status, value) = response_parts(response).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(value["code"], FORBIDDEN_HOST_CODE);
+        assert_eq!(intake.call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn overlay_with_missing_host_returns_403() {
+        let (app, intake) = app(Ok(InputServerAccepted::Queued {
+            job_id: Uuid::nil(),
+        }));
+
+        let response = app
+            .oneshot(request_with_host(
+                Method::GET,
+                "/overlay",
+                None,
+                Body::empty(),
+                None,
             ))
             .await
             .unwrap();

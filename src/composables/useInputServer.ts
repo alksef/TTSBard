@@ -26,6 +26,7 @@ export type InputServerTestResult =
 
 export const INPUT_SERVER_HOST = '127.0.0.1'
 export const INPUT_SERVER_PATH = '/v1/speech'
+export const INPUT_SERVER_OVERLAY_PATH = '/overlay'
 
 const DEFAULT_SETTINGS: InputServerSettings = {
   start_on_boot: false,
@@ -90,6 +91,10 @@ export function useInputServer() {
 
   const endpoint = computed(
     () => `http://${INPUT_SERVER_HOST}:${settings.value.port}${INPUT_SERVER_PATH}`,
+  )
+
+  const overlayUrl = computed(
+    () => `http://${INPUT_SERVER_HOST}:${settings.value.port}${INPUT_SERVER_OVERLAY_PATH}`,
   )
 
   function showMessage(text: string, type: UiMessageKind = 'info') {
@@ -200,13 +205,21 @@ export function useInputServer() {
     }
   }
 
-  async function copyEndpoint(): Promise<void> {
+  async function copyText(value: string, successKey: string): Promise<void> {
     try {
-      await navigator.clipboard.writeText(endpoint.value)
-      showMessage(t('input_server.endpoint_copied'), 'success')
+      await navigator.clipboard.writeText(value)
+      showMessage(t(successKey), 'success')
     } catch {
       showMessage(t('input_server.error.copy'), 'error')
     }
+  }
+
+  async function copyEndpoint(): Promise<void> {
+    await copyText(endpoint.value, 'input_server.endpoint_copied')
+  }
+
+  async function copyOverlayUrl(): Promise<void> {
+    await copyText(overlayUrl.value, 'input_server.overlay_url_copied')
   }
 
   onMounted(async () => {
@@ -253,6 +266,7 @@ export function useInputServer() {
     statusLabel,
     statusError,
     endpoint,
+    overlayUrl,
     showMessage,
     refreshSettings,
     refreshStatus,
@@ -261,5 +275,6 @@ export function useInputServer() {
     stopInputServer,
     sendTest,
     copyEndpoint,
+    copyOverlayUrl,
   }
 }

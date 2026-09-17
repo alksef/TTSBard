@@ -6,7 +6,7 @@
 
 use crate::commands::input_server::{accept_external_text, InputServerAccepted};
 use crate::commands::speech_queue::SpeechQueueState;
-use crate::input_server::server::{build_router, TextIntake};
+use crate::input_server::server::{build_router, OverlayLanguage, TextIntake};
 use crate::input_server::{InputServerService, InputServerStatus};
 use crate::ipc::CommandError;
 use crate::speech_queue::SubmissionSource;
@@ -68,6 +68,24 @@ async fn bind_loopback(port: u16) -> Result<TcpListener, String> {
         .map_err(|error| format!("Failed to bind 127.0.0.1:{port}: {error}"))
 }
 
+/// Resolve the overlay language decision from the effective UI locale.
+///
+/// The startup [`crate::commands::localization::LocalizationState`] holds the
+/// effective locale for this run; Russian selects Russian overlay messages and
+/// every other locale falls back to English. A missing state (never expected in
+/// production) also falls back to English.
+fn resolve_overlay_language(app_handle: &AppHandle) -> OverlayLanguage {
+    let locale = app_handle
+        .try_state::<crate::commands::localization::LocalizationState>()
+        .map(|state| state.snapshot().locale)
+        .unwrap_or_else(|| "en".to_string());
+    if locale == "ru" {
+        OverlayLanguage::Russian
+    } else {
+        OverlayLanguage::English
+    }
+}
+
 /// Run the input server listener lifecycle against the service's desired
 /// settings.
 ///
@@ -90,6 +108,8 @@ pub async fn run_input_server(app_handle: AppHandle, shutdown: CancellationToken
         app_handle: app_handle.clone(),
     });
 
+    let overlay_language = resolve_overlay_language(&app_handle);
+
     let serve = |listener: TcpListener, router: Router, token: CancellationToken| {
         tokio::spawn(async move {
             if let Err(error) = axum::serve(listener, router)
@@ -108,7 +128,16 @@ pub async fn run_input_server(app_handle: AppHandle, shutdown: CancellationToken
         }
     };
 
-    run_input_server_core(service, wake_rx, shutdown, intake, serve, emit).await;
+    run_input_server_core(
+        service,
+        wake_rx,
+        shutdown,
+        intake,
+        overlay_language,
+        serve,
+        emit,
+    )
+    .await;
 }
 
 /// Upper bound for draining in-flight requests before a listener stop aborts
@@ -140,6 +169,7 @@ async fn run_input_server_core<E, S>(
     mut wake_rx: tokio::sync::mpsc::UnboundedReceiver<()>,
     shutdown: CancellationToken,
     intake: Arc<dyn TextIntake>,
+    overlay_language: OverlayLanguage,
     serve: S,
     mut emit: E,
 ) where
@@ -190,7 +220,7 @@ async fn run_input_server_core<E, S>(
             }
         };
 
-        let router = build_router(intake.clone(), port);
+        let router = build_router(intake.clone(), port, overlay_language);
         let server_token = shutdown.child_token();
         let mut server_task = serve(listener, router, server_token.clone());
         service.publish_status(InputServerStatus::Running, &mut emit);
@@ -298,7 +328,13 @@ mod tests {
             transitions.lock().push(status.clone());
         };
         tokio::spawn(run_input_server_core(
-            service, wake_rx, shutdown, intake, real_serve, emit,
+            service,
+            wake_rx,
+            shutdown,
+            intake,
+            OverlayLanguage::English,
+            real_serve,
+            emit,
         ))
     }
 
@@ -630,6 +666,7 @@ mod tests {
             wake_rx,
             shutdown.clone(),
             intake,
+            OverlayLanguage::English,
             real_serve,
             emit,
         ));

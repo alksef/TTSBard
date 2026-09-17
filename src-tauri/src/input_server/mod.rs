@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::speech_queue::{DeliveryPolicy, SubmissionSource};
 
+pub mod overlay;
 pub mod server;
 pub mod service;
 

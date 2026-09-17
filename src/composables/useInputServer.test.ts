@@ -4,12 +4,15 @@ vi.stubGlobal('window', globalThis)
 
 const mocks = vi.hoisted(() => ({
   mockInvoke: vi.fn(),
+  mockWriteText: vi.fn(),
   listenCallbacks: new Map<string, (event: { payload: unknown }) => void>(),
   unlistenFns: new Map<string, () => void>(),
   mockDebugLog: vi.fn(),
   mockDebugError: vi.fn(),
   mockNormalizeCommandError: vi.fn(),
 }))
+
+vi.stubGlobal('navigator', { clipboard: { writeText: mocks.mockWriteText } })
 
 let capturedOnMountedCb: (() => void) | null = null
 let capturedOnUnmountedCb: (() => void) | null = null
@@ -97,6 +100,41 @@ describe('useInputServer', () => {
     settings.value.port = 8080
 
     expect(endpoint.value).toBe('http://127.0.0.1:8080/v1/speech')
+  })
+
+  it('derives the overlay URL from the default port', () => {
+    const { overlayUrl } = useInputServer()
+
+    expect(overlayUrl.value).toBe('http://127.0.0.1:10101/overlay')
+  })
+
+  it('derives the overlay URL from the configured port', () => {
+    const { settings, overlayUrl } = useInputServer()
+
+    settings.value.port = 8080
+
+    expect(overlayUrl.value).toBe('http://127.0.0.1:8080/overlay')
+  })
+
+  it('copies the overlay URL to the clipboard and reports success', async () => {
+    mocks.mockWriteText.mockResolvedValue(undefined)
+    const { overlayUrl, copyOverlayUrl, message, messageType } = await setupAndMount()
+
+    await copyOverlayUrl()
+
+    expect(mocks.mockWriteText).toHaveBeenCalledWith(overlayUrl.value)
+    expect(message.value).toBe('Адрес формы скопирован')
+    expect(messageType.value).toBe('success')
+  })
+
+  it('reports an error when copying the overlay URL fails', async () => {
+    mocks.mockWriteText.mockRejectedValue(new Error('denied'))
+    const { copyOverlayUrl, message, messageType } = await setupAndMount()
+
+    await copyOverlayUrl()
+
+    expect(message.value).toBe('Не удалось скопировать адрес')
+    expect(messageType.value).toBe('error')
   })
 
   it('saveSettings persists the full settings payload', async () => {

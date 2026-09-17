@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Send text</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 16px;
+    line-height: 1.4;
+    background: #f2f2f7;
+    color: #1c1c1e;
+    min-height: 100vh;
+    padding: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #1c1c1e; color: #f2f2f7; }
+  }
+  main {
+    width: 100%;
+    max-width: 480px;
+    margin: 0 auto;
+  }
+  form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  textarea {
+    width: 100%;
+    max-width: 100%;
+    min-height: 3.4em;
+    padding: 8px 10px;
+    font: inherit;
+    line-height: 1.4;
+    color: inherit;
+    background: #ffffff;
+    border: 1px solid #c7c7cc;
+    border-radius: 8px;
+    resize: vertical;
+  }
+  @media (prefers-color-scheme: dark) {
+    textarea { background: #2c2c2e; border-color: #48484a; }
+  }
+  textarea:focus-visible {
+    outline: 2px solid #0a84ff;
+    outline-offset: 2px;
+  }
+  @media (prefers-color-scheme: dark) {
+    textarea:focus-visible { outline-color: #409cff; }
+  }
+  #status {
+    min-height: 1.3em;
+    margin: 8px 0 0;
+    font-size: 0.9rem;
+  }
+  #status.success { color: #248a3d; }
+  #status.error { color: #d70015; }
+  @media (prefers-color-scheme: dark) {
+    #status.success { color: #30d158; }
+    #status.error { color: #ff453a; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <form id="form">
+    <label class="visually-hidden" id="label" for="text">Text to send</label>
+    <textarea id="text" name="text" rows="3" autofocus autocomplete="off" spellcheck="false"></textarea>
+  </form>
+  <p id="status" role="status" aria-live="polite"></p>
+</main>
+<script>
+  const messages = {
+    en: {
+      lang: 'en',
+      title: 'Send text',
+      label: 'Text to send',
+      sending: 'Sending…',
+      success: 'Sent',
+      error: 'Could not send the text. Try again.',
+    },
+    ru: {
+      lang: 'ru',
+      title: 'Отправить текст',
+      label: 'Текст для отправки',
+      sending: 'Отправка…',
+      success: 'Отправлено',
+      error: 'Не удалось отправить текст. Попробуйте ещё раз.',
+    },
+  };
+
+  const language = '__OVERLAY_LANGUAGE__';
+  const t = messages[language === 'ru' ? 'ru' : 'en'];
+
+  const form = document.getElementById('form');
+  const label = document.getElementById('label');
+  const textarea = document.getElementById('text');
+  const status = document.getElementById('status');
+
+  document.documentElement.lang = t.lang;
+  document.title = t.title;
+  label.textContent = t.label;
+
+  const SUCCESS_CLEAR_MS = 10000;
+
+  let pending = false;
+  let successTimer = 0;
+  let statusToken = 0;
+
+  function clearSuccessTimer() {
+    if (successTimer) {
+      clearTimeout(successTimer);
+      successTimer = 0;
+    }
+  }
+
+  function showStatus(kind, message) {
+    clearSuccessTimer();
+    statusToken += 1;
+    const token = statusToken;
+    status.textContent = message;
+    status.className = kind || '';
+    if (kind === 'success') {
+      successTimer = setTimeout(() => {
+        successTimer = 0;
+        if (token !== statusToken) return;
+        status.textContent = '';
+        status.className = '';
+      }, SUCCESS_CLEAR_MS);
+    }
+  }
+
+  function submit() {
+    if (pending) return;
+    const text = textarea.value.trim();
+    if (!text) {
+      textarea.focus();
+      return;
+    }
+    pending = true;
+    showStatus('', t.sending);
+    fetch('/v1/speech', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text }),
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('http error');
+        return response.json().then((data) => {
+          if (
+            data &&
+            (data.status === 'queued' || data.status === 'pending_review')
+          ) {
+            showStatus('success', t.success);
+          } else {
+            throw new Error('unexpected response');
+          }
+        });
+      })
+      .then(() => {
+        textarea.value = '';
+        textarea.focus();
+      })
+      .catch(() => {
+        showStatus('error', t.error);
+        textarea.focus();
+      })
+      .finally(() => {
+        pending = false;
+      });
+  }
+
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    submit();
+  });
+
+  textarea.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      submit();
+    }
+  });
+</script>
+</body>
+</html>
