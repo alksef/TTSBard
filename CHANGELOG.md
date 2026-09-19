@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.0] - 2026-09-19
+
+### Добавлено
+
+- На локальном сервере входящих сообщений появилась компактная веб-форма для
+  отправки реплик из обычного браузера или Steam Overlay. Форма использует тот
+  же маршрут обработки, поддерживает отправку по `Enter`, перенос строки по
+  `Shift+Enter` и сохраняет введённый текст при ошибке.
+- В настройках входящего сервера теперь отображается готовый адрес веб-формы с
+  текущим портом, который можно скопировать.
+
 ## [0.30.0] - 2026-09-14
 
 ### Добавлено
