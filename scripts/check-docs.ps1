@@ -434,7 +434,8 @@ function Test-DocsStructure {
     $allowedEntries = @(
         'README.md',
         'faq.md',
-        'product-overview.md',
+        'ttsbard-overview.md',
+        'ttsbard-overview.pdf',
         'decisions',
         'development',
         'integrations',
