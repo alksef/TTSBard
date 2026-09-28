@@ -165,6 +165,37 @@ function Get-ResourceValue([object]$Resources, [string]$Source) {
     return $prop.Value
 }
 
+function Test-CoversDictionary([string]$Path) {
+    $dictDir = [System.IO.Path]::GetFullPath((Join-Path $repoRoot 'src-tauri/resources/dict'))
+    $aff = [System.IO.Path]::GetFullPath((Join-Path $dictDir 'ru.aff'))
+    $dic = [System.IO.Path]::GetFullPath((Join-Path $dictDir 'ru.dic'))
+
+    if ($Path -eq $aff -or $Path -eq $dic) { return $true }
+
+    $prefix = $Path.TrimEnd('\') + '\'
+    $affPrefix = $aff.TrimEnd('\') + '\'
+    return $affPrefix.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -and
+           $prefix.Length -lt $affPrefix.Length
+}
+
+function Test-SourceBundlesDict([string]$Source) {
+    if ([string]::IsNullOrWhiteSpace($Source)) { return $false }
+
+    $srcTauri = [System.IO.Path]::GetFullPath((Join-Path $repoRoot 'src-tauri'))
+    $resolved = [System.IO.Path]::GetFullPath((Join-Path $srcTauri $Source))
+
+    if ($Source.IndexOfAny([char[]]@('*', '?', '[')) -lt 0) {
+        return Test-CoversDictionary $resolved
+    }
+
+    $matches = @(Get-ChildItem -Path $resolved -ErrorAction SilentlyContinue)
+    foreach ($match in $matches) {
+        $full = [System.IO.Path]::GetFullPath($match.FullName)
+        if (Test-CoversDictionary $full) { return $true }
+    }
+    return $false
+}
+
 function Test-TauriConfig {
     if (-not (Test-Path -LiteralPath $tauriConf -PathType Leaf)) {
         Add-Error 'Missing src-tauri/tauri.conf.json'
@@ -193,7 +224,8 @@ function Test-TauriConfig {
     $requiredMappings = @(
         @{ Source = '../THIRD_PARTY_NOTICES.md'; Destination = 'THIRD_PARTY_NOTICES.md' },
         @{ Source = 'vendor/signalsmith-stretch/LICENSE.txt'; Destination = 'third-party/licenses/signalsmith-stretch-LICENSE.txt' },
-        @{ Source = 'vendor/signalsmith-linear/LICENSE.txt'; Destination = 'third-party/licenses/signalsmith-linear-LICENSE.txt' }
+        @{ Source = 'vendor/signalsmith-linear/LICENSE.txt'; Destination = 'third-party/licenses/signalsmith-linear-LICENSE.txt' },
+        @{ Source = 'resources/dict/LICENSE.txt'; Destination = 'resources/dict/LICENSE.txt' }
     )
 
     foreach ($mapping in $requiredMappings) {
@@ -206,9 +238,10 @@ function Test-TauriConfig {
         }
     }
 
-    $dictDestination = Get-ResourceValue $resources 'resources/dict'
-    if ($dictDestination -ne 'resources/dict') {
-        Add-Error "bundle.resources['resources/dict'] must map to 'resources/dict' so dict/LICENSE.txt is bundled"
+    foreach ($prop in $resources.PSObject.Properties) {
+        if (Test-SourceBundlesDict $prop.Name) {
+            Add-Error "bundle.resources['$($prop.Name)'] would bundle the external dictionary (ru.aff/ru.dic); only 'resources/dict/LICENSE.txt' may be mapped from resources/dict"
+        }
     }
 }
 

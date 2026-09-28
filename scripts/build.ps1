@@ -479,6 +479,54 @@ if ($currentCompiled -and (Test-ValidEspeakData $currentCompiled)) {
     Invoke-BootstrapAndCompile
 }
 
+# --- Удаление устаревших внешних файлов словаря из ресурсов сборки ------------
+# До ROADMAP-110 каталог resources/dict целиком попадал в bundle. Остатки ru.aff
+# и ru.dic от прежних сборок лежат в выбранном profile и при повторной сборке
+# снова упаковались бы. Удаляем только эти два файла из выходного каталога
+# ресурсов, не трогая исходники src-tauri/resources и пользовательские каталоги.
+function Remove-StaleExternalDict([string]$ProfileResourcesDir, [string]$BuildTargetDir) {
+    $buildTarget = [System.IO.Path]::GetFullPath($BuildTargetDir).TrimEnd('\')
+    $profileRes = [System.IO.Path]::GetFullPath($ProfileResourcesDir).TrimEnd('\')
+    $dictOutputDir = [System.IO.Path]::GetFullPath((Join-Path $profileRes 'dict'))
+
+    if (-not (Test-IsAncestorOf $buildTarget $profileRes)) {
+        throw "Refusing to remove stale dictionary files: profile resources dir '$profileRes' is outside build target '$buildTarget'."
+    }
+
+    foreach ($fileName in @('ru.aff', 'ru.dic')) {
+        $filePath = [System.IO.Path]::GetFullPath((Join-Path $dictOutputDir $fileName))
+        if (-not (Test-IsAncestorOf $dictOutputDir $filePath)) {
+            throw "Refusing to remove stale dictionary file outside dict output dir: '$filePath'."
+        }
+        if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) { continue }
+
+        $reparse = $false
+        $cursor = $filePath
+        while ($cursor) {
+            if (Test-Path -LiteralPath $cursor) {
+                $entry = Get-Item -LiteralPath $cursor -Force
+                if (($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    $reparse = $true
+                    break
+                }
+            }
+            $parent = Split-Path -Parent $cursor
+            if (-not $parent -or $parent -eq $cursor) { break }
+            $cursor = $parent
+        }
+        if ($reparse) {
+            throw "Refusing to remove stale dictionary file: reparse point detected on path '$filePath'."
+        }
+
+        Remove-Item -LiteralPath $filePath -Force
+        Write-Ok "removed stale external dictionary file: $filePath"
+    }
+}
+
+$targetProfile = if ($Mode -eq 'debug') { 'debug' } else { 'release' }
+$profileResourcesDir = [System.IO.Path]::GetFullPath((Join-Path $targetDir "$targetProfile\resources"))
+Remove-StaleExternalDict $profileResourcesDir $targetDir
+
 # --- Сборка ------------------------------------------------------------------
 $buildStart = Get-Date
 

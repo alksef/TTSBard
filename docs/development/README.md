@@ -75,16 +75,24 @@ Hunspell-словарь, eSpeak NG и Signalsmith Stretch/Linear. Это точ�
 прямых assets, а не сгенерированный реестр всех транзитивных Rust/npm
 зависимостей.
 
+Данные русского словаря (`ru.aff`/`ru.dic`) встроены в exe на этапе компиляции
+через `include_str!`. В репозитории остаются исходные файлы словаря, а в поставке
+— его лицензия `resources/dict/LICENSE.txt`; внешние файлы словаря в bundle не
+входят.
+
 Проверка запускается отдельно:
 
 ```powershell
 ./scripts/check-third-party-notices.ps1
 ```
 
-Она сверяет SHA-256 словаря, наличие notice/license files, pinned revisions
-(LibreOffice, piper-rs, eSpeak NG), точные Tauri resource mappings и сохранение
-`bundle.licenseFile`. Проверка не обращается к сети и не валидирует полный
-dependency inventory — только перечисленные прямые assets.
+Она сверяет SHA-256 исходных файлов словаря, наличие notice/license files,
+pinned revisions (LibreOffice, piper-rs, eSpeak NG), явный license mapping
+`resources/dict/LICENSE.txt` и сохранение `bundle.licenseFile`. Валидатор
+отвергает resource mappings, которые упаковали бы словарь целиком: каталог
+`resources/dict`, глоб `resources/dict/*`, отдельные `ru.aff`/`ru.dic` или
+родительский каталог `resources`. Проверка не обращается к сети и не валидирует
+полный dependency inventory — только перечисленные прямые assets.
 
 ## Сборка приложения на Windows
 

@@ -23,7 +23,6 @@ use crate::commands::telegram::TelegramState;
 use crate::config::{AppSettings, Hotkey, SettingsManager, WindowsManager, WindowsSettings};
 use crate::event_loop::EventHandler;
 use crate::events::AppEvent;
-use crate::secret_log;
 use crate::soundpanel::SoundPanelState;
 use crate::speech_queue::JobStatus;
 use crate::state::AppState;
@@ -554,38 +553,9 @@ fn init_tts_provider(
     }
 }
 
-/// Initialize offline spellcheck (spellbook + Hunspell dictionary)
+/// Initialize offline spellcheck (spellbook + embedded Hunspell dictionary)
 fn init_spellcheck(app: &App, app_state: &AppState) {
-    let res_dir = match app.path().resource_dir() {
-        Ok(dir) => dir,
-        Err(e) => {
-            warn!(error = %e, "[spellcheck] resource_dir() failed (spellcheck disabled)");
-            return;
-        }
-    };
-
-    let dict_dir = res_dir.join("resources").join("dict");
-    let aff_path = dict_dir.join("ru.aff");
-    let dic_path = dict_dir.join("ru.dic");
-
-    if !aff_path.exists() {
-        warn!(path = %secret_log::safe_path_for_log(&aff_path), "[spellcheck] ru.aff not found (spellcheck disabled)");
-        return;
-    }
-    if !dic_path.exists() {
-        warn!(path = %secret_log::safe_path_for_log(&dic_path), "[spellcheck] ru.dic not found (spellcheck disabled)");
-        return;
-    }
-
-    info!(
-        aff = %secret_log::safe_path_for_log(&aff_path),
-        dic = %secret_log::safe_path_for_log(&dic_path),
-        "[spellcheck] loading dictionary..."
-    );
-
-    let manager = Arc::new(crate::spellcheck::SpellcheckManager::new(
-        aff_path, dic_path,
-    ));
+    let manager = Arc::new(crate::spellcheck::SpellcheckManager::new());
     let spellcheck_state = crate::commands::spellcheck::SpellcheckState(manager.clone());
     *app_state.editor.spellcheck_manager.lock() = Some(manager);
     app.manage(spellcheck_state);
