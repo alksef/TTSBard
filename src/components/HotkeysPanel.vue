@@ -5,6 +5,7 @@ import { Keyboard, RotateCcw, AppWindow, Music, MonitorPlay, SquarePen, ScanLine
 import type { HotkeyDto } from '../types/settings'
 import { useAppSettings } from '../composables/useAppSettings'
 import { debugError } from '../utils/debug'
+import { normalizeCommandError } from '../ipc/commandError'
 import { t } from '../i18n'
 
 const { settings, isLoading, reload } = useAppSettings()
@@ -45,7 +46,7 @@ async function startRecording(name: HotkeyName) {
     document.addEventListener('keydown', handleKeyDown)
     document.addEventListener('keyup', handleKeyUp)
   } catch (e) {
-    showMessage(t('hotkeys.error_prefix', { detail: (e as Error).message }), 'error')
+    showMessage(t('hotkeys.error_prefix', { detail: normalizeCommandError(e).message }), 'error')
     // Сбрасываем флаг при ошибке
     try {
       await invoke('set_hotkey_recording', { recording: false })
@@ -69,7 +70,7 @@ async function startEditorRecording(name: EditorHotkeyName) {
     document.addEventListener('keydown', handleKeyDown)
     document.addEventListener('keyup', handleKeyUp)
   } catch (e) {
-    showMessage(t('hotkeys.error_prefix', { detail: (e as Error).message }), 'error')
+    showMessage(t('hotkeys.error_prefix', { detail: normalizeCommandError(e).message }), 'error')
     // Сбрасываем флаг при ошибке
     try {
       await invoke('set_hotkey_recording', { recording: false })
@@ -125,30 +126,12 @@ function handleKeyDown(e: KeyboardEvent) {
   if (e.altKey) modifiers.push('alt')
   if (e.metaKey) modifiers.push('super')
 
-  const usesPhysicalCode = recordingFor.value === 'return_previous_window'
-    || recordingFor.value === 'toggle_minimal_mode'
-    || isEditorHotkeyName(recordingFor.value)
-
-  // Get the main key — use code for return_previous_window (physical key)
-  let key: string
-  if (usesPhysicalCode) {
-    key = codeToKey(e.code)
-    if (key === '') {
-      currentRecording.value = { modifiers, key: '' }
-      return
-    }
-  } else {
-    key = e.key.toUpperCase()
-    // Ignore modifier-only keys - just update the modifiers display
-    if (key === 'CONTROL' || key === 'SHIFT' || key === 'ALT' || key === 'META') {
-      currentRecording.value = { modifiers, key: '' }
-      return
-    }
-    // Map special keys
-    if (key === ' ') key = 'SPACE'
-    if (e.code.startsWith('F')) key = e.code
+  const key = codeToKey(e.code)
+  if (key === '') {
+    // Modifier-only and unsupported keys must never become a saved shortcut.
+    currentRecording.value = { modifiers, key: '' }
+    return
   }
-
   // Update recording with the main key
   currentRecording.value = { modifiers, key }
 }
@@ -156,23 +139,8 @@ function handleKeyDown(e: KeyboardEvent) {
 function handleKeyUp(e: KeyboardEvent) {
   if (!recordingFor.value || !currentRecording.value) return
 
-  const usesPhysicalCode = recordingFor.value === 'return_previous_window'
-    || recordingFor.value === 'toggle_minimal_mode'
-    || isEditorHotkeyName(recordingFor.value)
-
-  // Get the key being released — use code for return_previous_window
-  let releasedKey: string
-  if (usesPhysicalCode) {
-    releasedKey = codeToKey(e.code)
-    if (releasedKey === '') return
-    // For return_previous_window, ignore keyup on modifier-only keys
-    if (['CONTROL', 'SHIFT', 'ALT', 'META', 'CONTROL', 'SHIFT', 'ALT', 'META'].includes(releasedKey)) return
-  } else {
-    releasedKey = e.key.toUpperCase()
-    if (releasedKey === ' ') releasedKey = 'SPACE'
-    if (e.code.startsWith('F')) releasedKey = e.code
-  }
-
+  const releasedKey = codeToKey(e.code)
+  if (releasedKey === '') return
   // Only finish if we're releasing the main key we captured
   if (currentRecording.value.key !== '' && releasedKey === currentRecording.value.key) {
     // Save the hotkey
@@ -201,7 +169,7 @@ async function saveHotkey(name: string, hotkey: HotkeyDto) {
     await invoke('set_hotkey_recording', { recording: false })
   } catch (e) {
     // При ошибке нужно восстановить хоткеи вручную
-    showMessage(t('hotkeys.error_prefix', { detail: (e as Error).message }), 'error')
+    showMessage(t('hotkeys.error_prefix', { detail: normalizeCommandError(e).message }), 'error')
     try {
       await invoke('set_hotkey_recording', { recording: false })
       if (!isEditorHotkeyName(name)) {
@@ -223,7 +191,7 @@ async function resetToDefault(name: HotkeyName) {
     await reload()
     showMessage(t('hotkeys.reset_success'), 'success')
   } catch (e) {
-    showMessage(t('hotkeys.error_prefix', { detail: (e as Error).message }), 'error')
+    showMessage(t('hotkeys.error_prefix', { detail: normalizeCommandError(e).message }), 'error')
   }
 }
 
@@ -234,7 +202,7 @@ async function resetEditorToDefault(name: EditorHotkeyName) {
     await reload()
     showMessage(t('hotkeys.reset_success'), 'success')
   } catch (e) {
-    showMessage(t('hotkeys.error_prefix', { detail: (e as Error).message }), 'error')
+    showMessage(t('hotkeys.error_prefix', { detail: normalizeCommandError(e).message }), 'error')
   }
 }
 
