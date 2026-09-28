@@ -58,9 +58,9 @@ use commands::telegram::{
 };
 use commands::{
     apply_openai_proxy_settings, close_playback_control_window, close_soundpanel_window,
-    disable_virtual_mic, enable_virtual_mic, get_audio_effects, get_audio_settings,
-    get_dsp_settings, get_editor_font_family, get_editor_font_size_px, get_editor_height,
-    get_editor_hotkeys, get_editor_quick, get_editor_spellcheck_enabled,
+    disable_virtual_mic, enable_virtual_mic, get_audio_effects, get_audio_output_format_pending,
+    get_audio_settings, get_dsp_settings, get_editor_font_family, get_editor_font_size_px,
+    get_editor_height, get_editor_hotkeys, get_editor_quick, get_editor_spellcheck_enabled,
     get_editor_spellcheck_source, get_editor_typing_idle_timeout_ms,
     get_global_exclude_from_capture, get_hotkey_enabled, get_hotkey_settings, get_local_tts_url,
     get_main_appearance, get_main_compact_dims, get_openai_api_key, get_openai_voice,
@@ -74,8 +74,8 @@ use commands::{
     set_audio_effects_enabled, set_audio_effects_enhance_atten_db,
     set_audio_effects_enhance_enabled, set_audio_effects_formant_preserved,
     set_audio_effects_pitch, set_audio_effects_speed, set_audio_effects_volume,
-    set_editor_autocomplete_enabled, set_editor_default_route, set_editor_font_family,
-    set_editor_font_size, set_editor_height, set_editor_homograph_accentor,
+    set_audio_output_format, set_editor_autocomplete_enabled, set_editor_default_route,
+    set_editor_font_family, set_editor_font_size, set_editor_height, set_editor_homograph_accentor,
     set_editor_homograph_accentor_load_on_start, set_editor_hotkey, set_editor_keep_text,
     set_editor_quick, set_editor_spellcheck_enabled, set_editor_spellcheck_source,
     set_editor_typing_enabled, set_editor_typing_idle_timeout_ms, set_global_exclude_from_capture,
@@ -441,6 +441,8 @@ pub fn run() {
             disable_virtual_mic,
             set_virtual_mic_volume,
             test_audio_device,
+            get_audio_output_format_pending,
+            set_audio_output_format,
             // Audio Effects commands
             get_audio_effects,
             set_audio_effects_enabled,

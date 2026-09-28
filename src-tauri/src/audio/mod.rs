@@ -10,10 +10,13 @@ pub mod dsp;
 pub mod effects;
 mod player;
 
+pub(crate) use player::{init_output_settings, open_output_sink, output_format_pending};
+
 pub use boundary::{crossfade, process_boundaries, BoundaryConfig};
 pub use device::{get_output_devices, get_virtual_mic_devices, OutputDeviceInfo};
 pub use dsp::{process_dsp, CompressorConfig, DspConfig, EqBand, EqConfig, LimiterConfig};
 pub use effects::{apply_effects, decode_audio, AudioEffects, AudioPcm};
 pub use player::{
     open_sink_on_device, open_sink_on_device_pcm, resolve_output_device, AudioPlayer, OutputConfig,
+    OutputDeviceStream,
 };

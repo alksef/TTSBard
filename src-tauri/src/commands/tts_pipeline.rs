@@ -960,6 +960,7 @@ mod tests {
 
     fn make_audio_settings(speaker_enabled: bool, mic_device: Option<&str>) -> AudioSettings {
         AudioSettings {
+            output_format: crate::config::AudioOutputFormat::Default,
             speaker_enabled,
             speaker_device: None,
             speaker_volume: 80,

@@ -1,7 +1,9 @@
-use crate::audio::{open_sink_on_device_pcm, resolve_output_device, AudioPcm, OutputConfig};
+use crate::audio::{
+    open_sink_on_device_pcm, resolve_output_device, AudioPcm, OutputConfig, OutputDeviceStream,
+};
 use chrono::Utc;
 use parking_lot::RwLock;
-use rodio::{OutputStream, Sink};
+use rodio::Sink;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
@@ -548,8 +550,8 @@ impl PlaybackManager {
     ) {
         let mut sink_spk: Option<Sink> = None;
         let mut sink_mic: Option<Sink> = None;
-        let mut _stream_spk: Option<OutputStream> = None;
-        let mut _stream_mic: Option<OutputStream> = None;
+        let mut _stream_spk: Option<OutputDeviceStream> = None;
+        let mut _stream_mic: Option<OutputDeviceStream> = None;
         let mut playing = false;
         let mut stopped = false;
 

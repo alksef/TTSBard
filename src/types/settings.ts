@@ -244,6 +244,7 @@ export interface TwitchSettingsDto {
 // ============================================================================
 
 export interface AudioSettingsDto {
+  output_format: 'default' | 'i32'
   speaker_device: string | null
   speaker_enabled: boolean
   speaker_volume: number

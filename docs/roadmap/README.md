@@ -133,6 +133,8 @@ related_tasks: []
 
 ### Audio и playback pipeline
 
+- [ROADMAP-109 — Качество вывода через THX Spatial Audio](./completed/109-thx-output-format-compatibility.md)
+
 - [ROADMAP-020 — DeepFilterNet](./completed/020-audio-cleaning-enhancement.md)
 - [ROADMAP-021 — resampling optimization](./completed/021-audio-pipeline-resampling-optimization.md)
 - [ROADMAP-022 — effects navigation и preview](./completed/022-audio-effects-navigation-and-preview.md)

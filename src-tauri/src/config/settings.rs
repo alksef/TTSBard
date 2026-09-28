@@ -23,9 +23,19 @@ use tracing::{info, warn};
 
 // ==================== Audio Settings ====================
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AudioOutputFormat {
+    #[default]
+    Default,
+    I32,
+}
+
 /// Audio output settings
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AudioSettings {
+    #[serde(default)]
+    pub output_format: AudioOutputFormat,
     pub speaker_device: Option<String>,
     #[serde(default = "default_speaker_enabled")]
     pub speaker_enabled: bool,
@@ -49,6 +59,7 @@ fn default_virtual_mic_volume() -> u8 {
 impl Default for AudioSettings {
     fn default() -> Self {
         Self {
+            output_format: AudioOutputFormat::Default,
             speaker_device: None,
             speaker_enabled: true,
             speaker_volume: 80,
@@ -1892,6 +1903,10 @@ impl SettingsManager {
 
     // ========== Audio Settings ==========
 
+    pub fn set_audio_output_format(&self, format: AudioOutputFormat) -> Result<()> {
+        self.update_field("/audio/output_format", &format)
+    }
+
     /// Set speaker device
     pub fn set_speaker_device(&self, device_id: Option<String>) -> Result<()> {
         self.update_field("/audio/speaker_device", &device_id)
@@ -2992,6 +3007,60 @@ impl SettingsManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn audio_output_format_defaults_for_old_settings_and_rejects_unknown() {
+        let mut value = serde_json::to_value(AudioSettings::default()).unwrap();
+        value.as_object_mut().unwrap().remove("output_format");
+        let old: AudioSettings = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(old.output_format, AudioOutputFormat::Default);
+        value["output_format"] = serde_json::json!("f32");
+        assert!(serde_json::from_value::<AudioSettings>(value).is_err());
+    }
+
+    #[test]
+    fn audio_output_format_persists_and_updates_shared_cache() {
+        let (manager, dir) = webview_section_tmp_manager("audio-output-format");
+        let cache = manager.cache_arc();
+        manager
+            .set_audio_output_format(AudioOutputFormat::I32)
+            .unwrap();
+        assert_eq!(cache.read().audio.output_format, AudioOutputFormat::I32);
+        let restarted = SettingsManager::with_config_dir(dir.clone()).unwrap();
+        assert_eq!(
+            restarted.load().unwrap().audio.output_format,
+            AudioOutputFormat::I32
+        );
+        assert_eq!(
+            read_disk_settings(&dir).audio.output_format,
+            AudioOutputFormat::I32
+        );
+        assert_eq!(restarted.load().unwrap().audio.speaker_volume, 80);
+        manager
+            .set_audio_output_format(AudioOutputFormat::Default)
+            .unwrap();
+        assert_eq!(cache.read().audio.output_format, AudioOutputFormat::Default);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn audio_output_format_failed_write_preserves_cache() {
+        let (manager, dir) = webview_section_tmp_manager("audio-output-format-failed");
+        manager
+            .set_audio_output_format(AudioOutputFormat::I32)
+            .unwrap();
+        let path = dir.join("settings.json");
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert!(manager
+            .set_audio_output_format(AudioOutputFormat::Default)
+            .is_err());
+        assert_eq!(
+            manager.cache_arc().read().audio.output_format,
+            AudioOutputFormat::I32
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     /// Backwards-compatibility: an old settings.json written BEFORE the `deepseek`
     /// provider existed must still deserialize (the `deepseek` field is absent).

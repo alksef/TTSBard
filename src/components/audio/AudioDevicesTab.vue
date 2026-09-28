@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { RefreshCw, Loader, Volume2, VolumeX, Mic, Info, Play } from 'lucide-vue-next';
-import { useAudioSettings } from '../../composables/useAppSettings';
+import { useAudioSettings, useAppSettings } from '../../composables/useAppSettings';
 import { debugLog, debugError } from '../../utils/debug';
 import { t } from '../../i18n';
 import { presentCommandError } from '../../ipc/commandError';
@@ -31,6 +31,48 @@ const isTestingSpeaker = ref(false);
 const isTestingVirtualMic = ref(false);
 const errorMessage = ref('');
 const isDataLoaded = ref(false);
+const { reload: reloadSettings } = useAppSettings();
+const outputFormat = computed(() => audioSettingsFromComposable.value?.output_format ?? '');
+const isSettingFormat = ref(false);
+const isFormatPending = ref(false);
+let pendingTimer: ReturnType<typeof setInterval> | undefined;
+let disposed = false;
+let pendingRequest = false;
+
+async function refreshFormatPending() {
+  if (disposed || pendingRequest) return;
+  pendingRequest = true;
+  const formatAtRequest = outputFormat.value;
+  try {
+    const pending = await invoke<boolean>('get_audio_output_format_pending');
+    if (!disposed && outputFormat.value === formatAtRequest) isFormatPending.value = pending;
+  } catch (error) {
+    if (!disposed) debugError('Failed to read output format status:', error);
+  } finally {
+    pendingRequest = false;
+  }
+}
+
+async function setOutputFormat(format: string) {
+  if (isSettingFormat.value || (format !== 'default' && format !== 'i32')) return;
+  isSettingFormat.value = true;
+  errorMessage.value = '';
+  try {
+    await invoke('set_audio_output_format', { format });
+    await reloadSettings();
+    await refreshFormatPending();
+  } catch (error) {
+    if (!disposed) errorMessage.value = presentCommandError(error, t('audio.error.output_format'));
+  } finally {
+    if (!disposed) isSettingFormat.value = false;
+  }
+}
+
+watch(outputFormat, () => { isFormatPending.value = false; void refreshFormatPending(); });
+onUnmounted(() => {
+  disposed = true;
+  if (pendingTimer !== undefined) clearInterval(pendingTimer);
+});
 
 const selectedVirtualMicDevice = ref<string | null>(null);
 
@@ -58,6 +100,7 @@ async function refreshData() {
   errorMessage.value = '';
   try {
     await loadDevices(true);
+    await refreshFormatPending();
   } finally {
     isRefreshing.value = false;
   }
@@ -188,9 +231,11 @@ function getDeviceDisplayName(device: DeviceInfo): string {
 }
 
 onMounted(async () => {
+  pendingTimer = setInterval(() => { void refreshFormatPending(); }, 1000);
   isLoading.value = true;
   try {
     await loadDevices();
+    await refreshFormatPending();
   } finally {
     isLoading.value = false;
   }
@@ -268,7 +313,7 @@ watch(audioSettingsFromComposable, (newSettings) => {
             </select>
             <button
               @click="testSpeaker"
-              :disabled="!audioSettings.speaker_enabled || isTestingSpeaker"
+              :disabled="!audioSettings.speaker_enabled || isTestingSpeaker || isSettingFormat"
               class="test-btn"
               :title="t('audio.test_playback')"
               :aria-label="t('audio.test_playback')"
@@ -336,7 +381,7 @@ watch(audioSettingsFromComposable, (newSettings) => {
             </select>
             <button
               @click="testVirtualMic"
-              :disabled="!audioSettings.virtual_mic_device || isTestingVirtualMic"
+              :disabled="!audioSettings.virtual_mic_device || isTestingVirtualMic || isSettingFormat"
               class="test-btn"
               :title="t('audio.test_playback')"
               :aria-label="t('audio.test_playback')"
@@ -366,6 +411,27 @@ watch(audioSettingsFromComposable, (newSettings) => {
           <Info :size="16" /> {{ t('audio.mic.not_found_info') }}
         </div>
       </div>
+      <div class="setting-section output-format-section">
+        <div class="setting-row output-format-row">
+          <div class="output-format-label">
+            <label for="audio-output-format">{{ t('audio.output_format.label') }}</label>
+            <button type="button" class="format-help" :title="t('audio.output_format.help')" :aria-label="t('audio.output_format.help')">
+              <Info :size="16" />
+            </button>
+          </div>
+          <div class="input-with-action">
+            <select id="audio-output-format" :value="outputFormat"
+              :disabled="!audioSettingsFromComposable || isSettingFormat || isRefreshing || isTestingSpeaker || isTestingVirtualMic"
+              @change="setOutputFormat(($event.target as HTMLSelectElement).value)">
+              <option v-if="!outputFormat" value="" disabled>{{ t('audio.loading') }}</option>
+              <option value="default">{{ t('audio.output_format.default') }}</option>
+              <option value="i32">{{ t('audio.output_format.i32') }}</option>
+            </select>
+          </div>
+        </div>
+        <p class="format-hint">{{ t('audio.output_format.hint') }}</p>
+        <p v-if="isFormatPending" class="format-hint" role="status">{{ t('audio.output_format.pending') }}</p>
+      </div>
     </div>
 
     <div class="panel-footer">
@@ -385,6 +451,15 @@ watch(audioSettingsFromComposable, (newSettings) => {
 </template>
 
 <style scoped>
+.output-format-label { display: flex; align-items: center; gap: 6px; }
+.format-help { display: inline-flex; padding: 2px; background: none; border: none; color: var(--color-text-secondary); cursor: help; }
+.format-help:focus-visible { outline: 2px solid var(--card-active-border); outline-offset: 2px; border-radius: 4px; }
+.format-hint { margin: 8px 0 0; font-size: 12px; line-height: 1.5; color: var(--color-text-secondary); overflow-wrap: anywhere; }
+.output-format-section { min-width: 0; }
+.output-format-row { flex-wrap: wrap; gap: 8px; }
+.output-format-row .input-with-action { flex: 1 1 220px; }
+.output-format-row select { width: 100%; }
+
 .error-box {
   background: var(--danger-bg-weak);
   border: 1px solid var(--danger-border-strong);

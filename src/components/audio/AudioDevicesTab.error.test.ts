@@ -4,6 +4,7 @@ import { t } from '../../i18n'
 import { withLocale } from '../../test-utils/i18n'
 
 const deviceErrorKeys = [
+  'audio.error.output_format',
   'audio.error.load_devices',
   'audio.error.set_speaker_device',
   'audio.error.set_speaker_enabled',

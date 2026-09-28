@@ -1770,6 +1770,7 @@ mod tests {
         };
 
         let audio = AudioSettingsDto {
+            output_format: crate::config::AudioOutputFormat::Default,
             speaker_device: None,
             speaker_enabled: true,
             speaker_volume: 80,
@@ -2170,6 +2171,7 @@ mod tests {
         };
 
         let audio = AudioSettingsDto {
+            output_format: crate::config::AudioOutputFormat::Default,
             speaker_device: None,
             speaker_enabled: false,
             speaker_volume: 0,

@@ -40,6 +40,7 @@ pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std:
 
     // Get state managers
     let settings_manager = app.state::<SettingsManager>();
+    crate::audio::init_output_settings(settings_manager.cache_arc())?;
     let windows_manager = app.state::<WindowsManager>();
     let app_state = app.state::<AppState>();
     let telegram_state = app.state::<TelegramState>();

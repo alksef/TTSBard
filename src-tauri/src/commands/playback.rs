@@ -16,6 +16,25 @@ use tracing::{debug, info};
 pub struct PlaybackState(pub Arc<PlaybackManager>);
 
 #[tauri::command]
+pub fn get_audio_output_format_pending() -> Result<bool, String> {
+    crate::audio::output_format_pending()
+}
+
+#[tauri::command]
+pub async fn set_audio_output_format(
+    format: crate::config::AudioOutputFormat,
+    app_handle: AppHandle,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<(), String> {
+    super::persist_blocking(&*settings_manager, move |manager| {
+        manager.set_audio_output_format(format)
+    })
+    .await?;
+    super::emit_settings_changed(&app_handle);
+    Ok(())
+}
+
+#[tauri::command]
 pub fn playback_pause(playback: State<'_, PlaybackState>) -> Result<(), String> {
     let pb = &playback.inner().0;
     if pb.pause() {

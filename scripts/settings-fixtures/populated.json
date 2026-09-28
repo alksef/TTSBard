@@ -147,6 +147,7 @@
     }
   },
   "audio": {
+    "output_format": "default",
     "speaker_device": null,
     "speaker_enabled": true,
     "speaker_volume": 80,

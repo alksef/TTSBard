@@ -8,7 +8,7 @@
 //! ожидания завершения любого из них, поэтому sink стартуют одновременно.
 //! Ошибка на одном устройстве не отменяет другой выход.
 
-use crate::audio::{resolve_output_device, OutputConfig};
+use crate::audio::{open_output_sink, resolve_output_device, OutputConfig, OutputDeviceStream};
 use crate::config::AudioSettings;
 use cpal::traits::DeviceTrait;
 use std::fs::File;
@@ -63,7 +63,7 @@ pub fn play_audio_file(path: &str, audio_settings: &AudioSettings) {
     }
 
     let path = path.to_string();
-    let mut outputs: Vec<(rodio::OutputStream, rodio::Sink)> = Vec::new();
+    let mut outputs: Vec<(OutputDeviceStream, rodio::Sink)> = Vec::new();
 
     if let Some(config) = speaker_config {
         match setup_output(&path, &config, "Speaker") {
@@ -97,7 +97,7 @@ fn setup_output(
     path: &str,
     config: &OutputConfig,
     label: &str,
-) -> Result<(rodio::OutputStream, rodio::Sink), String> {
+) -> Result<(OutputDeviceStream, rodio::Sink), String> {
     let device = resolve_output_device(&config.device_id, &None)?;
 
     let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
@@ -107,11 +107,7 @@ fn setup_output(
     let source = rodio::Decoder::new(BufReader::new(file))
         .map_err(|e| format!("Failed to decode audio: {}", e))?;
 
-    let (stream, stream_handle) = rodio::OutputStream::try_from_device(&device)
-        .map_err(|e| format!("Failed to create output stream: {}", e))?;
-
-    let sink = rodio::Sink::try_new(&stream_handle)
-        .map_err(|e| format!("Failed to create sink: {}", e))?;
+    let (stream, sink) = open_output_sink(&device)?;
 
     sink.set_volume(config.volume);
     debug!(label, volume = config.volume, "Volume set");
@@ -138,6 +134,7 @@ mod tests {
 
     fn make_audio(speaker_enabled: bool, mic: Option<&str>) -> AudioSettings {
         AudioSettings {
+            output_format: crate::config::AudioOutputFormat::Default,
             speaker_enabled,
             speaker_device: None,
             speaker_volume: 80,
