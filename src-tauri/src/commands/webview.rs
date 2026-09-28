@@ -363,7 +363,7 @@ pub async fn get_webview_upnp_enabled(state: State<'_, AppState>) -> Result<bool
 
 #[cfg(test)]
 mod tests {
-    use super::validate_upnp_token;
+    use super::{parse_ipv4_response, validate_upnp_token};
 
     #[test]
     fn upnp_requires_configured_token() {
@@ -376,6 +376,23 @@ mod tests {
     fn disabling_upnp_never_requires_token() {
         assert!(validate_upnp_token(false, None).is_ok());
     }
+
+    #[test]
+    fn parses_trimmed_ipv4_response() {
+        assert_eq!(
+            parse_ipv4_response("  5.166.39.240\n").map(|ip| ip.to_string()),
+            Some("5.166.39.240".to_string())
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_empty_and_ipv6_response() {
+        assert!(parse_ipv4_response("").is_none());
+        assert!(parse_ipv4_response("   ").is_none());
+        assert!(parse_ipv4_response("<html>5.166.39.240</html>").is_none());
+        assert!(parse_ipv4_response("2001:db8::1").is_none());
+        assert!(parse_ipv4_response("999.1.1.1").is_none());
+    }
 }
 
 /// Forward typing state to WebView SSE (consumer adapter for the editor typing burst)
@@ -387,27 +404,43 @@ pub async fn set_webview_typing(typing: bool, state: State<'_, AppState>) -> Res
     Ok(())
 }
 
+/// Parse a plain-text response body as a trimmed IPv4 address.
+fn parse_ipv4_response(body: &str) -> Option<std::net::Ipv4Addr> {
+    body.trim().parse().ok()
+}
+
 /// Get external/public IP address with fallback
 #[tauri::command]
 pub async fn get_external_ip() -> Result<String, String> {
-    let sources = vec![
+    let sources = [
         "https://api.ipify.org?format=text",
         "https://icanhazip.com",
         "https://ifconfig.me",
     ];
 
-    let client = reqwest::Client::new();
+    // Bypass any configured proxy so the returned address is the direct public
+    // IPv4 used by the router/WebView port mapping.
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|_| {
+            "Не удалось получить внешний IP. Проверьте подключение к интернету.".to_string()
+        })?;
+
     for url in sources {
-        match client.get(url).send().await {
-            Ok(resp) => {
-                if let Ok(ip) = resp.text().await {
-                    let ip = ip.trim().to_string();
-                    if !ip.is_empty() {
-                        return Ok(ip);
-                    }
-                }
-            }
+        let resp = match client.get(url).send().await {
+            Ok(resp) => resp,
             Err(_) => continue,
+        };
+        let resp = match resp.error_for_status() {
+            Ok(resp) => resp,
+            Err(_) => continue,
+        };
+        if let Ok(body) = resp.text().await {
+            if let Some(ip) = parse_ipv4_response(&body) {
+                return Ok(ip.to_string());
+            }
         }
     }
 
