@@ -45,7 +45,9 @@ related_tasks: []
 
 ## Активные направления
 
-Активных направлений сейчас нет.
+- [ROADMAP-112 — Ограниченная очередь речи и неблокирующая запись истории](./active/112-speech-queue-retention-and-history-io.md) — `exploring`.
+- [ROADMAP-113 — Согласованное сохранение настроек Input Server и Twitch](./active/113-settings-save-consistency.md) — `planned`.
+- [ROADMAP-114 — Отзывчивый WebView lifecycle и устойчивый SSE](./active/114-webview-transport-resilience.md) — `exploring`.
 
 ## Завершённые направления
 
