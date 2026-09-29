@@ -28,6 +28,7 @@ implementation details и журналы обсуждений сюда не по
 - [DECISION-020 — Настройка действия VTube Studio требует живого подключения](./020-vtube-action-requires-live-connection.md) — `save_vtube_studio_typing_action` отклоняется без живого соединения (отменяет ROADMAP-060 P0.4); переименование = create→persist→delete
 - [DECISION-021 — Захват виртуального рабочего стола через xcap](./021-ocr-virtual-desktop-capture-xcap.md) — one-shot OCR снимает весь виртуальный стол до UI; геометрия/кроп — чистые функции
 - [DECISION-022 — Twitch IRC lifecycle принадлежит twitch-irc](./022-twitch-irc-lifecycle.md) — библиотека владеет transport/reconnect/JOIN; приложение — статусом, очередью и семантикой `sent`
+- [DECISION-023 — Ограниченное хранение terminal jobs очереди речи](./023-speech-queue-terminal-retention.md) — 50 последних `Completed`/`Cancelled`, вытеснение самого старого; active и `Failed` не вытесняются
 
 ## Заменённые решения
 

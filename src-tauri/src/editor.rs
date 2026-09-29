@@ -27,6 +27,14 @@ impl EditorService {
         prep.clone()
     }
 
+    /// Owned handle to the phrase-history manager.
+    ///
+    /// The slot guard is released here, so callers never hold a `parking_lot`
+    /// guard across blocking work or `.await` (see `DECISION-018`).
+    pub fn history_handle(&self) -> Option<Arc<HistoryManager>> {
+        self.history_manager.lock().as_ref().cloned()
+    }
+
     pub fn reload_preprocessor(&self) {
         *self.preprocessor.lock() = TextPreprocessor::load_from_files().ok();
     }

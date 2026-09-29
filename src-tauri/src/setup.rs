@@ -1346,19 +1346,33 @@ async fn speech_worker(
                 }
 
                 {
-                    if let Some(hm) = editor.history_manager.lock().as_ref() {
-                        let record_result = if prepared.cache_saved || prepared.cache_hit {
-                            hm.record_phrase_with_meta(
+                    // Owned handle: the history slot guard must not be held
+                    // across blocking I/O or awaits. The write stays on the
+                    // blocking pool and is awaited before the phrase event is
+                    // published (persist-before-publish).
+                    if let Some(history) = editor.history_handle() {
+                        let (provider, voice, cache_key) =
+                            if prepared.cache_saved || prepared.cache_hit {
+                                (
+                                    prepared.provider_name.clone(),
+                                    prepared.voice_name.clone(),
+                                    prepared.cache_key.clone(),
+                                )
+                            } else {
+                                (String::new(), String::new(), String::new())
+                            };
+                        let provider_text = provider_text.clone();
+                        let insert_text_for_history = insert_text.clone();
+                        let write = move || {
+                            history.record_phrase_with_meta(
                                 &provider_text,
-                                &insert_text,
-                                &prepared.provider_name,
-                                &prepared.voice_name,
-                                &prepared.cache_key,
+                                &insert_text_for_history,
+                                &provider,
+                                &voice,
+                                &cache_key,
                             )
-                        } else {
-                            hm.record_phrase_with_meta(&provider_text, &insert_text, "", "", "")
                         };
-                        if let Err(error) = record_result {
+                        if let Err(error) = crate::history::write_phrase_blocking(write).await {
                             warn!(error = %error, "Failed to persist phrase history");
                         }
                     }

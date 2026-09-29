@@ -13,6 +13,13 @@ use uuid::Uuid;
 
 pub const MAX_ACTIVE_CAPACITY: usize = 50;
 
+/// Terminal jobs (`Completed`/`Cancelled`) kept for replay and restore.
+///
+/// Non-terminal jobs are bounded separately by [`MAX_ACTIVE_CAPACITY`], so the
+/// queue holds at most `MAX_ACTIVE_CAPACITY + MAX_TERMINAL_RETENTION` jobs and
+/// `state()` stays bounded for long sessions.
+pub const MAX_TERMINAL_RETENTION: usize = 50;
+
 // ── AcceptedJob: returned by submit ──
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -314,6 +321,27 @@ impl SpeechQueue {
         }
     }
 
+    /// Drop the oldest retained terminal jobs.
+    ///
+    /// Called after every transition into a terminal state. Active jobs
+    /// (`Queued`/`Generating`/`Ready`/`Playing`) and `Failed` jobs are never
+    /// evicted: a failed job still requires an explicit retry/skip and is
+    /// already bounded by [`MAX_ACTIVE_CAPACITY`].
+    fn enforce_terminal_retention(&mut self) {
+        let mut terminal = self
+            .jobs
+            .iter()
+            .filter(|job| is_terminal(job.status))
+            .count();
+        while terminal > MAX_TERMINAL_RETENTION {
+            let Some(index) = self.jobs.iter().position(|job| is_terminal(job.status)) else {
+                break;
+            };
+            self.jobs.remove(index);
+            terminal -= 1;
+        }
+    }
+
     pub fn next_actionable(&self) -> Option<Uuid> {
         for job in &self.jobs {
             match job.status {
@@ -448,6 +476,7 @@ impl SpeechQueue {
             });
         }
         job.status = JobStatus::Completed;
+        self.enforce_terminal_retention();
         Ok(())
     }
 
@@ -472,13 +501,16 @@ impl SpeechQueue {
         match job.status {
             JobStatus::Queued | JobStatus::Failed => {
                 job.status = JobStatus::Cancelled;
-                Ok(())
             }
-            _ => Err(QueueError::InvalidTransition {
-                from: job.status,
-                to: "Cancelled",
-            }),
+            _ => {
+                return Err(QueueError::InvalidTransition {
+                    from: job.status,
+                    to: "Cancelled",
+                })
+            }
         }
+        self.enforce_terminal_retention();
+        Ok(())
     }
 
     pub fn cancel_ready_job(&mut self, job_id: Uuid) -> Result<(), QueueError> {
@@ -490,6 +522,7 @@ impl SpeechQueue {
             });
         }
         job.status = JobStatus::Cancelled;
+        self.enforce_terminal_retention();
         Ok(())
     }
 
@@ -503,6 +536,7 @@ impl SpeechQueue {
         }
         job.status = JobStatus::Cancelled;
         job.error = None;
+        self.enforce_terminal_retention();
         Ok(())
     }
 
@@ -523,6 +557,7 @@ impl SpeechQueue {
         }
         job.status = JobStatus::Cancelled;
         bump_activity(job);
+        self.enforce_terminal_retention();
         Ok(())
     }
 
@@ -601,6 +636,10 @@ fn bump_activity(job: &mut SpeechJob) {
     } else {
         job.last_activity_at_ms += 1;
     }
+}
+
+fn is_terminal(status: JobStatus) -> bool {
+    matches!(status, JobStatus::Completed | JobStatus::Cancelled)
 }
 
 #[cfg(test)]
@@ -1886,6 +1925,158 @@ mod tests {
             assert_eq!(a.job_id, b.job_id);
             assert_eq!(a.status, b.status);
         }
+    }
+
+    // ── terminal retention ──
+
+    fn complete_job(q: &mut SpeechQueue, id: Uuid) {
+        q.start_generation(id).unwrap();
+        q.mark_ready(id, "spoken".to_string()).unwrap();
+        q.mark_playing(id).unwrap();
+        q.mark_completed(id).unwrap();
+    }
+
+    #[test]
+    fn terminal_retention_bounds_completed_jobs() {
+        let mut q = SpeechQueue::new();
+        let mut ids = Vec::new();
+        for i in 0..(MAX_TERMINAL_RETENTION + 5) {
+            let id = q.submit(&format!("job {}", i), snap()).unwrap();
+            complete_job(&mut q, id);
+            ids.push(id);
+        }
+
+        assert_eq!(q.len(), MAX_TERMINAL_RETENTION);
+        assert_eq!(q.state().jobs.len(), MAX_TERMINAL_RETENTION);
+        assert!(q.len() <= MAX_ACTIVE_CAPACITY + MAX_TERMINAL_RETENTION);
+        assert_eq!(q.active_count(), 0);
+
+        for evicted in &ids[..5] {
+            assert!(!q.has_job(*evicted), "oldest completed job must be evicted");
+        }
+        let retained: Vec<Uuid> = q.state().jobs.iter().map(|job| job.job_id).collect();
+        assert_eq!(retained, ids[5..].to_vec());
+    }
+
+    #[test]
+    fn terminal_retention_bounds_cancelled_jobs() {
+        let mut q = SpeechQueue::new();
+        let mut ids = Vec::new();
+        for i in 0..(MAX_TERMINAL_RETENTION + 5) {
+            let id = q.submit(&format!("job {}", i), snap()).unwrap();
+            q.cancel_job(id).unwrap();
+            ids.push(id);
+        }
+
+        assert_eq!(q.len(), MAX_TERMINAL_RETENTION);
+        assert_eq!(q.state().jobs.len(), MAX_TERMINAL_RETENTION);
+        assert_eq!(q.active_count(), 0);
+        for evicted in &ids[..5] {
+            assert!(!q.has_job(*evicted), "oldest cancelled job must be evicted");
+        }
+        assert!(q.has_job(ids[5]));
+        assert!(q.has_job(*ids.last().unwrap()));
+    }
+
+    #[test]
+    fn terminal_retention_evicts_oldest_terminal_across_kinds() {
+        let mut q = SpeechQueue::new();
+        let mut ids = Vec::new();
+        for i in 0..(MAX_TERMINAL_RETENTION + 1) {
+            let id = q.submit(&format!("job {}", i), snap()).unwrap();
+            if i % 2 == 0 {
+                complete_job(&mut q, id);
+            } else {
+                q.cancel_job(id).unwrap();
+            }
+            ids.push(id);
+        }
+
+        assert_eq!(q.len(), MAX_TERMINAL_RETENTION);
+        assert!(!q.has_job(ids[0]), "oldest terminal job is evicted first");
+        assert!(q.has_job(ids[1]));
+        assert!(q.has_job(ids[MAX_TERMINAL_RETENTION]));
+    }
+
+    #[test]
+    fn terminal_retention_never_evicts_active_jobs() {
+        let mut q = SpeechQueue::new();
+        let mut completed = Vec::new();
+        for i in 0..(MAX_TERMINAL_RETENTION + 5) {
+            let id = q.submit(&format!("completed {}", i), snap()).unwrap();
+            complete_job(&mut q, id);
+            completed.push(id);
+        }
+
+        let mut queued = Vec::new();
+        for i in 0..5 {
+            queued.push(q.submit(&format!("queued {}", i), snap()).unwrap());
+        }
+
+        // The next terminal transition evicts the oldest terminal job only.
+        complete_job(&mut q, queued[0]);
+
+        for id in &queued[1..] {
+            assert!(q.has_job(*id), "queued job must survive terminal eviction");
+        }
+        assert_eq!(q.get_status(queued[0]), Some(JobStatus::Completed));
+        assert!(!q.has_job(completed[5]));
+        assert!(q.has_job(completed[6]));
+        assert_eq!(q.active_count(), 4);
+        assert_eq!(q.len(), MAX_TERMINAL_RETENTION + 4);
+    }
+
+    #[test]
+    fn terminal_retention_never_evicts_failed_jobs() {
+        let mut q = SpeechQueue::new();
+        let mut failed = Vec::new();
+        for i in 0..45 {
+            let id = q.submit(&format!("failed {}", i), snap()).unwrap();
+            q.start_generation(id).unwrap();
+            q.fail_generation(id, "boom".to_string()).unwrap();
+            failed.push(id);
+        }
+
+        let mut completed = Vec::new();
+        for i in 0..(MAX_TERMINAL_RETENTION + 5) {
+            let id = q.submit(&format!("completed {}", i), snap()).unwrap();
+            complete_job(&mut q, id);
+            completed.push(id);
+        }
+
+        for id in &failed {
+            assert!(q.has_job(*id), "failed job must stay actionable");
+        }
+        assert!(!q.has_job(completed[4]));
+        assert!(q.has_job(completed[5]));
+        assert_eq!(q.active_count(), 45);
+        assert_eq!(q.len(), 45 + MAX_TERMINAL_RETENTION);
+    }
+
+    #[test]
+    fn terminal_retention_keeps_recent_job_restorable() {
+        let mut q = SpeechQueue::new();
+        let mut ids = Vec::new();
+        for i in 0..(MAX_TERMINAL_RETENTION + 1) {
+            let id = q.submit(&format!("job {}", i), snap()).unwrap();
+            q.cancel_job(id).unwrap();
+            ids.push(id);
+        }
+
+        let evicted = ids[0];
+        let retained = ids[1];
+        assert!(!q.has_job(evicted));
+        assert_eq!(q.get_status(evicted), None);
+        assert_eq!(q.get_spoken_text(evicted), None);
+        assert!(matches!(
+            q.restore_cancelled_job(evicted),
+            Err(QueueError::JobNotFound(_))
+        ));
+
+        assert!(q.has_job(retained));
+        q.restore_cancelled_job(retained).unwrap();
+        assert_eq!(q.get_status(retained), Some(JobStatus::Queued));
+        assert_eq!(q.active_count(), 1);
     }
 
     // ── unknown id ──

@@ -586,6 +586,40 @@ impl HistoryManager {
     }
 }
 
+/// Failure of a phrase-history write that ran on the blocking pool.
+#[derive(Debug)]
+pub(crate) enum HistoryWriteError {
+    /// The write ran, but the persistence layer rejected it.
+    Persist(anyhow::Error),
+    /// The blocking task itself failed (panic or runtime shutdown).
+    Join(tokio::task::JoinError),
+}
+
+impl std::fmt::Display for HistoryWriteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HistoryWriteError::Persist(error) => write!(f, "history persistence failed: {error}"),
+            HistoryWriteError::Join(error) => write!(f, "history write task failed: {error}"),
+        }
+    }
+}
+
+/// Run a synchronous phrase-history write on the blocking pool.
+///
+/// Callers must own their manager handle (see
+/// [`crate::editor::EditorService::history_handle`]) and must await this before
+/// publishing the phrase event, so the persist-before-publish invariant holds
+/// while no async worker is occupied by disk I/O.
+pub(crate) async fn write_phrase_blocking<F>(write: F) -> Result<(), HistoryWriteError>
+where
+    F: FnOnce() -> Result<()> + Send + 'static,
+{
+    match tokio::task::spawn_blocking(write).await {
+        Ok(result) => result.map_err(HistoryWriteError::Persist),
+        Err(error) => Err(HistoryWriteError::Join(error)),
+    }
+}
+
 pub fn history_paths() -> Result<(PathBuf, PathBuf, PathBuf)> {
     let dir = dirs::config_dir()
         .context("Failed to get config dir")?
@@ -1084,5 +1118,135 @@ mod tests {
         assert!(suggestions.iter().any(|e| e.word == "kept"));
 
         let _ = fs::remove_file(&parent);
+    }
+
+    // ── blocking write seam ──
+
+    #[tokio::test]
+    async fn phrase_write_runs_off_the_async_worker_thread() {
+        let caller = std::thread::current().id();
+        let (thread_tx, thread_rx) = std::sync::mpsc::channel();
+
+        write_phrase_blocking(move || {
+            let _ = thread_tx.send(std::thread::current().id());
+            Ok(())
+        })
+        .await
+        .expect("isolated write must succeed");
+
+        let write_thread = thread_rx.recv().expect("write must run");
+        assert_ne!(
+            caller, write_thread,
+            "phrase history I/O must not run on the async worker thread"
+        );
+    }
+
+    /// A deliberately delayed write must not stall other tasks on the runtime:
+    /// the caller only resumes once the blocking stage is released.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn phrase_write_keeps_the_runtime_responsive_while_io_is_delayed() {
+        use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+        use std::sync::mpsc;
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let (entered_tx, entered_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+
+        let write = tokio::spawn(write_phrase_blocking(move || {
+            let _ = entered_tx.send(());
+            let _ = release_rx.recv();
+            Ok(())
+        }));
+
+        tokio::task::spawn_blocking(move || entered_rx.recv())
+            .await
+            .expect("observer must not panic")
+            .expect("blocking write must start");
+
+        let ticks = Arc::new(AtomicUsize::new(0));
+        let ticker = tokio::spawn({
+            let ticks = Arc::clone(&ticks);
+            async move {
+                for _ in 0..3 {
+                    tokio::task::yield_now().await;
+                    ticks.fetch_add(1, AtomicOrdering::SeqCst);
+                }
+            }
+        });
+        tokio::time::timeout(Duration::from_secs(5), ticker)
+            .await
+            .expect("runtime must keep running while the history write is parked")
+            .unwrap();
+        assert_eq!(ticks.load(AtomicOrdering::SeqCst), 3);
+
+        release_tx.send(()).expect("release the parked write");
+        write.await.expect("write task").expect("write succeeds");
+    }
+
+    #[tokio::test]
+    async fn phrase_write_reports_persist_error_for_broken_storage() {
+        let (mgr, _p1, _p2, p3) = manager_in_tmp();
+        let mgr = std::sync::Arc::new(mgr);
+        mgr.record_phrase("kept phrase").unwrap();
+
+        // Break persistence: the phrase file can no longer be replaced.
+        let parent = p3.parent().unwrap().to_path_buf();
+        fs::remove_dir_all(&parent).unwrap();
+        fs::write(&parent, "not a directory").unwrap();
+
+        let write_mgr = std::sync::Arc::clone(&mgr);
+        let error = write_phrase_blocking(move || write_mgr.record_phrase("lost phrase"))
+            .await
+            .expect_err("broken storage must surface as an error");
+
+        match error {
+            HistoryWriteError::Persist(error) => assert!(
+                error.to_string().to_lowercase().contains("persist"),
+                "unexpected persistence error: {error}"
+            ),
+            other => panic!("expected a persistence error, got {other:?}"),
+        }
+
+        // The failed write must not publish the unpersisted phrase.
+        let phrases = mgr.get_phrases(None, 100);
+        assert_eq!(phrases.len(), 1);
+        assert_eq!(phrases[0].provider_text, "kept phrase");
+
+        let _ = fs::remove_file(&parent);
+    }
+
+    #[tokio::test]
+    async fn phrase_write_reports_panicking_task_as_join_error() {
+        let error = write_phrase_blocking(|| panic!("intentional panic in history write"))
+            .await
+            .expect_err("panicking write must surface as an error");
+
+        match error {
+            HistoryWriteError::Join(error) => assert!(error.is_panic()),
+            other => panic!("expected a join error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn phrase_write_persists_before_publishing() {
+        let (mgr, _p1, _p2, p3) = manager_in_tmp();
+        let mgr = std::sync::Arc::new(mgr);
+
+        let write_mgr = std::sync::Arc::clone(&mgr);
+        write_phrase_blocking(move || write_mgr.record_phrase("ordered phrase"))
+            .await
+            .expect("write must succeed");
+
+        // The await is the publication barrier: memory and disk already agree.
+        let phrases = mgr.get_phrases(None, 100);
+        assert_eq!(phrases.len(), 1);
+        assert_eq!(phrases[0].provider_text, "ordered phrase");
+
+        let on_disk = fs::read_to_string(&p3).unwrap();
+        assert!(
+            on_disk.contains("ordered phrase"),
+            "phrase must be persisted when the write await returns"
+        );
     }
 }

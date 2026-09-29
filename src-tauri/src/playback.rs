@@ -1772,6 +1772,21 @@ mod tests {
         assert_eq!(rows[0].status, "completed");
     }
 
+    /// After terminal retention evicts a completed job from the speech queue,
+    /// its playback-cache entry must still surface as a replayable row with
+    /// `job_id: None` (ROADMAP-112 eviction path).
+    #[test]
+    fn project_evicted_completed_cache_row_stays_replayable() {
+        let id = "11111111-1111-1111-1111-111111111111";
+        let cache: Vec<(String, String, i64)> = vec![(id.into(), "hello".into(), 1000)];
+        let rows = project_playback_activity(&[], &cache, &None, &[], &PlaybackStatus::Idle);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, id);
+        assert_eq!(rows[0].status, "completed");
+        assert!(rows[0].job_id.is_none());
+        assert!(rows[0].can_replay);
+    }
+
     #[test]
     fn project_replay_tail_order_independent_of_blocked_queue() {
         let completed_id = "11111111-1111-1111-1111-111111111111";

@@ -45,7 +45,6 @@ related_tasks: []
 
 ## Активные направления
 
-- [ROADMAP-112 — Ограниченная очередь речи и неблокирующая запись истории](./active/112-speech-queue-retention-and-history-io.md) — `exploring`.
 - [ROADMAP-113 — Согласованное сохранение настроек Input Server и Twitch](./active/113-settings-save-consistency.md) — `planned`.
 - [ROADMAP-114 — Отзывчивый WebView lifecycle и устойчивый SSE](./active/114-webview-transport-resilience.md) — `exploring`.
 
@@ -84,6 +83,7 @@ related_tasks: []
 
 ### Надёжность и ревью
 
+- [ROADMAP-112 — Ограниченная очередь речи и неблокирующая запись истории](./completed/112-speech-queue-retention-and-history-io.md)
 - [ROADMAP-091 — Подсказка о формате аудио Silero](./completed/091-silero-audio-format-error.md)
 - [ROADMAP-089 — remediation полного ревью 2026-09-02](./completed/089-full-review-2026-09-02-remediation.md)
 - [ROADMAP-084 — Ошибки очереди речи: Silero и глобальное уведомление](./completed/084-speech-queue-global-error-toast.md)

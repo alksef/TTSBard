@@ -610,8 +610,11 @@ pub async fn synthesize_and_export(state: &AppState, text: &str, path: &str) -> 
         .await
         .map_err(|e| format!("Failed to write audio file: {}", e))?;
 
-    if let Some(hm) = state.editor.history_manager.lock().as_ref() {
-        if let Err(error) = hm.record_phrase(&text) {
+    // Owned handle + blocking pool so the export path never performs disk I/O
+    // on an async worker while holding the history slot guard.
+    if let Some(history) = state.editor.history_handle() {
+        let write = move || history.record_phrase(&text);
+        if let Err(error) = crate::history::write_phrase_blocking(write).await {
             tracing::error!(error = %error, "Failed to persist exported phrase history");
         }
     }
