@@ -266,7 +266,7 @@ pub struct OcrService {
 
 impl OcrService {
     pub fn new() -> Self {
-        let packs_root = crate::paths::config_root().unwrap_or_default();
+        let packs_root = crate::paths::local_root().unwrap_or_default();
         Self::with_packs_root(packs_root)
     }
 

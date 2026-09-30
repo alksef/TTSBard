@@ -696,14 +696,21 @@ pub fn decide_ruaccent_refresh_reconcile(
     RuaccentRefreshReconcile::None
 }
 
-/// Resolve the RUAccent pack search roots from the app config and resource
-/// directories. Shared by startup discovery and the refresh command.
+/// Resolve the RUAccent pack search roots. Shared by startup discovery and
+/// the refresh command. Order matters: the first root wins on duplicate IDs.
 pub(crate) fn ruaccent_search_roots(app_handle: &AppHandle) -> Vec<std::path::PathBuf> {
     let mut roots: Vec<std::path::PathBuf> = Vec::new();
-    if let Ok(config_dir) = crate::paths::config_root() {
-        roots.push(config_dir);
-    } else {
-        warn!("Config directory not found; skipping AppData root for RUAccent discovery");
+    // Portable-корень рядом с exe: модели размещаются вручную, только чтение.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            roots.push(exe_dir.to_path_buf());
+        }
+    }
+    match crate::paths::local_root() {
+        Ok(dir) => roots.push(dir),
+        Err(e) => {
+            warn!(error = %e, "Local data directory not found; skipping for RUAccent discovery")
+        }
     }
     match app_handle.path().resource_dir() {
         Ok(dir) => roots.push(dir),

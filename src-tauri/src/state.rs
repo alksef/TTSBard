@@ -704,22 +704,49 @@ impl AppState {
             .store(0, std::sync::atomic::Ordering::Relaxed);
     }
 
-    /// Discover and register Piper providers from the local models directory.
+    /// Discover and register Piper providers from the local model directories.
     ///
-    /// Scans `{config_dir}/models/piper/` for valid `.onnx` + `.onnx.json` pairs
+    /// Scans `<exe dir>/models/piper/` (portable, read-only) and
+    /// `{local_data_dir}/models/piper/` for valid `.onnx` + `.onnx.json` pairs
     /// and registers each as a `TtsProvider::Piper` in the provider registry.
+    /// Only the local root may be created; the exe root is never written.
     /// Does NOT select any Piper provider — the current built-in provider is preserved.
     /// Does NOT create ONNX sessions (they are lazily initialized on first use).
     pub fn register_piper_providers(&self) {
-        let config_root = match crate::paths::config_root() {
-            Ok(d) => d,
+        let mut descriptors = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        // Portable-корень рядом с exe: только сканирование, без записи.
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(exe_dir) = exe.parent() {
+                for desc in crate::tts::piper::scanner::scan_piper_models_dir(
+                    &exe_dir.join("models").join("piper"),
+                ) {
+                    if seen.insert(desc.id.clone()) {
+                        descriptors.push(desc);
+                    }
+                }
+            }
+        }
+
+        // Local-корень: основной; каталог models/piper может быть создан.
+        match crate::paths::local_root() {
+            Ok(local_root) => {
+                for desc in discover_piper_models(&local_root) {
+                    if seen.insert(desc.id.clone()) {
+                        descriptors.push(desc);
+                    }
+                }
+            }
             Err(e) => {
-                warn!(error = %e, "Cannot register Piper providers: config directory not found");
+                warn!(
+                    error = %e,
+                    "Cannot register Piper providers: local data directory not found"
+                );
                 return;
             }
-        };
+        }
 
-        let descriptors = discover_piper_models(&config_root);
         let count = descriptors.len();
         let mut registry = self.tts_registry.lock();
 

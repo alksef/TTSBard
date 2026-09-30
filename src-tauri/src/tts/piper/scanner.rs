@@ -20,6 +20,8 @@ pub struct PiperModelDescriptor {
 const MODELS_SUBDIR: &str = "models/piper";
 const ID_PREFIX: &str = "local-piper";
 
+/// Discover Piper models under `root/models/piper`, creating the directory if
+/// needed. Only used for writable roots (the local data root).
 pub fn discover_piper_models(root: &Path) -> Vec<PiperModelDescriptor> {
     let models_dir = root.join(MODELS_SUBDIR);
 
@@ -32,11 +34,20 @@ pub fn discover_piper_models(root: &Path) -> Vec<PiperModelDescriptor> {
         return Vec::new();
     }
 
-    let entries = match std::fs::read_dir(&models_dir) {
+    scan_piper_models_dir(&models_dir)
+}
+
+/// Scan a concrete `models/piper` directory without side effects.
+///
+/// A missing directory is normal for read-only roots (e.g. next to the exe)
+/// and stays silent; other read failures are logged.
+pub fn scan_piper_models_dir(models_dir: &Path) -> Vec<PiperModelDescriptor> {
+    let entries = match std::fs::read_dir(models_dir) {
         Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
         Err(e) => {
             tracing::warn!(
-                dir = %crate::secret_log::safe_path_for_log(&models_dir),
+                dir = %crate::secret_log::safe_path_for_log(models_dir),
                 error = %e,
                 "Failed to read Piper models directory"
             );
@@ -296,6 +307,16 @@ mod tests {
         let models = discover_piper_models(&root);
         assert!(models.is_empty());
         assert!(root.join(MODELS_SUBDIR).exists());
+    }
+
+    /// Read-only scan (portable root next to the exe) must not create anything.
+    #[test]
+    fn scan_missing_dir_creates_nothing_and_is_empty() {
+        let root = unique_test_root("scan-missing");
+        assert!(!root.exists());
+        let models = scan_piper_models_dir(&root.join(MODELS_SUBDIR));
+        assert!(models.is_empty());
+        assert!(!root.exists(), "read-only scan must not create directories");
     }
 
     /// Valid pair: one .onnx + .onnx.json produces exactly one descriptor.
