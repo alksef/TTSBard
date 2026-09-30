@@ -6,6 +6,7 @@ implementation plans и не задания AI-агентам.
 
 ## Текущие направления
 
+- [ROADMAP-118 — Доступ к Input Server из локальной сети с токеном](./118-input-server-lan-token-access.md) — `planned`.
 - [ROADMAP-117 — Разделение данных приложения: Roaming, Local и %TEMP%](./117-app-storage-split.md) — `planned`.
 - [ROADMAP-116 — Нагрузка audiodg и lifecycle потоков вывода](./116-audiodg-playback-stream-lifecycle.md) — `in_progress`.
 - [ROADMAP-115 — Последовательное сохранение настроек WebView и VTube Studio](./115-settings-save-consistency-followup.md) — `planned`.
