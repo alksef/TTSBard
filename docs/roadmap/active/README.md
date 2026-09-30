@@ -6,4 +6,5 @@ implementation plans и не задания AI-агентам.
 
 ## Текущие направления
 
+- [ROADMAP-116 — Нагрузка audiodg и lifecycle потоков вывода](./116-audiodg-playback-stream-lifecycle.md) — `in_progress`.
 - [ROADMAP-114 — Отзывчивый WebView lifecycle и устойчивый SSE](./114-webview-transport-resilience.md) — `exploring`.
