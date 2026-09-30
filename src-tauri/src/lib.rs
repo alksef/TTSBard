@@ -314,6 +314,10 @@ pub fn run() {
     #[cfg(windows)]
     crate::paths::remove_legacy_roaming_temp();
 
+    // Аудио-кеш: кастомный путь из настроек и одноразовый перенос legacy-кеша.
+    crate::history::init_audio_cache_dir(settings.storage.audio_cache_dir.as_deref());
+    crate::history::migrate_legacy_audio_cache();
+
     let app_dir = crate::paths::config_root().expect("Failed to resolve app data directory");
 
     std::fs::create_dir_all(&app_dir).expect("Failed to create appdata directory");

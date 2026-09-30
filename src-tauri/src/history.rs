@@ -634,10 +634,107 @@ const CACHE_NAMESPACE: uuid::Uuid = uuid::Uuid::from_bytes([
     0x63, 0x78, 0xb2, 0xe0, 0x1c, 0x4d, 0x4e, 0x8a, 0x9c, 0x3f, 0x7a, 0x2b, 0x1d, 0x5e, 0x6f, 0x0a,
 ]);
 
+/// Пользовательский override каталога аудио-кеша (`storage.audio_cache_dir`,
+/// ROADMAP-117). Глобальное состояние — как и остальные владельцы путей:
+/// hot-path чтения кеша не имеет доступа к SettingsManager.
+static AUDIO_CACHE_DIR_OVERRIDE: OnceLock<RwLock<Option<PathBuf>>> = OnceLock::new();
+
+fn audio_cache_dir_override() -> &'static RwLock<Option<PathBuf>> {
+    AUDIO_CACHE_DIR_OVERRIDE.get_or_init(|| RwLock::new(None))
+}
+
+/// Применить кастомный путь кеша из настроек. Невалидный (несоздаваемый)
+/// путь игнорируется с warning: запуск не блокируется, используется дефолт.
+pub(crate) fn init_audio_cache_dir(custom: Option<&str>) {
+    let Some(custom) = custom.map(str::trim).filter(|s| !s.is_empty()) else {
+        return;
+    };
+    let dir = PathBuf::from(custom);
+    match fs::create_dir_all(&dir) {
+        Ok(()) => *audio_cache_dir_override().write() = Some(dir),
+        Err(e) => tracing::warn!(
+            dir = %crate::secret_log::safe_path_for_log(&dir),
+            error = %e,
+            "Configured audio cache dir unavailable; falling back to default"
+        ),
+    }
+}
+
 pub fn cache_dir_path() -> Result<PathBuf> {
-    let dir = crate::paths::config_root()?.join("audio_cache");
+    let dir = match audio_cache_dir_override().read().clone() {
+        Some(dir) => dir,
+        None => crate::paths::local_root()?.join("audio_cache"),
+    };
     fs::create_dir_all(&dir).context("Failed to create audio_cache dir")?;
     Ok(dir)
+}
+
+/// Одноразовый перенос legacy-кеша из Roaming (`<config_root>/audio_cache`)
+/// в текущий корень (ROADMAP-117). Идемпотентен: занятый или непереносимый
+/// файл остаётся на месте и подхватывается при следующем старте.
+pub(crate) fn migrate_legacy_audio_cache() {
+    let Ok(config_root) = crate::paths::config_root() else {
+        return;
+    };
+    migrate_cache_dir(&config_root.join("audio_cache"), &match cache_dir_path() {
+        Ok(dir) => dir,
+        Err(e) => {
+            tracing::warn!(error = %e, "Legacy audio cache migration skipped: no cache dir");
+            return;
+        }
+    });
+}
+
+/// Перенести файлы из `legacy` в `target` и удалить `legacy`, если опустела.
+/// Явные пути — для тестируемости; пары файлов с одинаковым cache_key
+/// дедуплицируются (источник удаляется, содержимое идентично).
+fn migrate_cache_dir(legacy: &Path, target: &Path) {
+    if !legacy.is_dir() || legacy == target {
+        return;
+    }
+    let entries = match fs::read_dir(legacy) {
+        Ok(entries) => entries,
+        Err(e) => {
+            tracing::warn!(
+                dir = %crate::secret_log::safe_path_for_log(legacy),
+                error = %e,
+                "Failed to read legacy audio cache"
+            );
+            return;
+        }
+    };
+    let mut moved = 0u32;
+    let mut skipped = 0u32;
+    for entry in entries.flatten() {
+        let from = entry.path();
+        if !from.is_file() {
+            continue;
+        }
+        let Some(name) = from.file_name().map(std::ffi::OsStr::to_os_string) else {
+            continue;
+        };
+        let to = target.join(name);
+        let result = if to.exists() {
+            // Одинаковый cache_key => то же содержимое; источник лишний.
+            fs::remove_file(&from)
+        } else {
+            // rename падает между томами — запасной путь copy + remove.
+            fs::rename(&from, &to)
+                .or_else(|_| fs::copy(&from, &to).and_then(|_| fs::remove_file(&from)))
+        };
+        match result {
+            Ok(()) => moved += 1,
+            Err(_) => skipped += 1,
+        }
+    }
+    match fs::remove_dir(legacy) {
+        Ok(()) => tracing::info!(moved, "Migrated legacy audio cache out of Roaming"),
+        Err(_) if moved > 0 || skipped > 0 => tracing::warn!(
+            skipped,
+            "Legacy audio cache partially migrated; remaining files retry on next start"
+        ),
+        _ => {}
+    }
 }
 
 pub fn build_cache_key(
@@ -1242,6 +1339,40 @@ mod tests {
         assert!(
             on_disk.contains("ordered phrase"),
             "phrase must be persisted when the write await returns"
+        );
+    }
+
+    #[test]
+    fn migrate_cache_dir_moves_files_and_removes_legacy() {
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let n = SEQ.fetch_add(1, Ordering::SeqCst);
+        let base = std::env::temp_dir().join(format!(
+            "ttsbard-hist-migrate-{}-{}",
+            std::process::id(),
+            n
+        ));
+        let legacy = base.join("legacy");
+        let target = base.join("target");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::create_dir_all(&target).unwrap();
+        fs::write(legacy.join("a.wav"), b"x").unwrap();
+        fs::write(target.join("b.wav"), b"y").unwrap();
+        fs::write(legacy.join("b.wav"), b"y").unwrap();
+
+        migrate_cache_dir(&legacy, &target);
+
+        assert!(target.join("a.wav").exists());
+        assert!(target.join("b.wav").exists());
+        assert!(!legacy.exists(), "emptied legacy dir must be removed");
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn migrate_cache_dir_missing_legacy_is_noop() {
+        migrate_cache_dir(
+            Path::new("Z:/ttsbard-missing-legacy"),
+            Path::new("Z:/ttsbard-missing-target"),
         );
     }
 }

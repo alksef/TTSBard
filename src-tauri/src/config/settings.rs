@@ -1447,6 +1447,17 @@ impl Default for AiSettings {
     }
 }
 
+// ==================== Storage ====================
+
+/// Пользовательские пути хранения (ROADMAP-117).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct StorageSettings {
+    /// Каталог аудио-кеша истории фраз; `None` — дефолт
+    /// (`%LOCALAPPDATA%\ttsbard\audio_cache`).
+    #[serde(default)]
+    pub audio_cache_dir: Option<String>,
+}
+
 // ==================== Main App Settings ====================
 
 /// All application settings
@@ -1485,6 +1496,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub logging: LoggingSettings,
     #[serde(default)]
+    pub storage: StorageSettings,
+    #[serde(default)]
     pub ai: AiSettings,
     #[serde(default)]
     pub hotkeys: HotkeySettings,
@@ -1518,6 +1531,7 @@ impl Default for AppSettings {
             incoming: IncomingSettings::default(),
             ocr: OcrSettings::default(),
             logging: LoggingSettings::default(),
+            storage: StorageSettings::default(),
             ai: AiSettings::default(),
             hotkeys: HotkeySettings::default(),
             vtube_studio: VTubeStudioSettings::default(),

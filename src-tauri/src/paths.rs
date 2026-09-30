@@ -24,8 +24,6 @@ pub(crate) fn config_root() -> anyhow::Result<PathBuf> {
 
 /// Local-корень регенерируемых данных: `%LOCALAPPDATA%\ttsbard` (Windows),
 /// XDG cache (Linux), `~/Library/Caches/ttsbard` (macOS).
-// Используется этапом 2 ROADMAP-117 (audio_cache); до того — мёртвый код.
-#[allow(dead_code)]
 pub(crate) fn local_root() -> anyhow::Result<PathBuf> {
     Ok(dirs::cache_dir()
         .context("Failed to resolve local data directory")?
