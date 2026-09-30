@@ -1754,8 +1754,7 @@ impl SettingsManager {
             // Generate the input-server LAN access token when missing or empty:
             // the token is the only gate for non-loopback clients, so an absent
             // field must not leave LAN access unusable after an upgrade.
-            let needs_input_token_migration =
-                Self::ensure_input_server_access_token(&mut settings);
+            let needs_input_token_migration = Self::ensure_input_server_access_token(&mut settings);
 
             // Persist the migrated canonical file at most once: a single atomic
             // write covers the hotkey, incoming, ui_language and input-server
@@ -5894,9 +5893,7 @@ mod tests {
             .set_input_server_access_token(Some("token-a".to_string()))
             .unwrap();
         manager.set_input_server_section(true, 20202).unwrap();
-        manager
-            .set_input_server_access_token(None)
-            .unwrap();
+        manager.set_input_server_access_token(None).unwrap();
 
         let cached = manager.load().unwrap();
         assert_eq!(cached.input_server.access_token, None);

@@ -8,8 +8,9 @@ use axum::response::{Html, IntoResponse, Response};
 ///
 /// The page is a single HTML document with inline CSS/JS: no CDN, remote
 /// font, image, script, stylesheet, analytics or Steam API. It submits to the
-/// same-origin relative `/v1/speech` so the loopback `Host` gate keeps
-/// protecting the form without any CORS header. Keeping the document in a
+/// same-origin relative `/v1/speech`, so the `Host` gate and the access-token
+/// cookie keep protecting the form without any CORS header and without any
+/// token handling in this script. Keeping the document in a
 /// dedicated HTML file preserves editor/tooling support while `include_str!`
 /// still embeds it into the executable at compile time.
 const OVERLAY_HTML: &str = include_str!("overlay.html");

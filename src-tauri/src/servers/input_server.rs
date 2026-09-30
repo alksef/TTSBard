@@ -1,8 +1,9 @@
 // Input server module
 //
-// Owns the single loopback listener lifecycle for external text intake:
-// rereads desired settings, binds `127.0.0.1:<port>`, and reports runtime
-// status through `InputServerService::publish_status`.
+// Owns the single listener lifecycle for external text intake: rereads desired
+// settings, binds the configured address (default `0.0.0.0`; loopback-only
+// deployments narrow it to `127.0.0.1` via the config file), and reports
+// runtime status through `InputServerService::publish_status`.
 
 use crate::commands::input_server::{accept_external_text, InputServerAccepted};
 use crate::commands::speech_queue::SpeechQueueState;
@@ -59,13 +60,27 @@ impl TextIntake for ProductionTextIntake {
     }
 }
 
-/// Bind a loopback listener on `127.0.0.1:<port>`, returning a user-facing
-/// error message on failure.
-async fn bind_loopback(port: u16) -> Result<TcpListener, String> {
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+/// Resolve the listener socket address from the persisted bind address.
+///
+/// A bare IPv6 literal is bracketed; anything else passes through as
+/// `address:port`. Returns a user-facing error message for unparseable values.
+fn listener_bind_addr(bind_address: &str, port: u16) -> Result<SocketAddr, String> {
+    let addr = if bind_address.contains(':') && !bind_address.starts_with('[') {
+        format!("[{bind_address}]:{port}")
+    } else {
+        format!("{bind_address}:{port}")
+    };
+    addr.parse()
+        .map_err(|error| format!("Invalid bind address {addr}: {error}"))
+}
+
+/// Bind the input server listener, returning a user-facing error message on
+/// failure.
+async fn bind_listener(bind_address: &str, port: u16) -> Result<TcpListener, String> {
+    let addr = listener_bind_addr(bind_address, port)?;
     TcpListener::bind(addr)
         .await
-        .map_err(|error| format!("Failed to bind 127.0.0.1:{port}: {error}"))
+        .map_err(|error| format!("Failed to bind {addr}: {error}"))
 }
 
 /// Resolve the overlay language decision from the effective UI locale.
@@ -112,9 +127,14 @@ pub async fn run_input_server(app_handle: AppHandle, shutdown: CancellationToken
 
     let serve = |listener: TcpListener, router: Router, token: CancellationToken| {
         tokio::spawn(async move {
-            if let Err(error) = axum::serve(listener, router)
-                .with_graceful_shutdown(token.cancelled_owned())
-                .await
+            // ConnectInfo lets the router's auth middleware classify the client
+            // address (loopback vs token-required).
+            if let Err(error) = axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .with_graceful_shutdown(token.cancelled_owned())
+            .await
             {
                 warn!(error = %error, "Input server serve error");
             }
@@ -161,8 +181,8 @@ async fn drain_server_task(server_task: &mut JoinHandle<()>) {
 /// - not requested: no listener, status `stopped`, waits for wake/shutdown.
 /// - requested: `starting`, bind, `running` only after a successful bind.
 /// - bind error: `error { message }`, no retry spin, waits for wake/shutdown.
-/// - wake/settings change stops the active listener and rereads the run request
-///   and the desired port.
+/// - wake/settings change stops the active listener and rereads the run
+///   request, port and bind address.
 /// - shutdown stops the active listener and returns with `stopped`.
 async fn run_input_server_core<E, S>(
     service: Arc<InputServerService>,
@@ -183,10 +203,10 @@ async fn run_input_server_core<E, S>(
         // same port.
         while wake_rx.try_recv().is_ok() {}
 
-        let (requested, port) = {
+        let (requested, port, bind_address) = {
             let requested = service.run_requested();
             let settings = service.settings.read().await;
-            (requested, settings.port)
+            (requested, settings.port, settings.bind_address.clone())
         };
 
         if !requested {
@@ -204,8 +224,8 @@ async fn run_input_server_core<E, S>(
         }
 
         service.publish_status(InputServerStatus::Starting, &mut emit);
-        info!(port, "Input server starting on 127.0.0.1:{port}");
-        let listener = match bind_loopback(port).await {
+        info!("Input server starting on {bind_address}:{port}");
+        let listener = match bind_listener(&bind_address, port).await {
             Ok(listener) => listener,
             Err(message) => {
                 error!(error = %message, "Input server bind failed");
@@ -220,7 +240,7 @@ async fn run_input_server_core<E, S>(
             }
         };
 
-        let router = build_router(intake.clone(), port, overlay_language);
+        let router = build_router(intake.clone(), port, overlay_language, service.clone());
         let server_token = shutdown.child_token();
         let mut server_task = serve(listener, router, server_token.clone());
         service.publish_status(InputServerStatus::Running, &mut emit);
@@ -273,6 +293,27 @@ mod tests {
     use std::time::Duration;
     use uuid::Uuid;
 
+    #[test]
+    fn listener_bind_addr_formats_ipv4_and_brackets_bare_ipv6() {
+        assert_eq!(
+            listener_bind_addr("0.0.0.0", 10101).unwrap(),
+            SocketAddr::from(([0, 0, 0, 0], 10101))
+        );
+        assert_eq!(
+            listener_bind_addr("127.0.0.1", 10101).unwrap(),
+            SocketAddr::from(([127, 0, 0, 1], 10101))
+        );
+        assert_eq!(
+            listener_bind_addr("::1", 10101).unwrap(),
+            "[::1]:10101".parse::<SocketAddr>().unwrap()
+        );
+        assert_eq!(
+            listener_bind_addr("[::1]", 10101).unwrap(),
+            "[::1]:10101".parse::<SocketAddr>().unwrap()
+        );
+        assert!(listener_bind_addr("not an address", 10101).is_err());
+    }
+
     struct RecordingIntake;
 
     #[async_trait::async_trait]
@@ -307,9 +348,12 @@ mod tests {
         token: CancellationToken,
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
-            let _ = axum::serve(listener, router)
-                .with_graceful_shutdown(token.cancelled_owned())
-                .await;
+            let _ = axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .with_graceful_shutdown(token.cancelled_owned())
+            .await;
         })
     }
 
