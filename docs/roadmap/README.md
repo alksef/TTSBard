@@ -45,7 +45,6 @@ related_tasks: []
 
 ## Активные направления
 
-- [ROADMAP-118 — Доступ к Input Server из локальной сети с токеном](./active/118-input-server-lan-token-access.md) — `planned`.
 - [ROADMAP-117 — Разделение данных приложения: Roaming, Local и %TEMP%](./active/117-app-storage-split.md) — `planned`.
 - [ROADMAP-116 — Нагрузка audiodg и lifecycle потоков вывода](./active/116-audiodg-playback-stream-lifecycle.md) — `in_progress`.
 - [ROADMAP-115 — Последовательное сохранение настроек WebView и VTube Studio](./active/115-settings-save-consistency-followup.md) — `planned`.
@@ -58,6 +57,7 @@ related_tasks: []
 
 ### Ввод текста и OCR
 
+- [ROADMAP-118 — Доступ к Input Server из локальной сети с токеном](./completed/118-input-server-lan-token-access.md)
 - [ROADMAP-108 — Локальная веб-форма входящего текста](./completed/108-local-web-input-form.md)
 - [ROADMAP-088 — One-shot OCR выделенной области](./completed/088-one-shot-screen-ocr.md)
 - [ROADMAP-090 — Единое поведение моделей OCR и RUAccent](./completed/090-ocr-ruaccent-model-panel-behavior.md)
