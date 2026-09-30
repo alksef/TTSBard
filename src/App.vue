@@ -34,7 +34,12 @@ import {
 import { convertOcrOneShotFailure } from './composables/ocrFailureNotifications'
 import { useOcrRuntimeNotifications } from './composables/useOcrRuntimeNotifications'
 import { TWITCH_DELIVERY_FAILED_EVENT, twitchDeliveryFailureLocaleKey } from './ipc/twitchDelivery'
-import { upnpFailureKey } from './ipc/webviewUpnp'
+import {
+  convertUpnpForwardStatus,
+  upnpFailureKey,
+  UPNP_STATUS_CHANGED_EVENT,
+  GET_UPNP_STATUS_COMMAND,
+} from './ipc/webviewUpnp'
 
 type Panel = 'input' | 'tts' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'input-server' | 'vtube-studio' | 'ocr' | 'settings' | 'hotkeys' | 'intercept'
 
@@ -101,6 +106,22 @@ const listenerScope = createAsyncCleanupScope()
 let visibilityListenerSetup: Promise<void> | null = null
 let visibilityToken = 0
 let speechQueueFailureKeys: ReadonlySet<SpeechQueueFailureKey> = new Set()
+// Bumped by every UPnP status event so an in-flight snapshot never overwrites a
+// newer transition; `upnpFailureEpisode` deduplicates repeated failures into a
+// single toast per error episode.
+let upnpStatusEventToken = 0
+let upnpFailureEpisode = false
+
+function applyUpnpForwardStatus(raw: unknown): void {
+  const status = convertUpnpForwardStatus(raw)
+  if (status.state !== 'failed') {
+    upnpFailureEpisode = false
+    return
+  }
+  if (upnpFailureEpisode) return
+  upnpFailureEpisode = true
+  showError(t('webview.error.upnp_forward', { reason: t(upnpFailureKey(status.code)) }))
+}
 
 function formatHotkeyDisplay(hotkey: { modifiers: string[]; key: string } | undefined): string {
   if (!hotkey || !hotkey.key) return ''
@@ -328,19 +349,16 @@ onMounted(async () => {
   })
 
   // Show a global toast when the background UPnP open attempt fails at server
-  // startup. Only a string failure code is trusted: raw router text never
-  // reaches the UI, and a successful attempt produces no event.
-  void listenerScope.track(
-    listen<string>('webview-upnp-error', (event) => {
-      const code = (event as { payload: unknown }).payload
-      if (typeof code !== 'string' || code.length === 0) {
-        debugError('[App] Ignoring malformed webview-upnp-error payload')
-        return
-      }
-      showError(t('webview.error.upnp_forward', { reason: t(upnpFailureKey(code)) }))
+  // startup, even if the failure happened before the listener was registered.
+  // The snapshot is read after the listener; episode tracking deduplicates a
+  // snapshot that echoes a live event into a single toast per error episode.
+  const upnpListenerSetup = listenerScope.track(
+    listen<unknown>(UPNP_STATUS_CHANGED_EVENT, (event) => {
+      upnpStatusEventToken += 1
+      applyUpnpForwardStatus(event.payload)
     }),
   ).catch((e) => {
-    debugError('[App] Failed to listen for webview UPnP error events:', e)
+    debugError('[App] Failed to listen for webview UPnP status events:', e)
   })
 
   try {
@@ -427,6 +445,20 @@ onMounted(async () => {
     }
   } catch (e) {
     debugError('[App] Failed to get visibility snapshot:', e)
+  }
+
+  // Wait for the UPnP listener before reading its snapshot to avoid the gap.
+  await upnpListenerSetup
+
+  // Read the UPnP snapshot (skip if a newer status event already arrived).
+  try {
+    const token = upnpStatusEventToken
+    const snapshot = await invoke<unknown>(GET_UPNP_STATUS_COMMAND)
+    if (token === upnpStatusEventToken) {
+      applyUpnpForwardStatus(snapshot)
+    }
+  } catch (e) {
+    debugError('[App] Failed to read the initial WebView UPnP status:', e)
   }
 })
 

@@ -6,7 +6,14 @@ import { useWebViewSettings } from './useAppSettings'
 import { debugLog, debugError } from '../utils/debug'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
 import { presentCommandError } from '../ipc/commandError'
-import { upnpFailureKey, type UpnpToggleOutcome } from '../ipc/webviewUpnp'
+import {
+  convertUpnpForwardStatus,
+  upnpFailureKey,
+  type UpnpForwardStatus,
+  type UpnpToggleOutcome,
+  UPNP_STATUS_CHANGED_EVENT,
+  GET_UPNP_STATUS_COMMAND,
+} from '../ipc/webviewUpnp'
 import { t } from '../i18n'
 
 type UiMessageKind = 'success' | 'info' | 'error'
@@ -92,12 +99,17 @@ export function useWebView() {
   const testMessage = ref('')
   const displayUrl = ref('')
   const serverStatus = ref<WebViewServerStatus>({ state: 'stopped' })
+  // Фактический runtime-статус UPnP-проброса: mapping — факт, а не пожелание.
+  const upnpForwardStatus = ref<UpnpForwardStatus>({ state: 'closed' })
   // Переключение UPnP ждёт router до 5 секунд: пока операция в полёте, второй
   // клик по тумблеру не должен создавать новую попытку.
   const upnpPending = ref(false)
 
   let errorTimeout: number | null = null
   let displayUrlRequest = 0
+  // Bumped by every UPnP status event so an in-flight snapshot never overwrites
+  // a newer transition that arrived while it was pending.
+  let upnpStatusLoadToken = 0
   const listenerScope = createAsyncCleanupScope()
 
   function settingsSnapshot(): WebViewSettings {
@@ -221,6 +233,15 @@ export function useWebView() {
 
   const isUpnpAvailable = computed(() => {
     return savedBindAddress.value === '0.0.0.0'
+  })
+
+  const upnpForwardOpen = computed(() => upnpForwardStatus.value.state === 'open')
+
+  /** Локализованная причина persistent-отказа; `null`, когда статус не `failed`. */
+  const upnpForwardFailureText = computed(() => {
+    const status = upnpForwardStatus.value
+    if (status.state !== 'failed') return null
+    return t('webview.error.upnp_forward', { reason: t(upnpFailureKey(status.code)) })
   })
 
   function showError(message: string, type: UiMessageKind = 'error') {
@@ -412,17 +433,23 @@ export function useWebView() {
       const outcome = await invoke<UpnpToggleOutcome>('set_webview_upnp_enabled', { enabled: requested })
       if (outcome?.status === 'forward_failed') {
         // Настройка сохранена, но router не дал mapping: тумблер остаётся, а
-        // пользователь видит причину, почему внешний адрес не работает.
+        // пользователь видит причину, почему внешний адрес не работает. Отказ
+        // фиксируется и как persistent runtime-статус панели.
+        upnpForwardStatus.value = { state: 'failed', code: outcome.code }
         const reason = t(upnpFailureKey(outcome.code))
         showError(t('webview.error.upnp_forward', { reason }), 'error')
         return
       }
       if (!requested) {
+        upnpForwardStatus.value = { state: 'closed' }
         showError(t('webview.upnp.disabled'), 'info')
       } else if (outcome?.status === 'preference_only') {
         // Сервер не запущен: подтверждать открытый порт нечем.
+        upnpForwardStatus.value = { state: 'closed' }
         showError(t('webview.upnp.enabled_pending'), 'info')
       } else {
+        // `applied` с включением означает подтверждённый mapping.
+        upnpForwardStatus.value = { state: 'open' }
         showError(t('webview.upnp.enabled'), 'success')
       }
     } catch (e) {
@@ -521,6 +548,25 @@ export function useWebView() {
   onMounted(async () => {
     await loadToken()
     await listenerScope.track(
+      listen<unknown>(UPNP_STATUS_CHANGED_EVENT, (event) => {
+        upnpStatusLoadToken += 1
+        upnpForwardStatus.value = convertUpnpForwardStatus(event.payload)
+      }),
+    )
+    // Listener first, then snapshot: either ordering observes the latest
+    // transition without a read/listen gap; a newer event wins over the snapshot.
+    const upnpToken = upnpStatusLoadToken
+    try {
+      const payload = await invoke<unknown>(GET_UPNP_STATUS_COMMAND)
+      if (!listenerScope.disposed && upnpToken === upnpStatusLoadToken) {
+        upnpForwardStatus.value = convertUpnpForwardStatus(payload)
+      }
+    } catch (e) {
+      if (!listenerScope.disposed && upnpToken === upnpStatusLoadToken) {
+        debugError('[WebView] Failed to load UPnP forward status:', e)
+      }
+    }
+    await listenerScope.track(
       listen<WebViewServerStatus>('webview-server-status-changed', (event) => {
         serverStatus.value = event.payload
         if (event.payload.state === 'error') showError(presentCommandError(event.payload.message, t('webview.error.runtime')))
@@ -592,6 +638,9 @@ export function useWebView() {
     testMessage,
     displayUrl,
     serverStatus,
+    upnpForwardStatus,
+    upnpForwardOpen,
+    upnpForwardFailureText,
     externalUrl,
     externalDisplay,
     hasToken,

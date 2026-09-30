@@ -568,6 +568,7 @@
     "webview.upnp.failure.superseded": "запрос заменён более новым",
     "webview.upnp.failure.task_failed": "внутренняя ошибка операции",
     "webview.upnp.failure.unknown": "неизвестная причина",
+    "webview.upnp.status.open": "Роутер подтвердил проброс порта",
     "errors.webview.upnp.token_required": "Сначала сгенерируйте токен доступа для внешнего WebView",
     "errors.webview.settings_save_failed": "Не удалось сохранить настройку",
     "webview.token.regenerate_confirm_text": "Сделает старую ссылку недействительной и перезапустит сервер. Продолжить?",

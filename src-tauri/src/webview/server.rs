@@ -449,13 +449,13 @@ async fn index(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::webview::upnp::{RouterPortMapper, UpnpError, UpnpFailure};
     use axum::{
         body::{to_bytes, Body},
         http::{Request, StatusCode},
         routing::get,
         Router,
     };
-    use crate::webview::upnp::{RouterPortMapper, UpnpError, UpnpFailure};
     use std::convert::Infallible;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use tower::ServiceExt;

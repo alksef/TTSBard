@@ -52,6 +52,7 @@ vi.mock('./useAppSettings', () => ({
 }))
 
 import { useWebView } from './useWebView'
+import { convertUpnpForwardStatus } from '../ipc/webviewUpnp'
 import { i18n } from '../i18n'
 import { withLocale } from '../test-utils/i18n'
 import ruCatalog from '../../locales/ru.json'
@@ -1132,5 +1133,95 @@ describe('useWebView sequential settings persistence', () => {
 
     expect(settings.value.port).toBe(12000)
     expect(errorMessage.value).toBe('Не удалось сохранить настройки')
+  })
+})
+
+describe('convertUpnpForwardStatus', () => {
+  it('parses a valid open status', () => {
+    expect(convertUpnpForwardStatus({ state: 'open' })).toEqual({ state: 'open' })
+  })
+
+  it('parses a failed status with a failure code', () => {
+    expect(
+      convertUpnpForwardStatus({ state: 'failed', code: 'webview.upnp.timeout' }),
+    ).toEqual({ state: 'failed', code: 'webview.upnp.timeout' })
+  })
+
+  it('falls back to closed for malformed payloads', () => {
+    expect(convertUpnpForwardStatus(undefined)).toEqual({ state: 'closed' })
+    expect(convertUpnpForwardStatus(null)).toEqual({ state: 'closed' })
+    expect(convertUpnpForwardStatus('open')).toEqual({ state: 'closed' })
+    expect(convertUpnpForwardStatus({ state: 'bogus' })).toEqual({ state: 'closed' })
+  })
+
+  it('treats a failed status without a usable code as closed so no toast is produced', () => {
+    expect(convertUpnpForwardStatus({ state: 'failed' })).toEqual({ state: 'closed' })
+    expect(convertUpnpForwardStatus({ state: 'failed', code: 42 })).toEqual({ state: 'closed' })
+    expect(convertUpnpForwardStatus({ state: 'failed', code: '' })).toEqual({ state: 'closed' })
+  })
+})
+
+describe('useWebView UPnP forward status', () => {
+  beforeEach(() => {
+    resetHarness()
+  })
+
+  function upnpStatusImpl(snapshot: unknown): InvokeImpl {
+    return async (cmd: string) => {
+      if (cmd === 'get_webview_token') return null
+      if (cmd === 'get_local_ip') return '192.168.1.25'
+      if (cmd === 'get_webview_upnp_status') return snapshot
+      return undefined
+    }
+  }
+
+  it('applies a failed startup snapshot as a persistent localized failure', async () => {
+    const { webview } = await setupAndMountWithEvents(
+      upnpStatusImpl({ state: 'failed', code: 'webview.upnp.router_rejected' }),
+    )
+
+    expect(webview.upnpForwardStatus.value).toEqual({
+      state: 'failed',
+      code: 'webview.upnp.router_rejected',
+    })
+    expect(webview.upnpForwardOpen.value).toBe(false)
+    expect(webview.upnpForwardFailureText.value).toBe(
+      'UPnP включён, но проброс порта не удался: роутер отклонил проброс порта',
+    )
+  })
+
+  it('reflects a confirmed mapping as open', async () => {
+    const { webview } = await setupAndMountWithEvents(
+      upnpStatusImpl({ state: 'open' }),
+    )
+
+    expect(webview.upnpForwardStatus.value).toEqual({ state: 'open' })
+    expect(webview.upnpForwardOpen.value).toBe(true)
+    expect(webview.upnpForwardFailureText.value).toBeNull()
+  })
+
+  it('updates from a live status event and deduplicates a stale snapshot', async () => {
+    const { webview, listeners } = await setupAndMountWithEvents(upnpStatusImpl({ state: 'closed' }))
+    const onStatus = listeners.get('webview-upnp-status-changed')
+    expect(onStatus).toBeDefined()
+
+    onStatus?.({ payload: { state: 'open' } })
+
+    expect(webview.upnpForwardStatus.value).toEqual({ state: 'open' })
+    expect(webview.upnpForwardOpen.value).toBe(true)
+  })
+
+  it('closes the failure episode when a non-failed status arrives', async () => {
+    const { webview, listeners } = await setupAndMountWithEvents(
+      upnpStatusImpl({ state: 'failed', code: 'webview.upnp.timeout' }),
+    )
+    const onStatus = listeners.get('webview-upnp-status-changed')
+    expect(onStatus).toBeDefined()
+
+    onStatus?.({ payload: { state: 'closed' } })
+
+    expect(webview.upnpForwardStatus.value).toEqual({ state: 'closed' })
+    expect(webview.upnpForwardOpen.value).toBe(false)
+    expect(webview.upnpForwardFailureText.value).toBeNull()
   })
 })

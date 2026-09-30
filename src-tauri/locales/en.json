@@ -568,6 +568,7 @@
     "webview.upnp.failure.superseded": "the request was superseded by a newer one",
     "webview.upnp.failure.task_failed": "the operation failed internally",
     "webview.upnp.failure.unknown": "unknown reason",
+    "webview.upnp.status.open": "UPnP port mapping confirmed by router",
     "errors.webview.upnp.token_required": "Generate an access token for the external WebView first",
     "errors.webview.settings_save_failed": "Could not save the setting",
     "webview.token.regenerate_confirm_text": "This will invalidate the old link and restart the server. Continue?",

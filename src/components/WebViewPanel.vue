@@ -17,6 +17,8 @@ const {
   hasToken,
   isPortValid,
   isUpnpAvailable,
+  upnpForwardOpen,
+  upnpForwardFailureText,
   startServer,
   stopServer,
   restartServer,
@@ -190,6 +192,14 @@ const {
           <span>{{ t('webview.upnp.enable') }}</span>
         </label>
       </div>
+
+      <!-- Actual runtime UPnP status: mapping is a fact, not a preference. -->
+      <div v-if="upnpForwardOpen" class="upnp-status upnp-status-open">
+        {{ t('webview.upnp.status.open') }}
+      </div>
+      <div v-else-if="upnpForwardFailureText" class="upnp-status upnp-status-failed">
+        {{ upnpForwardFailureText }}
+      </div>
     </section>
   </div>
 </template>
@@ -290,6 +300,29 @@ h2 {
   font-size: 0.85rem;
   color: var(--warning-text-bright);
   line-height: 1.4;
+}
+
+.upnp-status {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem;
+  margin-bottom: 0.75rem;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.upnp-status-open {
+  background: var(--success-bg-weak);
+  border: 1px solid var(--success-shadow);
+  color: var(--success-text-bright);
+}
+
+.upnp-status-failed {
+  background: var(--danger-bg-weak);
+  border: 1px solid var(--danger-border);
+  color: var(--danger-text-bright);
 }
 
 .section-header {

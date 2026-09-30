@@ -130,9 +130,9 @@ pub async fn save_webview_settings(
     // сохранена, поэтому отказ router'а только логируется: у полного сохранения
     // секции свой контракт ответа.
     if upnp_changed {
-        if let UpnpToggleOutcome::ForwardFailed { code } =
-            state.webview.apply_upnp_toggle(settings.upnp_enabled).await
-        {
+        let outcome = state.webview.apply_upnp_toggle(settings.upnp_enabled).await;
+        state.webview.record_upnp_outcome(&outcome);
+        if let UpnpToggleOutcome::ForwardFailed { code } = outcome {
             tracing::warn!(code, "UPnP toggle from settings save was not confirmed");
         }
     }
@@ -359,13 +359,23 @@ pub async fn set_webview_upnp_enabled(
 
     // Настройка уже сохранена: отказ router'а возвращается как результат, а не как
     // ошибка команды, иначе UI откатил бы тумблер, который backend принял.
-    Ok(state.webview.apply_upnp_toggle(enabled).await)
+    let outcome = state.webview.apply_upnp_toggle(enabled).await;
+    state.webview.record_upnp_outcome(&outcome);
+    Ok(outcome)
 }
 
 /// Get UPnP enabled status
 #[tauri::command]
 pub async fn get_webview_upnp_enabled(state: State<'_, AppState>) -> Result<bool, String> {
     Ok(state.webview.settings.read().await.upnp_enabled)
+}
+
+/// Фактический runtime-статус UPnP-проброса: mapping — факт, а не пожелание.
+#[tauri::command]
+pub fn get_webview_upnp_status(
+    state: State<'_, AppState>,
+) -> crate::webview::service::UpnpForwardStatus {
+    state.webview.upnp_forward_status()
 }
 
 #[cfg(test)]

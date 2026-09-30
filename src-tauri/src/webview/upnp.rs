@@ -908,7 +908,10 @@ mod tests {
         assert!(blocked_by_close, "new open must wait for the old close");
         assert!(manager.is_desired());
         assert!(manager.is_mapping_open());
-        assert!(*mapper.mapping.lock().unwrap(), "router mapping must remain open");
+        assert!(
+            *mapper.mapping.lock().unwrap(),
+            "router mapping must remain open"
+        );
     }
 
     #[tokio::test]
