@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import { open as openDirectoryDialog } from '@tauri-apps/plugin-dialog';
 import { AlertTriangle, FolderOpen } from 'lucide-vue-next';
 import { useGeneralSettings, useWindowsSettings, useLoggingSettings } from '../../composables/useAppSettings';
 import { presentCommandError } from '../../ipc/commandError';
@@ -15,6 +16,15 @@ const languageSaving = ref(false);
 const languageError = ref<string | null>(null);
 const languageSaved = ref(false);
 const pendingLanguage = ref<string | null>(null);
+
+interface AudioCacheDirInfo {
+  path: string;
+  is_default: boolean;
+}
+
+const cacheDirInfo = ref<AudioCacheDirInfo | null>(null);
+const cacheDirSaving = ref(false);
+const localDataOpening = ref(false);
 
 // Get settings from composables
 const generalSettings = useGeneralSettings();
@@ -78,6 +88,60 @@ async function openAppFolder() {
     folderOpening.value = false;
   }
 }
+
+async function refreshCacheDirInfo() {
+  try {
+    cacheDirInfo.value = await invoke<AudioCacheDirInfo>('storage_get_audio_cache_info');
+  } catch (e) {
+    // Информационная панель: молча оставляем прочерк, ошибка видна при действии.
+    console.warn('Failed to load audio cache dir info', e);
+  }
+}
+
+async function changeCacheDir() {
+  if (cacheDirSaving.value) return;
+  try {
+    const selected = await openDirectoryDialog({ directory: true, multiple: false });
+    if (!selected || typeof selected !== 'string') return;
+    cacheDirSaving.value = true;
+    await invoke('storage_set_audio_cache_dir', { path: selected });
+    await refreshCacheDirInfo();
+    showMessage(t('general.storage.saved'), 'info');
+  } catch (e) {
+    showMessage(presentCommandError(e, t('general.storage.error')), 'error');
+  } finally {
+    cacheDirSaving.value = false;
+  }
+}
+
+async function resetCacheDir() {
+  if (cacheDirSaving.value) return;
+  try {
+    cacheDirSaving.value = true;
+    await invoke('storage_set_audio_cache_dir', { path: null });
+    await refreshCacheDirInfo();
+    showMessage(t('general.storage.saved'), 'info');
+  } catch (e) {
+    showMessage(presentCommandError(e, t('general.storage.error')), 'error');
+  } finally {
+    cacheDirSaving.value = false;
+  }
+}
+
+async function openLocalDataFolder() {
+  if (localDataOpening.value) return;
+  localDataOpening.value = true;
+
+  try {
+    await invoke('open_local_data_folder');
+  } catch (e) {
+    showMessage(presentCommandError(e, t('general.error.open_folder')), 'error');
+  } finally {
+    localDataOpening.value = false;
+  }
+}
+
+onMounted(refreshCacheDirInfo);
 
 async function toggleExcludeFromCapture() {
   try {
@@ -310,6 +374,44 @@ watch(loggingSettings, (newSettings) => {
         >
           <FolderOpen :size="16" />
           <span>{{ t('general.folder.open') }}</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Audio cache storage -->
+    <section class="settings-group">
+      <span class="setting-label folder-label">{{ t('general.storage.label') }}</span>
+      <div class="folder-inline-row">
+        <span class="folder-path" :title="cacheDirInfo?.path ?? ''">
+          {{ cacheDirInfo?.path ?? '…' }}
+        </span>
+        <button
+          type="button"
+          class="folder-button"
+          :disabled="cacheDirSaving"
+          :aria-label="t('general.storage.change')"
+          @click="changeCacheDir"
+        >
+          <span>{{ t('general.storage.change') }}</span>
+        </button>
+        <button
+          type="button"
+          class="folder-button"
+          :disabled="cacheDirSaving || cacheDirInfo?.is_default"
+          :aria-label="t('general.storage.reset')"
+          @click="resetCacheDir"
+        >
+          <span>{{ t('general.storage.reset') }}</span>
+        </button>
+        <button
+          type="button"
+          class="folder-button"
+          :disabled="localDataOpening"
+          :aria-label="t('general.storage.open')"
+          @click="openLocalDataFolder"
+        >
+          <FolderOpen :size="16" />
+          <span>{{ t('general.storage.open') }}</span>
         </button>
       </div>
     </section>

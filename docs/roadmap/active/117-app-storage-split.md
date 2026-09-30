@@ -1,6 +1,6 @@
 ---
 id: ROADMAP-117
-status: planned
+status: in_progress
 created: 2026-10-01
 updated: 2026-10-01
 related_tasks: []

@@ -20,6 +20,7 @@ pub mod playback;
 pub mod playback_window;
 pub mod preprocessor;
 pub mod proxy;
+pub mod storage;
 pub mod speech_queue;
 pub mod spellcheck;
 pub mod tabs;

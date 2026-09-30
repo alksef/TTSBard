@@ -449,6 +449,9 @@ pub fn run() {
             clear_intercept_binding,
             open_file_dialog,
             commands::open_app_folder,
+            commands::storage::storage_get_audio_cache_info,
+            commands::storage::storage_set_audio_cache_dir,
+            commands::storage::open_local_data_folder,
             // Audio commands
             get_output_devices,
             get_virtual_mic_devices,

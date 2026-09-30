@@ -211,6 +211,9 @@
     "level": "warn",
     "module_levels": {}
   },
+  "storage": {
+    "audio_cache_dir": null
+  },
   "preprocessor": {
     "enabled": false,
     "replacements_count": 0

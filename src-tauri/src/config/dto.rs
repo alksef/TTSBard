@@ -1546,6 +1546,14 @@ pub struct AllSourcesParams<'a> {
     pub soundpanel_bindings: Vec<SoundBinding>,
 }
 
+/// Storage settings (user paths, ROADMAP-117)
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct StorageSettingsDto {
+    /// Custom audio cache directory; `None` — default `%LOCALAPPDATA%`.
+    #[serde(default)]
+    pub audio_cache_dir: Option<String>,
+}
+
 /// All application settings in a single DTO
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettingsDto {
@@ -1574,6 +1582,8 @@ pub struct AppSettingsDto {
     pub ocr: OcrSettingsDto,
     /// Logging settings
     pub logging: LoggingSettingsDto,
+    /// Storage settings (user paths)
+    pub storage: StorageSettingsDto,
     /// Preprocessor settings
     pub preprocessor: PreprocessorSettingsDto,
     /// SoundPanel bindings
@@ -1620,6 +1630,9 @@ impl AppSettingsDto {
             },
             ocr: params.config.ocr.clone(),
             logging: params.config.logging.clone(),
+            storage: StorageSettingsDto {
+                audio_cache_dir: params.config.storage.audio_cache_dir.clone(),
+            },
             preprocessor: PreprocessorSettingsDto::from_preprocessor(params.preprocessor),
             soundpanel_bindings: params.soundpanel_bindings,
             ai: params.config.ai.clone().into(),
@@ -2031,6 +2044,7 @@ mod tests {
             audio,
             audio_effects,
             dsp,
+            storage: StorageSettingsDto { audio_cache_dir: None },
             general,
             editor,
             ocr,
@@ -2416,6 +2430,7 @@ mod tests {
             audio,
             audio_effects,
             dsp,
+            storage: StorageSettingsDto { audio_cache_dir: None },
             general,
             editor,
             ocr,

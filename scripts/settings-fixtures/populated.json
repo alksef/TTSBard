@@ -236,6 +236,9 @@
       "tts": "debug"
     }
   },
+  "storage": {
+    "audio_cache_dir": null
+  },
   "preprocessor": {
     "enabled": true,
     "replacements_count": 12

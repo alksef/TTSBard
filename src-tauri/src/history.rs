@@ -643,6 +643,11 @@ fn audio_cache_dir_override() -> &'static RwLock<Option<PathBuf>> {
     AUDIO_CACHE_DIR_OVERRIDE.get_or_init(|| RwLock::new(None))
 }
 
+/// Используется ли дефолтный каталог аудио-кеша (без пользовательского пути).
+pub(crate) fn audio_cache_dir_is_default() -> bool {
+    audio_cache_dir_override().read().is_none()
+}
+
 /// Применить кастомный путь кеша из настроек. Невалидный (несоздаваемый)
 /// путь игнорируется с warning: запуск не блокируется, используется дефолт.
 pub(crate) fn init_audio_cache_dir(custom: Option<&str>) {
@@ -686,13 +691,13 @@ pub(crate) fn migrate_legacy_audio_cache() {
 }
 
 /// Перенести файлы из `legacy` в `target` и удалить `legacy`, если опустела.
-/// Явные пути — для тестируемости; пары файлов с одинаковым cache_key
-/// дедуплицируются (источник удаляется, содержимое идентично).
-fn migrate_cache_dir(legacy: &Path, target: &Path) {
+/// Явные пути — для тестируемости и переиспользования сменой пути в UI;
+/// пары файлов с одинаковым cache_key дедуплицируются (источник удаляется,
+/// содержимое идентично).
+pub(crate) fn migrate_cache_dir(legacy: &Path, target: &Path) {
     if !legacy.is_dir() || legacy == target {
         return;
-    }
-    let entries = match fs::read_dir(legacy) {
+    }    let entries = match fs::read_dir(legacy) {
         Ok(entries) => entries,
         Err(e) => {
             tracing::warn!(
