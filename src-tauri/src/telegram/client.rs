@@ -199,10 +199,8 @@ impl TelegramClient {
 
     /// Get session path in %APPDATA%\ttsbard\telegram.session
     fn get_session_path() -> Result<PathBuf, String> {
-        let appdata =
-            std::env::var("APPDATA").map_err(|e| format!("Failed to get APPDATA: {}", e))?;
-
-        let app_dir = std::path::Path::new(&appdata).join("ttsbard");
+        let app_dir = crate::paths::config_root()
+            .map_err(|e| format!("Failed to get app directory: {}", e))?;
 
         // Create directory if it doesn't exist
         std::fs::create_dir_all(&app_dir)

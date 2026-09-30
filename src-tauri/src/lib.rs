@@ -13,6 +13,7 @@ mod input_server;
 pub mod ipc;
 mod localization;
 mod ocr;
+mod paths;
 pub mod playback;
 mod playback_window;
 mod preprocessor;
@@ -151,9 +152,9 @@ pub fn run() {
     }
 
     // Initialize tracing subscriber
-    let log_dir = PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string()))
-        .join("ttsbard")
-        .join("logs");
+    let log_dir = crate::paths::config_root()
+        .map(|dir| dir.join("logs"))
+        .unwrap_or_else(|_| PathBuf::from(".").join("logs"));
 
     // Ensure log directory exists with graceful fallback
     if let Err(e) = std::fs::create_dir_all(&log_dir)
@@ -306,12 +307,18 @@ pub fn run() {
         Box::leak(Box::new(non_blocking(std::io::sink()).1))
     };
 
-    let appdata_path = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
-    let appdata_path = format!("{}\\ttsbard", appdata_path);
+    // Стартовые одноразовые очистки: после single-instance (инвариант отсутствия
+    // живых владельцев temp-файлов) и после инициализации логгера.
+    #[cfg(windows)]
+    crate::paths::clean_temp_root();
+    #[cfg(windows)]
+    crate::paths::remove_legacy_roaming_temp();
 
-    std::fs::create_dir_all(&appdata_path).expect("Failed to create appdata directory");
+    let app_dir = crate::paths::config_root().expect("Failed to resolve app data directory");
 
-    let soundpanel_state = soundpanel::SoundPanelState::new(appdata_path);
+    std::fs::create_dir_all(&app_dir).expect("Failed to create appdata directory");
+
+    let soundpanel_state = soundpanel::SoundPanelState::new(app_dir.to_string_lossy().into_owned());
 
     let (history_path, ngram_path, phrase_path) =
         history::history_paths().expect("Failed to resolve history paths");

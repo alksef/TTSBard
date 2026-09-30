@@ -187,15 +187,31 @@ impl TtsEngine for SileroTts {
             .as_ref()
             .ok_or_else(|| "No audio path returned".to_string())?;
 
-        let audio_data = tokio::fs::read(audio_path)
-            .await
-            .map_err(|e| format!("Failed to read audio file: {}", e))?;
+        // Файл транзиентный: читаем в память и сразу удаляем независимо от
+        // исхода чтения (ROADMAP-117). Раньше файлы оставались навсегда.
+        let read_result = tokio::fs::read(audio_path).await;
+        cleanup_temp_audio(std::path::Path::new(audio_path)).await;
+
+        let audio_data = read_result.map_err(|e| format!("Failed to read audio file: {}", e))?;
 
         if let Some(message) = unsupported_silero_ogg_codec(&audio_data) {
             return Err(message);
         }
 
         Ok(audio_data)
+    }
+}
+
+/// Best-effort удаление скачанного временного аудиофайла после потребления.
+async fn cleanup_temp_audio(path: &std::path::Path) {
+    if let Err(e) = tokio::fs::remove_file(path).await {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!(
+                path = %crate::secret_log::safe_path_for_log(path),
+                error = %e,
+                "Failed to remove temporary TTS audio file"
+            );
+        }
     }
 }
 

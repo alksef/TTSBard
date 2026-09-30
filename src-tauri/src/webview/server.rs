@@ -40,10 +40,7 @@ pub struct TemplateCache {
 
 impl TemplateCache {
     pub async fn new() -> Result<Self, anyhow::Error> {
-        let config_dir = dirs::config_dir()
-            .ok_or_else(|| anyhow::anyhow!("Failed to get config dir"))?
-            .join("ttsbard")
-            .join("webview");
+        let config_dir = crate::paths::config_root()?.join("webview");
 
         // Ensure directory exists
         tokio::fs::create_dir_all(&config_dir)
@@ -92,10 +89,7 @@ impl TemplateCache {
     }
 
     pub async fn reload(&self) -> Result<(), anyhow::Error> {
-        let config_dir = dirs::config_dir()
-            .ok_or_else(|| anyhow::anyhow!("Failed to get config dir"))?
-            .join("ttsbard")
-            .join("webview");
+        let config_dir = crate::paths::config_root()?.join("webview");
 
         let html_path = config_dir.join("index.html");
         let css_path = config_dir.join("style.css");

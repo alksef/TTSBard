@@ -14,9 +14,7 @@ use std::path::PathBuf;
 
 /// Get the appdata directory for preprocessor files
 pub fn get_preprocessor_dir() -> Result<PathBuf> {
-    let config_dir = dirs::config_dir()
-        .ok_or_else(|| anyhow::anyhow!("Failed to get config dir"))?
-        .join("ttsbard");
+    let config_dir = crate::paths::config_root()?;
 
     // Create directory if it doesn't exist
     std::fs::create_dir_all(&config_dir)?;

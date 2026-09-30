@@ -240,9 +240,7 @@ pub struct WindowsManager {
 impl WindowsManager {
     /// Create a new WindowsManager with initialized cache
     pub fn new() -> Result<Self> {
-        let config_dir = dirs::config_dir()
-            .context("Failed to get config dir")?
-            .join("ttsbard");
+        let config_dir = crate::paths::config_root().context("Failed to get config dir")?;
 
         fs::create_dir_all(&config_dir).context("Failed to create config dir")?;
 

@@ -79,9 +79,8 @@ impl TabManager {
 }
 
 pub fn tabs_path() -> std::io::Result<PathBuf> {
-    let dir = dirs::config_dir()
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "config dir"))?
-        .join("ttsbard");
+    let dir = crate::paths::config_root()
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::NotFound, "config dir"))?;
     fs::create_dir_all(&dir)?;
     Ok(dir.join("tabs.json"))
 }

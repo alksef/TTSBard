@@ -621,9 +621,7 @@ where
 }
 
 pub fn history_paths() -> Result<(PathBuf, PathBuf, PathBuf)> {
-    let dir = dirs::config_dir()
-        .context("Failed to get config dir")?
-        .join("ttsbard");
+    let dir = crate::paths::config_root()?;
     fs::create_dir_all(&dir).context("Failed to create ttsbard dir")?;
     Ok((
         dir.join("input_history.json"),
@@ -637,10 +635,7 @@ const CACHE_NAMESPACE: uuid::Uuid = uuid::Uuid::from_bytes([
 ]);
 
 pub fn cache_dir_path() -> Result<PathBuf> {
-    let dir = dirs::config_dir()
-        .context("Failed to get config dir")?
-        .join("ttsbard")
-        .join("audio_cache");
+    let dir = crate::paths::config_root()?.join("audio_cache");
     fs::create_dir_all(&dir).context("Failed to create audio_cache dir")?;
     Ok(dir)
 }

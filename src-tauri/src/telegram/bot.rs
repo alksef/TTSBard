@@ -608,32 +608,12 @@ impl SileroTtsBot {
         }
     }
 
-    /// Получить путь к временной папке приложения
+    /// Получить путь к временной папке транзиентных файлов
+    ///
+    /// Скачанные голосовые живут секунды и удаляются сразу после чтения в
+    /// память (`tts::silero`); стартовый sweep подчищает остатки после краша.
     fn get_temp_dir() -> Result<PathBuf, String> {
-        let temp_dir = if cfg!(target_os = "windows") {
-            let appdata =
-                std::env::var("APPDATA").map_err(|e| format!("Failed to get APPDATA: {}", e))?;
-            PathBuf::from(appdata).join("ttsbard").join("temp")
-        } else if cfg!(target_os = "macos") {
-            let home = std::env::var("HOME").map_err(|e| format!("Failed to get HOME: {}", e))?;
-            PathBuf::from(home)
-                .join("Library")
-                .join("Application Support")
-                .join("ttsbard")
-                .join("temp")
-        } else {
-            // Linux
-            let home = std::env::var("HOME").map_err(|e| format!("Failed to get HOME: {}", e))?;
-            if let Ok(xdg_data) = std::env::var("XDG_DATA_HOME") {
-                PathBuf::from(xdg_data).join("ttsbard").join("temp")
-            } else {
-                PathBuf::from(home)
-                    .join(".local")
-                    .join("share")
-                    .join("ttsbard")
-                    .join("temp")
-            }
-        };
+        let temp_dir = crate::paths::temp_root();
 
         // Создаем директорию если не существует
         std::fs::create_dir_all(&temp_dir)

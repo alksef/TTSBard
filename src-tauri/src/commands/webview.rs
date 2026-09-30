@@ -171,9 +171,8 @@ pub fn get_local_ip() -> Result<String, String> {
 /// Open template folder in file explorer
 #[tauri::command]
 pub async fn open_template_folder() -> Result<(), String> {
-    let config_dir = dirs::config_dir()
-        .ok_or("Failed to get config dir")?
-        .join("ttsbard")
+    let config_dir = crate::paths::config_root()
+        .map_err(|_| "Failed to get config dir".to_string())?
         .join("webview");
 
     // Create directory first, before canonicalize

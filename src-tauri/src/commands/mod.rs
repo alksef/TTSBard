@@ -161,9 +161,8 @@ fn open_in_file_manager(path: &str) -> Result<(), String> {
 #[tauri::command]
 pub async fn open_app_folder() -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let app_dir = dirs::config_dir()
-            .ok_or_else(|| "Не удалось определить каталог конфигурации приложения".to_string())?
-            .join("ttsbard");
+        let app_dir = crate::paths::config_root()
+            .map_err(|_| "Не удалось определить каталог конфигурации приложения".to_string())?;
 
         std::fs::create_dir_all(&app_dir)
             .map_err(|e| format!("Не удалось создать папку приложения: {}", e))?;
@@ -701,8 +700,8 @@ pub fn decide_ruaccent_refresh_reconcile(
 /// directories. Shared by startup discovery and the refresh command.
 pub(crate) fn ruaccent_search_roots(app_handle: &AppHandle) -> Vec<std::path::PathBuf> {
     let mut roots: Vec<std::path::PathBuf> = Vec::new();
-    if let Some(config_dir) = dirs::config_dir() {
-        roots.push(config_dir.join("ttsbard"));
+    if let Ok(config_dir) = crate::paths::config_root() {
+        roots.push(config_dir);
     } else {
         warn!("Config directory not found; skipping AppData root for RUAccent discovery");
     }

@@ -711,10 +711,10 @@ impl AppState {
     /// Does NOT select any Piper provider — the current built-in provider is preserved.
     /// Does NOT create ONNX sessions (they are lazily initialized on first use).
     pub fn register_piper_providers(&self) {
-        let config_root = match dirs::config_dir() {
-            Some(d) => d.join("ttsbard"),
-            None => {
-                warn!("Cannot register Piper providers: config directory not found");
+        let config_root = match crate::paths::config_root() {
+            Ok(d) => d,
+            Err(e) => {
+                warn!(error = %e, "Cannot register Piper providers: config directory not found");
                 return;
             }
         };
