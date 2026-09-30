@@ -1,31 +1,49 @@
 //! UPnP port forwarding module
 //!
 //! Provides automatic port forwarding on UPnP-enabled routers.
+//!
+//! Router I/O is blocking by nature (SSDP discovery, local-address probe and SOAP
+//! calls), so it never runs on an async worker: every request is executed on the
+//! blocking pool behind a bounded wait. Requests are numbered by generation, and
+//! an operation whose generation was superseded is compensated — a mapping that
+//! is confirmed after stop/disable/restart is removed instead of surviving it.
 
 use igd::{search_gateway, Gateway, PortMappingProtocol, SearchOptions};
 use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-/// UPnP manager for automatic port forwarding
+/// Бюджет ожидания открытия mapping (discovery gateway + add_port).
+pub const UPNP_FORWARD_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Бюджет ожидания закрытия mapping.
+pub const UPNP_REMOVE_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Lease открытого mapping; после его истечения router снимает mapping сам.
+const UPNP_LEASE_SECONDS: u32 = 3600;
+
+/// Router I/O для одного порта.
 ///
-/// Automatically opens the configured port on the router when created,
-/// and closes it when dropped. If UPnP is not available, operations
-/// gracefully fail with warnings.
-pub struct UpnpManager {
-    port: u16,
-    gateway: Arc<Mutex<Option<Gateway>>>,
+/// Реализации блокирующие и вызываются только из blocking pool. Trait существует
+/// как шов: тесты подставляют искусственно медленный или отказывающий adapter.
+pub trait RouterPortMapper: Send + Sync {
+    /// Открыть внешний порт на router.
+    fn open(&self, port: u16) -> Result<(), String>;
+
+    /// Закрыть внешний порт на router.
+    fn close(&self, port: u16) -> Result<(), String>;
 }
 
-impl UpnpManager {
-    /// Create a new UPnP manager for the given port
-    ///
-    /// Attempts to discover UPnP devices on the local network.
-    /// If no devices are found, operations will gracefully fail.
-    pub fn new(port: u16) -> Self {
-        tracing::info!("UPnP manager created for port {}", port);
+/// Реальный adapter поверх `igd`: discovery gateway, локальный адрес и SOAP.
+pub struct IgdPortMapper {
+    gateway: Mutex<Option<Gateway>>,
+}
+
+impl IgdPortMapper {
+    pub fn new() -> Self {
         Self {
-            port,
-            gateway: Arc::new(Mutex::new(None)),
+            gateway: Mutex::new(None),
         }
     }
 
@@ -75,12 +93,16 @@ impl UpnpManager {
             IpAddr::V6(_) => Err("Got IPv6 address, expected IPv4".to_string()),
         }
     }
+}
 
-    /// Forward the configured port on the router
-    ///
-    /// Opens the external port on the UPnP gateway to redirect
-    /// to the same port on this machine. Uses TCP protocol.
-    pub fn forward(&self) -> Result<(), String> {
+impl Default for IgdPortMapper {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RouterPortMapper for IgdPortMapper {
+    fn open(&self, port: u16) -> Result<(), String> {
         // Discover gateway if not already done
         if self
             .gateway
@@ -100,14 +122,13 @@ impl UpnpManager {
             .lock()
             .map_err(|e| format!("Failed to lock gateway: {}", e))?;
 
-        let gateway = gw.as_ref().unwrap();
-        let local_addr = SocketAddrV4::new(local_ip, self.port);
-
-        // Duration in seconds (1 hour lease)
-        let duration = 3600u32;
+        let gateway = gw
+            .as_ref()
+            .ok_or_else(|| "UPnP gateway is not available".to_string())?;
+        let local_addr = SocketAddrV4::new(local_ip, port);
 
         tracing::info!(
-            external_port = self.port,
+            external_port = port,
             local_addr = %local_addr,
             "Adding UPnP port mapping"
         );
@@ -115,9 +136,9 @@ impl UpnpManager {
         gateway
             .add_port(
                 PortMappingProtocol::TCP,
-                self.port,
+                port,
                 local_addr,
-                duration,
+                UPNP_LEASE_SECONDS,
                 "ttsbard-webview",
             )
             .map_err(|e| {
@@ -125,50 +146,588 @@ impl UpnpManager {
                 format!("Failed to add port mapping: {}", e)
             })?;
 
-        tracing::info!(port = self.port, "UPnP port forwarding enabled");
+        tracing::info!(port, "UPnP port forwarding enabled");
         Ok(())
     }
 
-    /// Remove the port forwarding from the router
+    fn close(&self, port: u16) -> Result<(), String> {
+        let gw = self
+            .gateway
+            .lock()
+            .map_err(|e| format!("Failed to lock gateway: {}", e))?;
+
+        // Mapping мог быть открыт только после успешного discovery: без
+        // кэшированного gateway закрывать нечего.
+        let Some(gateway) = gw.as_ref() else {
+            return Ok(());
+        };
+
+        tracing::debug!(port, "Removing UPnP port mapping");
+        gateway
+            .remove_port(PortMappingProtocol::TCP, port)
+            .map_err(|e| {
+                tracing::warn!(error = %e, port, "Failed to remove UPnP port mapping");
+                format!("Failed to remove port mapping: {}", e)
+            })?;
+
+        tracing::info!(port, "UPnP port mapping removed");
+        Ok(())
+    }
+}
+
+/// UPnP manager for automatic port forwarding
+///
+/// Владеет желаемым состоянием forwarding и подтверждённым mapping. Каждый вызов
+/// получает новое поколение: результат устаревшего поколения не подтверждается,
+/// а фактическое состояние router приводится к последнему желаемому, поэтому
+/// поздний mapping не переживает stop/disable.
+pub struct UpnpManager {
+    port: u16,
+    mapper: Arc<dyn RouterPortMapper>,
+    forward_timeout: Duration,
+    remove_timeout: Duration,
+    desired: AtomicBool,
+    mapping_open: AtomicBool,
+    epoch: AtomicU64,
+}
+
+impl UpnpManager {
+    /// Create a new UPnP manager for the given port
+    pub fn new(port: u16) -> Self {
+        Self::with_mapper(port, Arc::new(IgdPortMapper::new()))
+    }
+
+    /// Менеджер с подставленным adapter'ом (тесты и альтернативные реализации
+    /// router I/O).
+    pub fn with_mapper(port: u16, mapper: Arc<dyn RouterPortMapper>) -> Self {
+        Self::with_mapper_and_timeouts(port, mapper, UPNP_FORWARD_TIMEOUT, UPNP_REMOVE_TIMEOUT)
+    }
+
+    /// Менеджер с явными бюджетами ожидания: тесты укорачивают их, чтобы
+    /// детерминированно проверять timeout и компенсацию.
+    pub fn with_mapper_and_timeouts(
+        port: u16,
+        mapper: Arc<dyn RouterPortMapper>,
+        forward_timeout: Duration,
+        remove_timeout: Duration,
+    ) -> Self {
+        tracing::info!(port, "UPnP manager created");
+        Self {
+            port,
+            mapper,
+            forward_timeout,
+            remove_timeout,
+            desired: AtomicBool::new(false),
+            mapping_open: AtomicBool::new(false),
+            epoch: AtomicU64::new(0),
+        }
+    }
+
+    /// Желаемое состояние forwarding (последнее запрошенное).
+    pub fn is_desired(&self) -> bool {
+        self.desired.load(Ordering::SeqCst)
+    }
+
+    /// Подтверждённый mapping: router сообщил об успехе, и намерение не менялось.
+    pub fn is_mapping_open(&self) -> bool {
+        self.mapping_open.load(Ordering::SeqCst)
+    }
+
+    fn budget(&self, enabled: bool) -> Duration {
+        if enabled {
+            self.forward_timeout
+        } else {
+            self.remove_timeout
+        }
+    }
+
+    fn is_current(&self, epoch: u64) -> bool {
+        self.epoch.load(Ordering::SeqCst) == epoch
+    }
+
+    /// Идемпотентно приводит router к желаемому состоянию.
     ///
-    /// Closes the external port mapping. This is called automatically
-    /// on drop, but can also be called manually if needed.
-    fn remove_internal(&self, context: &str) {
-        let gw = self.gateway.lock();
-        if let Ok(gateway) = gw {
-            if let Some(g) = gateway.as_ref() {
-                tracing::debug!(port = self.port, context, "Removing UPnP port mapping");
-                if let Err(e) = g.remove_port(PortMappingProtocol::TCP, self.port) {
-                    tracing::warn!(error = %e, port = self.port, context, "Failed to remove UPnP port mapping");
-                } else {
-                    tracing::info!(port = self.port, context, "UPnP port mapping removed");
-                }
+    /// Async lifecycle не блокируется: router I/O идёт на blocking pool с
+    /// ограниченным ожиданием. Результат, чьё поколение уже перехвачено более
+    /// новым запросом, не подтверждается и не оставляет нежелательный mapping.
+    pub async fn set_enabled(self: &Arc<Self>, enabled: bool) -> Result<(), String> {
+        let epoch = self.epoch.fetch_add(1, Ordering::SeqCst) + 1;
+        self.desired.store(enabled, Ordering::SeqCst);
+
+        let outcome = self.run_router_operation(epoch, enabled).await;
+
+        if !self.is_current(epoch) {
+            if outcome.is_ok() {
+                self.compensate_superseded_success(epoch, enabled).await;
+            }
+            return Err("UPnP request superseded by a newer one".to_string());
+        }
+
+        match outcome {
+            Ok(()) => {
+                self.mapping_open.store(enabled, Ordering::SeqCst);
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Один router-вызов на blocking pool с ограниченным ожиданием.
+    async fn run_router_operation(
+        self: &Arc<Self>,
+        epoch: u64,
+        enabled: bool,
+    ) -> Result<(), String> {
+        let budget = self.budget(enabled);
+        let mut task = self.spawn_router_task(enabled);
+
+        match tokio::time::timeout(budget, &mut task).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(join_error)) => Err(format!("UPnP router task failed: {}", join_error)),
+            Err(_) => {
+                // Ожидание истекло, но blocking-задача продолжает выполняться:
+                // её поздний успех не должен оставить нежелательный mapping.
+                let manager = Arc::clone(self);
+                tokio::spawn(async move {
+                    manager.finish_late_operation(epoch, enabled, task).await;
+                });
+                Err(format!(
+                    "UPnP {} did not complete within {:?}",
+                    if enabled {
+                        "port forwarding"
+                    } else {
+                        "port unmapping"
+                    },
+                    budget
+                ))
             }
         }
     }
 
-    /// Remove the port forwarding from the router
-    ///
-    /// Closes the external port mapping. This is called automatically
-    /// on drop, but can also be called manually if needed.
-    pub fn remove(&self) {
-        self.remove_internal("manual");
+    fn spawn_router_task(&self, enabled: bool) -> tokio::task::JoinHandle<Result<(), String>> {
+        let mapper = Arc::clone(&self.mapper);
+        let port = self.port;
+        tokio::task::spawn_blocking(move || {
+            if enabled {
+                mapper.open(port)
+            } else {
+                mapper.close(port)
+            }
+        })
+    }
+
+    /// Поздний результат операции, ожидание которой истекло: подтверждённый
+    /// mapping не должен пережить stop/disable/restart.
+    async fn finish_late_operation(
+        self: Arc<Self>,
+        epoch: u64,
+        enabled: bool,
+        task: tokio::task::JoinHandle<Result<(), String>>,
+    ) {
+        match task.await {
+            Ok(Ok(())) => {
+                if self.is_current(epoch) {
+                    // Намерение не изменилось: поздний успех — это желаемое
+                    // состояние, mapping можно подтвердить.
+                    self.mapping_open
+                        .store(self.desired.load(Ordering::SeqCst), Ordering::SeqCst);
+                    tracing::info!(
+                        port = self.port,
+                        enabled,
+                        "UPnP router operation completed after the wait"
+                    );
+                } else {
+                    tracing::warn!(
+                        port = self.port,
+                        enabled,
+                        "Late UPnP result belongs to a superseded request"
+                    );
+                    self.compensate_superseded_success(epoch, enabled).await;
+                }
+            }
+            Ok(Err(e)) => tracing::warn!(
+                error = %e,
+                port = self.port,
+                "Late UPnP router operation failed"
+            ),
+            Err(join_error) => tracing::warn!(
+                error = %join_error,
+                port = self.port,
+                "Late UPnP router task failed"
+            ),
+        }
+    }
+
+    /// Устаревший успешный результат: если он противоречит текущему намерению,
+    /// router физически приводится к этому намерению.
+    async fn compensate_superseded_success(self: &Arc<Self>, epoch: u64, enabled: bool) {
+        let desired = self.desired.load(Ordering::SeqCst);
+        if enabled == desired {
+            // Поздний результат совпадает с желаемым состоянием.
+            if self.is_current(epoch) {
+                self.mapping_open.store(desired, Ordering::SeqCst);
+            }
+            return;
+        }
+
+        tracing::warn!(
+            port = self.port,
+            enabled,
+            desired,
+            "UPnP result contradicts the current intent, compensating"
+        );
+        // MUTATION-CHECK-REVERTED
+        self.reconcile(desired).await;
+    }
+
+    /// Физически приводит router к состоянию `desired`. Используется только для
+    /// компенсации: подтверждённый `mapping_open` здесь не доказательство, потому
+    /// что отменённая операция могла успеть изменить router.
+    async fn reconcile(self: &Arc<Self>, desired: bool) {
+        let epoch = self.epoch.load(Ordering::SeqCst);
+        let mut task = self.spawn_router_task(desired);
+
+        match tokio::time::timeout(self.budget(desired), &mut task).await {
+            Ok(Ok(Ok(()))) => {
+                if self.is_current(epoch) {
+                    self.mapping_open.store(desired, Ordering::SeqCst);
+                }
+                tracing::info!(port = self.port, desired, "UPnP state reconciled");
+            }
+            Ok(Ok(Err(e))) => tracing::warn!(
+                error = %e,
+                port = self.port,
+                desired,
+                "Failed to reconcile UPnP state"
+            ),
+            Ok(Err(join_error)) => tracing::warn!(
+                error = %join_error,
+                port = self.port,
+                "UPnP reconcile task failed"
+            ),
+            Err(_) => tracing::warn!(
+                port = self.port,
+                desired,
+                "UPnP reconcile did not complete within its budget"
+            ),
+        }
     }
 }
 
 impl Drop for UpnpManager {
     fn drop(&mut self) {
-        self.remove_internal("drop");
+        if !self.mapping_open.load(Ordering::SeqCst) {
+            return;
+        }
+
+        // Никогда не блокируем поток, уничтожающий менеджер: закрытие уходит в
+        // blocking pool текущего runtime. Если runtime уже остановлен, mapping
+        // снимется сам по истечении lease.
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            tracing::debug!(
+                port = self.port,
+                "No Tokio runtime available to remove UPnP mapping; lease will expire"
+            );
+            return;
+        };
+
+        let mapper = Arc::clone(&self.mapper);
+        let port = self.port;
+        handle.spawn_blocking(move || {
+            if let Err(e) = mapper.close(port) {
+                tracing::warn!(error = %e, port, "Failed to remove UPnP port mapping on drop");
+            }
+        });
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    //! Scriptable router adapter: фиксирует вызовы, умеет блокировать открытие
+    //! до разрешения теста и сообщать о начале операции.
+
+    use super::RouterPortMapper;
+    use std::sync::mpsc::{channel, Receiver, Sender};
+    use std::sync::Mutex;
+    use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum RouterCall {
+        Open(u16),
+        Close(u16),
+    }
+
+    pub(crate) struct FakeRouterPortMapper {
+        calls: Mutex<Vec<RouterCall>>,
+        started: Mutex<Option<UnboundedSender<RouterCall>>>,
+        open_gate: Mutex<Option<Receiver<()>>>,
+    }
+
+    impl FakeRouterPortMapper {
+        pub(crate) fn new() -> Self {
+            Self {
+                calls: Mutex::new(Vec::new()),
+                started: Mutex::new(None),
+                open_gate: Mutex::new(None),
+            }
+        }
+
+        /// Открытие блокируется до `release()`; о начале операции сообщается в
+        /// возвращённый receiver. Закрытие выполняется сразу, поэтому тест может
+        /// снять намерение, пока открытие ещё в полёте.
+        pub(crate) fn gated_open() -> (Self, UnboundedReceiver<RouterCall>, Sender<()>) {
+            let (started_tx, started_rx) = unbounded_channel();
+            let (gate_tx, gate_rx) = channel();
+            let mapper = Self {
+                calls: Mutex::new(Vec::new()),
+                started: Mutex::new(Some(started_tx)),
+                open_gate: Mutex::new(Some(gate_rx)),
+            };
+            (mapper, started_rx, gate_tx)
+        }
+
+        pub(crate) fn calls(&self) -> Vec<RouterCall> {
+            self.calls.lock().unwrap().clone()
+        }
+
+        pub(crate) fn open_count(&self) -> usize {
+            self.calls()
+                .iter()
+                .filter(|call| matches!(call, RouterCall::Open(_)))
+                .count()
+        }
+
+        pub(crate) fn close_count(&self) -> usize {
+            self.calls()
+                .iter()
+                .filter(|call| matches!(call, RouterCall::Close(_)))
+                .count()
+        }
+
+        fn record(&self, call: RouterCall) {
+            self.calls.lock().unwrap().push(call);
+            if let Some(started) = self.started.lock().unwrap().as_ref() {
+                let _ = started.send(call);
+            }
+            if matches!(call, RouterCall::Open(_)) {
+                if let Some(gate) = self.open_gate.lock().unwrap().as_ref() {
+                    let _ = gate.recv();
+                }
+            }
+        }
+    }
+
+    impl RouterPortMapper for FakeRouterPortMapper {
+        fn open(&self, port: u16) -> Result<(), String> {
+            self.record(RouterCall::Open(port));
+            Ok(())
+        }
+
+        fn close(&self, port: u16) -> Result<(), String> {
+            self.record(RouterCall::Close(port));
+            Ok(())
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::test_support::{FakeRouterPortMapper, RouterCall};
     use super::*;
+    use std::time::Instant;
+
+    /// Тестовые бюджеты: достаточно короткие, чтобы timeout-путь был быстрым, и
+    /// достаточно длинные, чтобы успешная операция не считалась timeout'ом.
+    const TEST_BUDGET: Duration = Duration::from_millis(150);
+    const LONG_BUDGET: Duration = Duration::from_secs(30);
+
+    fn manager_with(
+        mapper: Arc<dyn RouterPortMapper>,
+        forward_timeout: Duration,
+        remove_timeout: Duration,
+    ) -> Arc<UpnpManager> {
+        Arc::new(UpnpManager::with_mapper_and_timeouts(
+            10100,
+            mapper,
+            forward_timeout,
+            remove_timeout,
+        ))
+    }
+
+    fn as_mapper(mapper: &Arc<FakeRouterPortMapper>) -> Arc<dyn RouterPortMapper> {
+        Arc::clone(mapper) as Arc<dyn RouterPortMapper>
+    }
+
+    async fn wait_for_closes(mapper: &FakeRouterPortMapper, expected: usize) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while mapper.close_count() < expected && Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
 
     #[test]
     fn test_upnp_manager_creation() {
-        let _manager = UpnpManager::new(10100);
-        // Test that manager can be created without panicking
+        let manager = UpnpManager::new(10100);
+        assert_eq!(manager.port, 10100);
+        assert!(!manager.is_desired());
+        assert!(!manager.is_mapping_open());
+    }
+
+    #[tokio::test]
+    async fn enabling_and_disabling_reaches_the_router_in_order() {
+        let mapper = Arc::new(FakeRouterPortMapper::new());
+        let manager = manager_with(as_mapper(&mapper), TEST_BUDGET, TEST_BUDGET);
+
+        manager.set_enabled(true).await.unwrap();
+        assert!(manager.is_mapping_open());
+        assert!(manager.is_desired());
+
+        manager.set_enabled(false).await.unwrap();
+        assert!(!manager.is_mapping_open());
+        assert_eq!(
+            mapper.calls(),
+            vec![RouterCall::Open(10100), RouterCall::Close(10100)]
+        );
+    }
+
+    #[tokio::test]
+    async fn restart_sequence_closes_before_reopening() {
+        let mapper = Arc::new(FakeRouterPortMapper::new());
+        let manager = manager_with(as_mapper(&mapper), TEST_BUDGET, TEST_BUDGET);
+
+        manager.set_enabled(true).await.unwrap();
+        manager.set_enabled(false).await.unwrap();
+        manager.set_enabled(true).await.unwrap();
+
+        assert_eq!(
+            mapper.calls(),
+            vec![
+                RouterCall::Open(10100),
+                RouterCall::Close(10100),
+                RouterCall::Open(10100)
+            ]
+        );
+        assert!(manager.is_mapping_open());
+    }
+
+    #[tokio::test]
+    async fn slow_router_does_not_block_the_async_caller() {
+        let (mapper, mut started, release) = FakeRouterPortMapper::gated_open();
+        let mapper = Arc::new(mapper);
+        let manager = manager_with(as_mapper(&mapper), LONG_BUDGET, TEST_BUDGET);
+
+        let forward = {
+            let manager = Arc::clone(&manager);
+            tokio::spawn(async move { manager.set_enabled(true).await })
+        };
+
+        // Операция уже ушла в router, но ожидание не блокирует runtime: другие
+        // задачи продолжают исполняться, пока router не ответил.
+        let call = tokio::time::timeout(Duration::from_secs(2), started.recv())
+            .await
+            .expect("router operation must start")
+            .expect("started channel must stay open");
+        assert_eq!(call, RouterCall::Open(10100));
+        assert!(!forward.is_finished());
+        assert!(!manager.is_mapping_open());
+
+        release.send(()).unwrap();
+        forward.await.unwrap().unwrap();
+        assert!(manager.is_mapping_open());
+    }
+
+    #[tokio::test]
+    async fn late_mapping_after_disable_is_compensated() {
+        let (mapper, mut started, release) = FakeRouterPortMapper::gated_open();
+        let mapper = Arc::new(mapper);
+        let manager = manager_with(as_mapper(&mapper), TEST_BUDGET, TEST_BUDGET);
+
+        // Открытие не укладывается в бюджет: подтверждения нет.
+        let timed_out = manager.set_enabled(true).await;
+        assert!(timed_out.is_err(), "forward must report the timeout");
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), started.recv())
+                .await
+                .expect("router operation must start")
+                .expect("started channel must stay open"),
+            RouterCall::Open(10100)
+        );
+        assert!(!manager.is_mapping_open());
+
+        // Stop/disable снимает намерение и закрывает mapping, пока открытие
+        // всё ещё висит в router.
+        manager.set_enabled(false).await.unwrap();
+        assert!(!manager.is_mapping_open());
+
+        // Поздний успех открытия противоречит текущему намерению и гасится.
+        release.send(()).unwrap();
+        wait_for_closes(&mapper, 2).await;
+
+        assert_eq!(mapper.open_count(), 1);
+        assert_eq!(
+            mapper.close_count(),
+            2,
+            "late mapping must be compensated after disable: {:?}",
+            mapper.calls()
+        );
+        assert!(!manager.is_mapping_open());
+    }
+
+    #[tokio::test]
+    async fn superseded_operation_is_not_confirmed_and_is_compensated() {
+        let (mapper, mut started, release) = FakeRouterPortMapper::gated_open();
+        let mapper = Arc::new(mapper);
+        let manager = manager_with(as_mapper(&mapper), LONG_BUDGET, TEST_BUDGET);
+
+        let forward = {
+            let manager = Arc::clone(&manager);
+            tokio::spawn(async move { manager.set_enabled(true).await })
+        };
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), started.recv())
+                .await
+                .expect("router operation must start")
+                .expect("started channel must stay open"),
+            RouterCall::Open(10100)
+        );
+
+        // Более новый запрос перехватывает владение, пока открытие в полёте.
+        manager.set_enabled(false).await.unwrap();
+        release.send(()).unwrap();
+
+        let outcome = forward.await.unwrap();
+        assert!(outcome.is_err(), "superseded forward must not be confirmed");
+        assert!(!manager.is_mapping_open());
+
+        wait_for_closes(&mapper, 2).await;
+        assert_eq!(
+            mapper.close_count(),
+            2,
+            "superseded open must be compensated: {:?}",
+            mapper.calls()
+        );
+    }
+
+    #[tokio::test]
+    async fn failure_is_reported_and_keeps_the_confirmed_state() {
+        struct FailingMapper;
+
+        impl RouterPortMapper for FailingMapper {
+            fn open(&self, _port: u16) -> Result<(), String> {
+                Err("router refused".to_string())
+            }
+
+            fn close(&self, _port: u16) -> Result<(), String> {
+                Ok(())
+            }
+        }
+
+        let manager = manager_with(Arc::new(FailingMapper), TEST_BUDGET, TEST_BUDGET);
+        let error = manager.set_enabled(true).await.unwrap_err();
+        assert!(
+            error.contains("router refused"),
+            "unexpected error: {error}"
+        );
+        assert!(!manager.is_mapping_open());
     }
 }

@@ -9,7 +9,7 @@ use crate::webview::WebViewServer;
 use crate::webview::WebViewServerStatus;
 use crate::webview::WebViewSettings;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
@@ -28,6 +28,48 @@ const SERVER_RESPAWN_BACKOFF: Duration = Duration::from_secs(2);
 /// failure such as a busy port makes the status flap Starting↔Error forever,
 /// which the WebView settings UI renders as a blinking panel.
 const MAX_START_ATTEMPTS: u32 = 3;
+
+/// Период повтора `typing: true`, пока набор остаётся активным.
+///
+/// Набор передаётся один раз на burst: редактор шлёт начало сразу, а завершение —
+/// по idle-таймауту. Поэтому SSE-клиент не может отличить потерянное
+/// `typing: false` (переполнение broadcast-буфера) от продолжающегося набора.
+/// Пока состояние активно, сервер повторяет `typing: true`; клиент сбрасывает
+/// индикатор, если повторов нет дольше собственного таймаута (в bundled-шаблоне
+/// это `TYPING_RESET_MS`, заведомо больше периода повтора).
+const TYPING_HEARTBEAT: Duration = Duration::from_secs(5);
+
+/// Состояние heartbeat'а набора: активен ли набор и когда слать повтор.
+#[derive(Debug)]
+struct TypingHeartbeat {
+    active: bool,
+    next_at: Instant,
+}
+
+impl TypingHeartbeat {
+    fn new(now: Instant) -> Self {
+        Self {
+            active: false,
+            next_at: now,
+        }
+    }
+
+    /// Применить событие набора: состояние передаётся клиенту вызывающей
+    /// стороной, повтор планируется от этого момента.
+    fn set(&mut self, typing: bool, now: Instant) {
+        self.active = typing;
+        self.next_at = now + TYPING_HEARTBEAT;
+    }
+
+    /// Пора ли повторить `typing: true`. Планирует следующий повтор.
+    fn due(&mut self, now: Instant) -> bool {
+        if !self.active || now < self.next_at {
+            return false;
+        }
+        self.next_at = now + TYPING_HEARTBEAT;
+        true
+    }
+}
 
 /// Wait for the respawn backoff, bailing out early if shutdown was requested.
 /// Returns `true` when the supervisor loop should keep running, `false` when
@@ -198,6 +240,7 @@ pub async fn run_webview_server(
 
             // Handle events and broadcast text
             let mut server_running = true;
+            let mut typing_heartbeat = TypingHeartbeat::new(Instant::now());
             while server_running {
                 // Check if settings changed
                 let current_settings = webview_settings.read().await;
@@ -214,7 +257,7 @@ pub async fn run_webview_server(
                     info!("[WEBVIEW] ========================================");
 
                     // Stop server and clean up UPnP
-                    server.stop();
+                    server.stop().await;
 
                     server_handle.abort();
                     state
@@ -222,6 +265,13 @@ pub async fn run_webview_server(
                         .set_status(&app_handle, WebViewServerStatus::Stopped);
                     server_running = false;
                 } else {
+                    // Пока набор активен, повторяем `typing: true`: клиент
+                    // отличает потерянное `typing: false` от продолжающегося
+                    // набора по отсутствию повторов.
+                    if typing_heartbeat.due(Instant::now()) {
+                        server.broadcast_typing(true).await;
+                    }
+
                     tokio::select! {
                         biased;
                         result = &mut server_handle => {
@@ -235,7 +285,7 @@ pub async fn run_webview_server(
                         }
                         _ = shutdown.cancelled() => {
                             info!("[WEBVIEW] ⛔ Shutdown signal");
-                            server.stop();
+                            server.stop().await;
                             server_handle.abort();
                             state.webview.set_status(&app_handle, WebViewServerStatus::Stopped);
                             return;
@@ -252,7 +302,7 @@ pub async fn run_webview_server(
                                             info!("[WEBVIEW] ⚠ Quit event received, shutting down server...");
 
                                             // Stop server and clean up UPnP
-                                            server.stop();
+                                            server.stop().await;
 
                                             server_handle.abort();
                                             state.webview.set_status(&app_handle, WebViewServerStatus::Stopped);
@@ -267,7 +317,7 @@ pub async fn run_webview_server(
                                             info!("[WEBVIEW] ⚠ Restart event received, stopping server...");
 
                                             // Stop server and clean up UPnP
-                                            server.stop();
+                                            server.stop().await;
 
                                             server_handle.abort();
                                             state.webview.set_status(&app_handle, WebViewServerStatus::Stopped);
@@ -288,10 +338,17 @@ pub async fn run_webview_server(
                                         }
                                         AppEvent::ToggleUpnp(enabled) => {
                                             info!("[WEBVIEW] 🔄 Toggling UPnP: {}", enabled);
-                                            server.toggle_upnp(enabled);
+                                            // Router I/O не должен задерживать supervisor
+                                            // loop: запрос уходит в blocking pool, а
+                                            // поздний результат гасится epoch-политикой.
+                                            let server_clone = server.clone();
+                                            tokio::spawn(async move {
+                                                server_clone.toggle_upnp(enabled).await;
+                                            });
                                         }
                                         AppEvent::WebViewTypingChanged(typing) => {
                                             debug!("[WEBVIEW] ⌨️ Typing changed: {}", typing);
+                                            typing_heartbeat.set(typing, Instant::now());
                                             server.broadcast_typing(typing).await;
                                         }
                                         _ => {
@@ -405,5 +462,54 @@ mod tests {
         let keep_running = respawn_backoff(&shutdown, Duration::from_secs(3600)).await;
         assert!(!keep_running, "shutdown must abort the backoff wait");
         assert!(start.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn typing_heartbeat_stays_silent_while_typing_is_inactive() {
+        let now = Instant::now();
+        let mut heartbeat = TypingHeartbeat::new(now);
+
+        assert!(!heartbeat.due(now));
+        assert!(
+            !heartbeat.due(now + Duration::from_secs(3600)),
+            "inactive typing must never produce heartbeats"
+        );
+    }
+
+    #[test]
+    fn typing_heartbeat_repeats_while_typing_is_active() {
+        let now = Instant::now();
+        let mut heartbeat = TypingHeartbeat::new(now);
+        heartbeat.set(true, now);
+
+        assert!(
+            !heartbeat.due(now + TYPING_HEARTBEAT - Duration::from_millis(1)),
+            "heartbeat must not fire before its period"
+        );
+        assert!(
+            heartbeat.due(now + TYPING_HEARTBEAT),
+            "active typing must be refreshed once the period elapsed"
+        );
+        assert!(
+            !heartbeat.due(now + TYPING_HEARTBEAT + Duration::from_secs(1)),
+            "the next refresh is scheduled from the previous one"
+        );
+        assert!(heartbeat.due(now + TYPING_HEARTBEAT * 2));
+    }
+
+    #[test]
+    fn typing_heartbeat_stops_after_the_end_of_typing() {
+        let now = Instant::now();
+        let mut heartbeat = TypingHeartbeat::new(now);
+        heartbeat.set(true, now);
+        assert!(heartbeat.due(now + TYPING_HEARTBEAT));
+
+        let stopped_at = now + TYPING_HEARTBEAT + Duration::from_secs(1);
+        heartbeat.set(false, stopped_at);
+
+        assert!(
+            !heartbeat.due(stopped_at + Duration::from_secs(3600)),
+            "a completed burst must stop the heartbeat"
+        );
     }
 }

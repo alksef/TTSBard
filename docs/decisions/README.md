@@ -29,6 +29,7 @@ implementation details и журналы обсуждений сюда не по
 - [DECISION-021 — Захват виртуального рабочего стола через xcap](./021-ocr-virtual-desktop-capture-xcap.md) — one-shot OCR снимает весь виртуальный стол до UI; геометрия/кроп — чистые функции
 - [DECISION-022 — Twitch IRC lifecycle принадлежит twitch-irc](./022-twitch-irc-lifecycle.md) — библиотека владеет transport/reconnect/JOIN; приложение — статусом, очередью и семантикой `sent`
 - [DECISION-023 — Ограниченное хранение terminal jobs очереди речи](./023-speech-queue-terminal-retention.md) — 50 последних `Completed`/`Cancelled`, вытеснение самого старого; active и `Failed` не вытесняются
+- [DECISION-024 — UPnP port forwarding вне async lifecycle WebView](./024-webview-upnp-ownership.md) — router I/O на blocking pool с bounded wait и epoch-поколениями; поздний mapping после stop/disable компенсируется; readiness listener не зависит от forwarding
 
 ## Заменённые решения
 

@@ -62,6 +62,11 @@ data: {"typing":true}
 настройки передачи набора в редакторе. Именованные события не вызывают
 `onmessage`, поэтому старый текстовый клиент продолжает работать.
 
+Пока набор активен, сервер повторяет `typing: true` не реже, чем раз в 5 секунд:
+редактор передаёт начало набора один раз, а окончание — по idle-таймауту, поэтому
+повтор позволяет клиенту отличить потерянное `typing: false` от продолжающегося
+набора. Повторное `true` идемпотентно и не требует отдельной обработки.
+
 ## Доставка и переподключение
 
 - При простое сервер отправляет keep-alive комментарии с интервалом 10 секунд;
@@ -69,8 +74,20 @@ data: {"typing":true}
 - История, номера `id` и восстановление по `Last-Event-ID` не реализованы.
   Новый клиент получает `connected`, затем только новые события; текущий текст
   и последнее состояние набора отдельным snapshot не отправляются.
-- Медленный клиент может потерять соединение при переполнении внутреннего
-  broadcast-буфера. После переподключения пропущенные события не повторяются.
+- Медленный клиент, отставший от внутреннего broadcast-буфера (ёмкость 100
+  событий), **не теряет соединение**: сервер пропускает недоставленные события,
+  пишет об этом warning с числом пропущенных и продолжает отдавать последующие
+  события в тот же поток. Пропущенные события не повторяются и не
+  восстанавливаются.
+- Пропуск не сигнализируется клиенту отдельным событием. Клиент, который держит
+  производное состояние (например индикатор набора), должен уметь сбрасывать его
+  самостоятельно: потерянное `typing: false` больше не приводит к разрыву
+  соединения, после которого состояние сбрасывалось. Для состояния набора это
+  делается таймаутом по отсутствию повторов `typing: true` (пример ниже);
+  таймаут должен быть заведомо больше периода повтора.
+- Разрыв потока означает закрытие сервера (или потерю сети), а не пропуск
+  событий. После переподключения новых пропусков не «догоняется»: клиент получает
+  `connected` и только последующие события.
 - Браузерный `EventSource` поддерживает переподключение. Не вызывайте `close()`
   при каждой временной ошибке, если хотите сохранить эту возможность.
 - `401` требует исправить авторизацию; это не сигнал об отсутствии новых реплик.
@@ -91,8 +108,29 @@ data: {"typing":true}
 const output = document.getElementById('text-container');
 const events = new EventSource('/sse');
 
+// Заведомо больше периода повтора `typing: true` (5 секунд).
+const TYPING_RESET_MS = 12000;
+let typingTimeout = null;
+
+function setTyping(typing) {
+    document.documentElement.classList.toggle('is-typing', typing);
+
+    if (typingTimeout) {
+        clearTimeout(typingTimeout);
+        typingTimeout = null;
+    }
+
+    if (typing) {
+        // Пропущенное `typing: false` не должно оставлять индикатор навсегда.
+        typingTimeout = setTimeout(() => {
+            typingTimeout = null;
+            document.documentElement.classList.remove('is-typing');
+        }, TYPING_RESET_MS);
+    }
+}
+
 events.addEventListener('connected', () => {
-    document.documentElement.classList.remove('is-typing');
+    setTyping(false);
 });
 
 events.onmessage = (event) => {
@@ -102,11 +140,11 @@ events.onmessage = (event) => {
 
 events.addEventListener('typing', (event) => {
     const data = JSON.parse(event.data);
-    document.documentElement.classList.toggle('is-typing', data.typing === true);
+    if (typeof data.typing === 'boolean') setTyping(data.typing);
 });
 
 events.onerror = () => {
-    document.documentElement.classList.remove('is-typing');
+    setTyping(false);
     console.warn('SSE: соединение потеряно или отклонено');
 };
 

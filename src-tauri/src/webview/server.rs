@@ -168,15 +168,6 @@ impl WebViewServer {
         }
         drop(settings);
 
-        // Forward UPnP port if enabled
-        if upnp_enabled {
-            if let Some(manager) = &self.upnp_manager {
-                if let Err(e) = manager.forward() {
-                    tracing::warn!(error = %e, "UPnP port forwarding failed, continuing anyway");
-                }
-            }
-        }
-
         let state = ServerState {
             sse_tx: self.sse_tx.clone(),
             templates: self.templates.clone(),
@@ -214,6 +205,23 @@ impl WebViewServer {
         if let Some(readiness) = readiness {
             let _ = readiness.send(Ok(()));
         }
+
+        // Optional port forwarding не задерживает readiness TCP listener и не
+        // удерживает async lifecycle: router I/O идёт на blocking pool, а его
+        // поздний результат гасится epoch-политикой UpnpManager.
+        if upnp_enabled {
+            if let Some(manager) = self.upnp_manager.clone() {
+                tokio::spawn(async move {
+                    if let Err(e) = manager.set_enabled(true).await {
+                        tracing::warn!(
+                            error = %e,
+                            "UPnP port forwarding failed, continuing anyway"
+                        );
+                    }
+                });
+            }
+        }
+
         axum::serve(
             listener,
             app.into_make_service_with_connect_info::<SocketAddr>(),
@@ -231,25 +239,34 @@ impl WebViewServer {
     }
 
     /// Stop the server and clean up resources (including UPnP)
-    pub fn stop(&self) {
+    ///
+    /// Router I/O не блокирует async-поток: закрытие уходит на blocking pool с
+    /// ограниченным ожиданием, а поздний mapping гасится epoch-политикой.
+    pub async fn stop(&self) {
         tracing::info!("Stopping WebViewServer and cleaning up resources");
         if let Some(manager) = &self.upnp_manager {
-            tracing::info!("Removing UPnP port mapping on server stop");
-            manager.remove();
+            if manager.is_mapping_open() || manager.is_desired() {
+                tracing::info!("Removing UPnP port mapping on server stop");
+                if let Err(e) = manager.set_enabled(false).await {
+                    tracing::warn!(error = %e, "Failed to remove UPnP port mapping on stop");
+                }
+            }
         }
     }
 
     /// Toggle UPnP port forwarding dynamically without server restart
-    pub fn toggle_upnp(&self, enabled: bool) {
+    pub async fn toggle_upnp(&self, enabled: bool) {
         if let Some(manager) = &self.upnp_manager {
             if enabled {
                 tracing::info!("Enabling UPnP port forwarding");
-                if let Err(e) = manager.forward() {
+                if let Err(e) = manager.set_enabled(true).await {
                     tracing::warn!(error = %e, "Failed to enable UPnP port forwarding");
                 }
             } else {
                 tracing::info!("Disabling UPnP port forwarding");
-                manager.remove();
+                if let Err(e) = manager.set_enabled(false).await {
+                    tracing::warn!(error = %e, "Failed to disable UPnP port forwarding");
+                }
             }
         }
     }
@@ -340,9 +357,23 @@ async fn sse_handler(
     let rx = state.sse_tx.subscribe();
 
     let events = futures::stream::unfold(rx, move |mut rx| async move {
-        match rx.recv().await {
-            Ok(sse_event) => Some((Ok(to_sse_event(&sse_event)), rx)),
-            Err(_) => None,
+        loop {
+            match rx.recv().await {
+                Ok(sse_event) => return Some((Ok(to_sse_event(&sse_event)), rx)),
+                // Медленный клиент отстал от broadcast-буфера. Пропущенные
+                // события не воспроизводятся, но соединение остаётся живым:
+                // клиент продолжает получать последующие события.
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    tracing::warn!(
+                        skipped,
+                        "SSE client lagged behind the broadcast buffer, skipping missed events"
+                    );
+                    // MUTATION-CHECK-REVERTED
+                    continue;
+                }
+                // Отправитель закрыт: поток больше не получит событий.
+                Err(broadcast::error::RecvError::Closed) => return None,
+            }
         }
     });
 
@@ -434,22 +465,90 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use tower::ServiceExt;
 
-    fn build_test_app(token: Option<String>) -> Router {
-        let state = ServerState {
-            sse_tx: broadcast::channel(10).0,
+    fn test_state(token: Option<String>, sse_capacity: usize) -> ServerState {
+        ServerState {
+            sse_tx: broadcast::channel(sse_capacity).0,
             templates: TemplateCache {
                 html: Arc::new(RwLock::new("<html>{{CSS}}</html>".to_string())),
                 css: Arc::new(RwLock::new("body {}".to_string())),
                 rendered: Arc::new(RwLock::new("<html>body {}</html>".to_string())),
             },
             access_token: token,
-        };
+        }
+    }
 
+    fn build_test_app(token: Option<String>) -> Router {
         Router::new()
             .route("/", get(index))
             .route("/auth", get(auth_handler))
             .route("/sse", get(sse_handler))
-            .with_state(state)
+            .with_state(test_state(token, 10))
+    }
+
+    /// Router с настраиваемой ёмкостью broadcast-буфера и отправителем, чтобы
+    /// тест мог переполнить буфер и наблюдать поведение потока.
+    fn build_test_app_with_sse(token: Option<String>, sse_capacity: usize) -> (Router, SseSender) {
+        let state = test_state(token, sse_capacity);
+        let sender = state.sse_tx.clone();
+        let app = Router::new()
+            .route("/", get(index))
+            .route("/auth", get(auth_handler))
+            .route("/sse", get(sse_handler))
+            .with_state(state);
+        (app, sender)
+    }
+
+    async fn next_sse_chunk(body: &mut axum::body::BodyDataStream) -> String {
+        let chunk = tokio::time::timeout(std::time::Duration::from_secs(2), body.next())
+            .await
+            .expect("SSE chunk timed out")
+            .expect("SSE stream ended early")
+            .expect("SSE chunk failed");
+        String::from_utf8(chunk.to_vec()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_sse_stream_continues_after_lag_and_ends_when_sender_closes() {
+        // Ёмкость 1: три отправки без чтения гарантируют RecvError::Lagged.
+        let (app, sse_tx) = build_test_app_with_sse(Some("secret-token".to_string()), 1);
+
+        let client_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 12345);
+        let req = Request::builder()
+            .uri("/sse")
+            .extension(ConnectInfo(client_addr))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let mut body = response.into_body().into_data_stream();
+
+        let first = next_sse_chunk(&mut body).await;
+        assert!(
+            first.contains("event: connected"),
+            "first chunk must confirm the connection: {first:?}"
+        );
+
+        for text in ["first", "second", "third"] {
+            sse_tx
+                .send(WebViewSseEvent::Text(text.to_string()))
+                .expect("SSE broadcast must have a receiver");
+        }
+
+        // Lag не завершает поток: клиент получает следующее доступное событие.
+        let after_lag = next_sse_chunk(&mut body).await;
+        assert!(
+            after_lag.contains("data:"),
+            "stream must survive a lag: {after_lag:?}"
+        );
+
+        // Закрытие отправителя — единственная причина завершить поток.
+        drop(sse_tx);
+        let end = tokio::time::timeout(std::time::Duration::from_secs(2), body.next()).await;
+        assert!(
+            matches!(end, Ok(None)),
+            "closed sender must end the stream: {end:?}"
+        );
     }
 
     #[tokio::test]
@@ -637,5 +736,92 @@ mod tests {
 
         let response = app.oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    fn build_server_with_upnp(
+        mapper: Arc<dyn crate::webview::upnp::RouterPortMapper>,
+        port: u16,
+    ) -> WebViewServer {
+        WebViewServer {
+            settings: Arc::new(RwLock::new(WebViewSettings {
+                port,
+                bind_address: "127.0.0.1".to_string(),
+                access_token: Some("secret-token".to_string()),
+                upnp_enabled: true,
+                ..WebViewSettings::default()
+            })),
+            sse_tx: broadcast::channel(10).0,
+            templates: TemplateCache {
+                html: Arc::new(RwLock::new("<html>{{CSS}}</html>".to_string())),
+                css: Arc::new(RwLock::new("body {}".to_string())),
+                rendered: Arc::new(RwLock::new("<html>body {}</html>".to_string())),
+            },
+            upnp_manager: Some(Arc::new(UpnpManager::with_mapper(port, mapper))),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_readiness_does_not_wait_for_slow_upnp_and_stop_removes_the_mapping() {
+        use crate::webview::upnp::test_support::{FakeRouterPortMapper, RouterCall};
+        use std::time::Duration;
+
+        let (mapper, mut started, release) = FakeRouterPortMapper::gated_open();
+        let mapper = Arc::new(mapper);
+        let mapping: Arc<dyn crate::webview::upnp::RouterPortMapper> = mapper.clone();
+        // Порт 0: listener получает свободный порт, readiness не зависит от router.
+        let server = build_server_with_upnp(mapping, 0);
+
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let serve = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                if let Err(e) = server.start(Some(ready_tx)).await {
+                    tracing::warn!(error = %e, "test server start failed");
+                }
+            })
+        };
+
+        // Readiness приходит раньше, чем router ответил на открытие mapping.
+        let ready = tokio::time::timeout(Duration::from_secs(5), ready_rx)
+            .await
+            .expect("readiness must arrive")
+            .expect("readiness channel must stay open");
+        assert!(ready.is_ok(), "listener must bind: {ready:?}");
+
+        let call = tokio::time::timeout(Duration::from_secs(2), started.recv())
+            .await
+            .expect("forwarding must start after readiness")
+            .expect("started channel must stay open");
+        assert_eq!(call, RouterCall::Open(0));
+
+        let manager = server.upnp_manager.clone().expect("manager is configured");
+        assert!(
+            !manager.is_mapping_open(),
+            "forwarding is still pending in the router"
+        );
+
+        // Открытие завершается: mapping подтверждается и снимается на stop.
+        release.send(()).unwrap();
+        for _ in 0..200 {
+            if manager.is_mapping_open() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert!(
+            manager.is_mapping_open(),
+            "completed open must be confirmed"
+        );
+
+        server.stop().await;
+
+        assert!(!manager.is_mapping_open());
+        assert!(
+            mapper.close_count() >= 1,
+            "stop must remove the mapping: {:?}",
+            mapper.calls()
+        );
+
+        serve.abort();
     }
 }

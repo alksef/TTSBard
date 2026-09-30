@@ -28,19 +28,41 @@ pub fn default_html() -> String {
         const textContent = container.querySelector('.text-content');
         const connectionIndicator = document.getElementById('connection-indicator');
         let hideTimeout = null;
+        let typingTimeout = null;
         let reconnectAttempts = 0;
         const MAX_RECONNECT_ATTEMPTS = 5;
         const DISPLAY_DURATION = 8000;
+        // Пока набор активен, сервер повторяет `typing: true`. Если повторов нет
+        // дольше этого таймаута, набор считается завершённым: потерянное событие
+        // `typing: false` (переполнение broadcast-буфера) не оставляет индикатор
+        // набора включённым навсегда.
+        const TYPING_RESET_MS = 12000;
 
         // Connection status
         function updateConnectionStatus(status) {
             connectionIndicator.className = 'connection-indicator ' + status;
         }
 
+        function setTyping(typing) {
+            document.documentElement.classList.toggle('is-typing', typing);
+
+            if (typingTimeout) {
+                clearTimeout(typingTimeout);
+                typingTimeout = null;
+            }
+
+            if (typing) {
+                typingTimeout = setTimeout(() => {
+                    typingTimeout = null;
+                    document.documentElement.classList.remove('is-typing');
+                }, TYPING_RESET_MS);
+            }
+        }
+
         evtSource.onopen = () => {
             console.log('SSE connection established');
             updateConnectionStatus('connected');
-            document.documentElement.classList.remove('is-typing');
+            setTyping(false);
         };
 
         evtSource.onmessage = (event) => {
@@ -92,7 +114,7 @@ pub fn default_html() -> String {
         evtSource.onerror = async (error) => {
             console.error('SSE error:', error);
             updateConnectionStatus('disconnected');
-            document.documentElement.classList.remove('is-typing');
+            setTyping(false);
 
             if (evtSource.readyState === EventSource.CLOSED) {
                 reconnectAttempts++;
@@ -131,7 +153,7 @@ pub fn default_html() -> String {
             try {
                 const data = JSON.parse(event.data);
                 if (typeof data.typing === 'boolean') {
-                    document.documentElement.classList.toggle('is-typing', data.typing);
+                    setTyping(data.typing);
                 }
             } catch (_) {
                 // ignore invalid JSON
@@ -335,8 +357,37 @@ mod tests {
             "typing listener must validate the payload type"
         );
         assert!(
-            html.contains("classList.toggle('is-typing', data.typing)"),
-            "typing listener must toggle the is-typing class"
+            html.contains("setTyping(data.typing)"),
+            "typing listener must apply the payload through setTyping"
+        );
+        assert!(
+            html.contains("classList.toggle('is-typing', typing)"),
+            "setTyping must toggle the is-typing class"
+        );
+    }
+
+    #[test]
+    fn test_default_template_resets_stale_typing_state() {
+        let html = default_html();
+        assert!(
+            html.contains("const TYPING_RESET_MS = 12000"),
+            "template must bound how long an unconfirmed typing state is kept"
+        );
+        assert!(
+            html.contains("clearTimeout(typingTimeout)"),
+            "a confirmed typing event must cancel the pending reset"
+        );
+
+        let watchdog = html
+            .split("typingTimeout = setTimeout(")
+            .nth(1)
+            .expect("template must arm a typing watchdog")
+            .split("}, TYPING_RESET_MS)")
+            .next()
+            .unwrap();
+        assert!(
+            watchdog.contains("classList.remove('is-typing')"),
+            "watchdog must clear is-typing when no refresh arrives"
         );
     }
 
@@ -351,7 +402,7 @@ mod tests {
             .next()
             .unwrap();
         assert!(
-            open_body.contains("classList.remove('is-typing')"),
+            open_body.contains("setTyping(false)"),
             "onopen must clear is-typing class"
         );
     }
@@ -367,7 +418,7 @@ mod tests {
             .next()
             .unwrap();
         assert!(
-            error_body.contains("classList.remove('is-typing')"),
+            error_body.contains("setTyping(false)"),
             "onerror must clear is-typing class"
         );
     }
