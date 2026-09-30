@@ -26,9 +26,23 @@ pub struct OutputDeviceStream {
     _rodio: Option<OutputStream>,
     _cpal: Option<cpal::Stream>,
     mode: OutputFormat,
+    broken: Arc<AtomicBool>,
 }
 
 use crate::config::AudioOutputFormat as OutputFormat;
+
+impl OutputDeviceStream {
+    /// The output format mode this stream was opened in.
+    pub(crate) fn output_format(&self) -> OutputFormat {
+        self.mode
+    }
+
+    /// Whether the strict-i32 stream has hit its error callback. The default
+    /// (rodio) mode cannot detect device loss and always reports `false`.
+    pub(crate) fn is_broken(&self) -> bool {
+        self.mode == OutputFormat::I32 && self.broken.load(Ordering::SeqCst)
+    }
+}
 
 // Share the SettingsManager cache: no separate mutable format override.
 static OUTPUT_SETTINGS: OnceLock<Arc<RwLock<crate::config::AppSettings>>> = OnceLock::new();
@@ -43,7 +57,7 @@ pub(crate) fn init_output_settings(
         .map_err(|_| "Audio output settings already initialized".to_string())
 }
 
-fn effective_output_format() -> Result<OutputFormat, String> {
+pub(crate) fn effective_output_format() -> Result<OutputFormat, String> {
     OUTPUT_SETTINGS
         .get()
         .map(|cache| cache.read().audio.output_format)
@@ -207,6 +221,7 @@ pub(crate) fn open_output_sink(
                     _rodio: Some(stream),
                     _cpal: None,
                     mode,
+                    broken: Arc::new(AtomicBool::new(false)),
                 },
                 sink,
             ));
@@ -217,6 +232,8 @@ pub(crate) fn open_output_sink(
             rodio::dynamic_mixer::mixer::<f32>(selected.channels(), selected.sample_rate().0);
         let (sink, queue) = Sink::new_idle();
         controller.add(PrimedSinkQueue::new(queue));
+        let broken = Arc::new(AtomicBool::new(false));
+        let broken_cb = Arc::clone(&broken);
         let stream = device
             .build_output_stream::<i32, _, _>(
                 &selected.config(),
@@ -226,7 +243,10 @@ pub(crate) fn open_output_sink(
                     }
                 },
                 // Match rodio's callback behavior; avoid logging on the audio thread.
-                |err| eprintln!("an error occurred on strict i32 output stream: {err}"),
+                move |err| {
+                    broken_cb.store(true, Ordering::SeqCst);
+                    eprintln!("an error occurred on strict i32 output stream: {err}");
+                },
                 None,
             )
             .map_err(|e| format!("Failed to create strict i32 output stream (no fallback): {e}"))?;
@@ -243,6 +263,7 @@ pub(crate) fn open_output_sink(
                 _rodio: None,
                 _cpal: Some(stream),
                 mode,
+                broken,
             },
             sink,
         ))
@@ -326,15 +347,11 @@ pub fn open_sink_on_device(
     Ok((_stream, sink))
 }
 
-/// Create OutputStream + Sink on device from interleaved PCM f32 samples.
-/// Uses `rodio::buffer::SamplesBuffer` instead of WAV/MP3 decoder.
-pub fn open_sink_on_device_pcm(
-    device: &cpal::Device,
-    pcm: &crate::audio::AudioPcm,
-    volume: f32,
-) -> Result<(OutputDeviceStream, Sink), String> {
-    let (_stream, sink) = open_output_sink(device)?;
-
+/// Play interleaved PCM into an existing `Sink` without opening a stream.
+/// Builds a `SamplesBuffer` from `AudioPcm` (channels/rate taken from the PCM),
+/// sets the sink volume, and appends. Never opens a stream or touches the mode
+/// counters — used to reuse a persistent sink across phrases.
+pub(crate) fn play_pcm_in_sink(sink: &Sink, pcm: &crate::audio::AudioPcm, volume: f32) {
     debug!(
         channels = pcm.channels,
         sample_rate = pcm.sample_rate,
@@ -348,6 +365,17 @@ pub fn open_sink_on_device_pcm(
     debug!(volume, "Volume set");
 
     sink.append(source);
+}
+
+/// Create OutputStream + Sink on device from interleaved PCM f32 samples.
+/// Uses `rodio::buffer::SamplesBuffer` instead of WAV/MP3 decoder.
+pub fn open_sink_on_device_pcm(
+    device: &cpal::Device,
+    pcm: &crate::audio::AudioPcm,
+    volume: f32,
+) -> Result<(OutputDeviceStream, Sink), String> {
+    let (_stream, sink) = open_output_sink(device)?;
+    play_pcm_in_sink(&sink, pcm, volume);
     Ok((_stream, sink))
 }
 

@@ -1,6 +1,8 @@
 use crate::audio::{
-    open_sink_on_device_pcm, resolve_output_device, AudioPcm, OutputConfig, OutputDeviceStream,
+    effective_output_format, open_sink_on_device_pcm, play_pcm_in_sink, resolve_output_device,
+    AudioPcm, OutputConfig, OutputDeviceStream,
 };
+use crate::config::AudioOutputFormat;
 use chrono::Utc;
 use parking_lot::RwLock;
 use rodio::Sink;
@@ -504,6 +506,116 @@ pub struct PlaybackSnapshot {
     pub pb_status: PlaybackStatus,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OutputKey {
+    device_id: Option<String>,
+    mode: AudioOutputFormat,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SinkDecision {
+    Reuse,
+    Reopen,
+}
+
+/// Pure key → action decision. No device logic; testable without audio.
+fn decide_sink(current: Option<&OutputKey>, desired: &OutputKey, is_broken: bool) -> SinkDecision {
+    if is_broken {
+        return SinkDecision::Reopen;
+    }
+    match current {
+        Some(key) if key == desired => SinkDecision::Reuse,
+        _ => SinkDecision::Reopen,
+    }
+}
+
+struct OutputHolder {
+    stream: OutputDeviceStream,
+    sink: Sink,
+    key: OutputKey,
+}
+
+fn ensure_output(
+    holder: &mut Option<OutputHolder>,
+    cfg: &OutputConfig,
+    audio: &AudioPcm,
+    cached_devices: &Option<Arc<RwLock<HashMap<String, cpal::Device>>>>,
+    label: &str,
+) -> bool {
+    let mode = match effective_output_format() {
+        Ok(m) => m,
+        Err(e) => {
+            warn!(target = "playback", error = %e, "{label} output format unavailable");
+            return false;
+        }
+    };
+    let desired = OutputKey {
+        device_id: cfg.device_id.clone(),
+        mode,
+    };
+    let is_broken = holder
+        .as_ref()
+        .map(|h| h.stream.is_broken())
+        .unwrap_or(false);
+    match decide_sink(holder.as_ref().map(|h| &h.key), &desired, is_broken) {
+        SinkDecision::Reuse => {
+            if let Some(h) = holder.as_ref() {
+                // rodio's stop() does not clear the pause flag; a sink paused
+                // before Stop must start audible on the next phrase.
+                h.sink.play();
+                play_pcm_in_sink(&h.sink, audio, cfg.volume);
+                return true;
+            }
+            false
+        }
+        SinkDecision::Reopen => {
+            *holder = None;
+            match resolve_output_device(&cfg.device_id, cached_devices) {
+                Ok(dev) => match open_sink_on_device_pcm(&dev, audio, cfg.volume) {
+                    Ok((stream, sink)) => {
+                        *holder = Some(OutputHolder {
+                            stream,
+                            sink,
+                            key: desired,
+                        });
+                        true
+                    }
+                    Err(e) => {
+                        warn!(target = "playback", error = %e, "{label} open_sink failed");
+                        false
+                    }
+                },
+                Err(e) => {
+                    warn!(target = "playback", error = %e, "{label} device resolve failed");
+                    false
+                }
+            }
+        }
+    }
+}
+
+/// Drop holders whose stream mode no longer matches the current output format.
+/// Format changes apply while idle (drain or Stop), keeping the
+/// «Применится после остановки текущего звука» UI hint honest.
+fn release_stale_mode_holders(spk: &mut Option<OutputHolder>, mic: &mut Option<OutputHolder>) {
+    if let Ok(cur_mode) = effective_output_format() {
+        if spk
+            .as_ref()
+            .map(|h| h.stream.output_format() != cur_mode)
+            .unwrap_or(false)
+        {
+            *spk = None;
+        }
+        if mic
+            .as_ref()
+            .map(|h| h.stream.output_format() != cur_mode)
+            .unwrap_or(false)
+        {
+            *mic = None;
+        }
+    }
+}
+
 pub struct PlaybackManager {
     cmd_tx: mpsc::Sender<Cmd>,
     state: Arc<RwLock<Shared>>,
@@ -548,10 +660,8 @@ impl PlaybackManager {
         state: Arc<RwLock<Shared>>,
         cached_devices: Option<Arc<RwLock<HashMap<String, cpal::Device>>>>,
     ) {
-        let mut sink_spk: Option<Sink> = None;
-        let mut sink_mic: Option<Sink> = None;
-        let mut _stream_spk: Option<OutputDeviceStream> = None;
-        let mut _stream_mic: Option<OutputDeviceStream> = None;
+        let mut spk_holder: Option<OutputHolder> = None;
+        let mut mic_holder: Option<OutputHolder> = None;
         let mut playing = false;
         let mut stopped = false;
 
@@ -578,40 +688,20 @@ impl PlaybackManager {
                     let audio = phrase.audio.clone();
 
                     if let Some(ref c) = spk_cfg {
-                        match resolve_output_device(&c.device_id, &cached_devices) {
-                            Ok(dev) => match open_sink_on_device_pcm(&dev, &audio, c.volume) {
-                                Ok((s, sink)) => {
-                                    sink_spk = Some(sink);
-                                    _stream_spk = Some(s);
-                                }
-                                Err(e) => {
-                                    warn!(target = "playback", error = %e, "speaker open_sink failed")
-                                }
-                            },
-                            Err(e) => {
-                                warn!(target = "playback", error = %e, "speaker device resolve failed")
-                            }
-                        }
+                        ensure_output(&mut spk_holder, c, &audio, &cached_devices, "speaker");
+                    } else {
+                        // Output disabled for this phrase: release its stream so
+                        // a silent holder cannot pin the graph or pending status.
+                        spk_holder = None;
                     }
                     if let Some(ref c) = mic_cfg {
-                        match resolve_output_device(&c.device_id, &cached_devices) {
-                            Ok(dev) => match open_sink_on_device_pcm(&dev, &audio, c.volume) {
-                                Ok((s, sink)) => {
-                                    sink_mic = Some(sink);
-                                    _stream_mic = Some(s);
-                                }
-                                Err(e) => {
-                                    warn!(target = "playback", error = %e, "mic open_sink failed")
-                                }
-                            },
-                            Err(e) => {
-                                warn!(target = "playback", error = %e, "mic device resolve failed")
-                            }
-                        }
+                        ensure_output(&mut mic_holder, c, &audio, &cached_devices, "mic");
+                    } else {
+                        mic_holder = None;
                     }
 
-                    info!(target: "playback", has_spk=sink_spk.is_some(), has_mic=sink_mic.is_some(), "Playback start check");
-                    if sink_spk.is_some() || sink_mic.is_some() {
+                    info!(target: "playback", has_spk=spk_holder.is_some(), has_mic=mic_holder.is_some(), "Playback start check");
+                    if spk_holder.is_some() || mic_holder.is_some() {
                         playing = true;
                         state.write().status = PlaybackStatus::Playing;
                         let _ = internal_ev.send(crate::events::AppEvent::PlaybackStarted {
@@ -644,38 +734,41 @@ impl PlaybackManager {
                     }
                 }
                 Ok(Cmd::Pause) => {
-                    if sink_spk.is_none() && sink_mic.is_none() {
+                    if !playing {
                         continue;
                     }
-                    if let Some(ref s) = sink_spk {
-                        s.pause();
+                    if let Some(ref h) = spk_holder {
+                        h.sink.pause();
                     }
-                    if let Some(ref s) = sink_mic {
-                        s.pause();
+                    if let Some(ref h) = mic_holder {
+                        h.sink.pause();
                     }
                     state.write().status = PlaybackStatus::Paused;
                     let _ = internal_ev.send(crate::events::AppEvent::PlaybackPaused);
                     let _ = app.emit("playback-paused", ());
                 }
                 Ok(Cmd::Resume) => {
-                    if sink_spk.is_none() && sink_mic.is_none() {
+                    if !playing {
                         continue;
                     }
-                    if let Some(ref s) = sink_spk {
-                        s.play();
+                    if let Some(ref h) = spk_holder {
+                        h.sink.play();
                     }
-                    if let Some(ref s) = sink_mic {
-                        s.play();
+                    if let Some(ref h) = mic_holder {
+                        h.sink.play();
                     }
                     state.write().status = PlaybackStatus::Playing;
                     let _ = internal_ev.send(crate::events::AppEvent::PlaybackResumed);
                     let _ = app.emit("playback-resumed", ());
                 }
                 Ok(Cmd::Stop) => {
-                    sink_spk.take();
-                    sink_mic.take();
-                    _stream_spk.take();
-                    _stream_mic.take();
+                    if let Some(ref h) = spk_holder {
+                        h.sink.stop();
+                    }
+                    if let Some(ref h) = mic_holder {
+                        h.sink.stop();
+                    }
+                    release_stale_mode_holders(&mut spk_holder, &mut mic_holder);
                     playing = false;
                     stopped = true;
                     state.write().status = PlaybackStatus::Stopped;
@@ -683,19 +776,25 @@ impl PlaybackManager {
                     let _ = app.emit("playback-stopped", ());
                 }
                 Ok(Cmd::Repeat) => {
-                    if sink_spk.is_none() && sink_mic.is_none() {
+                    if !playing {
                         warn!("Repeat: nothing playing");
                         continue;
                     }
-                    let was_paused = sink_spk.as_ref().map(|s| s.is_paused()).unwrap_or(false)
-                        || sink_mic.as_ref().map(|s| s.is_paused()).unwrap_or(false);
-                    let seek_ok = sink_spk
+                    let was_paused = spk_holder
                         .as_ref()
-                        .map(|s| s.try_seek(Duration::ZERO).is_ok())
-                        .unwrap_or(true)
-                        && sink_mic
+                        .map(|h| h.sink.is_paused())
+                        .unwrap_or(false)
+                        || mic_holder
                             .as_ref()
-                            .map(|s| s.try_seek(Duration::ZERO).is_ok())
+                            .map(|h| h.sink.is_paused())
+                            .unwrap_or(false);
+                    let seek_ok = spk_holder
+                        .as_ref()
+                        .map(|h| h.sink.try_seek(Duration::ZERO).is_ok())
+                        .unwrap_or(true)
+                        && mic_holder
+                            .as_ref()
+                            .map(|h| h.sink.try_seek(Duration::ZERO).is_ok())
                             .unwrap_or(true);
                     if !seek_ok {
                         // fallback: re-enqueue from cache (M9)
@@ -705,11 +804,11 @@ impl PlaybackManager {
                             let _ = cmd_tx.send(Cmd::Enqueue(p));
                         }
                     } else {
-                        if let Some(ref s) = sink_spk {
-                            s.play();
+                        if let Some(ref h) = spk_holder {
+                            h.sink.play();
                         }
-                        if let Some(ref s) = sink_mic {
-                            s.play();
+                        if let Some(ref h) = mic_holder {
+                            h.sink.play();
                         }
                         if was_paused {
                             state.write().status = PlaybackStatus::Playing;
@@ -725,18 +824,23 @@ impl PlaybackManager {
             }
 
             if playing && !stopped {
-                let spk_done = sink_spk.as_ref().map(|s| s.empty()).unwrap_or(true);
-                let mic_done = sink_mic.as_ref().map(|s| s.empty()).unwrap_or(true);
-                let paused = sink_spk.as_ref().map(|s| s.is_paused()).unwrap_or(false)
-                    || sink_mic.as_ref().map(|s| s.is_paused()).unwrap_or(false);
+                let spk_done = spk_holder.as_ref().map(|h| h.sink.empty()).unwrap_or(true);
+                let mic_done = mic_holder.as_ref().map(|h| h.sink.empty()).unwrap_or(true);
+                let paused = spk_holder
+                    .as_ref()
+                    .map(|h| h.sink.is_paused())
+                    .unwrap_or(false)
+                    || mic_holder
+                        .as_ref()
+                        .map(|h| h.sink.is_paused())
+                        .unwrap_or(false);
 
                 if !paused && spk_done && mic_done {
                     debug!(target: "playback", "Sinks drained, playing=false");
                     playing = false;
-                    sink_spk.take();
-                    sink_mic.take();
-                    _stream_spk.take();
-                    _stream_mic.take();
+                    // Keep holders alive for reuse; release only stale-mode
+                    // streams so a format change applies while idle.
+                    release_stale_mode_holders(&mut spk_holder, &mut mic_holder);
                     let finished_id = {
                         let mut s = state.write();
                         let id = s.current.as_ref().map(|p| p.id.clone());
@@ -992,6 +1096,61 @@ mod tests {
             timestamp: 2000,
         });
         s
+    }
+
+    // ── decide_sink ──
+
+    fn key(device_id: Option<&str>, mode: AudioOutputFormat) -> OutputKey {
+        OutputKey {
+            device_id: device_id.map(String::from),
+            mode,
+        }
+    }
+
+    #[test]
+    fn decide_sink_same_key_reuses() {
+        let current = key(Some("dev"), AudioOutputFormat::I32);
+        let desired = key(Some("dev"), AudioOutputFormat::I32);
+        assert_eq!(
+            decide_sink(Some(&current), &desired, false),
+            SinkDecision::Reuse
+        );
+    }
+
+    #[test]
+    fn decide_sink_changed_device_reopens() {
+        let current = key(Some("dev_a"), AudioOutputFormat::I32);
+        let desired = key(Some("dev_b"), AudioOutputFormat::I32);
+        assert_eq!(
+            decide_sink(Some(&current), &desired, false),
+            SinkDecision::Reopen
+        );
+    }
+
+    #[test]
+    fn decide_sink_changed_mode_reopens() {
+        let current = key(Some("dev"), AudioOutputFormat::Default);
+        let desired = key(Some("dev"), AudioOutputFormat::I32);
+        assert_eq!(
+            decide_sink(Some(&current), &desired, false),
+            SinkDecision::Reopen
+        );
+    }
+
+    #[test]
+    fn decide_sink_broken_reopens() {
+        let current = key(Some("dev"), AudioOutputFormat::I32);
+        let desired = key(Some("dev"), AudioOutputFormat::I32);
+        assert_eq!(
+            decide_sink(Some(&current), &desired, true),
+            SinkDecision::Reopen
+        );
+    }
+
+    #[test]
+    fn decide_sink_no_holder_reopens() {
+        let desired = key(Some("dev"), AudioOutputFormat::Default);
+        assert_eq!(decide_sink(None, &desired, false), SinkDecision::Reopen);
     }
 
     // ── enqueue_state ──
