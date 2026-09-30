@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Copy, AlertTriangle, Play, Square, Info } from 'lucide-vue-next'
+import { Copy, AlertTriangle, Play, Square, Info, RefreshCw } from 'lucide-vue-next'
 import { useInputServer } from '../composables/useInputServer'
 import { t } from '../i18n'
 
@@ -23,12 +23,17 @@ const {
   statusError,
   endpoint,
   overlayUrl,
+  lanUrl,
+  maskedToken,
+  regeneratePending,
   saveSettings,
   startInputServer,
   stopInputServer,
   sendTest,
   copyEndpoint,
   copyOverlayUrl,
+  copyLanUrl,
+  regenerateToken,
 } = useInputServer()
 
 const messageBoxClass = computed(() => (message.value ? messageType.value : ''))
@@ -154,6 +159,7 @@ const messageBoxClass = computed(() => (message.value ? messageType.value : ''))
     <section class="settings-section">
       <h2>{{ t('input_server.overlay_title') }}</h2>
       <div class="setting-row">
+        <label>{{ t('input_server.local_url_label') }}</label>
         <div class="url-display url-display-full">
           <label class="url-code url-code-wide">{{ overlayUrl }}</label>
           <button
@@ -165,6 +171,40 @@ const messageBoxClass = computed(() => (message.value ? messageType.value : ''))
             <Copy :size="16" />
           </button>
         </div>
+      </div>
+      <div class="setting-row">
+        <label>{{ t('input_server.lan_url_label') }}</label>
+        <div class="url-display url-display-full">
+          <label class="url-code url-code-wide">
+            {{ lanUrl ?? t('input_server.lan_url_unavailable') }}
+          </label>
+          <button
+            class="icon-button"
+            :title="t('input_server.copy_lan_url')"
+            :aria-label="t('input_server.copy_lan_url')"
+            :disabled="!lanUrl"
+            :class="{ disabled: !lanUrl }"
+            @click="copyLanUrl"
+          >
+            <Copy :size="16" />
+          </button>
+        </div>
+      </div>
+      <p class="format-hint">{{ t('input_server.lan_hint') }}</p>
+      <div class="setting-row token-row">
+        <label>{{ t('input_server.token.label') }}</label>
+        <label class="url-code token-code">
+          {{ maskedToken ?? t('input_server.token.not_generated') }}
+        </label>
+        <button
+          class="icon-button token-button"
+          :title="t('input_server.token.regenerate')"
+          :aria-label="t('input_server.token.regenerate')"
+          :disabled="regeneratePending"
+          @click="regenerateToken"
+        >
+          <RefreshCw :size="16" />
+        </button>
       </div>
     </section>
 
@@ -537,6 +577,30 @@ h2 {
 }
 
 .url-display .icon-button {
+  border-radius: 0 10px 10px 0;
+  border-left: none;
+}
+
+.icon-button.disabled:disabled,
+.icon-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.token-row {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--color-border);
+}
+
+.token-code {
+  width: auto !important;
+  min-width: 150px !important;
+  flex: 0 1 auto;
+  border-radius: 10px 0 0 10px;
+}
+
+.token-button {
   border-radius: 0 10px 10px 0;
   border-left: none;
 }

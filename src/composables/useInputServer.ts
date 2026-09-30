@@ -1,6 +1,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { confirm } from '@tauri-apps/plugin-dialog'
 import { normalizeCommandError } from '../ipc/commandError'
 import { debugError } from '../utils/debug'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
@@ -65,6 +66,14 @@ export function useInputServer() {
   const testResult = ref<InputServerTestResult | null>(null)
   const testError = ref<string | null>(null)
   const testPending = ref(false)
+
+  // LAN connection info: the ready-to-open overlay URL with the embedded
+  // token, plus the masked token for display. Fetched from the backend because
+  // both depend on persisted state the frontend must not own.
+  const lanUrl = ref<string | null>(null)
+  const lanUrlUnavailable = ref(false)
+  const maskedToken = ref<string | null>(null)
+  const regeneratePending = ref(false)
 
   const listenerScope = createAsyncCleanupScope()
   let disposed = false
@@ -302,6 +311,55 @@ export function useInputServer() {
     await copyText(overlayUrl.value, 'input_server.overlay_url_copied')
   }
 
+  async function copyLanUrl(): Promise<void> {
+    if (!lanUrl.value) return
+    await copyText(lanUrl.value, 'input_server.lan_url_copied')
+  }
+
+  async function refreshConnectionInfo(): Promise<void> {
+    try {
+      const url = await invoke<string>('get_input_server_connection_url')
+      if (disposed) return
+      lanUrl.value = url
+      lanUrlUnavailable.value = false
+    } catch {
+      if (disposed) return
+      // No token or no LAN IP yet: the panel shows a hint instead of a URL.
+      lanUrl.value = null
+      lanUrlUnavailable.value = true
+    }
+    try {
+      const token = await invoke<string | null>('get_input_server_token')
+      if (disposed) return
+      maskedToken.value = token
+    } catch (e) {
+      if (disposed) return
+      debugError('[InputServer] Failed to load token:', e)
+    }
+  }
+
+  async function regenerateToken(): Promise<void> {
+    if (regeneratePending.value) return
+    const confirmedResult = await confirm(t('input_server.token.regenerate_confirm'), {
+      title: t('input_server.server'),
+      kind: 'warning',
+    })
+    if (!confirmedResult) return
+    regeneratePending.value = true
+    try {
+      await invoke('regenerate_input_server_token')
+      if (disposed) return
+      showMessage(t('input_server.token.regenerated'), 'success')
+      await refreshConnectionInfo()
+    } catch (e) {
+      if (disposed) return
+      const errorMessage = normalizeCommandError(e).message
+      showMessage(t('input_server.error.regenerate_token', { detail: errorMessage }), 'error')
+    } finally {
+      if (!disposed) regeneratePending.value = false
+    }
+  }
+
   onMounted(async () => {
     await listenerScope.track(
       listen<unknown>('input-server-status-changed', (event) => {
@@ -312,11 +370,13 @@ export function useInputServer() {
       listen('settings-changed', () => {
         void refreshSettings()
         void refreshStatus()
+        void refreshConnectionInfo()
       }),
     )
     // Listener first, then snapshot: either ordering observes the latest state.
     await refreshSettings()
     await refreshStatus()
+    await refreshConnectionInfo()
   })
 
   onUnmounted(() => {
@@ -347,6 +407,10 @@ export function useInputServer() {
     statusError,
     endpoint,
     overlayUrl,
+    lanUrl,
+    lanUrlUnavailable,
+    maskedToken,
+    regeneratePending,
     showMessage,
     refreshSettings,
     refreshStatus,
@@ -356,5 +420,7 @@ export function useInputServer() {
     sendTest,
     copyEndpoint,
     copyOverlayUrl,
+    copyLanUrl,
+    regenerateToken,
   }
 }
