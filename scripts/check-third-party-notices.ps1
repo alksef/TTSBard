@@ -225,7 +225,7 @@ function Test-TauriConfig {
         @{ Source = '../THIRD_PARTY_NOTICES.md'; Destination = 'THIRD_PARTY_NOTICES.md' },
         @{ Source = 'vendor/signalsmith-stretch/LICENSE.txt'; Destination = 'third-party/licenses/signalsmith-stretch-LICENSE.txt' },
         @{ Source = 'vendor/signalsmith-linear/LICENSE.txt'; Destination = 'third-party/licenses/signalsmith-linear-LICENSE.txt' },
-        @{ Source = 'resources/dict/LICENSE.txt'; Destination = 'resources/dict/LICENSE.txt' }
+        @{ Source = 'resources/dict/LICENSE.txt'; Destination = 'third-party/licenses/hunspell-ru-LICENSE.txt' }
     )
 
     foreach ($mapping in $requiredMappings) {

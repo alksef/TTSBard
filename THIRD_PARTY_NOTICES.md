@@ -13,7 +13,7 @@ only; it is not a generated inventory of every transitive Rust or npm package.
 - Revision: `32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4`
 - Copyright: Copyright (c) 1997-2008, Alexander I. Lebedev
 - License: BSD-style redistribution terms; see the included notice below
-- License file: `resources/dict/LICENSE.txt` (bundled as an external resource)
+- License file: `third-party/licenses/hunspell-ru-LICENSE.txt` (bundled as an external resource)
 - SHA-256 (`ru.aff`): `38CE7D4AF78E211E9BAFE4BF7E3D6A2C420591136CB738EC6648F8FDF6524CD7`
 - SHA-256 (`ru.dic`): `F6047416A0204ADBECF3A451B874EC8A97EE37E2CBC714466EF04D8DBCC0D6FC`
 

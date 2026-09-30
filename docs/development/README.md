@@ -77,7 +77,7 @@ Hunspell-словарь, eSpeak NG и Signalsmith Stretch/Linear. Это точ�
 
 Данные русского словаря (`ru.aff`/`ru.dic`) встроены в exe на этапе компиляции
 через `include_str!`. В репозитории остаются исходные файлы словаря, а в поставке
-— его лицензия `resources/dict/LICENSE.txt`; внешние файлы словаря в bundle не
+— его лицензия `third-party/licenses/hunspell-ru-LICENSE.txt`; внешние файлы словаря в bundle не
 входят.
 
 Проверка запускается отдельно:
@@ -88,7 +88,7 @@ Hunspell-словарь, eSpeak NG и Signalsmith Stretch/Linear. Это точ�
 
 Она сверяет SHA-256 исходных файлов словаря, наличие notice/license files,
 pinned revisions (LibreOffice, piper-rs, eSpeak NG), явный license mapping
-`resources/dict/LICENSE.txt` и сохранение `bundle.licenseFile`. Валидатор
+`third-party/licenses/hunspell-ru-LICENSE.txt` и сохранение `bundle.licenseFile`. Валидатор
 отвергает resource mappings, которые упаковали бы словарь целиком: каталог
 `resources/dict`, глоб `resources/dict/*`, отдельные `ru.aff`/`ru.dic` или
 родительский каталог `resources`. Проверка не обращается к сети и не валидирует
