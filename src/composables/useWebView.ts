@@ -6,6 +6,7 @@ import { useWebViewSettings } from './useAppSettings'
 import { debugLog, debugError } from '../utils/debug'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
 import { presentCommandError } from '../ipc/commandError'
+import { upnpFailureKey, type UpnpToggleOutcome } from '../ipc/webviewUpnp'
 import { t } from '../i18n'
 
 type UiMessageKind = 'success' | 'info' | 'error'
@@ -91,6 +92,9 @@ export function useWebView() {
   const testMessage = ref('')
   const displayUrl = ref('')
   const serverStatus = ref<WebViewServerStatus>({ state: 'stopped' })
+  // Переключение UPnP ждёт router до 5 секунд: пока операция в полёте, второй
+  // клик по тумблеру не должен создавать новую попытку.
+  const upnpPending = ref(false)
 
   let errorTimeout: number | null = null
   let displayUrlRequest = 0
@@ -400,13 +404,26 @@ export function useWebView() {
   }
 
   async function saveUpnpEnabled() {
-    const confirmedBefore = webviewSettingsFromComposable.value?.upnp_enabled ?? settings.value.upnp_enabled
+    if (upnpPending.value) return
+    const requested = settings.value.upnp_enabled
+    const confirmedBefore = webviewSettingsFromComposable.value?.upnp_enabled ?? !requested
+    upnpPending.value = true
     try {
-      await invoke<string>('set_webview_upnp_enabled', { enabled: settings.value.upnp_enabled })
-      if (settings.value.upnp_enabled) {
-        showError(t('webview.upnp.enabled'), 'success')
-      } else {
+      const outcome = await invoke<UpnpToggleOutcome>('set_webview_upnp_enabled', { enabled: requested })
+      if (outcome?.status === 'forward_failed') {
+        // Настройка сохранена, но router не дал mapping: тумблер остаётся, а
+        // пользователь видит причину, почему внешний адрес не работает.
+        const reason = t(upnpFailureKey(outcome.code))
+        showError(t('webview.error.upnp_forward', { reason }), 'error')
+        return
+      }
+      if (!requested) {
         showError(t('webview.upnp.disabled'), 'info')
+      } else if (outcome?.status === 'preference_only') {
+        // Сервер не запущен: подтверждать открытый порт нечем.
+        showError(t('webview.upnp.enabled_pending'), 'info')
+      } else {
+        showError(t('webview.upnp.enabled'), 'success')
       }
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : String(e)
@@ -415,6 +432,8 @@ export function useWebView() {
       settings.value.upnp_enabled = webviewSettingsFromComposable.value?.upnp_enabled ?? confirmedBefore
       internalSettingsWrite = false
       showError(presentCommandError(e, t('webview.error.upnp')))
+    } finally {
+      upnpPending.value = false
     }
   }
 
@@ -590,6 +609,7 @@ export function useWebView() {
     loadToken,
     copyToken,
     saveUpnpEnabled,
+    upnpPending,
     regenerateAccessToken,
     showExternalUrl,
     copyExternalUrl,

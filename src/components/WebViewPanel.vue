@@ -27,6 +27,7 @@ const {
   copyToken,
   regenerateAccessToken,
   saveUpnpEnabled,
+  upnpPending,
   showExternalUrl,
   copyExternalUrl,
   openTemplateFolder,
@@ -185,7 +186,7 @@ const {
       <!-- UPnP status -->
       <div class="setting-row" style="margin-bottom: 8px;">
         <label class="checkbox-label" :class="{ disabled: !isUpnpAvailable }" :title="t('webview.upnp.tooltip')">
-          <input type="checkbox" v-model="settings.upnp_enabled" @change="saveUpnpEnabled" :disabled="!isUpnpAvailable" />
+          <input type="checkbox" v-model="settings.upnp_enabled" @change="saveUpnpEnabled" :disabled="!isUpnpAvailable || upnpPending" />
           <span>{{ t('webview.upnp.enable') }}</span>
         </label>
       </div>

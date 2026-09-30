@@ -1,7 +1,8 @@
 use crate::config::validate_port;
 use crate::config::SettingsManager;
+use crate::ipc::CommandError;
 use crate::state::AppState;
-use crate::webview::WebViewSettings;
+use crate::webview::{UpnpToggleOutcome, WebViewSettings};
 use std::fs;
 use tauri::{Manager, State};
 
@@ -125,11 +126,15 @@ pub async fn save_webview_settings(
 
     super::emit_settings_changed(&app_handle);
 
-    // Trigger UPnP toggle if it changed (without server restart)
+    // Trigger UPnP toggle if it changed (without server restart). Настройка уже
+    // сохранена, поэтому отказ router'а только логируется: у полного сохранения
+    // секции свой контракт ответа.
     if upnp_changed {
-        state
-            .webview
-            .send_event(crate::events::AppEvent::ToggleUpnp(settings.upnp_enabled));
+        if let UpnpToggleOutcome::ForwardFailed { code } =
+            state.webview.apply_upnp_toggle(settings.upnp_enabled).await
+        {
+            tracing::warn!(code, "UPnP toggle from settings save was not confirmed");
+        }
     }
 
     // Trigger server restart if server settings changed
@@ -314,45 +319,47 @@ pub async fn regenerate_webview_token(
 }
 
 /// Set UPnP enabled status
+///
+/// Настройка — пожелание, mapping — факт: команда сохраняет настройку и затем
+/// применяет переключение к живому владельцу, возвращая то, что действительно
+/// произошло (`applied` / `preference_only` / `forward_failed` с кодом причины).
+/// Поэтому UI не подтверждает открытый порт, которого нет.
 #[tauri::command]
 pub async fn set_webview_upnp_enabled(
     enabled: bool,
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
-) -> Result<String, String> {
+) -> Result<UpnpToggleOutcome, CommandError> {
     tracing::info!(enabled = enabled, "Setting UPnP enabled");
 
     let access_token = state.webview.settings.read().await.access_token.clone();
     validate_upnp_token(enabled, access_token.as_deref()).map_err(|e| {
         tracing::warn!(enabled = enabled, error = %e, "UPnP validation failed");
-        e
+        CommandError::new("webview.upnp.token_required", e, false)
     })?;
 
     let settings_manager = app_handle
         .try_state::<SettingsManager>()
-        .ok_or_else(|| "SettingsManager not available".to_string())?;
+        .ok_or_else(|| "SettingsManager not available".to_string())
+        .map_err(|e| {
+            tracing::warn!(enabled = enabled, error = %e, "UPnP settings manager unavailable");
+            CommandError::new("webview.settings_save_failed", e, false)
+        })?;
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_webview_upnp_enabled(enabled)
     })
     .await
     .map_err(|e| {
         tracing::warn!(enabled = enabled, error = %e, "Failed to persist UPnP setting");
-        e
+        CommandError::new("webview.settings_save_failed", e, false)
     })?;
 
     state.webview.settings.write().await.upnp_enabled = enabled;
     super::emit_settings_changed(&app_handle);
 
-    // Toggle UPnP without server restart
-    state
-        .webview
-        .send_event(crate::events::AppEvent::ToggleUpnp(enabled));
-
-    if enabled {
-        Ok("UPnP включён".to_string())
-    } else {
-        Ok("UPnP выключен".to_string())
-    }
+    // Настройка уже сохранена: отказ router'а возвращается как результат, а не как
+    // ошибка команды, иначе UI откатил бы тумблер, который backend принял.
+    Ok(state.webview.apply_upnp_toggle(enabled).await)
 }
 
 /// Get UPnP enabled status

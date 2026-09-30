@@ -34,6 +34,7 @@ import {
 import { convertOcrOneShotFailure } from './composables/ocrFailureNotifications'
 import { useOcrRuntimeNotifications } from './composables/useOcrRuntimeNotifications'
 import { TWITCH_DELIVERY_FAILED_EVENT, twitchDeliveryFailureLocaleKey } from './ipc/twitchDelivery'
+import { upnpFailureKey } from './ipc/webviewUpnp'
 
 type Panel = 'input' | 'tts' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'input-server' | 'vtube-studio' | 'ocr' | 'settings' | 'hotkeys' | 'intercept'
 
@@ -319,6 +320,22 @@ onMounted(async () => {
     }),
   ).catch((e) => {
     debugError('[App] Failed to listen for focus events:', e)
+  })
+
+  // Show a global toast when the background UPnP open attempt fails at server
+  // startup. Only a string failure code is trusted: raw router text never
+  // reaches the UI, and a successful attempt produces no event.
+  void listenerScope.track(
+    listen<string>('webview-upnp-error', (event) => {
+      const code = (event as { payload: unknown }).payload
+      if (typeof code !== 'string' || code.length === 0) {
+        debugError('[App] Ignoring malformed webview-upnp-error payload')
+        return
+      }
+      showError(t('webview.error.upnp_forward', { reason: t(upnpFailureKey(code)) }))
+    }),
+  ).catch((e) => {
+    debugError('[App] Failed to listen for webview UPnP error events:', e)
   })
 
   try {

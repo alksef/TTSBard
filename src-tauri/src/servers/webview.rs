@@ -177,14 +177,20 @@ pub async fn run_webview_server(
             };
 
             // Spawn server task with improved error handling
+            // Владелец UPnP публикуется в state: команда переключения применяет
+            // mapping напрямую и сообщает результат, а не подтверждает тумблер
+            // заранее. На остановке сервера владелец снимается.
+            state.webview.set_upnp_manager(server.upnp_manager.clone());
             let server_clone = server.clone();
             let app_handle_clone = app_handle.clone();
             let bind_address_clone = bind_address.clone();
             let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+            let (upnp_error_tx, mut upnp_error_rx) =
+                tokio::sync::mpsc::unbounded_channel::<String>();
             let mut server_handle = tokio::spawn(async move {
                 info!("[WEBVIEW] Server task started, waiting for connections...");
 
-                if let Err(e) = server_clone.start(Some(ready_tx)).await {
+                if let Err(e) = server_clone.start(Some(ready_tx), Some(upnp_error_tx)).await {
                     // Extract error details for user-friendly message
                     let error_msg = format!("{}", e);
                     let (user_friendly_msg, log_context) =
@@ -258,6 +264,7 @@ pub async fn run_webview_server(
 
                     // Stop server and clean up UPnP
                     server.stop().await;
+                    state.webview.set_upnp_manager(None);
 
                     server_handle.abort();
                     state
@@ -278,6 +285,9 @@ pub async fn run_webview_server(
                             if let Err(join_error) = result {
                                 error!(%join_error, "WebView server task join failed");
                             }
+                            // Сервер больше не обслуживает порт: владельца UPnP
+                            // в state быть не должно.
+                            state.webview.set_upnp_manager(None);
                             state.webview.set_status(&app_handle, WebViewServerStatus::Error {
                                 message: "WebView server stopped unexpectedly".into(),
                             });
@@ -286,9 +296,18 @@ pub async fn run_webview_server(
                         _ = shutdown.cancelled() => {
                             info!("[WEBVIEW] ⛔ Shutdown signal");
                             server.stop().await;
+                            state.webview.set_upnp_manager(None);
                             server_handle.abort();
                             state.webview.set_status(&app_handle, WebViewServerStatus::Stopped);
                             return;
+                        }
+                        upnp_code = upnp_error_rx.recv() => {
+                            // Провалившийся фоновый UPnP-проброс: наружу уходит
+                            // только код отказа, сырой текст router'а не
+                            // покидает backend.
+                            if let Some(code) = upnp_code {
+                                let _ = app_handle.emit("webview-upnp-error", &code);
+                            }
                         }
                         result = tokio::time::timeout(
                             tokio::time::Duration::from_secs(1),
@@ -303,6 +322,7 @@ pub async fn run_webview_server(
 
                                             // Stop server and clean up UPnP
                                             server.stop().await;
+                                            state.webview.set_upnp_manager(None);
 
                                             server_handle.abort();
                                             state.webview.set_status(&app_handle, WebViewServerStatus::Stopped);
@@ -318,6 +338,7 @@ pub async fn run_webview_server(
 
                                             // Stop server and clean up UPnP
                                             server.stop().await;
+                                            state.webview.set_upnp_manager(None);
 
                                             server_handle.abort();
                                             state.webview.set_status(&app_handle, WebViewServerStatus::Stopped);
@@ -335,16 +356,6 @@ pub async fn run_webview_server(
                                                     error!("[WEBVIEW] ❌ Failed to reload templates: {}", e);
                                                 }
                                             }
-                                        }
-                                        AppEvent::ToggleUpnp(enabled) => {
-                                            info!("[WEBVIEW] 🔄 Toggling UPnP: {}", enabled);
-                                            // Router I/O не должен задерживать supervisor
-                                            // loop: запрос уходит в blocking pool, а
-                                            // поздний результат гасится epoch-политикой.
-                                            let server_clone = server.clone();
-                                            tokio::spawn(async move {
-                                                server_clone.toggle_upnp(enabled).await;
-                                            });
                                         }
                                         AppEvent::WebViewTypingChanged(typing) => {
                                             debug!("[WEBVIEW] ⌨️ Typing changed: {}", typing);
@@ -371,6 +382,8 @@ pub async fn run_webview_server(
             }
         } else {
             if let Some(state) = app_handle.try_state::<crate::state::AppState>() {
+                // Сервер не запущен: mapping не существует, владельца быть не должно.
+                state.webview.set_upnp_manager(None);
                 state
                     .webview
                     .set_status(&app_handle, WebViewServerStatus::Stopped);

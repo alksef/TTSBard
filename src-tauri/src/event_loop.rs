@@ -89,9 +89,6 @@ impl EventHandler {
             AppEvent::ReloadWebViewTemplates => {
                 debug!("[EVENT] Reload WebView templates requested");
             }
-            AppEvent::ToggleUpnp(enabled) => {
-                debug!(enabled, "[EVENT] Toggle UPnP requested");
-            }
             AppEvent::WebViewTypingChanged(typing) => {
                 debug!(
                     typing,

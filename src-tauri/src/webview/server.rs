@@ -1,4 +1,4 @@
-use super::upnp::UpnpManager;
+use super::upnp::{UpnpFailure, UpnpManager};
 use super::{
     templates::{default_css, default_html},
     WebViewSettings,
@@ -152,6 +152,7 @@ impl WebViewServer {
     pub async fn start(
         &self,
         readiness: Option<tokio::sync::oneshot::Sender<Result<(), String>>>,
+        upnp_error: Option<tokio::sync::mpsc::UnboundedSender<String>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let settings = self.settings.read().await;
         let addr = if settings.bind_address.contains(':') && !settings.bind_address.starts_with('[')
@@ -211,12 +212,24 @@ impl WebViewServer {
         // поздний результат гасится epoch-политикой UpnpManager.
         if upnp_enabled {
             if let Some(manager) = self.upnp_manager.clone() {
+                let upnp_error = upnp_error.clone();
                 tokio::spawn(async move {
                     if let Err(e) = manager.set_enabled(true).await {
                         tracing::warn!(
                             error = %e,
                             "UPnP port forwarding failed, continuing anyway"
                         );
+                        if e.failure != UpnpFailure::Superseded && manager.is_desired() {
+                            if let Some(tx) = upnp_error {
+                                let _ = tx.send(e.failure.code().to_string());
+                            }
+                        } else {
+                            tracing::debug!(
+                                failure = ?e.failure,
+                                desired = manager.is_desired(),
+                                "Suppressing stale UPnP startup error"
+                            );
+                        }
                     }
                 });
             }
@@ -253,30 +266,12 @@ impl WebViewServer {
             }
         }
     }
-
-    /// Toggle UPnP port forwarding dynamically without server restart
-    pub async fn toggle_upnp(&self, enabled: bool) {
-        if let Some(manager) = &self.upnp_manager {
-            if enabled {
-                tracing::info!("Enabling UPnP port forwarding");
-                if let Err(e) = manager.set_enabled(true).await {
-                    tracing::warn!(error = %e, "Failed to enable UPnP port forwarding");
-                }
-            } else {
-                tracing::info!("Disabling UPnP port forwarding");
-                if let Err(e) = manager.set_enabled(false).await {
-                    tracing::warn!(error = %e, "Failed to disable UPnP port forwarding");
-                }
-            }
-        }
-    }
 }
 
 #[derive(Deserialize)]
 struct AuthQuery {
     token: Option<String>,
 }
-
 /// Maps a `WebViewSseEvent` to an Axum `Event` for SSE serialization.
 /// This is the single source of truth for wire format used by both `sse_handler` and tests.
 fn to_sse_event(event: &WebViewSseEvent) -> Event {
@@ -368,7 +363,6 @@ async fn sse_handler(
                         skipped,
                         "SSE client lagged behind the broadcast buffer, skipping missed events"
                     );
-                    // MUTATION-CHECK-REVERTED
                     continue;
                 }
                 // Отправитель закрыт: поток больше не получит событий.
@@ -461,6 +455,7 @@ mod tests {
         routing::get,
         Router,
     };
+    use crate::webview::upnp::{RouterPortMapper, UpnpError, UpnpFailure};
     use std::convert::Infallible;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use tower::ServiceExt;
@@ -742,6 +737,18 @@ mod tests {
         mapper: Arc<dyn crate::webview::upnp::RouterPortMapper>,
         port: u16,
     ) -> WebViewServer {
+        build_server_with_upnp_and_timeouts(
+            mapper,
+            port,
+            crate::webview::upnp::UPNP_FORWARD_TIMEOUT,
+        )
+    }
+
+    fn build_server_with_upnp_and_timeouts(
+        mapper: Arc<dyn crate::webview::upnp::RouterPortMapper>,
+        port: u16,
+        forward_timeout: std::time::Duration,
+    ) -> WebViewServer {
         WebViewServer {
             settings: Arc::new(RwLock::new(WebViewSettings {
                 port,
@@ -756,7 +763,12 @@ mod tests {
                 css: Arc::new(RwLock::new("body {}".to_string())),
                 rendered: Arc::new(RwLock::new("<html>body {}</html>".to_string())),
             },
-            upnp_manager: Some(Arc::new(UpnpManager::with_mapper(port, mapper))),
+            upnp_manager: Some(Arc::new(UpnpManager::with_mapper_and_timeouts(
+                port,
+                mapper,
+                forward_timeout,
+                crate::webview::upnp::UPNP_REMOVE_TIMEOUT,
+            ))),
         }
     }
 
@@ -775,7 +787,7 @@ mod tests {
         let serve = {
             let server = server.clone();
             tokio::spawn(async move {
-                if let Err(e) = server.start(Some(ready_tx)).await {
+                if let Err(e) = server.start(Some(ready_tx), None).await {
                     tracing::warn!(error = %e, "test server start failed");
                 }
             })
@@ -821,6 +833,148 @@ mod tests {
             "stop must remove the mapping: {:?}",
             mapper.calls()
         );
+
+        serve.abort();
+    }
+
+    #[tokio::test]
+    async fn test_superseded_startup_forward_does_not_emit_error_code() {
+        use crate::webview::upnp::test_support::{FakeRouterPortMapper, RouterCall};
+        use std::time::Duration;
+
+        let (mapper, mut started, release) = FakeRouterPortMapper::gated_open();
+        let mapper = Arc::new(mapper);
+        let mapping: Arc<dyn crate::webview::upnp::RouterPortMapper> = mapper.clone();
+        let server = build_server_with_upnp(mapping, 0);
+
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let (upnp_error_tx, mut upnp_error_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let serve = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                if let Err(e) = server.start(Some(ready_tx), Some(upnp_error_tx)).await {
+                    tracing::warn!(error = %e, "test server start failed");
+                }
+            })
+        };
+
+        // Readiness приходит раньше, чем router ответил на открытие mapping.
+        let ready = tokio::time::timeout(Duration::from_secs(5), ready_rx)
+            .await
+            .expect("readiness must arrive")
+            .expect("readiness channel must stay open");
+        assert!(ready.is_ok(), "listener must bind: {ready:?}");
+
+        // Открытие началось, но всё ещё висит в router.
+        let call = tokio::time::timeout(Duration::from_secs(2), started.recv())
+            .await
+            .expect("forwarding must start after readiness")
+            .expect("started channel must stay open");
+        assert_eq!(call, RouterCall::Open(0));
+
+        // Намерение снимается, пока открытие в полёте.
+        let manager = server.upnp_manager.clone().expect("manager is configured");
+        manager.set_enabled(false).await.unwrap();
+
+        // Поздний успех открытия гасится как Superseded и не должен уйти наружу.
+        release.send(()).unwrap();
+
+        let emitted = tokio::time::timeout(Duration::from_secs(2), upnp_error_rx.recv()).await;
+        assert!(
+            emitted.is_err(),
+            "superseded forward must not emit a startup error code: {emitted:?}"
+        );
+
+        serve.abort();
+    }
+
+    #[tokio::test]
+    async fn test_desired_timeout_still_emits_error_code() {
+        use crate::webview::upnp::test_support::FakeRouterPortMapper;
+        use std::time::Duration;
+
+        let (mapper, _started, _release) = FakeRouterPortMapper::gated_open();
+        let mapper = Arc::new(mapper);
+        let mapping: Arc<dyn crate::webview::upnp::RouterPortMapper> = mapper.clone();
+        let server = build_server_with_upnp_and_timeouts(mapping, 0, Duration::from_millis(100));
+
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let (upnp_error_tx, mut upnp_error_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let serve = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                if let Err(e) = server.start(Some(ready_tx), Some(upnp_error_tx)).await {
+                    tracing::warn!(error = %e, "test server start failed");
+                }
+            })
+        };
+
+        let ready = tokio::time::timeout(Duration::from_secs(5), ready_rx)
+            .await
+            .expect("readiness must arrive")
+            .expect("readiness channel must stay open");
+        assert!(ready.is_ok(), "listener must bind: {ready:?}");
+
+        // Намерение всё ещё желаемое: timeout — это реальный отказ, и его код
+        // должен дойти до фронтенда.
+        let code = tokio::time::timeout(Duration::from_secs(5), upnp_error_rx.recv())
+            .await
+            .expect("UPnP error code must arrive")
+            .expect("UPnP error sender must stay open");
+        assert_eq!(code, "webview.upnp.timeout");
+
+        serve.abort();
+    }
+
+    struct RejectingMapper;
+
+    impl RouterPortMapper for RejectingMapper {
+        fn open(&self, _port: u16) -> Result<(), UpnpError> {
+            Err(UpnpError::new(
+                UpnpFailure::RouterRejected,
+                "router refused",
+            ))
+        }
+
+        fn close(&self, _port: u16) -> Result<(), UpnpError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_failed_upnp_startup_emits_error_code_while_listener_stays_alive() {
+        use std::time::Duration;
+
+        let mapping: Arc<dyn crate::webview::upnp::RouterPortMapper> = Arc::new(RejectingMapper);
+        let server = build_server_with_upnp(mapping, 0);
+
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let (upnp_error_tx, mut upnp_error_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let serve = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                if let Err(e) = server.start(Some(ready_tx), Some(upnp_error_tx)).await {
+                    tracing::warn!(error = %e, "test server start failed");
+                }
+            })
+        };
+
+        // Readiness приходит независимо от отказавшего router-вызова.
+        let ready = tokio::time::timeout(Duration::from_secs(5), ready_rx)
+            .await
+            .expect("readiness must arrive")
+            .expect("readiness channel must stay open");
+        assert!(ready.is_ok(), "listener must bind: {ready:?}");
+
+        // Фоновый UPnP-проброс отвалился: наружу уходит только код отказа.
+        let code = tokio::time::timeout(Duration::from_secs(5), upnp_error_rx.recv())
+            .await
+            .expect("UPnP error code must arrive")
+            .expect("UPnP error sender must stay open");
+        assert_eq!(code, "webview.upnp.router_rejected");
+
+        // Слушатель остаётся живым после провалившегося UPnP-проброса.
+        assert!(!serve.is_finished(), "listener must keep running");
 
         serve.abort();
     }

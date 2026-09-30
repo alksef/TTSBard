@@ -365,14 +365,14 @@ describe('saveUpnpEnabled', () => {
     expect(mockInvoke).toHaveBeenCalledWith('set_webview_upnp_enabled', { enabled: false })
   })
 
-  it('preserves requested value on success', async () => {
+  it('preserves requested value when the mapping is confirmed', async () => {
     mockWebViewSettingsRef.value = makeSettings({ upnp_enabled: false })
     const { settings, saveUpnpEnabled, errorMessage } = await setupAndMount()
     await nextTick()
 
     settings.value.upnp_enabled = true
 
-    mockInvoke.mockResolvedValueOnce('UPnP включён')
+    mockInvoke.mockResolvedValueOnce({ status: 'applied' })
 
     await saveUpnpEnabled()
     await nextTick()
@@ -389,7 +389,7 @@ describe('saveUpnpEnabled', () => {
 
     settings.value.upnp_enabled = false
 
-    mockInvoke.mockResolvedValueOnce('UPnP выключен')
+    mockInvoke.mockResolvedValueOnce({ status: 'applied' })
 
     await saveUpnpEnabled()
     await nextTick()
@@ -397,6 +397,87 @@ describe('saveUpnpEnabled', () => {
     expect(settings.value.upnp_enabled).toBe(false)
     expect(errorMessage.value).toBe('UPnP выключен')
     expect(mockInvoke).toHaveBeenCalledWith('set_webview_upnp_enabled', { enabled: false })
+  })
+
+  it('reports the preference without claiming an open port when the server is stopped', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ upnp_enabled: false })
+    const { settings, saveUpnpEnabled, errorMessage, errorMessageType } = await setupAndMount()
+    await nextTick()
+
+    settings.value.upnp_enabled = true
+
+    mockInvoke.mockResolvedValueOnce({ status: 'preference_only' })
+
+    await saveUpnpEnabled()
+    await nextTick()
+
+    expect(settings.value.upnp_enabled).toBe(true)
+    expect(errorMessageType.value).toBe('info')
+    expect(errorMessage.value).toBe('UPnP включён. Проброс порта применится при запуске сервера')
+  })
+
+  it('keeps the enabled preference and shows the localized reason when forwarding fails', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ upnp_enabled: false })
+    const { settings, saveUpnpEnabled, errorMessage, errorMessageType } = await setupAndMount()
+    await nextTick()
+
+    settings.value.upnp_enabled = true
+
+    mockInvoke.mockResolvedValueOnce({ status: 'forward_failed', code: 'webview.upnp.router_rejected' })
+
+    await saveUpnpEnabled()
+    await nextTick()
+
+    // Настройка сохранена: тумблер остаётся, видна причина отказа.
+    expect(settings.value.upnp_enabled).toBe(true)
+    expect(errorMessageType.value).toBe('error')
+    expect(errorMessage.value).toBe('UPnP включён, но проброс порта не удался: роутер отклонил проброс порта')
+  })
+
+  it('falls back to a generic reason for an unknown failure code', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ upnp_enabled: false })
+    const { settings, saveUpnpEnabled, errorMessage } = await setupAndMount()
+    await nextTick()
+
+    settings.value.upnp_enabled = true
+
+    mockInvoke.mockResolvedValueOnce({ status: 'forward_failed', code: 'webview.upnp.something_new' })
+
+    await saveUpnpEnabled()
+    await nextTick()
+
+    expect(settings.value.upnp_enabled).toBe(true)
+    expect(errorMessage.value).toBe('UPnP включён, но проброс порта не удался: неизвестная причина')
+  })
+
+  it('blocks a second toggle while the first request is in flight', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ upnp_enabled: false })
+    const { settings, saveUpnpEnabled, upnpPending } = await setupAndMount()
+    await nextTick()
+
+    let resolveToggle: (value: unknown) => void = () => {}
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_webview_token') return Promise.resolve(null)
+      if (cmd === 'get_local_ip') return Promise.resolve('192.168.1.25')
+      if (cmd === 'get_webview_server_status') return Promise.resolve({ state: 'stopped' })
+      if (cmd === 'set_webview_upnp_enabled') {
+        return new Promise((resolve) => { resolveToggle = resolve })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    settings.value.upnp_enabled = true
+    const first = saveUpnpEnabled()
+    await nextTick()
+    expect(upnpPending.value).toBe(true)
+
+    await saveUpnpEnabled()
+    const toggles = mockInvoke.mock.calls.filter((call) => call[0] === 'set_webview_upnp_enabled')
+    expect(toggles).toHaveLength(1)
+
+    resolveToggle({ status: 'applied' })
+    await first
+    expect(upnpPending.value).toBe(false)
   })
 })
 
