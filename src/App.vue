@@ -171,10 +171,15 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
   }
 }
 
+// Normalized theme from the document attribute set in index.html before Vue
+// mounts. Used only as a fallback until backend settings arrive; a light
+// background is applied only when the attribute is exactly 'light'.
+const initialTheme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'
+
 // Dynamic background of the main window container (color + independent opacity)
 const appStyle = computed(() => {
   const main = appSettings.settings.value?.windows?.main
-  const theme = appSettings.settings.value?.general?.theme ?? 'dark'
+  const theme = appSettings.settings.value?.general?.theme ?? initialTheme
   let effectiveOpacity = main?.opacity ?? 100
   if (!main?.custom_opacity) effectiveOpacity = 100
   if (main?.opacity_compact_only && !isMinimalMode.value) effectiveOpacity = 100
