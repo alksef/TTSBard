@@ -174,6 +174,82 @@ pub async fn save_input_server_settings(
     Ok(())
 }
 
+// ==================== Input Server Security Commands ====================
+
+/// Mask the access token for display: first 8 characters plus `***`
+/// (same convention as the WebView token UI).
+fn mask_token(token: &str) -> String {
+    if token.len() > 8 {
+        format!("{}***", &token[..8])
+    } else {
+        token.to_string()
+    }
+}
+
+/// Masked input-server access token for display. The full token is only ever
+/// handed out embedded in the LAN connection URL.
+#[tauri::command]
+pub async fn get_input_server_token(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let settings = state.input_server.settings.read().await;
+    Ok(settings
+        .access_token
+        .as_deref()
+        .filter(|token| !token.is_empty())
+        .map(mask_token))
+}
+
+/// Rotate the input-server access token.
+///
+/// Persists the new uuid token, updates the live settings snapshot and emits
+/// the settings-changed event. The auth middleware reads the token from live
+/// settings on every request, so the old token stops working immediately and
+/// the listener keeps running — no restart, unlike the WebView server.
+#[tauri::command]
+pub async fn regenerate_input_server_token(
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    let token = uuid::Uuid::new_v4().to_string();
+
+    let settings_manager = app_handle
+        .try_state::<SettingsManager>()
+        .ok_or_else(|| "SettingsManager not available".to_string())?;
+    let persisted_token = token.clone();
+    super::persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_input_server_access_token(Some(persisted_token))
+    })
+    .await?;
+
+    // Persist succeeded: publish the new token to the live snapshot. On a
+    // failed save the `?` above returns early, so runtime state is untouched
+    // and the old token keeps working.
+    state.input_server.settings.write().await.access_token = Some(token);
+
+    super::emit_settings_changed(&app_handle);
+
+    Ok(())
+}
+
+/// Build the LAN overlay URL for display and clipboard.
+fn build_connection_url(lan_ip: &str, port: u16, token: &str) -> String {
+    format!("http://{lan_ip}:{port}/overlay?token={token}")
+}
+
+/// Full LAN overlay URL including the current access token, ready to open on
+/// another device. Errors when no valid token is configured.
+#[tauri::command]
+pub async fn get_input_server_connection_url(state: State<'_, AppState>) -> Result<String, String> {
+    let (port, token) = {
+        let settings = state.input_server.settings.read().await;
+        (settings.port, settings.access_token.clone())
+    };
+    let token = token
+        .filter(|token| !token.is_empty())
+        .ok_or("Input server access token is not generated")?;
+    let lan_ip = crate::commands::webview::get_local_ip()?;
+    Ok(build_connection_url(&lan_ip, port, &token))
+}
+
 /// Read the source-neutral Incoming policy from the runtime snapshot.
 #[tauri::command]
 pub async fn get_incoming_settings(state: State<'_, AppState>) -> Result<IncomingSettings, String> {
@@ -301,6 +377,27 @@ pub async fn discard_incoming_text(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mask_token_truncates_long_tokens() {
+        assert_eq!(mask_token("abcdefghijklmnop"), "abcdefgh***");
+        assert_eq!(mask_token("123456789"), "12345678***");
+    }
+
+    #[test]
+    fn mask_token_keeps_short_tokens_intact() {
+        assert_eq!(mask_token("12345678"), "12345678");
+        assert_eq!(mask_token("short"), "short");
+        assert_eq!(mask_token(""), "");
+    }
+
+    #[test]
+    fn connection_url_embeds_ip_port_and_token() {
+        assert_eq!(
+            build_connection_url("192.168.1.50", 10101, "secret"),
+            "http://192.168.1.50:10101/overlay?token=secret"
+        );
+    }
 
     #[test]
     fn normalize_accepts_non_empty_text_and_trims_outer_whitespace() {
