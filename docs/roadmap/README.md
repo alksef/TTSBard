@@ -43,6 +43,10 @@ related_tasks: []
 
 Формат и соответствие каталога статусу проверяет `scripts/check-docs.ps1`.
 
+## Активные направления
+
+Активных направлений сейчас нет.
+
 ## Завершённые направления
 
 - [ROADMAP-103 — Сгруппированные панели настроек](./completed/103-grouped-general-settings.md)
@@ -60,6 +64,8 @@ related_tasks: []
 - [ROADMAP-092 — Одна копия приложения и понятное сворачивание окна](./completed/092-single-instance-and-window-lifecycle.md)
 
 ### Интеграции
+
+- [ROADMAP-111 — Стабилизация подключения Twitch](./completed/111-twitch-connection-stabilization.md)
 
 - [ROADMAP-107 — Текст внешней доставки для WebView и Twitch](./completed/107-original-text-for-external-delivery.md)
 - [ROADMAP-106 — Ограничения длины текста TTS и внешних каналов](./completed/106-provider-text-length-limits.md)

@@ -1,3 +1,9 @@
+/// The dependency emits raw PASS and PRIVMSG frames even at user-enabled TRACE.
+/// Application-owned diagnostics remain enabled; raw library events never reach a sink.
+pub fn allow_log_target(target: &str) -> bool {
+    target != "twitch_irc" && !target.starts_with("twitch_irc::")
+}
+
 /// Safe-logging helpers for masking secrets and normalizing URLs.
 ///
 /// Policy:
@@ -141,6 +147,46 @@ mod tests {
     use super::*;
 
     // ---------- mask_secret ----------
+
+    #[test]
+    fn twitch_raw_frames_never_reach_log_sinks() {
+        use std::sync::{Arc, Mutex};
+        use tracing_subscriber::prelude::*;
+        #[derive(Clone)]
+        struct Buffer(Arc<Mutex<Vec<u8>>>);
+        impl std::io::Write for Buffer {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let bytes = Arc::new(Mutex::new(Vec::new()));
+        let writer = Buffer(Arc::clone(&bytes));
+        let subscriber = tracing_subscriber::registry()
+            .with(tracing_subscriber::filter::filter_fn(|metadata| {
+                allow_log_target(metadata.target())
+            }))
+            .with(tracing_subscriber::filter::EnvFilter::new(
+                "trace,twitch_irc::connection::event_loop=trace",
+            ))
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_ansi(false)
+                    .without_time()
+                    .with_writer(move || writer.clone()),
+            );
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::trace!(target: "twitch_irc::connection::event_loop", "> PASS oauth:synthetic_secret_123");
+            tracing::error!(target: "twitch_irc", "synthetic_secret_123");
+            tracing::info!(target: "ttsbard_lib::twitch::client", error_code = "twitch.username_mismatch", "Twitch token account does not match configured login");
+        });
+        let output = String::from_utf8(bytes.lock().unwrap().clone()).unwrap();
+        assert!(!output.contains("synthetic_secret_123"));
+        assert!(output.contains("twitch.username_mismatch"));
+    }
 
     #[test]
     fn mask_normal_key() {

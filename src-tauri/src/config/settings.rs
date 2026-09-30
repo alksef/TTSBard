@@ -842,14 +842,14 @@ impl Default for TwitchSettings {
 impl TwitchSettings {
     /// Check if settings are valid
     pub fn is_valid(&self) -> Result<(), String> {
-        if self.username.is_empty() {
-            return Err("Username cannot be empty".to_string());
+        if twitch_irc::validate::validate_login(&self.username.to_ascii_lowercase()).is_err() {
+            return Err("twitch.invalid_username".to_string());
         }
-        if self.token.is_empty() {
-            return Err("Token cannot be empty".to_string());
+        if self.token.trim().is_empty() {
+            return Err("twitch.missing_token".to_string());
         }
-        if self.channel.is_empty() {
-            return Err("Channel cannot be empty".to_string());
+        if twitch_irc::validate::validate_login(&self.channel.to_ascii_lowercase()).is_err() {
+            return Err("twitch.invalid_channel".to_string());
         }
         Ok(())
     }
@@ -3007,6 +3007,59 @@ impl SettingsManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn twitch_settings_validation_returns_stable_field_codes() {
+        let mut settings = TwitchSettings {
+            username: "user".into(),
+            token: "token".into(),
+            channel: "channel".into(),
+            ..TwitchSettings::default()
+        };
+        for login in [
+            "",
+            "@user",
+            "user name",
+            "юзер",
+            "abcdefghijklmnopqrstuvwxyz",
+        ] {
+            settings.username = login.into();
+            assert_eq!(settings.is_valid().unwrap_err(), "twitch.invalid_username");
+        }
+        settings.username = "Mixed_Case".into();
+        settings.channel = "https://twitch.tv/channel".into();
+        assert_eq!(settings.is_valid().unwrap_err(), "twitch.invalid_channel");
+        settings.channel = "channel".into();
+        settings.token = "   ".into();
+        assert_eq!(settings.is_valid().unwrap_err(), "twitch.missing_token");
+    }
+
+    #[test]
+    fn twitch_settings_validate_channel_name_without_url() {
+        let mut settings = TwitchSettings {
+            username: "user".into(),
+            token: "token".into(),
+            ..TwitchSettings::default()
+        };
+        for channel in ["user", "Mixed_Case123", "a", "abcdefghijklmnopqrstuvwxy"] {
+            settings.channel = channel.into();
+            assert!(settings.is_valid().is_ok(), "{channel}");
+        }
+        for channel in [
+            "",
+            "https://twitch.tv/user",
+            "#user",
+            " user",
+            "user ",
+            "a-b",
+            "a\nb",
+            "юзер",
+            "abcdefghijklmnopqrstuvwxyz",
+        ] {
+            settings.channel = channel.into();
+            assert!(settings.is_valid().is_err(), "{channel}");
+        }
+    }
 
     #[test]
     fn audio_output_format_defaults_for_old_settings_and_rejects_unknown() {

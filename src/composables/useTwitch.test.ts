@@ -93,8 +93,94 @@ describe('useTwitch action result localization', () => {
     vi.clearAllMocks()
     capturedOnMountedCbs = []
     capturedOnUnmountedCbs = []
-    mockTwitchSettingsRef.value = undefined
+    mockTwitchSettingsRef.value = { enabled: true, username: 'user', token: 'token', channel: 'channel', start_on_boot: false, send_original_text: true }
     listenMock.mockImplementation(async () => vi.fn())
+  })
+
+  it.each(['ru', 'en'] as const)('shows a localized initial JOIN timeout in %s', async (language) => {
+    await withLocale(language, async () => {
+      mockInvoke.mockResolvedValue({ Error: 'twitch.join_timeout' });
+      const twitch = useTwitch();
+      await capturedOnMountedCbs.shift()?.();
+      expect(twitch.currentStatus.value).toBe('Error');
+      expect(twitch.isConnected.value).toBe(false);
+      expect(twitch.connectionError.value).toBe(language === 'ru'
+        ? 'Не удалось войти в канал за 30 секунд. Проверьте имя канала и соединение.'
+        : 'Could not join the channel within 30 seconds. Check the channel name and connection.');
+      for (const cleanup of capturedOnUnmountedCbs) cleanup();
+    });
+  });
+
+  it('rejects invalid channel locally and clears its field error after correction', async () => {
+    const twitch = await setupAndMount()
+    mockInvoke.mockClear()
+    twitch.settings.value.channel = 'https://twitch.tv/channel'
+    await twitch.save()
+    expect(mockInvoke).not.toHaveBeenCalled()
+    expect(twitch.fieldErrors.value.channel).toContain('Введите имя канала Twitch')
+    twitch.settings.value.channel = 'valid_channel'
+    expect(twitch.fieldErrors.value.channel).toBeUndefined()
+  })
+
+  it('ignores a stale validation reply after the field has changed', async () => {
+    const twitch = await setupAndMount()
+    let reject: (error: unknown) => void = () => {}
+    mockInvoke.mockImplementationOnce(() => new Promise((_resolve, failure) => { reject = failure }))
+    const pending = twitch.save()
+    twitch.settings.value.channel = 'new_channel'
+    reject({ code: 'twitch.invalid_channel', message: 'backend text', retryable: false })
+    await pending
+    expect(twitch.fieldErrors.value.channel).toBeUndefined()
+  })
+
+  it.each(['ru', 'en'] as const)('keeps a connection reason after save and toast expiration in %s', async (language) => {
+    vi.useFakeTimers()
+    try {
+      await withLocale(language, async () => {
+        mockInvoke.mockResolvedValue({ Error: 'twitch.username_mismatch' })
+        const twitch = useTwitch()
+        await capturedOnMountedCbs.shift()?.()
+        const reason = twitch.connectionError.value
+        expect(reason).toContain(language === 'ru' ? 'Логин не соответствует' : 'login does not match')
+        mockInvoke.mockResolvedValue('saved')
+        await twitch.save()
+        vi.advanceTimersByTime(5000)
+        expect(twitch.errorMessage.value).toBeNull()
+        expect(twitch.connectionError.value).toBe(reason)
+        mockInvoke.mockResolvedValue('disconnected')
+        await twitch.stopTwitch()
+        expect(twitch.connectionError.value).toBeNull()
+        for (const cleanup of capturedOnUnmountedCbs) cleanup()
+      })
+    } finally { vi.useRealTimers() }
+  })
+
+  it('maps a backend field code without displaying its English detail', async () => {
+    const twitch = await setupAndMount()
+    mockInvoke.mockRejectedValueOnce({ code: 'twitch.invalid_username', message: 'English validation detail', retryable: false })
+    await twitch.save()
+    expect(twitch.fieldErrors.value.username).toContain('Введите логин Twitch')
+    expect(twitch.fieldErrors.value.username).not.toContain('English')
+  })
+
+  it('does not overwrite a newer status event with the initial status reply', async () => {
+    let callback: ((event: { payload: unknown }) => void) | undefined
+    listenMock.mockImplementation(async (...args: unknown[]) => {
+      callback = args[1] as (event: { payload: unknown }) => void
+      return vi.fn()
+    })
+    let resolve: (status: unknown) => void = () => {}
+    mockInvoke.mockImplementationOnce(() => new Promise(success => { resolve = success }))
+    const twitch = useTwitch()
+    const mounted = capturedOnMountedCbs.shift()?.()
+    await Promise.resolve()
+    await Promise.resolve()
+    callback?.({ payload: { Error: 'twitch.username_mismatch' } })
+    resolve({ Disconnected: null })
+    await mounted
+    expect(twitch.currentStatus.value).toBe('Error')
+    expect(twitch.connectionError.value).toContain('Логин не соответствует')
+    for (const cleanup of capturedOnUnmountedCbs) cleanup()
   })
 
   interface ActionCase {
@@ -162,7 +248,7 @@ describe('useTwitch action result localization', () => {
     expect(mockDebugError).toHaveBeenCalledWith('[Twitch] Unknown action code:', 'bogus_code')
   })
 
-  it('shows the DTO message in the detail, not [object Object]', async () => {
+  it('uses a localized fallback for unknown backend connection errors', async () => {
     const twitch = await setupAndMount()
     mockInvoke.mockRejectedValueOnce({
       code: 'twitch.unavailable',
@@ -172,8 +258,8 @@ describe('useTwitch action result localization', () => {
 
     await twitch.startTwitch()
 
-    expect(twitch.errorMessage.value).toContain('Twitch is not connected')
-    expect(twitch.errorMessage.value).not.toContain('[object Object]')
+    expect(twitch.connectionError.value).toBe('Ошибка подключения к Twitch')
+    expect(twitch.connectionError.value).not.toContain('Twitch is not connected')
   })
 })
 
@@ -182,7 +268,7 @@ describe('useTwitch test message delivery', () => {
     vi.clearAllMocks()
     capturedOnMountedCbs = []
     capturedOnUnmountedCbs = []
-    mockTwitchSettingsRef.value = undefined
+    mockTwitchSettingsRef.value = { enabled: true, username: 'user', token: 'token', channel: 'channel', start_on_boot: false, send_original_text: true }
     listenMock.mockImplementation(async () => vi.fn())
   })
 
@@ -395,7 +481,7 @@ describe('useTwitch send_original_text save rollback', () => {
     vi.clearAllMocks()
     capturedOnMountedCbs = []
     capturedOnUnmountedCbs = []
-    mockTwitchSettingsRef.value = undefined
+    mockTwitchSettingsRef.value = { enabled: true, username: 'user', token: 'token', channel: 'channel', start_on_boot: false, send_original_text: true }
     listenMock.mockImplementation(async () => vi.fn())
   })
 
@@ -436,7 +522,7 @@ describe('useTwitch send_original_text save rollback', () => {
     await second
 
     expect(twitch.settings.value.send_original_text).toBe(false)
-    expect(twitch.errorMessage.value).toContain('later failure')
+    expect(twitch.connectionError.value).toBe('Ошибка подключения к Twitch')
   })
 
   it('rolls the checkbox back to the persisted value and shows the localized save error on failure', async () => {
@@ -453,8 +539,8 @@ describe('useTwitch send_original_text save rollback', () => {
     await twitch.saveSendOriginalText()
 
     expect(twitch.settings.value.send_original_text).toBe(true)
-    expect(twitch.errorMessage.value).toContain('Twitch is not connected')
-    expect(twitch.errorMessage.value).not.toContain('[object Object]')
+    expect(twitch.connectionError.value).toBe('Ошибка подключения к Twitch')
+    expect(twitch.connectionError.value).not.toContain('Twitch is not connected')
   })
 
   it('ignores a stale failure that settles after a newer request', async () => {
@@ -490,7 +576,7 @@ describe('useTwitch send_original_text save rollback', () => {
     await second
 
     expect(twitch.settings.value.send_original_text).toBe(true)
-    expect(twitch.errorMessage.value).toContain('latest failure')
+    expect(twitch.connectionError.value).toBe('Ошибка подключения к Twitch')
   })
 
   it('suppresses a stale rollback and toast after unmount', async () => {

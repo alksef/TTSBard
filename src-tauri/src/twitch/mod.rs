@@ -3,7 +3,7 @@ mod limits;
 pub mod service;
 
 pub(crate) use client::{clean_irc_text, OUTGOING_QUEUE_CAPACITY};
-pub use client::{SendFailure, TwitchClient, TwitchStatus};
+pub use client::{SendFailure, TwitchClient, TwitchStartError, TwitchStatus};
 pub(crate) use limits::{plan_message_parts, PlanError, MAX_MESSAGE_CHARS};
 /// Тестам командного слоя нужны символы планировщика для проверки инвариантов
 /// частей; в production-коде их использует только сам `twitch::limits`.

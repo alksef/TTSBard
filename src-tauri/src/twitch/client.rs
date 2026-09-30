@@ -25,6 +25,17 @@ const MIN_SEND_INTERVAL: Duration = Duration::from_millis(1500);
 /// событие потери соединения, поэтому тихий обрыв обнаруживается опросом
 /// `get_channel_status` (пара (wanted, joined)).
 const CHANNEL_HEALTH_POLL_INTERVAL: Duration = Duration::from_secs(1);
+/// Only the first JOIN has a deadline; reconnection after success stays automatic.
+const INITIAL_JOIN_TIMEOUT: Duration = Duration::from_secs(30);
+const INITIAL_JOIN_TIMEOUT_ERROR: &str = "twitch.join_timeout";
+
+async fn wait_initial_join_deadline(deadline: Option<tokio::time::Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline).await,
+        None => std::future::pending::<()>().await,
+    }
+}
+
 /// Верхняя граница одного запроса здоровья: метод библиотеки паникует на мёртвом
 /// client loop (что поймает TaskDeathGuard), но медленный запрос не должен
 /// надолго задерживать обработку incoming-событий.
@@ -66,6 +77,15 @@ pub enum TwitchStatus {
     TransportFailure(String),
 }
 
+/// Startup failures retain whether retrying can help.
+#[derive(Debug, thiserror::Error)]
+pub enum TwitchStartError {
+    #[error("{0}")]
+    Permanent(String),
+    #[error("{0}")]
+    Transient(String),
+}
+
 /// Очистка текста для IRC БЕЗ обрезки длины: удаление CRLF и control-символов
 /// (кроме пробела и таба) + trim. Командный слой использует её для валидации
 /// длины ДО отправки: превышение лимита становится typed-ошибкой, а не молчаливой
@@ -104,6 +124,14 @@ fn classify_server_message(
     our_login: &str,
     target_channel: &str,
 ) -> Option<TwitchStatus> {
+    let source = message.source();
+    if source.command == "001" {
+        if let Some(actual_login) = source.params.first() {
+            if !actual_login.eq_ignore_ascii_case(our_login) {
+                return Some(TwitchStatus::Error("twitch.username_mismatch".to_string()));
+            }
+        }
+    }
     match message {
         ServerMessage::Join(join) => {
             if join.channel_login == target_channel && join.user_login == our_login {
@@ -113,12 +141,25 @@ fn classify_server_message(
             }
         }
         ServerMessage::Notice(notice) => {
+            if notice.channel_login.as_deref() == Some(target_channel) {
+                let reason = match notice.message_id.as_deref() {
+                    Some("msg_channel_suspended") => Some("twitch.channel_suspended"),
+                    Some("msg_banned") => Some("twitch.channel_banned"),
+                    Some("msg_channel_blocked") => Some("twitch.channel_blocked"),
+                    _ => None,
+                };
+                if let Some(reason) = reason {
+                    return Some(TwitchStatus::Error(reason.to_string()));
+                }
+            }
             let text = notice.message_text.as_str();
             if AUTH_FAILURE_MARKERS
                 .iter()
                 .any(|marker| text.contains(marker))
             {
-                Some(TwitchStatus::Error("Authentication failed".to_string()))
+                Some(TwitchStatus::Error(
+                    "twitch.authentication_failed".to_string(),
+                ))
             } else {
                 None
             }
@@ -297,13 +338,19 @@ impl TwitchClient {
 
     /// Запускает подключение: создаёт библиотечный клиент, входит в один канал
     /// и запускает consumer-задачу, отображающую события в статус.
-    pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn start(&self) -> Result<(), TwitchStartError> {
         if self.cancel.is_cancelled() {
-            return Err("Connection setup cancelled".into());
+            return Err(TwitchStartError::Permanent(
+                "Connection setup cancelled".to_string(),
+            ));
         }
 
         let login = self.settings.username.to_lowercase();
+        twitch_irc::validate::validate_login(&login)
+            .map_err(|_| TwitchStartError::Permanent("twitch.invalid_username".to_string()))?;
         let channel = self.settings.channel.to_lowercase();
+        twitch_irc::validate::validate_login(&channel)
+            .map_err(|_| TwitchStartError::Permanent("twitch.invalid_channel".to_string()))?;
         let credentials =
             StaticLoginCredentials::new(login.clone(), Some(login_token(&self.settings.token)));
 
@@ -318,7 +365,10 @@ impl TwitchClient {
         // JOIN подтверждается событием ServerMessage::Join; статус Connected
         // выставляется только после него.
         if let Err(e) = irc.join(channel.clone()) {
-            return Err(format!("Failed to join channel: {}", e).into());
+            return Err(TwitchStartError::Permanent(format!(
+                "Failed to join channel: {}",
+                e
+            )));
         }
         *self.status.lock().await = TwitchStatus::Connecting;
 
@@ -363,6 +413,9 @@ impl TwitchClient {
         // Детерминированность stop() сохраняется: consumer abort'ится stop()'ом,
         // а в auth-ветке завершается сразу после drop runtime-слота.
         let irc_health = irc.clone();
+        // Hold the slot until installation so terminal cleanup cannot race it.
+        let mut runtime_slot_guard = self.runtime.lock().await;
+        let initial_join_deadline = tokio::time::Instant::now() + INITIAL_JOIN_TIMEOUT;
         let consumer = tokio::spawn(async move {
             let _guard = TaskDeathGuard {
                 status: Arc::clone(&status),
@@ -371,10 +424,21 @@ impl TwitchClient {
             };
             let mut health_tick = tokio::time::interval(CHANNEL_HEALTH_POLL_INTERVAL);
             health_tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            let mut join_deadline = Some(initial_join_deadline);
             loop {
                 tokio::select! {
+                    biased;
                     _ = cancel.cancelled() => {
                         debug!("Shutdown signal received");
+                        break;
+                    }
+                    _ = wait_initial_join_deadline(join_deadline) => {
+                        error!(error_code = INITIAL_JOIN_TIMEOUT_ERROR, stage = "initial_join", timeout_seconds = INITIAL_JOIN_TIMEOUT.as_secs(), retryable = false, channel = %channel, "Twitch initial JOIN timed out");
+                        *status.lock().await = TwitchStatus::Error(INITIAL_JOIN_TIMEOUT_ERROR.to_string());
+                        if let Some(runtime) = runtime_slot.lock().await.take() {
+                            runtime.worker.abort();
+                            drop(runtime);
+                        }
                         break;
                     }
                     _ = health_tick.tick() => {
@@ -389,7 +453,7 @@ impl TwitchClient {
                                 if let Some(new_status) =
                                     channel_health_transition(&current, (wanted, joined))
                                 {
-                                    debug!(wanted, joined, "Channel health downgrade");
+                                    warn!(error_code = "twitch.transport_interrupted", stage = "reconnect", retryable = true, channel = %channel, wanted, joined, "Twitch channel connection lost; awaiting automatic reconnect");
                                     *status.lock().await = new_status;
                                 }
                             }
@@ -402,12 +466,22 @@ impl TwitchClient {
                         match message {
                             Some(message) => {
                                 if let Some(new_status) = classify_server_message(&message, &login, &channel) {
-                                    let terminal_auth = matches!(new_status, TwitchStatus::Error(_));
+                                    if matches!(new_status, TwitchStatus::Connected) {
+                                        join_deadline = None;
+                                        info!(stage = "joined", channel = %channel, username = %login, "Twitch connection confirmed");
+                                    }
+                                    let terminal_failure = matches!(new_status, TwitchStatus::Error(_));
                                     *status.lock().await = new_status;
-                                    if terminal_auth {
-                                        error!("Authentication failed");
-                                        error!("Check your username and token");
-                                        // Терминальная ошибка авторизации: остановить runtime,
+                                    if terminal_failure {
+                                        let reason = status.lock().await.clone();
+                                        if let TwitchStatus::Error(code) = reason {
+                                            if code == "twitch.username_mismatch" {
+                                                error!(error_code = %code, stage = "authentication", expected_login = %login, confirmed_login = ?message.source().params.first(), retryable = false, "Twitch token account does not match configured login");
+                                            } else {
+                                                error!(error_code = %code, stage = "server_notice", channel = %channel, notice_id = ?match &message { ServerMessage::Notice(notice) => notice.message_id.as_deref(), _ => None }, retryable = false, "Permanent Twitch connection failure");
+                                            }
+                                        }
+                                        // Терминальная ошибка подключения: остановить runtime,
                                         // иначе библиотека реконнектится с тем же токеном бесконечно.
                                         // Слот уже заполнен: сетевые события приходят позже заполнения.
                                         if let Some(runtime) = runtime_slot.lock().await.take() {
@@ -424,7 +498,7 @@ impl TwitchClient {
                                 // Runtime завершился без нашего stop(): это неожиданная смерть
                                 // фоновой задачи (panic/баг). Supervisor воскресит её retry-циклом.
                                 if !cancel.is_cancelled() {
-                                    warn!("Twitch IRC runtime ended unexpectedly");
+                                    warn!(error_code = "twitch.runtime_stopped", stage = "runtime", retryable = true, "Twitch IRC runtime ended unexpectedly");
                                     let mut current = status.lock().await;
                                     if !matches!(*current, TwitchStatus::Error(_)) {
                                         *current = TwitchStatus::TransportFailure(
@@ -440,7 +514,7 @@ impl TwitchClient {
             }
         });
 
-        *self.runtime.lock().await = Some(TwitchRuntime {
+        *runtime_slot_guard = Some(TwitchRuntime {
             irc,
             consumer,
             outgoing_tx,
@@ -520,6 +594,85 @@ mod tests {
     use super::*;
     use crate::twitch::TwitchSettings;
     use twitch_irc::message::IRCMessage;
+
+    #[tokio::test]
+    async fn initial_join_deadline_fires_and_can_be_disabled() {
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(10);
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            wait_initial_join_deadline(Some(deadline)),
+        )
+        .await
+        .expect("initial JOIN must have a bounded wait");
+        assert!(tokio::time::Instant::now() >= deadline);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), wait_initial_join_deadline(None))
+                .await
+                .is_err(),
+            "confirmed JOIN disables the startup deadline for later reconnects"
+        );
+    }
+
+    #[test]
+    fn welcome_detects_token_account_mismatch_before_join() {
+        let welcome = parse_server_message(":tmi.twitch.tv 001 actual_user :Welcome, GLHF!");
+        assert_eq!(
+            classify_server_message(&welcome, "wrong_user", "channel"),
+            Some(TwitchStatus::Error("twitch.username_mismatch".into()))
+        );
+        assert_eq!(
+            classify_server_message(&welcome, "ACTUAL_USER", "channel"),
+            None
+        );
+        let other_join = parse_server_message(":other!other@other.tmi.twitch.tv JOIN #channel");
+        assert_eq!(
+            classify_server_message(&other_join, "actual_user", "channel"),
+            None
+        );
+    }
+
+    #[test]
+    fn suspended_channel_notice_is_terminal_only_for_target() {
+        let message = parse_server_message(
+            "@msg-id=msg_channel_suspended :tmi.twitch.tv NOTICE #channel :Channel unavailable",
+        );
+        assert!(matches!(
+            classify_server_message(&message, "user", "channel"),
+            Some(TwitchStatus::Error(_))
+        ));
+        assert_eq!(classify_server_message(&message, "user", "other"), None);
+    }
+
+    #[test]
+    fn permanent_channel_refusal_uses_notice_id() {
+        for id in ["msg_banned", "msg_channel_blocked"] {
+            let message = parse_server_message(&format!(
+                "@msg-id={id} :tmi.twitch.tv NOTICE #channel :Refused"
+            ));
+            assert!(matches!(
+                classify_server_message(&message, "user", "channel"),
+                Some(TwitchStatus::Error(_))
+            ));
+            assert_eq!(classify_server_message(&message, "user", "other"), None);
+        }
+        let message =
+            parse_server_message("@msg-id=msg_ratelimit :tmi.twitch.tv NOTICE #channel :Slow down");
+        assert_eq!(classify_server_message(&message, "user", "channel"), None);
+    }
+
+    #[tokio::test]
+    async fn invalid_channel_start_is_permanent() {
+        let client = TwitchClient::new(TwitchSettings {
+            username: "user".into(),
+            channel: "https://twitch.tv/user".into(),
+            ..TwitchSettings::default()
+        });
+        assert!(matches!(
+            client.start().await,
+            Err(TwitchStartError::Permanent(_))
+        ));
+        assert!(client.runtime.lock().await.is_none());
+    }
 
     #[test]
     fn test_irc_crlf_injection_prevention() {
@@ -601,7 +754,7 @@ mod tests {
     #[test]
     fn test_status_semantic_distinction() {
         let retryable = TwitchStatus::TransportFailure("Connection reset".to_string());
-        let auth_error = TwitchStatus::Error("Authentication failed".to_string());
+        let auth_error = TwitchStatus::Error("twitch.authentication_failed".to_string());
 
         assert!(matches!(retryable, TwitchStatus::TransportFailure(_)));
         assert_ne!(retryable, TwitchStatus::Disconnected);

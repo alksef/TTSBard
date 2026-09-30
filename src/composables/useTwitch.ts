@@ -1,4 +1,4 @@
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useTwitchSettings } from './useAppSettings'
@@ -8,6 +8,7 @@ import { normalizeCommandError, presentCommandError } from '../ipc/commandError'
 import { deliverTwitchMessage } from '../ipc/twitchDelivery'
 import { useErrorHandler } from './useErrorHandler'
 import { t } from '../i18n'
+import { TWITCH_CONNECTION_LOCALE_KEYS, twitchErrorField, validateTwitchSettings, type TwitchSettingsField } from '../ipc/twitchConnection'
 
 export type TwitchStatus = 'Disconnected' | 'Connecting' | 'Connected' | 'Error'
 
@@ -110,12 +111,46 @@ export function useTwitch() {
   let sendOriginalTextRequest = 0
   let sendOriginalTextBaseline = settings.value.send_original_text
 
-  function handleStatusChange(status: TwitchStatus) {
+  const connectionErrorCode = ref<string | null>(null)
+  const connectionError = computed(() => connectionErrorCode.value
+    ? t(TWITCH_CONNECTION_LOCALE_KEYS[connectionErrorCode.value] ?? 'twitch.error.connect_twitch')
+    : null)
+  const fieldErrorCodes = ref<Partial<Record<TwitchSettingsField, string>>>({})
+  const fieldErrors = computed(() => Object.fromEntries(Object.entries(fieldErrorCodes.value)
+    .map(([field, code]) => [field, t(TWITCH_CONNECTION_LOCALE_KEYS[code] ?? 'twitch.error.connect_twitch')])))
+  let settingsRequest = 0
+  let statusRevision = 0
+
+  function handleStatusChange(status: TwitchStatus, raw?: RustTwitchStatus) {
+    ++statusRevision
     currentStatus.value = status
     isConnected.value = status === 'Connected'
-    if (status === 'Error') {
-      showError(t('twitch.error.connect_twitch'))
-    }
+    connectionErrorCode.value = status === 'Error'
+      ? (isRustEnumError(raw) ? raw.Error ?? 'twitch.unknown' : 'twitch.unknown')
+      : null
+  }
+
+  function validateFields() {
+    fieldErrorCodes.value = validateTwitchSettings(settings.value)
+    return Object.keys(fieldErrorCodes.value).length === 0
+  }
+
+  function handleSettingsFailure(error: unknown) {
+    const code = normalizeCommandError(error).code
+    const field = twitchErrorField(code)
+    if (field) fieldErrorCodes.value[field] = code
+    else connectionErrorCode.value = code
+  }
+
+  for (const field of ['username', 'channel', 'token'] as const) {
+    watch(() => settings.value[field], () => {
+      ++settingsRequest
+      if (fieldErrorCodes.value[field]) {
+        const code = validateTwitchSettings(settings.value)[field]
+        if (code) fieldErrorCodes.value[field] = code
+        else delete fieldErrorCodes.value[field]
+      }
+    }, { flush: 'sync' })
   }
 
   function showError(message: string, type: UiMessageKind = 'error') {
@@ -139,64 +174,82 @@ export function useTwitch() {
   }
 
   async function restartTwitch() {
+    if (!validateFields()) return
+    connectionErrorCode.value = null
+    const request = ++settingsRequest
     try {
       const result = await invoke<string>('restart_twitch')
+      if (listenerScope.disposed || request !== settingsRequest) return
       showActionResult(result, 'success')
     } catch (e) {
-      const errorMsg = normalizeCommandError(e).message
-      showError(t('twitch.error.restart', { detail: errorMsg }))
+      if (listenerScope.disposed || request !== settingsRequest) return
+      handleSettingsFailure(e)
     }
   }
 
   async function loadSettings() {
+    const revision = statusRevision
     try {
       const status = await invoke<RustTwitchStatus>('get_twitch_status')
-      handleStatusChange(convertStatusFromRust(status))
+      if (listenerScope.disposed || revision !== statusRevision) return
+      handleStatusChange(convertStatusFromRust(status), status)
     } catch (e) {
       debugError('[TwitchPanel] Failed to load status:', e)
     }
   }
 
   async function save() {
+    if (!validateFields()) return
+    const request = ++settingsRequest
+    const snapshot = { ...settings.value }
     try {
-      const result = await invoke<string>('save_twitch_settings', { settings: settings.value })
+      const result = await invoke<string>('save_twitch_settings', { settings: snapshot })
+      if (listenerScope.disposed || request !== settingsRequest) return
       showActionResult(result, 'success')
-    } catch (e) {
-      const errorMsg = normalizeCommandError(e).message
-      showError(t('twitch.error.save', { detail: errorMsg }))
+    } catch (error) {
+      if (listenerScope.disposed || request !== settingsRequest) return
+      handleSettingsFailure(error)
     }
   }
 
   async function startTwitch() {
+    if (!validateFields()) return
+    connectionErrorCode.value = null
+    const request = ++settingsRequest
     try {
       const result = await invoke<string>('connect_twitch')
+      if (listenerScope.disposed || request !== settingsRequest) return
       showActionResult(result, 'success')
-    } catch (e) {
-      const errorMsg = normalizeCommandError(e).message
-      showError(t('twitch.error.connect', { detail: errorMsg }))
+    } catch (error) {
+      if (listenerScope.disposed || request !== settingsRequest) return
+      handleSettingsFailure(error)
     }
   }
 
   async function stopTwitch() {
+    ++settingsRequest
     try {
       const result = await invoke<string>('disconnect_twitch')
+      connectionErrorCode.value = null
       showActionResult(result, 'info')
     } catch (e) {
-      const errorMsg = normalizeCommandError(e).message
-      showError(t('twitch.error.disconnect', { detail: errorMsg }))
+      handleSettingsFailure(e)
     }
   }
 
   async function saveStartOnBoot() {
+    const revision = settingsRequest
     try {
       await invoke('save_twitch_settings', { settings: settings.value })
     } catch (e) {
-      debugError('[Twitch] Failed to save start_on_boot:', e)
+      if (listenerScope.disposed || revision !== settingsRequest) return
+      handleSettingsFailure(e)
     }
   }
 
   async function saveSendOriginalText() {
     const request = ++sendOriginalTextRequest
+    const revision = settingsRequest
     const value = settings.value.send_original_text
     const settingsSnapshot = { ...settings.value }
     try {
@@ -204,11 +257,10 @@ export function useTwitch() {
       if (request !== sendOriginalTextRequest) return
       sendOriginalTextBaseline = value
     } catch (e) {
-      if (request !== sendOriginalTextRequest) return
+      if (listenerScope.disposed || request !== sendOriginalTextRequest || revision !== settingsRequest) return
       debugError('[Twitch] Failed to save send_original_text:', e)
       settings.value.send_original_text = sendOriginalTextBaseline
-      const errorMsg = normalizeCommandError(e).message
-      showError(t('twitch.error.save', { detail: errorMsg }))
+      handleSettingsFailure(e)
     }
   }
 
@@ -239,12 +291,12 @@ export function useTwitch() {
   }
 
   onMounted(async () => {
-    await loadSettings()
     await listenerScope.track(
       listen<unknown>('twitch-status-changed', (event) => {
-        handleStatusChange(convertStatusFromRust(event.payload as RustTwitchStatus))
+        handleStatusChange(convertStatusFromRust(event.payload as RustTwitchStatus), event.payload as RustTwitchStatus)
       }),
     )
+    if (!listenerScope.disposed) await loadSettings()
   })
 
   watch(twitchSettingsFromComposable, (newSettings) => {
@@ -264,6 +316,7 @@ export function useTwitch() {
   onUnmounted(() => {
     // Панель демонтирована: отправка в полёте не должна писать в state.
     testSendRequest++
+    settingsRequest++
     sendOriginalTextRequest++
     listenerScope.dispose()
     if (errorTimeout !== null) {
@@ -275,6 +328,8 @@ export function useTwitch() {
     settings,
     errorMessage,
     errorMessageType,
+    connectionError,
+    fieldErrors,
     currentStatus,
     showToken,
     isConnected,

@@ -8,6 +8,8 @@ const {
   errorMessage,
   errorMessageType,
   currentStatus,
+  connectionError,
+  fieldErrors,
   showToken,
   isConnected,
   restartTwitch,
@@ -28,6 +30,8 @@ const {
     <div v-if="errorMessage" class="message-box" :class="errorMessageType">
       {{ errorMessage }}
     </div>
+
+    <p v-if="connectionError" class="connection-error" role="alert">{{ connectionError }}</p>
 
     <section class="settings-section">
       <div class="section-header server-header">
@@ -77,21 +81,30 @@ const {
       </div>
 
       <div class="setting-row">
-        <label>{{ t('twitch.username') }}:</label>
+        <label for="twitch-username">{{ t('twitch.username') }}:</label>
         <input
           type="text"
           v-model="settings.username"
+          id="twitch-username"
+          :aria-invalid="!!fieldErrors.username"
+          :aria-describedby="fieldErrors.username ? 'twitch-username-feedback' : undefined"
           class="text-input"
           placeholder="your_bot_username"
         />
+        <div v-if="fieldErrors.username" id="twitch-username-feedback" class="field-feedback">
+          <small v-if="fieldErrors.username" class="field-error" role="alert">{{ fieldErrors.username }}</small>
+        </div>
       </div>
 
       <div class="setting-row">
-        <label>{{ t('twitch.token') }}:</label>
+        <label for="twitch-token">{{ t('twitch.token') }}:</label>
         <div class="input-with-toggle">
           <input
             :type="showToken ? 'text' : 'password'"
             v-model="settings.token"
+          id="twitch-token"
+            :aria-invalid="!!fieldErrors.token"
+            :aria-describedby="fieldErrors.token ? 'twitch-token-feedback' : undefined"
             class="text-input"
             placeholder="xxxxxxxxxxxxxx"
           />
@@ -106,16 +119,24 @@ const {
             <EyeOff v-else :size="18" />
           </button>
         </div>
+        <small v-if="fieldErrors.token" id="twitch-token-feedback" class="field-feedback field-error" role="alert">{{ fieldErrors.token }}</small>
       </div>
 
       <div class="setting-row">
-        <label>{{ t('twitch.channel') }}:</label>
+        <label for="twitch-channel">{{ t('twitch.channel') }}:</label>
         <input
           type="text"
           v-model="settings.channel"
+          id="twitch-channel"
+          :aria-invalid="!!fieldErrors.channel"
+          :aria-describedby="'twitch-channel-feedback'"
           class="text-input"
-          placeholder="your_channel"
+          :placeholder="t('twitch.channel_placeholder')"
         />
+        <div id="twitch-channel-feedback" class="field-feedback">
+          <small v-if="fieldErrors.channel" class="field-error" role="alert">{{ fieldErrors.channel }}</small>
+          <small>{{ t('twitch.channel_hint') }}</small>
+        </div>
       </div>
 
       <div class="setting-row button-row">
@@ -501,5 +522,52 @@ h2 {
   font-family: var(--font-mono);
   color: var(--color-info);
   border: 1px solid var(--info-border);
+}
+</style>
+
+<style scoped>
+.twitch-panel {
+  --twitch-error-text: var(--danger-text-bright);
+}
+
+:global([data-theme="light"]) .twitch-panel {
+  --twitch-error-text: #b91c1c;
+}
+
+.connection-error {
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--danger-border-strong);
+  border-radius: 8px;
+  background: var(--danger-bg-weak);
+  color: var(--twitch-error-text);
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.message-box.error {
+  background: var(--danger-bg-weak);
+  border-color: var(--danger-border-strong);
+  color: var(--twitch-error-text);
+}
+
+.field-feedback {
+  flex-basis: 100%;
+  padding-left: 82px;
+  color: var(--color-text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  overflow-wrap: anywhere;
+}
+
+.field-feedback small {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.field-error {
+  color: var(--twitch-error-text);
 }
 </style>

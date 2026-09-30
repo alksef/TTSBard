@@ -243,6 +243,9 @@ pub fn run() {
 
         tracing::subscriber::set_global_default(
             Registry::default()
+                .with(tracing_subscriber::filter::filter_fn(|metadata| {
+                    crate::secret_log::allow_log_target(metadata.target())
+                }))
                 .with(env_filter)
                 .with(fmt::layer().with_writer(std::io::stdout).with_ansi(true))
                 .with(fmt::layer().with_writer(non_blocking_file).with_ansi(false)),
@@ -279,6 +282,9 @@ pub fn run() {
 
         tracing::subscriber::set_global_default(
             Registry::default()
+                .with(tracing_subscriber::filter::filter_fn(|metadata| {
+                    crate::secret_log::allow_log_target(metadata.target())
+                }))
                 .with(env_filter)
                 .with(fmt::layer().with_writer(non_blocking_file).with_ansi(false)),
         )
@@ -289,6 +295,9 @@ pub fn run() {
         // Logging disabled: errors only to console (no guard needed for stdout)
         tracing::subscriber::set_global_default(
             Registry::default()
+                .with(tracing_subscriber::filter::filter_fn(|metadata| {
+                    crate::secret_log::allow_log_target(metadata.target())
+                }))
                 .with(EnvFilter::new("error"))
                 .with(fmt::layer().with_writer(std::io::stdout).with_ansi(true)),
         )

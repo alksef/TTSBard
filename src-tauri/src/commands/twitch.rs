@@ -6,6 +6,32 @@ use crate::twitch::{SendFailure, TwitchClient};
 use serde::Serialize;
 use tauri::{Manager, State};
 
+fn connection_command_error(code: &'static str) -> CommandError {
+    let stage = if code == "twitch.settings_save_failed" {
+        "settings_save"
+    } else {
+        "settings_validation"
+    };
+    tracing::error!(
+        error_code = code,
+        stage,
+        retryable = false,
+        "Twitch command rejected"
+    );
+    CommandError::new(code, code, false)
+}
+
+fn validate_connection_settings(settings: &TwitchSettings) -> Result<(), CommandError> {
+    settings.is_valid().map_err(|code| {
+        connection_command_error(match code.as_str() {
+            "twitch.invalid_username" => "twitch.invalid_username",
+            "twitch.invalid_channel" => "twitch.invalid_channel",
+            "twitch.missing_token" => "twitch.missing_token",
+            _ => "twitch.settings_save_failed",
+        })
+    })
+}
+
 /// Получить текущие настройки Twitch (включая токен)
 #[tauri::command]
 pub async fn get_twitch_settings(state: State<'_, AppState>) -> Result<TwitchSettings, String> {
@@ -19,25 +45,22 @@ pub async fn save_twitch_settings(
     settings: TwitchSettings,
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
-) -> Result<String, String> {
+) -> Result<String, CommandError> {
     tracing::info!(
         enabled = settings.enabled,
         start_on_boot = settings.start_on_boot,
-        channel = ?settings.channel,
         "Saving Twitch settings"
     );
 
     // Валидация
-    if let Err(e) = settings.is_valid() {
-        return Err(format!("Validation failed: {}", e));
-    }
+    validate_connection_settings(&settings)?;
 
     // Транзакционный подход: сначала сохраняем в файл, потом в память
     // Это предотвращает рассинхронизацию, если другой поток прочитает настройки между операциями
     // Получаем SettingsManager один раз
     let settings_manager = app_handle
         .try_state::<SettingsManager>()
-        .ok_or_else(|| "SettingsManager not available".to_string())?;
+        .ok_or_else(|| connection_command_error("twitch.settings_save_failed"))?;
 
     // Проверка изменений по persisted-конфигу, а не по runtime-состоянию:
     // команды connect/disconnect мутируют только runtime `enabled`, и сравнение
@@ -45,7 +68,7 @@ pub async fn save_twitch_settings(
     let old_settings = settings_manager
         .inner()
         .load()
-        .map_err(|e| format!("Failed to load settings: {}", e))?
+        .map_err(|_| connection_command_error("twitch.settings_save_failed"))?
         .twitch;
     let enabled_changed = old_settings.enabled != settings.enabled;
     let credentials_changed = old_settings.username != settings.username
@@ -56,7 +79,8 @@ pub async fn save_twitch_settings(
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_twitch_settings(&persisted_settings)
     })
-    .await?;
+    .await
+    .map_err(|_| connection_command_error("twitch.settings_save_failed"))?;
 
     // Только после успешного сохранения в файл обновляем AppState
     let mut s = state.twitch.settings.write().await;
@@ -76,16 +100,14 @@ pub async fn save_twitch_settings(
 
 /// Подключиться к Twitch
 #[tauri::command]
-pub async fn connect_twitch(state: State<'_, AppState>) -> Result<String, String> {
+pub async fn connect_twitch(state: State<'_, AppState>) -> Result<String, CommandError> {
     tracing::info!("Connect command received");
 
     // Получаем текущие настройки
     let settings = state.twitch.settings.read().await;
 
     // Валидация
-    if let Err(e) = settings.is_valid() {
-        return Err(format!("Settings invalid: {}", e));
-    }
+    validate_connection_settings(&settings)?;
     drop(settings);
 
     // Обновляем только runtime state (НЕ сохраняем в конфиг)
@@ -279,6 +301,21 @@ pub async fn deliver_twitch_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn connection_validation_exposes_field_code_and_is_not_retryable() {
+        let settings = TwitchSettings {
+            username: "user".into(),
+            token: "token".into(),
+            channel: "https://twitch.tv/channel".into(),
+            ..TwitchSettings::default()
+        };
+        let error = validate_connection_settings(&settings).unwrap_err();
+        assert_eq!(error.code, "twitch.invalid_channel");
+        assert!(!error.retryable);
+        let json = serde_json::to_value(error).unwrap();
+        assert_eq!(json["code"], "twitch.invalid_channel");
+    }
 
     #[test]
     fn deliver_command_name_matches_registered_function() {

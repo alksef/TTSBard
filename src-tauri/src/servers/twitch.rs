@@ -7,7 +7,9 @@ use crate::config::TwitchSettings as ConfigTwitchSettings;
 use crate::events::{TwitchConnectionStatus, TwitchEvent};
 use crate::ipc::{twitch_delivery, TwitchDeliveryFailure};
 use crate::state::AppState;
-use crate::twitch::{SendFailure, TwitchClient, TwitchStatus, OUTGOING_QUEUE_CAPACITY};
+use crate::twitch::{
+    SendFailure, TwitchClient, TwitchStartError, TwitchStatus, OUTGOING_QUEUE_CAPACITY,
+};
 use std::future::Future;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
@@ -158,7 +160,7 @@ fn log_send_failure(failure: &SendFailure) {
 
 struct PendingAttempt {
     client: TwitchClient,
-    handle: JoinHandle<Result<(), String>>,
+    handle: JoinHandle<Result<(), TwitchStartError>>,
     generation: u64,
     settings: ConfigTwitchSettings,
 }
@@ -191,7 +193,7 @@ fn spawn_attempt<F, Fut>(
     start_attempt: &mut F,
 ) where
     F: FnMut(TwitchClient) -> Fut,
-    Fut: Future<Output = Result<(), String>> + Send + 'static,
+    Fut: Future<Output = Result<(), TwitchStartError>> + Send + 'static,
 {
     *generation = generation.saturating_add(1);
     let handle = tokio::spawn(start_attempt(client.clone()));
@@ -228,8 +230,7 @@ pub async fn run_twitch_client(
         }
     };
 
-    let start_attempt =
-        |client: TwitchClient| async move { client.start().await.map_err(|e| e.to_string()) };
+    let start_attempt = |client: TwitchClient| async move { client.start().await };
 
     run_twitch_client_core(
         app_state,
@@ -251,7 +252,7 @@ async fn run_twitch_client_core<F, Fut>(
     report_delivery_failure: impl Fn(&TwitchDeliveryFailure) + Clone + Send + 'static,
 ) where
     F: FnMut(TwitchClient) -> Fut,
-    Fut: Future<Output = Result<(), String>> + Send + 'static,
+    Fut: Future<Output = Result<(), TwitchStartError>> + Send + 'static,
 {
     let mut twitch_client: Option<TwitchClient> = None;
     let mut last_status = TwitchConnectionStatus::Disconnected;
@@ -341,7 +342,7 @@ async fn run_twitch_client_core<F, Fut>(
                         update_status(new_status.clone());
                     }
                 } else if retry_deadline.is_none()
-                    && last_status != TwitchConnectionStatus::Disconnected
+                    && !matches!(last_status, TwitchConnectionStatus::Disconnected | TwitchConnectionStatus::Error(_))
                 {
                     last_status = TwitchConnectionStatus::Disconnected;
                     update_status(last_status.clone());
@@ -423,7 +424,9 @@ async fn run_twitch_client_core<F, Fut>(
                                             &mut start_attempt,
                                         );
                                     } else {
-                                        debug!("Settings invalid, not starting client");
+                                        let error = settings_clone.is_valid().err().unwrap_or_else(|| "Invalid Twitch settings".to_string());
+                                        last_status = TwitchConnectionStatus::Error(error);
+                                        update_status(last_status.clone());
                                     }
                                 } else {
                                     debug!("Twitch disabled, not starting client");
@@ -568,9 +571,19 @@ async fn run_twitch_client_core<F, Fut>(
                     Ok(result) => result,
                     Err(join_err) => {
                         error!(error = %join_err, "Twitch startup attempt task failed");
-                        Err(join_err.to_string())
+                        Err(TwitchStartError::Transient(join_err.to_string()))
                     }
                 };
+
+                if result.is_err() {
+                    let settings = app_state.twitch.settings.read().await;
+                    let still_wanted = connection_settings_match(&settings, &attempt.settings);
+                    drop(settings);
+                    if !still_wanted {
+                        discard_attempt(attempt).await;
+                        continue;
+                    }
+                }
 
                 match result {
                     Ok(()) => {
@@ -582,7 +595,7 @@ async fn run_twitch_client_core<F, Fut>(
                         drop(settings);
 
                         if settings_still_match {
-                            info!("Twitch client started");
+                            info!(stage = "runtime_ready", "Twitch runtime ready; awaiting confirmed JOIN");
                             *app_state.twitch.client.write().await = Some(attempt.client.clone());
                             twitch_client = Some(attempt.client);
                         } else {
@@ -590,8 +603,16 @@ async fn run_twitch_client_core<F, Fut>(
                             discard_attempt(attempt).await;
                         }
                     }
-                    Err(e) => {
-                        error!(error = %e, "Twitch reconnect attempt failed");
+                    Err(TwitchStartError::Permanent(e)) => {
+                        error!(error_code = %e, stage = "startup", retryable = false, "Twitch startup stopped");
+                        attempt.client.stop().await;
+                        retry_deadline = None;
+                        retry_attempt = 0;
+                        last_status = TwitchConnectionStatus::Error(e);
+                        update_status(last_status.clone());
+                    }
+                    Err(TwitchStartError::Transient(e)) => {
+                        error!(error_code = "twitch.startup_transport_failed", stage = "startup", retryable = true, error = %e, "Twitch reconnect attempt failed");
                         let delay = schedule_retry(&mut retry_deadline, &mut retry_attempt);
                         info!(
                             ?delay,
@@ -617,7 +638,7 @@ mod tests {
     use crate::events::{TwitchConnectionStatus, TwitchEvent};
     use crate::ipc::TwitchDeliveryFailure;
     use crate::state::AppState;
-    use crate::twitch::{SendFailure, TwitchClient, TwitchStatus};
+    use crate::twitch::{SendFailure, TwitchClient, TwitchStartError, TwitchStatus};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
@@ -663,6 +684,94 @@ mod tests {
         tokio::task::spawn_blocking(move || drop(state))
             .await
             .expect("drop AppState on a blocking thread");
+    }
+
+    #[tokio::test]
+    async fn permanent_start_failure_remains_error_without_retry() {
+        let state = AppState::new();
+        set_settings(&state, valid_settings()).await;
+        let (event_tx, _) = broadcast::channel::<TwitchEvent>(16);
+        let statuses = Arc::new(Mutex::new(Vec::new()));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let shutdown = CancellationToken::new();
+        let factory = {
+            let calls = Arc::clone(&calls);
+            move |_client: TwitchClient| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                async { Err(TwitchStartError::Permanent("Invalid channel".into())) }
+            }
+        };
+        let report = {
+            let statuses = Arc::clone(&statuses);
+            move |status| statuses.lock().unwrap().push(status)
+        };
+        let core = tokio::spawn(run_twitch_client_core(
+            state.clone(),
+            event_tx.subscribe(),
+            shutdown.clone(),
+            report,
+            factory,
+            no_delivery_failure,
+        ));
+        event_tx.send(TwitchEvent::Restart).unwrap();
+        wait_until(|| {
+            matches!(
+                statuses.lock().unwrap().last(),
+                Some(TwitchConnectionStatus::Error(_))
+            )
+        })
+        .await;
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        for _ in 0..100 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(matches!(
+            statuses.lock().unwrap().last(),
+            Some(TwitchConnectionStatus::Error(_))
+        ));
+        shutdown.cancel();
+        core.await.unwrap();
+        drop_state(state).await;
+    }
+
+    #[tokio::test]
+    async fn transient_start_failure_retries() {
+        let state = AppState::new();
+        set_settings(&state, valid_settings()).await;
+        let (event_tx, _) = broadcast::channel::<TwitchEvent>(16);
+        let statuses = Arc::new(Mutex::new(Vec::new()));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let shutdown = CancellationToken::new();
+        let factory = {
+            let calls = Arc::clone(&calls);
+            move |_client: TwitchClient| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                async { Err(TwitchStartError::Transient("Connection reset".into())) }
+            }
+        };
+        let report = {
+            let statuses = Arc::clone(&statuses);
+            move |status| statuses.lock().unwrap().push(status)
+        };
+        let core = tokio::spawn(run_twitch_client_core(
+            state.clone(),
+            event_tx.subscribe(),
+            shutdown.clone(),
+            report,
+            factory,
+            no_delivery_failure,
+        ));
+        event_tx.send(TwitchEvent::Restart).unwrap();
+        wait_until(|| calls.load(Ordering::SeqCst) == 1).await;
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        for _ in 0..100 {
+            tokio::task::yield_now().await;
+        }
+        assert!(calls.load(Ordering::SeqCst) >= 2);
+        shutdown.cancel();
+        core.await.unwrap();
+        drop_state(state).await;
     }
 
     #[tokio::test]
@@ -753,7 +862,7 @@ mod tests {
             let calls = Arc::clone(&calls);
             move |_client: TwitchClient| {
                 calls.fetch_add(1, Ordering::SeqCst);
-                std::future::pending::<Result<(), String>>()
+                std::future::pending::<Result<(), TwitchStartError>>()
             }
         };
 
