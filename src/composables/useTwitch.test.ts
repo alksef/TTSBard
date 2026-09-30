@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest'
-import { shallowRef } from 'vue'
+import { nextTick, shallowRef } from 'vue'
 import type { TwitchSettings } from './useTwitch'
 
 vi.stubGlobal('window', globalThis)
@@ -476,7 +476,7 @@ describe('useTwitch test message delivery', () => {
   })
 })
 
-describe('useTwitch send_original_text save rollback', () => {
+describe('useTwitch checkbox section saves', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     capturedOnMountedCbs = []
@@ -502,12 +502,42 @@ describe('useTwitch send_original_text save rollback', () => {
     return saves
   }
 
+  /** Payload попадает в persisted только в момент успешного resolve. */
+  function queuePersistingSaveCalls() {
+    const persisted: TwitchSettings = {
+      enabled: true,
+      username: 'user',
+      token: 'token',
+      channel: 'channel',
+      start_on_boot: false,
+      send_original_text: true,
+    }
+    const payloads: TwitchSettings[] = []
+    const saves: SaveDeferred[] = []
+    mockInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === 'get_twitch_status') return Promise.resolve({ Disconnected: null })
+      if (cmd === 'save_twitch_settings') {
+        const payload = { ...(args as { settings: TwitchSettings }).settings }
+        payloads.push(payload)
+        return new Promise<string>((resolve, reject) => {
+          saves.push({
+            resolve: (value: string) => { Object.assign(persisted, payload); resolve(value) },
+            reject,
+          })
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+    return { persisted, payloads, saves }
+  }
+
   it('advances the persisted baseline on a successful save', async () => {
     const twitch = await setupAndMount()
     const saves = queueSaveCalls()
 
     twitch.settings.value.send_original_text = false
     const first = twitch.saveSendOriginalText()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
     saves[0].resolve('saved')
     await first
 
@@ -543,40 +573,134 @@ describe('useTwitch send_original_text save rollback', () => {
     expect(twitch.connectionError.value).not.toContain('Twitch is not connected')
   })
 
-  it('ignores a stale failure that settles after a newer request', async () => {
+  it('coalesces an overlapping toggle into one follow-up write with the latest value', async () => {
     const twitch = await setupAndMount()
-    const saves = queueSaveCalls()
+    const { payloads, saves } = queuePersistingSaveCalls()
 
     twitch.settings.value.send_original_text = false
     const first = twitch.saveSendOriginalText()
-    twitch.settings.value.send_original_text = true
-    const second = twitch.saveSendOriginalText()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
 
+    // Второй клик во время записи не создаёт параллельную полную запись:
+    // drain прочитает новое значение после первого persist.
+    twitch.settings.value.send_original_text = true
+    await twitch.saveStartOnBoot()
+    expect(saves).toHaveLength(1)
+
+    saves[0].resolve('saved')
+    await vi.waitFor(() => expect(saves).toHaveLength(2))
     saves[1].resolve('saved')
-    await second
-    saves[0].reject({ code: 'twitch.unavailable', message: 'stale failure', retryable: true })
     await first
 
+    expect(payloads.map((payload) => payload.send_original_text)).toEqual([false, true])
     expect(twitch.settings.value.send_original_text).toBe(true)
     expect(twitch.errorMessage.value).toBeNull()
   })
 
-  it('does not let a stale success advance the baseline used for a later rollback', async () => {
+  it('does not lose a neighbour field edited while a checkbox save is in flight', async () => {
     const twitch = await setupAndMount()
-    const saves = queueSaveCalls()
+    const { persisted, payloads, saves } = queuePersistingSaveCalls()
 
     twitch.settings.value.send_original_text = false
     const first = twitch.saveSendOriginalText()
-    twitch.settings.value.send_original_text = true
-    const second = twitch.saveSendOriginalText()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+
+    twitch.settings.value.username = 'renamed'
+    twitch.settings.value.start_on_boot = true
+    await twitch.saveStartOnBoot()
 
     saves[0].resolve('saved')
+    await vi.waitFor(() => expect(saves).toHaveLength(2))
+    saves[1].resolve('saved')
     await first
-    saves[1].reject({ code: 'twitch.unavailable', message: 'latest failure', retryable: true })
-    await second
 
-    expect(twitch.settings.value.send_original_text).toBe(true)
+    // Последняя запись несёт актуальный полный snapshot: соседнее поле не
+    // затирается устаревшим значением.
+    expect(payloads).toHaveLength(2)
+    expect(persisted).toMatchObject({
+      username: 'renamed',
+      start_on_boot: true,
+      send_original_text: false,
+    })
+    expect(twitch.settings.value).toMatchObject({
+      username: 'renamed',
+      start_on_boot: true,
+      send_original_text: false,
+    })
+  })
+
+  it('rolls back to the last persisted checkboxes when a follow-up write fails', async () => {
+    const twitch = await setupAndMount()
+    const { persisted, saves } = queuePersistingSaveCalls()
+
+    twitch.settings.value.send_original_text = false
+    const first = twitch.saveSendOriginalText()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+
+    twitch.settings.value.start_on_boot = true
+    await twitch.saveStartOnBoot()
+
+    saves[0].resolve('saved')
+    await vi.waitFor(() => expect(saves).toHaveLength(2))
+    saves[1].reject({ code: 'twitch.unavailable', message: 'later failure', retryable: true })
+    await first
+
+    // Успел сохраниться только первый payload: UI показывает именно его.
+    expect(persisted).toMatchObject({ start_on_boot: false, send_original_text: false })
+    expect(twitch.settings.value).toMatchObject({ start_on_boot: false, send_original_text: false })
     expect(twitch.connectionError.value).toBe('Ошибка подключения к Twitch')
+  })
+
+  it('serializes a Save-button write behind a pending checkbox write', async () => {
+    const twitch = await setupAndMount()
+    const { persisted, saves } = queuePersistingSaveCalls()
+
+    twitch.settings.value.send_original_text = false
+    const checkbox = twitch.saveSendOriginalText()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+
+    twitch.settings.value.username = 'renamed'
+    const button = twitch.save()
+    await Promise.resolve()
+    expect(saves).toHaveLength(1)
+
+    saves[0].resolve('saved')
+    await vi.waitFor(() => expect(saves).toHaveLength(2))
+    saves[1].resolve('saved')
+    await Promise.all([checkbox, button])
+
+    expect(persisted).toMatchObject({ username: 'renamed', send_original_text: false })
+    expect(twitch.settings.value.username).toBe('renamed')
+    expect(twitch.errorMessage.value).toBe('Настройки сохранены.')
+  })
+
+  it('ignores a persisted echo that arrives while the checkbox write is in flight', async () => {
+    const twitch = await setupAndMount()
+    const { saves } = queuePersistingSaveCalls()
+
+    twitch.settings.value.send_original_text = false
+    const pending = twitch.saveSendOriginalText()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+
+    // settings-changed доносит ещё не обновлённый persisted-снимок.
+    mockTwitchSettingsRef.value = {
+      enabled: true,
+      username: 'user',
+      token: 'token',
+      channel: 'channel',
+      start_on_boot: false,
+      send_original_text: true,
+    }
+    await nextTick()
+
+    expect(twitch.settings.value.send_original_text).toBe(false)
+
+    saves[0].resolve('saved')
+    await pending
+
+    // Эхо не воскресило старое значение и не вызвало лишнюю запись.
+    expect(saves).toHaveLength(1)
+    expect(twitch.settings.value.send_original_text).toBe(false)
   })
 
   it('suppresses a stale rollback and toast after unmount', async () => {
@@ -585,6 +709,7 @@ describe('useTwitch send_original_text save rollback', () => {
 
     twitch.settings.value.send_original_text = false
     const pending = twitch.saveSendOriginalText()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
 
     const onUnmounted = capturedOnUnmountedCbs.shift()
     if (onUnmounted) onUnmounted()

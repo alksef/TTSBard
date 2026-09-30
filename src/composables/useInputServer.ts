@@ -43,9 +43,17 @@ export function convertInputServerStatusFromRust(raw: unknown): InputServerStatu
   return { state: 'stopped' }
 }
 
+function inputServerSettingsEqual(
+  a: InputServerSettings,
+  b: InputServerSettings,
+): boolean {
+  return a.start_on_boot === b.start_on_boot && a.port === b.port
+}
+
 export function useInputServer() {
   const settings = ref<InputServerSettings>({ ...DEFAULT_SETTINGS })
   let confirmedSettings: InputServerSettings = { ...DEFAULT_SETTINGS }
+  let settingsLoadToken = 0
   const status = ref<InputServerStatus>({ state: 'stopped' })
   const loading = ref(false)
   const message = ref<string | null>(null)
@@ -108,13 +116,21 @@ export function useInputServer() {
   }
 
   async function refreshSettings(): Promise<void> {
+    settingsLoadToken += 1
+    const token = settingsLoadToken
     try {
       const next = await invoke<InputServerSettings>('get_input_server_settings')
-      if (disposed) return
+      // Older overlapping snapshots and snapshots started before the last
+      // persist must not overwrite a newer state.
+      if (disposed || token !== settingsLoadToken) return
+      // A snapshot is applied only while the form holds no unconfirmed edit:
+      // a late echo of an earlier save must not replace an edit the user made
+      // after that save was submitted.
+      if (!inputServerSettingsEqual(settings.value, confirmedSettings)) return
       settings.value = next
       confirmedSettings = { ...next }
     } catch (e) {
-      if (disposed) return
+      if (disposed || token !== settingsLoadToken) return
       debugError('[InputServer] Failed to refresh settings:', e)
     }
   }
@@ -135,11 +151,29 @@ export function useInputServer() {
       showMessage(t('input_server.port_error'), 'error')
       return
     }
+    // A concurrent call while a save is in flight is not dropped: the drain
+    // loop below re-reads `settings.value` after every persisted snapshot, so
+    // the latest edit is always persisted once per iteration.
+    if (loading.value) return
     loading.value = true
     try {
-      await invoke('save_input_server_settings', { settings: settings.value })
-      if (disposed) return
-      confirmedSettings = { ...settings.value }
+      // The request payload is fixed before the await: the confirmation below
+      // reports what was actually sent, never the then-current editable value.
+      let payload = { ...settings.value }
+      while (true) {
+        await invoke('save_input_server_settings', { settings: payload })
+        if (disposed) return
+        // This persist owns the state: a refresh started earlier reflects an
+        // older value and must not roll the form back to it.
+        settingsLoadToken += 1
+        confirmedSettings = { ...payload }
+        if (inputServerSettingsEqual(settings.value, payload)) break
+        // An edit made during the await is persisted by the next iteration, but
+        // an invalid intermediate value is never sent: it stays in the field
+        // with the validation hint instead of being replaced by a rollback.
+        if (!isPortValid.value) break
+        payload = { ...settings.value }
+      }
       showMessage(t('input_server.saved'), 'success')
     } catch (e) {
       if (disposed) return
@@ -147,7 +181,11 @@ export function useInputServer() {
       const errorMessage = e instanceof Error ? e.message : String(e)
       showMessage(t('input_server.error.save', { detail: errorMessage }), 'error')
     } finally {
-      if (!disposed) loading.value = false
+      if (!disposed) {
+        // The drain is over; snapshots started before it are stale by now.
+        settingsLoadToken += 1
+        loading.value = false
+      }
     }
   }
 

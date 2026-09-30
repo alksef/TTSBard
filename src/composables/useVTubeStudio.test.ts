@@ -492,6 +492,161 @@ describe('useVTubeStudio', () => {
     })
   })
 
+  describe('sequential persistence', () => {
+    interface QueuedSave {
+      payload: { enabled: boolean; port: number; startOnBoot: boolean }
+      resolve: (value: string) => void
+      reject: (reason?: unknown) => void
+    }
+
+    /** Payload попадает в persisted только в момент успешного resolve. */
+    function queuePersistCalls(initial: Partial<VTubeStudioSettings> = {}) {
+      const persisted = { enabled: false, port: 8001, start_on_boot: false, ...initial }
+      const saves: QueuedSave[] = []
+      mockInvoke.mockImplementation((cmd: string, args?: unknown) => {
+        if (cmd === 'save_vtube_studio_settings') {
+          const payload = { ...(args as QueuedSave['payload']) }
+          return new Promise<string>((resolve, reject) => {
+            saves.push({
+              payload,
+              resolve: (value: string) => {
+                persisted.enabled = payload.enabled
+                persisted.port = payload.port
+                persisted.start_on_boot = payload.startOnBoot
+                resolve(value)
+              },
+              reject,
+            })
+          })
+        }
+        if (cmd === 'connect_vtube_studio') return Promise.resolve('Подключено к VTube Studio')
+        return Promise.resolve(undefined)
+      })
+      return { persisted, saves }
+    }
+
+    it('does not create a parallel write for a checkbox toggled during save()', async () => {
+      const { settings, save, saveStartOnBoot } = await setupAndMount({ enabled: true, port: 8001, start_on_boot: false })
+      const { persisted, saves } = queuePersistCalls({ enabled: true, port: 8001, start_on_boot: false })
+
+      const button = save()
+      await vi.waitFor(() => expect(saves).toHaveLength(1))
+      expect(saves[0].payload.startOnBoot).toBe(false)
+
+      settings.value.start_on_boot = true
+      const checkbox = saveStartOnBoot()
+      // Пока запись Save не завершена, второй IPC не начинается.
+      expect(saves).toHaveLength(1)
+
+      saves[0].resolve('saved')
+      await vi.waitFor(() => expect(saves).toHaveLength(2))
+      expect(saves[1].payload.startOnBoot).toBe(true)
+      saves[1].resolve('saved')
+      await Promise.all([button, checkbox])
+
+      expect(persisted.start_on_boot).toBe(true)
+      expect(settings.value.start_on_boot).toBe(true)
+    })
+
+    it('keeps port and enabled edited during a checkbox save', async () => {
+      const { settings, saveStartOnBoot } = await setupAndMount({ enabled: false, port: 8001, start_on_boot: false })
+      const { persisted, saves } = queuePersistCalls({ enabled: false, port: 8001, start_on_boot: false })
+
+      settings.value.start_on_boot = true
+      const checkbox = saveStartOnBoot()
+      await vi.waitFor(() => expect(saves).toHaveLength(1))
+
+      settings.value.port = 9001
+      settings.value.enabled = true
+
+      saves[0].resolve('saved')
+      await vi.waitFor(() => expect(saves).toHaveLength(2))
+      expect(saves[1].payload).toMatchObject({ enabled: true, port: 9001, startOnBoot: true })
+      saves[1].resolve('saved')
+      await checkbox
+
+      expect(persisted).toMatchObject({ enabled: true, port: 9001, start_on_boot: true })
+      expect(settings.value).toMatchObject({ enabled: true, port: 9001, start_on_boot: true })
+    })
+
+    it('rolls the checkbox back to the persisted value and shows the localized error', async () => {
+      const { settings, saveStartOnBoot, errorMessage } = await setupAndMount({ enabled: true, port: 8001, start_on_boot: false })
+      const { saves } = queuePersistCalls({ enabled: true, port: 8001, start_on_boot: false })
+
+      settings.value.start_on_boot = true
+      const checkbox = saveStartOnBoot()
+      await vi.waitFor(() => expect(saves).toHaveLength(1))
+
+      saves[0].reject('backend down')
+      await checkbox
+
+      expect(settings.value.start_on_boot).toBe(false)
+      expect(errorMessage.value).toBe('Не удалось сохранить настройки VTube Studio')
+    })
+
+    it('does not roll back or report a stale completion after a newer operation', async () => {
+      const { settings, saveStartOnBoot, startVTubeStudio, errorMessage } =
+        await setupAndMount({ enabled: true, port: 8001, start_on_boot: false }, 'Disconnected')
+      const { persisted, saves } = queuePersistCalls({ enabled: true, port: 8001, start_on_boot: false })
+
+      settings.value.start_on_boot = true
+      const checkbox = saveStartOnBoot()
+      await vi.waitFor(() => expect(saves).toHaveLength(1))
+
+      // Новая операция начинается, пока запись checkbox в полёте.
+      await startVTubeStudio()
+      expect(errorMessage.value).toBe('Подключено к VTube Studio')
+
+      saves[0].reject('backend down')
+      await checkbox
+
+      // UI принадлежит более новой операции: старый completion не откатывает
+      // состояние и не перекрывает её сообщение.
+      expect(persisted.start_on_boot).toBe(false)
+      expect(settings.value.start_on_boot).toBe(true)
+      expect(errorMessage.value).toBe('Подключено к VTube Studio')
+    })
+
+    it('reports the failure for the save() that joined a running checkbox write', async () => {
+      const { settings, save, saveStartOnBoot, errorMessage } = await setupAndMount({ enabled: true, port: 8001, start_on_boot: false })
+      const { persisted, saves } = queuePersistCalls({ enabled: true, port: 8001, start_on_boot: false })
+
+      settings.value.start_on_boot = true
+      const checkbox = saveStartOnBoot()
+      await vi.waitFor(() => expect(saves).toHaveLength(1))
+
+      // Save присоединяется к идущему drain: новой параллельной записи нет.
+      const button = save()
+      await flushMicrotasks()
+      expect(saves).toHaveLength(1)
+
+      saves[0].reject('backend down')
+      await Promise.all([checkbox, button])
+
+      // Ранняя checkbox-запись stale (Save начал новую операцию), поэтому
+      // откат и сообщение принадлежат именно Save.
+      expect(persisted.start_on_boot).toBe(false)
+      expect(settings.value.start_on_boot).toBe(false)
+      expect(errorMessage.value).toBe('Не удалось сохранить настройки VTube Studio')
+    })
+
+    it('does not publish a late rollback or toast after unmount', async () => {
+      const { settings, saveStartOnBoot, errorMessage } = await setupAndMount({ enabled: true, port: 8001, start_on_boot: false })
+      const { saves } = queuePersistCalls({ enabled: true, port: 8001, start_on_boot: false })
+
+      settings.value.start_on_boot = true
+      const checkbox = saveStartOnBoot()
+      await vi.waitFor(() => expect(saves).toHaveLength(1))
+
+      capturedOnUnmountedCb?.()
+      saves[0].reject('after unmount')
+      await checkbox
+
+      expect(settings.value.start_on_boot).toBe(true)
+      expect(errorMessage.value).toBeNull()
+    })
+  })
+
   describe('testTypingParameter', () => {
     it('calls test_vtube_studio_typing with default refs (800, 1)', async () => {
       const { testTypingParameter, currentStatus } = await setupAndMount(undefined, 'Connected')

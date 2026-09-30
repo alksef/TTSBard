@@ -108,8 +108,41 @@ export function useTwitch() {
   const isSendingTest = ref(false)
 
   let testSendRequest = 0
-  let sendOriginalTextRequest = 0
-  let sendOriginalTextBaseline = settings.value.send_original_text
+
+  // Every full-section write goes through one FIFO chain, so an older snapshot
+  // can never land after a newer one regardless of which control wrote it.
+  let sectionWriteTail: Promise<unknown> | null = null
+
+  // Checkbox writes share one drain: only one of them is in flight, and the
+  // next payload is read after the previous persist, so a rapid toggle cannot
+  // persist an older full snapshot than the one the UI already shows.
+  let checkboxSavePending = false
+  let persistedCheckboxes = {
+    start_on_boot: settings.value.start_on_boot,
+    send_original_text: settings.value.send_original_text,
+  }
+
+  function persistTwitchSettings(payload: TwitchSettings): Promise<string> {
+    const previous = sectionWriteTail
+    // An idle queue writes immediately; only a busy one defers the next write.
+    const write = previous
+      ? previous.then(() => invoke<string>('save_twitch_settings', { settings: payload }))
+      : invoke<string>('save_twitch_settings', { settings: payload })
+    const tail = write.then(
+      () => undefined,
+      () => undefined,
+    )
+    sectionWriteTail = tail
+    void tail.then(() => {
+      if (sectionWriteTail === tail) sectionWriteTail = null
+    })
+    return write
+  }
+
+  function checkboxFieldsEqual(a: TwitchSettings, b: TwitchSettings): boolean {
+    return a.start_on_boot === b.start_on_boot
+      && a.send_original_text === b.send_original_text
+  }
 
   const connectionErrorCode = ref<string | null>(null)
   const connectionError = computed(() => connectionErrorCode.value
@@ -203,7 +236,7 @@ export function useTwitch() {
     const request = ++settingsRequest
     const snapshot = { ...settings.value }
     try {
-      const result = await invoke<string>('save_twitch_settings', { settings: snapshot })
+      const result = await persistTwitchSettings(snapshot)
       if (listenerScope.disposed || request !== settingsRequest) return
       showActionResult(result, 'success')
     } catch (error) {
@@ -237,31 +270,51 @@ export function useTwitch() {
     }
   }
 
-  async function saveStartOnBoot() {
-    const revision = settingsRequest
+  /**
+   * Persist the checkbox fields of the section through one serialized drain.
+   *
+   * A call made while a write is in flight is not dropped: the loop re-reads
+   * `settings.value` after every persisted snapshot, so the latest toggle is
+   * written next and the last write always carries the newest full section.
+   * The payload is fixed before each await, so the persisted baseline updated
+   * below is what the backend actually stored, never a later editable value.
+   */
+  async function saveCheckboxFields(): Promise<void> {
+    if (checkboxSavePending) return
+    checkboxSavePending = true
     try {
-      await invoke('save_twitch_settings', { settings: settings.value })
-    } catch (e) {
-      if (listenerScope.disposed || revision !== settingsRequest) return
-      handleSettingsFailure(e)
+      let payload = { ...settings.value }
+      while (true) {
+        try {
+          await persistTwitchSettings(payload)
+        } catch (e) {
+          if (listenerScope.disposed) return
+          // Nothing from this payload was stored: the checkboxes must show the
+          // last persisted values instead of the rejected edit.
+          settings.value.start_on_boot = persistedCheckboxes.start_on_boot
+          settings.value.send_original_text = persistedCheckboxes.send_original_text
+          handleSettingsFailure(e)
+          return
+        }
+        if (listenerScope.disposed) return
+        persistedCheckboxes = {
+          start_on_boot: payload.start_on_boot,
+          send_original_text: payload.send_original_text,
+        }
+        if (checkboxFieldsEqual(settings.value, payload)) break
+        payload = { ...settings.value }
+      }
+    } finally {
+      checkboxSavePending = false
     }
   }
 
-  async function saveSendOriginalText() {
-    const request = ++sendOriginalTextRequest
-    const revision = settingsRequest
-    const value = settings.value.send_original_text
-    const settingsSnapshot = { ...settings.value }
-    try {
-      await invoke('save_twitch_settings', { settings: settingsSnapshot })
-      if (request !== sendOriginalTextRequest) return
-      sendOriginalTextBaseline = value
-    } catch (e) {
-      if (listenerScope.disposed || request !== sendOriginalTextRequest || revision !== settingsRequest) return
-      debugError('[Twitch] Failed to save send_original_text:', e)
-      settings.value.send_original_text = sendOriginalTextBaseline
-      handleSettingsFailure(e)
-    }
+  async function saveStartOnBoot(): Promise<void> {
+    await saveCheckboxFields()
+  }
+
+  async function saveSendOriginalText(): Promise<void> {
+    await saveCheckboxFields()
   }
 
   async function sendTestMessage() {
@@ -301,6 +354,10 @@ export function useTwitch() {
 
   watch(twitchSettingsFromComposable, (newSettings) => {
     if (!newSettings) return
+    // While a checkbox drain is in flight it owns the checkbox fields: applying
+    // the (possibly stale) persisted echo here would resurrect the value the
+    // drain is replacing and make the drain write that value back.
+    if (checkboxSavePending) return
     debugLog('[TwitchPanel] Settings updated from composable, has_token:', !!newSettings.token, 'channel:', newSettings.channel)
     settings.value = {
       enabled: newSettings.enabled,
@@ -310,14 +367,16 @@ export function useTwitch() {
       start_on_boot: newSettings.start_on_boot,
       send_original_text: newSettings.send_original_text,
     }
-    sendOriginalTextBaseline = newSettings.send_original_text
+    persistedCheckboxes = {
+      start_on_boot: newSettings.start_on_boot,
+      send_original_text: newSettings.send_original_text,
+    }
   }, { immediate: true })
 
   onUnmounted(() => {
-    // Панель демонтирована: отправка в полёте не должна писать в state.
+    // Панель демонтирована: отправка и сохранения в полёте не должны писать в state.
     testSendRequest++
     settingsRequest++
-    sendOriginalTextRequest++
     listenerScope.dispose()
     if (errorTimeout !== null) {
       clearTimeout(errorTimeout)

@@ -33,6 +33,42 @@ const WEBVIEW_ACTION_KEYS: Record<string, string> = {
   reloaded: 'webview.action.reloaded',
 }
 
+const WEBVIEW_SETTINGS_FIELDS: Array<keyof WebViewSettings> = [
+  'enabled',
+  'start_on_boot',
+  'send_original_text',
+  'port',
+  'bind_address',
+  'access_token',
+  'upnp_enabled',
+]
+
+/** Что логировать и какую локализованную ошибку показать при сбое записи. */
+interface PersistContext {
+  logLabel: string
+  errorKey: string
+}
+
+interface PersistOutcome {
+  ok: boolean
+  result: string | null
+}
+
+const PERSIST_CONTEXT: Record<'settings' | 'serverSettings' | 'startOnBoot' | 'sendOriginalText', PersistContext> = {
+  settings: { logLabel: 'settings', errorKey: 'webview.error.save_settings' },
+  serverSettings: { logLabel: 'server settings', errorKey: 'webview.error.save_server_settings' },
+  startOnBoot: { logLabel: 'start_on_boot', errorKey: 'webview.error.save_settings' },
+  sendOriginalText: { logLabel: 'send_original_text', errorKey: 'webview.error.save_settings' },
+}
+
+function copySettingsField<K extends keyof WebViewSettings>(
+  target: WebViewSettings,
+  source: WebViewSettings,
+  field: K,
+): void {
+  target[field] = source[field]
+}
+
 export function useWebView() {
   const webviewSettingsFromComposable = useWebViewSettings()
 
@@ -56,9 +92,35 @@ export function useWebView() {
 
   let errorTimeout: number | null = null
   let displayUrlRequest = 0
-  let sendOriginalTextRequest = 0
-  let sendOriginalTextBaseline = settings.value.send_original_text
   const listenerScope = createAsyncCleanupScope()
+
+  function settingsSnapshot(): WebViewSettings {
+    const current = settings.value
+    return {
+      enabled: current.enabled,
+      start_on_boot: current.start_on_boot,
+      send_original_text: current.send_original_text,
+      port: current.port,
+      bind_address: current.bind_address,
+      access_token: current.access_token,
+      upnp_enabled: current.upnp_enabled,
+    }
+  }
+
+  function settingsEqual(a: WebViewSettings, b: WebViewSettings): boolean {
+    return WEBVIEW_SETTINGS_FIELDS.every((field) => a[field] === b[field])
+  }
+
+  // Baseline: последний snapshot, который backend подтвердил. Из него берётся
+  // rollback, и по нему несохранённая правка отличается от persisted значения.
+  let persistedSettings: WebViewSettings = settingsSnapshot()
+
+  // Полные записи идут через одну FIFO-очередь и один drain: одновременно в
+  // полёте не более одной `save_webview_settings`, а draft перечитывается после
+  // каждого persist. Запись, начатая раньше, не может завершиться после более
+  // новой и вернуть старое значение.
+  let persistTail: Promise<unknown> | null = null
+  let persistDrain: Promise<PersistOutcome> | null = null
 
   async function updateDisplayUrl() {
     const request = ++displayUrlRequest
@@ -126,70 +188,135 @@ export function useWebView() {
     showError(t(key ?? 'webview.action.saved'), type)
   }
 
-  async function save() {
-    try {
-      debugLog('[WebView] Saving settings:', { enabled: settings.value.enabled, port: settings.value.port, bind_address: settings.value.bind_address, has_token: !!settings.value.access_token, upnp_enabled: settings.value.upnp_enabled, start_on_boot: settings.value.start_on_boot })
-      const result = await invoke<string>('save_webview_settings', { settings: settings.value })
-      debugLog('[WebView] Save result:', result)
-      showActionResult(result, 'success')
-    } catch (e) {
-      debugError('[WebView] Save failed:', e)
-      showError(presentCommandError(e, t('webview.error.save_settings')))
+  function persistWebViewSettings(payload: WebViewSettings): Promise<string> {
+    const previous = persistTail
+    // Свободная очередь пишет сразу, занятая — откладывает следующую запись.
+    const write = previous
+      ? previous.then(() => invoke<string>('save_webview_settings', { settings: payload }))
+      : invoke<string>('save_webview_settings', { settings: payload })
+    const tail = write.then(
+      () => undefined,
+      () => undefined,
+    )
+    persistTail = tail
+    void tail.then(() => {
+      if (persistTail === tail) persistTail = null
+    })
+    return write
+  }
+
+  function restorePersistedSettings(): void {
+    settings.value = { ...persistedSettings }
+  }
+
+  /**
+   * Записать draft целиком через последовательного owner'а. Вызов, пришедший
+   * во время идущего drain, присоединяется к нему: параллельной записи не
+   * появляется, а более новое намерение сохраняется следующей итерацией.
+   */
+  function requestPersist(context: PersistContext): Promise<PersistOutcome> {
+    if (!persistDrain) {
+      const run = runPersistDrain(context)
+      persistDrain = run
+      void run.then(() => {
+        if (persistDrain === run) persistDrain = null
+      })
+    }
+    return persistDrain
+  }
+
+  async function runPersistDrain(context: PersistContext): Promise<PersistOutcome> {
+    let lastResult: string | null = null
+    // Snapshot фиксируется до каждого invoke: успех относится к отправленному
+    // snapshot, а не к тому, что пользователь успел изменить во время await.
+    let payload = settingsSnapshot()
+    while (true) {
+      try {
+        lastResult = await persistWebViewSettings(payload)
+      } catch (e) {
+        if (listenerScope.disposed) return { ok: false, result: null }
+        // Ничего из отправленного snapshot не сохранено: форма показывает
+        // последнее подтверждённое состояние и существующую ошибку.
+        restorePersistedSettings()
+        debugError(`[WebView] Failed to save ${context.logLabel}:`, e)
+        showError(presentCommandError(e, t(context.errorKey)))
+        return { ok: false, result: null }
+      }
+      if (listenerScope.disposed) return { ok: false, result: null }
+      persistedSettings = { ...payload }
+      if (settingsEqual(settings.value, payload)) return { ok: true, result: lastResult }
+      // Правка во время await уходит в следующую запись; невалидный
+      // промежуточный порт не отправляется и остаётся в поле с подсказкой.
+      if (!isPortValid.value) return { ok: true, result: lastResult }
+      payload = settingsSnapshot()
     }
   }
 
-  async function startServer() {
+  /**
+   * Применить persisted-состояние, пришедшее с `settings-changed`. Эхо
+   * выполняющейся или более старой записи не должно перезаписать более новый
+   * локальный draft, поэтому во время drain оно игнорируется, а несохранённая
+   * правка поля сохраняется при частичном применении.
+   */
+  function applyPersistedSettings(next: WebViewSettings): void {
+    if (persistDrain !== null) return
+    // `savedBindAddress` описывает persisted-состояние, поэтому берётся из эха,
+    // а не из текущего draft.
+    savedBindAddress.value = next.bind_address
+    const merged: WebViewSettings = { ...next }
+    for (const field of WEBVIEW_SETTINGS_FIELDS) {
+      if (settings.value[field] !== persistedSettings[field]) {
+        copySettingsField(merged, settings.value, field)
+      }
+    }
+    settings.value = merged
+    persistedSettings = { ...next }
+  }
+
+  async function save(): Promise<boolean> {
+    debugLog('[WebView] Saving settings:', { enabled: settings.value.enabled, port: settings.value.port, bind_address: settings.value.bind_address, has_token: !!settings.value.access_token, upnp_enabled: settings.value.upnp_enabled, start_on_boot: settings.value.start_on_boot })
+    const outcome = await requestPersist(PERSIST_CONTEXT.settings)
+    if (!outcome.ok || listenerScope.disposed) return false
+    debugLog('[WebView] Save result:', outcome.result)
+    showActionResult(outcome.result ?? 'saved', 'success')
+    return true
+  }
+
+  async function startServer(): Promise<boolean> {
     debugLog('[WebView] Starting server...')
     settings.value.enabled = true
-    await save()
+    return await save()
   }
 
-  async function stopServer() {
+  async function stopServer(): Promise<boolean> {
     debugLog('[WebView] Stopping server...')
     settings.value.enabled = false
-    await save()
+    return await save()
   }
 
-  async function restartServer() {
+  async function restartServer(): Promise<void> {
     debugLog('[WebView] Restarting server...')
-    await stopServer()
+    // Stop обязан быть сохранён до Start: ошибка Stop не должна запускать
+    // следующий шаг как успешный.
+    const stopped = await stopServer()
+    if (!stopped) return
     await startServer()
   }
 
-  async function saveStartOnBoot() {
-    try {
-      debugLog('[WebView] Saving start_on_boot:', settings.value.start_on_boot)
-      await invoke('save_webview_settings', { settings: settings.value })
-    } catch (e) {
-      debugError('[WebView] Failed to save start_on_boot:', e)
-    }
+  async function saveStartOnBoot(): Promise<void> {
+    debugLog('[WebView] Saving start_on_boot:', settings.value.start_on_boot)
+    await requestPersist(PERSIST_CONTEXT.startOnBoot)
   }
 
-  async function saveSendOriginalText() {
-    const request = ++sendOriginalTextRequest
-    const value = settings.value.send_original_text
-    const settingsSnapshot = { ...settings.value }
-    try {
-      await invoke('save_webview_settings', { settings: settingsSnapshot })
-      if (request !== sendOriginalTextRequest) return
-      sendOriginalTextBaseline = value
-    } catch (e) {
-      if (request !== sendOriginalTextRequest) return
-      debugError('[WebView] Failed to save send_original_text:', e)
-      settings.value.send_original_text = sendOriginalTextBaseline
-      showError(presentCommandError(e, t('webview.error.save_settings')))
-    }
+  async function saveSendOriginalText(): Promise<void> {
+    await requestPersist(PERSIST_CONTEXT.sendOriginalText)
   }
 
-  async function saveServerSettings() {
-    try {
-      debugLog('[WebView] Saving server settings')
-      const result = await invoke<string>('save_webview_settings', { settings: settings.value })
-      showActionResult(result, 'success')
-    } catch (e) {
-      debugError('[WebView] Failed to save server settings:', e)
-      showError(presentCommandError(e, t('webview.error.save_server_settings')))
-    }
+  async function saveServerSettings(): Promise<void> {
+    debugLog('[WebView] Saving server settings')
+    const outcome = await requestPersist(PERSIST_CONTEXT.serverSettings)
+    if (!outcome.ok || listenerScope.disposed) return
+    showActionResult(outcome.result ?? 'saved', 'success')
   }
 
   function copyUrl() {
@@ -347,8 +474,7 @@ export function useWebView() {
 
   watch(webviewSettingsFromComposable, (newSettings) => {
     if (!newSettings) return
-    savedBindAddress.value = newSettings.bind_address
-    settings.value = {
+    applyPersistedSettings({
       enabled: newSettings.enabled,
       start_on_boot: newSettings.start_on_boot,
       send_original_text: newSettings.send_original_text,
@@ -356,8 +482,7 @@ export function useWebView() {
       bind_address: newSettings.bind_address,
       access_token: newSettings.access_token || null,
       upnp_enabled: newSettings.upnp_enabled || false,
-    }
-    sendOriginalTextBaseline = newSettings.send_original_text
+    })
   }, { immediate: true, deep: true })
 
   // Keep displayUrl synchronized with live bind_address/port edits and with
@@ -377,7 +502,6 @@ export function useWebView() {
     }
     // Invalidate any pending local-IP lookup so it cannot write after teardown.
     displayUrlRequest++
-    sendOriginalTextRequest++
     listenerScope.dispose()
   })
 

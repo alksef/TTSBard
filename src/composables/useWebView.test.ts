@@ -692,34 +692,44 @@ describe('useWebView action result localization', () => {
   })
 })
 
-describe('useWebView send_original_text save rollback', () => {
+describe('useWebView sequential settings persistence', () => {
   beforeEach(() => {
     resetHarness()
   })
 
-  function queueSaveCalls() {
-    const saves: Deferred[] = []
-    mockInvoke.mockImplementation((cmd: string) => {
+  /** Payload попадает в persisted только в момент успешного resolve. */
+  function queuePersistingSaveCalls(initial: Partial<WebViewSettingsDto> = {}) {
+    const persisted = makeSettings(initial)
+    const payloads: WebViewSettingsDto[] = []
+    const saves: Array<{ resolve: (value: string) => void; reject: (reason?: unknown) => void }> = []
+    mockInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === 'get_webview_token') return Promise.resolve(null)
       if (cmd === 'get_local_ip') return Promise.resolve('192.168.1.25')
+      if (cmd === 'get_webview_server_status') return Promise.resolve({ state: 'stopped' })
       if (cmd === 'save_webview_settings') {
-        const save = deferred()
-        saves.push(save)
-        return save.promise
+        const payload = { ...(args as { settings: WebViewSettingsDto }).settings }
+        payloads.push(payload)
+        return new Promise<string>((resolve, reject) => {
+          saves.push({
+            resolve: (value: string) => { Object.assign(persisted, payload); resolve(value) },
+            reject,
+          })
+        })
       }
       return Promise.resolve(undefined)
     })
-    return saves
+    return { persisted, payloads, saves }
   }
 
   it('advances the persisted baseline on a successful save', async () => {
     mockWebViewSettingsRef.value = makeSettings({ send_original_text: true })
     const { settings, saveSendOriginalText, errorMessage } = await setupAndMount()
     await nextTick()
-    const saves = queueSaveCalls()
+    const { saves } = queuePersistingSaveCalls({ send_original_text: true })
 
     settings.value.send_original_text = false
     const first = saveSendOriginalText()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
     saves[0].resolve('saved')
     await first
 
@@ -730,6 +740,7 @@ describe('useWebView send_original_text save rollback', () => {
     // the baseline advanced from the initial true.
     settings.value.send_original_text = true
     const second = saveSendOriginalText()
+    await vi.waitFor(() => expect(saves).toHaveLength(2))
     saves[1].reject('later failure')
     await second
 
@@ -754,43 +765,208 @@ describe('useWebView send_original_text save rollback', () => {
     })
   })
 
-  it('ignores a stale failure that settles after a newer request', async () => {
+  it('does not start a parallel write for a toggle made while the first save is in flight', async () => {
     mockWebViewSettingsRef.value = makeSettings({ send_original_text: true })
     const { settings, saveSendOriginalText, errorMessage } = await setupAndMount()
     await nextTick()
-    const saves = queueSaveCalls()
+    const { persisted, payloads, saves } = queuePersistingSaveCalls({ send_original_text: true })
 
     settings.value.send_original_text = false
-    const first = saveSendOriginalText()
-    settings.value.send_original_text = true
+    const pending = saveSendOriginalText()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+
+    // Повторный вызов во время записи присоединяется к drain, а не создаёт
+    // вторую полную запись с тем же намерением.
     const second = saveSendOriginalText()
+    expect(saves).toHaveLength(1)
 
-    saves[1].resolve('saved')
-    await second
-    saves[0].reject('stale failure')
-    await first
+    saves[0].resolve('saved')
+    await Promise.all([pending, second])
 
-    expect(settings.value.send_original_text).toBe(true)
+    expect(payloads.map((payload) => payload.send_original_text)).toEqual([false])
+    expect(persisted.send_original_text).toBe(false)
+    expect(settings.value.send_original_text).toBe(false)
     expect(errorMessage.value).toBeNull()
   })
 
-  it('does not let a stale success advance the baseline used for a later rollback', async () => {
+  it('keeps the latest of two rapid toggles as the only in-flight intent', async () => {
     mockWebViewSettingsRef.value = makeSettings({ send_original_text: true })
-    const { settings, saveSendOriginalText, errorMessage } = await setupAndMount()
+    const { settings, saveSendOriginalText } = await setupAndMount()
     await nextTick()
-    const saves = queueSaveCalls()
+    const { persisted, payloads, saves } = queuePersistingSaveCalls({ send_original_text: true })
 
     settings.value.send_original_text = false
     const first = saveSendOriginalText()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+
     settings.value.send_original_text = true
     const second = saveSendOriginalText()
 
-    saves[0].resolve('saved')
-    await first
-    saves[1].reject('latest failure')
-    await second
+    // Пока первая запись не завершена, второй IPC нет: обратный порядок
+    // завершения двух полных записей невозможен.
+    expect(saves).toHaveLength(1)
+    expect(payloads).toEqual([expect.objectContaining({ send_original_text: false })])
 
+    saves[0].resolve('saved')
+    await vi.waitFor(() => expect(saves).toHaveLength(2))
+    expect(payloads[1].send_original_text).toBe(true)
+
+    saves[1].resolve('saved')
+    await Promise.all([first, second])
+
+    expect(persisted.send_original_text).toBe(true)
     expect(settings.value.send_original_text).toBe(true)
+  })
+
+  it('does not resurrect the replaced value when the older settings echo arrives late', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ send_original_text: true })
+    const { settings, saveSendOriginalText, errorMessage } = await setupAndMount()
+    await nextTick()
+    const { saves } = queuePersistingSaveCalls({ send_original_text: true })
+
+    settings.value.send_original_text = false
+    const pending = saveSendOriginalText()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+
+    // Поздний settings event несёт состояние до записи.
+    mockWebViewSettingsRef.value = makeSettings({ send_original_text: true })
+    await nextTick()
+    expect(settings.value.send_original_text).toBe(false)
+
+    saves[0].resolve('saved')
+    await pending
+    await nextTick()
+
+    expect(settings.value.send_original_text).toBe(false)
+    expect(errorMessage.value).toBeNull()
+  })
+
+  it('writes a neighbour field edited during the await in the next snapshot', async () => {
+    mockWebViewSettingsRef.value = makeSettings()
+    const { settings, saveSendOriginalText } = await setupAndMount()
+    await nextTick()
+    const { persisted, payloads, saves } = queuePersistingSaveCalls()
+
+    settings.value.send_original_text = false
+    const pending = saveSendOriginalText()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+
+    settings.value.port = 12000
+
+    saves[0].resolve('saved')
+    await vi.waitFor(() => expect(saves).toHaveLength(2))
+    saves[1].resolve('saved')
+    await pending
+
+    expect(payloads.map((payload) => payload.port)).toEqual([10100, 12000])
+    expect(persisted.port).toBe(12000)
+    expect(settings.value.port).toBe(12000)
+  })
+
+  it('keeps a checkbox toggled while server settings are being saved', async () => {
+    mockWebViewSettingsRef.value = makeSettings()
+    const { settings, saveStartOnBoot, saveServerSettings } = await setupAndMount()
+    await nextTick()
+    const { persisted, payloads, saves } = queuePersistingSaveCalls()
+
+    const button = saveServerSettings()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+    expect(payloads[0].start_on_boot).toBe(false)
+
+    settings.value.start_on_boot = true
+    const checkbox = saveStartOnBoot()
+    // Пока server-settings запись не завершена, второй полной записи нет.
+    expect(saves).toHaveLength(1)
+
+    saves[0].resolve('saved')
+    await vi.waitFor(() => expect(saves).toHaveLength(2))
+    saves[1].resolve('saved')
+    await Promise.all([button, checkbox])
+
+    expect(payloads.map((payload) => payload.start_on_boot)).toEqual([false, true])
+    expect(persisted.start_on_boot).toBe(true)
+    expect(settings.value.start_on_boot).toBe(true)
+  })
+
+  it('rolls back to the last persisted snapshot when the follow-up write fails', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ send_original_text: true })
+    const { settings, saveSendOriginalText, errorMessage } = await setupAndMount()
+    await nextTick()
+    const { persisted, saves } = queuePersistingSaveCalls({ send_original_text: true })
+
+    settings.value.send_original_text = false
+    const pending = saveSendOriginalText()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+
+    settings.value.port = 12000
+
+    saves[0].resolve('saved')
+    await vi.waitFor(() => expect(saves).toHaveLength(2))
+    saves[1].reject('port busy')
+    await pending
+
+    // Сохранился только первый snapshot: форма показывает именно его.
+    expect(persisted).toMatchObject({ send_original_text: false, port: 10100 })
+    expect(settings.value).toMatchObject({ send_original_text: false, port: 10100 })
+    expect(errorMessage.value).toBe('Не удалось сохранить настройки')
+  })
+
+  it('does not overwrite an unconfirmed local edit with a settings echo', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ access_token: null })
+    const { settings, hasToken } = await setupAndMount()
+    await nextTick()
+
+    settings.value.port = 12000
+
+    // Эхо приносит persisted-состояние: несохранённая правка порта остаётся, а
+    // соседние поля обновляются.
+    mockWebViewSettingsRef.value = makeSettings({ access_token: 'fresh-token' })
+    await nextTick()
+
+    expect(settings.value.port).toBe(12000)
+    expect(settings.value.access_token).toBe('fresh-token')
+    expect(hasToken.value).toBe(true)
+  })
+
+  it('persists the restart snapshots sequentially as enabled false then true', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ enabled: true })
+    const { settings, restartServer } = await setupAndMount()
+    await nextTick()
+    const { persisted, payloads, saves } = queuePersistingSaveCalls({ enabled: true })
+
+    const restart = restartServer()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+    expect(payloads[0].enabled).toBe(false)
+
+    // Start не начинается, пока Stop не сохранён.
+    await flush()
+    expect(saves).toHaveLength(1)
+
+    saves[0].resolve('saved')
+    await vi.waitFor(() => expect(saves).toHaveLength(2))
+    expect(payloads[1].enabled).toBe(true)
+    saves[1].resolve('saved')
+    await restart
+
+    expect(persisted.enabled).toBe(true)
+    expect(settings.value.enabled).toBe(true)
+  })
+
+  it('does not start the server when the stop snapshot failed', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ enabled: true })
+    const { settings, restartServer, errorMessage } = await setupAndMount()
+    await nextTick()
+    const { persisted, saves } = queuePersistingSaveCalls({ enabled: true })
+
+    const restart = restartServer()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+    saves[0].reject('stop failed')
+    await restart
+
+    // Ошибка Stop не запускает Start как успешный следующий шаг.
+    expect(saves).toHaveLength(1)
+    expect(persisted.enabled).toBe(true)
+    expect(settings.value.enabled).toBe(true)
     expect(errorMessage.value).toBe('Не удалось сохранить настройки')
   })
 
@@ -798,10 +974,11 @@ describe('useWebView send_original_text save rollback', () => {
     mockWebViewSettingsRef.value = makeSettings({ send_original_text: true })
     const { settings, saveSendOriginalText, errorMessage } = await setupAndMount()
     await nextTick()
-    const saves = queueSaveCalls()
+    const { saves } = queuePersistingSaveCalls({ send_original_text: true })
 
     settings.value.send_original_text = false
     const pending = saveSendOriginalText()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
 
     const unmount = capturedOnUnmountedCbs.shift()
     unmount?.()

@@ -47,6 +47,17 @@ export interface VTubeStudioSettings {
   start_on_boot: boolean
 }
 
+const VTUBE_SETTINGS_FIELDS: Array<keyof VTubeStudioSettings> = [
+  'enabled',
+  'port',
+  'start_on_boot',
+]
+
+/** Результат одной последовательной записи секции настроек. */
+type PersistOutcome =
+  | { ok: true; result: string | null }
+  | { ok: false; error: unknown }
+
 interface TypingActionDraft extends VTubeStudioTypingActionDto {}
 
 function normalizeTypingAction(action: Partial<TypingActionDraft> | undefined): TypingActionDraft {
@@ -113,6 +124,17 @@ export function useVTubeStudio() {
 
   const busy = ref(false)
   let opGeneration = 0
+
+  // Baseline: последний snapshot, который backend подтвердил. Из него берётся
+  // откат, и по нему форма отличается от persisted-состояния.
+  let persistedSettings: VTubeStudioSettings = settingsSnapshot()
+
+  // Записи секции идут через одну FIFO-очередь и один drain: одновременно в
+  // полёте не более одной `save_vtube_studio_settings`, а payload перечитывается
+  // после каждого persist. Запись, начатая раньше, не может завершиться после
+  // более новой и вернуть старые `enabled`, `port` или `start_on_boot`.
+  let persistTail: Promise<unknown> | null = null
+  let persistDrain: Promise<PersistOutcome> | null = null
 
   const typingTimeout = ref(800)
   const typingRepeats = ref(1)
@@ -260,6 +282,9 @@ export function useVTubeStudio() {
       const data = await invoke<VTubeStudioSettings & { typingAction?: TypingActionDraft }>('get_vtube_studio_settings')
       if (gen !== loadSettingsGeneration) return
       settings.value = { enabled: data.enabled, port: data.port, start_on_boot: data.start_on_boot }
+      // Прочитанное persisted-состояние — это подтверждённый baseline, из
+      // которого берётся откат при ошибке записи.
+      persistedSettings = { ...settings.value }
       if (!vtubeSettingsFromComposable.value) {
         applyTypingAction(data.typingAction)
       }
@@ -300,23 +325,93 @@ export function useVTubeStudio() {
     return gen !== opGeneration
   }
 
+  function settingsSnapshot(): VTubeStudioSettings {
+    const current = settings.value
+    return { enabled: current.enabled, port: current.port, start_on_boot: current.start_on_boot }
+  }
+
+  function settingsEqual(a: VTubeStudioSettings, b: VTubeStudioSettings): boolean {
+    return VTUBE_SETTINGS_FIELDS.every((field) => a[field] === b[field])
+  }
+
+  function persistVTubeSettings(payload: VTubeStudioSettings): Promise<string> {
+    const args = { enabled: payload.enabled, port: payload.port, startOnBoot: payload.start_on_boot }
+    const previous = persistTail
+    // Свободная очередь пишет сразу, занятая — откладывает следующую запись.
+    const write = previous
+      ? previous.then(() => invoke<string>('save_vtube_studio_settings', args))
+      : invoke<string>('save_vtube_studio_settings', args)
+    const tail = write.then(
+      () => undefined,
+      () => undefined,
+    )
+    persistTail = tail
+    void tail.then(() => {
+      if (persistTail === tail) persistTail = null
+    })
+    return write
+  }
+
+  function restorePersistedSettings(): void {
+    settings.value = { ...persistedSettings }
+  }
+
+  /**
+   * Записать секцию целиком через последовательного owner'а. Вызов, пришедший
+   * во время идущего drain (в том числе checkbox во время `save()`),
+   * присоединяется к нему: параллельной записи не появляется, а более новое
+   * значение сохраняется следующей итерацией.
+   */
+  function requestPersist(): Promise<PersistOutcome> {
+    if (!persistDrain) {
+      const run = runPersistDrain()
+      persistDrain = run
+      void run.then(() => {
+        if (persistDrain === run) persistDrain = null
+      })
+    }
+    return persistDrain
+  }
+
+  async function runPersistDrain(): Promise<PersistOutcome> {
+    let lastResult: string | null = null
+    // Snapshot фиксируется до каждого invoke: успех относится к отправленному
+    // snapshot, а не к тому, что пользователь успел изменить во время await.
+    let payload = settingsSnapshot()
+    while (true) {
+      try {
+        lastResult = await persistVTubeSettings(payload)
+      } catch (e) {
+        debugError('[VTubeStudio] Failed to save settings:', e)
+        return { ok: false, error: e }
+      }
+      if (listenerScope.disposed) return { ok: false, error: null }
+      // Начатая backend-запись учитывается независимо от staleness: baseline —
+      // это то, что реально лежит в persisted-настройках.
+      persistedSettings = { ...payload }
+      if (settingsEqual(settings.value, payload)) return { ok: true, result: lastResult }
+      // Правка во время await уходит в следующую запись; невалидный
+      // промежуточный порт не отправляется и остаётся в поле с подсказкой.
+      if (!isValidPort(settings.value.port)) return { ok: true, result: lastResult }
+      payload = settingsSnapshot()
+    }
+  }
+
   async function save() {
     if (busy.value) return
     if (!validatePort()) return
     const gen = startOperation()
     try {
-      const result = await invoke<string>('save_vtube_studio_settings', {
-        enabled: settings.value.enabled,
-        port: settings.value.port,
-        startOnBoot: settings.value.start_on_boot,
-      })
-      if (!isStaleOp(gen)) {
-        showError(result, 'success')
+      const outcome = await requestPersist()
+      // Более новая операция уже владеет UI: её completion важнее, а откат
+      // только скрыл бы её результат.
+      if (listenerScope.disposed || isStaleOp(gen)) return
+      if (!outcome.ok) {
+        restorePersistedSettings()
+        showError(presentCommandError(outcome.error, t('vtube.error.save_settings')))
+        return
       }
-    } catch (e) {
-      if (!isStaleOp(gen)) {
-        showError(presentCommandError(e, t('vtube.error.save_settings')))
-      }
+      if (outcome.result !== null) showError(outcome.result, 'success')
     } finally {
       endOperation()
     }
@@ -528,14 +623,14 @@ export function useVTubeStudio() {
   const loadCurrentModelHotkeys = loadHotkeys
 
   async function saveStartOnBoot() {
-    try {
-      await invoke<string>('save_vtube_studio_settings', {
-        enabled: settings.value.enabled,
-        port: settings.value.port,
-        startOnBoot: settings.value.start_on_boot,
-      })
-    } catch (e) {
-      debugError('[VTubeStudio] Failed to save start_on_boot:', e)
+    // Generation не инкрементируется: checkbox не отменяет текущую операцию, но
+    // его completion становится stale, если более новая операция уже началась.
+    const gen = opGeneration
+    const outcome = await requestPersist()
+    if (listenerScope.disposed || isStaleOp(gen)) return
+    if (!outcome.ok) {
+      restorePersistedSettings()
+      showError(presentCommandError(outcome.error, t('vtube.error.save_settings')))
     }
   }
 
@@ -564,10 +659,15 @@ export function useVTubeStudio() {
     if (!newSettings) return
     loadSettingsGeneration += 1
     debugLog('[VTubeStudio] Settings updated from composable')
-    settings.value = {
-      enabled: newSettings.enabled,
-      port: newSettings.port,
-      start_on_boot: newSettings.start_on_boot,
+    // Во время drain его snapshot владеет секцией: эхо persisted-состояния
+    // вернуло бы значение, которое drain как раз заменяет.
+    if (persistDrain === null) {
+      settings.value = {
+        enabled: newSettings.enabled,
+        port: newSettings.port,
+        start_on_boot: newSettings.start_on_boot,
+      }
+      persistedSettings = { ...settings.value }
     }
     applyTypingAction(newSettings.typingAction)
   }, { immediate: true })

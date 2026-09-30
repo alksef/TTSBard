@@ -212,6 +212,193 @@ describe('useInputServer', () => {
     expect(settings.value).toEqual({ start_on_boot: false, port: 12000 })
   })
 
+  it('persists an edit made while the submitted save is in flight', async () => {
+    const { settings, saveSettings, message, messageType } = await setupAndMount()
+    const saves: Array<{ settings: { start_on_boot: boolean; port: number } }> = []
+    let resolveFirst!: () => void
+
+    mocks.mockInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === 'save_input_server_settings') {
+        // Копия аргумента: живой reactive-объект мутирует после вызова.
+        saves.push(JSON.parse(JSON.stringify(args)) as (typeof saves)[number])
+        if (saves.length === 1) {
+          return new Promise<void>((resolve) => { resolveFirst = () => resolve(undefined) })
+        }
+      }
+      return Promise.resolve(undefined)
+    })
+
+    settings.value.port = 12000
+    const first = saveSettings()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+
+    // Правка во время await не теряется и не выдаётся за уже сохранённую:
+    // повторный вызов не создаёт параллельную запись, её подхватывает drain.
+    settings.value.port = 13000
+    await saveSettings()
+    expect(saves).toHaveLength(1)
+
+    resolveFirst()
+    await first
+
+    expect(saves).toEqual([
+      { settings: { start_on_boot: false, port: 12000 } },
+      { settings: { start_on_boot: false, port: 13000 } },
+    ])
+    expect(settings.value).toEqual({ start_on_boot: false, port: 13000 })
+    expect(message.value).toBe('Настройки сохранены')
+    expect(messageType.value).toBe('success')
+  })
+
+  it('rolls back to the value really persisted, not to an unsaved edit', async () => {
+    const { settings, saveSettings, message, messageType } = await setupAndMount()
+
+    settings.value.port = 12000
+    await saveSettings()
+
+    let rejectSave!: (reason?: unknown) => void
+    mocks.mockInvoke.mockImplementationOnce((cmd: string) => {
+      if (cmd === 'save_input_server_settings') {
+        return new Promise((_resolve, reject) => { rejectSave = reject })
+      }
+      return undefined
+    })
+
+    settings.value.port = 13000
+    const pending = saveSettings()
+    settings.value.port = 14000
+    rejectSave(new Error('port busy'))
+    await pending
+
+    // 14000 не отправлялся, 13000 отклонён: форма показывает 12000 — то, что
+    // действительно лежит в persisted-настройках.
+    expect(settings.value).toEqual({ start_on_boot: false, port: 12000 })
+    expect(messageType.value).toBe('error')
+    expect(message.value).toContain('port busy')
+  })
+
+  it('never sends an invalid intermediate port and keeps it in the field', async () => {
+    const { settings, saveSettings, isPortValid } = await setupAndMount()
+    const saves: unknown[] = []
+    let resolveFirst!: () => void
+
+    mocks.mockInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === 'save_input_server_settings') {
+        saves.push(args)
+        if (saves.length === 1) {
+          return new Promise<void>((resolve) => { resolveFirst = () => resolve(undefined) })
+        }
+      }
+      return Promise.resolve(undefined)
+    })
+
+    settings.value.port = 12000
+    const pending = saveSettings()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+
+    settings.value.port = 5
+    resolveFirst()
+    await pending
+
+    expect(saves).toHaveLength(1)
+    expect(settings.value.port).toBe(5)
+    expect(isPortValid.value).toBe(false)
+  })
+
+  it('does not adopt an unsent mid-save edit as the confirmed baseline', async () => {
+    const { settings, saveSettings } = await setupAndMount()
+    let resolveFirst!: () => void
+    mocks.mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'save_input_server_settings') {
+        return new Promise<void>((resolve) => { resolveFirst = () => resolve(undefined) })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    settings.value.port = 12000
+    const pending = saveSettings()
+    await vi.waitFor(() => expect(resolveFirst).toBeDefined())
+
+    // Промежуточное невалидное значение не отправляется и не становится
+    // «подтверждённым» только потому, что оно стоит в форме.
+    settings.value.port = 5
+    resolveFirst()
+    await pending
+
+    mocks.mockInvoke.mockImplementationOnce(() => Promise.reject(new Error('port busy')))
+    settings.value.port = 13000
+    await saveSettings()
+
+    // Откат идёт к 12000 — единственному значению, которое реально записано.
+    expect(settings.value).toEqual({ start_on_boot: false, port: 12000 })
+  })
+
+  it('does not apply a stale echo over a save that already persisted a newer port', async () => {
+    const { settings, saveSettings, refreshSettings } = await setupAndMount()
+    let resolveSave!: () => void
+    let resolveEcho!: (value: unknown) => void
+
+    mocks.mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'save_input_server_settings') {
+        return new Promise<void>((resolve) => { resolveSave = () => resolve(undefined) })
+      }
+      if (cmd === 'get_input_server_settings') {
+        return new Promise((resolve) => { resolveEcho = resolve })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    settings.value.port = 12000
+    const pending = saveSettings()
+    await vi.waitFor(() => expect(resolveSave).toBeDefined())
+
+    // Эхо settings-changed: чтение началось до persist и вернёт старый порт.
+    const echo = refreshSettings()
+    await vi.waitFor(() => expect(resolveEcho).toBeDefined())
+
+    resolveSave()
+    await pending
+
+    resolveEcho({ start_on_boot: false, port: 10101 })
+    await echo
+
+    expect(settings.value).toEqual({ start_on_boot: false, port: 12000 })
+  })
+
+  it('keeps an unsent local edit when a settings snapshot arrives', async () => {
+    const { settings, refreshSettings } = await setupAndMount()
+    mocks.mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_input_server_settings') {
+        return Promise.resolve({ start_on_boot: false, port: 10101 })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    settings.value.port = 13000
+    await refreshSettings()
+
+    expect(settings.value.port).toBe(13000)
+  })
+
+  it('discards an older settings snapshot when a newer refresh overlaps', async () => {
+    const { settings, refreshSettings } = await setupAndMount()
+    let resolveFirst!: (value: unknown) => void
+    let resolveSecond!: (value: unknown) => void
+    mocks.mockInvoke
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve }))
+
+    const first = refreshSettings()
+    const second = refreshSettings()
+
+    resolveSecond({ start_on_boot: true, port: 20000 })
+    await second
+    resolveFirst({ start_on_boot: false, port: 10101 })
+    await first
+
+    expect(settings.value).toEqual({ start_on_boot: true, port: 20000 })
+  })
+
   it('convertInputServerStatusFromRust omits non-string message values', () => {
     expect(convertInputServerStatusFromRust({ state: 'error', message: 42 })).toEqual({ state: 'error' })
     expect(convertInputServerStatusFromRust({ state: 'error', message: 'backend exploded' })).toEqual({
