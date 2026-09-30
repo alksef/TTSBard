@@ -384,6 +384,8 @@ mod tests {
         *service.settings.write().await = InputServerSettings {
             start_on_boot: false,
             port,
+            bind_address: "127.0.0.1".to_string(),
+            access_token: None,
         };
         let shutdown = CancellationToken::new();
         let transitions = Arc::new(Mutex::new(Vec::new()));
@@ -422,6 +424,8 @@ mod tests {
         *service.settings.write().await = InputServerSettings {
             start_on_boot: false,
             port,
+            bind_address: "127.0.0.1".to_string(),
+            access_token: None,
         };
         service.set_run_request(true);
         let shutdown = CancellationToken::new();
@@ -464,6 +468,8 @@ mod tests {
         *service.settings.write().await = InputServerSettings {
             start_on_boot: false,
             port,
+            bind_address: "127.0.0.1".to_string(),
+            access_token: None,
         };
         service.set_run_request(true);
         let shutdown = CancellationToken::new();
@@ -504,6 +510,8 @@ mod tests {
         *service.settings.write().await = InputServerSettings {
             start_on_boot: false,
             port,
+            bind_address: "127.0.0.1".to_string(),
+            access_token: None,
         };
         service.set_run_request(true);
         let shutdown = CancellationToken::new();
@@ -538,6 +546,8 @@ mod tests {
         *service.settings.write().await = InputServerSettings {
             start_on_boot: false,
             port,
+            bind_address: "127.0.0.1".to_string(),
+            access_token: None,
         };
         let shutdown = CancellationToken::new();
         let transitions = Arc::new(Mutex::new(Vec::new()));
@@ -571,6 +581,8 @@ mod tests {
         *service.settings.write().await = InputServerSettings {
             start_on_boot: false,
             port,
+            bind_address: "127.0.0.1".to_string(),
+            access_token: None,
         };
         let shutdown = CancellationToken::new();
         let transitions = Arc::new(Mutex::new(Vec::new()));
@@ -598,6 +610,8 @@ mod tests {
         *service.settings.write().await = InputServerSettings {
             start_on_boot: false,
             port,
+            bind_address: "127.0.0.1".to_string(),
+            access_token: None,
         };
         service.set_run_request(true);
         let shutdown = CancellationToken::new();
@@ -644,6 +658,8 @@ mod tests {
         *service.settings.write().await = InputServerSettings {
             start_on_boot: false,
             port,
+            bind_address: "127.0.0.1".to_string(),
+            access_token: None,
         };
         service.set_run_request(true);
 

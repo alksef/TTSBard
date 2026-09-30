@@ -98,14 +98,25 @@ pub struct IncomingSettings {
     pub route: IncomingRoute,
 }
 
+/// Bind address persisted for the input server listener. `0.0.0.0` exposes the
+/// listener to the LAN; loopback-only deployments narrow it to `127.0.0.1` via
+/// the config file — there is deliberately no UI field for it.
+pub const DEFAULT_BIND_ADDRESS: &str = "0.0.0.0";
+
 /// Desired settings for the external text input server.
 ///
 /// `auto_play` used to live here but now belongs to the source-neutral
 /// `incoming` policy; this section retains only the server lifecycle fields.
+/// `access_token` authorizes non-loopback clients; loopback is always trusted
+/// without it. `SettingsManager::load_from_disk` generates a missing token so
+/// LAN access works right after an upgrade.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct InputServerSettings {
     pub start_on_boot: bool,
     pub port: u16,
+    pub bind_address: String,
+    #[serde(default)]
+    pub access_token: Option<String>,
 }
 
 fn default_input_port() -> u16 {
@@ -130,6 +141,8 @@ impl Default for InputServerSettings {
         Self {
             start_on_boot: false,
             port: default_input_port(),
+            bind_address: DEFAULT_BIND_ADDRESS.to_string(),
+            access_token: None,
         }
     }
 }
@@ -142,7 +155,9 @@ impl<'de> Deserialize<'de> for InputServerSettings {
         // Raw wire shape accepting both the new `start_on_boot` field and the
         // legacy `enabled` field from older on-disk settings. A legacy leftover
         // `auto_play` field is ignored here; it is migrated to `incoming` by
-        // `SettingsManager::load_from_disk`.
+        // `SettingsManager::load_from_disk`. Missing bind/token fields use the
+        // defaults; an empty value normalizes to the default so a corrupted
+        // file never produces an unbindable or empty-token configuration.
         #[derive(Deserialize)]
         struct Raw {
             #[serde(default)]
@@ -151,12 +166,21 @@ impl<'de> Deserialize<'de> for InputServerSettings {
             enabled: Option<bool>,
             #[serde(default = "default_input_port")]
             port: u16,
+            #[serde(default)]
+            bind_address: Option<String>,
+            #[serde(default)]
+            access_token: Option<String>,
         }
 
         let raw = Raw::deserialize(deserializer)?;
         Ok(InputServerSettings {
             start_on_boot: raw.start_on_boot.or(raw.enabled).unwrap_or(false),
             port: raw.port,
+            bind_address: raw
+                .bind_address
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| DEFAULT_BIND_ADDRESS.to_string()),
+            access_token: raw.access_token.filter(|value| !value.is_empty()),
         })
     }
 }
@@ -341,10 +365,17 @@ mod tests {
         let settings = InputServerSettings {
             start_on_boot: true,
             port: 20202,
+            bind_address: "0.0.0.0".to_string(),
+            access_token: Some("secret".to_string()),
         };
         assert_eq!(
             serde_json::to_value(settings).unwrap(),
-            serde_json::json!({ "start_on_boot": true, "port": 20202 })
+            serde_json::json!({
+                "start_on_boot": true,
+                "port": 20202,
+                "bind_address": "0.0.0.0",
+                "access_token": "secret"
+            })
         );
     }
 
@@ -352,5 +383,40 @@ mod tests {
     fn serialization_omits_legacy_auto_play() {
         let json = serde_json::to_string(&InputServerSettings::default()).unwrap();
         assert!(!json.contains("auto_play"), "json: {json}");
+    }
+
+    #[test]
+    fn defaults_bind_to_all_interfaces_without_token() {
+        let settings = InputServerSettings::default();
+        assert_eq!(settings.bind_address, "0.0.0.0");
+        assert_eq!(settings.access_token, None);
+    }
+
+    #[test]
+    fn missing_bind_address_and_token_deserialize_to_defaults() {
+        let legacy = r#"{"start_on_boot": true, "port": 20202}"#;
+        let settings: InputServerSettings = serde_json::from_str(legacy).unwrap();
+        assert_eq!(settings.bind_address, "0.0.0.0");
+        assert_eq!(settings.access_token, None);
+    }
+
+    #[test]
+    fn empty_bind_address_and_token_normalize_to_defaults() {
+        let raw = r#"{"port": 20202, "bind_address": "", "access_token": ""}"#;
+        let settings: InputServerSettings = serde_json::from_str(raw).unwrap();
+        assert_eq!(settings.bind_address, "0.0.0.0");
+        assert_eq!(settings.access_token, None);
+    }
+
+    #[test]
+    fn loopback_bind_address_round_trips() {
+        let raw = r#"{"port": 20202, "bind_address": "127.0.0.1", "access_token": "t"}"#;
+        let settings: InputServerSettings = serde_json::from_str(raw).unwrap();
+        assert_eq!(settings.bind_address, "127.0.0.1");
+        assert_eq!(settings.access_token.as_deref(), Some("t"));
+        assert_eq!(
+            serde_json::to_value(&settings).unwrap()["bind_address"],
+            "127.0.0.1"
+        );
     }
 }

@@ -1666,6 +1666,22 @@ impl SettingsManager {
         &self.config_dir
     }
 
+    /// Ensure the input server has a LAN access token, generating one when the
+    /// persisted value is missing or empty. Returns whether a token was
+    /// generated so the caller persists it in the same atomic write.
+    fn ensure_input_server_access_token(settings: &mut AppSettings) -> bool {
+        let needs_token = settings
+            .input_server
+            .access_token
+            .as_deref()
+            .map(str::is_empty)
+            .unwrap_or(true);
+        if needs_token {
+            settings.input_server.access_token = Some(uuid::Uuid::new_v4().to_string());
+        }
+        needs_token
+    }
+
     /// Load settings from disk (internal method)
     fn load_from_disk(config_dir: &Path) -> Result<AppSettings> {
         let path = config_dir.join("settings.json");
@@ -1735,9 +1751,20 @@ impl SettingsManager {
                 info!("Migrating ui_language from legacy default");
             }
 
+            // Generate the input-server LAN access token when missing or empty:
+            // the token is the only gate for non-loopback clients, so an absent
+            // field must not leave LAN access unusable after an upgrade.
+            let needs_input_token_migration =
+                Self::ensure_input_server_access_token(&mut settings);
+
             // Persist the migrated canonical file at most once: a single atomic
-            // write covers the hotkey, incoming and ui_language migrations.
-            if needs_hotkey_migration || needs_incoming_migration || needs_ui_language_migration {
+            // write covers the hotkey, incoming, ui_language and input-server
+            // token migrations.
+            if needs_hotkey_migration
+                || needs_incoming_migration
+                || needs_ui_language_migration
+                || needs_input_token_migration
+            {
                 // Save migrated settings
                 let content = serde_json::to_string_pretty(&settings)?;
                 let _guard = persistence::config_write_lock().lock();
@@ -1748,7 +1775,11 @@ impl SettingsManager {
             Ok(settings)
         } else {
             info!("Settings file not found, creating with defaults");
-            let settings = AppSettings::default();
+            let mut settings = AppSettings::default();
+            // A fresh installation gets a LAN access token immediately: the
+            // input server defaults to not starting, so nothing is exposed, but
+            // the token is ready when the listener is enabled.
+            Self::ensure_input_server_access_token(&mut settings);
             // Save defaults to disk for next time
             let content =
                 serde_json::to_string_pretty(&settings).context("Failed to serialize settings")?;
@@ -2381,6 +2412,15 @@ impl SettingsManager {
             app_settings.input_server.start_on_boot = start_on_boot;
             app_settings.input_server.port = port;
         })
+    }
+
+    /// Set the input-server LAN access token (non-loopback client auth).
+    ///
+    /// `None` removes the token; the next `load_from_disk` generates a fresh
+    /// one, while the live auth middleware fails closed for non-loopback
+    /// requests in the meantime.
+    pub fn set_input_server_access_token(&self, token: Option<String>) -> Result<()> {
+        self.update_field("/input_server/access_token", &token)
     }
 
     // ========== Incoming Settings ==========
@@ -5840,6 +5880,145 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap())
                 .unwrap();
         assert_eq!(disk, after, "disk and cache must agree");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The token setter persists via the JSON pointer and keeps cache/disk in
+    /// sync without touching any other input-server field.
+    #[test]
+    fn set_input_server_access_token_persists_and_keeps_cache_in_sync() {
+        let (manager, dir) = input_server_section_tmp_manager("token-save");
+
+        manager
+            .set_input_server_access_token(Some("token-a".to_string()))
+            .unwrap();
+        manager.set_input_server_section(true, 20202).unwrap();
+        manager
+            .set_input_server_access_token(None)
+            .unwrap();
+
+        let cached = manager.load().unwrap();
+        assert_eq!(cached.input_server.access_token, None);
+        assert!(cached.input_server.start_on_boot, "section must survive");
+        assert_eq!(cached.input_server.port, 20202, "section must survive");
+
+        let disk: AppSettings =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap())
+                .unwrap();
+        assert_eq!(disk, cached, "disk and cache must agree");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Serialize a canonical settings.json without the input-server access
+    /// token, simulating a pre-ROADMAP-118 file.
+    fn legacy_input_server_token_json() -> String {
+        let mut value = serde_json::to_value(AppSettings::default()).unwrap();
+        value
+            .get_mut("input_server")
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .remove("access_token");
+        serde_json::to_string_pretty(&value).unwrap()
+    }
+
+    fn legacy_token_tmp_dir(label: &str) -> PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-input-server-token-{}-{}-{}",
+            label,
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A legacy settings.json without an input-server access token gets one
+    /// generated on load, persisted to disk and reflected in the cache.
+    #[test]
+    fn legacy_settings_without_input_token_generate_one_on_load() {
+        let dir = legacy_token_tmp_dir("migrate");
+        std::fs::write(dir.join("settings.json"), legacy_input_server_token_json()).unwrap();
+
+        let manager = SettingsManager::with_config_dir(dir.clone()).unwrap();
+        let token = manager
+            .load()
+            .unwrap()
+            .input_server
+            .access_token
+            .expect("legacy load must generate a token");
+        assert!(!token.is_empty());
+
+        let disk_value: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            disk_value.pointer("/input_server/access_token"),
+            Some(&serde_json::Value::String(token)),
+            "generated token must be persisted"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A persisted token is never regenerated on load.
+    #[test]
+    fn existing_input_token_survives_load() {
+        let dir = legacy_token_tmp_dir("preserve");
+        let mut value: serde_json::Value =
+            serde_json::from_str(&legacy_input_server_token_json()).unwrap();
+        value
+            .get_mut("input_server")
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .insert(
+                "access_token".to_string(),
+                serde_json::Value::String("keep-me".to_string()),
+            );
+        std::fs::write(
+            dir.join("settings.json"),
+            serde_json::to_string_pretty(&value).unwrap(),
+        )
+        .unwrap();
+
+        let manager = SettingsManager::with_config_dir(dir.clone()).unwrap();
+        assert_eq!(
+            manager.load().unwrap().input_server.access_token,
+            Some("keep-me".to_string())
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A fresh settings file is created with a generated token.
+    #[test]
+    fn fresh_settings_file_gets_input_token() {
+        let dir = legacy_token_tmp_dir("fresh");
+
+        let manager = SettingsManager::with_config_dir(dir.clone()).unwrap();
+        let token = manager
+            .load()
+            .unwrap()
+            .input_server
+            .access_token
+            .expect("fresh settings must carry a generated token");
+        assert!(!token.is_empty());
+
+        let disk_value: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            disk_value.pointer("/input_server/access_token"),
+            Some(&serde_json::Value::String(token)),
+            "fresh file must persist the token"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
