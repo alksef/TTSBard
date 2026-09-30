@@ -989,4 +989,67 @@ describe('useWebView sequential settings persistence', () => {
     expect(settings.value.send_original_text).toBe(false)
     expect(errorMessage.value).toBeNull()
   })
+
+  it('preserves a later port edit while rolling back the rejected checkbox', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ send_original_text: true })
+    const { settings, saveSendOriginalText, errorMessage } = await setupAndMount()
+    await nextTick()
+    const { persisted, saves } = queuePersistingSaveCalls({ send_original_text: true })
+
+    settings.value.send_original_text = false
+    const pending = saveSendOriginalText()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+
+    // Правка поля уже после отправки упавшего payload остаётся несохранённой.
+    settings.value.port = 12000
+
+    saves[0].reject('backend down')
+    await pending
+
+    expect(settings.value.send_original_text).toBe(true)
+    expect(settings.value.port).toBe(12000)
+    expect(persisted.send_original_text).toBe(true)
+    expect(errorMessage.value).toBe('Не удалось сохранить настройки')
+  })
+
+  it('preserves an independently edited neighbour while rolling back the rejected field', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ enabled: false, bind_address: '0.0.0.0' })
+    const { settings, save, errorMessage } = await setupAndMount()
+    await nextTick()
+    const { saves } = queuePersistingSaveCalls({ enabled: false, bind_address: '0.0.0.0' })
+
+    settings.value.enabled = true
+    const pending = save()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+
+    settings.value.bind_address = '127.0.0.1'
+
+    saves[0].reject('backend down')
+    await pending
+
+    expect(settings.value.enabled).toBe(false)
+    expect(settings.value.bind_address).toBe('127.0.0.1')
+    expect(errorMessage.value).toBe('Не удалось сохранить настройки')
+  })
+
+  it('keeps an A->B->A port edit made after the failed payload', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ port: 10100 })
+    const { settings, save, errorMessage } = await setupAndMount()
+    await nextTick()
+    const { payloads, saves } = queuePersistingSaveCalls({ port: 10100 })
+
+    settings.value.port = 12000
+    const pending = save()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+    expect(payloads[0].port).toBe(12000)
+
+    settings.value.port = 9000
+    settings.value.port = 12000
+
+    saves[0].reject('backend down')
+    await pending
+
+    expect(settings.value.port).toBe(12000)
+    expect(errorMessage.value).toBe('Не удалось сохранить настройки')
+  })
 })

@@ -122,6 +122,23 @@ export function useTwitch() {
     send_original_text: settings.value.send_original_text,
   }
 
+  // Per-field edit revisions for the two checkbox fields. Only a user toggle
+  // bumps a revision; internal rollback, persisted echoes and baseline updates
+  // do not. A save snapshots the revisions with its payload so a failure can
+  // roll back only fields that were not re-toggled after that payload was
+  // submitted (including the A→B→A case where the final value equals the
+  // submitted one).
+  const checkboxRevisions = { start_on_boot: 0, send_original_text: 0 }
+  let applyingInternalState = false
+
+  watch(() => settings.value.start_on_boot, () => {
+    if (!applyingInternalState) checkboxRevisions.start_on_boot += 1
+  }, { flush: 'sync' })
+
+  watch(() => settings.value.send_original_text, () => {
+    if (!applyingInternalState) checkboxRevisions.send_original_text += 1
+  }, { flush: 'sync' })
+
   function persistTwitchSettings(payload: TwitchSettings): Promise<string> {
     const previous = sectionWriteTail
     // An idle queue writes immediately; only a busy one defers the next write.
@@ -284,15 +301,24 @@ export function useTwitch() {
     checkboxSavePending = true
     try {
       let payload = { ...settings.value }
+      let payloadRevisions = { ...checkboxRevisions }
       while (true) {
         try {
           await persistTwitchSettings(payload)
         } catch (e) {
           if (listenerScope.disposed) return
-          // Nothing from this payload was stored: the checkboxes must show the
-          // last persisted values instead of the rejected edit.
-          settings.value.start_on_boot = persistedCheckboxes.start_on_boot
-          settings.value.send_original_text = persistedCheckboxes.send_original_text
+          // Roll back only the checkbox fields whose user toggle has not
+          // changed since this payload was submitted. A later toggle stays
+          // visible and unsaved; the internal writes below must not count as a
+          // fresh user edit.
+          applyingInternalState = true
+          if (checkboxRevisions.start_on_boot === payloadRevisions.start_on_boot) {
+            settings.value.start_on_boot = persistedCheckboxes.start_on_boot
+          }
+          if (checkboxRevisions.send_original_text === payloadRevisions.send_original_text) {
+            settings.value.send_original_text = persistedCheckboxes.send_original_text
+          }
+          applyingInternalState = false
           handleSettingsFailure(e)
           return
         }
@@ -303,6 +329,7 @@ export function useTwitch() {
         }
         if (checkboxFieldsEqual(settings.value, payload)) break
         payload = { ...settings.value }
+        payloadRevisions = { ...checkboxRevisions }
       }
     } finally {
       checkboxSavePending = false
@@ -359,6 +386,7 @@ export function useTwitch() {
     // drain is replacing and make the drain write that value back.
     if (checkboxSavePending) return
     debugLog('[TwitchPanel] Settings updated from composable, has_token:', !!newSettings.token, 'channel:', newSettings.channel)
+    applyingInternalState = true
     settings.value = {
       enabled: newSettings.enabled,
       username: newSettings.username,
@@ -367,6 +395,7 @@ export function useTwitch() {
       start_on_boot: newSettings.start_on_boot,
       send_original_text: newSettings.send_original_text,
     }
+    applyingInternalState = false
     persistedCheckboxes = {
       start_on_boot: newSettings.start_on_boot,
       send_original_text: newSettings.send_original_text,

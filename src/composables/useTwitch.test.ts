@@ -573,6 +573,50 @@ describe('useTwitch checkbox section saves', () => {
     expect(twitch.connectionError.value).not.toContain('Twitch is not connected')
   })
 
+  it('keeps a later toggle when the earlier checkbox write fails', async () => {
+    const twitch = await setupAndMount()
+    const saves = queueSaveCalls()
+
+    twitch.settings.value.send_original_text = false
+    const first = twitch.saveSendOriginalText()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+
+    // Во время записи переключается другое checkbox-поле: эта правка не должна
+    // исчезнуть из-за ошибки первой записи.
+    twitch.settings.value.start_on_boot = true
+    await twitch.saveStartOnBoot()
+    expect(saves).toHaveLength(1)
+
+    saves[0].reject({ code: 'twitch.unavailable', message: 'earlier failure', retryable: true })
+    await first
+
+    // send_original_text не менялось после отправки: откат к persisted true.
+    // start_on_boot правился во время await: остаётся true.
+    expect(twitch.settings.value.send_original_text).toBe(true)
+    expect(twitch.settings.value.start_on_boot).toBe(true)
+    expect(twitch.connectionError.value).toBe('Ошибка подключения к Twitch')
+  })
+
+  it('keeps an A-to-B-to-A checkbox toggle made after submission', async () => {
+    const twitch = await setupAndMount()
+    const saves = queueSaveCalls()
+
+    twitch.settings.value.send_original_text = false
+    const pending = twitch.saveSendOriginalText()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+
+    // A→B→A: значение вернулось к отправленному (false), но это была правка,
+    // а не отсутствие правки, поэтому отката к persisted true быть не должно.
+    twitch.settings.value.send_original_text = true
+    twitch.settings.value.send_original_text = false
+
+    saves[0].reject({ code: 'twitch.unavailable', message: 'failure', retryable: true })
+    await pending
+
+    expect(twitch.settings.value.send_original_text).toBe(false)
+    expect(twitch.connectionError.value).toBe('Ошибка подключения к Twitch')
+  })
+
   it('coalesces an overlapping toggle into one follow-up write with the latest value', async () => {
     const twitch = await setupAndMount()
     const { payloads, saves } = queuePersistingSaveCalls()

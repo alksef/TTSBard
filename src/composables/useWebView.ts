@@ -43,6 +43,8 @@ const WEBVIEW_SETTINGS_FIELDS: Array<keyof WebViewSettings> = [
   'upnp_enabled',
 ]
 
+type FieldRevisions = Record<keyof WebViewSettings, number>
+
 /** Что логировать и какую локализованную ошибку показать при сбое записи. */
 interface PersistContext {
   logLabel: string
@@ -114,6 +116,59 @@ export function useWebView() {
   // Baseline: последний snapshot, который backend подтвердил. Из него берётся
   // rollback, и по нему несохранённая правка отличается от persisted значения.
   let persistedSettings: WebViewSettings = settingsSnapshot()
+
+  // Счётчик правок пользователя по полям. Инкрементируется только реальными
+  // правками, а не внутренними rollback/echo/baseline-записями. При ошибке
+  // persist откатываются только поля, чья ревизия не продвинулась после
+  // отправки упавшего payload; поздние правки (включая A->B->A) остаются.
+  const editRevisions: FieldRevisions = {
+    enabled: 0,
+    start_on_boot: 0,
+    send_original_text: 0,
+    port: 0,
+    bind_address: 0,
+    access_token: 0,
+    upnp_enabled: 0,
+  }
+  let internalSettingsWrite = false
+  let lastObservedSettings: WebViewSettings = settingsSnapshot()
+
+  watch(
+    settings,
+    (next) => {
+      if (internalSettingsWrite) {
+        lastObservedSettings = settingsSnapshot()
+        return
+      }
+      for (const field of WEBVIEW_SETTINGS_FIELDS) {
+        if (next[field] !== lastObservedSettings[field]) {
+          editRevisions[field] += 1
+        }
+      }
+      lastObservedSettings = settingsSnapshot()
+    },
+    { deep: true, flush: 'sync' },
+  )
+
+  function captureEditRevisions(): FieldRevisions {
+    const snapshot = {} as FieldRevisions
+    for (const field of WEBVIEW_SETTINGS_FIELDS) {
+      snapshot[field] = editRevisions[field]
+    }
+    return snapshot
+  }
+
+  function rollbackUneditedFields(submitted: FieldRevisions): void {
+    const next = settingsSnapshot()
+    for (const field of WEBVIEW_SETTINGS_FIELDS) {
+      if (editRevisions[field] <= submitted[field]) {
+        copySettingsField(next, persistedSettings, field)
+      }
+    }
+    internalSettingsWrite = true
+    settings.value = next
+    internalSettingsWrite = false
+  }
 
   // Полные записи идут через одну FIFO-очередь и один drain: одновременно в
   // полёте не более одной `save_webview_settings`, а draft перечитывается после
@@ -205,10 +260,6 @@ export function useWebView() {
     return write
   }
 
-  function restorePersistedSettings(): void {
-    settings.value = { ...persistedSettings }
-  }
-
   /**
    * Записать draft целиком через последовательного owner'а. Вызов, пришедший
    * во время идущего drain, присоединяется к нему: параллельной записи не
@@ -230,14 +281,17 @@ export function useWebView() {
     // Snapshot фиксируется до каждого invoke: успех относится к отправленному
     // snapshot, а не к тому, что пользователь успел изменить во время await.
     let payload = settingsSnapshot()
+    // Ревизии на момент отправки именно этого payload: откат относится к
+    // времени отправки упавшей записи, а не к моменту входа в drain.
+    let submittedRevisions = captureEditRevisions()
     while (true) {
       try {
         lastResult = await persistWebViewSettings(payload)
       } catch (e) {
         if (listenerScope.disposed) return { ok: false, result: null }
-        // Ничего из отправленного snapshot не сохранено: форма показывает
-        // последнее подтверждённое состояние и существующую ошибку.
-        restorePersistedSettings()
+        // Из отправленного snapshot не сохранено ничего, но поля, отредактированные
+        // уже после его отправки, остаются видимыми как несохранённый draft.
+        rollbackUneditedFields(submittedRevisions)
         debugError(`[WebView] Failed to save ${context.logLabel}:`, e)
         showError(presentCommandError(e, t(context.errorKey)))
         return { ok: false, result: null }
@@ -249,6 +303,7 @@ export function useWebView() {
       // промежуточный порт не отправляется и остаётся в поле с подсказкой.
       if (!isPortValid.value) return { ok: true, result: lastResult }
       payload = settingsSnapshot()
+      submittedRevisions = captureEditRevisions()
     }
   }
 
@@ -269,7 +324,9 @@ export function useWebView() {
         copySettingsField(merged, settings.value, field)
       }
     }
+    internalSettingsWrite = true
     settings.value = merged
+    internalSettingsWrite = false
     persistedSettings = { ...next }
   }
 
@@ -354,7 +411,9 @@ export function useWebView() {
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : String(e)
       debugError('[WebView] UPnP toggle failed:', errorMsg)
+      internalSettingsWrite = true
       settings.value.upnp_enabled = webviewSettingsFromComposable.value?.upnp_enabled ?? confirmedBefore
+      internalSettingsWrite = false
       showError(presentCommandError(e, t('webview.error.upnp')))
     }
   }

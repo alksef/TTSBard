@@ -53,10 +53,20 @@ const VTUBE_SETTINGS_FIELDS: Array<keyof VTubeStudioSettings> = [
   'start_on_boot',
 ]
 
+type FieldRevisions = Record<keyof VTubeStudioSettings, number>
+
+function copySettingsField<K extends keyof VTubeStudioSettings>(
+  target: VTubeStudioSettings,
+  source: VTubeStudioSettings,
+  field: K,
+): void {
+  target[field] = source[field]
+}
+
 /** Результат одной последовательной записи секции настроек. */
 type PersistOutcome =
   | { ok: true; result: string | null }
-  | { ok: false; error: unknown }
+  | { ok: false; error: unknown; submittedRevisions: FieldRevisions }
 
 interface TypingActionDraft extends VTubeStudioTypingActionDto {}
 
@@ -128,6 +138,51 @@ export function useVTubeStudio() {
   // Baseline: последний snapshot, который backend подтвердил. Из него берётся
   // откат, и по нему форма отличается от persisted-состояния.
   let persistedSettings: VTubeStudioSettings = settingsSnapshot()
+
+  // Счётчик правок пользователя по полям. Инкрементируется только реальными
+  // правками, а не внутренними rollback/echo/baseline-записями. При ошибке
+  // persist откатываются только поля, чья ревизия не продвинулась после
+  // отправки упавшего payload; поздние правки (включая A->B->A) остаются.
+  const editRevisions: FieldRevisions = { enabled: 0, port: 0, start_on_boot: 0 }
+  let internalSettingsWrite = false
+  let lastObservedSettings: VTubeStudioSettings = settingsSnapshot()
+
+  watch(
+    settings,
+    (next) => {
+      if (internalSettingsWrite) {
+        lastObservedSettings = settingsSnapshot()
+        return
+      }
+      for (const field of VTUBE_SETTINGS_FIELDS) {
+        if (next[field] !== lastObservedSettings[field]) {
+          editRevisions[field] += 1
+        }
+      }
+      lastObservedSettings = settingsSnapshot()
+    },
+    { deep: true, flush: 'sync' },
+  )
+
+  function captureEditRevisions(): FieldRevisions {
+    const snapshot = {} as FieldRevisions
+    for (const field of VTUBE_SETTINGS_FIELDS) {
+      snapshot[field] = editRevisions[field]
+    }
+    return snapshot
+  }
+
+  function rollbackUneditedFields(submitted: FieldRevisions): void {
+    const next = settingsSnapshot()
+    for (const field of VTUBE_SETTINGS_FIELDS) {
+      if (editRevisions[field] <= submitted[field]) {
+        copySettingsField(next, persistedSettings, field)
+      }
+    }
+    internalSettingsWrite = true
+    settings.value = next
+    internalSettingsWrite = false
+  }
 
   // Записи секции идут через одну FIFO-очередь и один drain: одновременно в
   // полёте не более одной `save_vtube_studio_settings`, а payload перечитывается
@@ -281,7 +336,9 @@ export function useVTubeStudio() {
     try {
       const data = await invoke<VTubeStudioSettings & { typingAction?: TypingActionDraft }>('get_vtube_studio_settings')
       if (gen !== loadSettingsGeneration) return
+      internalSettingsWrite = true
       settings.value = { enabled: data.enabled, port: data.port, start_on_boot: data.start_on_boot }
+      internalSettingsWrite = false
       // Прочитанное persisted-состояние — это подтверждённый baseline, из
       // которого берётся откат при ошибке записи.
       persistedSettings = { ...settings.value }
@@ -352,10 +409,6 @@ export function useVTubeStudio() {
     return write
   }
 
-  function restorePersistedSettings(): void {
-    settings.value = { ...persistedSettings }
-  }
-
   /**
    * Записать секцию целиком через последовательного owner'а. Вызов, пришедший
    * во время идущего drain (в том числе checkbox во время `save()`),
@@ -378,14 +431,17 @@ export function useVTubeStudio() {
     // Snapshot фиксируется до каждого invoke: успех относится к отправленному
     // snapshot, а не к тому, что пользователь успел изменить во время await.
     let payload = settingsSnapshot()
+    // Ревизии на момент отправки именно этого payload: откат относится к
+    // времени отправки упавшей записи, а не к моменту присоединения caller'а.
+    let submittedRevisions = captureEditRevisions()
     while (true) {
       try {
         lastResult = await persistVTubeSettings(payload)
       } catch (e) {
         debugError('[VTubeStudio] Failed to save settings:', e)
-        return { ok: false, error: e }
+        return { ok: false, error: e, submittedRevisions }
       }
-      if (listenerScope.disposed) return { ok: false, error: null }
+      if (listenerScope.disposed) return { ok: false, error: null, submittedRevisions }
       // Начатая backend-запись учитывается независимо от staleness: baseline —
       // это то, что реально лежит в persisted-настройках.
       persistedSettings = { ...payload }
@@ -394,6 +450,7 @@ export function useVTubeStudio() {
       // промежуточный порт не отправляется и остаётся в поле с подсказкой.
       if (!isValidPort(settings.value.port)) return { ok: true, result: lastResult }
       payload = settingsSnapshot()
+      submittedRevisions = captureEditRevisions()
     }
   }
 
@@ -407,7 +464,7 @@ export function useVTubeStudio() {
       // только скрыл бы её результат.
       if (listenerScope.disposed || isStaleOp(gen)) return
       if (!outcome.ok) {
-        restorePersistedSettings()
+        rollbackUneditedFields(outcome.submittedRevisions)
         showError(presentCommandError(outcome.error, t('vtube.error.save_settings')))
         return
       }
@@ -629,7 +686,7 @@ export function useVTubeStudio() {
     const outcome = await requestPersist()
     if (listenerScope.disposed || isStaleOp(gen)) return
     if (!outcome.ok) {
-      restorePersistedSettings()
+      rollbackUneditedFields(outcome.submittedRevisions)
       showError(presentCommandError(outcome.error, t('vtube.error.save_settings')))
     }
   }
@@ -662,11 +719,13 @@ export function useVTubeStudio() {
     // Во время drain его snapshot владеет секцией: эхо persisted-состояния
     // вернуло бы значение, которое drain как раз заменяет.
     if (persistDrain === null) {
+      internalSettingsWrite = true
       settings.value = {
         enabled: newSettings.enabled,
         port: newSettings.port,
         start_on_boot: newSettings.start_on_boot,
       }
+      internalSettingsWrite = false
       persistedSettings = { ...settings.value }
     }
     applyTypingAction(newSettings.typingAction)

@@ -270,15 +270,90 @@ describe('useInputServer', () => {
     rejectSave(new Error('port busy'))
     await pending
 
-    // 14000 не отправлялся, 13000 отклонён: форма показывает 12000 — то, что
-    // действительно лежит в persisted-настройках.
-    expect(settings.value).toEqual({ start_on_boot: false, port: 12000 })
+    // 14000 был правкой, сделанной уже после отправки 13000: её нельзя
+    // затирать откатом к 12000. Поле остаётся с несохранённой правкой, а
+    // сообщение об ошибке по-прежнему локализовано и честно.
+    expect(settings.value).toEqual({ start_on_boot: false, port: 14000 })
     expect(messageType.value).toBe('error')
     expect(message.value).toContain('port busy')
   })
 
-  it('never sends an invalid intermediate port and keeps it in the field', async () => {
-    const { settings, saveSettings, isPortValid } = await setupAndMount()
+  it('rolls back an unchanged rejected field to the last confirmed value', async () => {
+    const { settings, saveSettings } = await setupAndMount()
+
+    settings.value.port = 12000
+    await saveSettings()
+
+    let rejectSave!: (reason?: unknown) => void
+    mocks.mockInvoke.mockImplementationOnce((cmd: string) => {
+      if (cmd === 'save_input_server_settings') {
+        return new Promise((_resolve, reject) => { rejectSave = reject })
+      }
+      return undefined
+    })
+
+    settings.value.port = 13000
+    const pending = saveSettings()
+    rejectSave(new Error('port busy'))
+    await pending
+
+    // Поле не правилось после отправки 13000, поэтому откат к последнему
+    // подтверждённому значению корректен.
+    expect(settings.value).toEqual({ start_on_boot: false, port: 12000 })
+  })
+
+  it('keeps a field edited after submission but rolls back the untouched neighbour field', async () => {
+    const { settings, saveSettings } = await setupAndMount()
+
+    let rejectSave!: (reason?: unknown) => void
+    mocks.mockInvoke.mockImplementationOnce((cmd: string) => {
+      if (cmd === 'save_input_server_settings') {
+        return new Promise((_resolve, reject) => { rejectSave = reject })
+      }
+      return undefined
+    })
+
+    settings.value.start_on_boot = true
+    settings.value.port = 12000
+    const pending = saveSettings()
+
+    // Во время await порт правится ещё раз, а start_on_boot остаётся без
+    // изменений. Откат затрагивает только start_on_boot.
+    settings.value.port = 13000
+    rejectSave(new Error('port busy'))
+    await pending
+
+    expect(settings.value).toEqual({ start_on_boot: false, port: 13000 })
+  })
+
+  it('keeps an A-to-B-to-A edit made after submission when the final value equals the submitted one', async () => {
+    const { settings, saveSettings } = await setupAndMount()
+
+    settings.value.port = 12000
+    await saveSettings()
+
+    let rejectSave!: (reason?: unknown) => void
+    mocks.mockInvoke.mockImplementationOnce((cmd: string) => {
+      if (cmd === 'save_input_server_settings') {
+        return new Promise((_resolve, reject) => { rejectSave = reject })
+      }
+      return undefined
+    })
+
+    settings.value.port = 13000
+    const pending = saveSettings()
+    // A→B→A во время await: значение вернулось к отправленному, но это была
+    // пользовательская правка, а не отсутствие правки.
+    settings.value.port = 14000
+    settings.value.port = 13000
+    rejectSave(new Error('port busy'))
+    await pending
+
+    expect(settings.value).toEqual({ start_on_boot: false, port: 13000 })
+  })
+
+  it('never sends an invalid intermediate port, keeps it with the error, and saves a corrected port', async () => {
+    const { settings, saveSettings, isPortValid, message, messageType } = await setupAndMount()
     const saves: unknown[] = []
     let resolveFirst!: () => void
 
@@ -296,13 +371,34 @@ describe('useInputServer', () => {
     const pending = saveSettings()
     await vi.waitFor(() => expect(saves).toHaveLength(1))
 
+    // Во время await порт становится невалидным: значение остаётся в форме,
+    // не отправляется на бэкенд, а вместо ложного «Настройки сохранены»
+    // показывается локализованная ошибка валидации порта.
     settings.value.port = 5
     resolveFirst()
     await pending
 
-    expect(saves).toHaveLength(1)
+    expect(saves).toEqual([
+      { settings: { start_on_boot: false, port: 12000 } },
+    ])
     expect(settings.value.port).toBe(5)
     expect(isPortValid.value).toBe(false)
+    expect(message.value).toBe('Порт должен быть от 1024 до 65535')
+    expect(messageType.value).toBe('error')
+
+    // После исправления порта значение сохраняется, и появляется честный
+    // успех — только валидный payload достиг бэкенда.
+    settings.value.port = 12345
+    await saveSettings()
+
+    expect(saves).toEqual([
+      { settings: { start_on_boot: false, port: 12000 } },
+      { settings: { start_on_boot: false, port: 12345 } },
+    ])
+    expect(settings.value).toEqual({ start_on_boot: false, port: 12345 })
+    expect(isPortValid.value).toBe(true)
+    expect(message.value).toBe('Настройки сохранены')
+    expect(messageType.value).toBe('success')
   })
 
   it('does not adopt an unsent mid-save edit as the confirmed baseline', async () => {

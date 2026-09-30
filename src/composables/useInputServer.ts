@@ -1,4 +1,4 @@
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { normalizeCommandError } from '../ipc/commandError'
@@ -70,6 +70,23 @@ export function useInputServer() {
   let disposed = false
   let messageTimeout: number | null = null
 
+  // Per-field edit revisions. A field's revision changes only on a user edit:
+  // internal rollback, settings echoes and baseline updates never bump it. A
+  // save captures the revision of every field with its payload, so a failure can
+  // distinguish "unchanged since submission" (roll back) from "re-edited during
+  // the await" (keep), including the A→B→A case where the final value happens to
+  // equal the submitted one.
+  const editRevisions = { start_on_boot: 0, port: 0 }
+  let applyingInternalState = false
+
+  watch(() => settings.value.start_on_boot, () => {
+    if (!applyingInternalState) editRevisions.start_on_boot += 1
+  }, { flush: 'sync' })
+
+  watch(() => settings.value.port, () => {
+    if (!applyingInternalState) editRevisions.port += 1
+  }, { flush: 'sync' })
+
   const isPortValid = computed(() => {
     const port = settings.value.port
     return Number.isInteger(port) && port >= 1024 && port <= 65535
@@ -127,7 +144,9 @@ export function useInputServer() {
       // a late echo of an earlier save must not replace an edit the user made
       // after that save was submitted.
       if (!inputServerSettingsEqual(settings.value, confirmedSettings)) return
+      applyingInternalState = true
       settings.value = next
+      applyingInternalState = false
       confirmedSettings = { ...next }
     } catch (e) {
       if (disposed || token !== settingsLoadToken) return
@@ -156,10 +175,15 @@ export function useInputServer() {
     // the latest edit is always persisted once per iteration.
     if (loading.value) return
     loading.value = true
+    // The request payload is fixed before the await: the confirmation below
+    // reports what was actually sent, never the then-current editable value.
+    // The edit revisions are snapshotted together with the payload so a later
+    // failure can tell which fields the user changed while the save was in
+    // flight. Declared outside try so the failure handler can read them.
+    let payload = { ...settings.value }
+    let payloadRevisions = { ...editRevisions }
     try {
-      // The request payload is fixed before the await: the confirmation below
-      // reports what was actually sent, never the then-current editable value.
-      let payload = { ...settings.value }
+      let skippedInvalidDraft = false
       while (true) {
         await invoke('save_input_server_settings', { settings: payload })
         if (disposed) return
@@ -171,13 +195,31 @@ export function useInputServer() {
         // An edit made during the await is persisted by the next iteration, but
         // an invalid intermediate value is never sent: it stays in the field
         // with the validation hint instead of being replaced by a rollback.
-        if (!isPortValid.value) break
+        if (!isPortValid.value) {
+          skippedInvalidDraft = true
+          break
+        }
         payload = { ...settings.value }
+        payloadRevisions = { ...editRevisions }
       }
-      showMessage(t('input_server.saved'), 'success')
+      if (skippedInvalidDraft) {
+        showMessage(t('input_server.port_error'), 'error')
+      } else {
+        showMessage(t('input_server.saved'), 'success')
+      }
     } catch (e) {
       if (disposed) return
-      settings.value = { ...confirmedSettings }
+      // Roll back only fields whose user edit has not changed since the failed
+      // payload was submitted. A later edit stays visible and unsaved; internal
+      // writes below must not count as a fresh user edit.
+      applyingInternalState = true
+      if (editRevisions.start_on_boot === payloadRevisions.start_on_boot) {
+        settings.value.start_on_boot = confirmedSettings.start_on_boot
+      }
+      if (editRevisions.port === payloadRevisions.port) {
+        settings.value.port = confirmedSettings.port
+      }
+      applyingInternalState = false
       const errorMessage = e instanceof Error ? e.message : String(e)
       showMessage(t('input_server.error.save', { detail: errorMessage }), 'error')
     } finally {

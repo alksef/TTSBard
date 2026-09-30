@@ -645,6 +645,65 @@ describe('useVTubeStudio', () => {
       expect(settings.value.start_on_boot).toBe(true)
       expect(errorMessage.value).toBeNull()
     })
+
+    it('preserves a later port edit while rolling back the rejected checkbox', async () => {
+      const { settings, saveStartOnBoot, errorMessage } = await setupAndMount({ enabled: true, port: 8001, start_on_boot: false })
+      const { saves } = queuePersistCalls({ enabled: true, port: 8001, start_on_boot: false })
+
+      settings.value.start_on_boot = true
+      const checkbox = saveStartOnBoot()
+      await vi.waitFor(() => expect(saves).toHaveLength(1))
+
+      settings.value.port = 9001
+
+      saves[0].reject('backend down')
+      await checkbox
+
+      expect(settings.value.start_on_boot).toBe(false)
+      expect(settings.value.port).toBe(9001)
+      expect(errorMessage.value).toBe('Не удалось сохранить настройки VTube Studio')
+    })
+
+    it('preserves a port edit made between the checkbox submit and the joining save()', async () => {
+      const { settings, save, saveStartOnBoot, errorMessage } = await setupAndMount({ enabled: true, port: 8001, start_on_boot: false })
+      const { saves } = queuePersistCalls({ enabled: true, port: 8001, start_on_boot: false })
+
+      settings.value.start_on_boot = true
+      const checkbox = saveStartOnBoot()
+      await vi.waitFor(() => expect(saves).toHaveLength(1))
+
+      settings.value.port = 9001
+
+      const button = save()
+      await flushMicrotasks()
+      expect(saves).toHaveLength(1)
+
+      saves[0].reject('backend down')
+      await Promise.all([checkbox, button])
+
+      expect(settings.value.start_on_boot).toBe(false)
+      expect(settings.value.port).toBe(9001)
+      expect(errorMessage.value).toBe('Не удалось сохранить настройки VTube Studio')
+    })
+
+    it('keeps an A->B->A port edit made after the failed payload', async () => {
+      const { settings, saveStartOnBoot, errorMessage } = await setupAndMount({ enabled: true, port: 8001, start_on_boot: false })
+      const { saves } = queuePersistCalls({ enabled: true, port: 8001, start_on_boot: false })
+
+      settings.value.port = 9001
+      const checkbox = saveStartOnBoot()
+      await vi.waitFor(() => expect(saves).toHaveLength(1))
+      expect(saves[0].payload.port).toBe(9001)
+
+      settings.value.port = 7000
+      settings.value.port = 9001
+
+      saves[0].reject('backend down')
+      await checkbox
+
+      expect(settings.value.port).toBe(9001)
+      expect(errorMessage.value).toBe('Не удалось сохранить настройки VTube Studio')
+    })
   })
 
   describe('testTypingParameter', () => {
