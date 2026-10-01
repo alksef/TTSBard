@@ -1,0 +1,15 @@
+/* Shared token visibility (eye) button.
+   Global selectors deliberately out-specify component-scoped .icon-button
+   color rules so the neutral/accent states apply consistently across panels. */
+
+button.icon-button.token-visibility-button,
+button.toggle-icon-button.token-visibility-button {
+  color: var(--color-text-secondary);
+}
+
+button.icon-button.token-visibility-button:hover:not(:disabled),
+button.icon-button.token-visibility-button:focus-visible:not(:disabled),
+button.toggle-icon-button.token-visibility-button:hover:not(:disabled),
+button.toggle-icon-button.token-visibility-button:focus-visible:not(:disabled) {
+  color: var(--color-accent);
+}

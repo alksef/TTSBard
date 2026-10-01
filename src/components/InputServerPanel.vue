@@ -40,12 +40,14 @@ const {
 
 const messageBoxClass = computed(() => (message.value ? messageType.value : ''))
 
-const HIDDEN_TOKEN_BULLETS = '••••••••'
+const HIDDEN_TOKEN_BULLET = '•'
 const tokenVisible = ref(true)
 
 const tokenDisplay = computed(() => {
   if (!accessToken.value) return t('input_server.token.not_generated')
-  return tokenVisible.value ? accessToken.value : HIDDEN_TOKEN_BULLETS
+  return tokenVisible.value
+    ? accessToken.value
+    : HIDDEN_TOKEN_BULLET.repeat(accessToken.value.length)
 })
 </script>
 
@@ -191,11 +193,14 @@ const tokenDisplay = computed(() => {
         <div class="connection-row connection-token-row">
           <label class="row-label">{{ t('input_server.token.label') }}</label>
           <div class="url-display url-display-full">
-            <label class="url-code url-code-wide">
+            <label
+              class="url-code url-code-wide"
+              :class="{ 'token-hidden': !tokenVisible && tokenAvailable }"
+            >
               {{ tokenDisplay }}
             </label>
             <button
-              class="icon-button token-toggle"
+              class="icon-button token-toggle token-visibility-button"
               :title="tokenVisible ? t('input_server.token.hide') : t('input_server.token.show')"
               :aria-label="tokenVisible ? t('input_server.token.hide') : t('input_server.token.show')"
               :aria-pressed="tokenVisible ? 'true' : 'false'"
@@ -670,6 +675,10 @@ h2 {
 .url-code-wide {
   display: block !important;
   line-height: 36px;
+}
+
+.url-code.token-hidden {
+  text-overflow: clip;
 }
 
 .connection-row .row-label {

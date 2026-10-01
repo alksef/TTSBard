@@ -54,9 +54,12 @@ function updateValue(event: Event) {
     <button
       v-if="hasToggle"
       type="button"
-      class="toggle-icon-button"
+      class="toggle-icon-button token-visibility-button"
       @click="showValue = !showValue"
       :title="showValue ? t('common.hide') : t('common.show')"
+      :aria-label="showValue ? t('common.hide') : t('common.show')"
+      :aria-pressed="showValue ? 'true' : 'false'"
+      :disabled="disabled"
     >
       <Eye v-if="!showValue" :size="18" />
       <EyeOff v-else :size="18" />
@@ -114,15 +117,10 @@ function updateValue(event: Event) {
   padding: 6px;
   border: none;
   cursor: pointer;
-  color: var(--color-text-secondary);
   display: flex;
   align-items: center;
   justify-content: center;
   transition: color 0.2s;
   background: transparent !important;
-}
-
-.toggle-icon-button:hover {
-  color: var(--color-accent);
 }
 </style>

@@ -37,13 +37,13 @@ const {
   reloadTemplates,
 } = useWebView()
 
-const HIDDEN_TOKEN_BULLETS = '••••••••'
+const HIDDEN_TOKEN_BULLET = '•'
 const tokenVisible = ref(true)
 
 const tokenDisplay = computed(() => {
   const token = settings.value.access_token
   if (!token) return t('webview.token.not_generated')
-  return tokenVisible.value ? token : HIDDEN_TOKEN_BULLETS
+  return tokenVisible.value ? token : HIDDEN_TOKEN_BULLET.repeat(token.length)
 })
 </script>
 
@@ -184,8 +184,11 @@ const tokenDisplay = computed(() => {
       <div class="setting-row token-row">
         <label>{{ t('webview.token.label') }}</label>
         <div class="token-field url-display url-display-expand">
-          <label class="url-code url-code-expand token-text">{{ tokenDisplay }}</label>
-          <button @click="tokenVisible = !tokenVisible" class="icon-button" :title="tokenVisible ? t('webview.token.hide') : t('webview.token.show')" :aria-label="tokenVisible ? t('webview.token.hide') : t('webview.token.show')" :aria-pressed="tokenVisible ? 'true' : 'false'" :disabled="!hasToken">
+          <label
+            class="url-code url-code-expand token-text"
+            :class="{ 'token-hidden': !tokenVisible && hasToken }"
+          >{{ tokenDisplay }}</label>
+          <button @click="tokenVisible = !tokenVisible" class="icon-button token-visibility-button" :title="tokenVisible ? t('webview.token.hide') : t('webview.token.show')" :aria-label="tokenVisible ? t('webview.token.hide') : t('webview.token.show')" :aria-pressed="tokenVisible ? 'true' : 'false'" :disabled="!hasToken">
             <Eye v-if="!tokenVisible" :size="16" />
             <EyeOff v-else :size="16" />
           </button>
@@ -660,6 +663,10 @@ h2 {
   min-width: 0 !important;
   width: auto !important;
   line-height: 36px;
+}
+
+.token-field .token-text.token-hidden {
+  text-overflow: clip;
 }
 
 @media (max-width: 440px) {
