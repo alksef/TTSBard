@@ -1549,6 +1549,8 @@ pub struct AllSourcesParams<'a> {
 /// Storage settings (user paths, ROADMAP-117)
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct StorageSettingsDto {
+    #[serde(default)]
+    pub data_dir: Option<String>,
     /// Custom audio cache directory; `None` — default `%LOCALAPPDATA%`.
     #[serde(default)]
     pub audio_cache_dir: Option<String>,
@@ -1631,6 +1633,7 @@ impl AppSettingsDto {
             ocr: params.config.ocr.clone(),
             logging: params.config.logging.clone(),
             storage: StorageSettingsDto {
+                data_dir: params.config.storage.data_dir.clone(),
                 audio_cache_dir: params.config.storage.audio_cache_dir.clone(),
             },
             preprocessor: PreprocessorSettingsDto::from_preprocessor(params.preprocessor),
@@ -2044,7 +2047,7 @@ mod tests {
             audio,
             audio_effects,
             dsp,
-            storage: StorageSettingsDto { audio_cache_dir: None },
+            storage: StorageSettingsDto { data_dir: None, audio_cache_dir: None },
             general,
             editor,
             ocr,
@@ -2430,7 +2433,7 @@ mod tests {
             audio,
             audio_effects,
             dsp,
-            storage: StorageSettingsDto { audio_cache_dir: None },
+            storage: StorageSettingsDto { data_dir: None, audio_cache_dir: None },
             general,
             editor,
             ocr,

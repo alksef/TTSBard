@@ -1,88 +1,209 @@
-//! Пользовательские пути хранения (ROADMAP-117): каталог аудио-кеша и
-//! открытие папки локальных данных.
+//! Пользовательские пути хранения (ROADMAP-117): каталог аудио-кеша, корень
+//! данных программы, перенос данных и открытие папки локальных данных.
 
-use tauri::{AppHandle, State};
+use std::sync::OnceLock;
+
+use tauri::{AppHandle, Emitter, State};
 
 use crate::config::SettingsManager;
 
-/// Эффективный каталог аудио-кеша и признак дефолтного пути.
+/// Эффективный корень данных программы и признак дефолтного пути.
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct AudioCacheDirInfo {
+pub struct DataInfo {
     pub path: String,
     pub is_default: bool,
 }
 
-/// Текущий каталог аудио-кеша (дефолт `%LOCALAPPDATA%\ttsbard\audio_cache`
-/// или пользовательский путь).
+/// Результат подготовки переноса данных.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TransferPrepareInfo {
+    pub source_path: String,
+    pub target_path: String,
+    pub total_bytes: u64,
+}
+
+/// Результат успешного переноса данных.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TransferDataResult {
+    pub path: String,
+    pub is_default: bool,
+    /// Живые инстансы моделей могут удерживать старые пути: после переноса
+    /// моделей рекомендуется перезапуск. Не утверждает runtime-миграцию.
+    pub restart_required: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct TransferProgressPayload {
+    operation_id: String,
+    phase: &'static str,
+    completed_bytes: u64,
+    total_bytes: u64,
+}
+
+/// Глобальный owner-guard: допускает только один одновременный перенос.
+static TRANSFER_GUARD: OnceLock<std::sync::Mutex<()>> = OnceLock::new();
+
+fn transfer_guard() -> &'static std::sync::Mutex<()> {
+    TRANSFER_GUARD.get_or_init(|| std::sync::Mutex::new(()))
+}
+
+/// Текущий корень данных программы (дефолт `%LOCALAPPDATA%\ttsbard` или
+/// пользовательский `storage.data_dir`).
 #[tauri::command]
-pub async fn storage_get_audio_cache_info() -> Result<AudioCacheDirInfo, String> {
+pub async fn storage_get_data_info() -> Result<DataInfo, String> {
     tokio::task::spawn_blocking(move || {
-        let path = crate::history::cache_dir_path().map_err(|e| e.to_string())?;
-        Ok(AudioCacheDirInfo {
-            path: path.to_string_lossy().into_owned(),
-            is_default: crate::history::audio_cache_dir_is_default(),
+        let root = crate::paths::data_root()
+            .map_err(|e| format!("Не удалось определить корень данных: {}", e))?;
+        Ok(DataInfo {
+            path: root.to_string_lossy().into_owned(),
+            // A legacy custom cache still needs a reset/migration even when
+            // the program root itself uses the default location.
+            is_default: crate::paths::data_root_is_default()
+                && crate::history::audio_cache_dir_is_default(),
         })
     })
     .await
     .map_err(|e| format!("Операция была прервана: {}", e))?
 }
 
-/// Задать каталог аудио-кеша (`None` — вернуть дефолт). Существующие файлы
-/// переносятся до записи настройки; при недоступном пути остаётся прежнее
-/// подтверждённое состояние.
-#[tauri::command]
-pub async fn storage_set_audio_cache_dir(
-    path: Option<String>,
-    settings_manager: State<'_, SettingsManager>,
-    app_handle: AppHandle,
-) -> Result<(), String> {
-    let normalized = path
-        .map(|p| p.trim().to_string())
-        .filter(|p| !p.is_empty());
-    let manager = settings_manager.inner().clone();
-
-    let apply: Result<(), String> = tokio::task::spawn_blocking(move || {
-        let previous_dir = crate::history::cache_dir_path().map_err(|e| e.to_string())?;
-
-        let target_dir = match &normalized {
-            Some(p) => {
-                let dir = std::path::PathBuf::from(p);
-                std::fs::create_dir_all(&dir)
-                    .map_err(|e| format!("Не удалось создать каталог кеша: {}", e))?;
-                dir
-            }
-            None => crate::paths::local_root()
-                .map_err(|e| e.to_string())?
-                .join("audio_cache"),
-        };
-
-        if target_dir != previous_dir {
-            crate::history::migrate_cache_dir(&previous_dir, &target_dir);
+/// Разобрать `path: Option<String>` в целевой корень и persisted-значение
+/// `storage.data_dir` (`None` — сброс на дефолт).
+fn resolve_transfer_target(path: Option<String>) -> Result<(std::path::PathBuf, Option<String>), String> {
+    match path.map(|p| p.trim().to_string()).filter(|p| !p.is_empty()) {
+        None => {
+            let root = crate::paths::default_data_root()
+                .map_err(|e| format!("Не удалось определить дефолтный корень данных: {}", e))?;
+            Ok((root, None))
         }
-
-        // Настройка пишется только после успешного применения переноса;
-        // провал записи возвращает прежнее подтверждённое состояние.
-        let mut settings = manager.load().map_err(|e| e.to_string())?;
-        settings.storage.audio_cache_dir = normalized;
-        manager.save(&settings).map_err(|e| e.to_string())?;
-
-        crate::history::init_audio_cache_dir(settings.storage.audio_cache_dir.as_deref());
-        Ok(())
-    })
-    .await
-    .map_err(|e| format!("Операция была прервана: {}", e))?;
-
-    apply?;
-
-    crate::commands::emit_settings_changed(&app_handle);
-    Ok(())
+        Some(p) => Ok((std::path::PathBuf::from(&p), Some(p))),
+    }
 }
 
-/// Open the local data folder (%LOCALAPPDATA%/ttsbard) in the OS file manager.
+fn current_transfer_inputs() -> Result<(std::path::PathBuf, std::path::PathBuf, bool), String> {
+    let source_root = crate::paths::data_root()
+        .map_err(|e| format!("Не удалось определить корень данных: {}", e))?;
+    let audio_cache_source = crate::history::resolved_audio_cache_dir()
+        .map_err(|e| format!("Не удалось определить каталог аудио-кеша: {}", e))?;
+    let legacy_audio_cache = !crate::history::audio_cache_dir_is_default();
+    Ok((source_root, audio_cache_source, legacy_audio_cache))
+}
+
+/// Подготовить перенос данных в новый корень (`None` — сброс на дефолт).
+/// Возвращает source/target пути и объём данных. Advisory: не мутирует ФС и
+/// не блокирует выполнение параллельных переносов.
+#[tauri::command]
+pub async fn storage_prepare_data_transfer(
+    path: Option<String>,
+) -> Result<TransferPrepareInfo, String> {
+    tokio::task::spawn_blocking(move || {
+        let (target_root, _) = resolve_transfer_target(path)?;
+        let (source_root, audio_cache_source, legacy_audio_cache) = current_transfer_inputs()?;
+        let config_root = crate::paths::config_root()
+            .map_err(|e| format!("Не удалось определить корень конфигурации: {}", e))?;
+
+        let plan = crate::storage_transfer::build_transfer_plan(
+            &source_root,
+            &target_root,
+            &audio_cache_source,
+            legacy_audio_cache,
+            &config_root,
+        )
+        .map_err(|e| e.to_string())?;
+
+        Ok(TransferPrepareInfo {
+            source_path: source_root.to_string_lossy().into_owned(),
+            target_path: target_root.to_string_lossy().into_owned(),
+            total_bytes: plan.total_bytes,
+        })
+    })
+    .await
+    .map_err(|e| format!("Операция была прервана: {}", e))?
+}
+
+/// Выполнить перенос данных в новый корень (`None` — сброс на дефолт).
+/// Эмитирует `storage-transfer-progress` и возвращает инфо после успешного
+/// копирования и сохранения настроек.
+#[tauri::command]
+pub async fn storage_transfer_data(
+    path: Option<String>,
+    operation_id: String,
+    settings_manager: State<'_, SettingsManager>,
+    app_handle: AppHandle,
+) -> Result<TransferDataResult, String> {
+    let manager = settings_manager.inner().clone();
+    let app = app_handle.clone();
+    let operation_id = operation_id.clone();
+
+    tokio::task::spawn_blocking(move || {
+        let _guard = transfer_guard()
+            .try_lock()
+            .map_err(|_| "Передача данных уже выполняется".to_string())?;
+        let _cache_guard = crate::history::cache_io_lock().write();
+
+        let (target_root, new_data_dir) = resolve_transfer_target(path)?;
+        let (source_root, audio_cache_source, legacy_audio_cache) = current_transfer_inputs()?;
+        let config_root = crate::paths::config_root()
+            .map_err(|e| format!("Не удалось определить корень конфигурации: {}", e))?;
+
+        let plan = crate::storage_transfer::build_transfer_plan(
+            &source_root,
+            &target_root,
+            &audio_cache_source,
+            legacy_audio_cache,
+            &config_root,
+        )
+        .map_err(|e| e.to_string())?;
+
+        let op = operation_id.clone();
+        let app_emit = app.clone();
+        let mut progress = move |phase: crate::storage_transfer::TransferPhase,
+                                 completed: u64,
+                                 total: u64| {
+            let _ = app_emit.emit(
+                "storage-transfer-progress",
+                TransferProgressPayload {
+                    operation_id: op.clone(),
+                    phase: phase.as_str(),
+                    completed_bytes: completed,
+                    total_bytes: total,
+                },
+            );
+        };
+
+        let mgr = manager.clone();
+        let new_data_dir_clone = new_data_dir.clone();
+        let mut persist = move || {
+            mgr.set_storage_data_dir(new_data_dir_clone.clone(), None)?;
+            crate::paths::publish_data_root(new_data_dir_clone.as_ref().map(std::path::PathBuf::from));
+            crate::history::init_audio_cache_dir(None);
+            Ok(())
+        };
+
+        let outcome = crate::storage_transfer::execute_transfer(plan, &mut progress, &mut persist)
+            .map_err(|e| e.to_string())?;
+
+        let root = crate::paths::data_root()
+            .map_err(|e| format!("Не удалось определить корень данных: {}", e))?;
+        Ok(TransferDataResult {
+            path: root.to_string_lossy().into_owned(),
+            is_default: crate::paths::data_root_is_default(),
+            restart_required: outcome.models_migrated || source_root != target_root,
+        })
+    })
+    .await
+    .map_err(|e| format!("Операция была прервана: {}", e))?
+    .map(|result| {
+        crate::commands::emit_settings_changed(&app_handle);
+        result
+    })
+}
+
+/// Открыть эффективный корень данных программы (по умолчанию
+/// `%LOCALAPPDATA%\ttsbard`) в файловом менеджере ОС.
 #[tauri::command]
 pub async fn open_local_data_folder() -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let app_dir = crate::paths::local_root()
+        let app_dir = crate::paths::data_root()
             .map_err(|_| "Не удалось определить каталог локальных данных приложения".to_string())?;
 
         std::fs::create_dir_all(&app_dir)

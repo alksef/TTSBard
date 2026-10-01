@@ -29,6 +29,7 @@ mod soundpanel_window;
 pub mod speech_queue;
 mod spellcheck;
 mod state;
+mod storage_transfer;
 pub mod stress;
 mod system_fonts;
 mod tabs;
@@ -156,15 +157,10 @@ pub fn run() {
     #[cfg(windows)]
     crate::single_instance::acquire_lock_or_exit();
 
-    // Инициализируем состояние и менеджеры ДО setup
-    let mut app_state = AppState::new();
-
+    // Инициализируем менеджеры ДО setup
     let settings_manager = SettingsManager::new().expect("Failed to create settings manager");
 
     let windows_manager = WindowsManager::new().expect("Failed to create windows manager");
-
-    // Share the cache Arc so hot-path reads stay consistent with setter writes
-    app_state.settings_cache = settings_manager.cache_arc();
 
     // Load settings to configure logger
     // These settings will be passed to init_app to avoid race condition
@@ -338,6 +334,13 @@ pub fn run() {
     #[cfg(windows)]
     crate::paths::remove_legacy_roaming_temp();
 
+    // Корень данных: пользовательский override из настроек должен быть
+    // применён до model discovery (Piper/OCR/RUAccent) и переноса legacy-кеша.
+    crate::paths::init_data_root(settings.storage.data_dir.as_deref());
+    // OCR and other services snapshot their model root at construction.
+    let mut app_state = AppState::new();
+    app_state.settings_cache = settings_manager.cache_arc();
+
     // Аудио-кеш: кастомный путь из настроек и одноразовый перенос legacy-кеша.
     crate::history::init_audio_cache_dir(settings.storage.audio_cache_dir.as_deref());
     migrate_legacy_audio_cache_once(
@@ -477,9 +480,10 @@ pub fn run() {
             clear_intercept_binding,
             open_file_dialog,
             commands::open_app_folder,
-            commands::storage::storage_get_audio_cache_info,
-            commands::storage::storage_set_audio_cache_dir,
             commands::storage::open_local_data_folder,
+            commands::storage::storage_get_data_info,
+            commands::storage::storage_prepare_data_transfer,
+            commands::storage::storage_transfer_data,
             // Audio commands
             get_output_devices,
             get_virtual_mic_devices,

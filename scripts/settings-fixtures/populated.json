@@ -237,6 +237,7 @@
     }
   },
   "storage": {
+    "data_dir": null,
     "audio_cache_dir": null
   },
   "preprocessor": {

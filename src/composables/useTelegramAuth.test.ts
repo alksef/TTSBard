@@ -39,6 +39,7 @@ function mockUser(): TelegramStatus {
 
 function mockSettings(): AppSettingsDto {
   return {
+    storage: { data_dir: null, audio_cache_dir: null },
     tts: {
       provider: 'silero',
       provider_id: 'id1',

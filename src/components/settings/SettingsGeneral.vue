@@ -2,10 +2,14 @@
 import { ref, computed, watch, onMounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { open as openDirectoryDialog } from '@tauri-apps/plugin-dialog';
-import { AlertTriangle, FolderOpen } from 'lucide-vue-next';
+import { AlertTriangle, FolderOpen, RotateCcw } from 'lucide-vue-next';
 import { useGeneralSettings, useWindowsSettings, useLoggingSettings } from '../../composables/useAppSettings';
 import { presentCommandError } from '../../ipc/commandError';
 import { availableLanguages, locale, setLanguage, t } from '../../i18n';
+import DataTransferModal from './DataTransferModal.vue';
+
+const DEFAULT_CONFIG_DIR_DISPLAY = '%APPDATA%\\ttsbard';
+const DEFAULT_DATA_DIR_DISPLAY = '%LOCALAPPDATA%\\ttsbard';
 
 const showPlaybackOnStart = ref(false);
 const startCompact = ref(false);
@@ -17,14 +21,20 @@ const languageError = ref<string | null>(null);
 const languageSaved = ref(false);
 const pendingLanguage = ref<string | null>(null);
 
-interface AudioCacheDirInfo {
+interface DataInfo {
   path: string;
   is_default: boolean;
 }
 
-const cacheDirInfo = ref<AudioCacheDirInfo | null>(null);
-const cacheDirSaving = ref(false);
+const dataInfo = ref<DataInfo | null>(null);
+const transferTarget = ref<string | null | undefined>(undefined);
 const localDataOpening = ref(false);
+const dataFolderSelecting = ref(false);
+
+const dataPathDisplay = computed(() =>
+  dataInfo.value?.is_default ? DEFAULT_DATA_DIR_DISPLAY : (dataInfo.value?.path ?? '…')
+);
+const dataPathTooltip = computed(() => dataInfo.value?.path ?? '');
 
 // Get settings from composables
 const generalSettings = useGeneralSettings();
@@ -49,11 +59,13 @@ const loggingLevel = computed(() => loggingSettings.value?.level ?? 'info');
 const selectedLanguage = computed(() => pendingLanguage.value ?? locale.value);
 
 // Emit error message event for parent to display
+type MessageSeverity = 'error' | 'success' | 'warning' | 'info';
+
 const emit = defineEmits<{
-  (e: 'show-message', message: string, severity?: 'error' | 'warning' | 'info'): void;
+  (e: 'show-message', message: string, severity?: MessageSeverity): void;
 }>();
 
-function showMessage(message: string, severity: 'error' | 'warning' | 'info') {
+function showMessage(message: string, severity: MessageSeverity) {
   emit('show-message', message, severity);
 }
 
@@ -89,42 +101,40 @@ async function openAppFolder() {
   }
 }
 
-async function refreshCacheDirInfo() {
+async function refreshDataInfo() {
   try {
-    cacheDirInfo.value = await invoke<AudioCacheDirInfo>('storage_get_audio_cache_info');
+    dataInfo.value = await invoke<DataInfo>('storage_get_data_info');
   } catch (e) {
     // Информационная панель: молча оставляем прочерк, ошибка видна при действии.
-    console.warn('Failed to load audio cache dir info', e);
+    console.warn('Failed to load data dir info', e);
   }
 }
 
-async function changeCacheDir() {
-  if (cacheDirSaving.value) return;
+async function changeDataDir() {
+  if (dataFolderSelecting.value || transferTarget.value !== undefined) return;
+  dataFolderSelecting.value = true;
   try {
     const selected = await openDirectoryDialog({ directory: true, multiple: false });
     if (!selected || typeof selected !== 'string') return;
-    cacheDirSaving.value = true;
-    await invoke('storage_set_audio_cache_dir', { path: selected });
-    await refreshCacheDirInfo();
-    showMessage(t('general.storage.saved'), 'info');
+    transferTarget.value = selected;
   } catch (e) {
-    showMessage(presentCommandError(e, t('general.storage.error')), 'error');
+    showMessage(presentCommandError(e, t('dataTransfer.error')), 'error');
   } finally {
-    cacheDirSaving.value = false;
+    dataFolderSelecting.value = false;
   }
 }
 
-async function resetCacheDir() {
-  if (cacheDirSaving.value) return;
-  try {
-    cacheDirSaving.value = true;
-    await invoke('storage_set_audio_cache_dir', { path: null });
-    await refreshCacheDirInfo();
-    showMessage(t('general.storage.saved'), 'info');
-  } catch (e) {
-    showMessage(presentCommandError(e, t('general.storage.error')), 'error');
-  } finally {
-    cacheDirSaving.value = false;
+function resetDataDir() {
+  transferTarget.value = null;
+}
+
+function handleTransferSuccess(result: { restartRequired: boolean; path: string; isDefault: boolean }) {
+  dataInfo.value = { path: result.path, is_default: result.isDefault };
+  transferTarget.value = undefined;
+  if (result.restartRequired) {
+    showMessage(t('dataTransfer.success.restart'), 'warning');
+  } else {
+    showMessage(t('dataTransfer.success'), 'success');
   }
 }
 
@@ -141,7 +151,7 @@ async function openLocalDataFolder() {
   }
 }
 
-onMounted(refreshCacheDirInfo);
+onMounted(refreshDataInfo);
 
 async function toggleExcludeFromCapture() {
   try {
@@ -359,63 +369,75 @@ watch(loggingSettings, (newSettings) => {
       </span>
     </section>
 
-    <!-- Settings and models folder -->
+    <!-- Folders -->
     <section class="settings-group">
-      <span class="setting-label folder-label">{{ t('general.folder.label') }}</span>
-      <div class="folder-inline-row">
-        <span class="folder-path">%APPDATA%\ttsbard</span>
-        <button
-          type="button"
-          class="folder-button"
-          :disabled="folderOpening"
-          title="%APPDATA%\ttsbard"
-          :aria-label="t('general.folder.open')"
-          @click="openAppFolder"
-        >
-          <FolderOpen :size="16" />
-          <span>{{ t('general.folder.open') }}</span>
-        </button>
-      </div>
-    </section>
+      <h3 class="settings-group-title">{{ t('general.folders.title') }}</h3>
 
-    <!-- Audio cache storage -->
-    <section class="settings-group">
-      <span class="setting-label folder-label">{{ t('general.storage.label') }}</span>
-      <div class="folder-inline-row">
-        <span class="folder-path" :title="cacheDirInfo?.path ?? ''">
-          {{ cacheDirInfo?.path ?? '…' }}
-        </span>
-        <button
-          type="button"
-          class="folder-button"
-          :disabled="cacheDirSaving"
-          :aria-label="t('general.storage.change')"
-          @click="changeCacheDir"
-        >
-          <span>{{ t('general.storage.change') }}</span>
-        </button>
-        <button
-          type="button"
-          class="folder-button"
-          :disabled="cacheDirSaving || cacheDirInfo?.is_default"
-          :aria-label="t('general.storage.reset')"
-          @click="resetCacheDir"
-        >
-          <span>{{ t('general.storage.reset') }}</span>
-        </button>
-        <button
-          type="button"
-          class="folder-button"
-          :disabled="localDataOpening"
-          :aria-label="t('general.storage.open')"
-          @click="openLocalDataFolder"
-        >
-          <FolderOpen :size="16" />
-          <span>{{ t('general.storage.open') }}</span>
-        </button>
+      <div class="folder-row">
+        <div class="folder-info">
+          <span class="folder-name">{{ t('general.folders.configuration') }}</span>
+          <span class="folder-path">{{ DEFAULT_CONFIG_DIR_DISPLAY }}</span>
+        </div>
+        <div class="folder-actions">
+          <button
+            type="button"
+            class="folder-button"
+            :disabled="folderOpening"
+            :aria-label="t('general.folders.open')"
+            @click="openAppFolder"
+          >
+            <FolderOpen :size="16" />
+            <span>{{ t('general.folders.open') }}</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="folder-row">
+        <div class="folder-info">
+          <span class="folder-name">{{ t('general.folders.program_data') }}</span>
+          <span class="folder-path" :title="dataPathTooltip">{{ dataPathDisplay }}</span>
+          <span class="folder-hint">{{ t('general.folders.data_hint') }}</span>
+        </div>
+        <div class="folder-actions">
+          <button
+            type="button"
+            class="folder-button"
+            :disabled="localDataOpening"
+            :aria-label="t('general.folders.open')"
+            @click="openLocalDataFolder"
+          >
+            <FolderOpen :size="16" />
+            <span>{{ t('general.folders.open') }}</span>
+          </button>
+          <button
+            type="button"
+            class="folder-button"
+            :aria-label="t('general.folders.change')"
+            @click="changeDataDir"
+          >
+            <span>{{ t('general.folders.change') }}</span>
+          </button>
+          <button
+            type="button"
+            class="folder-button folder-button-icon"
+            :disabled="dataInfo?.is_default !== false"
+            :title="t('general.folders.reset')"
+            :aria-label="t('general.folders.reset')"
+            @click="resetDataDir"
+          >
+            <RotateCcw :size="16" />
+          </button>
+        </div>
       </div>
     </section>
   </div>
+
+  <DataTransferModal
+    v-if="transferTarget !== undefined"
+    :target-path="transferTarget"
+    @close="transferTarget = undefined"
+    @success="handleTransferSuccess"
+  />
 </template>
 
 <style scoped>
@@ -573,17 +595,37 @@ watch(loggingSettings, (newSettings) => {
   background: var(--select-bg-hover);
 }
 
-.folder-label {
-  display: block;
-  cursor: default;
+.folder-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  flex-wrap: wrap;
+  padding: 0.6rem 0;
 }
 
-.folder-inline-row {
+.folder-row + .folder-row {
+  border-top: 1px solid var(--color-border);
+}
+
+.folder-info {
+  flex: 1 1 220px;
+  min-width: 0;
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem 0.75rem;
-  margin-top: 0.4rem;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.folder-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.folder-hint {
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+  line-height: 1.4;
 }
 
 .folder-path {
@@ -595,6 +637,14 @@ watch(loggingSettings, (newSettings) => {
   line-height: 1.4;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.folder-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
 }
 
 .folder-button {
@@ -611,6 +661,12 @@ watch(loggingSettings, (newSettings) => {
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
+}
+
+.folder-button-icon {
+  padding: 0.4rem;
+  justify-content: center;
+  min-width: 34px;
 }
 
 .folder-button:hover:not(:disabled) {
@@ -655,8 +711,9 @@ watch(loggingSettings, (newSettings) => {
     flex: 1 1 100%;
   }
 
-  .folder-inline-row {
-    align-items: flex-start;
+  .folder-actions {
+    width: 100%;
+    justify-content: flex-start;
   }
 
   .folder-button {

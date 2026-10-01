@@ -11,8 +11,18 @@
 
 use anyhow::Context;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 const APP_DIR_NAME: &str = "ttsbard";
+
+/// Пользовательский override корня данных программы (`storage.data_dir`).
+/// Глобальное состояние — как и остальные владельцы путей: hot-path резолверы
+/// не имеют доступа к SettingsManager.
+static DATA_ROOT_OVERRIDE: OnceLock<parking_lot::RwLock<Option<PathBuf>>> = OnceLock::new();
+
+fn data_root_override() -> &'static parking_lot::RwLock<Option<PathBuf>> {
+    DATA_ROOT_OVERRIDE.get_or_init(|| parking_lot::RwLock::new(None))
+}
 
 /// Roaming-корень данных: `%APPDATA%\ttsbard` (Windows), XDG config (Linux),
 /// `~/Library/Application Support/ttsbard` (macOS).
@@ -22,12 +32,61 @@ pub(crate) fn config_root() -> anyhow::Result<PathBuf> {
         .join(APP_DIR_NAME))
 }
 
-/// Local-корень регенерируемых данных: `%LOCALAPPDATA%\ttsbard` (Windows),
-/// XDG cache (Linux), `~/Library/Caches/ttsbard` (macOS).
-pub(crate) fn local_root() -> anyhow::Result<PathBuf> {
+/// Дефолтный корень данных программы: `%LOCALAPPDATA%\ttsbard` (Windows),
+/// XDG cache (Linux), `~/Library/Caches/ttsbard` (macOS). Не зависит от
+/// пользовательского override и используется для сброса (`reset`).
+pub(crate) fn default_data_root() -> anyhow::Result<PathBuf> {
     Ok(dirs::cache_dir()
         .context("Failed to resolve local data directory")?
         .join(APP_DIR_NAME))
+}
+
+/// Эффективный корень данных программы (пользовательский override либо дефолт).
+/// Каталог не создаётся.
+pub(crate) fn data_root() -> anyhow::Result<PathBuf> {
+    if let Some(dir) = data_root_override().read().clone() {
+        Ok(dir)
+    } else {
+        default_data_root()
+    }
+}
+
+/// Используется ли дефолтный корень данных (без пользовательского override).
+pub(crate) fn data_root_is_default() -> bool {
+    data_root_override().read().is_none()
+}
+
+/// Publish an already validated and created root after its setting was saved.
+pub(crate) fn publish_data_root(custom: Option<PathBuf>) {
+    *data_root_override().write() = custom;
+}
+
+/// Применить пользовательский корень данных из настроек. `None` сбрасывает
+/// override; невалидный (несоздаваемый) путь игнорируется с warning — запуск не
+/// блокируется, используется дефолт.
+pub(crate) fn init_data_root(custom: Option<&str>) {
+    let Some(custom) = custom.map(str::trim).filter(|s| !s.is_empty()) else {
+        *data_root_override().write() = None;
+        return;
+    };
+    let dir = PathBuf::from(custom);
+    match std::fs::create_dir_all(&dir) {
+        Ok(()) => *data_root_override().write() = Some(dir),
+        Err(e) => {
+            tracing::warn!(
+                dir = %crate::secret_log::safe_path_for_log(&dir),
+                error = %e,
+                "Configured data root unavailable; falling back to default"
+            );
+            *data_root_override().write() = None;
+        }
+    }
+}
+
+/// Local-корень регенерируемых данных: эффективный корень (override либо
+/// дефолт). Каталог не создаётся.
+pub(crate) fn local_root() -> anyhow::Result<PathBuf> {
+    data_root()
 }
 
 /// Корень транзиентных файлов: `%TEMP%\ttsbard`. Каталог не создаётся.
@@ -126,6 +185,34 @@ mod tests {
     fn local_root_ends_with_app_dir() {
         let root = local_root().expect("cache dir must resolve on CI hosts");
         assert!(root.ends_with(APP_DIR_NAME));
+    }
+
+    #[test]
+    fn default_data_root_ends_with_app_dir() {
+        let root = default_data_root().expect("cache dir must resolve on CI hosts");
+        assert!(root.ends_with(APP_DIR_NAME));
+    }
+
+    #[test]
+    fn data_root_matches_default_without_override() {
+        let effective = data_root().expect("data root must resolve");
+        let default = default_data_root().expect("default root must resolve");
+        assert_eq!(effective, default);
+    }
+
+    #[test]
+    fn data_root_is_default_without_override() {
+        assert!(data_root_is_default());
+    }
+
+    #[test]
+    fn init_data_root_none_is_idempotent_reset() {
+        init_data_root(None);
+        assert!(data_root_is_default());
+        init_data_root(Some(""));
+        assert!(data_root_is_default());
+        init_data_root(Some("   "));
+        assert!(data_root_is_default());
     }
 
     #[test]

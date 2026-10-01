@@ -1452,6 +1452,10 @@ impl Default for AiSettings {
 /// Пользовательские пути хранения (ROADMAP-117).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct StorageSettings {
+    /// Корень данных программы (`%LOCALAPPDATA%\ttsbard` по умолчанию),
+    /// содержащий `audio_cache` и `models`. `None` — дефолт.
+    #[serde(default)]
+    pub data_dir: Option<String>,
     /// Каталог аудио-кеша истории фраз; `None` — дефолт
     /// (`%LOCALAPPDATA%\ttsbard\audio_cache`).
     #[serde(default)]
@@ -2602,6 +2606,21 @@ impl SettingsManager {
     pub fn set_legacy_audio_cache_migrated(&self) -> Result<()> {
         self.update_settings_atomically(move |settings| {
             settings.storage.legacy_audio_cache_migrated = true;
+        })
+    }
+
+    /// Atomically persist the program data root and the legacy audio-cache
+    /// override together (data transfer completion). A successful transfer
+    /// migrates the audio cache into the new root, so the legacy override is
+    /// cleared via `audio_cache_dir = None`.
+    pub fn set_storage_data_dir(
+        &self,
+        data_dir: Option<String>,
+        audio_cache_dir: Option<String>,
+    ) -> Result<()> {
+        self.update_settings_atomically(move |settings| {
+            settings.storage.data_dir = data_dir;
+            settings.storage.audio_cache_dir = audio_cache_dir;
         })
     }
 
@@ -6745,6 +6764,7 @@ mod tests {
     #[test]
     fn storage_legacy_audio_cache_migrated_round_trip() {
         let s = StorageSettings {
+            data_dir: None,
             audio_cache_dir: None,
             legacy_audio_cache_migrated: true,
         };

@@ -648,21 +648,45 @@ pub(crate) fn audio_cache_dir_is_default() -> bool {
     audio_cache_dir_override().read().is_none()
 }
 
-/// Применить кастомный путь кеша из настроек. Невалидный (несоздаваемый)
-/// путь игнорируется с warning: запуск не блокируется, используется дефолт.
+/// Применить кастомный путь кеша из настроек. `None` сбрасывает override к
+/// дефолту. Невалидный (несоздаваемый) путь игнорируется с warning: запуск не
+/// блокируется, используется дефолт.
 pub(crate) fn init_audio_cache_dir(custom: Option<&str>) {
     let Some(custom) = custom.map(str::trim).filter(|s| !s.is_empty()) else {
+        *audio_cache_dir_override().write() = None;
         return;
     };
     let dir = PathBuf::from(custom);
     match fs::create_dir_all(&dir) {
         Ok(()) => *audio_cache_dir_override().write() = Some(dir),
-        Err(e) => tracing::warn!(
-            dir = %crate::secret_log::safe_path_for_log(&dir),
-            error = %e,
-            "Configured audio cache dir unavailable; falling back to default"
-        ),
+        Err(e) => {
+            tracing::warn!(
+                dir = %crate::secret_log::safe_path_for_log(&dir),
+                error = %e,
+                "Configured audio cache dir unavailable; falling back to default"
+            );
+            *audio_cache_dir_override().write() = None;
+        }
     }
+}
+
+/// Эффективный каталог аудио-кеша без создания на диске: пользовательский
+/// override либо `<data_root>/audio_cache`.
+pub(crate) fn resolved_audio_cache_dir() -> Result<PathBuf> {
+    if let Some(dir) = audio_cache_dir_override().read().clone() {
+        Ok(dir)
+    } else {
+        Ok(crate::paths::data_root()?.join("audio_cache"))
+    }
+}
+
+/// Глобальный lock синхронизации чтения/записи аудио-кеша с переносом данных.
+/// Чтение/запись кеша берут read-guard; перенос данных берёт write-guard на всё
+/// время критической секции (snapshot → copy → cleanup), чтобы фоновые записи
+/// кеша не могли создать/изменить файл в источнике во время переноса.
+pub(crate) fn cache_io_lock() -> &'static parking_lot::RwLock<()> {
+    static CACHE_IO_LOCK: OnceLock<parking_lot::RwLock<()>> = OnceLock::new();
+    CACHE_IO_LOCK.get_or_init(|| parking_lot::RwLock::new(()))
 }
 
 pub fn cache_dir_path() -> Result<PathBuf> {
@@ -790,6 +814,11 @@ fn migrate_legacy_wav_files(legacy: &Path, target: &Path) -> bool {
 /// Явные пути — для тестируемости и переиспользования сменой пути в UI;
 /// пары файлов с одинаковым cache_key дедуплицируются (источник удаляется,
 /// содержимое идентично).
+///
+/// Легаси-миграция сохранена только для тестов/истории; команды UI используют
+/// безопасный перенос в `storage_transfer` (copy-then-switch без удаления
+/// источника при неудаче).
+#[allow(dead_code)]
 pub(crate) fn migrate_cache_dir(legacy: &Path, target: &Path) {
     if !legacy.is_dir() || legacy == target {
         return;
@@ -863,6 +892,7 @@ pub fn get_cache_file_path(cache_key: &str) -> Result<PathBuf> {
 }
 
 pub fn save_audio_cache(cache_key: &str, pcm: &crate::audio::AudioPcm) -> Result<()> {
+    let _guard = cache_io_lock().read();
     let wav_bytes = crate::audio::effects::encode_wav(&pcm.samples, pcm.sample_rate, pcm.channels)
         .map_err(|e| anyhow::anyhow!("Failed to encode cache WAV: {}", e))?;
     let path = get_cache_file_path(cache_key)?;
@@ -871,6 +901,7 @@ pub fn save_audio_cache(cache_key: &str, pcm: &crate::audio::AudioPcm) -> Result
 }
 
 pub fn read_audio_cache(cache_key: &str) -> Result<crate::audio::AudioPcm> {
+    let _guard = cache_io_lock().read();
     let path = get_cache_file_path(cache_key)?;
     if !path.exists() {
         anyhow::bail!("CacheMiss");
