@@ -54,7 +54,7 @@ function handleSave() {
       <div class="card-subtitle">{{ t('tts.local.desc') }}</div>
       <div class="setting-group">
         <div class="local-url-row">
-          <label>URL:</label>
+          <label>URL</label>
           <input
             v-model="inputUrl"
             @keydown="handleUrlKeydown"

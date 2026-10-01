@@ -81,7 +81,7 @@ const {
       </div>
 
       <div class="setting-row">
-        <label for="twitch-username">{{ t('twitch.username') }}:</label>
+        <label for="twitch-username">{{ t('twitch.username') }}</label>
         <input
           type="text"
           v-model="settings.username"
@@ -97,7 +97,7 @@ const {
       </div>
 
       <div class="setting-row">
-        <label for="twitch-token">{{ t('twitch.token') }}:</label>
+        <label for="twitch-token">{{ t('twitch.token') }}</label>
         <div class="input-with-toggle">
           <input
             :type="showToken ? 'text' : 'password'"
@@ -123,7 +123,7 @@ const {
       </div>
 
       <div class="setting-row">
-        <label for="twitch-channel">{{ t('twitch.channel') }}:</label>
+        <label for="twitch-channel">{{ t('twitch.channel') }}</label>
         <input
           type="text"
           v-model="settings.channel"

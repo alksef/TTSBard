@@ -117,7 +117,7 @@ function handleProxyChange(event: Event) {
       <div class="proxy-settings-row">
         <div class="proxy-select-row">
           <div class="form-field">
-            <label>{{ t('tts.proxy') }}:</label>
+            <label>{{ t('tts.proxy') }}</label>
             <select
               :value="proxyMode"
               @change="handleProxyChange"

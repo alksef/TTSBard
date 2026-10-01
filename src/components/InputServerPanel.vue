@@ -121,7 +121,7 @@ const tokenDisplay = computed(() => {
       </div>
 
       <div class="setting-row">
-        <label>{{ t('input_server.port') }}:</label>
+        <label>{{ t('input_server.port') }}</label>
         <div class="address-inputs">
           <input
             type="number"

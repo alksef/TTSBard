@@ -70,7 +70,7 @@ function handleProxyToggle(event: Event) {
       <!-- API Key -->
       <div class="setting-group">
         <div class="openai-form-row">
-          <label>{{ t('tts.api_key') }}:</label>
+          <label>{{ t('tts.api_key') }}</label>
           <InputWithToggle
             v-model="localApiKey"
             type="password"

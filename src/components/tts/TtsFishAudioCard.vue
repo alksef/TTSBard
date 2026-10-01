@@ -140,7 +140,7 @@ function handleProxyToggle(event: Event) {
       <!-- API Key -->
       <div class="setting-group">
         <div class="form-row">
-          <label>{{ t('tts.api_key') }}:</label>
+          <label>{{ t('tts.api_key') }}</label>
           <InputWithToggle
             :model-value="localApiKey"
             @update:model-value="localApiKey = $event"
@@ -156,7 +156,7 @@ function handleProxyToggle(event: Event) {
         <!-- Format and Sample Rate in one row -->
         <div class="audio-settings-row">
           <div class="audio-setting">
-            <label>{{ t('tts.format') }}:</label>
+            <label>{{ t('tts.format') }}</label>
             <select
               :value="localFormat"
               @change="localFormat = ($event.target as HTMLSelectElement).value"
@@ -169,7 +169,7 @@ function handleProxyToggle(event: Event) {
           </div>
 
           <div class="audio-setting">
-            <label>{{ t('tts.sample_rate') }}:</label>
+            <label>{{ t('tts.sample_rate') }}</label>
             <select
               :value="localSampleRate"
               @change="localSampleRate = Number(($event.target as HTMLSelectElement).value)"
@@ -185,7 +185,7 @@ function handleProxyToggle(event: Event) {
         <!-- Temperature in separate row -->
         <div class="audio-settings-row">
           <div class="audio-setting">
-            <label>{{ t('tts.temperature') }}: {{ localTemperature }}</label>
+            <label>{{ t('tts.temperature') }} {{ localTemperature }}</label>
             <input
               type="range"
               :value="localTemperature"

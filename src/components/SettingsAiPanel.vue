@@ -490,7 +490,7 @@ function dismissStatus() {
           <!-- URL -->
           <div class="setting-group">
             <div class="zai-form-row">
-              <label>{{ t('settings.ai.url') }}:</label>
+              <label>{{ t('settings.ai.url') }}</label>
               <input
                 v-model="zaiUrl"
                 type="text"
@@ -502,7 +502,7 @@ function dismissStatus() {
           <!-- API Key -->
           <div class="setting-group">
             <div class="zai-form-row">
-              <label>{{ t('tts.api_key') }}:</label>
+              <label>{{ t('tts.api_key') }}</label>
               <InputWithToggle
                 v-model="zaiApiKey"
                 type="password"
@@ -531,7 +531,7 @@ function dismissStatus() {
           <!-- API Key -->
           <div class="setting-group">
             <div class="openai-api-row">
-              <label>{{ t('tts.api_key') }}:</label>
+              <label>{{ t('tts.api_key') }}</label>
               <InputWithToggle
                 v-model="openaiApiKey"
                 type="password"
@@ -573,7 +573,7 @@ function dismissStatus() {
           <!-- API Key -->
           <div class="setting-group">
             <div class="openai-api-row">
-              <label>{{ t('tts.api_key') }}:</label>
+              <label>{{ t('tts.api_key') }}</label>
               <InputWithToggle
                 v-model="deepseekApiKey"
                 type="password"
@@ -615,7 +615,7 @@ function dismissStatus() {
           <!-- URL -->
           <div class="setting-group">
             <div class="zai-form-row">
-              <label>{{ t('settings.ai.api_url') }}:</label>
+              <label>{{ t('settings.ai.api_url') }}</label>
               <input
                 v-model="customUrl"
                 type="text"
@@ -628,7 +628,7 @@ function dismissStatus() {
           <!-- API Key -->
           <div class="setting-group">
             <div class="zai-form-row">
-              <label>{{ t('tts.api_key') }}:</label>
+              <label>{{ t('tts.api_key') }}</label>
               <InputWithToggle
                 v-model="customApiKey"
                 type="password"
@@ -640,7 +640,7 @@ function dismissStatus() {
           <!-- Model -->
           <div class="setting-group">
             <div class="zai-form-row">
-              <label>{{ t('settings.ai.model') }}:</label>
+              <label>{{ t('settings.ai.model') }}</label>
               <input
                 v-model="customModel"
                 type="text"

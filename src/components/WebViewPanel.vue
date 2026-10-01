@@ -95,7 +95,7 @@ const tokenDisplay = computed(() => {
       </div>
 
       <div class="setting-row" style="margin-bottom: 8px;">
-        <label>{{ t('webview.address') }}:</label>
+        <label>{{ t('webview.address') }}</label>
         <div class="address-inputs">
           <select v-model="settings.bind_address" class="address-bind" :disabled="serverStatus.state === 'running' || serverStatus.state === 'starting'">
             <option value="0.0.0.0">0.0.0.0 ({{ t('webview.bind.all_interfaces') }})</option>

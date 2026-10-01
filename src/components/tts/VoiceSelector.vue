@@ -28,7 +28,7 @@ function handleChange(event: Event) {
 
 <template>
   <div class="voice-selector">
-    <label>{{ label || t('tts.voice') }}:</label>
+    <label>{{ label || t('tts.voice') }}</label>
     <div class="voice-select-wrapper">
       <select
         :value="selectedVoiceId"

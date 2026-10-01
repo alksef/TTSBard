@@ -445,13 +445,13 @@ onUnmounted(() => {
         <div class="network-form">
           <!-- Host and Port Row -->
           <div class="form-row">
-            <label>{{ t('settings.network.host') }}:</label>
+            <label>{{ t('settings.network.host') }}</label>
             <input
               v-model="host"
               type="text"
               class="network-input network-input-host"
             />
-            <label>{{ t('settings.network.port') }}:</label>
+            <label>{{ t('settings.network.port') }}</label>
             <input
               v-model="port"
               type="number"
@@ -463,14 +463,14 @@ onUnmounted(() => {
 
           <!-- Username and Password Row -->
           <div class="form-row">
-            <label>{{ t('settings.network.login') }}:</label>
+            <label>{{ t('settings.network.login') }}</label>
             <input
               v-model="username"
               type="text"
               :placeholder="t('settings.network.optional')"
               class="network-input network-input-host"
             />
-            <label>{{ t('settings.network.password') }}:</label>
+            <label>{{ t('settings.network.password') }}</label>
             <InputWithToggle
               v-model="password"
               type="password"
@@ -502,13 +502,13 @@ onUnmounted(() => {
         <div class="network-form">
           <!-- Host and Port Row -->
           <div class="form-row">
-            <label>{{ t('settings.network.host') }}:</label>
+            <label>{{ t('settings.network.host') }}</label>
             <input
               v-model="mtHost"
               type="text"
               class="network-input network-input-host"
             />
-            <label>{{ t('settings.network.port') }}:</label>
+            <label>{{ t('settings.network.port') }}</label>
             <input
               v-model="mtPort"
               type="number"
@@ -520,7 +520,7 @@ onUnmounted(() => {
 
           <!-- Secret Row -->
           <div class="form-row">
-            <label>{{ t('settings.network.secret') }}:</label>
+            <label>{{ t('settings.network.secret') }}</label>
             <InputWithToggle
               v-model="mtSecret"
               type="password"
@@ -530,7 +530,7 @@ onUnmounted(() => {
 
           <!-- DC ID Row (Optional) -->
           <div class="form-row">
-            <label>DC ID:</label>
+            <label>DC ID</label>
             <select
               v-model="mtDcId"
               class="network-select dc-id-select"

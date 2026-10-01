@@ -226,7 +226,7 @@ function handleProxyToggle(event: Event) {
       <!-- API Key -->
       <div class="setting-group">
         <div class="key-row">
-          <label class="key-label">{{ t('tts.api_key') }}:</label>
+          <label class="key-label">{{ t('tts.api_key') }}</label>
           <InputWithToggle
             :model-value="localApiKey"
             @update:model-value="localApiKey = $event"
@@ -258,7 +258,7 @@ function handleProxyToggle(event: Event) {
       <div class="setting-group">
         <div class="model-output-row">
           <div class="control-group">
-            <label>{{ t('tts.elevenlabs.model') }}:</label>
+            <label>{{ t('tts.elevenlabs.model') }}</label>
             <select
               v-if="models.length > 0"
               :value="localModelId"
@@ -286,7 +286,7 @@ function handleProxyToggle(event: Event) {
           </div>
 
           <div class="control-group">
-            <label>{{ t('tts.elevenlabs.output_format') }}:</label>
+            <label>{{ t('tts.elevenlabs.output_format') }}</label>
             <select
               :value="localOutputFormat"
               @change="localOutputFormat = ($event.target as HTMLSelectElement).value"
@@ -309,7 +309,7 @@ function handleProxyToggle(event: Event) {
 
         <div class="slider-row">
           <div class="slider-setting">
-            <label>{{ t('tts.elevenlabs.stability') }}: {{ localStability.toFixed(2) }}</label>
+            <label>{{ t('tts.elevenlabs.stability') }} {{ localStability.toFixed(2) }}</label>
             <input
               type="range"
               :value="localStability"
@@ -322,7 +322,7 @@ function handleProxyToggle(event: Event) {
           </div>
 
           <div class="slider-setting">
-            <label>{{ t('tts.elevenlabs.similarity_boost') }}: {{ localSimilarityBoost.toFixed(2) }}</label>
+            <label>{{ t('tts.elevenlabs.similarity_boost') }} {{ localSimilarityBoost.toFixed(2) }}</label>
             <input
               type="range"
               :value="localSimilarityBoost"
@@ -335,7 +335,7 @@ function handleProxyToggle(event: Event) {
           </div>
 
           <div class="slider-setting" :class="{ disabled: !canUseStyle }">
-            <label>{{ t('tts.elevenlabs.style') }}: {{ effectiveStyle.toFixed(2) }}</label>
+            <label>{{ t('tts.elevenlabs.style') }} {{ effectiveStyle.toFixed(2) }}</label>
             <input
               type="range"
               :value="effectiveStyle"
