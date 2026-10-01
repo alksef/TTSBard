@@ -1,0 +1,39 @@
+/* focus.css - Shared main-app focus fallbacks (low specificity).
+   Imported from styles/index.css for the main window only.
+
+   Source of truth for normal text/select/textarea focus (InputWithToggle.vue):
+     outline: none;
+     border-color: var(--color-accent);
+     box-shadow: 0 0 0 3px var(--color-accent-glow);
+
+   These rules use :where() so the whole selector resolves to zero
+   specificity: any scoped/component rule wins per property, and this only
+   fills gaps where no dedicated focus style exists. */
+
+/* Normal text-like field focus: accent border + glow.
+   Excludes native checkbox/radio/range/color/file (kept native) and
+   disabled fields plus error states (.input-error / .has-error /
+   aria-invalid) so red validation focus stays visible. */
+:where(
+  input:not([type]):focus,
+  input[type='text']:focus,
+  input[type='password']:focus,
+  input[type='number']:focus,
+  input[type='search']:focus,
+  input[type='email']:focus,
+  input[type='url']:focus,
+  input[type='tel']:focus,
+  textarea:focus,
+  select:focus
+):where(:not(:disabled)):where(:not(.input-error)):where(:not(.has-error)):where(:not([aria-invalid='true'])) {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
+}
+
+/* Keyboard focus for buttons without a dedicated focus style.
+   :focus-visible keeps the ring off after mouse clicks. */
+:where(button):where(:focus-visible) {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}

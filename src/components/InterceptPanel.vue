@@ -497,6 +497,12 @@ onUnmounted(() => {
   cursor: pointer;
 }
 
+.action-select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
+}
+
 .action-select option {
   background: var(--select-bg);
   color: var(--color-text-primary);

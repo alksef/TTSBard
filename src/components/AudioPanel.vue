@@ -162,7 +162,7 @@ function onEffectsDirty(dirty: boolean) {
 
 .setting-row select:focus {
   outline: none;
-  border-color: var(--card-active-border);
+  border-color: var(--color-accent);
   box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 

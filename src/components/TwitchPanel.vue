@@ -408,6 +408,12 @@ h2 {
   color: var(--color-text-primary);
 }
 
+.test-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
+}
+
 .test-button {
   padding: 0.6rem 1.2rem;
   background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);

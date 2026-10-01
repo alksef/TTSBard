@@ -526,6 +526,12 @@ h2 {
   height: 38px;
 }
 
+.address-inputs .address-port:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
+}
+
 .address-inputs .address-port.input-error {
   border-color: var(--danger-border-strong);
   background: var(--card-error-bg);
@@ -533,6 +539,7 @@ h2 {
 
 .address-inputs .address-port.input-error:focus {
   border-color: var(--danger-gradient-start);
+  box-shadow: none;
   outline: none;
 }
 
@@ -750,6 +757,12 @@ h2 {
   font-size: 14px;
   background: var(--color-bg-field);
   color: var(--color-text-primary);
+}
+
+.test-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
 .test-button {

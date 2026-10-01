@@ -516,6 +516,12 @@ watch(
   color: var(--color-text-primary);
 }
 
+.text-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
+}
+
 .text-input.color-text {
   font-size: 14px;
 }
@@ -561,7 +567,7 @@ watch(
 .source-select:focus {
   outline: none;
   border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px var(--focus-glow);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
 .source-select option {

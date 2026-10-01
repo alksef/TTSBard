@@ -329,7 +329,7 @@ function onSizeInput(event: Event): void {
 .font-search:focus {
   outline: none;
   border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px var(--focus-glow);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
 .font-empty {
@@ -404,7 +404,7 @@ function onSizeInput(event: Event): void {
 .font-size-input:focus {
   outline: none;
   border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px var(--focus-glow);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
 .font-size-input:disabled {

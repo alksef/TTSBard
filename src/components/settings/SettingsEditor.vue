@@ -696,7 +696,7 @@ watch(editorSettings, (newSettings) => {
 .accentor-select:focus {
   outline: none;
   border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px var(--focus-glow);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
 </style>

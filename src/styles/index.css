@@ -5,4 +5,5 @@
 @import './variables.css';
 @import './gradients.css';
 @import './base.css';
+@import './focus.css';
 @import './token-visibility.css';
