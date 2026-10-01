@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::env;
-#[cfg(test)]
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -199,6 +198,69 @@ fn local_espeak_data_visible() -> bool {
     false
 }
 
+/// Rewrite a Windows verbatim path (`\\?\C:\...` or `\\?\UNC\server\share\...`)
+/// into the ordinary drive / UNC form the C runtime's `stat` accepts.
+///
+/// The Tauri resource resolver and `std::fs::canonicalize` return verbatim
+/// paths on Windows, but the C `stat` used by eSpeak NG rejects the `\\?\`
+/// prefix even when the underlying folder exists. Only the verbatim prefix is
+/// rewritten; ordinary paths and every non-Windows path pass through unchanged
+/// (no filesystem canonicalization is performed).
+#[cfg(windows)]
+fn normalize_for_clib(path: &Path) -> PathBuf {
+    use std::path::{Component, Prefix};
+
+    let mut components = path.components();
+    let prefix = match components.next() {
+        Some(Component::Prefix(prefix)) => prefix,
+        _ => return path.to_path_buf(),
+    };
+
+    let mut result = match prefix.kind() {
+        Prefix::VerbatimDisk(drive) => format!("{}:", drive as char),
+        Prefix::VerbatimUNC(server, share) => {
+            format!(
+                "\\\\{}\\{}",
+                server.to_string_lossy(),
+                share.to_string_lossy()
+            )
+        }
+        _ => return path.to_path_buf(),
+    };
+
+    let mut pending_separator = false;
+    for component in components {
+        match component {
+            Component::RootDir => {
+                result.push('\\');
+                pending_separator = false;
+            }
+            Component::CurDir | Component::Prefix(_) => {}
+            Component::ParentDir => {
+                if pending_separator {
+                    result.push('\\');
+                }
+                result.push_str("..");
+                pending_separator = true;
+            }
+            Component::Normal(part) => {
+                if pending_separator {
+                    result.push('\\');
+                }
+                result.push_str(&part.to_string_lossy());
+                pending_separator = true;
+            }
+        }
+    }
+
+    PathBuf::from(result)
+}
+
+#[cfg(not(windows))]
+fn normalize_for_clib(path: &Path) -> PathBuf {
+    path.to_path_buf()
+}
+
 #[derive(Deserialize, Clone)]
 struct AudioConfig {
     sample_rate: u32,
@@ -274,6 +336,7 @@ impl LocalModelTts {
                     .parent()
                     .map(|p| p.to_path_buf())
                     .unwrap_or_else(|| data_dir.clone());
+                let parent = normalize_for_clib(&parent);
                 env::set_var("PIPER_ESPEAKNG_DATA_DIRECTORY", &parent);
                 tracing::info!(
                     dir = %data_dir.display(),
@@ -285,6 +348,7 @@ impl LocalModelTts {
             if let Ok(cwd) = env::current_dir() {
                 let p = cwd.join("espeak-ng-data");
                 if p.join("voices").exists() && p.join("en_dict").exists() {
+                    let cwd = normalize_for_clib(&cwd);
                     env::set_var("PIPER_ESPEAKNG_DATA_DIRECTORY", &cwd);
                     tracing::info!(
                         dir = %p.display(),
@@ -298,6 +362,7 @@ impl LocalModelTts {
                 if let Some(exe_dir) = exe.parent() {
                     let p = exe_dir.join("espeak-ng-data");
                     if p.join("voices").exists() && p.join("en_dict").exists() {
+                        let exe_dir = normalize_for_clib(exe_dir);
                         env::set_var("PIPER_ESPEAKNG_DATA_DIRECTORY", exe_dir);
                         tracing::info!(
                             dir = %p.display(),
@@ -1011,5 +1076,94 @@ mod tests {
         assert!(error.to_string().contains("not ready"));
         assert!(!PiperReadiness::DataDamaged.is_ready());
         assert!(PiperReadiness::Ready.is_ready());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn normalize_verbatim_drive_path_for_clib() {
+        let verbatim = PathBuf::from(r"\\?\E:\cargo-target\app tts v2\espeak-ng-data");
+        assert_eq!(
+            normalize_for_clib(&verbatim),
+            PathBuf::from(r"E:\cargo-target\app tts v2\espeak-ng-data")
+        );
+
+        let root = PathBuf::from(r"\\?\E:\");
+        assert_eq!(normalize_for_clib(&root), PathBuf::from(r"E:\"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn normalize_verbatim_unc_path_for_clib() {
+        let verbatim = PathBuf::from(r"\\?\UNC\server\share\folder with space");
+        assert_eq!(
+            normalize_for_clib(&verbatim),
+            PathBuf::from(r"\\server\share\folder with space")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn normalize_ordinary_paths_unchanged_for_clib() {
+        let drive = PathBuf::from(r"E:\cargo-target\app-tts-v2");
+        assert_eq!(normalize_for_clib(&drive), drive);
+
+        let unc = PathBuf::from(r"\\server\share\folder with space");
+        assert_eq!(normalize_for_clib(&unc), unc);
+
+        let spaced = PathBuf::from(r"C:\Program Files\App TTS");
+        assert_eq!(normalize_for_clib(&spaced), spaced);
+
+        let relative = PathBuf::from(r"relative\path");
+        assert_eq!(normalize_for_clib(&relative), relative);
+    }
+
+    #[test]
+    #[ignore = "set TTSBARD_ESPEAK_TEST_DATA_PARENT to a parent dir containing espeak-ng-data"]
+    fn espeak_real_phonemization_with_verbatim_resource_dir() {
+        let parent = env::var("TTSBARD_ESPEAK_TEST_DATA_PARENT").expect(
+            "TTSBARD_ESPEAK_TEST_DATA_PARENT must point to a directory containing espeak-ng-data",
+        );
+        let parent = PathBuf::from(&parent);
+
+        let data_dir = parent.join("espeak-ng-data");
+        assert!(
+            data_dir.join("voices").is_dir() && data_dir.join("en_dict").is_file(),
+            "espeak-ng-data (voices dir + en_dict file) must exist under the supplied parent"
+        );
+
+        let canonical =
+            std::fs::canonicalize(&parent).expect("supplied parent must be canonicalizable");
+
+        LocalModelTts::init_espeak_data(Some(canonical.clone()));
+
+        let exported = env::var("PIPER_ESPEAKNG_DATA_DIRECTORY")
+            .expect("PIPER_ESPEAKNG_DATA_DIRECTORY must be exported after init");
+
+        #[cfg(windows)]
+        {
+            assert!(
+                !exported.starts_with(r"\\?\"),
+                "exported data directory must not be a verbatim path: {exported}"
+            );
+            assert_eq!(
+                exported,
+                normalize_for_clib(&canonical)
+                    .to_string_lossy()
+                    .into_owned()
+            );
+        }
+
+        let readiness = PiperReadiness::assess_cached();
+        assert!(
+            readiness.is_ready(),
+            "real eSpeak phonemization readiness must succeed, got {readiness:?}"
+        );
+
+        let phonemes = espeak_rs::text_to_phonemes("hello world", "en", None)
+            .expect("neutral English phonemization must succeed");
+        assert!(
+            phonemes.iter().any(|text| !text.trim().is_empty()),
+            "neutral English phonemization must return non-empty text"
+        );
     }
 }
