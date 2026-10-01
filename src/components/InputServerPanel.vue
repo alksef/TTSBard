@@ -153,79 +153,81 @@ const tokenDisplay = computed(() => {
 
       <h3 class="subsection-heading">{{ t('input_server.web_form') }}</h3>
 
-      <div class="connection-row">
-        <label class="row-label">{{ t('input_server.local_url_label') }}</label>
-        <div class="url-display url-display-full">
-          <label class="url-code url-code-wide">{{ overlayUrl }}</label>
-          <button
-            class="icon-button"
-            :title="t('input_server.copy_overlay')"
-            :aria-label="t('input_server.copy_overlay')"
-            @click="copyOverlayUrl"
-          >
-            <Copy :size="16" />
-          </button>
+      <div class="connection-grid">
+        <div class="connection-row">
+          <label class="row-label">{{ t('input_server.local_url_label') }}</label>
+          <div class="url-display url-display-full">
+            <label class="url-code url-code-wide">{{ overlayUrl }}</label>
+            <button
+              class="icon-button"
+              :title="t('input_server.copy_overlay')"
+              :aria-label="t('input_server.copy_overlay')"
+              @click="copyOverlayUrl"
+            >
+              <Copy :size="16" />
+            </button>
+          </div>
         </div>
-      </div>
 
-      <div class="connection-row">
-        <label class="row-label">{{ t('input_server.lan_url_label') }}</label>
-        <div class="url-display url-display-full">
-          <label class="url-code url-code-wide">
-            {{ lanUrl ?? t('input_server.lan_url_unavailable') }}
-          </label>
-          <button
-            class="icon-button"
-            :title="t('input_server.copy_lan_url')"
-            :aria-label="t('input_server.copy_lan_url')"
-            :disabled="!lanUrl"
-            :class="{ disabled: !lanUrl }"
-            @click="copyLanUrl"
-          >
-            <Copy :size="16" />
-          </button>
+        <div class="connection-row">
+          <label class="row-label">{{ t('input_server.lan_url_label') }}</label>
+          <div class="url-display url-display-full">
+            <label class="url-code url-code-wide">
+              {{ lanUrl ?? t('input_server.lan_url_unavailable') }}
+            </label>
+            <button
+              class="icon-button"
+              :title="t('input_server.copy_lan_url')"
+              :aria-label="t('input_server.copy_lan_url')"
+              :disabled="!lanUrl"
+              :class="{ disabled: !lanUrl }"
+              @click="copyLanUrl"
+            >
+              <Copy :size="16" />
+            </button>
+          </div>
         </div>
-      </div>
 
-      <div class="connection-row connection-token-row">
-        <label class="row-label">{{ t('input_server.token.label') }}</label>
-        <div class="url-display url-display-full">
-          <label class="url-code url-code-wide">
-            {{ tokenDisplay }}
-          </label>
+        <div class="connection-row connection-token-row">
+          <label class="row-label">{{ t('input_server.token.label') }}</label>
+          <div class="url-display url-display-full">
+            <label class="url-code url-code-wide">
+              {{ tokenDisplay }}
+            </label>
+            <button
+              class="icon-button token-toggle"
+              :title="tokenVisible ? t('input_server.token.hide') : t('input_server.token.show')"
+              :aria-label="tokenVisible ? t('input_server.token.hide') : t('input_server.token.show')"
+              :aria-pressed="tokenVisible ? 'true' : 'false'"
+              :disabled="!tokenAvailable"
+              :class="{ disabled: !tokenAvailable }"
+              @click="tokenVisible = !tokenVisible"
+            >
+              <Eye v-if="!tokenVisible" :size="16" />
+              <EyeOff v-else :size="16" />
+            </button>
+            <button
+              class="icon-button"
+              :title="t('input_server.token.copy')"
+              :aria-label="t('input_server.token.copy')"
+              :disabled="!tokenAvailable || regeneratePending"
+              :class="{ disabled: !tokenAvailable || regeneratePending }"
+              @click="copyToken"
+            >
+              <Copy :size="16" />
+            </button>
+          </div>
           <button
-            class="icon-button token-toggle"
-            :title="tokenVisible ? t('input_server.token.hide') : t('input_server.token.show')"
-            :aria-label="tokenVisible ? t('input_server.token.hide') : t('input_server.token.show')"
-            :aria-pressed="tokenVisible ? 'true' : 'false'"
-            :disabled="!tokenAvailable"
-            :class="{ disabled: !tokenAvailable }"
-            @click="tokenVisible = !tokenVisible"
+            class="icon-button danger-button"
+            :title="t('input_server.token.regenerate')"
+            :aria-label="t('input_server.token.regenerate')"
+            :disabled="regeneratePending"
+            :class="{ disabled: regeneratePending }"
+            @click="regenerateToken"
           >
-            <Eye v-if="!tokenVisible" :size="16" />
-            <EyeOff v-else :size="16" />
-          </button>
-          <button
-            class="icon-button"
-            :title="t('input_server.token.copy')"
-            :aria-label="t('input_server.token.copy')"
-            :disabled="!tokenAvailable || regeneratePending"
-            :class="{ disabled: !tokenAvailable || regeneratePending }"
-            @click="copyToken"
-          >
-            <Copy :size="16" />
+            <RefreshCw :size="16" />
           </button>
         </div>
-        <button
-          class="icon-button danger-button"
-          :title="t('input_server.token.regenerate')"
-          :aria-label="t('input_server.token.regenerate')"
-          :disabled="regeneratePending"
-          :class="{ disabled: regeneratePending }"
-          @click="regenerateToken"
-        >
-          <RefreshCw :size="16" />
-        </button>
       </div>
 
       <div class="subsection-divider"></div>
@@ -645,25 +647,29 @@ h2 {
   margin: 1.25rem 0;
 }
 
-.connection-row {
+.connection-grid {
   display: grid;
-  grid-template-columns: 132px minmax(0, 1fr);
+  grid-template-columns: max-content minmax(0, 1fr) auto;
+  column-gap: 12px;
+  row-gap: 1rem;
   align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
 }
 
-.connection-token-row {
-  grid-template-columns: 132px minmax(0, 1fr) auto;
+.connection-row {
+  display: contents;
+}
+
+.connection-row .url-display {
+  grid-column: 2 / -1;
+}
+
+.connection-token-row .url-display {
+  grid-column: 2;
 }
 
 .url-code-wide {
   display: block !important;
   line-height: 36px;
-}
-
-.connection-row:last-child {
-  margin-bottom: 0;
 }
 
 .connection-row .row-label {
@@ -685,9 +691,18 @@ h2 {
 }
 
 @media (max-width: 440px) {
+  .connection-grid {
+    display: block;
+  }
   .connection-row {
+    display: grid;
+    gap: 12px;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: stretch;
+    margin-bottom: 1rem;
+  }
+  .connection-row:last-child {
+    margin-bottom: 0;
   }
   .connection-row .row-label {
     grid-column: 1 / -1;
