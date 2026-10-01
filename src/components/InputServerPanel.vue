@@ -25,6 +25,7 @@ const {
   overlayUrl,
   lanUrl,
   maskedToken,
+  tokenAvailable,
   regeneratePending,
   saveSettings,
   startInputServer,
@@ -33,6 +34,7 @@ const {
   copyEndpoint,
   copyOverlayUrl,
   copyLanUrl,
+  copyToken,
   regenerateToken,
 } = useInputServer()
 
@@ -139,27 +141,12 @@ const messageBoxClass = computed(() => (message.value ? messageType.value : ''))
     </div>
 
     <section class="settings-section">
-      <h2>Endpoint</h2>
-      <div class="setting-row">
-        <div class="url-display url-display-full">
-          <label class="url-code url-code-wide">{{ endpoint }}</label>
-          <button
-            class="icon-button"
-            :title="t('input_server.copy_endpoint')"
-            :aria-label="t('input_server.copy_endpoint')"
-            @click="copyEndpoint"
-          >
-            <Copy :size="16" />
-          </button>
-        </div>
-      </div>
-      <p class="format-hint">{{ t('input_server.format_hint') }} <code class="inline-code">{"text":"реплика"}</code></p>
-    </section>
+      <h2>{{ t('input_server.connection') }}</h2>
 
-    <section class="settings-section">
-      <h2>{{ t('input_server.overlay_title') }}</h2>
-      <div class="setting-row">
-        <label>{{ t('input_server.local_url_label') }}</label>
+      <h3 class="subsection-heading">{{ t('input_server.web_form') }}</h3>
+
+      <div class="connection-row">
+        <label class="row-label">{{ t('input_server.local_url_label') }}</label>
         <div class="url-display url-display-full">
           <label class="url-code url-code-wide">{{ overlayUrl }}</label>
           <button
@@ -172,8 +159,9 @@ const messageBoxClass = computed(() => (message.value ? messageType.value : ''))
           </button>
         </div>
       </div>
-      <div class="setting-row">
-        <label>{{ t('input_server.lan_url_label') }}</label>
+
+      <div class="connection-row">
+        <label class="row-label">{{ t('input_server.lan_url_label') }}</label>
         <div class="url-display url-display-full">
           <label class="url-code url-code-wide">
             {{ lanUrl ?? t('input_server.lan_url_unavailable') }}
@@ -190,22 +178,54 @@ const messageBoxClass = computed(() => (message.value ? messageType.value : ''))
           </button>
         </div>
       </div>
-      <p class="format-hint">{{ t('input_server.lan_hint') }}</p>
-      <div class="setting-row token-row">
-        <label>{{ t('input_server.token.label') }}</label>
-        <label class="url-code token-code">
-          {{ maskedToken ?? t('input_server.token.not_generated') }}
-        </label>
+
+      <div class="connection-row connection-token-row">
+        <label class="row-label">{{ t('input_server.token.label') }}</label>
+        <div class="url-display url-display-full">
+          <label class="url-code url-code-wide">
+            {{ maskedToken ?? t('input_server.token.not_generated') }}
+          </label>
+          <button
+            class="icon-button"
+            :title="t('input_server.token.copy')"
+            :aria-label="t('input_server.token.copy')"
+            :disabled="!tokenAvailable || regeneratePending"
+            :class="{ disabled: !tokenAvailable || regeneratePending }"
+            @click="copyToken"
+          >
+            <Copy :size="16" />
+          </button>
+        </div>
         <button
-          class="icon-button token-button"
+          class="icon-button danger-button"
           :title="t('input_server.token.regenerate')"
           :aria-label="t('input_server.token.regenerate')"
           :disabled="regeneratePending"
+          :class="{ disabled: regeneratePending }"
           @click="regenerateToken"
         >
           <RefreshCw :size="16" />
         </button>
       </div>
+
+      <div class="subsection-divider"></div>
+
+      <h3 class="subsection-heading">{{ t('input_server.speech_api') }}</h3>
+
+      <div class="setting-row">
+        <div class="url-display url-display-full">
+          <label class="url-code url-code-wide">{{ endpoint }}</label>
+          <button
+            class="icon-button"
+            :title="t('input_server.copy_endpoint')"
+            :aria-label="t('input_server.copy_endpoint')"
+            @click="copyEndpoint"
+          >
+            <Copy :size="16" />
+          </button>
+        </div>
+      </div>
+      <p class="format-hint">{{ t('input_server.format_hint') }} <code class="inline-code">{"text":"реплика"}</code></p>
     </section>
 
     <section class="settings-section">
@@ -587,22 +607,72 @@ h2 {
   cursor: not-allowed;
 }
 
-.token-row {
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
-  border-top: 1px dashed var(--color-border);
+.subsection-heading {
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
 }
 
-.token-code {
-  width: auto !important;
-  min-width: 150px !important;
-  flex: 0 1 auto;
-  border-radius: 10px 0 0 10px;
+.subsection-divider {
+  border-top: 1px solid var(--color-border);
+  margin: 1.25rem 0;
 }
 
-.token-button {
-  border-radius: 0 10px 10px 0;
-  border-left: none;
+.connection-row {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.connection-token-row {
+  grid-template-columns: 132px minmax(0, 1fr) auto;
+}
+
+.url-code-wide {
+  display: block !important;
+  line-height: 36px;
+}
+
+.connection-row:last-child {
+  margin-bottom: 0;
+}
+
+.connection-row .row-label {
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  min-width: 0;
+}
+
+.icon-button.danger-button {
+  background: var(--danger-bg-weak);
+  border-color: var(--danger-border);
+  color: var(--danger-text-bright);
+}
+
+.icon-button.danger-button:hover:not(:disabled) {
+  background: var(--danger-bg-hover);
+  border-color: var(--danger-border-strong);
+}
+
+@media (max-width: 440px) {
+  .connection-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: stretch;
+  }
+  .connection-row .row-label {
+    grid-column: 1 / -1;
+  }
+  .connection-row .url-display {
+    width: 100%;
+    grid-column: 1 / -1;
+  }
+  .connection-token-row .url-display {
+    grid-column: 1;
+  }
 }
 
 .format-hint {

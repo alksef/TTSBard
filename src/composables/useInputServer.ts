@@ -131,6 +131,21 @@ export function useInputServer() {
     () => `http://${INPUT_SERVER_HOST}:${settings.value.port}${INPUT_SERVER_OVERLAY_PATH}`,
   )
 
+  // The real token travels only inside the ready connection URL. It is derived
+  // here so the copy action can expose the full value without any backend call
+  // and without ever logging it.
+  function deriveToken(): string | null {
+    const url = lanUrl.value
+    if (!url) return null
+    try {
+      return new URL(url).searchParams.get('token') || null
+    } catch {
+      return null
+    }
+  }
+
+  const tokenAvailable = computed(() => deriveToken() !== null)
+
   function showMessage(text: string, type: UiMessageKind = 'info') {
     message.value = text
     messageType.value = type
@@ -316,6 +331,13 @@ export function useInputServer() {
     await copyText(lanUrl.value, 'input_server.lan_url_copied')
   }
 
+  async function copyToken(): Promise<void> {
+    if (regeneratePending.value) return
+    const token = deriveToken()
+    if (!token) return
+    await copyText(token, 'input_server.token_copied')
+  }
+
   async function refreshConnectionInfo(): Promise<void> {
     try {
       const url = await invoke<string>('get_input_server_connection_url')
@@ -410,6 +432,7 @@ export function useInputServer() {
     lanUrl,
     lanUrlUnavailable,
     maskedToken,
+    tokenAvailable,
     regeneratePending,
     showMessage,
     refreshSettings,
@@ -421,6 +444,7 @@ export function useInputServer() {
     copyEndpoint,
     copyOverlayUrl,
     copyLanUrl,
+    copyToken,
     regenerateToken,
   }
 }
