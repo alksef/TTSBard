@@ -38,7 +38,7 @@ const {
 } = useWebView()
 
 const HIDDEN_TOKEN_BULLET = '•'
-const tokenVisible = ref(true)
+const tokenVisible = ref(false)
 
 const tokenDisplay = computed(() => {
   const token = settings.value.access_token

@@ -41,7 +41,7 @@ const {
 const messageBoxClass = computed(() => (message.value ? messageType.value : ''))
 
 const HIDDEN_TOKEN_BULLET = '•'
-const tokenVisible = ref(true)
+const tokenVisible = ref(false)
 
 const tokenDisplay = computed(() => {
   if (!accessToken.value) return t('input_server.token.not_generated')
