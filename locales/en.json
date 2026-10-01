@@ -551,6 +551,8 @@
     "webview.token.label": "Access token:",
     "webview.token.not_generated": "Not generated",
     "webview.token.copy": "Copy token",
+    "webview.token.show": "Show token",
+    "webview.token.hide": "Hide token",
     "webview.token.regenerate": "Regenerate access token",
     "webview.upnp.enable": "Enable UPnP (automatic port forwarding)",
     "webview.upnp.tooltip": "UPnP automatically opens a port on the router for external access. Only available with 0.0.0.0",

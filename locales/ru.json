@@ -551,6 +551,8 @@
     "webview.token.label": "Токен доступа:",
     "webview.token.not_generated": "Не сгенерирован",
     "webview.token.copy": "Копировать токен",
+    "webview.token.show": "Показать токен",
+    "webview.token.hide": "Скрыть токен",
     "webview.token.regenerate": "Перегенерировать токен доступа",
     "webview.upnp.enable": "Включить UPnP (автоматический проброс порта)",
     "webview.upnp.tooltip": "UPnP автоматически открывает порт на роутере для внешнего доступа. Доступно только при 0.0.0.0",

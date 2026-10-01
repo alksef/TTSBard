@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { Copy, RotateCw, Play, Square, AlertTriangle, Globe } from 'lucide-vue-next'
+import { computed, ref } from 'vue'
+import { Copy, RotateCw, Play, Square, AlertTriangle, Globe, Eye, EyeOff } from 'lucide-vue-next'
 import { useWebView } from '../composables/useWebView'
 import { t } from '../i18n'
 
@@ -36,6 +36,15 @@ const {
   sendTest,
   reloadTemplates,
 } = useWebView()
+
+const HIDDEN_TOKEN_BULLETS = '••••••••'
+const tokenVisible = ref(true)
+
+const tokenDisplay = computed(() => {
+  const token = settings.value.access_token
+  if (!token) return t('webview.token.not_generated')
+  return tokenVisible.value ? token : HIDDEN_TOKEN_BULLETS
+})
 </script>
 
 <template>
@@ -172,10 +181,14 @@ const {
       </div>
 
       <!-- Token access -->
-      <div class="setting-row">
+      <div class="setting-row token-row">
         <label>{{ t('webview.token.label') }}</label>
-        <div class="url-display url-display-expand">
-          <label class="url-code url-code-expand">{{ settings.access_token || t('webview.token.not_generated') }}</label>
+        <div class="token-field url-display url-display-expand">
+          <label class="url-code url-code-expand token-text">{{ tokenDisplay }}</label>
+          <button @click="tokenVisible = !tokenVisible" class="icon-button" :title="tokenVisible ? t('webview.token.hide') : t('webview.token.show')" :aria-label="tokenVisible ? t('webview.token.hide') : t('webview.token.show')" :aria-pressed="tokenVisible ? 'true' : 'false'" :disabled="!hasToken">
+            <Eye v-if="!tokenVisible" :size="16" />
+            <EyeOff v-else :size="16" />
+          </button>
           <button @click="copyToken" class="icon-button" :title="t('webview.token.copy')" :aria-label="t('webview.token.copy')" :disabled="!hasToken || !isUpnpAvailable">
             <Copy :size="16" />
           </button>
@@ -627,6 +640,36 @@ h2 {
 .url-code-expand {
   flex: 1 !important;
   width: auto !important;
+}
+
+/* Token row: grid keeps the token field shrinkable next to regenerate */
+.token-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.token-field {
+  min-width: 0;
+  width: auto;
+}
+
+.token-field .token-text {
+  display: block !important;
+  min-width: 0 !important;
+  width: auto !important;
+  line-height: 36px;
+}
+
+@media (max-width: 440px) {
+  .token-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .token-row > label {
+    grid-column: 1 / -1;
+  }
 }
 
 .icon-button {
