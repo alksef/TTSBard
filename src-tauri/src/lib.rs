@@ -127,6 +127,30 @@ fn should_hide_soundpanel_on_blur(
     hide_on_blur && !stay_visible && !config_mode
 }
 
+/// Выполнить одноразовый перенос legacy-кеша и сохранить маркер (ROADMAP-117).
+///
+/// Маркер `true` полностью отключает проверку legacy-каталога. Маркер ставится
+/// только после подтверждения полного переноса; провал сохранения логируется и
+/// оставляет возможность повторной попытки на следующем старте.
+fn migrate_legacy_audio_cache_once(
+    marker: bool,
+    migrate: impl FnOnce() -> bool,
+    persist_marker: impl FnOnce() -> anyhow::Result<()>,
+) {
+    if marker {
+        return;
+    }
+    if !migrate() {
+        return;
+    }
+    if let Err(e) = persist_marker() {
+        warn!(
+            error = %e,
+            "Failed to persist legacy audio cache migration marker; will retry on next start"
+        );
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(windows)]
@@ -316,7 +340,11 @@ pub fn run() {
 
     // Аудио-кеш: кастомный путь из настроек и одноразовый перенос legacy-кеша.
     crate::history::init_audio_cache_dir(settings.storage.audio_cache_dir.as_deref());
-    crate::history::migrate_legacy_audio_cache();
+    migrate_legacy_audio_cache_once(
+        settings.storage.legacy_audio_cache_migrated,
+        crate::history::migrate_legacy_audio_cache,
+        || settings_manager.set_legacy_audio_cache_migrated(),
+    );
 
     let app_dir = crate::paths::config_root().expect("Failed to resolve app data directory");
 
@@ -900,5 +928,61 @@ mod should_hide_tests {
     #[test]
     fn config_mode_suppresses_hide_on_blur() {
         assert!(!should_hide_soundpanel_on_blur(true, false, true));
+    }
+}
+
+#[cfg(test)]
+mod migrate_once_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    /// A completed marker skips the migration entirely: even a recreated legacy
+    /// directory must not be probed.
+    #[test]
+    fn migrate_skips_when_marker_true() {
+        let ran = Arc::new(AtomicBool::new(false));
+        let ran_flag = Arc::clone(&ran);
+        migrate_legacy_audio_cache_once(
+            true,
+            || {
+                ran_flag.store(true, Ordering::SeqCst);
+                true
+            },
+            || Ok(()),
+        );
+        assert!(!ran.load(Ordering::SeqCst));
+    }
+
+    /// The marker is persisted only after a completed migration.
+    #[test]
+    fn migrate_persists_marker_only_after_complete() {
+        let persisted = Arc::new(AtomicBool::new(false));
+        let persisted_flag = Arc::clone(&persisted);
+        migrate_legacy_audio_cache_once(
+            false,
+            || true,
+            || {
+                persisted_flag.store(true, Ordering::SeqCst);
+                Ok(())
+            },
+        );
+        assert!(persisted.load(Ordering::SeqCst));
+    }
+
+    /// An incomplete migration must not persist the marker.
+    #[test]
+    fn migrate_incomplete_does_not_persist_marker() {
+        let persisted = Arc::new(AtomicBool::new(false));
+        let persisted_flag = Arc::clone(&persisted);
+        migrate_legacy_audio_cache_once(
+            false,
+            || false,
+            || {
+                persisted_flag.store(true, Ordering::SeqCst);
+                Ok(())
+            },
+        );
+        assert!(!persisted.load(Ordering::SeqCst));
     }
 }

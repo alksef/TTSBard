@@ -675,19 +675,115 @@ pub fn cache_dir_path() -> Result<PathBuf> {
 }
 
 /// Одноразовый перенос legacy-кеша из Roaming (`<config_root>/audio_cache`)
-/// в текущий корень (ROADMAP-117). Идемпотентен: занятый или непереносимый
-/// файл остаётся на месте и подхватывается при следующем старте.
-pub(crate) fn migrate_legacy_audio_cache() {
+/// в текущий корень (ROADMAP-117).
+///
+/// Возвращает `true`, только если перенос можно считать завершённым:
+/// legacy-каталог отсутствует либо все его `*.wav` перенесены и каталог удалён.
+/// Ошибки файловой системы, оставшиеся файлы (занятые `*.wav`, не-wav, вложенные
+/// каталоги) или равенство `legacy == target` дают `false` — маркер не ставится
+/// и попытка повторяется на следующем старте.
+pub(crate) fn migrate_legacy_audio_cache() -> bool {
     let Ok(config_root) = crate::paths::config_root() else {
-        return;
+        return false;
     };
-    migrate_cache_dir(&config_root.join("audio_cache"), &match cache_dir_path() {
+    let legacy = config_root.join("audio_cache");
+    let target = match cache_dir_path() {
         Ok(dir) => dir,
         Err(e) => {
             tracing::warn!(error = %e, "Legacy audio cache migration skipped: no cache dir");
-            return;
+            return false;
         }
-    });
+    };
+    migrate_legacy_wav_files(&legacy, &target)
+}
+
+/// Перенести только `*.wav` файлы из legacy-каталога в `target` и удалить
+/// `legacy`, если он опустел (ROADMAP-117, одноразовая стартовая миграция).
+///
+/// В отличие от [`migrate_cache_dir`] (смена пути кеша пользователем) не трогает
+/// не-wav файлы и не переносит их: они остаются на месте, поэтому каталог не
+/// удаляется и миграция не считается завершённой. Возвращает `true`, когда
+/// legacy-каталог отсутствует или после переноса удалён.
+fn migrate_legacy_wav_files(legacy: &Path, target: &Path) -> bool {
+    if legacy == target {
+        return false;
+    }
+    let metadata = match fs::symlink_metadata(legacy) {
+        Ok(metadata) => metadata,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // On Windows a regular file in an ancestor path also reports
+            // NotFound (ERROR_PATH_NOT_FOUND). Confirm the parent is a real
+            // directory before treating the legacy directory as gone.
+            return legacy
+                .parent()
+                .map(|parent| fs::metadata(parent).map(|m| m.is_dir()).unwrap_or(true))
+                .unwrap_or(true);
+        }
+        Err(e) => {
+            tracing::warn!(
+                dir = %crate::secret_log::safe_path_for_log(legacy),
+                error = %e,
+                "Legacy audio cache metadata unavailable; migration incomplete"
+            );
+            return false;
+        }
+    };
+    if !metadata.is_dir() {
+        return false;
+    }
+    let entries = match fs::read_dir(legacy) {
+        Ok(entries) => entries,
+        Err(e) => {
+            tracing::warn!(
+                dir = %crate::secret_log::safe_path_for_log(legacy),
+                error = %e,
+                "Failed to read legacy audio cache"
+            );
+            return false;
+        }
+    };
+    let mut moved = 0u32;
+    let mut skipped = 0u32;
+    for entry in entries.flatten() {
+        let from = entry.path();
+        if !from.is_file() {
+            continue;
+        }
+        let Some(name) = from.file_name().map(std::ffi::OsStr::to_os_string) else {
+            continue;
+        };
+        if !name.to_string_lossy().to_ascii_lowercase().ends_with(".wav") {
+            continue;
+        }
+        let to = target.join(&name);
+        let result = if to.exists() {
+            // Одинаковый cache_key => то же содержимое; источник лишний.
+            fs::remove_file(&from)
+        } else {
+            // rename падает между томами — запасной путь copy + remove.
+            fs::rename(&from, &to)
+                .or_else(|_| fs::copy(&from, &to).and_then(|_| fs::remove_file(&from)))
+        };
+        match result {
+            Ok(()) => moved += 1,
+            Err(_) => skipped += 1,
+        }
+    }
+    match fs::remove_dir(legacy) {
+        Ok(()) => {
+            tracing::info!(moved, "Migrated legacy audio cache out of Roaming");
+            true
+        }
+        Err(_) => {
+            if moved > 0 || skipped > 0 {
+                tracing::warn!(
+                    skipped,
+                    "Legacy audio cache partially migrated; remaining files retry on next start"
+                );
+            }
+            false
+        }
+    }
 }
 
 /// Перенести файлы из `legacy` в `target` и удалить `legacy`, если опустела.
@@ -1379,5 +1475,145 @@ mod tests {
             Path::new("Z:/ttsbard-missing-legacy"),
             Path::new("Z:/ttsbard-missing-target"),
         );
+    }
+
+    #[test]
+    fn migrate_legacy_wav_files_missing_legacy_completes() {
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let n = SEQ.fetch_add(1, Ordering::SeqCst);
+        let base = std::env::temp_dir().join(format!(
+            "ttsbard-hist-legacy-missing-{}-{}",
+            std::process::id(),
+            n
+        ));
+        let legacy = base.join("legacy");
+        let target = base.join("target");
+        fs::create_dir_all(&target).unwrap();
+
+        assert!(migrate_legacy_wav_files(&legacy, &target));
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn migrate_legacy_wav_files_complete_moves_wavs_and_removes_legacy() {
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let n = SEQ.fetch_add(1, Ordering::SeqCst);
+        let base = std::env::temp_dir().join(format!(
+            "ttsbard-hist-legacy-complete-{}-{}",
+            std::process::id(),
+            n
+        ));
+        let legacy = base.join("legacy");
+        let target = base.join("target");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::create_dir_all(&target).unwrap();
+        fs::write(legacy.join("a.wav"), b"a").unwrap();
+        fs::write(legacy.join("b.wav"), b"b").unwrap();
+
+        assert!(migrate_legacy_wav_files(&legacy, &target));
+
+        assert!(target.join("a.wav").exists());
+        assert!(target.join("b.wav").exists());
+        assert!(!legacy.exists(), "emptied legacy dir must be removed");
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn migrate_legacy_wav_files_partial_nested_dir_incomplete() {
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let n = SEQ.fetch_add(1, Ordering::SeqCst);
+        let base = std::env::temp_dir().join(format!(
+            "ttsbard-hist-legacy-partial-{}-{}",
+            std::process::id(),
+            n
+        ));
+        let legacy = base.join("legacy");
+        let target = base.join("target");
+        fs::create_dir_all(legacy.join("nested")).unwrap();
+        fs::create_dir_all(&target).unwrap();
+        fs::write(legacy.join("a.wav"), b"a").unwrap();
+        fs::write(legacy.join("nested").join("keep.wav"), b"keep").unwrap();
+
+        assert!(!migrate_legacy_wav_files(&legacy, &target));
+
+        assert!(target.join("a.wav").exists(), "top-level wav must be moved");
+        assert!(legacy.exists(), "legacy dir with nested dir must remain");
+        assert!(
+            legacy.join("nested").join("keep.wav").exists(),
+            "nested files must not be touched"
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn migrate_legacy_wav_files_leaves_non_wav_files() {
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let n = SEQ.fetch_add(1, Ordering::SeqCst);
+        let base = std::env::temp_dir().join(format!(
+            "ttsbard-hist-legacy-nonwav-{}-{}",
+            std::process::id(),
+            n
+        ));
+        let legacy = base.join("legacy");
+        let target = base.join("target");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::create_dir_all(&target).unwrap();
+        fs::write(legacy.join("notes.txt"), b"txt").unwrap();
+        fs::write(legacy.join("a.wav"), b"a").unwrap();
+
+        assert!(!migrate_legacy_wav_files(&legacy, &target));
+
+        assert!(target.join("a.wav").exists(), "wav must be moved");
+        assert!(
+            legacy.join("notes.txt").exists(),
+            "unexpected files must not be deleted"
+        );
+        assert!(legacy.exists(), "legacy dir still holds notes.txt");
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn migrate_legacy_wav_files_parent_is_file_incomplete() {
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let n = SEQ.fetch_add(1, Ordering::SeqCst);
+        let base = std::env::temp_dir().join(format!(
+            "ttsbard-hist-legacy-parent-file-{}-{}",
+            std::process::id(),
+            n
+        ));
+        fs::write(&base, "not a directory").unwrap();
+        let legacy = base.join("audio_cache");
+        let target = base.join("target");
+
+        // A regular file in the path makes `symlink_metadata` fail. The error
+        // kind is platform-dependent (NotADirectory on Unix, NotFound on
+        // Windows), but the migration must never report completion.
+        assert!(fs::symlink_metadata(&legacy).is_err());
+        assert!(
+            !migrate_legacy_wav_files(&legacy, &target),
+            "a legacy path under a regular file must not report completion"
+        );
+
+        let _ = fs::remove_file(&base);
+    }
+
+    #[test]
+    fn migrate_legacy_wav_files_same_source_target_incomplete() {
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let n = SEQ.fetch_add(1, Ordering::SeqCst);
+        let base = std::env::temp_dir().join(format!(
+            "ttsbard-hist-legacy-same-{}-{}",
+            std::process::id(),
+            n
+        ));
+        fs::create_dir_all(&base).unwrap();
+
+        assert!(!migrate_legacy_wav_files(&base, &base));
+
+        let _ = fs::remove_dir_all(&base);
     }
 }

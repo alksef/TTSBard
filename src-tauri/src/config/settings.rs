@@ -1456,6 +1456,11 @@ pub struct StorageSettings {
     /// (`%LOCALAPPDATA%\ttsbard\audio_cache`).
     #[serde(default)]
     pub audio_cache_dir: Option<String>,
+    /// Одноразовый перенос legacy-кеша из Roaming уже выполнен (ROADMAP-117).
+    /// Отсутствующее поле трактуется как `false`. Backend-only маркер: в IPC
+    /// DTO не выводится.
+    #[serde(default)]
+    pub legacy_audio_cache_migrated: bool,
 }
 
 // ==================== Main App Settings ====================
@@ -2584,6 +2589,20 @@ impl SettingsManager {
             return Err(anyhow::anyhow!("Invalid UI language tag: {:?}", language));
         }
         self.update_field("/ui_language", &language)
+    }
+
+    // ========== Storage Settings ==========
+
+    /// Пометить одноразовый перенос legacy-кеша выполненным (ROADMAP-117).
+    ///
+    /// Атомарно читает текущие настройки с диска, ставит
+    /// `storage.legacy_audio_cache_migrated = true` и сохраняет их без потери
+    /// других полей. Провал записи возвращает ошибку, не меняя ни диск, ни кеш, —
+    /// маркер можно повторить на следующем старте.
+    pub fn set_legacy_audio_cache_migrated(&self) -> Result<()> {
+        self.update_settings_atomically(move |settings| {
+            settings.storage.legacy_audio_cache_migrated = true;
+        })
     }
 
     // ========== Editor Settings ==========
@@ -6691,6 +6710,100 @@ mod tests {
             18,
             "family setter must not clobber size"
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ==================== Storage legacy audio cache marker ====================
+
+    fn storage_tmp_manager(label: &str) -> (SettingsManager, PathBuf) {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-storage-{}-{}-{}",
+            label,
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let manager = SettingsManager::with_config_dir(dir.clone()).unwrap();
+        (manager, dir)
+    }
+
+    /// The marker defaults to false, both for a fresh struct and for an empty
+    /// (or legacy) JSON that predates the field.
+    #[test]
+    fn storage_legacy_audio_cache_migrated_defaults_false() {
+        assert!(!StorageSettings::default().legacy_audio_cache_migrated);
+        let s: StorageSettings = serde_json::from_str("{}").unwrap();
+        assert!(!s.legacy_audio_cache_migrated);
+    }
+
+    /// The marker survives a serde round-trip.
+    #[test]
+    fn storage_legacy_audio_cache_migrated_round_trip() {
+        let s = StorageSettings {
+            audio_cache_dir: None,
+            legacy_audio_cache_migrated: true,
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        let back: StorageSettings = serde_json::from_str(&json).unwrap();
+        assert!(back.legacy_audio_cache_migrated);
+    }
+
+    /// set_legacy_audio_cache_migrated persists `true` to disk and cache, and a
+    /// restarted manager over the same dir still reads `true`.
+    #[test]
+    fn storage_legacy_audio_cache_migrated_persists_and_updates_cache() {
+        let (manager, dir) = storage_tmp_manager("migrated-persist");
+        assert!(!manager.load().unwrap().storage.legacy_audio_cache_migrated);
+
+        manager.set_legacy_audio_cache_migrated().unwrap();
+
+        assert!(manager.load().unwrap().storage.legacy_audio_cache_migrated);
+        assert!(read_disk_settings(&dir).storage.legacy_audio_cache_migrated);
+
+        let restarted = SettingsManager::with_config_dir(dir.clone()).unwrap();
+        assert!(restarted
+            .load()
+            .unwrap()
+            .storage
+            .legacy_audio_cache_migrated);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Later settings updates (field-level and section-level) must preserve the
+    /// saved marker on disk and in the cache.
+    #[test]
+    fn storage_legacy_audio_cache_migrated_preserved_across_updates() {
+        let (manager, dir) = storage_tmp_manager("migrated-preserved");
+        manager.set_legacy_audio_cache_migrated().unwrap();
+
+        manager.set_speaker_volume(42).unwrap();
+        manager
+            .set_webview_section(false, 9090, "127.0.0.1".to_string(), false, true)
+            .unwrap();
+
+        assert!(manager.load().unwrap().storage.legacy_audio_cache_migrated);
+        assert!(read_disk_settings(&dir).storage.legacy_audio_cache_migrated);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A failed marker write must not flip the in-memory or on-disk state, so a
+    /// later startup retries.
+    #[test]
+    fn storage_legacy_audio_cache_migrated_failed_write_preserves_false() {
+        let (manager, dir) = storage_tmp_manager("migrated-failed");
+        let path = dir.join("settings.json");
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+
+        assert!(manager.set_legacy_audio_cache_migrated().is_err());
+        assert!(!manager.load().unwrap().storage.legacy_audio_cache_migrated);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
