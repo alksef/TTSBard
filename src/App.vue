@@ -27,6 +27,7 @@ import { useRuAccentRuntime } from './composables/useRuAccentRuntime'
 import { debugLog, debugError } from './utils/debug'
 import { createAsyncCleanupScope } from './utils/asyncCleanup'
 import { useErrorHandler } from './composables/useErrorHandler'
+import { useStartupNotifications } from './composables/useStartupNotifications'
 import {
   collectSpeechQueueFailures,
   type SpeechQueueFailureKey,
@@ -69,11 +70,7 @@ const { dispose: disposeRuAccentRuntime } = useRuAccentRuntime()
 // is never opened. Registers its own status listener and boot snapshot read.
 useOcrRuntimeNotifications()
 
-watch(
-  () => appSettings.settings.value?.notifications,
-  notifications => notifications?.forEach(message => showWarning(message, 8000)),
-  { immediate: true },
-)
+useStartupNotifications(appSettings.settings)
 
 // Create single shared instance of Telegram auth
 const telegramAuth = useTelegramAuth()

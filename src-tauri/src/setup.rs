@@ -271,6 +271,9 @@ pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std:
             }
         };
         crate::tts::piper::runtime::LocalModelTts::init_espeak_data(resource_dir);
+        // Probe every startup, even when Piper is not selected. Failure stays
+        // silent until a saved or manually requested Piper needs the runtime.
+        crate::tts::piper::runtime::PiperReadiness::assess_cached();
     }
 
     // Restore saved concrete provider ID. A deleted Piper model falls back to
@@ -311,12 +314,46 @@ pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std:
         };
 
         // A persisted Piper choice is already selected from the user's point
-        // of view. Prepare it before backend-ready so the first UI snapshot
-        // reports Ready. Unselected discovered models remain lazy.
+        // of view. Verify eSpeak phonemization readiness before loading the
+        // model: an unusable runtime keeps the saved selection (no silent
+        // provider rewrite) and reports a single app-level notification
+        // instead of leaving a "Ready"-looking model that fails at synthesis.
         if let Some((provider_id, provider)) = restored_piper {
-            info!(provider_id, "Preparing restored Piper provider");
-            if let Err(error) = provider.prepare() {
-                warn!(provider_id, error = %error, "Failed to prepare restored Piper provider");
+            let readiness = provider.espeak_readiness();
+            if readiness.is_ready() {
+                info!(provider_id, "Preparing restored Piper provider");
+                match provider.check_phonemization() {
+                    Ok(()) => {
+                        if let Err(error) = provider.prepare() {
+                            warn!(provider_id, error = %error, "Failed to prepare restored Piper provider");
+                        }
+                    }
+                    Err(cause) => {
+                        warn!(provider_id, error = %cause, "Restored Piper phonemization unavailable");
+                        if let Some(key) =
+                            crate::tts::piper::runtime::phonemization_error_key(&cause)
+                        {
+                            let snapshot = app
+                                .state::<crate::commands::localization::LocalizationState>()
+                                .snapshot();
+                            app_state.push_startup_error(
+                                snapshot.messages.get(key).cloned().unwrap_or_else(||
+                                    "Piper model voice is unavailable in eSpeak NG. Check the model configuration or select another model.".to_string()),
+                            );
+                        }
+                    }
+                }
+            } else {
+                warn!(
+                    provider_id,
+                    readiness = ?readiness,
+                    "Restored Piper provider skipped: eSpeak NG data unavailable"
+                );
+                let localization = app.state::<crate::commands::localization::LocalizationState>();
+                let snapshot = localization.snapshot();
+                let message =
+                    crate::tts::piper::runtime::not_ready_message(&snapshot.messages, readiness);
+                app_state.push_startup_error(message);
             }
         }
     }

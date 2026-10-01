@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::env;
 #[cfg(test)]
@@ -28,6 +29,174 @@ pub enum PiperRuntimeError {
     Inference(String),
     #[error("Model not loaded")]
     NotLoaded,
+    #[error("Piper is not ready: eSpeak NG phonemization unavailable ({0:?})")]
+    NotReady(PiperReadiness),
+    #[error("Piper model voice is unavailable: {0}")]
+    VoiceUnavailable(String),
+}
+
+/// Readiness of eSpeak NG phonemization for Piper, fixed once per app run.
+///
+/// The espeak-rs dependency initializes eSpeak exactly once into its own
+/// internal `OnceLock`, so a failed initialization cannot be retried without
+/// restarting the application. The verdict is therefore cached process-wide.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PiperReadiness {
+    /// The real phonemization probe succeeded.
+    Ready,
+    /// A local `espeak-ng-data` folder is visible to the library lookup, but
+    /// the real phonemization probe failed: the folder is empty, incomplete
+    /// or damaged.
+    DataDamaged,
+    /// No local `espeak-ng-data` folder is visible and the system fallback
+    /// (registry / `ESPEAK_DATA_PATH`) failed to initialize as well.
+    DataNotFound,
+}
+
+impl PiperReadiness {
+    pub fn is_ready(self) -> bool {
+        matches!(self, PiperReadiness::Ready)
+    }
+
+    /// Locale key naming the specific known cause; `None` when ready.
+    pub fn message_key(self) -> Option<&'static str> {
+        match self {
+            PiperReadiness::Ready => None,
+            PiperReadiness::DataDamaged => Some("tts.piper.espeak_data_damaged"),
+            PiperReadiness::DataNotFound => Some("tts.piper.espeak_data_not_found"),
+        }
+    }
+
+    /// Model-independent process readiness; never use a model voice here.
+    pub fn assess_cached() -> PiperReadiness {
+        *ESPEAK_READINESS.get_or_init(Self::assess)
+    }
+
+    fn assess() -> PiperReadiness {
+        let local_data_found = local_espeak_data_visible();
+        let probe = espeak_rs::text_to_phonemes(ESPEAK_PROBE_TEXT, ESPEAK_PROBE_VOICE, None);
+        classify_readiness(
+            local_data_found,
+            probe.and_then(|phonemes| {
+                if phonemes.iter().all(|text| text.trim().is_empty()) {
+                    Err(espeak_rs::ESpeakError(
+                        "Empty phonemization probe result".into(),
+                    ))
+                } else {
+                    Ok(())
+                }
+            }),
+        )
+    }
+}
+
+static ESPEAK_READINESS: OnceLock<PiperReadiness> = OnceLock::new();
+
+fn validate_model_voice(
+    readiness: PiperReadiness,
+    voice: &str,
+    probe: impl FnOnce(&str) -> espeak_rs::ESpeakResult<Vec<String>>,
+) -> Result<(), PiperRuntimeError> {
+    if !readiness.is_ready() {
+        return Err(PiperRuntimeError::NotReady(readiness));
+    }
+    let phonemes = probe(voice).map_err(|error| {
+        tracing::warn!(voice, error = %error, "Piper model voice check failed");
+        PiperRuntimeError::VoiceUnavailable(voice.to_string())
+    })?;
+    if phonemes.iter().all(|text| text.trim().is_empty()) {
+        return Err(PiperRuntimeError::VoiceUnavailable(voice.to_string()));
+    }
+    Ok(())
+}
+
+pub fn phonemization_error_key(error: &PiperRuntimeError) -> Option<&'static str> {
+    match error {
+        PiperRuntimeError::NotReady(_) => Some("tts.piper.espeak_not_ready"),
+        PiperRuntimeError::VoiceUnavailable(_) => Some("tts.piper.voice_unavailable"),
+        _ => None,
+    }
+}
+
+const ESPEAK_PROBE_TEXT: &str = "eSpeak readiness probe";
+const ESPEAK_PROBE_VOICE: &str = "en";
+
+/// Generic locale key used when the specific cause key is missing from the
+/// loaded locale pack.
+pub const PIPER_NOT_READY_FALLBACK_KEY: &str = "tts.piper.espeak_not_ready";
+
+/// Hardcoded last-resort message, matching the generic locale key.
+pub const PIPER_NOT_READY_FALLBACK_TEXT: &str = "Piper не готов: данные eSpeak NG не найдены или повреждены. Восстановите папку espeak-ng-data или установку eSpeak NG и перезапустите приложение";
+
+/// Build the localized user-facing message for a not-ready verdict. Falls
+/// back from the specific cause key to the generic key and then to the
+/// hardcoded default, mirroring window-title localization in setup.
+pub fn not_ready_message(messages: &BTreeMap<String, String>, readiness: PiperReadiness) -> String {
+    if readiness.is_ready() {
+        return String::new();
+    }
+    messages
+        .get(
+            readiness
+                .message_key()
+                .unwrap_or(PIPER_NOT_READY_FALLBACK_KEY),
+        )
+        .or_else(|| messages.get(PIPER_NOT_READY_FALLBACK_KEY))
+        .cloned()
+        .unwrap_or_else(|| PIPER_NOT_READY_FALLBACK_TEXT.to_string())
+}
+
+/// Pure classification of the phonemization probe outcome. `local_data_found`
+/// mirrors the library's own folder lookup and only refines the failure
+/// reason; readiness itself is always decided by the real probe, so a working
+/// system installation (registry / `ESPEAK_DATA_PATH`) stays valid.
+fn classify_readiness(
+    local_data_found: bool,
+    probe: espeak_rs::ESpeakResult<()>,
+) -> PiperReadiness {
+    match probe {
+        Ok(_) => PiperReadiness::Ready,
+        Err(error) => {
+            tracing::warn!(
+                error = %error,
+                local_data_found,
+                "eSpeak NG phonemization probe failed; Piper runtime is not ready"
+            );
+            if local_data_found {
+                PiperReadiness::DataDamaged
+            } else {
+                PiperReadiness::DataNotFound
+            }
+        }
+    }
+}
+
+/// Mirror of the espeak-rs `locate_espeak_data` lookup: a `PIPER_ESPEAKNG_DATA_DIRECTORY`
+/// value pointing at the directory that *contains* `espeak-ng-data`, then the
+/// working directory, then the executable directory. Used only to refine the
+/// failure reason — the probe itself resolves the path exactly like synthesis.
+fn local_espeak_data_visible() -> bool {
+    const ENV_KEY: &str = "PIPER_ESPEAKNG_DATA_DIRECTORY";
+    const DATA_DIR_NAME: &str = "espeak-ng-data";
+
+    if let Ok(dir) = env::var(ENV_KEY) {
+        if PathBuf::from(&dir).join(DATA_DIR_NAME).is_dir() {
+            return true;
+        }
+    }
+    if let Ok(cwd) = env::current_dir() {
+        if cwd.join(DATA_DIR_NAME).is_dir() {
+            return true;
+        }
+    }
+    if let Ok(exe) = env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            if exe_dir.join(DATA_DIR_NAME).is_dir() {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 #[derive(Deserialize, Clone)]
@@ -98,7 +267,14 @@ impl LocalModelTts {
             });
 
             if let Some(data_dir) = candidate {
-                env::set_var("PIPER_ESPEAKNG_DATA_DIRECTORY", &data_dir);
+                // espeak-rs expects the variable to point at the directory
+                // CONTAINING espeak-ng-data (parent form), not the data dir
+                // itself; it re-validates `<value>/espeak-ng-data` before use.
+                let parent = data_dir
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| data_dir.clone());
+                env::set_var("PIPER_ESPEAKNG_DATA_DIRECTORY", &parent);
                 tracing::info!(
                     dir = %data_dir.display(),
                     "espeak-ng data directory set"
@@ -109,7 +285,7 @@ impl LocalModelTts {
             if let Ok(cwd) = env::current_dir() {
                 let p = cwd.join("espeak-ng-data");
                 if p.join("voices").exists() && p.join("en_dict").exists() {
-                    env::set_var("PIPER_ESPEAKNG_DATA_DIRECTORY", &p);
+                    env::set_var("PIPER_ESPEAKNG_DATA_DIRECTORY", &cwd);
                     tracing::info!(
                         dir = %p.display(),
                         "espeak-ng data directory set (from cwd)"
@@ -122,7 +298,7 @@ impl LocalModelTts {
                 if let Some(exe_dir) = exe.parent() {
                     let p = exe_dir.join("espeak-ng-data");
                     if p.join("voices").exists() && p.join("en_dict").exists() {
-                        env::set_var("PIPER_ESPEAKNG_DATA_DIRECTORY", &p);
+                        env::set_var("PIPER_ESPEAKNG_DATA_DIRECTORY", exe_dir);
                         tracing::info!(
                             dir = %p.display(),
                             "espeak-ng data directory set (next to exe)"
@@ -138,6 +314,26 @@ impl LocalModelTts {
 
     pub fn prepare(&self) -> Result<(), String> {
         self.ensure_loaded().map_err(|e| e.to_string())
+    }
+
+    /// Cached shared data readiness, independent of the model voice.
+    pub fn espeak_readiness(&self) -> PiperReadiness {
+        PiperReadiness::assess_cached()
+    }
+
+    /// Validate shared readiness and the model voice before any ONNX load.
+    pub fn check_phonemization(&self) -> Result<(), PiperRuntimeError> {
+        let readiness = self.espeak_readiness();
+        if !readiness.is_ready() {
+            return Err(PiperRuntimeError::NotReady(readiness));
+        }
+        let content = std::fs::read_to_string(&self.config_path)
+            .map_err(|error| PiperRuntimeError::Load(error.to_string()))?;
+        let config: ModelConfig = serde_json::from_str(&content)
+            .map_err(|error| PiperRuntimeError::Load(error.to_string()))?;
+        validate_model_voice(readiness, &config.espeak.voice, |voice| {
+            espeak_rs::text_to_phonemes(ESPEAK_PROBE_TEXT, voice, None)
+        })
     }
 
     pub fn is_loaded(&self) -> bool {
@@ -188,6 +384,14 @@ impl LocalModelTts {
                 e
             ))
         })?;
+
+        // ROADMAP-119: never create the ONNX session when phonemization
+        // cannot work; the probe verdict is cached for the whole app run.
+        validate_model_voice(
+            PiperReadiness::assess_cached(),
+            &config.espeak.voice,
+            |voice| espeak_rs::text_to_phonemes(ESPEAK_PROBE_TEXT, voice, None),
+        )?;
 
         let session = Session::builder()
             .map_err(|e| {
@@ -695,5 +899,117 @@ mod tests {
         );
         assert_eq!(tts.provider_id, "local-piper:test-model");
         assert_eq!(tts.display_name, "Test Model");
+    }
+
+    #[test]
+    fn readiness_model_voice_failures_do_not_poison_other_models() {
+        for voices in [["invalid", "en"], ["en", "invalid"]] {
+            for voice in voices {
+                let result = validate_model_voice(PiperReadiness::Ready, voice, |name| {
+                    if name == "invalid" {
+                        Err(espeak_rs::ESpeakError("Unknown voice".into()))
+                    } else {
+                        Ok(vec!["phonemes".into()])
+                    }
+                });
+                assert_eq!(result.is_ok(), voice == "en");
+                if let Err(error) = result {
+                    assert!(matches!(error, PiperRuntimeError::VoiceUnavailable(_)));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn readiness_unavailable_data_blocks_voice_probe() {
+        let result = validate_model_voice(PiperReadiness::DataNotFound, "en", |_| {
+            panic!("Voice probe must not run after shared initialization failed")
+        });
+        assert!(matches!(result, Err(PiperRuntimeError::NotReady(_))));
+    }
+
+    #[test]
+    fn readiness_empty_voice_result_is_not_ready() {
+        for phonemes in [vec![], vec![" ".into()]] {
+            assert!(matches!(
+                validate_model_voice(PiperReadiness::Ready, "en", |_| Ok(phonemes)),
+                Err(PiperRuntimeError::VoiceUnavailable(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn readiness_classifies_probe_outcomes() {
+        let ok: espeak_rs::ESpeakResult<()> = Ok(());
+        let failed: espeak_rs::ESpeakResult<()> = Err(espeak_rs::ESpeakError(
+            "Failed to initialize eSpeak-ng".into(),
+        ));
+
+        assert_eq!(classify_readiness(true, ok), PiperReadiness::Ready);
+        assert_eq!(classify_readiness(false, Ok(())), PiperReadiness::Ready);
+        assert_eq!(
+            classify_readiness(true, failed.clone()),
+            PiperReadiness::DataDamaged,
+            "a visible local data folder that fails the probe is damaged"
+        );
+        assert_eq!(
+            classify_readiness(false, failed),
+            PiperReadiness::DataNotFound,
+            "no visible local folder and a failed probe means data not found"
+        );
+    }
+
+    #[test]
+    fn readiness_message_uses_specific_cause_key() {
+        let mut messages = BTreeMap::new();
+        messages.insert(
+            "tts.piper.espeak_data_damaged".to_string(),
+            "damaged-specific".to_string(),
+        );
+        messages.insert(
+            "tts.piper.espeak_data_not_found".to_string(),
+            "not-found-specific".to_string(),
+        );
+        messages.insert(
+            PIPER_NOT_READY_FALLBACK_KEY.to_string(),
+            "generic".to_string(),
+        );
+
+        assert_eq!(
+            not_ready_message(&messages, PiperReadiness::DataDamaged),
+            "damaged-specific"
+        );
+        assert_eq!(
+            not_ready_message(&messages, PiperReadiness::DataNotFound),
+            "not-found-specific"
+        );
+    }
+
+    #[test]
+    fn readiness_message_falls_back_to_generic_key_then_default_text() {
+        let mut messages = BTreeMap::new();
+        messages.insert(
+            PIPER_NOT_READY_FALLBACK_KEY.to_string(),
+            "generic".to_string(),
+        );
+        assert_eq!(
+            not_ready_message(&messages, PiperReadiness::DataDamaged),
+            "generic"
+        );
+
+        let empty = BTreeMap::new();
+        assert_eq!(
+            not_ready_message(&empty, PiperReadiness::DataNotFound),
+            PIPER_NOT_READY_FALLBACK_TEXT
+        );
+        assert!(not_ready_message(&empty, PiperReadiness::Ready).is_empty());
+    }
+
+    #[test]
+    fn not_ready_error_keeps_verdict_for_logs() {
+        let error = PiperRuntimeError::NotReady(PiperReadiness::DataDamaged);
+        assert!(error.to_string().contains("not ready"));
+        assert!(!PiperReadiness::DataDamaged.is_ready());
+        assert!(PiperReadiness::Ready.is_ready());
     }
 }

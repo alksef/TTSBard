@@ -2,6 +2,7 @@ use crate::config::{
     normalize_typing_idle_timeout_ms, AppSettingsDto, EditorRoute, QuickEditorMode,
     SettingsManager, SpellSource, TtsProviderInfoDto, WindowsManager,
 };
+use crate::ipc::CommandError;
 use crate::state::AppState;
 use crate::stress::packs::RuAccentPackDescriptor;
 use crate::stress::runtime::RuAccentRuntimeSlot;
@@ -20,9 +21,9 @@ pub mod playback;
 pub mod playback_window;
 pub mod preprocessor;
 pub mod proxy;
-pub mod storage;
 pub mod speech_queue;
 pub mod spellcheck;
+pub mod storage;
 pub mod tabs;
 pub mod telegram;
 pub mod tts_pipeline;
@@ -199,6 +200,7 @@ pub async fn get_all_app_settings(
     windows_manager: State<'_, WindowsManager>,
     settings_manager: State<'_, SettingsManager>,
     soundpanel_state: State<'_, crate::soundpanel::SoundPanelState>,
+    consume_startup_notifications: Option<bool>,
 ) -> Result<AppSettingsDto, String> {
     info!("get_all_app_settings: Loading all settings");
 
@@ -236,7 +238,14 @@ pub async fn get_all_app_settings(
         preprocessor: preprocessor.as_ref(),
         soundpanel_bindings,
     });
-    settings.notifications = app_state.take_notifications();
+    // Startup notifications are one-shot: only the owning settings context may
+    // drain them. A non-consuming read (omitted argument or `false`) must leave
+    // both queues intact and return the empty transient fields already set by
+    // `from_all_sources`, so a background Telegram read cannot steal them.
+    if consume_startup_notifications == Some(true) {
+        settings.notifications = app_state.take_notifications();
+        settings.startup_errors = app_state.take_startup_errors();
+    }
 
     // The generic `ElevenLabsSettings -> ElevenLabsSettingsDto` conversion inside
     // `from_all_sources` intentionally leaves `voices`/`models` empty: the cached
@@ -554,26 +563,100 @@ pub fn get_editor_font_size_px(settings_manager: State<'_, SettingsManager>) -> 
     settings_manager.get_editor_font_size_px()
 }
 
+/// ROADMAP-119: block Piper model loading when eSpeak NG phonemization is
+/// unusable. Built-in providers pass through unchanged. The readiness probe
+/// (file I/O plus the one-time eSpeak initialization) runs on the blocking
+/// pool; a not-ready verdict yields a structured not-ready error and never
+/// starts a background model load. Repeated attempts reuse the cached probe
+/// verdict, so no duplicate work is queued.
+async fn gate_piper_espeak_readiness(
+    app_handle: &AppHandle,
+    state: &AppState,
+    id: &str,
+) -> Result<(), CommandError> {
+    use crate::ipc::tts_provider::error_code;
+
+    let provider = {
+        let registry = state.tts_registry.lock();
+        registry.get(id).map(|entry| entry.provider.clone())
+    };
+    let piper = match provider {
+        Some(TtsProvider::Piper(tts)) => tts,
+        _ => return Ok(()),
+    };
+
+    let error = match tokio::task::spawn_blocking(move || piper.check_phonemization()).await {
+        Ok(Ok(())) => return Ok(()),
+        Ok(Err(error)) => error,
+        Err(e) => {
+            warn!(id, error = %e, "Piper readiness check task failed");
+            return Err(CommandError::new(
+                error_code::READINESS_CHECK_FAILED,
+                format!("Piper readiness check failed: {}", e),
+                false,
+            ));
+        }
+    };
+    warn!(id, error = %error, "Piper provider request blocked before model load");
+    let messages = app_handle
+        .try_state::<crate::commands::localization::LocalizationState>()
+        .map(|localization| localization.snapshot().messages)
+        .unwrap_or_default();
+    let code = match &error {
+        crate::tts::piper::runtime::PiperRuntimeError::NotReady(
+            crate::tts::piper::runtime::PiperReadiness::DataNotFound,
+        ) => error_code::ESPEAK_DATA_NOT_FOUND,
+        crate::tts::piper::runtime::PiperRuntimeError::NotReady(_) => {
+            error_code::ESPEAK_DATA_DAMAGED
+        }
+        crate::tts::piper::runtime::PiperRuntimeError::VoiceUnavailable(_) => {
+            error_code::ESPEAK_VOICE_UNAVAILABLE
+        }
+        _ => error_code::PREPARE_TASK_FAILED,
+    };
+    let message = crate::tts::piper::runtime::phonemization_error_key(&error)
+        .and_then(|key| messages.get(key))
+        .cloned()
+        .unwrap_or_else(|| "Piper model preparation failed".to_string());
+    Err(CommandError::new(code, message, false))
+}
+
 /// Prepare (warm up) a registered TTS provider by ID.
 /// For Piper this loads the model into memory; for network providers it is a no-op.
 #[tauri::command]
 pub async fn prepare_tts_provider_by_id(
     id: String,
+    app_handle: AppHandle,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
+    use crate::ipc::tts_provider::error_code;
+
     info!(id, "Preparing TTS provider by ID");
+
+    gate_piper_espeak_readiness(&app_handle, state.inner(), &id).await?;
 
     let provider = {
         let registry = state.tts_registry.lock();
         registry
             .get(&id)
             .map(|entry| entry.provider.clone())
-            .ok_or_else(|| format!("Unknown provider ID: {}", id))?
+            .ok_or(CommandError::new(
+                error_code::UNKNOWN_ID,
+                format!("Unknown provider ID: {}", id),
+                false,
+            ))?
     };
 
-    tokio::task::spawn_blocking(move || provider.prepare())
-        .await
-        .map_err(|e| format!("Provider preparation task failed: {}", e))?
+    match tokio::task::spawn_blocking(move || provider.prepare()).await {
+        Ok(result) => {
+            result.map_err(|e| CommandError::new(error_code::PREPARE_TASK_FAILED, e, false))
+        }
+        Err(e) => Err(CommandError::new(
+            error_code::PREPARE_TASK_FAILED,
+            format!("Provider preparation task failed: {}", e),
+            false,
+        )),
+    }
 }
 
 /// Select an already registered TTS provider by its stable concrete ID.
@@ -585,11 +668,15 @@ pub async fn select_tts_provider_by_id(
     app_handle: AppHandle,
     state: State<'_, AppState>,
     settings_manager: State<'_, SettingsManager>,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
+    use crate::ipc::tts_provider::error_code;
+
     info!(id, "Selecting TTS provider by ID");
+    gate_piper_espeak_readiness(&app_handle, state.inner(), &id).await?;
+
     let manager = settings_manager.inner().clone();
     state
-        .select_tts_provider(id, move |provider_id, legacy_type| {
+        .select_tts_provider(id.clone(), move |provider_id, legacy_type| {
             let mut settings = manager.load().map_err(|e| e.to_string())?;
             settings.tts.provider_id = Some(provider_id);
             if let Some(provider_type) = legacy_type {
@@ -597,7 +684,8 @@ pub async fn select_tts_provider_by_id(
             }
             manager.save(&settings).map_err(|e| e.to_string())
         })
-        .await?;
+        .await
+        .map_err(|e| CommandError::new(error_code::SELECTION_FAILED, e, false))?;
     emit_settings_changed(&app_handle);
     Ok(())
 }

@@ -17,10 +17,16 @@ import { createAsyncCleanupScope } from '../utils/asyncCleanup'
 const MAX_RETRIES = 50
 const RETRY_INTERVAL_MS = 100
 
+export interface CreateAppSettingsOptions {
+  consumeStartupNotifications?: boolean
+}
+
 /**
  * Create app settings context (for root component)
  */
-export function createAppSettings(): AppSettingsContext {
+export function createAppSettings(options: CreateAppSettingsOptions = {}): AppSettingsContext {
+  const { consumeStartupNotifications = false } = options
+
   const settings: Ref<AppSettingsDto | null> = ref<AppSettingsDto | null>(null)
   const isLoading: Ref<boolean> = ref(false)
   const error: Ref<string | null> = ref<string | null>(null)
@@ -75,7 +81,7 @@ export function createAppSettings(): AppSettingsContext {
         throw new Error('Backend not ready after timeout')
       }
 
-      const data = await invoke<AppSettingsDto>('get_all_app_settings')
+      const data = await invoke<AppSettingsDto>('get_all_app_settings', { consumeStartupNotifications })
       settings.value = data
 
       debugLog('[useAppSettings] ✅ Settings loaded successfully:', {
@@ -199,7 +205,7 @@ export function createAppSettings(): AppSettingsContext {
  * Provide app settings to child components
  */
 export function provideAppSettings(): AppSettingsContext {
-  const context = createAppSettings()
+  const context = createAppSettings({ consumeStartupNotifications: true })
   provide(APP_SETTINGS_KEY, context)
   return context
 }

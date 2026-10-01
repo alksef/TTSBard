@@ -2,6 +2,9 @@
   "notifications": [
     "startup-message"
   ],
+  "startup_errors": [
+    "startup-error"
+  ],
   "tts": {
     "provider": "openai",
     "openai": {

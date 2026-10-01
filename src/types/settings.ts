@@ -580,6 +580,7 @@ export interface OcrSettingsDto {
  * This is the response from get_all_app_settings command
  */
 export interface AppSettingsDto {
+  startup_errors?: string[]
   storage: { data_dir: string | null; audio_cache_dir: string | null }
   notifications?: string[]
   tts: TtsSettingsDto

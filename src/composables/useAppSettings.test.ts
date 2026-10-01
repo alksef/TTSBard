@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { effectScope, nextTick, createRenderer, h } from 'vue'
 
 const { mockInvoke, listenCallbacks, unlistenFns } = vi.hoisted(() => ({
   mockInvoke: vi.fn(),
@@ -28,7 +29,9 @@ vi.mock('../utils/debug', () => ({
   debugInfo: vi.fn(),
 }))
 
-import { createAppSettings } from './useAppSettings'
+import { createAppSettings, provideAppSettings } from './useAppSettings'
+import { useStartupNotifications } from './useStartupNotifications'
+import { useErrorHandler, ErrorLevel } from './useErrorHandler'
 import type { AppSettingsDto } from '../types/settings'
 
 function mockSettings(): AppSettingsDto {
@@ -122,6 +125,7 @@ describe('createAppSettings', () => {
   })
 
   afterEach(() => {
+    useErrorHandler().clearAllErrors()
     vi.useRealTimers()
   })
 
@@ -138,7 +142,41 @@ describe('createAppSettings', () => {
     expect(ctx.isLoading.value).toBe(false)
     expect(ctx.error.value).toBeNull()
     expect(mockInvoke).toHaveBeenCalledWith('is_backend_ready')
-    expect(mockInvoke).toHaveBeenCalledWith('get_all_app_settings')
+    expect(mockInvoke).toHaveBeenCalledWith('get_all_app_settings', { consumeStartupNotifications: false })
+  })
+
+  it('provideAppSettings opts the main window into consuming startup notifications', async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'is_backend_ready') return true
+      if (cmd === 'get_all_app_settings') return mockSettings()
+    })
+
+    const renderer = createRenderer({
+      createElement: () => ({}),
+      createText: () => ({}),
+      createComment: () => ({}),
+      insert: () => {},
+      remove: () => {},
+      setText: () => {},
+      setElementText: () => {},
+      parentNode: () => null,
+      nextSibling: () => null,
+      patchProp: () => {},
+    })
+
+    const app = renderer.createApp({
+      setup() {
+        provideAppSettings()
+        return () => h('div')
+      },
+    })
+    app.mount({})
+    await vi.runAllTimersAsync()
+
+    const settingsCalls = mockInvoke.mock.calls.filter(([cmd]) => cmd === 'get_all_app_settings')
+    expect(settingsCalls.length).toBeGreaterThan(0)
+    expect(settingsCalls[0]).toEqual(['get_all_app_settings', { consumeStartupNotifications: true }])
+    app.unmount()
   })
 
   it('sets error when backend is not ready', async () => {
@@ -172,7 +210,7 @@ describe('createAppSettings', () => {
     await vi.runAllTimersAsync()
 
     expect(mockInvoke).toHaveBeenCalledWith('is_backend_ready')
-    expect(mockInvoke).toHaveBeenCalledWith('get_all_app_settings')
+    expect(mockInvoke).toHaveBeenCalledWith('get_all_app_settings', { consumeStartupNotifications: false })
   })
 
   it('reloads when backend-ready event fires after failed initial load', async () => {
@@ -234,5 +272,110 @@ describe('createAppSettings', () => {
     expect(listenCallbacks.has('settings-changed')).toBe(true)
     expect(listenCallbacks.has('tts-provider-changed')).toBe(true)
     expect(listenCallbacks.has('soundpanel-bindings-changed')).toBe(true)
+  })
+})
+
+describe('createAppSettings startup notification ownership', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    listenCallbacks.clear()
+    unlistenFns.clear()
+    mockInvoke.mockReset()
+  })
+
+  afterEach(() => {
+    useErrorHandler().clearAllErrors()
+  })
+
+  it('does not consume startup notifications for secondary contexts and consumes them once for the main context', async () => {
+    // Backend one-shot queue: notifications and startup_errors are returned and
+    // cleared only when a read explicitly requests consumption.
+    let startupQueue: { notifications: string[]; startup_errors: string[] } | null = {
+      notifications: ['warning'],
+      startup_errors: ['Piper unavailable'],
+    }
+    mockInvoke.mockImplementation(async (cmd: string, args?: { consumeStartupNotifications?: boolean }) => {
+      if (cmd === 'is_backend_ready') return true
+      if (cmd === 'get_all_app_settings') {
+        const settings = mockSettings()
+        if (args?.consumeStartupNotifications && startupQueue) {
+          settings.notifications = startupQueue.notifications
+          settings.startup_errors = startupQueue.startup_errors
+          startupQueue = null
+        }
+        return settings
+      }
+      throw new Error(`Unexpected command: ${cmd}`)
+    })
+
+    // A default secondary context (font sync) must not consume the queue.
+    const secondary = createAppSettings()
+    await vi.waitFor(() => expect(secondary.settings.value).not.toBeNull())
+    expect(startupQueue).not.toBeNull()
+    expect(mockInvoke).toHaveBeenCalledWith('get_all_app_settings', { consumeStartupNotifications: false })
+    expect(useErrorHandler().errors.value).toHaveLength(0)
+
+    // The consuming main context surfaces the global warning + error exactly once.
+    const scope = effectScope()
+    const main = createAppSettings({ consumeStartupNotifications: true })
+    scope.run(() => useStartupNotifications(main.settings))
+    await vi.waitFor(() => expect(main.settings.value).not.toBeNull())
+    await nextTick()
+    expect(startupQueue).toBeNull()
+    expect(useErrorHandler().errors.value.map(({ message, level }) => ({ message, level }))).toEqual([
+      { message: 'warning', level: ErrorLevel.WARNING },
+      { message: 'Piper unavailable', level: ErrorLevel.ERROR },
+    ])
+
+    // Secondary reload cannot consume; primary reload produces no duplicate.
+    await secondary.reload()
+    await nextTick()
+    expect(useErrorHandler().errors.value).toHaveLength(2)
+
+    await main.reload()
+    await nextTick()
+    expect(useErrorHandler().errors.value).toHaveLength(2)
+
+    scope.stop()
+    secondary.cleanup?.()
+    main.cleanup?.()
+    useErrorHandler().clearAllErrors()
+  })
+
+  it('consumes the startup queue first when the main context loads before secondary contexts', async () => {
+    let startupQueue: { notifications: string[]; startup_errors: string[] } | null = {
+      notifications: ['warning'],
+      startup_errors: ['Piper unavailable'],
+    }
+    mockInvoke.mockImplementation(async (cmd: string, args?: { consumeStartupNotifications?: boolean }) => {
+      if (cmd === 'is_backend_ready') return true
+      if (cmd === 'get_all_app_settings') {
+        const settings = mockSettings()
+        if (args?.consumeStartupNotifications && startupQueue) {
+          settings.notifications = startupQueue.notifications
+          settings.startup_errors = startupQueue.startup_errors
+          startupQueue = null
+        }
+        return settings
+      }
+      throw new Error(`Unexpected command: ${cmd}`)
+    })
+
+    const scope = effectScope()
+    const main = createAppSettings({ consumeStartupNotifications: true })
+    scope.run(() => useStartupNotifications(main.settings))
+    await vi.waitFor(() => expect(main.settings.value).not.toBeNull())
+    await nextTick()
+
+    const secondary = createAppSettings()
+    await vi.waitFor(() => expect(secondary.settings.value).not.toBeNull())
+
+    expect(startupQueue).toBeNull()
+    expect(useErrorHandler().errors.value).toHaveLength(2)
+
+    scope.stop()
+    main.cleanup?.()
+    secondary.cleanup?.()
+    useErrorHandler().clearAllErrors()
   })
 })

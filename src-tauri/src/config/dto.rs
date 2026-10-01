@@ -1562,6 +1562,8 @@ pub struct AppSettingsDto {
     /// One-shot startup notifications; consumed by the first settings request.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notifications: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub startup_errors: Vec<String>,
     /// TTS settings
     pub tts: TtsSettingsDto,
     /// WebView settings
@@ -1603,6 +1605,7 @@ impl AppSettingsDto {
     pub fn from_all_sources(params: AllSourcesParams<'_>) -> Self {
         Self {
             notifications: Vec::new(),
+            startup_errors: Vec::new(),
             tts: params.config.tts.clone().into(),
             webview: params.webview_settings.clone().into(),
             twitch: params.twitch_settings.clone(),
@@ -2040,6 +2043,7 @@ mod tests {
 
         AppSettingsDto {
             notifications: vec!["startup-message".into()],
+            startup_errors: vec!["startup-error".into()],
             tts,
             webview,
             twitch,
@@ -2426,6 +2430,7 @@ mod tests {
 
         AppSettingsDto {
             notifications: Vec::new(),
+            startup_errors: Vec::new(),
             tts,
             webview,
             twitch,

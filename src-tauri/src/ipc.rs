@@ -30,6 +30,26 @@ pub mod twitch_delivery {
     }
 }
 
+/// Stable error codes for TTS provider management commands (ROADMAP-119).
+pub mod tts_provider {
+    pub mod error_code {
+        /// The requested provider ID is not registered.
+        pub const UNKNOWN_ID: &str = "tts_provider.unknown_id";
+        /// The eSpeak readiness check could not be evaluated.
+        pub const READINESS_CHECK_FAILED: &str = "tts_provider.readiness_check_failed";
+        /// eSpeak NG data is missing; Piper loading is blocked until it is
+        /// restored and the application is restarted.
+        pub const ESPEAK_DATA_NOT_FOUND: &str = "tts_provider.espeak_data_not_found";
+        /// A visible espeak-ng-data folder failed the phonemization probe.
+        pub const ESPEAK_DATA_DAMAGED: &str = "tts_provider.espeak_data_damaged";
+        pub const ESPEAK_VOICE_UNAVAILABLE: &str = "tts_provider.espeak_voice_unavailable";
+        /// The prepare/selection worker task failed.
+        pub const PREPARE_TASK_FAILED: &str = "tts_provider.prepare_task_failed";
+        /// The selection could not be persisted.
+        pub const SELECTION_FAILED: &str = "tts_provider.selection_failed";
+    }
+}
+
 /// Exhaustive production declaration: every `submit_speech` error code and its retryability.
 #[derive(Debug, Clone, Serialize)]
 pub struct SpeechErrorDef {

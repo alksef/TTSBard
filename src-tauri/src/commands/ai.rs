@@ -694,6 +694,7 @@ pub async fn set_tts_provider(
 
     super::select_tts_provider_by_id(concrete_id.to_string(), app_handle, state, settings_manager)
         .await
+        .map_err(|e| e.to_string())
 }
 
 /// Get Local TTS URL

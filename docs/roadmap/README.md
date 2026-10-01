@@ -45,6 +45,7 @@ related_tasks: []
 
 ## Активные направления
 
+- [ROADMAP-119 — Готовность Piper до загрузки модели](./active/119-piper-runtime-readiness.md) — `in_progress`.
 - [ROADMAP-117 — Разделение данных приложения: Roaming, Local и %TEMP%](./active/117-app-storage-split.md) — `in_progress`.
 - [ROADMAP-116 — Нагрузка audiodg и lifecycle потоков вывода](./active/116-audiodg-playback-stream-lifecycle.md) — `in_progress`.
 - [ROADMAP-115 — Последовательное сохранение настроек WebView и VTube Studio](./active/115-settings-save-consistency-followup.md) — `planned`.

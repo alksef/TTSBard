@@ -6,6 +6,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }))
 
 import {
   getPiperProviderUiStatus,
+  isPiperPhonemizationError,
   selectBuiltinTtsProvider,
   selectConcreteTtsProvider,
 } from './ttsProviderSelection'
@@ -18,6 +19,15 @@ const piperProvider = {
 } as const
 
 describe('TTS provider selection adapters', () => {
+  it('identifies structured Piper phonemization errors for global reporting', () => {
+    for (const code of ['espeak_data_not_found', 'espeak_data_damaged', 'espeak_voice_unavailable']) {
+      expect(isPiperPhonemizationError({ code: `tts_provider.${code}` })).toBe(true)
+    }
+    for (const error of [null, 'failure', { code: 'tts_provider.prepare_task_failed' }]) {
+      expect(isPiperPhonemizationError(error)).toBe(false)
+    }
+  })
+
   beforeEach(() => invokeMock.mockReset())
 
   it('selects a built-in provider with one backend transaction', async () => {

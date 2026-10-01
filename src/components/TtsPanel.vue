@@ -16,6 +16,8 @@ import type {
 import { debugLog, debugError } from '../utils/debug';
 import { t } from '../i18n';
 import { LocalizedError, presentCommandError } from '../ipc/commandError';
+import { useErrorHandler } from '../composables/useErrorHandler';
+import { isPiperPhonemizationError } from './ttsProviderSelection';
 import { TELEGRAM_AUTH_KEY, type UseTelegramAuthReturn } from '../composables/useTelegramAuth';
 import TelegramAuthModal from './TelegramAuthModal.vue';
 import StatusMessage from './shared/StatusMessage.vue';
@@ -45,6 +47,7 @@ interface TtsProviderState {
 }
 
 // State
+const { showError: showGlobalError } = useErrorHandler();
 const activeProvider = ref<TtsProviderType | null>(null);
 const activeProviderId = ref<string | null>(null);
 
@@ -588,7 +591,9 @@ async function selectPiperProvider(id: string) {
     showSuccess(t('tts.model.loaded'));
   } catch (error) {
     piperError.value[id] = presentCommandError(error, t('tts.model.load_error'));
-    showError(presentCommandError(error, t('tts.model.load_error')));
+    const message = piperError.value[id];
+    if (isPiperPhonemizationError(error)) showGlobalError(message);
+    else showError(message);
   } finally {
     piperLoading.value[id] = false;
     await reloadSettings();

@@ -1,6 +1,12 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { TtsProviderInfoDto, TtsProviderType } from '../types/settings'
 
+export function isPiperPhonemizationError(error: unknown): boolean {
+  if (!error || typeof error !== 'object' || !('code' in error)) return false
+  return ['tts_provider.espeak_data_not_found', 'tts_provider.espeak_data_damaged',
+    'tts_provider.espeak_voice_unavailable'].includes(String(error.code))
+}
+
 export interface PiperProviderUiStatus {
   kind: 'discovered' | 'loading' | 'ready' | 'error'
   label: string

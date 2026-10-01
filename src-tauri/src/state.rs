@@ -195,6 +195,7 @@ pub struct AppState {
 
     /// One-shot messages produced during backend startup before the WebView is ready.
     pub pending_notifications: Arc<Mutex<Vec<String>>>,
+    pub pending_startup_errors: Arc<Mutex<Vec<String>>>,
 }
 
 impl AppState {
@@ -252,6 +253,7 @@ impl AppState {
             soundpanel_blur_hide_generation: Arc::new(AtomicU64::new(0)),
             selection_mutex: Arc::new(tokio::sync::Mutex::new(())),
             pending_notifications: Arc::new(Mutex::new(Vec::new())),
+            pending_startup_errors: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -261,6 +263,14 @@ impl AppState {
 
     pub fn take_notifications(&self) -> Vec<String> {
         std::mem::take(&mut *self.pending_notifications.lock())
+    }
+
+    pub fn push_startup_error(&self, message: String) {
+        self.pending_startup_errors.lock().push(message);
+    }
+
+    pub fn take_startup_errors(&self) -> Vec<String> {
+        std::mem::take(&mut *self.pending_startup_errors.lock())
     }
 
     pub fn set_event_sender(&self, sender: Sender<AppEvent>) {
@@ -1260,9 +1270,12 @@ mod tests {
     fn startup_notifications_are_delivered_once() {
         let state = AppState::new();
         state.push_notification("message".to_string());
+        state.push_startup_error("error".to_string());
 
         assert_eq!(state.take_notifications(), vec!["message"]);
         assert!(state.take_notifications().is_empty());
+        assert_eq!(state.take_startup_errors(), vec!["error"]);
+        assert!(state.take_startup_errors().is_empty());
     }
 
     #[test]
