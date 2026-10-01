@@ -597,7 +597,7 @@
     "input_server.start_on_boot": "Запускать при старте приложения",
     "input_server.port": "Порт",
     "input_server.port_error": "Порт должен быть от 1024 до 65535",
-    "input_server.info_callout": "Используется активный TTS-провайдер/пайплайн; доставка только аудио — текст не отправляется в WebView или Twitch.",
+    "input_server.info_callout": "Используется активный TTS-провайдер/пайплайн; маршрут доставки настраивается на вкладке «Входящие».",
     "input_server.copy_endpoint": "Копировать адрес",
     "input_server.format_hint": "Формат: POST JSON",
     "input_server.test.title": "Тест",

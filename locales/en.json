@@ -597,7 +597,7 @@
     "input_server.start_on_boot": "Start with the app",
     "input_server.port": "Port",
     "input_server.port_error": "Port must be between 1024 and 65535",
-    "input_server.info_callout": "Uses the active TTS provider/pipeline; only audio is delivered — text is not sent to WebView or Twitch.",
+    "input_server.info_callout": "Uses the active TTS provider/pipeline; the delivery route is configured on the Incoming tab.",
     "input_server.copy_endpoint": "Copy address",
     "input_server.format_hint": "Format: POST JSON",
     "input_server.test.title": "Test",
