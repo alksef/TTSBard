@@ -430,14 +430,14 @@ watch(loggingSettings, (newSettings) => {
         </div>
       </div>
     </section>
-  </div>
 
-  <DataTransferModal
-    v-if="transferTarget !== undefined"
-    :target-path="transferTarget"
-    @close="transferTarget = undefined"
-    @success="handleTransferSuccess"
-  />
+    <DataTransferModal
+      v-if="transferTarget !== undefined"
+      :target-path="transferTarget"
+      @close="transferTarget = undefined"
+      @success="handleTransferSuccess"
+    />
+  </div>
 </template>
 
 <style scoped>
