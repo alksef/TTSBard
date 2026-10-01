@@ -106,6 +106,7 @@
   };
 
   const language = '__OVERLAY_LANGUAGE__';
+  const accessToken = __ACCESS_TOKEN__;
   const t = messages[language === 'ru' ? 'ru' : 'en'];
 
   const form = document.getElementById('form');
@@ -157,7 +158,10 @@
     showStatus('', t.sending);
     fetch('/v1/speech', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(accessToken ? { 'Authorization': 'Bearer ' + accessToken } : {}),
+      },
       body: JSON.stringify({ text: text }),
     })
       .then((response) => {

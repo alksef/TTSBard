@@ -34,13 +34,6 @@ pub const FORBIDDEN_HOST_CODE: &str = "input_server.forbidden_host";
 /// access token.
 pub const UNAUTHORIZED_CODE: &str = "input_server.unauthorized";
 
-/// Cookie carrying the input-server access token for browser clients.
-///
-/// Deliberately distinct from the WebView server cookie: cookies are scoped by
-/// domain, not port, and the shared `localhost` origin must not leak one
-/// server's token to the other.
-const AUTH_COOKIE_NAME: &str = "input_server_auth";
-
 /// Test-injectable asynchronous intake seam for the input server.
 ///
 /// The supervisor plugs an adapter wrapping the application-level accept
@@ -81,8 +74,8 @@ struct OverlayQuery {
 ///    loopback name or a local-network IP literal, so DNS-rebinding pages
 ///    rebinding an attacker domain are rejected with 403 before any handler.
 /// 2. `auth_gate` — loopback connections and `/health` pass freely; every
-///    other connection must present the current access token (query `?token=`,
-///    cookie, or `Authorization: Bearer`) and is rejected with 401 otherwise.
+///    other connection must present the current access token (query `?token=`
+///    or `Authorization: Bearer`) and is rejected with 401 otherwise.
 ///
 /// The router must be served through `into_make_service_with_connect_info`
 /// so `auth_gate` can classify the client address; a missing connection info
@@ -147,19 +140,9 @@ async fn auth_gate(State(state): State<RouterState>, request: Request, next: Nex
     }
 }
 
-/// Collect the client-provided access token from the cookie, the
-/// `Authorization: Bearer` header, or the `?token=` query parameter, in that
-/// order of priority.
+/// Collect the client-provided access token from the `Authorization: Bearer`
+/// header or the `?token=` query parameter, in that order of priority.
 fn extract_provided_token(request: &Request) -> Option<String> {
-    if let Some(value) = request
-        .headers()
-        .get(header::COOKIE)
-        .and_then(|value| value.to_str().ok())
-    {
-        if let Some(token) = cookie_value(value, AUTH_COOKIE_NAME) {
-            return Some(token);
-        }
-    }
     if let Some(value) = request
         .headers()
         .get(header::AUTHORIZATION)
@@ -182,17 +165,6 @@ fn extract_provided_token(request: &Request) -> Option<String> {
         }
     }
     None
-}
-
-fn cookie_value(cookie_header: &str, name: &str) -> Option<String> {
-    cookie_header.split(';').find_map(|pair| {
-        let mut parts = pair.trim().splitn(2, '=');
-        if parts.next()? == name {
-            parts.next().map(str::to_string)
-        } else {
-            None
-        }
-    })
 }
 
 fn host_matches_listener(host: &str, port: u16) -> bool {
@@ -224,23 +196,19 @@ async fn overlay_handler(
     State(state): State<RouterState>,
     Query(query): Query<OverlayQuery>,
 ) -> Response {
-    let mut response = overlay(state.overlay_language).await;
-    // A valid `?token=` promotes the browser client to the cookie so the
-    // same-origin form POST works without a token in every request. The
-    // overlay page itself is unchanged.
-    if let Some(provided) = query.token.as_deref() {
-        let stored = state.service.settings.read().await.access_token.clone();
-        let stored = stored.filter(|token| !token.is_empty());
-        if validate_token(Some(provided), stored.as_deref()) {
-            let cookie = format!("{AUTH_COOKIE_NAME}={provided}; HttpOnly; Path=/; SameSite=Lax");
-            if let Ok(header_value) = cookie.parse() {
-                response
-                    .headers_mut()
-                    .insert(header::SET_COOKIE, header_value);
-            }
+    // A valid `?token=` is embedded into the page as the access token so the
+    // same-origin form POST can carry `Authorization: Bearer`; no cookie is
+    // set. An invalid token is dropped, and the page falls back to the
+    // tokenless (loopback-only) form.
+    let page_token = match query.token.as_deref() {
+        Some(provided) => {
+            let stored = state.service.settings.read().await.access_token.clone();
+            let stored = stored.filter(|token| !token.is_empty());
+            validate_token(Some(provided), stored.as_deref()).then_some(provided)
         }
-    }
-    response
+        None => None,
+    };
+    overlay(state.overlay_language, page_token).await
 }
 
 async fn post_speech(
@@ -1171,26 +1139,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lan_speech_with_cookie_token_returns_202() {
-        let (app, intake, _service) = app_with_token(
-            Ok(InputServerAccepted::Queued {
-                job_id: Uuid::nil(),
-            }),
-            Some("secret-token"),
-        );
-
-        let request = lan_speech_request(Some((
-            header::COOKIE,
-            format!("{AUTH_COOKIE_NAME}=secret-token"),
-        )));
-
-        let response = app.oneshot(request).await.unwrap();
-
-        assert_eq!(response.status(), StatusCode::ACCEPTED);
-        assert_eq!(intake.call_count(), 1);
-    }
-
-    #[tokio::test]
     async fn lan_speech_with_wrong_token_returns_401() {
         let (app, intake, _service) = app_with_token(
             Ok(InputServerAccepted::Queued {
@@ -1233,7 +1181,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn overlay_with_valid_query_token_sets_cookie() {
+    async fn overlay_with_valid_query_token_embeds_token_without_cookie() {
         let (app, _intake, _service) = app_with_token(
             Ok(InputServerAccepted::Queued {
                 job_id: Uuid::nil(),
@@ -1252,17 +1200,21 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
-        let cookie = response
-            .headers()
-            .get(header::SET_COOKIE)
-            .and_then(|value| value.to_str().ok())
-            .expect("valid token must set the auth cookie");
         assert!(
-            cookie.starts_with(&format!("{AUTH_COOKIE_NAME}=secret-token")),
-            "cookie: {cookie}"
+            response.headers().get(header::SET_COOKIE).is_none(),
+            "a valid token must not set a cookie"
         );
-        assert!(cookie.contains("HttpOnly"), "cookie: {cookie}");
-        assert!(cookie.contains("SameSite=Lax"), "cookie: {cookie}");
+        assert_eq!(
+            response.headers()[header::CACHE_CONTROL],
+            "no-store",
+            "a page embedding the token must not be cached"
+        );
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            html.contains("secret-token"),
+            "the page must embed the validated token"
+        );
     }
 
     #[tokio::test]
@@ -1289,7 +1241,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lan_post_with_overlay_cookie_passes_auth() {
+    async fn lan_post_with_cookie_header_returns_401() {
         let (app, intake, _service) = app_with_token(
             Ok(InputServerAccepted::Queued {
                 job_id: Uuid::nil(),
@@ -1299,13 +1251,55 @@ mod tests {
 
         let request = lan_speech_request(Some((
             header::COOKIE,
-            format!("other=1; {AUTH_COOKIE_NAME}=secret-token; another=2"),
+            "other=1; input_server_auth=secret-token; another=2".to_string(),
         )));
 
         let response = app.oneshot(request).await.unwrap();
 
-        assert_eq!(response.status(), StatusCode::ACCEPTED);
-        assert_eq!(intake.call_count(), 1);
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(intake.call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn lan_overlay_without_token_returns_401() {
+        let (app, _intake, _service) = app_with_token(
+            Ok(InputServerAccepted::Queued {
+                job_id: Uuid::nil(),
+            }),
+            Some("secret-token"),
+        );
+
+        let response = app
+            .oneshot(lan_request(Method::GET, "/overlay", None, Body::empty()))
+            .await
+            .unwrap();
+
+        let (status, value) = response_parts(response).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(value["code"], UNAUTHORIZED_CODE);
+    }
+
+    #[tokio::test]
+    async fn overlay_without_token_page_has_null_token_constant() {
+        let (app, _intake, _service) = app_with_token(
+            Ok(InputServerAccepted::Queued {
+                job_id: Uuid::nil(),
+            }),
+            Some("secret-token"),
+        );
+
+        let response = app
+            .oneshot(request(Method::GET, "/overlay", None, Body::empty()))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            html.contains("const accessToken = null;"),
+            "tokenless page must embed a null access token constant"
+        );
     }
 
     #[tokio::test]
@@ -1384,7 +1378,7 @@ mod tests {
         }
     }
 
-    /// A LAN POST to `/v1/speech` with one extra header (cookie/bearer variants).
+    /// A LAN POST to `/v1/speech` with one extra header.
     fn lan_speech_request(extra: Option<(header::HeaderName, String)>) -> Request<Body> {
         let mut builder = Request::builder()
             .method(Method::POST)

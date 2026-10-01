@@ -56,14 +56,14 @@ Input Server (порт по умолчанию 10101) принимает вне�
 - **Классификация по адресу подключения**: `ConnectInfo(addr)` →
   `addr.ip().is_loopback()` пропускается без токена, остальное — 401 без
   валидного токена. Не «настройка режима», а свойство запроса.
-- **Приём токена**: query `?token=`, HttpOnly cookie (SameSite=Lax) или
-  `Authorization: Bearer`. Сравнение — `validate_token` (constant-time).
-  Cookie-имя своё (не `AUTH_COOKIE_NAME` WebView): cookies не изолируются по
-  порту, а `localhost:10100` и `localhost:10101` делят домен.
+- **Приём токена**: query `?token=` или `Authorization: Bearer`; cookie не
+  используется (follow-up 2026-10-01 ниже). Сравнение — `validate_token`
+  (constant-time).
 - **Область токена**: `/v1/speech` и `/overlay` требуют токен на не-loopback;
   `/health` остаётся открытым (не раскрывает ничего кроме `{"status":"ok"}`).
-- **Overlay без изменений JS**: валидный `?token=` при отдаче `/overlay`
-  ставит cookie; POST формы — same-origin fetch, cookie уходит автоматически.
+- **Overlay**: валидный `?token=` при отдаче `/overlay` вшивает токен в
+  страницу JSON-литералом (с экранированием `<`); POST формы — same-origin
+  fetch с `Authorization: Bearer`; ответ помечен `Cache-Control: no-store`.
 - **Токен**: uuid v4, как у WebView-сервера. Автогенерация при первой
   загрузке настроек, если поля нет (иначе LAN молча не заработает после
   апгрейда). Ротация обновляет токен живьём (middleware читает актуальные
@@ -109,7 +109,8 @@ Input Server (порт по умолчанию 10101) принимает вне�
 - loopback без токена: все текущие сценарии не регрессировали;
 - LAN-адрес (`ConnectInfo` с приватным IP): без токена 401, с валидным
   токеном 202/страница, с чужим 401; `/health` на LAN без токена 200;
-- `/overlay?token=…` валидным токеном ставит cookie; POST с cookie проходит;
+- `/overlay?token=…` валидным токеном вшивает токен без `Set-Cookie`; POST
+  с cookie-заголовком получает 401;
 - ротация: старый токен 401, новый работает, без рестарта слушателя;
 - host-gate: loopback-хосты и приватные IP в Host принимаются, чужой
   hostname и неверный порт — 403;
@@ -146,15 +147,14 @@ Release note: после апгрейда Windows Firewall один раз сп�
 - Один слушатель на `bind_address` (по умолчанию `0.0.0.0`) с портом
   без изменений; `bind_address` остался конфиг-люком без поля в UI.
 - Loopback-подключения работают как раньше, без токена. Не-loopback:
-  обязательный токен (query `?token=`, HttpOnly-cookie `input_server_auth`
-  — имя сознательно отлично от `webview_auth`, или `Authorization: Bearer`),
+  обязательный токен (query `?token=` или `Authorization: Bearer`),
   сравнение constant-time; отсутствующий или пустой сохранённый токен
   запрещает не-loopback доступ (fail-closed).
 - Host-gate как defense-in-depth: принимает loopback-имена, IPv6 loopback
   и приватные IP-литералы, чужие hostname отклоняет 403.
 - `/health` остался открытым; `/overlay` и `/v1/speech` — под токеном.
-- `GET /overlay?token=…` валидным токеном ставит cookie, JS оверлея
-  не менялся.
+- `GET /overlay?token=…` валидным токеном вшивает токен в страницу
+  (JSON-литерал), форма POST отправляет `Authorization: Bearer`.
 - Токен uuid v4; автогенерация при загрузке настроек (легаси-миграция и
   свежая установка), ротация живьём без рестарта слушателя — middleware
   читает актуальные настройки на каждый запрос.
@@ -168,6 +168,16 @@ Release note: после апгрейда Windows Firewall один раз сп�
 роутера, супервизор и миграции настроек), `cargo check`, vitest 1233,
 `vue-tsc`, контракты IPC и локалей, `check-docs.ps1`, debug-сборка
 `scripts/build.ps1 -Mode debug`.
+
+Follow-up 2026-10-01: сессионный cookie убран после полевого репорта —
+мобильный браузер держал сессию днями, и LAN-страница открывалась без
+токена. `/overlay` больше не использует cookie: валидный `?token=`
+вшивается в страницу (JSON-литерал с экранированием `<`, ответ
+`Cache-Control: no-store`), форма несёт `Authorization: Bearer`; любое
+не-loopback открытие без токена — всегда 401, включая запрос со старым
+cookie-заголовком. Loopback-вход остался без токена. Оценка по OWASP/
+CWE-598: токен в query при входе — осознанный компромисс (точка входа
+продукта и до правки), Bearer-схема исключает CSRF по построению.
 
 Release note: после обновления Windows Firewall один раз спросит разрешение
 для приватных сетей — это ожидаемый запрос самого приложения.
