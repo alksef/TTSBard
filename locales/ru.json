@@ -633,6 +633,8 @@
     "input_server.token.label": "Токен доступа",
     "input_server.token.copy": "Копировать токен",
     "input_server.token.not_generated": "Не сгенерирован",
+    "input_server.token.show": "Показать токен",
+    "input_server.token.hide": "Скрыть токен",
     "input_server.token.regenerate": "Сгенерировать новый токен",
     "input_server.token.regenerate_confirm": "Старая ссылка на форму перестанет действовать. Продолжить?",
     "input_server.token.regenerated": "Токен обновлён. Старая ссылка больше не действует.",

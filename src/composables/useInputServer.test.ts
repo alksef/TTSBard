@@ -593,36 +593,35 @@ describe('useInputServer', () => {
     expect(settings.value).toEqual({ start_on_boot: false, port: 10101 })
   })
 
-  it('copies the full token derived from the connection URL, not the masked display', async () => {
+  it('shows and copies the full access token independently of a missing LAN URL', async () => {
     mocks.mockWriteText.mockResolvedValue(undefined)
     mocks.mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === 'get_input_server_settings') return { start_on_boot: false, port: 10101 }
       if (cmd === 'get_input_server_status') return { state: 'stopped' }
-      if (cmd === 'get_input_server_connection_url') return 'http://192.168.1.5:10101/overlay?token=secret-token-abc'
-      if (cmd === 'get_input_server_token') return '••••••••'
+      if (cmd === 'get_input_server_connection_url') throw new Error('no LAN IP')
+      if (cmd === 'get_input_server_token') return 'secret-token-abc'
       return undefined
     })
-    const { maskedToken, tokenAvailable, copyToken, message, messageType } = useInputServer()
+    const { accessToken, tokenAvailable, copyToken, message, messageType } = useInputServer()
     if (capturedOnMountedCb) await capturedOnMountedCb()
 
-    expect(maskedToken.value).toBe('••••••••')
+    expect(accessToken.value).toBe('secret-token-abc')
     expect(tokenAvailable.value).toBe(true)
 
     await copyToken()
 
     expect(mocks.mockWriteText).toHaveBeenCalledWith('secret-token-abc')
-    expect(mocks.mockWriteText).not.toHaveBeenCalledWith('••••••••')
     expect(message.value).toBe('Токен скопирован')
     expect(messageType.value).toBe('success')
   })
 
-  it.each([null, 'not-a-valid-url', 'http://192.168.1.5:10101/overlay', 'http://192.168.1.5:10101/overlay?token='])('does not copy an unavailable token from %s', async (url) => {
+  it.each([null, ''])('does not copy an absent or empty token (%s)', async (token) => {
     mocks.mockWriteText.mockResolvedValue(undefined)
     mocks.mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === 'get_input_server_settings') return { start_on_boot: false, port: 10101 }
       if (cmd === 'get_input_server_status') return { state: 'stopped' }
-      if (cmd === 'get_input_server_connection_url') return url
-      if (cmd === 'get_input_server_token') return '••••'
+      if (cmd === 'get_input_server_connection_url') throw new Error('no LAN IP')
+      if (cmd === 'get_input_server_token') return token
       return undefined
     })
     const { tokenAvailable, copyToken } = useInputServer()
@@ -640,8 +639,8 @@ describe('useInputServer', () => {
     mocks.mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === 'get_input_server_settings') return { start_on_boot: false, port: 10101 }
       if (cmd === 'get_input_server_status') return { state: 'stopped' }
-      if (cmd === 'get_input_server_connection_url') return 'http://192.168.1.5:10101/overlay?token=secret-token-abc'
-      if (cmd === 'get_input_server_token') return '••••'
+      if (cmd === 'get_input_server_connection_url') throw new Error('no LAN IP')
+      if (cmd === 'get_input_server_token') return 'secret-token-abc'
       return undefined
     })
     const { copyToken, message, messageType } = useInputServer()

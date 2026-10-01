@@ -176,18 +176,9 @@ pub async fn save_input_server_settings(
 
 // ==================== Input Server Security Commands ====================
 
-/// Mask the access token for display: first 8 characters plus `***`
-/// (same convention as the WebView token UI).
-fn mask_token(token: &str) -> String {
-    if token.len() > 8 {
-        format!("{}***", &token[..8])
-    } else {
-        token.to_string()
-    }
-}
-
-/// Masked input-server access token for display. The full token is only ever
-/// handed out embedded in the LAN connection URL.
+/// Full persisted input-server access token, or `None` when no token is
+/// configured. The token is a per-install UUID the frontend may show and copy;
+/// it is no longer masked on the backend.
 #[tauri::command]
 pub async fn get_input_server_token(state: State<'_, AppState>) -> Result<Option<String>, String> {
     let settings = state.input_server.settings.read().await;
@@ -195,7 +186,7 @@ pub async fn get_input_server_token(state: State<'_, AppState>) -> Result<Option
         .access_token
         .as_deref()
         .filter(|token| !token.is_empty())
-        .map(mask_token))
+        .map(str::to_string))
 }
 
 /// Rotate the input-server access token.
@@ -377,19 +368,6 @@ pub async fn discard_incoming_text(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn mask_token_truncates_long_tokens() {
-        assert_eq!(mask_token("abcdefghijklmnop"), "abcdefgh***");
-        assert_eq!(mask_token("123456789"), "12345678***");
-    }
-
-    #[test]
-    fn mask_token_keeps_short_tokens_intact() {
-        assert_eq!(mask_token("12345678"), "12345678");
-        assert_eq!(mask_token("short"), "short");
-        assert_eq!(mask_token(""), "");
-    }
 
     #[test]
     fn connection_url_embeds_ip_port_and_token() {

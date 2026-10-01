@@ -68,11 +68,12 @@ export function useInputServer() {
   const testPending = ref(false)
 
   // LAN connection info: the ready-to-open overlay URL with the embedded
-  // token, plus the masked token for display. Fetched from the backend because
-  // both depend on persisted state the frontend must not own.
+  // token, plus the full access token for display and clipboard. Fetched from
+  // the backend because both depend on persisted state the frontend must not
+  // own.
   const lanUrl = ref<string | null>(null)
   const lanUrlUnavailable = ref(false)
-  const maskedToken = ref<string | null>(null)
+  const accessToken = ref<string | null>(null)
   const regeneratePending = ref(false)
 
   const listenerScope = createAsyncCleanupScope()
@@ -131,20 +132,9 @@ export function useInputServer() {
     () => `http://${INPUT_SERVER_HOST}:${settings.value.port}${INPUT_SERVER_OVERLAY_PATH}`,
   )
 
-  // The real token travels only inside the ready connection URL. It is derived
-  // here so the copy action can expose the full value without any backend call
-  // and without ever logging it.
-  function deriveToken(): string | null {
-    const url = lanUrl.value
-    if (!url) return null
-    try {
-      return new URL(url).searchParams.get('token') || null
-    } catch {
-      return null
-    }
-  }
-
-  const tokenAvailable = computed(() => deriveToken() !== null)
+  const tokenAvailable = computed(
+    () => accessToken.value !== null && accessToken.value !== '',
+  )
 
   function showMessage(text: string, type: UiMessageKind = 'info') {
     message.value = text
@@ -333,7 +323,7 @@ export function useInputServer() {
 
   async function copyToken(): Promise<void> {
     if (regeneratePending.value) return
-    const token = deriveToken()
+    const token = accessToken.value
     if (!token) return
     await copyText(token, 'input_server.token_copied')
   }
@@ -353,7 +343,7 @@ export function useInputServer() {
     try {
       const token = await invoke<string | null>('get_input_server_token')
       if (disposed) return
-      maskedToken.value = token
+      accessToken.value = token
     } catch (e) {
       if (disposed) return
       debugError('[InputServer] Failed to load token:', e)
@@ -431,7 +421,7 @@ export function useInputServer() {
     overlayUrl,
     lanUrl,
     lanUrlUnavailable,
-    maskedToken,
+    accessToken,
     tokenAvailable,
     regeneratePending,
     showMessage,

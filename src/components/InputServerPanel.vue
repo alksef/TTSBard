@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { Copy, AlertTriangle, Play, Square, Info, RefreshCw } from 'lucide-vue-next'
+import { computed, ref } from 'vue'
+import { Copy, AlertTriangle, Play, Square, Info, RefreshCw, Eye, EyeOff } from 'lucide-vue-next'
 import { useInputServer } from '../composables/useInputServer'
 import { t } from '../i18n'
 
@@ -24,7 +24,7 @@ const {
   endpoint,
   overlayUrl,
   lanUrl,
-  maskedToken,
+  accessToken,
   tokenAvailable,
   regeneratePending,
   saveSettings,
@@ -39,6 +39,14 @@ const {
 } = useInputServer()
 
 const messageBoxClass = computed(() => (message.value ? messageType.value : ''))
+
+const HIDDEN_TOKEN_BULLETS = '••••••••'
+const tokenVisible = ref(true)
+
+const tokenDisplay = computed(() => {
+  if (!accessToken.value) return t('input_server.token.not_generated')
+  return tokenVisible.value ? accessToken.value : HIDDEN_TOKEN_BULLETS
+})
 </script>
 
 <template>
@@ -183,8 +191,20 @@ const messageBoxClass = computed(() => (message.value ? messageType.value : ''))
         <label class="row-label">{{ t('input_server.token.label') }}</label>
         <div class="url-display url-display-full">
           <label class="url-code url-code-wide">
-            {{ maskedToken ?? t('input_server.token.not_generated') }}
+            {{ tokenDisplay }}
           </label>
+          <button
+            class="icon-button token-toggle"
+            :title="tokenVisible ? t('input_server.token.hide') : t('input_server.token.show')"
+            :aria-label="tokenVisible ? t('input_server.token.hide') : t('input_server.token.show')"
+            :aria-pressed="tokenVisible ? 'true' : 'false'"
+            :disabled="!tokenAvailable"
+            :class="{ disabled: !tokenAvailable }"
+            @click="tokenVisible = !tokenVisible"
+          >
+            <Eye v-if="!tokenVisible" :size="16" />
+            <EyeOff v-else :size="16" />
+          </button>
           <button
             class="icon-button"
             :title="t('input_server.token.copy')"
@@ -599,6 +619,12 @@ h2 {
 .url-display .icon-button {
   border-radius: 0 10px 10px 0;
   border-left: none;
+}
+
+.url-display .icon-button.token-toggle {
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
 }
 
 .icon-button.disabled:disabled,

@@ -633,6 +633,8 @@
     "input_server.token.label": "Access token",
     "input_server.token.copy": "Copy token",
     "input_server.token.not_generated": "Not generated",
+    "input_server.token.show": "Show token",
+    "input_server.token.hide": "Hide token",
     "input_server.token.regenerate": "Generate a new token",
     "input_server.token.regenerate_confirm": "The old overlay link will stop working. Continue?",
     "input_server.token.regenerated": "Token updated. The old link no longer works.",
