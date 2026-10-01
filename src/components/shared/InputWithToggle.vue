@@ -8,6 +8,8 @@ interface Props {
   type?: 'text' | 'password';
   placeholder?: string;
   disabled?: boolean;
+  readonly?: boolean;
+  label?: string;
   class?: string;
 }
 
@@ -19,6 +21,8 @@ const props = withDefaults(defineProps<Props>(), {
   type: 'password',
   placeholder: '',
   disabled: false,
+  readonly: false,
+  label: '',
   class: '',
 });
 
@@ -49,6 +53,8 @@ function updateValue(event: Event) {
       @input="updateValue"
       :placeholder="placeholder"
       :disabled="disabled"
+      :readonly="readonly"
+      :aria-label="label || undefined"
       class="input-with-toggle-input"
     />
     <button

@@ -623,7 +623,7 @@
     "input_server.overlay_title": "Форма ввода",
     "input_server.connection": "Подключение",
     "input_server.web_form": "Веб-форма",
-    "input_server.speech_api": "API для озвучивания",
+    "input_server.speech_api": "API",
     "input_server.copy_overlay": "Копировать адрес формы",
     "input_server.overlay_url_copied": "Адрес формы скопирован",
     "input_server.local_url_label": "На этом ПК",

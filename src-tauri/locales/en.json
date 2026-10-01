@@ -623,7 +623,7 @@
     "input_server.overlay_title": "Overlay form",
     "input_server.connection": "Connection",
     "input_server.web_form": "Web form",
-    "input_server.speech_api": "Speech API",
+    "input_server.speech_api": "API",
     "input_server.copy_overlay": "Copy overlay address",
     "input_server.overlay_url_copied": "Overlay address copied",
     "input_server.local_url_label": "On this PC",

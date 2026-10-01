@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { Copy, RotateCw, Play, Square, AlertTriangle, Globe, Eye, EyeOff } from 'lucide-vue-next'
+import { computed } from 'vue'
+import { Copy, RotateCw, Play, Square, AlertTriangle, Globe } from 'lucide-vue-next'
 import { useWebView } from '../composables/useWebView'
 import { t } from '../i18n'
+import InputWithToggle from './shared/InputWithToggle.vue'
 
 const messageBoxClass = computed(() => (errorMessage.value ? errorMessageType.value : ''))
 
@@ -36,15 +37,6 @@ const {
   sendTest,
   reloadTemplates,
 } = useWebView()
-
-const HIDDEN_TOKEN_BULLET = '•'
-const tokenVisible = ref(false)
-
-const tokenDisplay = computed(() => {
-  const token = settings.value.access_token
-  if (!token) return t('webview.token.not_generated')
-  return tokenVisible.value ? token : HIDDEN_TOKEN_BULLET.repeat(token.length)
-})
 </script>
 
 <template>
@@ -183,15 +175,16 @@ const tokenDisplay = computed(() => {
       <!-- Token access -->
       <div class="setting-row token-row">
         <label>{{ t('webview.token.label') }}</label>
-        <div class="token-field url-display url-display-expand">
-          <label
-            class="url-code url-code-expand token-text"
-            :class="{ 'token-hidden': !tokenVisible && hasToken }"
-          >{{ tokenDisplay }}</label>
-          <button @click="tokenVisible = !tokenVisible" class="icon-button token-visibility-button" :title="tokenVisible ? t('webview.token.hide') : t('webview.token.show')" :aria-label="tokenVisible ? t('webview.token.hide') : t('webview.token.show')" :aria-pressed="tokenVisible ? 'true' : 'false'" :disabled="!hasToken">
-            <Eye v-if="!tokenVisible" :size="16" />
-            <EyeOff v-else :size="16" />
-          </button>
+        <div class="token-field">
+          <InputWithToggle
+            :model-value="settings.access_token ?? ''"
+            :label="t('webview.token.label')"
+            type="password"
+            readonly
+            :placeholder="t('webview.token.not_generated')"
+            :disabled="!hasToken"
+            class="token-field-input"
+          />
           <button @click="copyToken" class="icon-button" :title="t('webview.token.copy')" :aria-label="t('webview.token.copy')" :disabled="!hasToken || !isUpnpAvailable">
             <Copy :size="16" />
           </button>
@@ -615,10 +608,6 @@ h2 {
   width: 100%;
 }
 
-.url-display-expand {
-  width: 60%;
-}
-
 .url-code {
   display: inline-flex !important;
   align-items: center;
@@ -648,11 +637,6 @@ h2 {
   min-width: 300px !important;
 }
 
-.url-code-expand {
-  flex: 1 !important;
-  width: auto !important;
-}
-
 /* Token row: grid keeps the token field shrinkable next to regenerate */
 .token-row {
   display: grid;
@@ -662,19 +646,25 @@ h2 {
 }
 
 .token-field {
+  display: flex;
+  align-items: center;
+  gap: 0;
   min-width: 0;
   width: auto;
 }
 
-.token-field .token-text {
-  display: block !important;
-  min-width: 0 !important;
-  width: auto !important;
-  line-height: 36px;
+.token-field-input {
+  flex: 1;
+  min-width: 0;
 }
 
-.token-field .token-text.token-hidden {
-  text-overflow: clip;
+.token-field :deep(.input-with-toggle-input) {
+  height: 38px;
+  padding: 0 40px 0 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 36px;
+  box-sizing: border-box;
 }
 
 @media (max-width: 440px) {
@@ -820,21 +810,6 @@ h2 {
   color: var(--warning-text-bright);
 }
 
-.token-code {
-  flex: 1;
-  padding: 0.5rem 0.75rem;
-  background: var(--color-bg-field);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  color: var(--color-text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 200px;
-}
-
 .danger-button {
   background: var(--danger-bg-weak);
   border-color: var(--danger-border);
@@ -897,5 +872,17 @@ h2 {
 .icon-button.secondary:hover {
   background: var(--btn-accent-bg);
   border-color: var(--card-active-border);
+}
+
+/* Join the token input and copy button like the URL control. */
+.token-field :deep(.input-with-toggle-input) {
+  min-width: 0;
+  border-radius: 10px 0 0 10px;
+}
+
+.token-field > .icon-button {
+  border-left: none;
+  border-radius: 0 10px 10px 0;
+  flex-shrink: 0;
 }
 </style>

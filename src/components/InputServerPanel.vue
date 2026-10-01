@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { Copy, AlertTriangle, Play, Square, Info, RefreshCw, Eye, EyeOff } from 'lucide-vue-next'
+import { computed } from 'vue'
+import { Copy, AlertTriangle, Play, Square, Info, RefreshCw } from 'lucide-vue-next'
 import { useInputServer } from '../composables/useInputServer'
 import { t } from '../i18n'
+import InputWithToggle from './shared/InputWithToggle.vue'
 
 const {
   settings,
@@ -21,7 +22,6 @@ const {
   isStartingOrRunning,
   statusLabel,
   statusError,
-  endpoint,
   overlayUrl,
   lanUrl,
   accessToken,
@@ -31,7 +31,6 @@ const {
   startInputServer,
   stopInputServer,
   sendTest,
-  copyEndpoint,
   copyOverlayUrl,
   copyLanUrl,
   copyToken,
@@ -39,16 +38,6 @@ const {
 } = useInputServer()
 
 const messageBoxClass = computed(() => (message.value ? messageType.value : ''))
-
-const HIDDEN_TOKEN_BULLET = '•'
-const tokenVisible = ref(false)
-
-const tokenDisplay = computed(() => {
-  if (!accessToken.value) return t('input_server.token.not_generated')
-  return tokenVisible.value
-    ? accessToken.value
-    : HIDDEN_TOKEN_BULLET.repeat(accessToken.value.length)
-})
 </script>
 
 <template>
@@ -192,25 +181,16 @@ const tokenDisplay = computed(() => {
 
         <div class="connection-row connection-token-row">
           <label class="row-label">{{ t('input_server.token.label') }}</label>
-          <div class="url-display url-display-full">
-            <label
-              class="url-code url-code-wide"
-              :class="{ 'token-hidden': !tokenVisible && tokenAvailable }"
-            >
-              {{ tokenDisplay }}
-            </label>
-            <button
-              class="icon-button token-toggle token-visibility-button"
-              :title="tokenVisible ? t('input_server.token.hide') : t('input_server.token.show')"
-              :aria-label="tokenVisible ? t('input_server.token.hide') : t('input_server.token.show')"
-              :aria-pressed="tokenVisible ? 'true' : 'false'"
+          <div class="token-field-group">
+            <InputWithToggle
+              :model-value="accessToken ?? ''"
+              :label="t('input_server.token.label')"
+              type="password"
+              readonly
+              :placeholder="t('input_server.token.not_generated')"
               :disabled="!tokenAvailable"
-              :class="{ disabled: !tokenAvailable }"
-              @click="tokenVisible = !tokenVisible"
-            >
-              <Eye v-if="!tokenVisible" :size="16" />
-              <EyeOff v-else :size="16" />
-            </button>
+              class="token-field"
+            />
             <button
               class="icon-button"
               :title="t('input_server.token.copy')"
@@ -238,21 +218,10 @@ const tokenDisplay = computed(() => {
       <div class="subsection-divider"></div>
 
       <h3 class="subsection-heading">{{ t('input_server.speech_api') }}</h3>
-
-      <div class="setting-row">
-        <div class="url-display url-display-full">
-          <label class="url-code url-code-wide">{{ endpoint }}</label>
-          <button
-            class="icon-button"
-            :title="t('input_server.copy_endpoint')"
-            :aria-label="t('input_server.copy_endpoint')"
-            @click="copyEndpoint"
-          >
-            <Copy :size="16" />
-          </button>
-        </div>
-      </div>
-      <p class="format-hint">{{ t('input_server.format_hint') }} <code class="inline-code">{"text":"реплика"}</code></p>
+      <p class="api-summary">
+        <span>POST <code class="inline-code">&lt;url&gt;/v1/speech</code></span>
+        <span>JSON <code class="inline-code">{"text":"реплика"}</code></span>
+      </p>
     </section>
 
     <section class="settings-section">
@@ -635,12 +604,6 @@ h2 {
   border-left: none;
 }
 
-.url-display .icon-button.token-toggle {
-  border-radius: 0;
-  border-left: none;
-  border-right: none;
-}
-
 .icon-button.disabled:disabled,
 .icon-button:disabled {
   opacity: 0.5;
@@ -675,17 +638,31 @@ h2 {
   grid-column: 2 / -1;
 }
 
-.connection-token-row .url-display {
+.connection-token-row .token-field-group {
   grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  min-width: 0;
+}
+
+.token-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.token-field :deep(.input-with-toggle-input) {
+  height: 38px;
+  padding: 0 40px 0 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 36px;
+  box-sizing: border-box;
 }
 
 .url-code-wide {
   display: block !important;
   line-height: 36px;
-}
-
-.url-code.token-hidden {
-  text-overflow: clip;
 }
 
 .connection-row .row-label {
@@ -727,7 +704,7 @@ h2 {
     width: 100%;
     grid-column: 1 / -1;
   }
-  .connection-token-row .url-display {
+  .connection-token-row .token-field-group {
     grid-column: 1;
   }
 }
@@ -862,5 +839,26 @@ h2 {
   flex-shrink: 0;
   margin-top: 1px;
   color: var(--info-text-bright);
+}
+
+/* Join the token input and copy button like the URL control. */
+.token-field :deep(.input-with-toggle-input) {
+  min-width: 0;
+  border-radius: 10px 0 0 10px;
+}
+
+.token-field-group > .icon-button {
+  border-left: none;
+  border-radius: 0 10px 10px 0;
+  flex-shrink: 0;
+}
+.api-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
 }
 </style>
