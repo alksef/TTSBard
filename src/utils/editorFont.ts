@@ -1,7 +1,7 @@
 import type { EditorFontFamily } from '../types/settings'
 
 export const EDITOR_FONT_SIZE_MIN = 12
-export const EDITOR_FONT_SIZE_MAX = 32
+export const EDITOR_FONT_SIZE_MAX = 96
 export const EDITOR_FONT_SIZE_DEFAULT = 16
 
 export interface EditorFontOption {
@@ -49,7 +49,7 @@ export function editorFontCssStack(family: EditorFontFamily): string {
 }
 
 /**
- * Parse an editor font size input. Returns an integer within `12..32` or
+ * Parse an editor font size input. Returns an integer within `12..96` or
  * `null` when the value is empty, non-numeric, fractional or out of range.
  */
 export function parseEditorFontSize(raw: unknown): number | null {

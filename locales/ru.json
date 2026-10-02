@@ -183,7 +183,7 @@
     "settings.editor.font.default": "По умолчанию",
     "settings.editor.font.system": "Системный",
     "settings.editor.font.sample": "Текст. 0123",
-    "settings.editor.font.error.invalid_size": "Размер шрифта должен быть целым числом от 12 до 32 px",
+    "settings.editor.font.error.invalid_size": "Размер шрифта должен быть целым числом от 12 до 96 px",
     "settings.editor.font.error.family": "Ошибка сохранения шрифта: {detail}",
     "settings.editor.font.error.size": "Ошибка сохранения размера шрифта: {detail}",
     "settings.ai.auto_correct.label": "Применять AI коррекцию автоматически",

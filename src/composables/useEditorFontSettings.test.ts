@@ -101,19 +101,19 @@ describe('useEditorFontSettings', () => {
   })
 
   it('saves a size change through IPC with a sizePx payload', async () => {
-    mockInvoke.mockResolvedValue(20)
+    mockInvoke.mockResolvedValue(96)
     const c = useEditorFontSettings(ref(createSettings()))
-    await c.onSizeChange(20)
-    expect(invokeCalls('set_editor_font_size')).toEqual([['set_editor_font_size', { sizePx: 20 }]])
-    expect(c.sizeInput.value).toBe(20)
+    await c.onSizeChange(96)
+    expect(invokeCalls('set_editor_font_size')).toEqual([['set_editor_font_size', { sizePx: 96 }]])
+    expect(c.sizeInput.value).toBe(96)
   })
 
   it('accepts a numeric string size and normalizes it', async () => {
-    mockInvoke.mockResolvedValue(20)
+    mockInvoke.mockResolvedValue(96)
     const c = useEditorFontSettings(ref(createSettings()))
-    await c.onSizeChange('20')
-    expect(mockInvoke).toHaveBeenCalledWith('set_editor_font_size', { sizePx: 20 })
-    expect(c.sizeInput.value).toBe(20)
+    await c.onSizeChange('96')
+    expect(mockInvoke).toHaveBeenCalledWith('set_editor_font_size', { sizePx: 96 })
+    expect(c.sizeInput.value).toBe(96)
   })
 
   describe('invalid size input never invokes IPC', () => {
@@ -121,7 +121,7 @@ describe('useEditorFontSettings', () => {
       ['empty', ''],
       ['non-numeric', 'abc'],
       ['below range', 11],
-      ['above range', 33],
+      ['above range', 97],
       ['fraction number', 16.5],
       ['fraction string', '16.5'],
       ['null', null],
@@ -182,7 +182,7 @@ describe('useEditorFontSettings', () => {
     expect(c.saving.value).toBe(true)
 
     await c.onFamilyChange('georgia')
-    await c.onSizeChange(20)
+    await c.onSizeChange(96)
 
     expect(invokeCalls('set_editor_font_family')).toHaveLength(1)
     expect(invokeCalls('set_editor_font_size')).toHaveLength(0)

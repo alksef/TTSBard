@@ -83,7 +83,7 @@ describe('editorFont', () => {
   })
 
   describe('parseEditorFontSize', () => {
-    it('accepts every value in the 12..32 range', () => {
+    it('accepts every value in the 12..96 range', () => {
       for (let n = EDITOR_FONT_SIZE_MIN; n <= EDITOR_FONT_SIZE_MAX; n++) {
         expect(parseEditorFontSize(n)).toBe(n)
       }
@@ -94,6 +94,8 @@ describe('editorFont', () => {
       expect(parseEditorFontSize(' 24 ')).toBe(24)
       expect(parseEditorFontSize('12')).toBe(12)
       expect(parseEditorFontSize('32')).toBe(32)
+      expect(parseEditorFontSize('64')).toBe(64)
+      expect(parseEditorFontSize('96')).toBe(96)
     })
 
     it('rejects empty values', () => {

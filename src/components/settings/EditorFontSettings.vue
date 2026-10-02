@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { EDITOR_FONT_SIZE_MAX } from '../../utils/editorFont'
 import { t } from '../../i18n'
 import { useEditorFontSettings } from '../../composables/useEditorFontSettings'
 
@@ -155,7 +156,7 @@ function onSizeInput(event: Event): void {
             class="font-size-input"
             :disabled="saving"
             min="12"
-            max="32"
+            :max="EDITOR_FONT_SIZE_MAX"
             step="1"
             @change="onSizeInput"
           />

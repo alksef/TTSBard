@@ -183,7 +183,7 @@
     "settings.editor.font.default": "Default",
     "settings.editor.font.system": "System",
     "settings.editor.font.sample": "Text. 0123",
-    "settings.editor.font.error.invalid_size": "Font size must be an integer from 12 to 32 px",
+    "settings.editor.font.error.invalid_size": "Font size must be an integer from 12 to 96 px",
     "settings.editor.font.error.family": "Could not save the font: {detail}",
     "settings.editor.font.error.size": "Could not save the font size: {detail}",
     "settings.ai.auto_correct.label": "Apply AI correction automatically",

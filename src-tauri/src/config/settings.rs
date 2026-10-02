@@ -1044,7 +1044,7 @@ where
 
 /// Minimum/maximum/default editor font size in pixels.
 pub const EDITOR_FONT_SIZE_MIN_PX: u32 = 12;
-pub const EDITOR_FONT_SIZE_MAX_PX: u32 = 32;
+pub const EDITOR_FONT_SIZE_MAX_PX: u32 = 96;
 const EDITOR_FONT_SIZE_DEFAULT_PX: u32 = 16;
 
 fn default_editor_font_size_px() -> u32 {
@@ -1052,7 +1052,7 @@ fn default_editor_font_size_px() -> u32 {
 }
 
 /// Forgiving deserializer for `font_size_px`: any value that is not an integer
-/// within `12..=32` falls back to the default `16`.
+/// within `12..=96` falls back to the default `16`.
 fn deserialize_font_size_px<'de, D>(deserializer: D) -> Result<u32, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -6521,10 +6521,10 @@ mod tests {
         }
     }
 
-    /// Font size boundaries (12 and 32) round-trip through serde.
+    /// Font size boundaries (12 and 96) round-trip through serde.
     #[test]
     fn editor_font_size_boundaries_round_trip() {
-        for size in [EDITOR_FONT_SIZE_MIN_PX, EDITOR_FONT_SIZE_MAX_PX] {
+        for size in [EDITOR_FONT_SIZE_MIN_PX, 64, EDITOR_FONT_SIZE_MAX_PX] {
             let s = EditorSettings {
                 font_size_px: size,
                 ..EditorSettings::default()
@@ -6576,7 +6576,7 @@ mod tests {
         }
 
         // Below-min, above-max, negative and float sizes all fall back to 16.
-        for raw in ["11", "33", "-5", "16.5", "null"] {
+        for raw in ["11", "97", "-5", "16.5", "null"] {
             let json3 = format!(
                 r#"{{"quick":"disabled","spellcheck_enabled":true,"spellcheck_source":"offline","font_size_px":{}}}"#,
                 raw
@@ -6616,7 +6616,7 @@ mod tests {
         manager.set_editor_font_size_px(20).unwrap();
         assert_eq!(manager.get_editor_font_size_px(), 20);
 
-        for invalid in [11, 33, 0, u32::MAX] {
+        for invalid in [11, 97, 0, u32::MAX] {
             let result = manager.set_editor_font_size_px(invalid);
             assert!(result.is_err(), "size {} must be rejected", invalid);
             assert_eq!(
@@ -6690,13 +6690,13 @@ mod tests {
             manager
                 .set_editor_font_family("PT Sans".to_owned())
                 .unwrap();
-            manager.set_editor_font_size_px(28).unwrap();
+            manager.set_editor_font_size_px(96).unwrap();
         }
 
         let manager2 = SettingsManager::with_config_dir(dir.clone()).unwrap();
         let after = manager2.load().unwrap();
         assert_eq!(after.editor.font_family, "PT Sans");
-        assert_eq!(after.editor.font_size_px, 28);
+        assert_eq!(after.editor.font_size_px, 96);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
