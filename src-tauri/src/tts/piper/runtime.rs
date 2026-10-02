@@ -261,6 +261,51 @@ fn normalize_for_clib(path: &Path) -> PathBuf {
     path.to_path_buf()
 }
 
+/// Source of a discovered application-local eSpeak NG data folder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EspeakDataSource {
+    Resource,
+    DataRoot,
+    Cwd,
+    ExeDir,
+}
+
+/// True when `parent` contains a usable `espeak-ng-data` folder: a `voices`
+/// subdirectory together with an `en_dict` file.
+fn has_espeak_data(parent: &Path) -> bool {
+    let data = parent.join("espeak-ng-data");
+    data.join("voices").is_dir() && data.join("en_dict").is_file()
+}
+
+/// Pure resolution of the application-local eSpeak NG data folder.
+///
+/// Candidates are tried in order — resource directory, effective data root,
+/// process working directory, executable directory — and the first one whose
+/// `espeak-ng-data` child is usable wins. The returned value is the directory
+/// that *contains* `espeak-ng-data` (the parent form `espeak-rs` expects in
+/// `PIPER_ESPEAKNG_DATA_DIRECTORY`). `None` leaves the native/system fallback
+/// (registry / `ESPEAK_DATA_PATH`) untouched.
+fn resolve_espeak_data_parent(
+    resource_dir: Option<&Path>,
+    data_root: Option<&Path>,
+    cwd: Option<&Path>,
+    exe_dir: Option<&Path>,
+) -> Option<(EspeakDataSource, PathBuf)> {
+    let candidates = [
+        (EspeakDataSource::Resource, resource_dir),
+        (EspeakDataSource::DataRoot, data_root),
+        (EspeakDataSource::Cwd, cwd),
+        (EspeakDataSource::ExeDir, exe_dir),
+    ];
+    for (source, dir) in candidates {
+        let Some(dir) = dir else { continue };
+        if has_espeak_data(dir) {
+            return Some((source, dir.to_path_buf()));
+        }
+    }
+    None
+}
+
 #[derive(Deserialize, Clone)]
 struct AudioConfig {
     sample_rate: u32,
@@ -319,61 +364,38 @@ impl std::fmt::Debug for LocalModelTts {
 impl LocalModelTts {
     pub fn init_espeak_data(resource_dir: Option<PathBuf>) {
         ESPEAKNG_DATA_INIT.get_or_init(|| {
-            let candidate = resource_dir.and_then(|dir| {
-                let p = dir.join("espeak-ng-data");
-                if p.join("voices").exists() && p.join("en_dict").exists() {
-                    Some(p)
-                } else {
-                    None
-                }
-            });
+            let data_root = crate::paths::data_root().ok();
+            let cwd = env::current_dir().ok();
+            let exe_dir = env::current_exe()
+                .ok()
+                .and_then(|exe| exe.parent().map(Path::to_path_buf));
 
-            if let Some(data_dir) = candidate {
-                // espeak-rs expects the variable to point at the directory
-                // CONTAINING espeak-ng-data (parent form), not the data dir
-                // itself; it re-validates `<value>/espeak-ng-data` before use.
-                let parent = data_dir
-                    .parent()
-                    .map(|p| p.to_path_buf())
-                    .unwrap_or_else(|| data_dir.clone());
-                let parent = normalize_for_clib(&parent);
-                env::set_var("PIPER_ESPEAKNG_DATA_DIRECTORY", &parent);
-                tracing::info!(
-                    dir = %data_dir.display(),
-                    "espeak-ng data directory set"
-                );
-                return;
-            }
+            let selected = resolve_espeak_data_parent(
+                resource_dir.as_deref(),
+                data_root.as_deref(),
+                cwd.as_deref(),
+                exe_dir.as_deref(),
+            );
 
-            if let Ok(cwd) = env::current_dir() {
-                let p = cwd.join("espeak-ng-data");
-                if p.join("voices").exists() && p.join("en_dict").exists() {
-                    let cwd = normalize_for_clib(&cwd);
-                    env::set_var("PIPER_ESPEAKNG_DATA_DIRECTORY", &cwd);
+            match selected {
+                Some((source, parent)) => {
+                    // espeak-rs expects the variable to point at the directory
+                    // CONTAINING espeak-ng-data (parent form), not the data dir
+                    // itself; it re-validates `<value>/espeak-ng-data` before use.
+                    let parent = normalize_for_clib(&parent);
+                    env::set_var("PIPER_ESPEAKNG_DATA_DIRECTORY", &parent);
                     tracing::info!(
-                        dir = %p.display(),
-                        "espeak-ng data directory set (from cwd)"
+                        source = ?source,
+                        dir = %parent.display(),
+                        "espeak-ng data directory set"
                     );
-                    return;
+                }
+                None => {
+                    tracing::warn!(
+                        "espeak-ng data directory not found; Piper phonemization may fail"
+                    );
                 }
             }
-
-            if let Ok(exe) = env::current_exe() {
-                if let Some(exe_dir) = exe.parent() {
-                    let p = exe_dir.join("espeak-ng-data");
-                    if p.join("voices").exists() && p.join("en_dict").exists() {
-                        let exe_dir = normalize_for_clib(exe_dir);
-                        env::set_var("PIPER_ESPEAKNG_DATA_DIRECTORY", exe_dir);
-                        tracing::info!(
-                            dir = %p.display(),
-                            "espeak-ng data directory set (next to exe)"
-                        );
-                        return;
-                    }
-                }
-            }
-
-            tracing::warn!("espeak-ng data directory not found; Piper phonemization may fail");
         });
     }
 
@@ -643,6 +665,40 @@ impl TtsEngine for LocalModelTts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static TEMP_SEQ: AtomicUsize = AtomicUsize::new(0);
+
+    /// Isolated temporary directory that removes itself on drop.
+    struct TestDir(PathBuf);
+
+    impl TestDir {
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "ttsbard-espeak-{tag}-{}-{}",
+                std::process::id(),
+                TEMP_SEQ.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            TestDir(dir)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn write_valid_espeak_data(parent: &Path) {
+        std::fs::create_dir_all(parent.join("espeak-ng-data").join("voices")).unwrap();
+        std::fs::write(parent.join("espeak-ng-data").join("en_dict"), b"x").unwrap();
+    }
 
     #[tokio::test]
     #[ignore = "set TTSBARD_PIPER_TEST_MODEL and TTSBARD_PIPER_TEST_CONFIG to run real inference"]
@@ -1118,8 +1174,94 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "set TTSBARD_ESPEAK_TEST_DATA_PARENT to a parent dir containing espeak-ng-data"]
-    fn espeak_real_phonemization_with_verbatim_resource_dir() {
+    fn resolver_valid_resource_beats_data_root() {
+        let resource = TestDir::new("resource");
+        write_valid_espeak_data(resource.path());
+        let root = TestDir::new("root");
+        write_valid_espeak_data(root.path());
+
+        let selected = resolve_espeak_data_parent(
+            Some(resource.path()),
+            Some(root.path()),
+            None,
+            None,
+        )
+        .expect("a valid resource candidate must be selected");
+
+        assert_eq!(selected.0, EspeakDataSource::Resource);
+        assert_eq!(selected.1, resource.path().to_path_buf());
+    }
+
+    #[test]
+    fn resolver_valid_data_root_selected_when_resource_missing() {
+        let root = TestDir::new("root");
+        write_valid_espeak_data(root.path());
+
+        let selected = resolve_espeak_data_parent(None, Some(root.path()), None, None)
+            .expect("a valid data root candidate must be selected");
+
+        assert_eq!(selected.0, EspeakDataSource::DataRoot);
+        assert_eq!(selected.1, root.path().to_path_buf());
+    }
+
+    #[test]
+    fn resolver_incomplete_data_root_falls_through_to_cwd() {
+        let root = TestDir::new("root-incomplete");
+        std::fs::create_dir_all(root.path().join("espeak-ng-data")).unwrap();
+        let cwd = TestDir::new("cwd");
+        write_valid_espeak_data(cwd.path());
+
+        let selected =
+            resolve_espeak_data_parent(None, Some(root.path()), Some(cwd.path()), None)
+                .expect("cwd candidate must be selected after an incomplete data root");
+
+        assert_eq!(selected.0, EspeakDataSource::Cwd);
+        assert_eq!(selected.1, cwd.path().to_path_buf());
+    }
+
+    #[test]
+    fn resolver_absent_data_root_and_cwd_falls_through_to_exe_dir() {
+        let cwd = TestDir::new("cwd-incomplete");
+        std::fs::create_dir_all(cwd.path().join("espeak-ng-data")).unwrap();
+        let exe = TestDir::new("exe");
+        write_valid_espeak_data(exe.path());
+
+        let selected =
+            resolve_espeak_data_parent(None, None, Some(cwd.path()), Some(exe.path()))
+                .expect("exe candidate must be selected after absent data root and cwd");
+
+        assert_eq!(selected.0, EspeakDataSource::ExeDir);
+        assert_eq!(selected.1, exe.path().to_path_buf());
+    }
+
+    #[test]
+    fn resolver_no_candidate_when_none_usable() {
+        let empty = TestDir::new("empty");
+        assert!(resolve_espeak_data_parent(
+            None,
+            Some(empty.path()),
+            Some(empty.path()),
+            Some(empty.path()),
+        )
+        .is_none());
+        assert!(resolve_espeak_data_parent(None, None, None, None).is_none());
+    }
+
+    #[test]
+    fn resolver_returns_parent_not_data_dir() {
+        let parent = TestDir::new("parent");
+        write_valid_espeak_data(parent.path());
+
+        let selected = resolve_espeak_data_parent(None, Some(parent.path()), None, None)
+            .expect("a valid data root candidate must be selected");
+
+        assert_eq!(selected.1, parent.path().to_path_buf());
+        assert_ne!(selected.1, parent.path().join("espeak-ng-data"));
+    }
+
+    #[test]
+    #[ignore = "set TTSBARD_ESPEAK_TEST_DATA_PARENT to a parent dir containing espeak-ng-data; run alone in a fresh process"]
+    fn espeak_real_phonemization_with_data_root() {
         let parent = env::var("TTSBARD_ESPEAK_TEST_DATA_PARENT").expect(
             "TTSBARD_ESPEAK_TEST_DATA_PARENT must point to a directory containing espeak-ng-data",
         );
@@ -1134,19 +1276,24 @@ mod tests {
         let canonical =
             std::fs::canonicalize(&parent).expect("supplied parent must be canonicalizable");
 
-        LocalModelTts::init_espeak_data(Some(canonical.clone()));
+        // Exercise the data-root branch directly: resource directory is missing.
+        let selected = resolve_espeak_data_parent(None, Some(&canonical), None, None)
+            .expect("supplied parent must be selected as the data-root candidate");
+        assert_eq!(selected.0, EspeakDataSource::DataRoot);
 
-        let exported = env::var("PIPER_ESPEAKNG_DATA_DIRECTORY")
-            .expect("PIPER_ESPEAKNG_DATA_DIRECTORY must be exported after init");
+        // Export via the production normalization path.
+        let normalized = normalize_for_clib(&selected.1);
+        env::set_var("PIPER_ESPEAKNG_DATA_DIRECTORY", &normalized);
 
         #[cfg(windows)]
         {
             assert!(
-                !exported.starts_with(r"\\?\"),
-                "exported data directory must not be a verbatim path: {exported}"
+                !normalized.to_string_lossy().starts_with(r"\\?\"),
+                "exported data directory must not be a verbatim path: {}",
+                normalized.display()
             );
             assert_eq!(
-                exported,
+                normalized.to_string_lossy().into_owned(),
                 normalize_for_clib(&canonical)
                     .to_string_lossy()
                     .into_owned()
