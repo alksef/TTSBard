@@ -431,6 +431,8 @@
     "vtube.disconnect": "Disconnect",
     "vtube.connect": "Connect",
     "vtube.start_on_boot": "Start with the app",
+    "vtube.host": "Host",
+    "vtube.host_error": "Enter an IP address or computer name without scheme, path, or port",
     "vtube.port": "Port",
     "vtube.port_error": "Port must be between 1024 and 65535",
     "vtube.action.title": "Typing action",

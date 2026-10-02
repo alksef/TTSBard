@@ -111,6 +111,7 @@ function mockSettings(): AppSettingsDto {
     },
     vtube_studio: {
       enabled: false,
+      host: '127.0.0.1',
       port: 8001,
       start_on_boot: false,
       typingAction: { outputMode: 'Event', parameterName: 'TTSBardTyping', startHotkeyId: '', stopHotkeyId: '', startHotkeyName: '', stopHotkeyName: '', itemFileName: '', itemType: '' },

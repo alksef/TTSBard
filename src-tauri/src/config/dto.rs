@@ -1493,6 +1493,7 @@ impl From<&crate::config::VTubeStudioTypingAction> for VTubeStudioTypingActionDt
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VTubeStudioSettingsDto {
     pub enabled: bool,
+    pub host: String,
     pub port: u16,
     pub start_on_boot: bool,
     #[serde(rename = "typingAction")]
@@ -1503,6 +1504,7 @@ impl From<crate::config::VTubeStudioSettings> for VTubeStudioSettingsDto {
     fn from(s: crate::config::VTubeStudioSettings) -> Self {
         Self {
             enabled: s.enabled,
+            host: s.host,
             port: s.port,
             start_on_boot: s.start_on_boot,
             typing_action: (&s.typing_action).into(),
@@ -2027,6 +2029,7 @@ mod tests {
 
         let vtube_studio = VTubeStudioSettingsDto {
             enabled: false,
+            host: "127.0.0.1".to_string(),
             port: 8001,
             start_on_boot: false,
             typing_action: VTubeStudioTypingActionDto {
@@ -2414,6 +2417,7 @@ mod tests {
 
         let vtube_studio = VTubeStudioSettingsDto {
             enabled: false,
+            host: "127.0.0.1".to_string(),
             port: 8001,
             start_on_boot: false,
             typing_action: VTubeStudioTypingActionDto {

@@ -1108,12 +1108,17 @@ fn init_vtube_studio(app_state: &AppState, app_handle: AppHandle) {
     let app_state_clone = app_state.clone();
 
     app_state.runtime.spawn(async move {
-        let (port, stored_token) = {
+        let (host, port, stored_token) = {
             let settings = app_state_clone.vtube_studio.settings.read().await;
-            (settings.port, settings.token.clone())
+            (
+                settings.host.clone(),
+                settings.port,
+                settings.token.clone(),
+            )
         };
 
         info!(
+            host = %host,
             port,
             has_token = stored_token.is_some(),
             "VTube Studio: attempting autostart connection"
@@ -1121,7 +1126,7 @@ fn init_vtube_studio(app_state: &AppState, app_handle: AppHandle) {
 
         let result = app_state_clone
             .vtube_studio
-            .connect(port, stored_token.as_deref(), ConnectOrigin::Autostart)
+            .connect(&host, port, stored_token.as_deref(), ConnectOrigin::Autostart)
             .await;
 
         let status = app_state_clone.vtube_studio.get_connection_status();

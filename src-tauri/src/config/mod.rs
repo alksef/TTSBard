@@ -23,7 +23,7 @@ pub use settings::{
     DspLimiterSettings, DspSettings, EditorRoute, HomographAccentorSettings, LoggingSettings,
     MtProxySettings, NetworkSettings, ProxyMode, ProxyType, QuickEditorMode, SettingsManager,
     SpellSource, Theme, TwitchSettings, VTubeStudioSettings, VTubeStudioTypingAction,
-    VTubeStudioTypingMode,
+    VTubeStudioTypingMode, validate_vtube_host,
 };
 pub use validation::{is_valid_hex_color, validate_port};
 pub use windows::{WindowsManager, WindowsSettings};

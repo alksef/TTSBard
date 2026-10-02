@@ -424,6 +424,7 @@
   },
   "vtube_studio": {
     "enabled": false,
+    "host": "127.0.0.1",
     "port": 8001,
     "start_on_boot": false,
     "typingAction": {

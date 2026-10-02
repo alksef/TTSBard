@@ -431,6 +431,8 @@
     "vtube.disconnect": "Отключиться",
     "vtube.connect": "Подключиться",
     "vtube.start_on_boot": "Запускать при старте приложения",
+    "vtube.host": "Адрес",
+    "vtube.host_error": "Введите IP-адрес или имя компьютера без схемы, пути и порта",
     "vtube.port": "Порт",
     "vtube.port_error": "Порт должен быть от 1024 до 65535",
     "vtube.action.title": "Действие при наборе",

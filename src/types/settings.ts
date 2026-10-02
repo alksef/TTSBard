@@ -521,6 +521,8 @@ export interface VtsHotkeyInfoDto {
  */
 export interface VTubeStudioSettingsDto {
   enabled: boolean
+  /** VTS Plugin API server address: IP or computer name, no scheme and no port. */
+  host: string
   port: number
   start_on_boot: boolean
   typingAction: VTubeStudioTypingActionDto

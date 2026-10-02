@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest'
-import { shallowRef } from 'vue'
+import { nextTick, shallowRef } from 'vue'
 import type { VTubeStudioSettingsDto } from '../types/settings'
 
 vi.stubGlobal('window', globalThis)
@@ -76,6 +76,7 @@ function setupBaseMock(settings?: Partial<VTubeStudioSettings>, status?: string)
     if (cmd === 'get_vtube_studio_settings') {
       return {
         enabled: false,
+        host: '127.0.0.1',
         port: 8001,
         start_on_boot: false,
         ...settings,
@@ -105,6 +106,7 @@ describe('useVTubeStudio', () => {
     vi.clearAllMocks()
     mockVtubeSettingsRef.value = {
       enabled: false,
+      host: '127.0.0.1',
       port: 8001,
       start_on_boot: false,
       typingAction: {
@@ -167,6 +169,58 @@ describe('useVTubeStudio', () => {
       await save()
       await flushMicrotasks()
       expect(mockInvoke).not.toHaveBeenCalledWith('save_vtube_studio_settings', expect.anything())
+    })
+  })
+
+  describe('host validation (ROADMAP-120)', () => {
+    it('validateHost accepts IPv4, hostname and clears hostError', async () => {
+      const { settings, validateHost, hostError } = await setupAndMount()
+      for (const ok of ['127.0.0.1', '192.168.1.50', 'DESKTOP-ABC', 'my.pc.local']) {
+        settings.value.host = ok
+        expect(validateHost()).toBe(true)
+        expect(hostError.value).toBeNull()
+      }
+    })
+
+    it('validateHost rejects empty, scheme, path, port and whitespace inside', async () => {
+      const { settings, validateHost, hostError } = await setupAndMount()
+      for (const bad of ['', '   ', 'ws://127.0.0.1', 'pc:8001', 'a/b', 'a\\b', 'two words', '-lead', 'trail-', '.dot', 'double..dot']) {
+        settings.value.host = bad
+        expect(validateHost()).toBe(false)
+        expect(hostError.value).not.toBeNull()
+      }
+    })
+
+    it('validateHost rejects out-of-range IPv4 octets and leading zeros', async () => {
+      const { settings, validateHost } = await setupAndMount()
+      settings.value.host = '999.1.1.1'
+      expect(validateHost()).toBe(false)
+      settings.value.host = '010.1.1.1'
+      expect(validateHost()).toBe(false)
+    })
+
+    it('save does not invoke backend when host is invalid', async () => {
+      const { settings, save } = await setupAndMount({ enabled: true })
+      setupBaseMock()
+      settings.value.host = 'ws://pc:8001'
+      await save()
+      await flushMicrotasks()
+      expect(mockInvoke).not.toHaveBeenCalledWith('save_vtube_studio_settings', expect.anything())
+    })
+
+    it('save sends host in the payload', async () => {
+      const { settings, save } = await setupAndMount({ enabled: true })
+      setupBaseMock()
+      mockInvoke.mockResolvedValue('VTube Studio settings saved')
+      settings.value.host = '192.168.1.50'
+      await save()
+      await flushMicrotasks()
+      expect(mockInvoke).toHaveBeenCalledWith('save_vtube_studio_settings', expect.objectContaining({
+        enabled: true,
+        host: '192.168.1.50',
+        port: 8001,
+        startOnBoot: false,
+      }))
     })
   })
 
@@ -457,7 +511,7 @@ describe('useVTubeStudio', () => {
       setupBaseMock()
       mockInvoke.mockResolvedValue('VTube Studio settings saved')
 
-      settings.value = { enabled: true, port: 9001, start_on_boot: true }
+      settings.value = { enabled: true, host: '127.0.0.1', port: 9001, start_on_boot: true }
       await save()
       await flushMicrotasks()
 
@@ -481,7 +535,7 @@ describe('useVTubeStudio', () => {
         return undefined
       })
 
-      settings.value = { enabled: true, port: 9001, start_on_boot: true }
+      settings.value = { enabled: true, host: '127.0.0.1', port: 9001, start_on_boot: true }
       const p1 = save()
       const p2 = save()
       resolveDelay!()
@@ -494,14 +548,14 @@ describe('useVTubeStudio', () => {
 
   describe('sequential persistence', () => {
     interface QueuedSave {
-      payload: { enabled: boolean; port: number; startOnBoot: boolean }
+      payload: { enabled: boolean; host: string; port: number; startOnBoot: boolean }
       resolve: (value: string) => void
       reject: (reason?: unknown) => void
     }
 
     /** Payload попадает в persisted только в момент успешного resolve. */
     function queuePersistCalls(initial: Partial<VTubeStudioSettings> = {}) {
-      const persisted = { enabled: false, port: 8001, start_on_boot: false, ...initial }
+      const persisted = { enabled: false, host: '127.0.0.1', port: 8001, start_on_boot: false, ...initial }
       const saves: QueuedSave[] = []
       mockInvoke.mockImplementation((cmd: string, args?: unknown) => {
         if (cmd === 'save_vtube_studio_settings') {
@@ -511,6 +565,7 @@ describe('useVTubeStudio', () => {
               payload,
               resolve: (value: string) => {
                 persisted.enabled = payload.enabled
+                persisted.host = payload.host
                 persisted.port = payload.port
                 persisted.start_on_boot = payload.startOnBoot
                 resolve(value)
@@ -703,6 +758,87 @@ describe('useVTubeStudio', () => {
 
       expect(settings.value.port).toBe(9001)
       expect(errorMessage.value).toBe('Не удалось сохранить настройки VTube Studio')
+    })
+
+    it('normalizes host despite a settings echo during persistence and rolls back to the normalized baseline', async () => {
+      const { settings, save } = await setupAndMount({ enabled: true })
+      const { saves } = queuePersistCalls({ enabled: true })
+      settings.value.host = ' 192.168.1.50 '
+      const first = save()
+      await vi.waitFor(() => expect(saves).toHaveLength(1))
+      expect(saves[0].payload.host).toBe('192.168.1.50')
+      mockVtubeSettingsRef.value = {
+        enabled: true, host: '192.168.1.50', port: 8001, start_on_boot: false,
+        typingAction: {
+          outputMode: 'Event', parameterName: 'TTSBardTyping',
+          startHotkeyId: '', stopHotkeyId: '', startHotkeyName: '', stopHotkeyName: '',
+          itemFileName: '', itemType: '',
+        },
+      }
+      await nextTick()
+      saves[0].resolve('saved')
+      await first
+      expect(saves).toHaveLength(1)
+      expect(settings.value.host).toBe('192.168.1.50')
+      settings.value.host = 'other-pc'
+      const second = save()
+      await vi.waitFor(() => expect(saves).toHaveLength(2))
+      saves[1].reject('backend down')
+      await second
+      expect(settings.value.host).toBe('192.168.1.50')
+    })
+
+    it('preserves and persists a newer host edit during normalization', async () => {
+      const { settings, save } = await setupAndMount({ enabled: true })
+      const { saves } = queuePersistCalls({ enabled: true })
+      settings.value.host = ' 192.168.1.50 '
+      const button = save()
+      await vi.waitFor(() => expect(saves).toHaveLength(1))
+      settings.value.host = ' stream-pc '
+      saves[0].resolve('saved')
+      await vi.waitFor(() => expect(saves).toHaveLength(2))
+      expect(settings.value.host).toBe(' stream-pc ')
+      expect(saves[1].payload.host).toBe('stream-pc')
+      saves[1].resolve('saved')
+      await button
+      expect(settings.value.host).toBe('stream-pc')
+    })
+
+    it('rolls back only the host after a failed save that included it', async () => {
+      const { settings, save, hostError, errorMessage } = await setupAndMount({ enabled: true })
+      const { saves } = queuePersistCalls({ enabled: true })
+
+      settings.value.host = '192.168.1.50'
+      const button = save()
+      await vi.waitFor(() => expect(saves).toHaveLength(1))
+      expect(saves[0].payload.host).toBe('192.168.1.50')
+
+      saves[0].reject('backend down')
+      await button
+
+      expect(settings.value.host).toBe('127.0.0.1')
+      expect(hostError.value).toBeNull()
+      expect(errorMessage.value).toBe('Не удалось сохранить настройки VTube Studio')
+    })
+
+    it('does not send an invalid intermediate host edited during a running save', async () => {
+      const { settings, saveStartOnBoot, hostError } = await setupAndMount({ enabled: false })
+      const { saves } = queuePersistCalls({ enabled: false })
+
+      settings.value.start_on_boot = true
+      const checkbox = saveStartOnBoot()
+      await vi.waitFor(() => expect(saves).toHaveLength(1))
+
+      settings.value.host = 'not a host'
+      saves[0].resolve('saved')
+      await checkbox
+
+      // Невалидный промежуточный адрес не отправляется: вторая запись не
+      // выполняется, поле остаётся с подсказкой об ошибке.
+      expect(saves).toHaveLength(1)
+      expect(saves[0].payload.host).toBe('127.0.0.1')
+      expect(settings.value.host).toBe('not a host')
+      expect(hostError.value).toBeNull()
     })
   })
 
@@ -972,8 +1108,9 @@ describe('useVTubeStudio', () => {
 
   describe('settings loading', () => {
     it('loadSettings updates settings from backend', async () => {
-      const { settings } = await setupAndMount({ enabled: true, port: 9001, start_on_boot: true })
+      const { settings } = await setupAndMount({ enabled: true, host: '192.168.1.50', port: 9001, start_on_boot: true })
       expect(settings.value.enabled).toBe(true)
+      expect(settings.value.host).toBe('192.168.1.50')
       expect(settings.value.port).toBe(9001)
       expect(settings.value.start_on_boot).toBe(true)
     })
@@ -1080,7 +1217,7 @@ describe('useVTubeStudio', () => {
   describe('shared settings typing action sync', () => {
     it('applies typingAction from shared settings via immediate watcher', async () => {
       mockVtubeSettingsRef.value = {
-        enabled: false, port: 8001, start_on_boot: false,
+        enabled: false, host: '127.0.0.1', port: 8001, start_on_boot: false,
         typingAction: {
           outputMode: 'Event', parameterName: 'TTSBardTyping2',
           startHotkeyId: '', stopHotkeyId: '', startHotkeyName: '', stopHotkeyName: '',
@@ -1099,7 +1236,7 @@ describe('useVTubeStudio', () => {
 
     it('applies full typing action (Hotkeys mode, saved hotkeys) from shared settings', async () => {
       mockVtubeSettingsRef.value = {
-        enabled: false, port: 8001, start_on_boot: false,
+        enabled: false, host: '127.0.0.1', port: 8001, start_on_boot: false,
         typingAction: {
           outputMode: 'Hotkeys', parameterName: 'TTSBardTyping2',
           startHotkeyId: 'hkA', stopHotkeyId: 'hkB',
@@ -1152,7 +1289,7 @@ describe('useVTubeStudio', () => {
       const loadPromise = composable.loadSettings()
 
       mockVtubeSettingsRef.value = {
-        enabled: false, port: 8001, start_on_boot: false,
+        enabled: false, host: '127.0.0.1', port: 8001, start_on_boot: false,
         typingAction: {
           outputMode: 'Event', parameterName: 'TTSBardTyping2',
           startHotkeyId: '', stopHotkeyId: '', startHotkeyName: '', stopHotkeyName: '',
@@ -1165,7 +1302,7 @@ describe('useVTubeStudio', () => {
       expect(composable.savedTypingAction.value.parameterName).toBe('TTSBardTyping2')
 
       resolveLoad!({
-        enabled: false, port: 8001, start_on_boot: false,
+        enabled: false, host: '127.0.0.1', port: 8001, start_on_boot: false,
         typingAction: {
           outputMode: 'Event', parameterName: 'TTSBardTyping_old',
           startHotkeyId: '', stopHotkeyId: '', startHotkeyName: '', stopHotkeyName: '',
@@ -1181,7 +1318,7 @@ describe('useVTubeStudio', () => {
 
     it('onMounted loadSettings preserves shared settings order (watch before onMounted)', async () => {
       mockVtubeSettingsRef.value = {
-        enabled: false, port: 8001, start_on_boot: false,
+        enabled: false, host: '127.0.0.1', port: 8001, start_on_boot: false,
         typingAction: {
           outputMode: 'Event', parameterName: 'TTSBardTyping2',
           startHotkeyId: '', stopHotkeyId: '', startHotkeyName: '', stopHotkeyName: '',

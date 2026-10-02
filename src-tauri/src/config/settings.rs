@@ -861,6 +861,62 @@ fn default_vtube_port() -> u16 {
     8001
 }
 
+fn default_vtube_host() -> String {
+    "127.0.0.1".to_string()
+}
+
+/// Проверяет адрес сервера VTube Studio Plugin API: IPv4 или имя компьютера
+/// (включая mDNS-суффикс `.local`) без схемы, пути и порта. Порт задаётся
+/// отдельным полем. IPv6 не поддерживается: `:` зарезервирован разделителем
+/// порта в `ws://host:port`.
+pub fn validate_vtube_host(host: &str) -> Result<(), String> {
+    let host = host.trim();
+    if host.is_empty() {
+        return Err("Host must not be empty".to_string());
+    }
+    if host.len() > 253 {
+        return Err("Host is too long (max 253 characters)".to_string());
+    }
+    if host.contains("://")
+        || host.contains('/')
+        || host.contains('\\')
+        || host.contains(':')
+        || host.contains(char::is_whitespace)
+    {
+        return Err(format!(
+            "Invalid host '{}': use an IP address or computer name without scheme, path, or port",
+            host
+        ));
+    }
+    if host.parse::<std::net::Ipv4Addr>().is_ok() {
+        return Ok(());
+    }
+    let labels: Vec<_> = host.split('.').collect();
+    if labels.len() == 4
+        && labels.iter().all(|label| {
+            !label.is_empty() && label.len() <= 3 && label.bytes().all(|c| c.is_ascii_digit())
+        })
+    {
+        return Err("Invalid IPv4 address".to_string());
+    }
+    let invalid_label = |label: &str| {
+        label.is_empty()
+            || label.len() > 63
+            || !label
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-')
+            || label.starts_with('-')
+            || label.ends_with('-')
+    };
+    if host.split('.').any(invalid_label) {
+        return Err(format!(
+            "Invalid host '{}': use an IPv4 address or a computer name (letters, digits, hyphens, dots)",
+            host
+        ));
+    }
+    Ok(())
+}
+
 /// VTube Studio typing output mode
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum VTubeStudioTypingMode {
@@ -906,6 +962,10 @@ impl Default for VTubeStudioTypingAction {
 pub struct VTubeStudioSettings {
     #[serde(default)]
     pub enabled: bool,
+    /// Адрес сервера Plugin API: IP или имя компьютера. Старые настройки без
+    /// этого поля загружаются как `127.0.0.1` (ROADMAP-120).
+    #[serde(default = "default_vtube_host")]
+    pub host: String,
     #[serde(default = "default_vtube_port")]
     pub port: u16,
     #[serde(default)]
@@ -920,6 +980,7 @@ impl Default for VTubeStudioSettings {
     fn default() -> Self {
         Self {
             enabled: false,
+            host: default_vtube_host(),
             port: default_vtube_port(),
             token: None,
             start_on_boot: false,
@@ -5367,17 +5428,37 @@ mod tests {
         let settings: AppSettings = serde_json::from_str(old_json)
             .expect("old AppSettings (without vtube_studio field) must deserialize");
         assert!(!settings.vtube_studio.enabled);
+        assert_eq!(settings.vtube_studio.host, "127.0.0.1");
         assert_eq!(settings.vtube_studio.port, 8001);
         assert!(settings.vtube_studio.token.is_none());
         assert!(!settings.vtube_studio.start_on_boot);
     }
 
-    /// VTubeStudioSettings defaults: disabled, port 8001, no token, start_on_boot false,
-    /// typing mode Event, param name TTSBardTyping, empty hotkey IDs, empty item metadata.
+    /// Backward-compat (ROADMAP-120): old settings.json where vtube_studio exists
+    /// but has no `host` field must load host as 127.0.0.1.
+    #[test]
+    fn vtube_studio_settings_without_host_field_defaults_to_localhost() {
+        let old_json = r#"{
+            "enabled": true,
+            "port": 8001,
+            "token": null,
+            "start_on_boot": false
+        }"#;
+        let settings: VTubeStudioSettings = serde_json::from_str(old_json)
+            .expect("old VTubeStudioSettings (without host field) must deserialize");
+        assert!(settings.enabled);
+        assert_eq!(settings.host, "127.0.0.1");
+        assert_eq!(settings.port, 8001);
+    }
+
+    /// VTubeStudioSettings defaults: disabled, host 127.0.0.1, port 8001, no token,
+    /// start_on_boot false, typing mode Event, param name TTSBardTyping, empty
+    /// hotkey IDs, empty item metadata.
     #[test]
     fn vtube_studio_settings_defaults() {
         let s = VTubeStudioSettings::default();
         assert!(!s.enabled);
+        assert_eq!(s.host, "127.0.0.1");
         assert_eq!(s.port, 8001);
         assert!(s.token.is_none());
         assert!(!s.start_on_boot);
@@ -5394,6 +5475,7 @@ mod tests {
     fn vtube_studio_settings_token_round_trip() {
         let original = VTubeStudioSettings {
             enabled: true,
+            host: "192.168.1.50".to_string(),
             port: 8002,
             token: Some("secret-token".to_string()),
             start_on_boot: true,
@@ -5413,6 +5495,7 @@ mod tests {
         assert!(json.contains("secret-token"));
         let back: VTubeStudioSettings = serde_json::from_str(&json).unwrap();
         assert!(back.enabled);
+        assert_eq!(back.host, "192.168.1.50");
         assert_eq!(back.port, 8002);
         assert_eq!(back.token.as_deref(), Some("secret-token"));
         assert!(back.start_on_boot);
@@ -5425,6 +5508,59 @@ mod tests {
         assert_eq!(back.typing_action.stop_hotkey_id, "hotkey-stop-1");
         assert_eq!(back.typing_action.start_hotkey_name, "Start");
         assert_eq!(back.typing_action.stop_hotkey_name, "Stop");
+    }
+
+    /// Host validation (ROADMAP-120): IPv4 and hostnames are accepted; schemes,
+    /// paths, ports, whitespace and malformed labels are rejected.
+    #[test]
+    fn validate_vtube_host_accepts_ipv4_and_hostnames() {
+        for ok in [
+            "127.0.0.1",
+            "192.168.1.50",
+            "0.0.0.0",
+            "DESKTOP-ABC123",
+            "stream-pc",
+            "my.pc.local",
+            "a.b",
+        ] {
+            assert!(
+                validate_vtube_host(ok).is_ok(),
+                "expected '{ok}' to be a valid host"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_vtube_host_rejects_scheme_path_port_and_bad_labels() {
+        for bad in [
+            "999.1.1.1",
+            "192.168.001.50",
+            "",
+            "   ",
+            "ws://127.0.0.1",
+            "http://pc:8001",
+            "192.168.1.50:8001",
+            "127.0.0.1/",
+            "127.0.0.1\\",
+            "two words",
+            "-leading",
+            "trailing-",
+            ".dot",
+            "dot.",
+            "double..dot",
+            "-",
+            "very-long-label-that-exceeds-sixty-three-characters-aaaaaaaaaaaaaaaaa",
+        ] {
+            assert!(
+                validate_vtube_host(bad).is_err(),
+                "expected '{bad}' to be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_vtube_host_trims_surrounding_whitespace() {
+        assert!(validate_vtube_host("  127.0.0.1  ").is_ok());
     }
 
     /// VTubeStudioTypingMode is serialized as Event/Hotkeys/Item.

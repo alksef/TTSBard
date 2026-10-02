@@ -1,6 +1,6 @@
 use crate::config::{
-    SettingsManager, VTubeStudioSettings, VTubeStudioSettingsDto, VTubeStudioTypingAction,
-    VTubeStudioTypingMode, VtsHotkeyInfoDto,
+    validate_vtube_host, SettingsManager, VTubeStudioSettings, VTubeStudioSettingsDto,
+    VTubeStudioTypingAction, VTubeStudioTypingMode, VtsHotkeyInfoDto,
 };
 use crate::events::VTubeStudioConnectionStatus;
 use crate::state::AppState;
@@ -97,6 +97,7 @@ pub async fn get_vtube_studio_settings(
 #[tauri::command]
 pub async fn save_vtube_studio_settings(
     enabled: bool,
+    host: String,
     port: u16,
     start_on_boot: bool,
     state: State<'_, AppState>,
@@ -105,16 +106,17 @@ pub async fn save_vtube_studio_settings(
     if port < 1024 {
         return Err(format!("Invalid port: {}. Must be 1024-65535.", port));
     }
+    let host = host.trim().to_string();
+    validate_vtube_host(&host)?;
 
-    info!(enabled, port, start_on_boot, "Saving VTube Studio settings");
+    info!(enabled, host = %host, port, start_on_boot, "Saving VTube Studio settings");
 
-    let old_port;
-    {
+    let (old_host, old_port) = {
         let current = state.vtube_studio.settings.read().await;
-        old_port = current.port;
-    }
+        (current.host.clone(), current.port)
+    };
 
-    let endpoint_changed = old_port != port;
+    let endpoint_changed = old_host != host || old_port != port;
 
     let settings_manager = app_handle
         .try_state::<SettingsManager>()
@@ -127,6 +129,7 @@ pub async fn save_vtube_studio_settings(
 
     let persist_settings = VTubeStudioSettings {
         enabled,
+        host: host.clone(),
         port,
         token: token.clone(),
         start_on_boot,
@@ -142,6 +145,7 @@ pub async fn save_vtube_studio_settings(
     {
         let mut s = state.vtube_studio.settings.write().await;
         s.enabled = enabled;
+        s.host = host;
         s.port = port;
         s.start_on_boot = start_on_boot;
     }
@@ -154,7 +158,7 @@ pub async fn save_vtube_studio_settings(
         emit_vts_status(&app_handle, &status);
         let item_status = state.vtube_studio.get_item_status();
         emit_vts_item_status(&app_handle, &item_status);
-        info!("VTube Studio connection cleared due to port change");
+        info!("VTube Studio connection cleared due to endpoint change");
     }
 
     Ok("Настройки подключения VTube Studio сохранены".to_string())
@@ -250,6 +254,7 @@ pub async fn save_vtube_studio_typing_action(
         existing_file_name,
         existing_item_type,
         enabled,
+        host,
         port,
         token,
         start_on_boot,
@@ -261,6 +266,7 @@ pub async fn save_vtube_studio_typing_action(
             s.typing_action.item_file_name.clone(),
             s.typing_action.item_type.clone(),
             s.enabled,
+            s.host.clone(),
             s.port,
             s.token.clone(),
             s.start_on_boot,
@@ -299,6 +305,7 @@ pub async fn save_vtube_studio_typing_action(
         settings_manager: settings_manager.inner(),
         app_handle: &app_handle,
         enabled,
+        host,
         port,
         token,
         start_on_boot,
@@ -378,6 +385,7 @@ struct LiveTypingActionSaveOperations<'a> {
     settings_manager: &'a SettingsManager,
     app_handle: &'a AppHandle,
     enabled: bool,
+    host: String,
     port: u16,
     token: Option<String>,
     start_on_boot: bool,
@@ -407,6 +415,7 @@ impl TypingActionSaveOperations for LiveTypingActionSaveOperations<'_> {
     async fn persist_action(&self, action: &VTubeStudioTypingAction) -> Result<(), String> {
         let persist_settings = VTubeStudioSettings {
             enabled: self.enabled,
+            host: self.host.clone(),
             port: self.port,
             token: self.token.clone(),
             start_on_boot: self.start_on_boot,
@@ -581,12 +590,13 @@ pub async fn test_vtube_studio_connection(
     let settings_manager = app_handle
         .try_state::<SettingsManager>()
         .ok_or_else(|| "SettingsManager not available".to_string())?;
-    let (port, stored_token) = {
+    let (host, port, stored_token) = {
         let settings = state.vtube_studio.settings.read().await;
-        (settings.port, settings.token.clone())
+        (settings.host.clone(), settings.port, settings.token.clone())
     };
 
     info!(
+        host = %host,
         port,
         has_token = stored_token.is_some(),
         "Testing VTube Studio connection"
@@ -594,7 +604,7 @@ pub async fn test_vtube_studio_connection(
 
     let result = state
         .vtube_studio
-        .test_connection(port, stored_token.as_deref())
+        .test_connection(&host, port, stored_token.as_deref())
         .await;
 
     match result {
@@ -638,12 +648,13 @@ pub async fn connect_vtube_studio(
     let settings_manager = app_handle
         .try_state::<SettingsManager>()
         .ok_or_else(|| "SettingsManager not available".to_string())?;
-    let (port, stored_token) = {
+    let (host, port, stored_token) = {
         let settings = state.vtube_studio.settings.read().await;
-        (settings.port, settings.token.clone())
+        (settings.host.clone(), settings.port, settings.token.clone())
     };
 
     info!(
+        host = %host,
         port,
         has_token = stored_token.is_some(),
         "Connect VTube Studio"
@@ -651,7 +662,7 @@ pub async fn connect_vtube_studio(
 
     let result = state
         .vtube_studio
-        .connect(port, stored_token.as_deref(), ConnectOrigin::Manual)
+        .connect(&host, port, stored_token.as_deref(), ConnectOrigin::Manual)
         .await;
 
     match result {
@@ -706,14 +717,14 @@ pub async fn restart_vtube_studio(
 
     state.vtube_studio.disconnect().await;
 
-    let (port, stored_token) = {
+    let (host, port, stored_token) = {
         let settings = state.vtube_studio.settings.read().await;
-        (settings.port, settings.token.clone())
+        (settings.host.clone(), settings.port, settings.token.clone())
     };
 
     let result = state
         .vtube_studio
-        .connect(port, stored_token.as_deref(), ConnectOrigin::Manual)
+        .connect(&host, port, stored_token.as_deref(), ConnectOrigin::Manual)
         .await;
 
     match result {
@@ -796,9 +807,9 @@ pub async fn set_vtube_studio_typing(
     state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
-    let (port, token) = {
+    let (host, port, token) = {
         let settings = state.vtube_studio.settings.read().await;
-        (settings.port, settings.token.clone())
+        (settings.host.clone(), settings.port, settings.token.clone())
     };
 
     let mode = state
@@ -843,7 +854,7 @@ pub async fn set_vtube_studio_typing(
     debug!(typing, "VTS: set_vtube_studio_typing");
     let result = state
         .vtube_studio
-        .set_typing(typing, port, stored_token)
+        .set_typing(typing, &host, port, stored_token)
         .await;
 
     let status_after = state.vtube_studio.get_connection_status();

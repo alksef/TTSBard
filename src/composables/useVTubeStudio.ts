@@ -43,12 +43,14 @@ type RustVTubeStatus = RustEnumDisconnected | RustEnumConnecting | RustEnumConne
 
 export interface VTubeStudioSettings {
   enabled: boolean
+  host: string
   port: number
   start_on_boot: boolean
 }
 
 const VTUBE_SETTINGS_FIELDS: Array<keyof VTubeStudioSettings> = [
   'enabled',
+  'host',
   'port',
   'start_on_boot',
 ]
@@ -121,6 +123,7 @@ export function useVTubeStudio() {
 
   const settings = ref<VTubeStudioSettings>({
     enabled: false,
+    host: '127.0.0.1',
     port: 8001,
     start_on_boot: false,
   })
@@ -128,6 +131,7 @@ export function useVTubeStudio() {
   const errorMessage = ref<string | null>(null)
   const errorMessageType = ref<UiMessageKind>('info')
   const portError = ref<string | null>(null)
+  const hostError = ref<string | null>(null)
   let errorTimeout: number | null = null
   const currentStatus = ref<VTubeStatus>('Disconnected')
   const listenerScope = createAsyncCleanupScope()
@@ -143,7 +147,7 @@ export function useVTubeStudio() {
   // правками, а не внутренними rollback/echo/baseline-записями. При ошибке
   // persist откатываются только поля, чья ревизия не продвинулась после
   // отправки упавшего payload; поздние правки (включая A->B->A) остаются.
-  const editRevisions: FieldRevisions = { enabled: 0, port: 0, start_on_boot: 0 }
+  const editRevisions: FieldRevisions = { enabled: 0, host: 0, port: 0, start_on_boot: 0 }
   let internalSettingsWrite = false
   let lastObservedSettings: VTubeStudioSettings = settingsSnapshot()
 
@@ -281,6 +285,30 @@ export function useVTubeStudio() {
     return Number.isFinite(port) && port >= 1024 && port <= 65535 && Number.isInteger(port)
   }
 
+  /**
+   * Mirrors the backend `validate_vtube_host`: IPv4 or computer name without
+   * scheme, path, port or whitespace. IPv6 is rejected because `:` is the
+   * port separator in `ws://host:port`.
+   */
+  function isValidHost(host: string): boolean {
+    const value = host.trim()
+    if (value.length === 0 || value.length > 253) return false
+    if (value.includes('://') || value.includes('/') || value.includes('\\') || value.includes(':')) return false
+    if (/\s/.test(value)) return false
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) {
+      // Rust Ipv4Addr::from_str rejects leading zeros, so must the UI check.
+      return value.split('.').every(octet => {
+        if (octet.length > 1 && octet.startsWith('0')) return false
+        const n = Number(octet)
+        return n >= 0 && n <= 255
+      })
+    }
+    return value.split('.').every(label =>
+      label.length > 0 && label.length <= 63
+      && /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$/.test(label),
+    )
+  }
+
   function validatePort(): boolean {
     const raw = settings.value.port
     if (!isValidPort(raw)) {
@@ -288,6 +316,16 @@ export function useVTubeStudio() {
       return false
     }
     portError.value = null
+    return true
+  }
+
+  function validateHost(): boolean {
+    const raw = settings.value.host
+    if (!isValidHost(raw)) {
+      hostError.value = t('vtube.host_error')
+      return false
+    }
+    hostError.value = null
     return true
   }
 
@@ -337,7 +375,7 @@ export function useVTubeStudio() {
       const data = await invoke<VTubeStudioSettings & { typingAction?: TypingActionDraft }>('get_vtube_studio_settings')
       if (gen !== loadSettingsGeneration) return
       internalSettingsWrite = true
-      settings.value = { enabled: data.enabled, port: data.port, start_on_boot: data.start_on_boot }
+      settings.value = { enabled: data.enabled, host: data.host, port: data.port, start_on_boot: data.start_on_boot }
       internalSettingsWrite = false
       // Прочитанное persisted-состояние — это подтверждённый baseline, из
       // которого берётся откат при ошибке записи.
@@ -384,7 +422,7 @@ export function useVTubeStudio() {
 
   function settingsSnapshot(): VTubeStudioSettings {
     const current = settings.value
-    return { enabled: current.enabled, port: current.port, start_on_boot: current.start_on_boot }
+    return { enabled: current.enabled, host: current.host, port: current.port, start_on_boot: current.start_on_boot }
   }
 
   function settingsEqual(a: VTubeStudioSettings, b: VTubeStudioSettings): boolean {
@@ -392,7 +430,7 @@ export function useVTubeStudio() {
   }
 
   function persistVTubeSettings(payload: VTubeStudioSettings): Promise<string> {
-    const args = { enabled: payload.enabled, port: payload.port, startOnBoot: payload.start_on_boot }
+    const args = { enabled: payload.enabled, host: payload.host, port: payload.port, startOnBoot: payload.start_on_boot }
     const previous = persistTail
     // Свободная очередь пишет сразу, занятая — откладывает следующую запись.
     const write = previous
@@ -435,6 +473,7 @@ export function useVTubeStudio() {
     // времени отправки упавшей записи, а не к моменту присоединения caller'а.
     let submittedRevisions = captureEditRevisions()
     while (true) {
+      payload.host = payload.host.trim()
       try {
         lastResult = await persistVTubeSettings(payload)
       } catch (e) {
@@ -445,10 +484,16 @@ export function useVTubeStudio() {
       // Начатая backend-запись учитывается независимо от staleness: baseline —
       // это то, что реально лежит в persisted-настройках.
       persistedSettings = { ...payload }
+      // Нормализация подтверждённого адреса не должна затирать позднюю правку.
+      if (editRevisions.host === submittedRevisions.host) {
+        internalSettingsWrite = true
+        settings.value.host = payload.host
+        internalSettingsWrite = false
+      }
       if (settingsEqual(settings.value, payload)) return { ok: true, result: lastResult }
       // Правка во время await уходит в следующую запись; невалидный
-      // промежуточный порт не отправляется и остаётся в поле с подсказкой.
-      if (!isValidPort(settings.value.port)) return { ok: true, result: lastResult }
+      // промежуточный адрес или порт не отправляется и остаётся в поле с подсказкой.
+      if (!isValidPort(settings.value.port) || !isValidHost(settings.value.host)) return { ok: true, result: lastResult }
       payload = settingsSnapshot()
       submittedRevisions = captureEditRevisions()
     }
@@ -456,7 +501,7 @@ export function useVTubeStudio() {
 
   async function save() {
     if (busy.value) return
-    if (!validatePort()) return
+    if (!validatePort() || !validateHost()) return
     const gen = startOperation()
     try {
       const outcome = await requestPersist()
@@ -722,6 +767,7 @@ export function useVTubeStudio() {
       internalSettingsWrite = true
       settings.value = {
         enabled: newSettings.enabled,
+        host: newSettings.host,
         port: newSettings.port,
         start_on_boot: newSettings.start_on_boot,
       }
@@ -743,6 +789,7 @@ export function useVTubeStudio() {
     errorMessage,
     errorMessageType,
     portError,
+    hostError,
     currentStatus,
     busy,
     typingTimeout,
@@ -793,6 +840,8 @@ export function useVTubeStudio() {
     restartVTubeStudio,
     saveStartOnBoot,
     validatePort,
+    validateHost,
+    isValidHost,
     showError,
     loadSettings,
     loadStatus,

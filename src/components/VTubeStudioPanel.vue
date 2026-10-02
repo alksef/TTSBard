@@ -8,6 +8,7 @@ const {
   errorMessage,
   errorMessageType,
   portError,
+  hostError,
   currentStatus,
   busy,
   typingTimeout,
@@ -95,23 +96,32 @@ const {
       </div>
 
       <div class="setting-row port-setting-row">
+        <label>{{ t('vtube.host') }}</label>
+        <input
+          type="text"
+          v-model="settings.host"
+          class="text-input endpoint-input endpoint-input-host"
+          :class="{ 'text-input-error': hostError }"
+          spellcheck="false"
+          autocomplete="off"
+          placeholder="127.0.0.1"
+        />
         <label>{{ t('vtube.port') }}</label>
-        <div class="address-inputs">
-          <input
-            type="number"
-            v-model.number="settings.port"
-            class="text-input port-input"
-            :class="{ 'text-input-error': portError }"
-            :min="1024"
-            :max="65535"
-            placeholder="8001"
-          />
-          <button @click="save" class="save-button-inline" :disabled="busy" :class="{ disabled: busy }">
-            {{ t('common.save') }}
-          </button>
-        </div>
+        <input
+          type="number"
+          v-model.number="settings.port"
+          class="text-input endpoint-input endpoint-input-port"
+          :class="{ 'text-input-error': portError }"
+          :min="1024"
+          :max="65535"
+          placeholder="8001"
+        />
+        <button @click="save" class="save-button-inline" :disabled="busy" :class="{ disabled: busy }">
+          {{ t('common.save') }}
+        </button>
       </div>
-      <div v-if="portError" class="port-error">{{ portError }}</div>
+      <div v-if="hostError" class="port-error endpoint-error">{{ hostError }}</div>
+      <div v-if="portError" class="port-error endpoint-error">{{ portError }}</div>
     </section>
 
     <section class="settings-section">
@@ -556,16 +566,40 @@ h2 {
   max-width: 130px;
 }
 
-.port-setting-row .port-input {
-  flex: 0 0 100px;
+.port-setting-row {
+  flex-wrap: wrap;
+}
+
+/* Адрес/порт подключения — эталон: строка SOCKS5/MTProxy в SettingsNetwork
+   (.form-row, .network-input-host, .network-input-port). */
+.endpoint-input {
+  flex: 0 1 auto;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  min-width: 0;
+  transition: all 0.15s ease;
+  box-sizing: border-box;
+}
+
+.endpoint-input:hover {
+  background: var(--color-bg-field-hover);
+  border-color: var(--color-border-strong);
+}
+
+.endpoint-input-host {
+  width: 150px;
+  max-width: 150px;
+}
+
+.endpoint-input-port {
+  width: 100px;
   max-width: 100px;
 }
 
-.address-inputs {
-  display: flex;
-  gap: 8px;
-  min-width: 0;
-  flex-wrap: wrap;
+.endpoint-error {
+  padding-left: 82px;
 }
 
 .test-parameters-row {
@@ -854,10 +888,18 @@ select.text-input {
     max-width: 140px;
   }
 
-  .address-inputs .port-input {
-    flex-basis: 100px;
+  .endpoint-input-host {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .endpoint-input-port {
     width: 100px;
     max-width: 100px;
+  }
+
+  .endpoint-error {
+    padding-left: 0;
   }
 
   .status-indicator {

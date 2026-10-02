@@ -796,6 +796,7 @@ impl VTubeStudioService {
 
     pub async fn test_connection(
         &self,
+        host: &str,
         port: u16,
         stored_token: Option<&str>,
     ) -> Result<Option<String>, String> {
@@ -806,7 +807,7 @@ impl VTubeStudioService {
         self.stop_actor_locked(&mut inner);
         inner.typing_active = false;
 
-        let mut ws = match connect_ws(port).await {
+        let mut ws = match connect_ws(host, port).await {
             Ok(ws) => ws,
             Err(e) => {
                 self.is_authenticated.store(false, Ordering::SeqCst);
@@ -825,7 +826,7 @@ impl VTubeStudioService {
         };
 
         if let Some(ref token) = new_token {
-            ws = match connect_and_auth_fresh(port, token).await {
+            ws = match connect_and_auth_fresh(host, port, token).await {
                 Ok(fresh_ws) => fresh_ws,
                 Err(e) => {
                     self.is_authenticated.store(false, Ordering::SeqCst);
@@ -846,6 +847,7 @@ impl VTubeStudioService {
 
     pub async fn connect(
         &self,
+        host: &str,
         port: u16,
         stored_token: Option<&str>,
         origin: ConnectOrigin,
@@ -864,7 +866,7 @@ impl VTubeStudioService {
         inner.typing_active = false;
         inner.resolved_item = None;
 
-        let ws_result = connect_ws(port).await;
+        let ws_result = connect_ws(host, port).await;
         let mut ws = match ws_result {
             Ok(ws) => ws,
             Err(e) => {
@@ -895,7 +897,7 @@ impl VTubeStudioService {
         };
 
         if let Some(ref token) = new_token {
-            ws = match connect_and_auth_fresh(port, token).await {
+            ws = match connect_and_auth_fresh(host, port, token).await {
                 Ok(fresh_ws) => fresh_ws,
                 Err(e) => {
                     self.is_authenticated.store(false, Ordering::SeqCst);
@@ -955,6 +957,7 @@ impl VTubeStudioService {
     pub async fn set_typing(
         self: &Arc<Self>,
         typing: bool,
+        host: &str,
         port: u16,
         stored_token: &str,
     ) -> Result<(), String> {
@@ -1009,7 +1012,7 @@ impl VTubeStudioService {
             self.stop_heartbeat_locked(&mut inner);
             self.set_connection_status(VTubeStudioConnectionStatus::Connecting);
 
-            let mut ws = match connect_ws(port).await {
+            let mut ws = match connect_ws(host, port).await {
                 Ok(ws) => ws,
                 Err(e) => {
                     debug!(error = %e, "VTS connect for typing=true failed");
@@ -2123,8 +2126,8 @@ async fn actor_transport_failure(
     }
 }
 
-async fn connect_ws(port: u16) -> Result<WsStream, String> {
-    let url = format!("ws://127.0.0.1:{}", port);
+async fn connect_ws(host: &str, port: u16) -> Result<WsStream, String> {
+    let url = format!("ws://{}:{}", host, port);
     info!(%url, "Connecting to VTube Studio");
 
     let (ws, _resp) = timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(&url))
@@ -2139,10 +2142,10 @@ async fn connect_ws(port: u16) -> Result<WsStream, String> {
     Ok(ws)
 }
 
-async fn connect_and_auth_fresh(port: u16, token: &str) -> Result<WsStream, String> {
+async fn connect_and_auth_fresh(host: &str, port: u16, token: &str) -> Result<WsStream, String> {
     info!("Establishing fresh socket for new-token session");
     let id = uuid::Uuid::new_v4().to_string();
-    let mut ws = connect_ws(port)
+    let mut ws = connect_ws(host, port)
         .await
         .map_err(|e| format!("Fresh-connect after token issuance failed: {}", e))?;
     match perform_authentication(&mut ws, id, Some(token)).await {
@@ -2673,6 +2676,7 @@ mod tests {
         rt.block_on(async {
             let settings = svc.settings.read().await;
             assert!(!settings.enabled);
+            assert_eq!(settings.host, "127.0.0.1");
             assert_eq!(settings.port, 8001);
             assert!(settings.token.is_none());
             assert_eq!(
@@ -2739,7 +2743,7 @@ mod tests {
             .unwrap();
         let svc = Arc::new(VTubeStudioService::new());
         rt.block_on(async {
-            let result = svc.set_typing(false, 8001, "").await;
+            let result = svc.set_typing(false, "127.0.0.1", 8001, "").await;
             assert!(result.is_ok());
             let inner = svc.inner.lock().await;
             assert!(!inner.typing_active);
@@ -2755,7 +2759,7 @@ mod tests {
         let svc = Arc::new(VTubeStudioService::new());
         svc.set_desired_running(true);
         rt.block_on(async {
-            let result = svc.set_typing(true, 8001, "").await;
+            let result = svc.set_typing(true, "127.0.0.1", 8001, "").await;
             assert!(result.is_ok());
             let inner = svc.inner.lock().await;
             assert!(inner.actor.is_none());
@@ -2771,7 +2775,7 @@ mod tests {
         let svc = Arc::new(VTubeStudioService::new());
         assert!(!svc.is_desired_running());
         rt.block_on(async {
-            let result = svc.set_typing(true, 8001, "test-token").await;
+            let result = svc.set_typing(true, "127.0.0.1", 8001, "test-token").await;
             assert!(result.is_ok());
             let inner = svc.inner.lock().await;
             assert!(inner.actor.is_none());
@@ -3078,7 +3082,7 @@ mod tests {
         svc.set_error_decay_delay(Duration::from_millis(50));
         let port = unused_local_port();
         rt.block_on(async {
-            let result = svc.connect(port, None, ConnectOrigin::Manual).await;
+            let result = svc.connect("127.0.0.1", port, None, ConnectOrigin::Manual).await;
             assert!(result.is_err());
             // Сразу после ручной ошибки desired_running жив — красный в titlebar.
             assert!(svc.is_desired_running());
@@ -3102,7 +3106,7 @@ mod tests {
         svc.set_error_decay_delay(Duration::from_millis(50));
         let port = unused_local_port();
         rt.block_on(async {
-            let result = svc.connect(port, None, ConnectOrigin::Autostart).await;
+            let result = svc.connect("127.0.0.1", port, None, ConnectOrigin::Autostart).await;
             assert!(result.is_err());
             assert!(svc.is_desired_running());
             assert_eq!(
@@ -3125,7 +3129,7 @@ mod tests {
         svc.set_error_decay_delay(Duration::from_millis(50));
         let port = unused_local_port();
         rt.block_on(async {
-            let result = svc.connect(port, None, ConnectOrigin::Manual).await;
+            let result = svc.connect("127.0.0.1", port, None, ConnectOrigin::Manual).await;
             assert!(result.is_err());
             assert!(svc.is_desired_running());
 
@@ -3463,7 +3467,7 @@ mod tests {
         let svc = VTubeStudioService::new();
         let port = unused_local_port();
         rt.block_on(async {
-            let result = svc.connect(port, None, ConnectOrigin::Autostart).await;
+            let result = svc.connect("127.0.0.1", port, None, ConnectOrigin::Autostart).await;
             assert!(result.is_err());
         });
         // Ошибка сохраняет desired_running (красный бессрочно), но не оставляет
@@ -5641,7 +5645,7 @@ mod tests {
         });
 
         rt.block_on(async {
-            let result = svc.connect(port, None, ConnectOrigin::Autostart).await;
+            let result = svc.connect("127.0.0.1", port, None, ConnectOrigin::Autostart).await;
             assert!(result.is_err());
             let inner = svc.inner.lock().await;
             assert!(
@@ -5901,7 +5905,7 @@ mod tests {
 
         let port = unused_local_port();
         rt.block_on(async {
-            let result = svc.test_connection(port, None).await;
+            let result = svc.test_connection("127.0.0.1", port, None).await;
             assert!(result.is_err(), "connect to closed port must fail");
         });
 
@@ -5947,7 +5951,7 @@ mod tests {
         let port = unused_local_port();
 
         rt.block_on(async {
-            let result = svc.test_connection(port, None).await;
+            let result = svc.test_connection("127.0.0.1", port, None).await;
             assert!(result.is_err());
         });
 
@@ -5970,7 +5974,7 @@ mod tests {
 
         let port = unused_local_port();
         rt.block_on(async {
-            let result = svc.test_connection(port, None).await;
+            let result = svc.test_connection("127.0.0.1", port, None).await;
             assert!(result.is_err());
         });
 
