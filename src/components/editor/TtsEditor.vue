@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, shallowRef, computed, nextTick } from 'vue'
-import { EditorView, keymap, placeholder } from '@codemirror/view'
+import { EditorView, keymap, placeholder, drawSelection } from '@codemirror/view'
 import { EditorState, Annotation, Prec } from '@codemirror/state'
 import { defaultKeymap, historyKeymap, history, redo, isolateHistory } from '@codemirror/commands'
 import {
@@ -332,6 +332,7 @@ function createState() {
     doc: props.modelValue,
     extensions: [
       ttsTheme,
+      drawSelection(),
       placeholder(props.placeholder),
       spellLinter,
       EditorView.lineWrapping,
