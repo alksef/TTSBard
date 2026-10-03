@@ -6,6 +6,57 @@ use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::config::SettingsManager;
+use crate::ipc::CommandError;
+
+enum TransferCommandFailure {
+    Message(String),
+    Transfer(anyhow::Error),
+}
+
+impl From<String> for TransferCommandFailure {
+    fn from(message: String) -> Self {
+        Self::Message(message)
+    }
+}
+
+impl From<anyhow::Error> for TransferCommandFailure {
+    fn from(error: anyhow::Error) -> Self {
+        Self::Transfer(error)
+    }
+}
+
+impl TransferCommandFailure {
+    fn into_command_error(self) -> CommandError {
+        match self {
+            Self::Transfer(error)
+                if error.is::<crate::storage_transfer::ManualTransferRequired>() =>
+            {
+                CommandError::new("storage.manual_transfer_required", error.to_string(), false)
+            }
+            Self::Transfer(error) => transfer_failed(error),
+            Self::Message(message) => transfer_failed(message),
+        }
+    }
+}
+
+fn transfer_failed(error: impl std::fmt::Display) -> CommandError {
+    CommandError::new("storage.transfer_failed", error.to_string(), true)
+}
+
+#[cfg(test)]
+mod error_tests {
+    use super::*;
+
+    #[test]
+    fn manual_transfer_error_survives_command_boundary() {
+        let error = TransferCommandFailure::from(anyhow::Error::new(
+            crate::storage_transfer::ManualTransferRequired,
+        ))
+        .into_command_error();
+        assert_eq!(error.code, "storage.manual_transfer_required");
+        assert!(!error.retryable);
+    }
+}
 
 /// Эффективный корень данных программы и признак дефолтного пути.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -94,8 +145,8 @@ fn current_transfer_inputs() -> Result<(std::path::PathBuf, std::path::PathBuf, 
 #[tauri::command]
 pub async fn storage_prepare_data_transfer(
     path: Option<String>,
-) -> Result<TransferPrepareInfo, String> {
-    tokio::task::spawn_blocking(move || {
+) -> Result<TransferPrepareInfo, CommandError> {
+    tokio::task::spawn_blocking(move || -> Result<TransferPrepareInfo, TransferCommandFailure> {
         let (target_root, _) = resolve_transfer_target(path)?;
         let (source_root, audio_cache_source, legacy_audio_cache) = current_transfer_inputs()?;
         let config_root = crate::paths::config_root()
@@ -107,8 +158,7 @@ pub async fn storage_prepare_data_transfer(
             &audio_cache_source,
             legacy_audio_cache,
             &config_root,
-        )
-        .map_err(|e| e.to_string())?;
+        )?;
 
         Ok(TransferPrepareInfo {
             source_path: source_root.to_string_lossy().into_owned(),
@@ -117,7 +167,8 @@ pub async fn storage_prepare_data_transfer(
         })
     })
     .await
-    .map_err(|e| format!("Операция была прервана: {}", e))?
+    .map_err(transfer_failed)?
+    .map_err(TransferCommandFailure::into_command_error)
 }
 
 /// Выполнить перенос данных в новый корень (`None` — сброс на дефолт).
@@ -129,12 +180,12 @@ pub async fn storage_transfer_data(
     operation_id: String,
     settings_manager: State<'_, SettingsManager>,
     app_handle: AppHandle,
-) -> Result<TransferDataResult, String> {
+) -> Result<TransferDataResult, CommandError> {
     let manager = settings_manager.inner().clone();
     let app = app_handle.clone();
     let operation_id = operation_id.clone();
 
-    tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || -> Result<TransferDataResult, TransferCommandFailure> {
         let _guard = transfer_guard()
             .try_lock()
             .map_err(|_| "Передача данных уже выполняется".to_string())?;
@@ -151,8 +202,7 @@ pub async fn storage_transfer_data(
             &audio_cache_source,
             legacy_audio_cache,
             &config_root,
-        )
-        .map_err(|e| e.to_string())?;
+        )?;
 
         let op = operation_id.clone();
         let app_emit = app.clone();
@@ -179,8 +229,7 @@ pub async fn storage_transfer_data(
             Ok(())
         };
 
-        let outcome = crate::storage_transfer::execute_transfer(plan, &mut progress, &mut persist)
-            .map_err(|e| e.to_string())?;
+        let outcome = crate::storage_transfer::execute_transfer(plan, &mut progress, &mut persist)?;
 
         let root = crate::paths::data_root()
             .map_err(|e| format!("Не удалось определить корень данных: {}", e))?;
@@ -191,7 +240,8 @@ pub async fn storage_transfer_data(
         })
     })
     .await
-    .map_err(|e| format!("Операция была прервана: {}", e))?
+    .map_err(transfer_failed)?
+    .map_err(TransferCommandFailure::into_command_error)
     .map(|result| {
         crate::commands::emit_settings_changed(&app_handle);
         result

@@ -22,6 +22,17 @@ pub(crate) const MODELS_DIR_NAME: &str = "models";
 
 const COPY_CHUNK_SIZE: usize = 1024 * 1024;
 
+#[derive(Debug)]
+pub(crate) struct ManualTransferRequired;
+
+impl std::fmt::Display for ManualTransferRequired {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Source and destination both contain data; manual transfer required")
+    }
+}
+
+impl std::error::Error for ManualTransferRequired {}
+
 /// Фазы переноса, публикуемые в событии `storage-transfer-progress`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TransferPhase {
@@ -110,7 +121,7 @@ pub(crate) fn build_transfer_plan(
             let ac_target_canon = canonical_or_nearest(&ac_target)?;
             if !paths_equal(&ac_canon, &ac_target_canon) {
                 reject_nested(&ac_canon, &ac_target_canon, "audio cache")?;
-                let files = collect_files(audio_cache_source, &ac_target, false)?;
+                let files = collect_files(audio_cache_source, &ac_target)?;
                 total_bytes += files.iter().map(|f| f.size).sum::<u64>();
                 units.push(CopyUnit {
                     source_dir: audio_cache_source.to_path_buf(),
@@ -125,7 +136,7 @@ pub(crate) fn build_transfer_plan(
 
         let models_src = source_root.join(MODELS_DIR_NAME);
         let models_tgt = target_root.join(MODELS_DIR_NAME);
-        let models_files = collect_files(&models_src, &models_tgt, true)?;
+        let models_files = collect_files(&models_src, &models_tgt)?;
         if !models_files.is_empty() {
             models_migrated = true;
             total_bytes += models_files.iter().map(|f| f.size).sum::<u64>();
@@ -140,7 +151,7 @@ pub(crate) fn build_transfer_plan(
         let ac_canon = canonical_or_nearest(audio_cache_source)?;
         let ac_target_canon = canonical_or_nearest(&ac_target)?;
         reject_nested(&ac_canon, &ac_target_canon, "audio cache")?;
-        let files = collect_files(audio_cache_source, &ac_target, true)?;
+        let files = collect_files(audio_cache_source, &ac_target)?;
         total_bytes += files.iter().map(|f| f.size).sum::<u64>();
         units.push(CopyUnit {
             source_dir: audio_cache_source.to_path_buf(),
@@ -365,29 +376,16 @@ fn ensure_no_reparse(path: &Path) -> Result<()> {
 
 // ============================ scanning / copying ============================
 
-fn dir_nonempty(dir: &Path) -> bool {
-    match std::fs::read_dir(dir) {
-        Ok(mut it) => it.next().is_some(),
-        Err(_) => false,
-    }
-}
-
 /// Собрать файлы для копирования из `source` в `target`.
 ///
-/// `reject_nonempty_target` отклоняет непустой каталог-назначение (защита от
-/// молчаливой перезаписи) — для свежего корня. Файлы с уже существующим
-/// назначением пропускаются (никогда не перезаписываются). Любой reparse-point
-/// внутри дерева отклоняется.
-fn collect_files(source: &Path, target: &Path, reject_nonempty_target: bool) -> Result<Vec<FileToCopy>> {
+/// Пустой источник допускает уже заполненное назначение. Если данные есть
+/// с обеих сторон, требуется ручной перенос; автоматического объединения нет.
+/// Любой reparse-point внутри переносимого дерева отклоняется.
+fn collect_files(source: &Path, target: &Path) -> Result<Vec<FileToCopy>> {
     ensure_no_reparse(source)?;
     ensure_no_reparse(target)?;
-    if reject_nonempty_target {
-        if target.exists() && !target.is_dir() {
-            bail!("destination is not a directory: {}", target.display());
-        }
-        if target.is_dir() && dir_nonempty(target) {
-            bail!("destination is not empty: {}", target.display());
-        }
+    if target.exists() && !target.is_dir() {
+        bail!("destination is not a directory: {}", target.display());
     }
     match std::fs::metadata(source) {
         Ok(m) if m.is_dir() => {},
@@ -396,13 +394,28 @@ fn collect_files(source: &Path, target: &Path, reject_nonempty_target: bool) -> 
         Err(e) => return Err(e).with_context(|| format!("Cannot read {}", source.display())),
     }
     let mut files = Vec::new();
-    collect_files_recursive(source, target, source, &mut files)?;
+    collect_files_recursive(source, source, &mut files)?;
+    if !files.is_empty() && target.is_dir() && directory_has_data(target)? {
+        return Err(ManualTransferRequired.into());
+    }
     Ok(files)
+}
+
+fn directory_has_data(directory: &Path) -> Result<bool> {
+    for entry in std::fs::read_dir(directory)
+        .with_context(|| format!("Cannot read destination {}", directory.display()))?
+    {
+        let path = entry?.path();
+        let metadata = std::fs::symlink_metadata(&path)?;
+        if is_reparse_meta(&metadata) || !metadata.is_dir() || directory_has_data(&path)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn collect_files_recursive(
     base: &Path,
-    target_base: &Path,
     current: &Path,
     out: &mut Vec<FileToCopy>,
 ) -> Result<()> {
@@ -417,16 +430,12 @@ fn collect_files_recursive(
             bail!("Refusing to transfer symlink/junction: {}", path.display());
         }
         if meta.is_dir() {
-            collect_files_recursive(base, target_base, &path, out)?;
+            collect_files_recursive(base, &path, out)?;
         } else if meta.is_file() {
             let rel = path
                 .strip_prefix(base)
                 .with_context(|| format!("Failed to relativize {}", path.display()))?
                 .to_path_buf();
-            let dest = target_base.join(&rel);
-            if dest.exists() {
-                bail!("Destination already exists: {}", dest.display());
-            }
             out.push(FileToCopy {
                 rel,
                 size: meta.len(),
@@ -798,17 +807,111 @@ mod tests {
     }
 
     #[test]
-    fn execute_rejects_nonempty_destination() {
+    fn nonconflicting_files_in_both_roots_require_manual_transfer() {
         let root = tmp_dir("nonempty-dst");
         let src = source_with_data(&root);
         let target = root.join("dst");
         write_bytes(&target.join("audio_cache").join("existing.wav"), b"occupied");
+        write_bytes(&target.join("models").join("ocr").join("existing.onnx"), b"model");
         let config = root.join("cfg");
         std::fs::create_dir_all(&config).unwrap();
 
-        let err = build_transfer_plan(&src, &target, &src.join("audio_cache"), false, &config)
+        let error = build_transfer_plan(&src, &target, &src.join("audio_cache"), false, &config)
             .unwrap_err();
-        assert!(err.to_string().contains("not empty"));
+        assert!(error.is::<ManualTransferRequired>());
+        assert_eq!(std::fs::read(target.join("audio_cache/existing.wav")).unwrap(), b"occupied");
+        assert_eq!(std::fs::read(target.join("models/ocr/existing.onnx")).unwrap(), b"model");
+        assert!(!target.join("audio_cache/a.wav").exists());
+        assert!(!target.join("models/piper/m.onnx").exists());
+        assert!(src.join("audio_cache/a.wav").is_file());
+        assert!(src.join("models/piper/m.onnx").is_file());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn empty_source_can_switch_to_existing_data_root() {
+        let root = tmp_dir("empty-to-existing");
+        let src = root.join("src");
+        let target = root.join("dst");
+        let config = root.join("cfg");
+        std::fs::create_dir_all(src.join("models/piper")).unwrap();
+        std::fs::create_dir_all(src.join("audio_cache")).unwrap();
+        write_bytes(&target.join("models/piper/existing.onnx"), b"existing model");
+        write_bytes(&target.join("audio_cache/existing.wav"), b"existing cache");
+        let plan = build_transfer_plan(&src, &target, &src.join("audio_cache"), false, &config).unwrap();
+        assert_eq!(plan.total_bytes, 0);
+        let mut persisted = false;
+        let outcome = execute_transfer(plan, &mut noop_progress, &mut || {
+            persisted = true;
+            Ok(())
+        }).unwrap();
+        assert!(persisted);
+        assert!(!outcome.models_migrated);
+        assert_eq!(std::fs::read(target.join("models/piper/existing.onnx")).unwrap(), b"existing model");
+        assert_eq!(std::fs::read(target.join("audio_cache/existing.wav")).unwrap(), b"existing cache");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn empty_destination_subdirectories_do_not_require_manual_transfer() {
+        let root = tmp_dir("empty-dst-subdirs");
+        let src = source_with_data(&root);
+        let target = root.join("dst");
+        std::fs::create_dir_all(target.join("models/piper")).unwrap();
+        std::fs::create_dir_all(target.join("audio_cache/empty")).unwrap();
+        let plan = build_transfer_plan(&src, &target, &src.join("audio_cache"), false, &root.join("cfg")).unwrap();
+        execute_transfer(plan, &mut noop_progress, &mut || Ok(())).unwrap();
+        assert!(target.join("models/piper/m.onnx").is_file());
+        assert!(target.join("audio_cache/a.wav").is_file());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn categories_are_checked_independently() {
+        let root = tmp_dir("independent-categories");
+        let src = root.join("src");
+        let target = root.join("dst");
+        write_bytes(&src.join("models/piper/new.onnx"), b"model");
+        write_bytes(&target.join("audio_cache/existing.wav"), b"cache");
+        let plan = build_transfer_plan(&src, &target, &src.join("audio_cache"), false, &root.join("cfg")).unwrap();
+        execute_transfer(plan, &mut noop_progress, &mut || Ok(())).unwrap();
+        assert_eq!(std::fs::read(target.join("models/piper/new.onnx")).unwrap(), b"model");
+        assert_eq!(std::fs::read(target.join("audio_cache/existing.wav")).unwrap(), b"cache");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn conflicting_destination_is_rejected_without_changing_either_root() {
+        let root = tmp_dir("conflicting-dst");
+        let src = source_with_data(&root);
+        let target = root.join("dst");
+        let config = root.join("cfg");
+        write_bytes(&target.join("audio_cache/a.wav"), b"keep target");
+        let source_before = std::fs::read(src.join("audio_cache/a.wav")).unwrap();
+        let err = build_transfer_plan(&src, &target, &src.join("audio_cache"), false, &config).unwrap_err();
+        assert!(err.is::<ManualTransferRequired>());
+        assert_eq!(std::fs::read(target.join("audio_cache/a.wav")).unwrap(), b"keep target");
+        assert_eq!(std::fs::read(src.join("audio_cache/a.wav")).unwrap(), source_before);
+        assert!(!target.join("models").exists());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn rollback_preserves_existing_destination_files() {
+        let root = tmp_dir("existing-rollback");
+        let src = source_with_data(&root);
+        let target = root.join("dst");
+        let config = root.join("cfg");
+        write_bytes(&target.join("notes.txt"), b"keep notes");
+        let plan = build_transfer_plan(&src, &target, &src.join("audio_cache"), false, &config).unwrap();
+        let result = execute_transfer(plan, &mut noop_progress, &mut || anyhow::bail!("save failed"));
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(target.join("notes.txt")).unwrap(), b"keep notes");
+        assert!(!target.join("audio_cache/a.wav").exists());
+        assert!(!target.join("models/piper").exists());
+        assert!(src.join("audio_cache/a.wav").is_file());
+        assert!(src.join("models/piper/m.onnx").is_file());
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
@@ -890,7 +993,7 @@ mod tests {
     }
 
     #[test]
-    fn execute_same_root_legacy_cache_merges() {
+    fn same_root_legacy_cache_requires_manual_transfer_when_both_have_data() {
         let root = tmp_dir("same-root");
         let data_root = root.join("data");
         let legacy = root.join("legacy-cache");
@@ -899,15 +1002,11 @@ mod tests {
         let config = root.join("cfg");
         std::fs::create_dir_all(&config).unwrap();
 
-        let plan = build_transfer_plan(&data_root, &data_root, &legacy, true, &config).unwrap();
-        assert_eq!(plan.total_bytes, 8);
-
-        execute_transfer(plan, &mut noop_progress, &mut || Ok(())).unwrap();
-
-        // Legacy file migrated into the default cache; existing file preserved.
-        assert!(data_root.join("audio_cache").join("a.wav").exists());
+        let error = build_transfer_plan(&data_root, &data_root, &legacy, true, &config).unwrap_err();
+        assert!(error.is::<ManualTransferRequired>());
+        assert!(!data_root.join("audio_cache").join("a.wav").exists());
         assert!(data_root.join("audio_cache").join("b.wav").exists());
-        assert!(!legacy.join("a.wav").exists(), "migrated legacy file removed");
+        assert!(legacy.join("a.wav").exists());
 
         let _ = std::fs::remove_dir_all(&root);
     }

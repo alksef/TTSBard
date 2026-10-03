@@ -1082,6 +1082,7 @@
     "errors.input_server.unknown_item": "Неизвестный идентификатор",
     "errors.input_server.too_long": "Текст слишком длинный",
     "dataTransfer.error": "Не удалось перенести данные",
+    "errors.storage.manual_transfer_required": "Папка models или audio_cache содержит данные и в текущем, и в выбранном каталоге. Перенесите файлы вручную и повторите попытку. Ничего не перенесено, папка данных не изменена.",
     "dataTransfer.from_source": "Текущее расположение:",
     "dataTransfer.phase.copying": "Копирование…",
     "dataTransfer.phase.finalizing": "Завершение…",

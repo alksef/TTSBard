@@ -31,4 +31,12 @@ describe('presentCommandError', () => {
   it('presents the fallback for a raw string', () => {
     expect(presentCommandError('Внутренняя ошибка IPC', fallback)).toBe(fallback)
   })
+
+  it('explains that populated storage folders require a manual transfer', () => {
+    expect(presentCommandError({
+      code: 'storage.manual_transfer_required',
+      message: 'internal details',
+      retryable: false,
+    }, fallback)).toContain('Move the files manually and try again')
+  })
 })

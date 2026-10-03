@@ -1082,6 +1082,7 @@
     "errors.input_server.unknown_item": "Unknown item id",
     "errors.input_server.too_long": "Text is too long",
     "dataTransfer.error": "Could not transfer data",
+    "errors.storage.manual_transfer_required": "The models or audio_cache folder contains data in both the current and selected directories. Move the files manually and try again. Nothing was transferred and the data directory was not changed.",
     "dataTransfer.from_source": "Current location:",
     "dataTransfer.phase.copying": "Copying…",
     "dataTransfer.phase.finalizing": "Finalizing…",
