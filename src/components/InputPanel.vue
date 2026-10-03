@@ -14,6 +14,7 @@ import TtsEditor from './editor/TtsEditor.vue'
 import PhraseHistoryList from './PhraseHistoryList.vue'
 import EditorMenu from './editor/EditorMenu.vue'
 import { useEditorTabs } from '../composables/useEditorTabs'
+import { createEditorStateCache, pruneEditorStates } from './editor/tabEditorSync'
 import EditorTabs from './editor/EditorTabs.vue'
 import IncomingTextsTab from './editor/IncomingTextsTab.vue'
 import { useIncomingTexts } from '../composables/useIncomingTexts'
@@ -40,6 +41,13 @@ import { t } from '../i18n'
 
 const { showError } = useErrorHandler()
 const { tabs, activeId, active, create: createTab, close: closeTab, select: selectTab, next: nextTab, previous: previousTab, rename: renameTab, openIncomingEdit, init: initTabs, flushSave: flushTabsSave } = useEditorTabs()
+
+// Editor sessions (undo/redo history per tab) live only for the app run.
+const editorStateCache = createEditorStateCache()
+// Post-flush so it runs after the editor stashed the outgoing session.
+watch(() => tabs.value.map(tab => tab.id), (ids) => {
+  pruneEditorStates(editorStateCache, ids)
+}, { flush: 'post' })
 
 const {
   pendingItems: incomingPendingItems,
@@ -1070,6 +1078,8 @@ defineExpose({ focusEditor })
           <TtsEditor
             ref="editorRef"
             v-model="text"
+            :editor-key="active.id"
+            :state-cache="editorStateCache"
             :placeholder="t('editor.placeholder')"
             :replacements="replacementsRecord"
             :usernames="usernamesRecord"

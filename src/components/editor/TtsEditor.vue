@@ -17,6 +17,7 @@ import { SPELLCHECK_SOURCE } from './spellLinter'
 import { useSpellcheck } from '../../composables/useSpellcheck'
 import { useSpellContextMenu } from './spellContextMenu'
 import { createCompletionSources } from './completionSources'
+import { restoreEditorState, syncEditorToTab } from './tabEditorSync'
 import { matchesEditorHotkey, shouldEnterSubmit, shouldEscapeSubmit } from './keymapArbitration'
 import { editorFontCssStack, toEditorFontFamily, parseEditorFontSize, EDITOR_FONT_SIZE_DEFAULT } from '../../utils/editorFont'
 import SpellContextMenu from './SpellContextMenu.vue'
@@ -25,6 +26,10 @@ import { t } from '../../i18n'
 const props = withDefaults(
   defineProps<{
     modelValue: string
+    /** Identity of the tab the editor session belongs to. */
+    editorKey: string
+    /** Per-tab editor sessions (document, selection, undo/redo history). */
+    stateCache: Map<string, EditorState>
     placeholder?: string
     replacements?: Record<string, string>
     usernames?: Record<string, string>
@@ -327,52 +332,62 @@ function handleSpellMenuKeydown(event: KeyboardEvent): boolean {
   return true
 }
 
-function createState() {
-  return EditorState.create({
-    doc: props.modelValue,
-    extensions: [
-      ttsTheme,
-      drawSelection(),
-      placeholder(props.placeholder),
-      spellLinter,
-      EditorView.lineWrapping,
-      EditorState.readOnly.of(false),
-      EditorView.domEventHandlers({
-        keydown: (event, targetView) =>
-          handleSpellMenuKeydown(event) || handleEditorHotkey(event, targetView),
-      }),
-      history(),
-      ...createKeymap(),
-      autocompletion({
-        override: [hybridSource, presetSource],
-        closeOnBlur: true,
-        selectOnOpen: false,
-        icons: true,
-        defaultKeymap: true,
-      }),
-      EditorView.updateListener.of((update) => {
-        if (!update.docChanged) return
-        closeMenu()
-        const isExternal = update.transactions.some(tr => tr.annotation(ExternalUpdate) !== undefined)
-        if (isExternal) return
-        emit('update:modelValue', update.state.doc.toString())
-        emit('user-edit')
-      }),
-      EditorView.theme({
-        '&': { height: 'auto' },
-      }),
-    ],
-  })
+function createExtensions() {
+  return [
+    ttsTheme,
+    drawSelection(),
+    placeholder(props.placeholder),
+    spellLinter,
+    EditorView.lineWrapping,
+    EditorState.readOnly.of(false),
+    EditorView.domEventHandlers({
+      keydown: (event, targetView) =>
+        handleSpellMenuKeydown(event) || handleEditorHotkey(event, targetView),
+    }),
+    history(),
+    ...createKeymap(),
+    autocompletion({
+      override: [hybridSource, presetSource],
+      closeOnBlur: true,
+      selectOnOpen: false,
+      icons: true,
+      defaultKeymap: true,
+    }),
+    EditorView.updateListener.of((update) => {
+      if (!update.docChanged) return
+      closeMenu()
+      const isExternal = update.transactions.some(tr => tr.annotation(ExternalUpdate) !== undefined)
+      if (isExternal) return
+      emit('update:modelValue', update.state.doc.toString())
+      emit('user-edit')
+    }),
+    EditorView.theme({
+      '&': { height: 'auto' },
+    }),
+  ]
+}
+
+function createState(doc: string) {
+  return EditorState.create({ doc, extensions: createExtensions() })
 }
 
 onMounted(() => {
   if (!editorRef.value) return
-  const state = createState()
+  const cached = props.stateCache.get(props.editorKey)
+  const state = cached
+    ? restoreEditorState(cached, createExtensions())
+    : createState(props.modelValue)
   view.value = new EditorView({
     state,
     parent: editorRef.value,
   })
   view.value.focus()
+
+  // The tab may have been edited externally while the editor was unmounted
+  // (e.g. the incoming tab), so bring the restored session up to date.
+  if (props.modelValue !== state.doc.toString()) {
+    dispatchExternalReplacement(view.value, props.modelValue)
+  }
 
   const v = view.value!
 
@@ -403,20 +418,39 @@ function openSpellMenu() {
 
 onUnmounted(() => {
   document.removeEventListener('mousedown', onDocMouseDown)
-  view.value?.destroy()
-  view.value = null
+  const v = view.value
+  if (v) {
+    // Keep the session (including undo/redo history) alive for the next mount.
+    props.stateCache.set(props.editorKey, v.state)
+    v.destroy()
+    view.value = null
+  }
 })
 
-watch(() => props.modelValue, (newVal) => {
+function dispatchExternalReplacement(v: EditorView, doc: string) {
+  const currentDoc = v.state.doc.toString()
+  v.dispatch({
+    changes: { from: 0, to: currentDoc.length, insert: doc },
+    annotations: [ExternalUpdate.of(true), isolateHistory.of('full')],
+  })
+}
+
+watch([() => props.editorKey, () => props.modelValue], ([newKey, newVal], [oldKey]) => {
   const v = view.value
   if (!v) return
-  const currentDoc = v.state.doc.toString()
-  if (newVal !== currentDoc) {
-    v.dispatch({
-      changes: { from: 0, to: currentDoc.length, insert: newVal },
-      annotations: [ExternalUpdate.of(true), isolateHistory.of('full')],
-    })
-  }
+  syncEditorToTab({
+    surface: {
+      get state() { return v.state },
+      setState: (state) => v.setState(restoreEditorState(state, createExtensions())),
+      replaceExternalDoc: (doc) => dispatchExternalReplacement(v, doc),
+    },
+    cache: props.stateCache,
+    docOf: (state) => state.doc.toString(),
+    prevKey: oldKey,
+    nextKey: newKey,
+    nextDoc: newVal,
+    createState: (doc) => createState(doc),
+  })
 })
 
 watch(available, (val) => {
