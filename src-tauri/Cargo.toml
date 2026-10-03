@@ -80,6 +80,9 @@ uuid = { version = "1.11", features = ["v4", "v5", "serde"] }
 
 # UPnP port forwarding
 igd = "0.12"
+# Active IPv4 interface enumeration for explicit SSDP binding. The `gateway`
+# feature supplies Interface::gateway and NetworkDevice; other defaults are off.
+netdev = { version = "0.46", default-features = false, features = ["gateway"] }
 
 # Telegram client
 # Using fork with MTProxy support from https://github.com/alksef/grammers-mtproxy
