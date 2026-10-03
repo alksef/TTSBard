@@ -9,7 +9,6 @@ use crate::commands::input_server::accept_external_text;
 use crate::commands::speech_queue::SpeechQueueState;
 use crate::config::{Hotkey, SettingsManager};
 use crate::ocr::capture::{capture_virtual_desktop, CaptureError, VirtualScreenGeometry};
-use crate::ocr::packs::scan_ocr_packs;
 use crate::ocr::service::{
     decide_ocr_refresh_reconcile, decide_transition, BeginOutcome, FinishOutcome,
     OcrRefreshReconcile, OcrTransition, SelectionCorners,
@@ -921,7 +920,9 @@ pub fn get_ocr_status(state: State<'_, AppState>) -> OcrStatus {
 
 #[tauri::command]
 pub fn list_ocr_packs(state: State<'_, AppState>) -> Vec<OcrPackDto> {
-    scan_ocr_packs(state.ocr.packs_root())
+    state
+        .ocr
+        .discover_packs()
         .into_iter()
         .map(|pack| OcrPackDto {
             id: pack.id,
@@ -931,9 +932,12 @@ pub fn list_ocr_packs(state: State<'_, AppState>) -> Vec<OcrPackDto> {
         .collect()
 }
 
-/// Re-scan the OCR packs directory and reconcile the persisted selection.
+/// Re-scan the OCR packs roots and reconcile the persisted selection.
 ///
-/// The reconcile follows the shared checkbox rule: when the selected model is
+/// Uses the same merged discovery as the runtime (`discover_packs`), so the
+/// reconcile decisions and the returned list always match what a start would
+/// load, including models that only exist in the cwd root. The reconcile
+/// follows the shared checkbox rule: when the selected model is
 /// gone and not held in memory the feature is disabled with a save (auto-
 /// selecting the single remaining model); a dangling selection with exactly one
 /// pack auto-selects it without enabling; a model still held in memory is left
@@ -944,7 +948,7 @@ pub async fn refresh_ocr_packs(
     settings_manager: State<'_, SettingsManager>,
     app_handle: AppHandle,
 ) -> Result<Vec<OcrPackDto>, String> {
-    let packs = scan_ocr_packs(state.ocr.packs_root());
+    let packs = state.ocr.discover_packs();
     let persisted = settings_manager
         .load()
         .map_err(|e| format!("Failed to load settings: {e}"))?
@@ -1012,14 +1016,16 @@ pub async fn refresh_ocr_packs(
         .collect())
 }
 
-/// Open the configured OCR packs root in the OS file manager.
+/// Open the managed OCR packs root in the OS file manager.
 ///
-/// The target is resolved only from the managed state's `packs_root()`, so the
-/// frontend can never supply an arbitrary path. The root directory is created
-/// when missing, canonicalized to a real platform path, then revealed with the
-/// platform file manager (Explorer on Windows), mirroring the existing
-/// `open_template_folder` command. Model-pack contents are never scanned,
-/// downloaded, deleted or modified. Every failure is a safe `Err(String)`.
+/// The target is the managed state's `packs_root()` — the effective data root
+/// («Данные программы»), deliberately not the higher-priority cwd discovery
+/// root — so the frontend can never supply an arbitrary path. The root
+/// directory is created when missing, canonicalized to a real platform path,
+/// then revealed with the platform file manager (Explorer on Windows),
+/// mirroring the existing `open_template_folder` command. Model-pack contents
+/// are never scanned, downloaded, deleted or modified. Every failure is a
+/// safe `Err(String)`.
 #[tauri::command]
 pub async fn open_ocr_packs_folder(state: State<'_, AppState>) -> Result<(), String> {
     let root = state.ocr.packs_root().to_path_buf();

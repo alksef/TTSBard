@@ -299,4 +299,66 @@ mod tests {
         std::fs::remove_dir_all(root1).ok();
         std::fs::remove_dir_all(root2).ok();
     }
+
+    /// Different valid IDs from both search roots stay available together
+    /// (cwd → data root, ROADMAP-117).
+    #[test]
+    fn both_roots_ids_are_discovered_together() {
+        let root1 = tu::unique_test_root("cwd-root");
+        let root2 = tu::unique_test_root("data-root");
+
+        let pack1 = tu::write_upstream_pack(&root1, &["cwd-variant"]);
+        let pack2 = tu::write_upstream_pack(&root2, &["data-variant"]);
+
+        let descriptors = discover_ruaccent_packs(&[root1.clone(), root2.clone()]);
+        assert_eq!(descriptors.len(), 2);
+        assert_eq!(
+            descriptors[0].pack_root, pack1,
+            "sorted by ID: cwd-variant first"
+        );
+        assert_eq!(descriptors[0].omograph_model_id, "cwd-variant");
+        assert_eq!(descriptors[1].pack_root, pack2);
+        assert_eq!(descriptors[1].omograph_model_id, "data-variant");
+
+        std::fs::remove_dir_all(root1).ok();
+        std::fs::remove_dir_all(root2).ok();
+    }
+
+    /// A broken same-ID candidate in the earlier root does not block the
+    /// valid variant in the later root: dedup happens after validation.
+    #[test]
+    fn broken_earlier_root_allows_later_root_fallback() {
+        let root1 = tu::unique_test_root("broken-cwd");
+        let root2 = tu::unique_test_root("valid-data");
+
+        tu::write_incomplete_root(&root1, &["dup"]);
+        let pack2 = tu::write_upstream_pack(&root2, &["dup"]);
+
+        let descriptors = discover_ruaccent_packs(&[root1.clone(), root2.clone()]);
+        assert_eq!(descriptors.len(), 1);
+        assert_eq!(descriptors[0].pack_root, pack2);
+        assert_ne!(descriptors[0].pack_root, root1.join("models/ruaccent"));
+
+        std::fs::remove_dir_all(root1).ok();
+        std::fs::remove_dir_all(root2).ok();
+    }
+
+    /// A missing earlier root (e.g. no models in the cwd) must not break
+    /// discovery of the later root; the missing directory is not created.
+    #[test]
+    fn missing_earlier_root_still_scans_later_root() {
+        let root1 = tu::unique_test_root("missing-cwd");
+        assert!(!root1.exists());
+        let root2 = tu::unique_test_root("data-root");
+
+        let pack2 = tu::write_upstream_pack(&root2, &["variant"]);
+
+        let descriptors = discover_ruaccent_packs(&[root1.clone(), root2.clone()]);
+        assert_eq!(descriptors.len(), 1);
+        assert_eq!(descriptors[0].pack_root, pack2);
+        assert!(!root1.exists(), "missing root must not be created");
+
+        std::fs::remove_dir_all(root1).ok();
+        std::fs::remove_dir_all(root2).ok();
+    }
 }

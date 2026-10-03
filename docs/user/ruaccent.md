@@ -13,11 +13,19 @@ RUAccent — локальная модель для русского текст�
 
 Веса распространяет автор RUAccent на [Hugging Face
 `ruaccent/accentuator`](https://huggingface.co/ruaccent/accentuator). Создайте
-для модели отдельную папку:
+для модели отдельную папку в корне моделей TTSBard — по умолчанию это
+«Данные программы»:
 
 ```text
-%APPDATA%\ttsbard\models\ruaccent\
+%LOCALAPPDATA%\ttsbard\models\ruaccent\
 ```
+
+Если в настройках TTSBard выбрана другая папка данных, создайте папку
+`models\ruaccent` внутри неё. Альтернативно модель можно положить в рабочую
+директорию процесса: `<рабочая папка>\models\ruaccent\` — её задаёт поле
+«Рабочая папка» в свойствах ярлыка. Оба корня сканируются вместе; при
+совпадении варианта используется модель из рабочей директории, и в неё
+TTSBard ничего не записывает.
 
 ### Скачать вручную
 
@@ -33,7 +41,7 @@ RUAccent — локальная модель для русского текст�
 После этого структура должна выглядеть так:
 
 ```text
-%APPDATA%\ttsbard\models\ruaccent\
+%LOCALAPPDATA%\ttsbard\models\ruaccent\
   dictionary/
     accents.json.gz
     omographs.json.gz
@@ -70,7 +78,7 @@ TTSBard.
 
 ```powershell
 python -m pip install ruaccent
-python -c "from ruaccent import RUAccent; RUAccent().load(omograph_model_size='tiny', use_dictionary=True, workdir=r'$env:APPDATA\ttsbard\models\ruaccent')"
+python -c "from ruaccent import RUAccent; RUAccent().load(omograph_model_size='tiny', use_dictionary=True, workdir=r'$env:LOCALAPPDATA\ttsbard\models\ruaccent')"
 ```
 
 Python не нужен для работы TTSBard: приложение использует встроенный native

@@ -18,7 +18,7 @@ use super::capture::{
     clamp_selection, crop_to_rgb, normalize_selection, validate_selection, CaptureError,
     VirtualScreenGeometry,
 };
-use super::packs::scan_ocr_packs;
+use super::packs::{scan_ocr_packs_across_roots, OcrPackDescriptor};
 use super::runtime::{OcrResult, OcrRuntime};
 use super::settings::OcrSettings;
 use crate::config::Hotkey;
@@ -247,11 +247,19 @@ fn translate_by_session_origin(
 ///
 /// Owns the desired settings snapshot, the runtime lifecycle status, the
 /// resolved `OcrRuntime` (if `Ready`) and the currently registered capture
-/// shortcut. The packs root is injectable so tests can point at a temp dir.
+/// shortcut. The search roots and the managed packs root are injectable so
+/// tests can point at temp dirs.
 pub struct OcrService {
     /// Desired settings snapshot, updated by the save command.
     pub settings: Arc<tokio::sync::RwLock<OcrSettings>>,
     status: Arc<Mutex<OcrStatus>>,
+    /// Ordered pack search roots (ROADMAP-117): the process cwd first, then
+    /// the effective data root. Discovery merges valid packs by ID across
+    /// roots; a missing root is normal and stays read-only.
+    search_roots: Vec<PathBuf>,
+    /// The managed packs root — the effective data root («Данные программы»).
+    /// The target of `open_ocr_packs_folder` and the only root where
+    /// directories are ever created; deliberately not the priority cwd.
     packs_root: PathBuf,
     runtime: tokio::sync::Mutex<Option<OcrRuntime>>,
     registered_hotkey: Mutex<Option<Hotkey>>,
@@ -265,15 +273,29 @@ pub struct OcrService {
 }
 
 impl OcrService {
+    /// Production constructor: the shared model search roots (cwd → data root)
+    /// for discovery and the effective data root for the managed packs folder.
     pub fn new() -> Self {
-        let packs_root = crate::paths::local_root().unwrap_or_default();
-        Self::with_packs_root(packs_root)
+        Self::with_search_roots(
+            crate::paths::model_search_root_paths(),
+            crate::paths::data_root().unwrap_or_default(),
+        )
     }
 
+    /// Single-root constructor kept for existing tests: the injected root
+    /// serves both discovery and the managed packs root.
+    #[cfg(test)]
     pub fn with_packs_root(packs_root: PathBuf) -> Self {
+        Self::with_search_roots(vec![packs_root.clone()], packs_root)
+    }
+
+    /// Injectable constructor: ordered discovery roots plus the managed packs
+    /// root. Resolves nothing on disk.
+    pub fn with_search_roots(search_roots: Vec<PathBuf>, packs_root: PathBuf) -> Self {
         Self {
             settings: Arc::new(tokio::sync::RwLock::new(OcrSettings::default())),
             status: Arc::new(Mutex::new(OcrStatus::Disabled)),
+            search_roots,
             packs_root,
             runtime: tokio::sync::Mutex::new(None),
             registered_hotkey: Mutex::new(None),
@@ -282,8 +304,18 @@ impl OcrService {
         }
     }
 
+    /// The managed packs root («Данные программы») — the folder opened by
+    /// `open_ocr_packs_folder`, not the higher-priority cwd root.
     pub fn packs_root(&self) -> &Path {
         &self.packs_root
+    }
+
+    /// Merged pack discovery across the ordered search roots. The runtime
+    /// start, the pack list command and refresh/reconcile all use this single
+    /// source, so a selected ID always resolves to the descriptor the user
+    /// saw, including a model that only exists in the cwd.
+    pub fn discover_packs(&self) -> Vec<OcrPackDescriptor> {
+        scan_ocr_packs_across_roots(&self.search_roots)
     }
 
     pub fn status(&self) -> OcrStatus {
@@ -369,7 +401,7 @@ impl OcrService {
             return;
         };
 
-        let packs = scan_ocr_packs(&self.packs_root);
+        let packs = self.discover_packs();
         let Some(descriptor) = packs.into_iter().find(|p| p.id == model_id) else {
             self.publish_status(
                 OcrStatus::Error {
@@ -1152,6 +1184,123 @@ mod tests {
         let service = OcrService::with_packs_root(PathBuf::new());
         service.stop(|_| {}, noop_unregister()).await;
         assert_eq!(service.status(), OcrStatus::Disabled);
+    }
+
+    // --- Two-root discovery (cwd → data root, ROADMAP-117) ---
+
+    fn write_broken_pack(root: &Path, id: &str) {
+        let dir = root.join("models").join("ocr").join(id);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("manifest.json"),
+            serde_json::json!({
+                "id": id,
+                "display_name": "Broken Pack",
+                "languages": ["ru"],
+                "family": "pp_ocr_v5",
+                "det_file": "det.onnx",
+                "rec_file": "rec.onnx",
+                "dict_file": "dict.txt"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(dir.join("det.onnx"), b"dummy det").unwrap();
+        std::fs::write(dir.join("dict.txt"), b"dummy dict").unwrap();
+    }
+
+    /// Merged discovery through the service: packs from both roots are
+    /// available, a shared ID resolves to the cwd descriptor. The runtime
+    /// start, the pack list and refresh all call `discover_packs`, so this is
+    /// the same selection every consumer makes.
+    #[test]
+    fn discover_packs_merges_roots_and_cwd_wins_shared_id() {
+        let cwd = unique_test_root("svc-merge-cwd");
+        let data = unique_test_root("svc-merge-data");
+        write_valid_pack(&cwd, "shared-pack");
+        write_valid_pack(&cwd, "cwd-only-pack");
+        write_valid_pack(&data, "shared-pack");
+        write_valid_pack(&data, "data-only-pack");
+
+        let service = OcrService::with_search_roots(vec![cwd.clone(), data.clone()], data.clone());
+        let packs = service.discover_packs();
+
+        let ids: Vec<&str> = packs.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, vec!["cwd-only-pack", "data-only-pack", "shared-pack"]);
+        let shared = packs.iter().find(|p| p.id == "shared-pack").unwrap();
+        assert!(
+            shared.pack_root.starts_with(&cwd),
+            "cwd descriptor must win: {:?}",
+            shared.pack_root
+        );
+        assert!(
+            shared.rec_path.starts_with(&cwd),
+            "file paths must come from the descriptor's own root"
+        );
+
+        std::fs::remove_dir_all(&cwd).ok();
+        std::fs::remove_dir_all(&data).ok();
+    }
+
+    /// A broken same-ID candidate in the cwd does not hide the valid data-root
+    /// pack; the runtime would load the data-root files.
+    #[test]
+    fn discover_packs_broken_cwd_pack_falls_back_to_data_root() {
+        let cwd = unique_test_root("svc-fallback-cwd");
+        let data = unique_test_root("svc-fallback-data");
+        write_broken_pack(&cwd, "shared-pack");
+        write_valid_pack(&data, "shared-pack");
+
+        let service = OcrService::with_search_roots(vec![cwd.clone(), data.clone()], data.clone());
+        let packs = service.discover_packs();
+
+        assert_eq!(packs.len(), 1);
+        assert!(
+            packs[0].pack_root.starts_with(&data),
+            "fallback must resolve to the valid data-root pack: {:?}",
+            packs[0].pack_root
+        );
+
+        std::fs::remove_dir_all(&cwd).ok();
+        std::fs::remove_dir_all(&data).ok();
+    }
+
+    /// The managed packs root stays the effective data root even when the cwd
+    /// has priority in discovery: opening the folder must not open the cwd.
+    #[test]
+    fn packs_root_is_managed_data_root_not_priority_cwd() {
+        let cwd = unique_test_root("svc-open-cwd");
+        let data = unique_test_root("svc-open-data");
+
+        let service = OcrService::with_search_roots(vec![cwd.clone(), data.clone()], data.clone());
+        assert_eq!(service.packs_root(), data.as_path());
+
+        // Single-root constructor keeps the root for both roles.
+        let single = OcrService::with_packs_root(cwd.clone());
+        assert_eq!(single.packs_root(), cwd.as_path());
+        assert_eq!(single.discover_packs().len(), 0);
+
+        std::fs::remove_dir_all(&cwd).ok();
+        std::fs::remove_dir_all(&data).ok();
+    }
+
+    /// A missing cwd root (e.g. deleted working directory) must not break
+    /// discovery of the data-root packs.
+    #[test]
+    fn discover_packs_missing_cwd_root_still_finds_data_root() {
+        let cwd = unique_test_root("svc-missing-cwd");
+        assert!(!cwd.exists());
+        let data = unique_test_root("svc-missing-data");
+        write_valid_pack(&data, "data-pack");
+
+        let service = OcrService::with_search_roots(vec![cwd.clone(), data.clone()], data.clone());
+        let packs = service.discover_packs();
+
+        assert_eq!(packs.len(), 1);
+        assert_eq!(packs[0].id, "data-pack");
+        assert!(!cwd.exists(), "discovery must not create the cwd root");
+
+        std::fs::remove_dir_all(&data).ok();
     }
 
     #[tokio::test]

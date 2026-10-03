@@ -89,6 +89,98 @@ pub(crate) fn local_root() -> anyhow::Result<PathBuf> {
     data_root()
 }
 
+/// Один корень поиска пользовательских моделей (Piper, OCR, RUAccent).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ModelSearchRoot {
+    /// Каталог корня: cwd процесса или эффективный корень данных.
+    pub path: PathBuf,
+    /// True для эффективного корня данных («Данные программы»): единственный
+    /// корень, где потребителю разрешено создавать каталоги и управляемые файлы.
+    pub managed: bool,
+}
+
+/// Упорядоченные корни поиска пользовательских моделей (ROADMAP-117): cwd
+/// процесса, затем эффективный корень данных (`storage.data_dir` либо дефолт).
+/// Разрешение ничего не создаёт и не меняет cwd процесса. Ошибка получения
+/// cwd теряет только первый корень. Повтор одного каталога — включая
+/// канонические алиасы существующих путей на Windows — убирается с сохранением
+/// признака управляемого корня.
+pub(crate) fn model_search_roots() -> Vec<ModelSearchRoot> {
+    let cwd = std::env::current_dir();
+    if let Err(error) = &cwd {
+        tracing::warn!(
+            error = %error,
+            "Failed to resolve process cwd; model search continues in the data root"
+        );
+    }
+    let data_root = data_root();
+    if let Err(error) = &data_root {
+        tracing::warn!(
+            error = %error,
+            "Failed to resolve data root; model search continues in the cwd"
+        );
+    }
+    model_search_roots_from(cwd.ok().as_deref(), data_root.ok())
+}
+
+/// Пути корней в том же порядке — для сканеров, которым нужны только пути.
+pub(crate) fn model_search_root_paths() -> Vec<PathBuf> {
+    model_search_roots()
+        .into_iter()
+        .map(|root| root.path)
+        .collect()
+}
+
+/// Чистое ядро [`model_search_roots`] с инъекцией входов: тесты не трогают
+/// глобальный cwd процесса. `None` для cwd моделирует ошибку получения и
+/// теряет только первый корень.
+pub(crate) fn model_search_roots_from(
+    cwd: Option<&Path>,
+    data_root: Option<PathBuf>,
+) -> Vec<ModelSearchRoot> {
+    let mut roots = Vec::new();
+    if let Some(cwd) = cwd {
+        push_model_root(&mut roots, cwd.to_path_buf(), false);
+    }
+    if let Some(data_root) = data_root {
+        push_model_root(&mut roots, data_root, true);
+    }
+    roots
+}
+
+fn push_model_root(roots: &mut Vec<ModelSearchRoot>, path: PathBuf, managed: bool) {
+    if let Some(existing) = roots
+        .iter_mut()
+        .find(|root| same_directory(&root.path, &path))
+    {
+        existing.managed |= managed;
+        return;
+    }
+    roots.push(ModelSearchRoot { path, managed });
+}
+
+/// Обозначают ли два пути один каталог. Для существующих путей сравнение
+/// выполняется после canonicalize, что на Windows снимает различия регистра,
+/// префикса `\\?\` и коротких имён; для несуществующих остаётся текстовое
+/// сравнение — без учёта регистра на Windows и точное на остальных ОС.
+fn same_directory(a: &Path, b: &Path) -> bool {
+    if let (Ok(a), Ok(b)) = (a.canonicalize(), b.canonicalize()) {
+        return same_path_text(&a, &b);
+    }
+    same_path_text(a, b)
+}
+
+fn same_path_text(a: &Path, b: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        a.as_os_str().eq_ignore_ascii_case(b.as_os_str())
+    }
+    #[cfg(not(windows))]
+    {
+        a == b
+    }
+}
+
 /// Корень транзиентных файлов: `%TEMP%\ttsbard`. Каталог не создаётся.
 pub(crate) fn temp_root() -> PathBuf {
     std::env::temp_dir().join(APP_DIR_NAME)
@@ -174,6 +266,124 @@ pub(crate) fn remove_legacy_roaming_temp() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn unique_model_roots_test_dir(name: &str) -> PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-model-roots-test-{}-{}-{}",
+            std::process::id(),
+            unique,
+            name
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn model_roots_order_is_cwd_then_data_root() {
+        let cwd = unique_model_roots_test_dir("cwd");
+        let data = unique_model_roots_test_dir("data");
+
+        let roots = model_search_roots_from(Some(&cwd), Some(data.clone()));
+
+        assert_eq!(roots.len(), 2);
+        assert_eq!(roots[0].path, cwd);
+        assert!(!roots[0].managed, "cwd is a read-only root");
+        assert_eq!(roots[1].path, data);
+        assert!(roots[1].managed, "data root is the managed root");
+
+        std::fs::remove_dir_all(&cwd).ok();
+        std::fs::remove_dir_all(&data).ok();
+    }
+
+    #[test]
+    fn model_roots_cwd_only_without_data_root() {
+        let cwd = unique_model_roots_test_dir("cwd-only");
+
+        let roots = model_search_roots_from(Some(&cwd), None);
+
+        assert_eq!(roots.len(), 1);
+        assert_eq!(roots[0].path, cwd);
+        assert!(!roots[0].managed);
+
+        std::fs::remove_dir_all(&cwd).ok();
+    }
+
+    #[test]
+    fn model_roots_failed_cwd_lookup_keeps_data_root() {
+        let data = unique_model_roots_test_dir("data-only");
+
+        let roots = model_search_roots_from(None, Some(data.clone()));
+
+        assert_eq!(roots.len(), 1, "a failed cwd lookup drops only the cwd");
+        assert_eq!(roots[0].path, data);
+        assert!(roots[0].managed);
+
+        std::fs::remove_dir_all(&data).ok();
+    }
+
+    #[test]
+    fn model_roots_empty_when_both_lookups_fail() {
+        assert!(model_search_roots_from(None, None).is_empty());
+    }
+
+    #[test]
+    fn model_roots_identical_paths_collapse_to_one_managed_root() {
+        let dir = unique_model_roots_test_dir("same");
+
+        let roots = model_search_roots_from(Some(&dir), Some(dir.clone()));
+
+        assert_eq!(roots.len(), 1, "cwd equal to the data root is scanned once");
+        assert_eq!(roots[0].path, dir);
+        assert!(roots[0].managed, "dedup must keep the managed flag");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn model_roots_canonical_alias_collapse() {
+        let dir = unique_model_roots_test_dir("alias");
+        let alias = dir.canonicalize().unwrap();
+
+        let roots = model_search_roots_from(Some(&alias), Some(dir.clone()));
+
+        assert_eq!(roots.len(), 1, "canonical alias must be deduplicated");
+        assert!(roots[0].managed);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn model_roots_windows_case_only_paths_collapse() {
+        let dir = unique_model_roots_test_dir("case");
+        let upper: PathBuf = dir.to_string_lossy().to_uppercase().into();
+        assert_ne!(upper, dir);
+
+        let roots = model_search_roots_from(Some(&upper), Some(dir.clone()));
+
+        assert_eq!(roots.len(), 1, "case-only Windows paths are one directory");
+        assert!(roots[0].managed);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn model_roots_dedup_keeps_stored_path_unchanged() {
+        let cwd = unique_model_roots_test_dir("stored");
+        let data = unique_model_roots_test_dir("stored-data");
+
+        let roots = model_search_roots_from(Some(&cwd), Some(data.clone()));
+
+        assert_eq!(roots[0].path, cwd, "stored paths stay as resolved");
+        assert_eq!(roots[1].path, data);
+
+        std::fs::remove_dir_all(&cwd).ok();
+        std::fs::remove_dir_all(&data).ok();
+    }
 
     #[test]
     fn config_root_ends_with_app_dir() {

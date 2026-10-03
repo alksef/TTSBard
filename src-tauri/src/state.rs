@@ -5,10 +5,16 @@ use crate::stress::packs::RuAccentPackDescriptor;
 use crate::stress::runtime::RuAccentRuntimeSlot;
 use crate::telegram::TelegramClient;
 use crate::tts::{
-    elevenlabs::ElevenLabsTts, fish::FishTts, local_http_server::LocalHttpServerTts,
-    openai::OpenAiTts, piper::runtime::LocalModelTts, piper::scanner::discover_piper_models,
-    registry::TtsProviderEntry, registry::TtsProviderRegistry, silero::SileroTts, TtsProvider,
-    TtsProviderType,
+    elevenlabs::ElevenLabsTts,
+    fish::FishTts,
+    local_http_server::LocalHttpServerTts,
+    openai::OpenAiTts,
+    piper::runtime::LocalModelTts,
+    piper::scanner::{discover_piper_models, merge_piper_roots, scan_piper_models_root},
+    registry::TtsProviderEntry,
+    registry::TtsProviderRegistry,
+    silero::SileroTts,
+    TtsProvider, TtsProviderType,
 };
 use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
@@ -714,48 +720,31 @@ impl AppState {
             .store(0, std::sync::atomic::Ordering::Relaxed);
     }
 
-    /// Discover and register Piper providers from the local model directories.
+    /// Discover and register Piper providers across the shared model search
+    /// roots (ROADMAP-117): the process cwd first, then the effective data
+    /// root (`storage.data_dir` override or the default). There is no separate
+    /// exe/resource root: models next to the exe are found whenever the cwd
+    /// equals the exe directory.
     ///
-    /// Scans `<exe dir>/models/piper/` (portable, read-only) and
-    /// `{local_data_dir}/models/piper/` for valid `.onnx` + `.onnx.json` pairs
-    /// and registers each as a `TtsProvider::Piper` in the provider registry.
-    /// Only the local root may be created; the exe root is never written.
+    /// The cwd root is scanned read-only; only the managed data root may have
+    /// its `models/piper` directory created. Descriptors are deduplicated by
+    /// ID after per-root validation, so a broken candidate in the cwd never
+    /// blocks a valid same-ID model in the data root, while a valid cwd model
+    /// wins over the data-root duplicate.
     /// Does NOT select any Piper provider — the current built-in provider is preserved.
     /// Does NOT create ONNX sessions (they are lazily initialized on first use).
     pub fn register_piper_providers(&self) {
-        let mut descriptors = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-
-        // Portable-корень рядом с exe: только сканирование, без записи.
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(exe_dir) = exe.parent() {
-                for desc in crate::tts::piper::scanner::scan_piper_models_dir(
-                    &exe_dir.join("models").join("piper"),
-                ) {
-                    if seen.insert(desc.id.clone()) {
-                        descriptors.push(desc);
-                    }
+        let per_root: Vec<Vec<_>> = crate::paths::model_search_roots()
+            .iter()
+            .map(|root| {
+                if root.managed {
+                    discover_piper_models(&root.path)
+                } else {
+                    scan_piper_models_root(&root.path)
                 }
-            }
-        }
-
-        // Local-корень: основной; каталог models/piper может быть создан.
-        match crate::paths::local_root() {
-            Ok(local_root) => {
-                for desc in discover_piper_models(&local_root) {
-                    if seen.insert(desc.id.clone()) {
-                        descriptors.push(desc);
-                    }
-                }
-            }
-            Err(e) => {
-                warn!(
-                    error = %e,
-                    "Cannot register Piper providers: local data directory not found"
-                );
-                return;
-            }
-        }
+            })
+            .collect();
+        let descriptors = merge_piper_roots(per_root);
 
         let count = descriptors.len();
         let mut registry = self.tts_registry.lock();
@@ -833,41 +822,20 @@ impl AppState {
         count
     }
 
-    /// Re-scan RUAccent packs with a bounded retry when the primary models
-    /// directory exists but the scan finds nothing.
+    /// Re-scan RUAccent packs with a bounded retry when any search root has an
+    /// existing `models/ruaccent` directory but the scan finds nothing.
     ///
     /// A transient boot-time filesystem failure must not read as "models
     /// removed": that would make the startup autoload fail and persist-disable
     /// the feature (ROADMAP-090). Only this suspicious combination is retried;
-    /// a genuinely absent models directory and a persistently empty scan keep
-    /// the "no models" meaning.
+    /// a genuinely absent models directory in every root and a persistently
+    /// empty scan keep the "no models" meaning.
     pub fn refresh_ruaccent_packs_with_retry(&self, search_roots: &[std::path::PathBuf]) -> usize {
-        let mut count = self.refresh_ruaccent_packs(search_roots);
-        if count > 0 {
-            return count;
-        }
-        let primary_exists = search_roots
-            .first()
-            .map(|root| {
-                root.join(crate::stress::packs::PRIMARY_MODELS_SUBDIR)
-                    .is_dir()
-            })
-            .unwrap_or(false);
-        if !primary_exists {
-            return count;
-        }
-        for attempt in 1..=2 {
-            tracing::warn!(
-                attempt,
-                "RUAccent scan found no packs in an existing models directory; retrying"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(300));
-            count = self.refresh_ruaccent_packs(search_roots);
-            if count > 0 {
-                return count;
-            }
-        }
-        count
+        refresh_ruaccent_packs_with_retry_core(
+            search_roots,
+            |roots| self.refresh_ruaccent_packs(roots),
+            || std::thread::sleep(std::time::Duration::from_millis(300)),
+        )
     }
 
     /// Prepare, persist and publish one concrete provider selection.
@@ -912,6 +880,44 @@ impl AppState {
         info!(id, legacy = ?legacy_type, "TTS provider selected");
         Ok(())
     }
+}
+
+/// Bounded RUAccent retry policy with injectable scan and pause.
+///
+/// Production ([`AppState::refresh_ruaccent_packs_with_retry`]) passes the real
+/// discovery scan and a 300 ms pause; tests inject counters to assert the exact
+/// number of attempts without sleeping.
+fn refresh_ruaccent_packs_with_retry_core<S, P>(
+    search_roots: &[std::path::PathBuf],
+    mut scan: S,
+    mut pause: P,
+) -> usize
+where
+    S: FnMut(&[std::path::PathBuf]) -> usize,
+    P: FnMut(),
+{
+    let mut count = scan(search_roots);
+    if count > 0 {
+        return count;
+    }
+    let models_dir_exists = search_roots
+        .iter()
+        .any(|root| root.join(crate::stress::packs::PRIMARY_MODELS_SUBDIR).is_dir());
+    if !models_dir_exists {
+        return count;
+    }
+    for attempt in 1..=2 {
+        tracing::warn!(
+            attempt,
+            "RUAccent scan found no packs in an existing models directory; retrying"
+        );
+        pause();
+        count = scan(search_roots);
+        if count > 0 {
+            return count;
+        }
+    }
+    count
 }
 
 /// Map a concrete provider ID to its built-in TtsProviderType, if any.
@@ -1555,6 +1561,118 @@ mod tests {
             state.refresh_ruaccent_packs_with_retry(std::slice::from_ref(&root)),
             0
         );
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    // ── RUAccent retry policy seam tests (attempt counts, no sleeping) ──
+
+    #[test]
+    fn ruaccent_refresh_retry_retries_when_second_root_has_models_dir() {
+        use crate::stress::packs::test_util as tu;
+
+        let first = tu::unique_test_root("retry-multi-first-absent");
+        let second = tu::unique_test_root("retry-multi-second-present");
+        std::fs::create_dir_all(tu::upstream_pack_root(&second)).unwrap();
+        let roots = vec![first.clone(), second.clone()];
+
+        let scans = std::cell::Cell::new(0usize);
+        let pauses = std::cell::Cell::new(0usize);
+        let count = refresh_ruaccent_packs_with_retry_core(
+            &roots,
+            |_| {
+                scans.set(scans.get() + 1);
+                if scans.get() == 1 {
+                    0
+                } else {
+                    1
+                }
+            },
+            || pauses.set(pauses.get() + 1),
+        );
+
+        assert_eq!(count, 1);
+        assert_eq!(scans.get(), 2);
+        assert_eq!(pauses.get(), 1);
+
+        std::fs::remove_dir_all(&first).ok();
+        std::fs::remove_dir_all(&second).ok();
+    }
+
+    #[test]
+    fn ruaccent_refresh_retry_exhausts_two_retries_with_seam() {
+        use crate::stress::packs::test_util as tu;
+
+        let root = tu::unique_test_root("retry-multi-exhaust");
+        std::fs::create_dir_all(tu::upstream_pack_root(&root)).unwrap();
+        let roots = vec![root.clone()];
+
+        let scans = std::cell::Cell::new(0usize);
+        let pauses = std::cell::Cell::new(0usize);
+        let count = refresh_ruaccent_packs_with_retry_core(
+            &roots,
+            |_| {
+                scans.set(scans.get() + 1);
+                0usize
+            },
+            || pauses.set(pauses.get() + 1),
+        );
+
+        assert_eq!(count, 0);
+        assert_eq!(scans.get(), 3);
+        assert_eq!(pauses.get(), 2);
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn ruaccent_refresh_retry_absent_models_dir_in_all_roots_scans_once() {
+        use crate::stress::packs::test_util as tu;
+
+        let first = tu::unique_test_root("retry-multi-absent-a");
+        let second = tu::unique_test_root("retry-multi-absent-b");
+        let roots = vec![first.clone(), second.clone()];
+
+        let scans = std::cell::Cell::new(0usize);
+        let pauses = std::cell::Cell::new(0usize);
+        let count = refresh_ruaccent_packs_with_retry_core(
+            &roots,
+            |_| {
+                scans.set(scans.get() + 1);
+                0usize
+            },
+            || pauses.set(pauses.get() + 1),
+        );
+
+        assert_eq!(count, 0);
+        assert_eq!(scans.get(), 1);
+        assert_eq!(pauses.get(), 0);
+
+        std::fs::remove_dir_all(&first).ok();
+        std::fs::remove_dir_all(&second).ok();
+    }
+
+    #[test]
+    fn ruaccent_refresh_retry_successful_first_scan_is_immediate() {
+        use crate::stress::packs::test_util as tu;
+
+        let root = tu::unique_test_root("retry-multi-immediate");
+        let roots = vec![root.clone()];
+
+        let scans = std::cell::Cell::new(0usize);
+        let pauses = std::cell::Cell::new(0usize);
+        let count = refresh_ruaccent_packs_with_retry_core(
+            &roots,
+            |_| {
+                scans.set(scans.get() + 1);
+                1usize
+            },
+            || pauses.set(pauses.get() + 1),
+        );
+
+        assert_eq!(count, 1);
+        assert_eq!(scans.get(), 1);
+        assert_eq!(pauses.get(), 0);
+
         std::fs::remove_dir_all(&root).ok();
     }
 }

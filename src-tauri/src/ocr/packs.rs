@@ -5,6 +5,7 @@
 //! introduces callers.
 #![allow(dead_code)]
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -162,6 +163,31 @@ pub fn scan_ocr_packs(app_data_root: &Path) -> Vec<OcrPackDescriptor> {
         tracing::info!(count = results.len(), "OCR model pack discovery complete");
     }
 
+    results
+}
+
+/// Discover valid OCR packs across the ordered model search roots, merging by
+/// pack ID (ROADMAP-117).
+///
+/// Each root is scanned and validated independently by [`scan_ocr_packs`]
+/// before merging, so a broken candidate in an earlier root does not hide a
+/// valid same-ID pack in a later root, while a valid earlier-root pack wins
+/// over the later-root duplicate. The merged list is sorted by `id`; every
+/// descriptor keeps the actual file paths of its own root — files from
+/// different roots are never mixed. Scanning never creates directories.
+pub fn scan_ocr_packs_across_roots(search_roots: &[PathBuf]) -> Vec<OcrPackDescriptor> {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut results = Vec::new();
+
+    for root in search_roots {
+        for pack in scan_ocr_packs(root) {
+            if seen.insert(pack.id.clone()) {
+                results.push(pack);
+            }
+        }
+    }
+
+    results.sort_by(|a, b| a.id.cmp(&b.id));
     results
 }
 
@@ -632,6 +658,121 @@ mod tests {
         let packs = scan_ocr_packs(&root);
         assert_eq!(packs.len(), 1);
         assert_eq!(packs[0].id, "outer");
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    // --- Two-root discovery (cwd → data root, ROADMAP-117) ---
+
+    #[test]
+    fn across_roots_keeps_packs_from_both_roots() {
+        let cwd = unique_test_root("across-both-cwd");
+        let data = unique_test_root("across-both-data");
+        write_valid_pack(&cwd, "cwd-pack");
+        write_valid_pack(&data, "data-pack");
+
+        let packs = scan_ocr_packs_across_roots(&[cwd.clone(), data.clone()]);
+
+        let ids: Vec<&str> = packs.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, vec!["cwd-pack", "data-pack"]);
+        assert_eq!(packs[0].pack_root, ocr_root(&cwd).join("cwd-pack"));
+        assert_eq!(packs[1].pack_root, ocr_root(&data).join("data-pack"));
+
+        std::fs::remove_dir_all(&cwd).ok();
+        std::fs::remove_dir_all(&data).ok();
+    }
+
+    /// The same valid ID in both roots: the earlier root (cwd) wins with its
+    /// own file paths.
+    #[test]
+    fn across_roots_earlier_root_wins_duplicate_id() {
+        let cwd = unique_test_root("across-dup-cwd");
+        let data = unique_test_root("across-dup-data");
+        write_valid_pack(&cwd, "shared-pack");
+        write_valid_pack(&data, "shared-pack");
+
+        let packs = scan_ocr_packs_across_roots(&[cwd.clone(), data.clone()]);
+
+        assert_eq!(packs.len(), 1);
+        assert_eq!(packs[0].pack_root, ocr_root(&cwd).join("shared-pack"));
+        assert_eq!(
+            packs[0].det_path,
+            ocr_root(&cwd).join("shared-pack").join("det.onnx")
+        );
+    }
+
+    /// A broken same-ID candidate in the cwd does not block the valid pack in
+    /// the data root: dedup happens after validation.
+    #[test]
+    fn across_roots_broken_earlier_candidate_allows_fallback() {
+        let cwd = unique_test_root("across-broken-cwd");
+        let data = unique_test_root("across-broken-data");
+
+        let broken = ocr_root(&cwd).join("shared-pack");
+        write_manifest(&broken, &default_manifest("shared-pack"));
+        write_model_file(&broken, "det.onnx");
+        write_model_file(&broken, "dict.txt");
+
+        write_valid_pack(&data, "shared-pack");
+
+        let packs = scan_ocr_packs_across_roots(&[cwd.clone(), data.clone()]);
+
+        assert_eq!(packs.len(), 1);
+        assert_eq!(packs[0].pack_root, ocr_root(&data).join("shared-pack"));
+        assert_eq!(
+            packs[0].rec_path,
+            ocr_root(&data).join("shared-pack").join("rec.onnx")
+        );
+
+        std::fs::remove_dir_all(&cwd).ok();
+        std::fs::remove_dir_all(&data).ok();
+    }
+
+    #[test]
+    fn across_roots_missing_earlier_root_still_scans_later_root() {
+        let cwd = unique_test_root("across-missing-cwd");
+        assert!(!cwd.exists());
+        let data = unique_test_root("across-missing-data");
+        write_valid_pack(&data, "data-pack");
+
+        let packs = scan_ocr_packs_across_roots(&[cwd.clone(), data.clone()]);
+
+        assert_eq!(packs.len(), 1);
+        assert_eq!(packs[0].id, "data-pack");
+        assert!(!cwd.exists(), "missing cwd root must not be created");
+
+        std::fs::remove_dir_all(&data).ok();
+    }
+
+    #[test]
+    fn across_roots_both_empty_yield_empty() {
+        let cwd = unique_test_root("across-empty-cwd");
+        let data = unique_test_root("across-empty-data");
+        std::fs::create_dir_all(ocr_root(&cwd)).unwrap();
+        std::fs::create_dir_all(ocr_root(&data)).unwrap();
+
+        assert!(scan_ocr_packs_across_roots(&[cwd.clone(), data.clone()]).is_empty());
+
+        std::fs::remove_dir_all(&cwd).ok();
+        std::fs::remove_dir_all(&data).ok();
+    }
+
+    #[test]
+    fn across_roots_no_roots_yield_empty() {
+        assert!(scan_ocr_packs_across_roots(&[]).is_empty());
+    }
+
+    /// The same root passed twice (cwd equals the data root) yields each pack
+    /// exactly once.
+    #[test]
+    fn across_roots_identical_roots_deduplicate() {
+        let root = unique_test_root("across-same-root");
+        write_valid_pack(&root, "solo-pack");
+
+        let packs = scan_ocr_packs_across_roots(&[root.clone(), root.clone()]);
+
+        assert_eq!(packs.len(), 1);
+        assert_eq!(packs[0].id, "solo-pack");
 
         std::fs::remove_dir_all(&root).ok();
     }

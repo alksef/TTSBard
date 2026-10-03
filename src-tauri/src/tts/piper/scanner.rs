@@ -37,6 +37,35 @@ pub fn discover_piper_models(root: &Path) -> Vec<PiperModelDescriptor> {
     scan_piper_models_dir(&models_dir)
 }
 
+/// Scan `models/piper` under a root directory without creating anything.
+///
+/// For read-only roots (the process cwd): a missing directory is normal
+/// and stays silent; the root directory is never created.
+pub fn scan_piper_models_root(root: &Path) -> Vec<PiperModelDescriptor> {
+    scan_piper_models_dir(&root.join(MODELS_SUBDIR))
+}
+
+/// Merge validated per-root descriptor lists; the earlier root wins on a
+/// duplicate ID. Inputs are already validated per root, so a broken candidate
+/// in an earlier root never appears here and cannot block a valid same-ID
+/// model in a later root. The merged list is sorted by ID for a deterministic
+/// order regardless of which root each model came from.
+pub(crate) fn merge_piper_roots(
+    per_root: Vec<Vec<PiperModelDescriptor>>,
+) -> Vec<PiperModelDescriptor> {
+    let mut seen = std::collections::HashSet::new();
+    let mut merged = Vec::new();
+    for descriptors in per_root {
+        for descriptor in descriptors {
+            if seen.insert(descriptor.id.clone()) {
+                merged.push(descriptor);
+            }
+        }
+    }
+    merged.sort_by(|a, b| a.id.cmp(&b.id));
+    merged
+}
+
 /// Scan a concrete `models/piper` directory without side effects.
 ///
 /// A missing directory is normal for read-only roots (e.g. next to the exe)
@@ -506,5 +535,171 @@ mod tests {
 
         let models = discover_piper_models(&root);
         assert!(models.is_empty());
+    }
+
+    // --- Two-root discovery (cwd → data root, ROADMAP-117) ---
+
+    fn descriptor(id: &str, root: &Path) -> PiperModelDescriptor {
+        PiperModelDescriptor {
+            id: id.to_string(),
+            display_name: id.to_string(),
+            onnx_path: root.join(format!("{id}.onnx")),
+            json_path: root.join(format!("{id}.onnx.json")),
+            sample_rate: 22050,
+            phoneme_id_map: serde_json::json!({"a": [0]}),
+        }
+    }
+
+    /// Read-only root scan never creates `models/piper` (cwd must stay clean).
+    #[test]
+    fn scan_piper_models_root_creates_nothing() {
+        let root = unique_test_root("scan-root-readonly");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let models = scan_piper_models_root(&root);
+
+        assert!(models.is_empty());
+        assert!(
+            !root.join("models").exists(),
+            "read-only root scan must not create the models directory"
+        );
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn merge_piper_roots_empty_inputs_yield_empty() {
+        assert!(merge_piper_roots(vec![Vec::new(), Vec::new()]).is_empty());
+        assert!(merge_piper_roots(Vec::new()).is_empty());
+    }
+
+    /// Different valid IDs from both roots stay available together.
+    #[test]
+    fn merge_piper_roots_keeps_ids_from_both_roots() {
+        let cwd = unique_test_root("merge-both-cwd");
+        let data = unique_test_root("merge-both-data");
+
+        let merged = merge_piper_roots(vec![
+            vec![descriptor("local-piper:cwd-only", &cwd)],
+            vec![descriptor("local-piper:data-only", &data)],
+        ]);
+
+        let ids: Vec<&str> = merged.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, vec!["local-piper:cwd-only", "local-piper:data-only"]);
+    }
+
+    /// The same valid ID in both roots: the earlier root (cwd) wins.
+    #[test]
+    fn merge_piper_roots_earlier_root_wins_duplicate_id() {
+        let cwd = unique_test_root("merge-dup-cwd");
+        let data = unique_test_root("merge-dup-data");
+
+        let merged = merge_piper_roots(vec![
+            vec![descriptor("local-piper:dup", &cwd)],
+            vec![descriptor("local-piper:dup", &data)],
+        ]);
+
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].onnx_path, cwd.join("local-piper:dup.onnx"));
+    }
+
+    /// Recursive listing of every file and directory under `root`, for
+    /// read-only guarantees in two-root tests.
+    fn fs_listing(root: &Path) -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path.clone());
+                }
+                paths.push(path);
+            }
+        }
+        paths.sort();
+        paths
+    }
+
+    /// An invalid cwd candidate (scan yields nothing) cannot block the valid
+    /// same-ID model in the data root.
+    #[test]
+    fn merge_piper_roots_invalid_earlier_root_allows_fallback() {
+        let cwd = unique_test_root("merge-fallback-cwd");
+        let data = unique_test_root("merge-fallback-data");
+        create_onnx_only(&cwd, "shared-model");
+        create_model_pair(&data, "shared-model", 22050);
+
+        let before = fs_listing(&cwd);
+        let merged = merge_piper_roots(vec![
+            scan_piper_models_dir(&cwd.join(MODELS_SUBDIR)),
+            discover_piper_models(&data),
+        ]);
+        assert_eq!(
+            fs_listing(&cwd),
+            before,
+            "read-only cwd scan must not change the directory"
+        );
+
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].id, "local-piper:shared-model");
+        assert!(
+            merged[0].onnx_path.starts_with(&data),
+            "fallback descriptor must come from the data root"
+        );
+    }
+
+    /// The same root passed twice (cwd equals the data root) is not scanned
+    /// into duplicates.
+    #[test]
+    fn merge_piper_roots_identical_roots_deduplicate() {
+        let root = unique_test_root("merge-same-root");
+        create_model_pair(&root, "voice", 22050);
+
+        let models_dir_scan = || scan_piper_models_dir(&root.join(MODELS_SUBDIR));
+        let merged = merge_piper_roots(vec![models_dir_scan(), models_dir_scan()]);
+
+        assert_eq!(merged.len(), 1);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// Full production shape: read-only cwd scan, creating data-root scan,
+    /// merged result sorted by ID with cwd priority.
+    #[test]
+    fn merge_piper_roots_production_shape() {
+        let cwd = unique_test_root("merge-prod-cwd");
+        let data = unique_test_root("merge-prod-data");
+        create_model_pair(&cwd, "zzz-cwd-model", 22050);
+        create_model_pair(&cwd, "shared-model", 22050);
+        create_invalid_json(&cwd, "broken-model");
+        create_model_pair(&data, "shared-model", 22050);
+        create_model_pair(&data, "aaa-data-model", 22050);
+
+        let merged = merge_piper_roots(vec![
+            scan_piper_models_dir(&cwd.join(MODELS_SUBDIR)),
+            discover_piper_models(&data),
+        ]);
+
+        let ids: Vec<&str> = merged.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec![
+                "local-piper:aaa-data-model",
+                "local-piper:shared-model",
+                "local-piper:zzz-cwd-model",
+            ]
+        );
+        assert!(
+            merged[1].onnx_path.starts_with(&cwd),
+            "valid cwd model must win over the data-root duplicate"
+        );
+        assert!(
+            merged[2].onnx_path.starts_with(&cwd),
+            "cwd-only model stays available"
+        );
+        std::fs::remove_dir_all(&cwd).ok();
+        std::fs::remove_dir_all(&data).ok();
     }
 }

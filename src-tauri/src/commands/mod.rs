@@ -785,27 +785,14 @@ pub fn decide_ruaccent_refresh_reconcile(
     RuaccentRefreshReconcile::None
 }
 
-/// Resolve the RUAccent pack search roots. Shared by startup discovery and
-/// the refresh command. Order matters: the first root wins on duplicate IDs.
-pub(crate) fn ruaccent_search_roots(app_handle: &AppHandle) -> Vec<std::path::PathBuf> {
-    let mut roots: Vec<std::path::PathBuf> = Vec::new();
-    // Portable-корень рядом с exe: модели размещаются вручную, только чтение.
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
-            roots.push(exe_dir.to_path_buf());
-        }
-    }
-    match crate::paths::local_root() {
-        Ok(dir) => roots.push(dir),
-        Err(e) => {
-            warn!(error = %e, "Local data directory not found; skipping for RUAccent discovery")
-        }
-    }
-    match app_handle.path().resource_dir() {
-        Ok(dir) => roots.push(dir),
-        Err(e) => warn!(error = %e, "resource_dir() failed for RUAccent discovery"),
-    }
-    roots
+/// Resolve the RUAccent pack search roots from the shared model root source
+/// (ROADMAP-117): the process cwd first, then the effective data root
+/// («Данные программы» — `storage.data_dir` override or the default). Order
+/// matters: the first root wins on duplicate IDs. There is no separate
+/// exe/resource root for user models: models next to the exe are found
+/// whenever the process cwd equals the exe directory.
+pub(crate) fn ruaccent_search_roots(_app_handle: &AppHandle) -> Vec<std::path::PathBuf> {
+    crate::paths::model_search_root_paths()
 }
 
 /// Re-scan the RUAccent pack directories and reconcile the persisted selection.
