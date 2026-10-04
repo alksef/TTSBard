@@ -12,6 +12,7 @@ const {
   fieldErrors,
   showToken,
   isConnected,
+  connectPending,
   restartTwitch,
   stopTwitch,
   startTwitch,
@@ -48,7 +49,7 @@ const {
                t('twitch.status.disconnected') }}
           </span>
           <template v-if="currentStatus === 'Connected'">
-            <button @click="restartTwitch" class="status-button refresh" :title="t('twitch.restart')" :aria-label="t('twitch.restart')">
+            <button @click="restartTwitch" class="status-button refresh" :disabled="connectPending" :class="{ disabled: connectPending }" :title="t('twitch.restart')" :aria-label="t('twitch.restart')">
               <RotateCw :size="14" />
             </button>
             <button @click="stopTwitch" class="status-button stop" :title="t('twitch.disconnect')" :aria-label="t('twitch.disconnect')">
@@ -56,7 +57,7 @@ const {
             </button>
           </template>
           <template v-else>
-            <button @click="startTwitch" class="status-button start" :disabled="currentStatus === 'Connecting'" :class="{ disabled: currentStatus === 'Connecting' }" :title="t('twitch.connect')" :aria-label="t('twitch.connect')">
+            <button @click="startTwitch" class="status-button start" :disabled="currentStatus === 'Connecting' || connectPending" :class="{ disabled: currentStatus === 'Connecting' || connectPending }" :title="t('twitch.connect')" :aria-label="t('twitch.connect')">
               <Play :size="14" />
             </button>
             <button @click="stopTwitch" class="status-button stop disabled" :title="t('twitch.disconnect')" :aria-label="t('twitch.disconnect')" disabled>

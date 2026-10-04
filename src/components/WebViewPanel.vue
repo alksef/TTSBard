@@ -23,6 +23,7 @@ const {
   startServer,
   stopServer,
   restartServer,
+  startPending,
   saveStartOnBoot,
   saveSendOriginalText,
   saveServerSettings,
@@ -62,7 +63,7 @@ const {
             </button>
           </template>
           <template v-else>
-            <button @click="startServer" class="status-button start" :disabled="!isPortValid" :class="{ disabled: !isPortValid }" :title="t('webview.start')" :aria-label="t('webview.start')">
+            <button @click="startServer" class="status-button start" :disabled="!isPortValid || startPending" :class="{ disabled: !isPortValid || startPending }" :title="t('webview.start')" :aria-label="t('webview.start')">
               <Play :size="14" />
             </button>
             <button @click="stopServer" class="status-button stop disabled" :title="t('webview.stop')" :aria-label="t('webview.stop')" disabled>

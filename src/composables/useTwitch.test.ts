@@ -195,7 +195,9 @@ describe('useTwitch action result localization', () => {
       name: 'restartTwitch',
       code: 'restarting',
       trigger: async (twitch) => { await twitch.restartTwitch() },
-      expected: { ru: 'Перезапуск Twitch...', en: 'Restarting Twitch...' },
+      // Результат команды подтверждает runtime: до события статуса виден
+      // ожидание подключения, а не принятый код команды.
+      expected: { ru: 'Подключение к Twitch...', en: 'Connecting to Twitch...' },
     },
     {
       name: 'save',
@@ -763,5 +765,208 @@ describe('useTwitch checkbox section saves', () => {
 
     expect(twitch.settings.value.send_original_text).toBe(false)
     expect(twitch.errorMessage.value).toBeNull()
+  })
+})
+
+describe('useTwitch start with save', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    capturedOnMountedCbs = []
+    capturedOnUnmountedCbs = []
+    mockTwitchSettingsRef.value = { enabled: true, username: 'user', token: 'token', channel: 'channel', start_on_boot: false, send_original_text: true }
+    listenMock.mockImplementation(async () => vi.fn())
+  })
+
+  async function setupWithStatusEvents() {
+    let callback: ((event: { payload: unknown }) => void) | undefined
+    listenMock.mockImplementation(async (...args: unknown[]) => {
+      callback = args[1] as (event: { payload: unknown }) => void
+      return vi.fn()
+    })
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_twitch_status') return { Disconnected: null }
+      return undefined
+    })
+    const twitch = useTwitch()
+    const mounted = capturedOnMountedCbs.shift()
+    if (mounted) await mounted()
+    return { twitch, emitStatus: (payload: unknown) => callback?.({ payload }) }
+  }
+
+  it('saves changed credentials before connecting and skips the duplicate reconnect', async () => {
+    const { twitch, emitStatus } = await setupWithStatusEvents()
+    const saves: Array<{ settings: { token: string } }> = []
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === 'get_twitch_status') return { Disconnected: null }
+      if (cmd === 'save_twitch_settings') {
+        saves.push(JSON.parse(JSON.stringify(args)) as (typeof saves)[number])
+        return 'saved_reconnecting'
+      }
+      return undefined
+    })
+
+    twitch.settings.value.token = 'new_token'
+    const start = twitch.startTwitch()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+    // Изменённые реквизиты сохраняются до подключения; ожидание видно сразу.
+    expect(saves[0].settings.token).toBe('new_token')
+    expect(twitch.errorMessage.value).toBe('Подключение к Twitch...')
+
+    await start
+
+    // Своё переподключение сохранение уже инициировало: второй restart
+    // из одной операции не создаётся.
+    expect(mockInvoke).not.toHaveBeenCalledWith('connect_twitch')
+    expect(twitch.errorMessage.value).toBe('Настройки сохранены. Подключение...')
+
+    // Успех подтверждает runtime-событие, а не приём команды.
+    emitStatus({ Connected: null })
+    expect(twitch.currentStatus.value).toBe('Connected')
+    expect(twitch.errorMessage.value).toBe('Настройки сохранены. Подключено')
+  })
+
+  it('issues a single connect when saving did not trigger a reconnect', async () => {
+    const { twitch, emitStatus } = await setupWithStatusEvents()
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_twitch_status') return { Disconnected: null }
+      if (cmd === 'save_twitch_settings') return 'saved'
+      return undefined
+    })
+
+    twitch.settings.value.token = 'new_token'
+    const start = twitch.startTwitch()
+    await vi.waitFor(() => expect(mockInvoke).toHaveBeenCalledWith('save_twitch_settings', expect.anything()))
+    await start
+
+    expect(mockInvoke).toHaveBeenCalledWith('connect_twitch')
+    expect(twitch.errorMessage.value).toBe('Настройки сохранены. Подключение...')
+
+    emitStatus({ Connected: null })
+    expect(twitch.errorMessage.value).toBe('Настройки сохранены. Подключено')
+  })
+
+  it('does not report saved settings when the fields are unchanged', async () => {
+    const { twitch, emitStatus } = await setupWithStatusEvents()
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_twitch_status') return { Disconnected: null }
+      return undefined
+    })
+
+    const start = twitch.startTwitch()
+    await start
+
+    expect(mockInvoke).not.toHaveBeenCalledWith('save_twitch_settings', expect.anything())
+    expect(mockInvoke).toHaveBeenCalledWith('connect_twitch')
+    expect(twitch.errorMessage.value).toBe('Подключение к Twitch...')
+
+    emitStatus({ Connected: null })
+    expect(twitch.errorMessage.value).toBe('Подключено')
+  })
+
+  it('blocks the connect when saving credentials fails', async () => {
+    const { twitch } = await setupWithStatusEvents()
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_twitch_status') return { Disconnected: null }
+      if (cmd === 'save_twitch_settings') {
+        return Promise.reject({ code: 'twitch.settings_save_failed', message: 'backend', retryable: false })
+      }
+      return undefined
+    })
+
+    twitch.settings.value.token = 'new_token'
+    await twitch.startTwitch()
+
+    expect(mockInvoke).not.toHaveBeenCalledWith('connect_twitch')
+    // Ошибка сохранения блокирует подключение и показывается локализованно.
+    expect(twitch.errorMessage.value).toContain('Не удалось подключиться:')
+    expect(twitch.connectionError.value).toContain('Не удалось сохранить настройки Twitch')
+  })
+
+  it('reports both outcomes when the runtime connection fails after a successful save', async () => {
+    const { twitch, emitStatus } = await setupWithStatusEvents()
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_twitch_status') return { Disconnected: null }
+      if (cmd === 'save_twitch_settings') return 'saved'
+      return undefined
+    })
+
+    twitch.settings.value.token = 'new_token'
+    const start = twitch.startTwitch()
+    await start
+
+    emitStatus({ Error: 'twitch.join_timeout' })
+    // Успешно сохранённые реквизиты не откатываются: сообщается обе части.
+    expect(twitch.errorMessage.value).toBe(
+      'Настройки сохранены. Не удалось подключиться: Не удалось войти в канал за 30 секунд. Проверьте имя канала и соединение.',
+    )
+    expect(twitch.currentStatus.value).toBe('Error')
+  })
+
+  it('does not overwrite the result of a newer operation with a late event', async () => {
+    const { twitch, emitStatus } = await setupWithStatusEvents()
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_twitch_status') return { Disconnected: null }
+      return undefined
+    })
+
+    const first = twitch.startTwitch()
+    await first
+    // Слот первой операции закрыт подтверждением: поздняя ошибка не меняет
+    // результат, а показывается как обычное runtime-событие панели.
+    emitStatus({ Connected: null })
+    expect(twitch.errorMessage.value).toBe('Подключено')
+
+    emitStatus({ Error: 'twitch.join_timeout' })
+    // Тост результата новой операции сохраняется; причина уходит в
+    // постоянный paragraph подключения, как и для любого runtime-события.
+    expect(twitch.errorMessage.value).toBe('Подключено')
+    expect(twitch.connectionError.value).toContain('Не удалось войти в канал')
+  })
+  it('keeps the operation through the backend restart status sequence', async () => {
+    const { twitch, emitStatus } = await setupWithStatusEvents()
+    await twitch.startTwitch()
+    emitStatus({ Disconnected: null })
+    emitStatus({ Connecting: null })
+    emitStatus({ Connected: null })
+    expect(twitch.errorMessage.value).toBe('Подключено')
+  })
+
+  it('persists edits made while the first credential write is pending', async () => {
+    const { twitch } = await setupWithStatusEvents()
+    let finishSave!: (value: string) => void
+    const writes: Array<{ token: string }> = []
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === 'save_twitch_settings') {
+        writes.push(structuredClone((args as { settings: { token: string } }).settings))
+        if (writes.length === 1) return new Promise<string>((resolve) => { finishSave = resolve })
+        return 'saved'
+      }
+      return undefined
+    })
+    twitch.settings.value.token = 'first-token'
+    const starting = twitch.startTwitch()
+    await vi.waitFor(() => expect(writes).toHaveLength(1))
+    twitch.settings.value.token = 'latest-token'
+    finishSave('saved')
+    await starting
+    expect(writes.map((write) => write.token)).toEqual(['first-token', 'latest-token'])
+    expect(mockInvoke).toHaveBeenCalledWith('connect_twitch')
+  })
+
+  it('retains runtime confirmation received before saving resolves', async () => {
+    const { twitch, emitStatus } = await setupWithStatusEvents()
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'save_twitch_settings') {
+        emitStatus({ Disconnected: null })
+        emitStatus({ Connecting: null })
+        emitStatus({ Connected: null })
+        return 'saved_reconnecting'
+      }
+      return undefined
+    })
+    twitch.settings.value.token = 'new-token'
+    await twitch.restartTwitch()
+    expect(twitch.errorMessage.value).toBe('Настройки сохранены. Подключено')
+    expect(mockInvoke).not.toHaveBeenCalledWith('restart_twitch')
   })
 })

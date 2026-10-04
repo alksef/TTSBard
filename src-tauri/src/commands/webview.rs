@@ -139,7 +139,15 @@ pub async fn save_webview_settings(
 
     // Trigger server restart if server settings changed
     // Note: start_on_boot changes don't require restart (only affects next boot)
-    if enabled_changed || port_changed {
+    // A save with `enabled = true` while the server is down (например, retry
+    // после ошибки запуска) тоже обязан применить настройки: без этого кнопка
+    // запуска при неизменных полях не даёт серверу повторного старта.
+    let server_needs_apply = settings.enabled
+        && !matches!(
+            state.webview.status(),
+            crate::webview::WebViewServerStatus::Running | crate::webview::WebViewServerStatus::Starting,
+        );
+    if enabled_changed || port_changed || server_needs_apply {
         tracing::info!("Sending RestartWebViewServer event to WebView server");
         // Send restart event directly to WebView server using the state parameter
         state

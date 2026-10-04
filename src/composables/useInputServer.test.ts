@@ -233,13 +233,14 @@ describe('useInputServer', () => {
     await vi.waitFor(() => expect(saves).toHaveLength(1))
 
     // Правка во время await не теряется и не выдаётся за уже сохранённую:
-    // повторный вызов не создаёт параллельную запись, её подхватывает drain.
+    // повторный вызов присоединяется к drain, её подхватывает следующая
+    // итерация, параллельной записи не создаётся.
     settings.value.port = 13000
-    await saveSettings()
+    const second = saveSettings()
     expect(saves).toHaveLength(1)
 
     resolveFirst()
-    await first
+    await Promise.all([first, second])
 
     expect(saves).toEqual([
       { settings: { start_on_boot: false, port: 12000 } },
@@ -650,5 +651,112 @@ describe('useInputServer', () => {
 
     expect(message.value).toBe('Не удалось скопировать адрес')
     expect(messageType.value).toBe('error')
+  })
+})
+
+describe('useInputServer start with save', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.listenCallbacks.clear()
+    mocks.unlistenFns.clear()
+    capturedOnMountedCb = null
+    capturedOnUnmountedCb = null
+  })
+
+  function emitStatus(state: string, message?: string) {
+    mocks.listenCallbacks.get('input-server-status-changed')?.({ payload: { state, message } })
+  }
+
+  it('saves the changed port before the start and reports the confirmed runtime start', async () => {
+    const { settings, startInputServer, message } = await setupAndMount()
+    const saves: Array<{ settings: { start_on_boot: boolean; port: number } }> = []
+    mocks.mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === 'save_input_server_settings') {
+        saves.push(JSON.parse(JSON.stringify(args)) as (typeof saves)[number])
+        return undefined
+      }
+      return undefined
+    })
+
+    settings.value.port = 12000
+    const start = startInputServer()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+    // Изменённый порт сохраняется до запуска; ожидание видно сразу.
+    expect(saves[0].settings).toEqual({ start_on_boot: false, port: 12000 })
+    expect(message.value).toBe('Запуск...')
+
+    emitStatus('running')
+    await start
+
+    expect(mocks.mockInvoke).toHaveBeenCalledWith('start_input_server')
+    expect(message.value).toBe('Настройки сохранены. Сервер запущен')
+  })
+
+  it('does not report saved settings when the fields are unchanged', async () => {
+    const { startInputServer, message } = await setupAndMount()
+    const saves: unknown[] = []
+    mocks.mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'save_input_server_settings') saves.push(cmd)
+      return undefined
+    })
+
+    const start = startInputServer()
+    emitStatus('running')
+    await start
+
+    // Само переключение запуска сохранением не сопровождается.
+    expect(saves).toHaveLength(0)
+    expect(message.value).toBe('Сервер запущен')
+  })
+
+  it('blocks the start when the save fails and reports both parts on runtime error', async () => {
+    const { settings, startInputServer, message } = await setupAndMount()
+    let rejectSave!: (reason?: unknown) => void
+    mocks.mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'save_input_server_settings') {
+        return new Promise((_resolve, reject) => { rejectSave = reject })
+      }
+      return undefined
+    })
+
+    settings.value.port = 12000
+    const start = startInputServer()
+    await vi.waitFor(() => expect(mocks.mockInvoke).toHaveBeenCalledWith(
+      'save_input_server_settings',
+      { settings: { start_on_boot: false, port: 12000 } },
+    ))
+    rejectSave(new Error('disk full'))
+    await start
+
+    // Ошибка сохранения блокирует запуск: start_input_server не вызван.
+    expect(mocks.mockInvoke).not.toHaveBeenCalledWith('start_input_server')
+    expect(message.value).toBe('Не удалось сохранить настройки: disk full')
+  })
+
+  it('reports the runtime failure with the saved prefix', async () => {
+    const { settings, startInputServer, message } = await setupAndMount()
+    mocks.mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'save_input_server_settings') return undefined
+      return undefined
+    })
+
+    settings.value.port = 12000
+    const start = startInputServer()
+    await vi.waitFor(() => expect(mocks.mockInvoke).toHaveBeenCalledWith('start_input_server'))
+    emitStatus('error', 'port busy')
+    await start
+
+    expect(message.value).toBe('Настройки сохранены. Не удалось запустить сервер: port busy')
+  })
+
+  it('blocks the start on an invalid port without saving', async () => {
+    const { settings, startInputServer, message } = await setupAndMount()
+
+    settings.value.port = 80
+    await startInputServer()
+
+    expect(mocks.mockInvoke).not.toHaveBeenCalledWith('save_input_server_settings', expect.anything())
+    expect(mocks.mockInvoke).not.toHaveBeenCalledWith('start_input_server')
+    expect(message.value).toBe('Порт должен быть от 1024 до 65535')
   })
 })

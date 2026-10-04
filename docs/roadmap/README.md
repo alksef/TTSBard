@@ -49,6 +49,8 @@ related_tasks: []
 
 ## Завершённые направления
 
+- [ROADMAP-122 — Сохранение настроек при запуске интеграций](./completed/122-integration-start-save-feedback.md) — `completed`.
+
 - [ROADMAP-103 — Сгруппированные панели настроек](./completed/103-grouped-general-settings.md)
 - [ROADMAP-096 — Английский интерфейс и внешние языковые пакеты](./completed/096-interface-localization-and-language-packs.md)
 

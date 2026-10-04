@@ -132,6 +132,70 @@ describe('useVTubeStudio', () => {
   afterEach(() => {
   })
 
+  it.each(['start', 'restart'] as const)('%s keeps Connecting while endpoint save disconnects the previous session', async (action) => {
+    const vtube = await setupAndMount(undefined, action === 'restart' ? 'Connected' : 'Disconnected')
+    const statusEvent = getCapturedListenCallback()!
+    let finish!: (value: string) => void
+    const command = action === 'start' ? 'connect_vtube_studio' : 'restart_vtube_studio'
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'save_vtube_studio_settings') {
+        statusEvent({ payload: 'Disconnected' })
+        return 'saved'
+      }
+      if (cmd === command) return new Promise<string>((resolve) => { finish = resolve })
+      return undefined
+    })
+    vtube.settings.value.host = '192.168.1.50'
+    const run = action === 'start' ? vtube.startVTubeStudio : vtube.restartVTubeStudio
+    const pending = run()
+    await vi.waitFor(() => expect(mockInvoke).toHaveBeenCalledWith(command))
+    expect(vtube.currentStatus.value).toBe('Connecting')
+    expect(vtube.busy.value).toBe(true)
+    statusEvent({ payload: 'Error' })
+    expect(vtube.currentStatus.value).toBe('Connecting')
+    await run()
+    expect(mockInvoke.mock.calls.filter(([cmd]) => cmd === command)).toHaveLength(1)
+    finish('connected')
+    await pending
+    expect(vtube.currentStatus.value).toBe('Connected')
+    expect(vtube.busy.value).toBe(false)
+    statusEvent({ payload: 'Disconnected' })
+    expect(vtube.currentStatus.value).toBe('Disconnected')
+  })
+
+  it.each(['start', 'restart'] as const)('%s releases the operation after connection failure', async (action) => {
+    const vtube = await setupAndMount()
+    const command = action === 'start' ? 'connect_vtube_studio' : 'restart_vtube_studio'
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'save_vtube_studio_settings') {
+        getCapturedListenCallback()?.({ payload: 'Disconnected' })
+        return 'saved'
+      }
+      if (cmd === command) throw new Error('unreachable')
+      return undefined
+    })
+    vtube.settings.value.host = '192.168.1.50'
+    await (action === 'start' ? vtube.startVTubeStudio() : vtube.restartVTubeStudio())
+    expect(vtube.currentStatus.value).toBe('Error')
+    expect(vtube.busy.value).toBe(false)
+    getCapturedListenCallback()?.({ payload: 'Disconnected' })
+    expect(vtube.currentStatus.value).toBe('Disconnected')
+  })
+
+  it('ordinary endpoint save still applies the runtime disconnection', async () => {
+    const vtube = await setupAndMount(undefined, 'Connected')
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'save_vtube_studio_settings') {
+        getCapturedListenCallback()?.({ payload: 'Disconnected' })
+        return 'saved'
+      }
+      return undefined
+    })
+    vtube.settings.value.host = '192.168.1.50'
+    await vtube.save()
+    expect(vtube.currentStatus.value).toBe('Disconnected')
+    expect(vtube.busy.value).toBe(false)
+  })
   describe('port validation', () => {
     it('validatePort returns false for port < 1024 and sets portError', async () => {
       const { settings, validatePort, portError } = await setupAndMount()
@@ -639,8 +703,8 @@ describe('useVTubeStudio', () => {
       expect(errorMessage.value).toBe('Не удалось сохранить настройки VTube Studio')
     })
 
-    it('does not roll back or report a stale completion after a newer operation', async () => {
-      const { settings, saveStartOnBoot, startVTubeStudio, errorMessage } =
+    it('blocks the connect and reports the save failure when the joined write rejects', async () => {
+      const { settings, saveStartOnBoot, startVTubeStudio, errorMessage, currentStatus } =
         await setupAndMount({ enabled: true, port: 8001, start_on_boot: false }, 'Disconnected')
       const { persisted, saves } = queuePersistCalls({ enabled: true, port: 8001, start_on_boot: false })
 
@@ -648,18 +712,21 @@ describe('useVTubeStudio', () => {
       const checkbox = saveStartOnBoot()
       await vi.waitFor(() => expect(saves).toHaveLength(1))
 
-      // Новая операция начинается, пока запись checkbox в полёте.
-      await startVTubeStudio()
-      expect(errorMessage.value).toBe('Подключено к VTube Studio')
+      // Подключение начинается, пока запись checkbox в полёте: оно
+      // присоединяется к drain и ждёт её исхода, параллельной записи нет.
+      const connect = startVTubeStudio()
+      expect(saves).toHaveLength(1)
 
       saves[0].reject('backend down')
-      await checkbox
+      await Promise.all([checkbox, connect])
 
-      // UI принадлежит более новой операции: старый completion не откатывает
-      // состояние и не перекрывает её сообщение.
+      // Ошибка сохранения блокирует подключение: connect не вызван,
+      // индикатор возвращён к исходному статусу, сообщение принадлежит записи.
+      expect(mockInvoke).not.toHaveBeenCalledWith('connect_vtube_studio', expect.anything())
       expect(persisted.start_on_boot).toBe(false)
-      expect(settings.value.start_on_boot).toBe(true)
-      expect(errorMessage.value).toBe('Подключено к VTube Studio')
+      expect(settings.value.start_on_boot).toBe(false)
+      expect(currentStatus.value).toBe('Disconnected')
+      expect(errorMessage.value).toBe('Не удалось сохранить настройки VTube Studio')
     })
 
     it('reports the failure for the save() that joined a running checkbox write', async () => {
@@ -1990,5 +2057,148 @@ describe('useVTubeStudio', () => {
         expect(composable.savedTypingAction.value.parameterName).toBe('MyTypingParam')
       })
     })
+  })
+})
+
+describe('useVTubeStudio start with save', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockVtubeSettingsRef.value = {
+      enabled: false,
+      host: '127.0.0.1',
+      port: 8001,
+      start_on_boot: false,
+      typingAction: {
+        outputMode: 'Event',
+        parameterName: 'TTSBardTyping',
+        startHotkeyId: '',
+        stopHotkeyId: '',
+        startHotkeyName: '',
+        stopHotkeyName: '',
+        itemFileName: '',
+        itemType: '',
+      },
+    }
+    capturedOnMountedCb = null
+    capturedOnUnmountedCb = null
+    setCapturedListenCallback('', null)
+    listenMock.mockImplementation(async (event: string, cb: (event: unknown) => void) => {
+      setCapturedListenCallback(event, cb)
+      return mockUnlistenFn
+    })
+  })
+
+  /** Payload попадает в persisted только в момент успешного resolve. */
+  function queuePersistingSaves(initial: Partial<VTubeStudioSettings> = {}) {
+    const persisted = { enabled: false, host: '127.0.0.1', port: 8001, start_on_boot: false, ...initial }
+    const payloads: Array<Record<string, unknown>> = []
+    const saves: Array<{ resolve: (value: string) => void; reject: (reason?: unknown) => void }> = []
+    mockInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === 'save_vtube_studio_settings') {
+        const payload = { ...(args as Record<string, unknown>) }
+        payloads.push(payload)
+        return new Promise<string>((resolve, reject) => {
+          saves.push({
+            resolve: (value: string) => {
+              persisted.enabled = payload.enabled as boolean
+              persisted.host = payload.host as string
+              persisted.port = payload.port as number
+              persisted.start_on_boot = payload.startOnBoot as boolean
+              resolve(value)
+            },
+            reject,
+          })
+        })
+      }
+      if (cmd === 'connect_vtube_studio') return Promise.resolve('Connected')
+      return Promise.resolve(undefined)
+    })
+    return { persisted, payloads, saves }
+  }
+
+  it('saves the changed endpoint before connecting and reports the saved prefix', async () => {
+    const { settings, startVTubeStudio, errorMessage, currentStatus } =
+      await setupAndMount({ enabled: false, host: '127.0.0.1', port: 8001, start_on_boot: false }, 'Disconnected')
+    const { payloads, saves } = queuePersistingSaves({ enabled: false })
+
+    settings.value.host = '127.0.0.2'
+    const connect = startVTubeStudio()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+    // Изменённый адрес сохраняется до подключения; ожидание видно сразу.
+    expect(payloads[0]).toEqual(expect.objectContaining({ host: '127.0.0.2', port: 8001 }))
+    expect(errorMessage.value).toBe('Подключение...')
+
+    saves[0].resolve('saved')
+    await connect
+
+    expect(mockInvoke).toHaveBeenCalledWith('connect_vtube_studio')
+    expect(currentStatus.value).toBe('Connected')
+    // Подключение синхронное: результат invoke — подтверждённый runtime-результат.
+    expect(errorMessage.value).toBe('Настройки сохранены. Подключено')
+  })
+
+  it('does not save or report saved settings when the fields are unchanged', async () => {
+    const { startVTubeStudio, errorMessage, currentStatus } =
+      await setupAndMount({ enabled: false, host: '127.0.0.1', port: 8001, start_on_boot: false }, 'Disconnected')
+    const { saves } = queuePersistingSaves({ enabled: false })
+    mockInvoke.mockClear()
+
+    await startVTubeStudio()
+
+    // Само переключение запуска сохранением не сопровождается.
+    expect(saves).toHaveLength(0)
+    expect(currentStatus.value).toBe('Connected')
+    expect(errorMessage.value).toBe('Подключено')
+  })
+
+  it('blocks the connect and reports the save failure when the write rejects', async () => {
+    const { settings, startVTubeStudio, errorMessage, currentStatus } =
+      await setupAndMount({ enabled: false, host: '127.0.0.1', port: 8001, start_on_boot: false }, 'Disconnected')
+    const { saves } = queuePersistingSaves({ enabled: false })
+
+    settings.value.host = '127.0.0.2'
+    const connect = startVTubeStudio()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+    saves[0].reject('backend down')
+    await connect
+
+    expect(mockInvoke).not.toHaveBeenCalledWith('connect_vtube_studio')
+    // Ошибка сохранения блокирует подключение, индикатор возвращён к исходному.
+    expect(currentStatus.value).toBe('Disconnected')
+    expect(errorMessage.value).toBe('Не удалось сохранить настройки VTube Studio')
+  })
+
+  it('blocks the connect on an invalid host without saving', async () => {
+    const { settings, startVTubeStudio, hostError } =
+      await setupAndMount({ enabled: false, host: '127.0.0.1', port: 8001, start_on_boot: false }, 'Disconnected')
+    const { saves } = queuePersistingSaves({ enabled: false })
+
+    settings.value.host = '127.0.0.1:8001'
+    await startVTubeStudio()
+
+    expect(saves).toHaveLength(0)
+    expect(mockInvoke).not.toHaveBeenCalledWith('connect_vtube_studio')
+    expect(hostError.value).toContain('без схемы')
+  })
+
+  it('reports both outcomes when the connect fails after a successful save', async () => {
+    const { settings, startVTubeStudio, errorMessage, currentStatus } =
+      await setupAndMount({ enabled: false, host: '127.0.0.1', port: 8001, start_on_boot: false }, 'Disconnected')
+    const { saves } = queuePersistingSaves({ enabled: false })
+    const queueImpl = mockInvoke.getMockImplementation()
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === 'connect_vtube_studio') throw new Error('connection refused')
+      return queueImpl?.(cmd, args)
+    })
+
+    settings.value.host = '127.0.0.2'
+    const connect = startVTubeStudio()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+    saves[0].resolve('saved')
+    await connect
+
+    // Успешная запись не откатывается: сообщается обе части операции.
+    expect(currentStatus.value).toBe('Error')
+    expect(errorMessage.value).toBe('Настройки сохранены. Не удалось подключиться к VTube Studio')
   })
 })

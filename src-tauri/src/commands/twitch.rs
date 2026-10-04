@@ -74,6 +74,11 @@ pub async fn save_twitch_settings(
     let credentials_changed = old_settings.username != settings.username
         || old_settings.token != settings.token
         || old_settings.channel != settings.channel;
+    // Реквизиты перечитываются клиентом только при подключении: restart ради
+    // переподключения имеет смысл лишь для живого клиента. Отключённому
+    // сохранение даёт просто записанные реквизиты, а следующая команда
+    // connect/restart поднимет одно соединение уже с ними.
+    let runtime_enabled = { state.twitch.settings.read().await.enabled };
 
     let persisted_settings = settings.clone();
     super::persist_blocking(settings_manager.inner(), move |mgr| {
@@ -89,8 +94,9 @@ pub async fn save_twitch_settings(
 
     super::emit_settings_changed(&app_handle);
 
-    // Отправить событие для перезапуска клиента только если есть изменения
-    if enabled_changed || credentials_changed {
+    // Отправить событие перезапуска клиента только если есть изменения,
+    // требующие переподключения живого клиента
+    if enabled_changed || (credentials_changed && runtime_enabled) {
         state.send_twitch_event(crate::events::TwitchEvent::Restart);
         Ok("saved_reconnecting".to_string())
     } else {

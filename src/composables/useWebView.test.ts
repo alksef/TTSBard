@@ -1225,3 +1225,165 @@ describe('useWebView UPnP forward status', () => {
     expect(webview.upnpForwardFailureText.value).toBeNull()
   })
 })
+
+describe('useWebView start with save', () => {
+  beforeEach(() => {
+    resetHarness()
+  })
+
+  /** Payload попадает в persisted только в момент успешного resolve. */
+  function queuePersistingStart(initial: Partial<WebViewSettingsDto> = {}) {
+    const persisted = makeSettings(initial)
+    const payloads: WebViewSettingsDto[] = []
+    const saves: Array<{ resolve: (value: string) => void; reject: (reason?: unknown) => void }> = []
+    mockInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === 'get_webview_token') return Promise.resolve(null)
+      if (cmd === 'get_local_ip') return Promise.resolve('192.168.1.25')
+      if (cmd === 'get_webview_server_status') return Promise.resolve({ state: 'stopped' })
+      if (cmd === 'save_webview_settings') {
+        const payload = { ...(args as { settings: WebViewSettingsDto }).settings }
+        payloads.push(payload)
+        return new Promise<string>((resolve, reject) => {
+          saves.push({
+            resolve: (value: string) => { Object.assign(persisted, payload); resolve(value) },
+            reject,
+          })
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+    return { persisted, payloads, saves }
+  }
+
+  it('saves changed fields before the start and reports the confirmed runtime start', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ enabled: false, port: 10100 })
+    const { webview, listeners } = await setupAndMountWithEvents()
+    const { payloads, saves } = queuePersistingStart({ enabled: false, port: 10100 })
+
+    webview.settings.value.port = 10500
+    const start = webview.startServer()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+    // Изменённый порт уходит в сохранение вместе с включением сервера.
+    expect(payloads[0]).toEqual(expect.objectContaining({ enabled: true, port: 10500 }))
+    expect(webview.errorMessage.value).toBe('Запуск...')
+
+    saves[0].resolve('saved_restarting')
+    await start
+    expect(webview.errorMessage.value).toBe('Настройки сохранены. Запуск...')
+
+    // Успех подтверждает runtime, а не приём команды.
+    listeners.get('webview-server-status-changed')?.({ payload: { state: 'running' } })
+    expect(webview.errorMessage.value).toBe('Настройки сохранены. Сервер запущен')
+    expect(webview.serverStatus.value).toEqual({ state: 'running' })
+  })
+
+  it('does not report saved settings when the fields were unchanged', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ enabled: false, port: 10100 })
+    const { webview, listeners } = await setupAndMountWithEvents()
+    const { payloads, saves } = queuePersistingStart({ enabled: false, port: 10100 })
+
+    const start = webview.startServer()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+    // Само переключение запуска изменением настроек не считается.
+    expect(payloads[0]).toEqual(expect.objectContaining({ enabled: true, port: 10100 }))
+    expect(webview.errorMessage.value).toBe('Запуск...')
+
+    saves[0].resolve('saved_restarting')
+    await start
+    expect(webview.errorMessage.value).toBe('Запуск...')
+
+    listeners.get('webview-server-status-changed')?.({ payload: { state: 'running' } })
+    expect(webview.errorMessage.value).toBe('Сервер запущен')
+  })
+
+  it('blocks the start when the save fails and ignores a late running event', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ enabled: false, port: 10100 })
+    const { webview, listeners } = await setupAndMountWithEvents()
+    const { saves } = queuePersistingStart({ enabled: false, port: 10100 })
+
+    webview.settings.value.port = 10500
+    const start = webview.startServer()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+    saves[0].reject('backend down')
+    await start
+
+    expect(webview.errorMessage.value).toBe('Не удалось сохранить настройки')
+
+    // Слот операции закрыт: позднее событие не выдаёт себя за результат запуска.
+    listeners.get('webview-server-status-changed')?.({ payload: { state: 'running' } })
+    expect(webview.errorMessage.value).toBe('Не удалось сохранить настройки')
+  })
+
+  it('reports both outcomes when the runtime start fails after a successful save', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ enabled: false, port: 10100 })
+    const { webview, listeners } = await setupAndMountWithEvents()
+    const { saves } = queuePersistingStart({ enabled: false, port: 10100 })
+
+    webview.settings.value.port = 10500
+    const start = webview.startServer()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+    saves[0].resolve('saved_restarting')
+    await start
+
+    listeners.get('webview-server-status-changed')?.({ payload: { state: 'error', message: 'port busy' } })
+    expect(webview.errorMessage.value).toBe('Настройки сохранены. Не удалось запустить сервер: Сервер WebView сообщил об ошибке')
+    expect(webview.serverStatus.value).toEqual({ state: 'error', message: 'port busy' })
+  })
+
+  it('does not persist unrelated form edits when stopping', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ enabled: true, port: 10100 })
+    const { webview } = await setupAndMountWithEvents()
+    const { persisted, payloads, saves } = queuePersistingStart({ enabled: true, port: 10100 })
+
+    webview.settings.value.port = 10900
+    const stopped = webview.stopServer()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+    // Стоп пишет только переключение запуска: правка порта остаётся draft'ом.
+    expect(payloads[0]).toEqual(expect.objectContaining({ enabled: false, port: 10100 }))
+
+    saves[0].resolve('saved_restarting')
+    await stopped
+
+    expect(persisted).toEqual(expect.objectContaining({ enabled: false, port: 10100 }))
+    expect(webview.settings.value).toEqual(expect.objectContaining({ enabled: false, port: 10900 }))
+  })
+
+  it('restores the form draft when the stop write fails', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ enabled: true, port: 10100 })
+    const { webview } = await setupAndMountWithEvents()
+    const { persisted, saves } = queuePersistingStart({ enabled: true, port: 10100 })
+
+    webview.settings.value.port = 10900
+    const stopped = webview.stopServer()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+    saves[0].reject('backend down')
+    await stopped
+
+    expect(persisted).toEqual(expect.objectContaining({ enabled: true, port: 10100 }))
+    expect(webview.settings.value).toEqual(expect.objectContaining({ enabled: true, port: 10900 }))
+    expect(webview.errorMessage.value).toBe('Не удалось сохранить настройки')
+  })
+
+  it('blocks the start on an invalid port without saving', async () => {
+    const { webview } = await setupAndMountWithEvents()
+
+    webview.settings.value.port = 80
+    await webview.startServer()
+
+    expect(mockInvoke).not.toHaveBeenCalledWith('save_webview_settings', expect.anything())
+    expect(webview.errorMessage.value).toBe('Порт должен быть от 1024 до 65535')
+  })
+  it('keeps the launch result across the intermediate stopped status of a restart', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ enabled: true, port: 10100 })
+    const { webview, listeners } = await setupAndMountWithEvents()
+    const { saves } = queuePersistingStart({ enabled: true, port: 10100 })
+    const starting = webview.startServer()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+    saves[0].resolve('saved_restarting')
+    await starting
+    listeners.get('webview-server-status-changed')?.({ payload: { state: 'stopped' } })
+    listeners.get('webview-server-status-changed')?.({ payload: { state: 'starting' } })
+    listeners.get('webview-server-status-changed')?.({ payload: { state: 'running' } })
+    expect(webview.errorMessage.value).toBe('Сервер запущен')
+  })
+})

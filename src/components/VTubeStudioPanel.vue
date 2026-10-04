@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { Download, Play, RefreshCw, RotateCw, Square } from 'lucide-vue-next'
 import { useVTubeStudio, SAVED_HOTKEY_TYPE } from '../composables/useVTubeStudio'
 import { t } from '../i18n'
@@ -70,15 +70,15 @@ const {
                t('vtube.status.disconnected') }}
           </span>
           <template v-if="currentStatus === 'Connected'">
-            <button @click="restartVTubeStudio" class="status-button refresh" :title="t('vtube.restart')" :aria-label="t('vtube.restart')">
+            <button @click="restartVTubeStudio" class="status-button refresh" :disabled="busy" :class="{ disabled: busy }" :title="t('vtube.restart')" :aria-label="t('vtube.restart')">
               <RotateCw :size="14" />
             </button>
-            <button @click="stopVTubeStudio" class="status-button stop" :title="t('vtube.disconnect')" :aria-label="t('vtube.disconnect')">
+            <button @click="stopVTubeStudio" class="status-button stop" :disabled="busy" :class="{ disabled: busy }" :title="t('vtube.disconnect')" :aria-label="t('vtube.disconnect')">
               <Square :size="14" />
             </button>
           </template>
           <template v-else>
-            <button @click="startVTubeStudio" class="status-button start" :disabled="currentStatus === 'Connecting'" :class="{ disabled: currentStatus === 'Connecting' }" :title="t('vtube.connect')" :aria-label="t('vtube.connect')">
+            <button @click="startVTubeStudio" class="status-button start" :disabled="busy || currentStatus === 'Connecting'" :class="{ disabled: busy || currentStatus === 'Connecting' }" :title="t('vtube.connect')" :aria-label="t('vtube.connect')">
               <Play :size="14" />
             </button>
             <button class="status-button stop disabled" :title="t('vtube.disconnect')" :aria-label="t('vtube.disconnect')" disabled>

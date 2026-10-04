@@ -53,6 +53,11 @@ const WEBVIEW_SETTINGS_FIELDS: Array<keyof WebViewSettings> = [
 
 type FieldRevisions = Record<keyof WebViewSettings, number>
 
+// Пользовательские параметры секции без переключения запуска: `enabled`
+// меняется кнопками старт/стоп и изменения настроек не образует.
+const WEBVIEW_USER_SETTINGS_FIELDS: Array<keyof WebViewSettings> =
+  WEBVIEW_SETTINGS_FIELDS.filter((field) => field !== 'enabled')
+
 /** Что логировать и какую локализованную ошибку показать при сбое записи. */
 interface PersistContext {
   logLabel: string
@@ -99,6 +104,13 @@ export function useWebView() {
   const testMessage = ref('')
   const displayUrl = ref('')
   const serverStatus = ref<WebViewServerStatus>({ state: 'stopped' })
+  // Операция запуска, ожидающая runtime-подтверждения. Пока она не завершена,
+  // кнопка запуска заблокирована, а повторные клики не создают вторую операцию.
+  const startPending = ref(false)
+  let startOpToken = 0
+  // `saved` — сохраняла ли операция изменённые настройки: от этого зависит
+  // префикс сообщений запуска. Статусные события ниже завершают операцию.
+  let pendingStart: { saved: boolean } | null = null
   // Фактический runtime-статус UPnP-проброса: mapping — факт, а не пожелание.
   const upnpForwardStatus = ref<UpnpForwardStatus>({ state: 'closed' })
   // Переключение UPnP ждёт router до 5 секунд: пока операция в полёте, второй
@@ -127,6 +139,11 @@ export function useWebView() {
 
   function settingsEqual(a: WebViewSettings, b: WebViewSettings): boolean {
     return WEBVIEW_SETTINGS_FIELDS.every((field) => a[field] === b[field])
+  }
+
+  /** Отличаются ли пользовательские параметры; переключение запуска не считается. */
+  function userSettingsChanged(a: WebViewSettings, b: WebViewSettings): boolean {
+    return WEBVIEW_USER_SETTINGS_FIELDS.some((field) => a[field] !== b[field])
   }
 
   // Baseline: последний snapshot, который backend подтвердил. Из него берётся
@@ -268,6 +285,32 @@ export function useWebView() {
     showError(t(key ?? 'webview.action.saved'), type)
   }
 
+  /**
+   * Завершить операцию запуска подтверждённым runtime-статусом. Сообщение
+   * различает сохранение изменённых настроек и результат запуска; событие
+   * операции, чей слот уже закрыт, результат новой не перезаписывает.
+   */
+  function resolvePendingStart(status: WebViewServerStatus | undefined): void {
+    const operation = pendingStart
+    if (!operation || !status) return
+    if (status.state === 'running') {
+      pendingStart = null
+      showError(t(operation.saved ? 'webview.launch.started_saved' : 'webview.launch.started'), 'success')
+      return
+    }
+    if (status.state === 'error') {
+      pendingStart = null
+      const detail = presentCommandError(status.message, t('webview.error.runtime'))
+      showError(
+        t(operation.saved ? 'webview.launch.failed_saved' : 'webview.launch.failed', { detail }),
+        'error',
+      )
+      return
+    }
+    // Restart штатно проходит через stopped. Явная остановка закрывает слот
+    // в stopServer; промежуточный runtime-статус не отменяет запуск.
+  }
+
   function persistWebViewSettings(payload: WebViewSettings): Promise<string> {
     const previous = persistTail
     // Свободная очередь пишет сразу, занятая — откладывает следующую запись.
@@ -365,15 +408,90 @@ export function useWebView() {
   }
 
   async function startServer(): Promise<boolean> {
+    if (startPending.value) return false
+    if (!isPortValid.value) {
+      showError(t('webview.port_error'))
+      return false
+    }
     debugLog('[WebView] Starting server...')
+    startPending.value = true
+    const gen = ++startOpToken
+    // Кнопка запуска меняет только переключение запуска: об изменениях настроек
+    // говорит сравнение остальных пользовательских параметров с persisted.
     settings.value.enabled = true
-    return await save()
+    const saved = userSettingsChanged(settings.value, persistedSettings)
+    // Слот открывается до сохранения: статусные события, отправленные backend
+    // сразу после записи, не могут завершиться до ответа invoke и должны найти
+    // операцию на месте.
+    pendingStart = { saved }
+    showError(t('webview.launch.pending'), 'info')
+    try {
+      const outcome = await requestPersist(PERSIST_CONTEXT.settings)
+      if (listenerScope.disposed || gen !== startOpToken) {
+        pendingStart = null
+        return false
+      }
+      if (!outcome.ok) {
+        // Ошибка сохранения блокирует запуск: restart-события не было, слот
+        // закрывается, текст ошибки уже показан persist-владельцем.
+        pendingStart = null
+        return false
+      }
+      if (saved && pendingStart) {
+        // Слот мог быть закрыт ранним runtime-событием: подтверждённый
+        // результат ожиданием не перезаписывается.
+        showError(t('webview.launch.pending_saved'), 'info')
+      }
+      if (outcome.result !== 'saved_restarting') {
+        // Перезапуск не инициирован: сервер уже в целевом состоянии либо
+        // подтвердится событием после apply-события backend. Уточнить статус,
+        // чтобы слот не ждал несуществующий переход.
+        void refreshServerStatus().then(() => {
+          if (!listenerScope.disposed && gen === startOpToken) {
+            resolvePendingStart(serverStatus.value)
+          }
+        })
+      }
+      return true
+    } finally {
+      if (!listenerScope.disposed && gen === startOpToken) {
+        startPending.value = false
+      }
+    }
   }
 
   async function stopServer(): Promise<boolean> {
     debugLog('[WebView] Stopping server...')
-    settings.value.enabled = false
-    return await save()
+    pendingStart = null
+    // Завершить идущий drain до записи стопа: иначе его следующий payload
+    // перезаписал бы persisted-состояние после переключения запуска.
+    if (persistDrain) {
+      await persistDrain.catch(() => undefined)
+      if (listenerScope.disposed) return false
+    }
+    // Стоп меняет только переключение запуска: несохранённые правки формы
+    // остаются видимым draft'ом и на диск не записываются.
+    const payload = { ...persistedSettings, enabled: false }
+    const formBeforeStop = settingsSnapshot()
+    internalSettingsWrite = true
+    settings.value = { ...settings.value, enabled: false }
+    internalSettingsWrite = false
+    try {
+      await persistWebViewSettings(payload)
+      if (listenerScope.disposed) return false
+      persistedSettings = payload
+      return true
+    } catch (e) {
+      if (!listenerScope.disposed) {
+        debugError('[WebView] Failed to stop server:', e)
+        // Запись не удалась: форма возвращается к до-остановленному draft'у.
+        internalSettingsWrite = true
+        settings.value = formBeforeStop
+        internalSettingsWrite = false
+        showError(presentCommandError(e, t('webview.error.save_settings')))
+      }
+      return false
+    }
   }
 
   async function restartServer(): Promise<void> {
@@ -569,7 +687,11 @@ export function useWebView() {
     await listenerScope.track(
       listen<WebViewServerStatus>('webview-server-status-changed', (event) => {
         serverStatus.value = event.payload
-        if (event.payload.state === 'error') showError(presentCommandError(event.payload.message, t('webview.error.runtime')))
+        if (pendingStart) {
+          resolvePendingStart(event.payload)
+        } else if (event.payload.state === 'error') {
+          showError(presentCommandError(event.payload.message, t('webview.error.runtime')))
+        }
       }),
     )
     try {
@@ -651,6 +773,7 @@ export function useWebView() {
     startServer,
     stopServer,
     restartServer,
+    startPending,
     saveStartOnBoot,
     saveSendOriginalText,
     saveServerSettings,

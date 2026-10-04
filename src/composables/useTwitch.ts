@@ -41,6 +41,31 @@ export interface TwitchSettings {
   send_original_text: boolean
 }
 
+const TWITCH_SETTINGS_FIELDS: Array<keyof TwitchSettings> = [
+  'enabled',
+  'username',
+  'token',
+  'channel',
+  'start_on_boot',
+  'send_original_text',
+]
+
+// Пользовательские параметры секции без переключения запуска: `enabled`
+// меняется кнопками подключения и изменения настроек не образует.
+const TWITCH_USER_SETTINGS_FIELDS: Array<keyof TwitchSettings> =
+  TWITCH_SETTINGS_FIELDS.filter((field) => field !== 'enabled')
+
+/** Итог сохранения перед подключением: `null` — ошибка записи, запуск заблокирован. */
+type TwitchPersistOutcome = 'unchanged' | 'saved' | 'saved-reconnecting' | null
+
+function copySettingsField<K extends keyof TwitchSettings>(
+  target: TwitchSettings,
+  source: TwitchSettings,
+  field: K,
+): void {
+  target[field] = source[field]
+}
+
 function isRustEnumDisconnected(obj: unknown): obj is RustEnumDisconnected {
   return typeof obj === 'object' && obj !== null && 'Disconnected' in obj
 }
@@ -131,6 +156,24 @@ export function useTwitch() {
   const checkboxRevisions = { start_on_boot: 0, send_original_text: 0 }
   let applyingInternalState = false
 
+  // Baseline: последнее подтверждённое backend'ом состояние секции. По нему
+  // несохранённая правка отличается от persisted-значения, из него же берётся
+  // защита более новых правок при применении эха.
+  let persistedSettings: TwitchSettings = { ...settings.value }
+  // Операция подключения/переподключения, ожидающая runtime-подтверждения:
+  // приём асинхронной команды успехом подключения не считается.
+  let pendingConnect: { saved: boolean; ready: boolean; status?: TwitchStatus } | null = null
+  const connectPending = ref(false)
+
+  function settingsSnapshot(): TwitchSettings {
+    return { ...settings.value }
+  }
+
+  /** Отличаются ли пользовательские параметры; переключение запуска не считается. */
+  function userSettingsChanged(a: TwitchSettings, b: TwitchSettings): boolean {
+    return TWITCH_USER_SETTINGS_FIELDS.some((field) => a[field] !== b[field])
+  }
+
   watch(() => settings.value.start_on_boot, () => {
     if (!applyingInternalState) checkboxRevisions.start_on_boot += 1
   }, { flush: 'sync' })
@@ -178,6 +221,70 @@ export function useTwitch() {
     connectionErrorCode.value = status === 'Error'
       ? (isRustEnumError(raw) ? raw.Error ?? 'twitch.unknown' : 'twitch.unknown')
       : null
+    resolvePendingConnect(status)
+  }
+
+  /** Локализованный отказ подключения с причиной из field/connection ошибок. */
+  function presentConnectFailure(saved: boolean): string {
+    const detail = connectionError.value
+      ?? (Object.values(fieldErrors.value)[0] as string | undefined)
+      ?? ''
+    return t(saved ? 'twitch.error.connect_saved' : 'twitch.error.connect', { detail })
+  }
+
+  /**
+   * Завершить операцию подключения подтверждённым runtime-статусом. Поздние
+   * события операции без слота результат новой не перезаписывают.
+   */
+  function resolvePendingConnect(status: TwitchStatus): void {
+    const operation = pendingConnect
+    if (!operation) return
+    if (!operation.ready) {
+      operation.status = status
+      return
+    }
+    if (status === 'Connected') {
+      pendingConnect = null
+      showError(t(operation.saved ? 'twitch.action.connected_saved' : 'twitch.action.connected'), 'success')
+      return
+    }
+    if (status === 'Error') {
+      pendingConnect = null
+      // Успешно сохранённые реквизиты не откатываются: сообщается обе части.
+      showError(presentConnectFailure(operation.saved), 'error')
+      return
+    }
+    // Restart штатно публикует Disconnected перед Connecting: это не отмена.
+  }
+
+  /**
+   * Сохранить изменённые реквизиты перед подключением. Возвращает `null` при
+   * ошибке записи (она блокирует подключение; отказ показывает
+   * `handleSettingsFailure`), `'unchanged'`, когда сохранять нечего, и
+   * `'saved-reconnecting'`, когда сохранение само инициировало переподключение.
+   */
+  async function persistBeforeConnect(): Promise<TwitchPersistOutcome> {
+    let snapshot = settingsSnapshot()
+    if (!userSettingsChanged(snapshot, persistedSettings)) return 'unchanged'
+    const request = ++settingsRequest
+    let reconnecting = false
+    try {
+      while (true) {
+        const result = await persistTwitchSettings(snapshot)
+        if (listenerScope.disposed || request !== settingsRequest) return null
+        persistedSettings = snapshot
+        reconnecting ||= result === 'saved_reconnecting'
+        const latest = settingsSnapshot()
+        if (!userSettingsChanged(latest, snapshot)) break
+        if (!validateFields()) return null
+        snapshot = latest
+      }
+      return reconnecting ? 'saved-reconnecting' : 'saved'
+    } catch (error) {
+      if (listenerScope.disposed || request !== settingsRequest) return null
+      handleSettingsFailure(error)
+      return null
+    }
   }
 
   function validateFields() {
@@ -194,7 +301,9 @@ export function useTwitch() {
 
   for (const field of ['username', 'channel', 'token'] as const) {
     watch(() => settings.value[field], () => {
-      ++settingsRequest
+      // Во время сохранения перед подключением новая правка принадлежит drain,
+      // а не отменяет его до следующей итерации.
+      if (!connectPending.value) ++settingsRequest
       if (fieldErrorCodes.value[field]) {
         const code = validateTwitchSettings(settings.value)[field]
         if (code) fieldErrorCodes.value[field] = code
@@ -224,16 +333,46 @@ export function useTwitch() {
   }
 
   async function restartTwitch() {
+    if (connectPending.value) return
     if (!validateFields()) return
     connectionErrorCode.value = null
-    const request = ++settingsRequest
+    connectPending.value = true
+    let saved = false
+    let request = 0
     try {
-      const result = await invoke<string>('restart_twitch')
-      if (listenerScope.disposed || request !== settingsRequest) return
-      showActionResult(result, 'success')
+      // Пока сохранение и переподключение в полёте, результат подтверждает
+      // runtime-событие: приём команды успехом подключения не считается.
+      showError(t('twitch.action.connecting'), 'info')
+      pendingConnect = { saved: userSettingsChanged(settings.value, persistedSettings), ready: false }
+      const operation = pendingConnect
+      const persistOutcome = await persistBeforeConnect()
+      if (listenerScope.disposed) return
+      if (persistOutcome === null) {
+        if (pendingConnect === operation) pendingConnect = null
+        // Ошибка сохранения блокирует подключение: тост ожидания заменяется
+        // локализованной причиной, постоянную ошибку ставит handleSettingsFailure.
+        showError(presentConnectFailure(false), 'error')
+        return
+      }
+      saved = persistOutcome !== 'unchanged'
+      if (saved) {
+        showError(t('twitch.action.connecting_saved'), 'info')
+      }
+      operation.saved = saved
+      operation.ready = true
+      if (pendingConnect === operation && operation.status) resolvePendingConnect(operation.status)
+      // Своё переподключение сохранение уже инициировало: второй restart
+      // из одной операции не создаётся.
+      if (persistOutcome !== 'saved-reconnecting') {
+        request = ++settingsRequest
+        await invoke<string>('restart_twitch')
+      }
     } catch (e) {
+      pendingConnect = null
       if (listenerScope.disposed || request !== settingsRequest) return
       handleSettingsFailure(e)
+    } finally {
+      if (!listenerScope.disposed) connectPending.value = false
     }
   }
 
@@ -255,6 +394,7 @@ export function useTwitch() {
     try {
       const result = await persistTwitchSettings(snapshot)
       if (listenerScope.disposed || request !== settingsRequest) return
+      persistedSettings = snapshot
       showActionResult(result, 'success')
     } catch (error) {
       if (listenerScope.disposed || request !== settingsRequest) return
@@ -263,20 +403,51 @@ export function useTwitch() {
   }
 
   async function startTwitch() {
+    if (connectPending.value) return
     if (!validateFields()) return
     connectionErrorCode.value = null
-    const request = ++settingsRequest
+    connectPending.value = true
+    let saved = false
+    let request = 0
     try {
-      const result = await invoke<string>('connect_twitch')
-      if (listenerScope.disposed || request !== settingsRequest) return
-      showActionResult(result, 'success')
+      // Пока сохранение и подключение в полёте, результат подтверждает
+      // runtime-событие: приём команды успехом подключения не считается.
+      showError(t('twitch.action.connecting'), 'info')
+      pendingConnect = { saved: userSettingsChanged(settings.value, persistedSettings), ready: false }
+      const operation = pendingConnect
+      const persistOutcome = await persistBeforeConnect()
+      if (listenerScope.disposed) return
+      if (persistOutcome === null) {
+        if (pendingConnect === operation) pendingConnect = null
+        // Ошибка сохранения блокирует подключение: тост ожидания заменяется
+        // локализованной причиной, постоянную ошибку ставит handleSettingsFailure.
+        showError(presentConnectFailure(false), 'error')
+        return
+      }
+      saved = persistOutcome !== 'unchanged'
+      if (saved) {
+        showError(t('twitch.action.connecting_saved'), 'info')
+      }
+      operation.saved = saved
+      operation.ready = true
+      if (pendingConnect === operation && operation.status) resolvePendingConnect(operation.status)
+      // Своё переподключение сохранение уже инициировало: второй restart
+      // из одной операции не создаётся.
+      if (persistOutcome !== 'saved-reconnecting') {
+        request = ++settingsRequest
+        await invoke<string>('connect_twitch')
+      }
     } catch (error) {
+      pendingConnect = null
       if (listenerScope.disposed || request !== settingsRequest) return
       handleSettingsFailure(error)
+    } finally {
+      if (!listenerScope.disposed) connectPending.value = false
     }
   }
 
   async function stopTwitch() {
+    pendingConnect = null
     ++settingsRequest
     try {
       const result = await invoke<string>('disconnect_twitch')
@@ -327,6 +498,9 @@ export function useTwitch() {
           start_on_boot: payload.start_on_boot,
           send_original_text: payload.send_original_text,
         }
+        // Подтверждённый baseline — это то, что реально записал backend:
+        // payload содержит и остальную секцию в момент записи.
+        persistedSettings = payload
         if (checkboxFieldsEqual(settings.value, payload)) break
         payload = { ...settings.value }
         payloadRevisions = { ...checkboxRevisions }
@@ -386,8 +560,7 @@ export function useTwitch() {
     // drain is replacing and make the drain write that value back.
     if (checkboxSavePending) return
     debugLog('[TwitchPanel] Settings updated from composable, has_token:', !!newSettings.token, 'channel:', newSettings.channel)
-    applyingInternalState = true
-    settings.value = {
+    const echo: TwitchSettings = {
       enabled: newSettings.enabled,
       username: newSettings.username,
       token: newSettings.token,
@@ -395,10 +568,21 @@ export function useTwitch() {
       start_on_boot: newSettings.start_on_boot,
       send_original_text: newSettings.send_original_text,
     }
+    // Эхо выполняющейся записи не затирает более новую правку: поля, чьё
+    // значение отличается от persisted-состояния, остаются видимым draft'ом.
+    const merged: TwitchSettings = { ...echo }
+    for (const field of TWITCH_SETTINGS_FIELDS) {
+      if (settings.value[field] !== persistedSettings[field]) {
+        copySettingsField(merged, settings.value, field)
+      }
+    }
+    applyingInternalState = true
+    settings.value = merged
     applyingInternalState = false
+    persistedSettings = echo
     persistedCheckboxes = {
-      start_on_boot: newSettings.start_on_boot,
-      send_original_text: newSettings.send_original_text,
+      start_on_boot: echo.start_on_boot,
+      send_original_text: echo.send_original_text,
     }
   }, { immediate: true })
 
@@ -421,6 +605,7 @@ export function useTwitch() {
     currentStatus,
     showToken,
     isConnected,
+    connectPending,
     restartTwitch,
     stopTwitch,
     startTwitch,

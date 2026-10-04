@@ -57,6 +57,11 @@ const VTUBE_SETTINGS_FIELDS: Array<keyof VTubeStudioSettings> = [
 
 type FieldRevisions = Record<keyof VTubeStudioSettings, number>
 
+// Пользовательские параметры секции без переключения запуска: `enabled`
+// меняется кнопкой подключения и изменения настроек не образует.
+const VTUBE_USER_SETTINGS_FIELDS: Array<keyof VTubeStudioSettings> =
+  VTUBE_SETTINGS_FIELDS.filter((field) => field !== 'enabled')
+
 function copySettingsField<K extends keyof VTubeStudioSettings>(
   target: VTubeStudioSettings,
   source: VTubeStudioSettings,
@@ -137,6 +142,9 @@ export function useVTubeStudio() {
   const listenerScope = createAsyncCleanupScope()
 
   const busy = ref(false)
+  // Connect/restart invoke подтверждает итог авторизации. Промежуточное
+  // отключение старого endpoint при сохранении не завершает эту операцию.
+  let connectionOperationPending = false
   let opGeneration = 0
 
   // Baseline: последний snapshot, который backend подтвердил. Из него берётся
@@ -330,6 +338,7 @@ export function useVTubeStudio() {
   }
 
   function handleStatusChange(status: VTubeStatus) {
+    if (connectionOperationPending) return
     currentStatus.value = status
     if (status === 'Error') {
       showError(t('vtube.error.connection'))
@@ -429,6 +438,11 @@ export function useVTubeStudio() {
     return VTUBE_SETTINGS_FIELDS.every((field) => a[field] === b[field])
   }
 
+  /** Отличаются ли пользовательские параметры; переключение запуска не считается. */
+  function userSettingsChanged(a: VTubeStudioSettings, b: VTubeStudioSettings): boolean {
+    return VTUBE_USER_SETTINGS_FIELDS.some((field) => a[field] !== b[field])
+  }
+
   function persistVTubeSettings(payload: VTubeStudioSettings): Promise<string> {
     const args = { enabled: payload.enabled, host: payload.host, port: payload.port, startOnBoot: payload.start_on_boot }
     const previous = persistTail
@@ -519,22 +533,64 @@ export function useVTubeStudio() {
     }
   }
 
+  /**
+   * Сохранить изменённые настройки перед подключением. Возвращает `false`,
+   * когда сохранять нечего, `true` при успешной записи и `null` при ошибке:
+   * ошибка сохранения блокирует подключение, откат и текст обрабатывает drain.
+   */
+  async function persistBeforeConnect(gen: number): Promise<boolean | null> {
+    // Адрес нормализуется как в persist-пайплайне: trim сам по себе не изменение.
+    const draft = settingsSnapshot()
+    const normalized = { ...draft, host: draft.host.trim() }
+    if (!userSettingsChanged(normalized, persistedSettings)) return false
+    const outcome = await requestPersist()
+    if (listenerScope.disposed || isStaleOp(gen)) return null
+    if (!outcome.ok) {
+      rollbackUneditedFields(outcome.submittedRevisions)
+      showError(presentCommandError(outcome.error, t('vtube.error.save_settings')))
+      return null
+    }
+    return true
+  }
+
   async function startVTubeStudio() {
     if (busy.value) return
-    currentStatus.value = 'Connecting'
+    if (!validatePort() || !validateHost()) return
     const gen = startOperation()
+    connectionOperationPending = true
+    const statusBefore = currentStatus.value
+    currentStatus.value = 'Connecting'
+    showError(t('vtube.action.connecting'), 'info')
+    let saved = false
     try {
+      const persistOutcome = await persistBeforeConnect(gen)
+      if (listenerScope.disposed || isStaleOp(gen)) return
+      if (persistOutcome === null) {
+        // Ошибка сохранения блокирует подключение: индикатор возвращается к
+        // исходному статусу, а не изображает продолжающееся подключение.
+        currentStatus.value = statusBefore
+        return
+      }
+      saved = persistOutcome
+      if (saved) {
+        showError(t('vtube.action.connecting_saved'), 'info')
+      }
+      // Подключение выполняется синхронно: результат invoke и есть
+      // подтверждённый runtime-результат, асинхронных событий ждать не нужно.
       const result = await invoke<string>('connect_vtube_studio')
       if (!isStaleOp(gen)) {
+        debugLog('[VTubeStudio] Connect result:', result)
         currentStatus.value = 'Connected'
-        showError(result, 'success')
+        showError(t(saved ? 'vtube.action.connected_saved' : 'vtube.action.connected'), 'success')
       }
     } catch (e) {
       if (!isStaleOp(gen)) {
+        // Успешно сохранённые настройки не откатываются: сообщается обе части.
         currentStatus.value = 'Error'
-        showError(presentCommandError(e, t('vtube.error.connect')))
+        showError(presentCommandError(e, t(saved ? 'vtube.error.connect_saved' : 'vtube.error.connect')))
       }
     } finally {
+      connectionOperationPending = false
       endOperation()
     }
   }
@@ -559,20 +615,39 @@ export function useVTubeStudio() {
 
   async function restartVTubeStudio() {
     if (busy.value) return
-    currentStatus.value = 'Connecting'
+    if (!validatePort() || !validateHost()) return
     const gen = startOperation()
+    connectionOperationPending = true
+    const statusBefore = currentStatus.value
+    currentStatus.value = 'Connecting'
+    showError(t('vtube.action.connecting'), 'info')
+    let saved = false
     try {
-      const result = await invoke<string>('restart_vtube_studio')
+      const persistOutcome = await persistBeforeConnect(gen)
+      if (listenerScope.disposed || isStaleOp(gen)) return
+      if (persistOutcome === null) {
+        // Ошибка сохранения блокирует переподключение: индикатор возвращается
+        // к исходному статусу, а не изображает продолжающееся подключение.
+        currentStatus.value = statusBefore
+        return
+      }
+      saved = persistOutcome
+      if (saved) {
+        showError(t('vtube.action.connecting_saved'), 'info')
+      }
+      await invoke('restart_vtube_studio')
       if (!isStaleOp(gen)) {
         currentStatus.value = 'Connected'
-        showError(result, 'success')
+        showError(t(saved ? 'vtube.action.connected_saved' : 'vtube.action.connected'), 'success')
       }
     } catch (e) {
       if (!isStaleOp(gen)) {
+        // Успешно сохранённые настройки не откатываются: сообщается обе части.
         currentStatus.value = 'Error'
-        showError(presentCommandError(e, t('vtube.error.restart')))
+        showError(presentCommandError(e, t(saved ? 'vtube.error.restart_saved' : 'vtube.error.restart')))
       }
     } finally {
+      connectionOperationPending = false
       endOperation()
     }
   }
