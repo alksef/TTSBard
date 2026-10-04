@@ -45,7 +45,7 @@ related_tasks: []
 
 ## Активные направления
 
-- [ROADMAP-120 — Подключение VTube Studio по локальной сети](./active/120-vtube-studio-lan-connection.md) — `in_progress`.
+Нет активных направлений в этом релизном срезе.
 
 ## Завершённые направления
 
@@ -194,6 +194,8 @@ related_tasks: []
 - [ROADMAP-059 — Владение integration state и атомарность settings](./completed/059-integration-state-ownership-and-settings-atomicity.md) — P0–P3: WebView atomic save, Telegram owner API, контракты DECISION-018/019.
 
 ### VTube Studio и WebView
+
+- [ROADMAP-120 — Подключение VTube Studio по локальной сети](./completed/120-vtube-studio-lan-connection.md) — `completed`.
 
 - [ROADMAP-079 — затухание ошибки ручного подключения VTS](./completed/079-vts-manual-connect-error-decay.md)
 - [ROADMAP-042 — VTube Studio typing UI](./completed/042-vtube-studio-typing-ui.md)
