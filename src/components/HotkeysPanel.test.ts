@@ -10,23 +10,50 @@ const source = componentSource
 const script = ts.transpile(source, { target: ts.ScriptTarget.ES2022 })
 
 function setup() {
+  const props = { active: true }
+  let activeChanged: (active: boolean) => void = () => {}
   const invoke = vi.fn().mockResolvedValue(undefined)
   const reload = vi.fn().mockResolvedValue(undefined)
   const run = new Function('ref', 'computed', 'onUnmounted', 'invoke', 'useAppSettings',
-    'debugError', 't', 'normalizeCommandError', 'document', `${script}
+    'debugError', 't', 'normalizeCommandError', 'document', 'defineProps', 'withDefaults', 'watch', `${script}
     return { startRecording, handleKeyDown, handleKeyUp, recordingFor, errorMessage };`)
   const panel = run((value: unknown) => ({ value }), (fn: () => unknown) => ({ get value() { return fn() } }),
     () => {}, invoke, () => ({ settings: { value: {} }, reload }), () => {},
     (_key: string, args: { detail: string }) => `Ошибка: ${args.detail}`, normalizeCommandError,
-    { addEventListener() {}, removeEventListener() {} })
+    { addEventListener() {}, removeEventListener() {} }, () => props, (value: unknown) => value,
+    (_source: unknown, callback: (active: boolean) => void) => { activeChanged = callback })
   const event = (key: string, code: string, modifiers = true) => ({
     key, code, ctrlKey: modifiers, shiftKey: modifiers, altKey: false, metaKey: false,
     preventDefault: vi.fn(),
   })
-  return { panel, invoke, event }
+  const leavePanel = () => { props.active = false; activeChanged(false) }
+  return { panel, invoke, event, leavePanel }
 }
 
 describe('global shortcut recording', () => {
+  it('cancels recording when the panel is hidden', async () => {
+    const { panel, invoke, event, leavePanel } = setup()
+    await panel.startRecording('main_window')
+    leavePanel()
+    panel.handleKeyDown(event('R', 'KeyR'))
+    panel.handleKeyUp(event('R', 'KeyR'))
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('reregister_hotkeys_cmd'))
+    expect(panel.recordingFor.value).toBeNull()
+    expect(invoke).not.toHaveBeenCalledWith('set_hotkey', expect.anything())
+  })
+
+  it('does not start recording after leaving during IPC setup', async () => {
+    const { panel, invoke, leavePanel } = setup()
+    let release!: () => void
+    invoke.mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve }))
+    const starting = panel.startRecording('main_window')
+    leavePanel()
+    release()
+    await starting
+    expect(panel.recordingFor.value).toBeNull()
+    expect(invoke).toHaveBeenCalledWith('set_hotkey_recording', { recording: false })
+    expect(invoke).toHaveBeenCalledWith('reregister_hotkeys_cmd')
+  })
   it.each([
     ['К', 'KeyR', 'R'], ['R', 'KeyR', 'R'], ['!', 'Digit1', '1'],
     ['F3', 'F3', 'F3'], [' ', 'Space', 'SPACE'], ['Enter', 'Enter', 'Enter'],

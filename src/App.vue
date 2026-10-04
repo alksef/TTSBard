@@ -526,7 +526,7 @@ onUnmounted(() => {
           <VTubeStudioPanel v-show="currentPanel === 'vtube-studio'" />
           <OcrPanel v-show="currentPanel === 'ocr'" />
           <SettingsPanel v-show="currentPanel === 'settings'" />
-          <HotkeysPanel v-show="currentPanel === 'hotkeys'" />
+          <HotkeysPanel v-show="currentPanel === 'hotkeys'" :active="currentPanel === 'hotkeys'" />
           <InterceptPanel v-show="currentPanel === 'intercept'" />
         </main>
       </div>

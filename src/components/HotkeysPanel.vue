@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed, onUnmounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { Keyboard, RotateCcw, AppWindow, Music, MonitorPlay, SquarePen, ScanLine } from 'lucide-vue-next'
 import type { HotkeyDto } from '../types/settings'
@@ -9,6 +9,17 @@ import { normalizeCommandError } from '../ipc/commandError'
 import { t } from '../i18n'
 
 const { settings, isLoading, reload } = useAppSettings()
+
+const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true })
+let recordingGeneration = 0
+let recordingStartPending = false
+
+watch(() => props.active, active => {
+  if (!active) {
+    recordingGeneration++
+    if (recordingFor.value) void cancelRecording()
+  }
+}, { flush: 'sync' })
 
 const hotkeys = computed(() => settings.value?.hotkeys)
 
@@ -31,12 +42,21 @@ let messageTimeoutId: ReturnType<typeof setTimeout> | null = null
 
 // Start recording a hotkey
 async function startRecording(name: HotkeyName) {
+  if (!props.active || recordingStartPending) return
+  const generation = recordingGeneration
+  recordingStartPending = true
   try {
     // Устанавливаем флаг записи (блокирует выполнение хоткеев)
     await invoke('set_hotkey_recording', { recording: true })
 
     // Отключаем все глобальные хоткеи для надежности
     await invoke('unregister_hotkeys')
+
+    if (!props.active || generation !== recordingGeneration) {
+      await invoke('set_hotkey_recording', { recording: false })
+      await invoke('reregister_hotkeys_cmd')
+      return
+    }
 
     recordingFor.value = name
     errorMessage.value = null
@@ -51,14 +71,24 @@ async function startRecording(name: HotkeyName) {
     try {
       await invoke('set_hotkey_recording', { recording: false })
     } catch {}
+  } finally {
+    recordingStartPending = false
   }
 }
 
 // Start recording an editor-scoped hotkey (no global unregister/reregister)
 async function startEditorRecording(name: EditorHotkeyName) {
+  if (!props.active || recordingStartPending) return
+  const generation = recordingGeneration
+  recordingStartPending = true
   try {
     // Устанавливаем флаг записи (блокирует выполнение хоткеев)
     await invoke('set_hotkey_recording', { recording: true })
+
+    if (!props.active || generation !== recordingGeneration) {
+      await invoke('set_hotkey_recording', { recording: false })
+      return
+    }
 
     // Editor hotkeys не регистрируются глобально, поэтому unregister/reregister не нужны
 
@@ -75,6 +105,8 @@ async function startEditorRecording(name: EditorHotkeyName) {
     try {
       await invoke('set_hotkey_recording', { recording: false })
     } catch {}
+  } finally {
+    recordingStartPending = false
   }
 }
 
@@ -244,6 +276,7 @@ function showMessage(msg: string, type: Exclude<HotkeyMessageType, null>) {
 
 // Cleanup on unmount
 onUnmounted(async () => {
+  recordingGeneration++
   if (messageTimeoutId !== null) {
     clearTimeout(messageTimeoutId)
     messageTimeoutId = null
