@@ -1,7 +1,7 @@
 # DECISION-024 — UPnP port forwarding вне async lifecycle WebView
 
 **Статус:** `accepted` (ROADMAP-114)
-**Связано:** [ROADMAP-114](../roadmap/active/114-webview-transport-resilience.md), [DECISION-010](./010-webview-sse.md)
+**Связано:** [ROADMAP-114](../roadmap/completed/114-webview-transport-resilience.md), [DECISION-010](./010-webview-sse.md)
 
 > **TL;DR.** Router I/O (`igd`: SSDP discovery, локальный адрес, SOAP add/remove)
 > больше не выполняется в async-задачах. Каждый запрос уходит на blocking pool с

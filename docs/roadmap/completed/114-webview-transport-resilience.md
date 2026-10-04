@@ -1,8 +1,8 @@
 ---
 id: ROADMAP-114
-status: exploring
+status: completed
 created: 2026-09-29
-updated: 2026-09-29
+updated: 2026-10-04
 related_tasks: []
 ---
 
@@ -48,3 +48,19 @@ broadcast receiver завершает SSE-поток. Локальное evidenc
 ## Не входит
 
 Замена SSE-протокола, новый брокер событий, изменение модели доступа WebView.
+
+## Outcome
+
+Router I/O вынесен из async executor; готовность TCP listener не зависит от
+optional UPnP forwarding. Lifecycle учитывает timeout, stop/restart и позднее
+завершение mapping; поздний mapping после остановки компенсируется. Статусы
+отражают актуальное поколение операции, ошибки старта сохраняются для показа.
+Discovery gateway дополнен явными IPv4-интерфейсами.
+
+SSE продолжает чтение после `RecvError::Lagged` и завершает поток при `Closed`.
+Контракт и диагностика уточнены в документации WebView/SSE; соответствующие
+regression tests включены в реализацию.
+
+2026-10-04 пользователь подтвердил готовность ROADMAP-114 в текущей ветке.
+Это запись пользовательской приёмки; отдельный повторный runtime-прогон при
+оформлении закрытия не выполнялся.

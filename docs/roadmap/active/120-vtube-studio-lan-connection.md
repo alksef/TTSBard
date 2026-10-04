@@ -107,7 +107,7 @@ frontend (vitest, vue-tsc, vite build, parity-скрипты settings/locales/IP
   WebSocket API, авторизация и UDP discovery в локальной сети. Discovery
   подтверждает сетевой сценарий, но не заменяет проверку доступности сервера.
 - [Руководство текущей интеграции](../../integrations/vtube-studio.md).
-- [ROADMAP-115 — Последовательное сохранение настроек WebView и VTube Studio](./115-settings-save-consistency-followup.md):
+- [ROADMAP-115 — Последовательное сохранение настроек WebView и VTube Studio](../completed/115-settings-save-consistency-followup.md):
   изменение адреса должно учитывать текущий контракт сохранения.
 - [AI-assisted workflow](../../development/ai-workflow.md): реализация
   через локальные task-файлы и DeepSeek/OpenCode с независимой проверкой.

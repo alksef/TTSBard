@@ -46,11 +46,6 @@ related_tasks: []
 ## Активные направления
 
 - [ROADMAP-120 — Подключение VTube Studio по локальной сети](./active/120-vtube-studio-lan-connection.md) — `in_progress`.
-- [ROADMAP-119 — Готовность Piper до загрузки модели](./active/119-piper-runtime-readiness.md) — `in_progress`.
-- [ROADMAP-117 — Разделение данных приложения: Roaming, Local и %TEMP%](./active/117-app-storage-split.md) — `in_progress`.
-- [ROADMAP-116 — Нагрузка audiodg и lifecycle потоков вывода](./active/116-audiodg-playback-stream-lifecycle.md) — `in_progress`.
-- [ROADMAP-115 — Последовательное сохранение настроек WebView и VTube Studio](./active/115-settings-save-consistency-followup.md) — `planned`.
-- [ROADMAP-114 — Отзывчивый WebView lifecycle и устойчивый SSE](./active/114-webview-transport-resilience.md) — `exploring`.
 
 ## Завершённые направления
 
@@ -71,6 +66,8 @@ related_tasks: []
 
 ### Интеграции
 
+- [ROADMAP-114 — Отзывчивый WebView lifecycle и устойчивый SSE](./completed/114-webview-transport-resilience.md)
+
 - [ROADMAP-111 — Стабилизация подключения Twitch](./completed/111-twitch-connection-stabilization.md)
 
 - [ROADMAP-107 — Текст внешней доставки для WebView и Twitch](./completed/107-original-text-for-external-delivery.md)
@@ -83,10 +80,16 @@ related_tasks: []
 
 ### TTS-провайдеры
 
+- [ROADMAP-119 — Готовность Piper до загрузки модели](./completed/119-piper-runtime-readiness.md) — `completed`.
+
 - [ROADMAP-097 — ElevenLabs как TTS-провайдер](./completed/097-elevenlabs-tts-provider.md)
 - [ROADMAP-086 — управляемая видимость провайдеров в панели TTS](./completed/086-tts-provider-panel-visibility.md)
 
 ### Надёжность и ревью
+
+- [ROADMAP-117 — Разделение данных приложения: Roaming, Local и %TEMP%](./completed/117-app-storage-split.md) — `completed`.
+
+- [ROADMAP-115 — Последовательное сохранение настроек WebView и VTube Studio](./completed/115-settings-save-consistency-followup.md)
 
 - [ROADMAP-113 — Согласованное сохранение настроек Input Server и Twitch](./completed/113-settings-save-consistency.md)
 - [ROADMAP-112 — Ограниченная очередь речи и неблокирующая запись истории](./completed/112-speech-queue-retention-and-history-io.md)
@@ -147,6 +150,8 @@ related_tasks: []
 - [ROADMAP-065 — Саундпанель: раскладка клавиатуры, разделение runtime/config](./completed/065-soundpanel-keyboard-layout-runtime-config.md)
 
 ### Audio и playback pipeline
+
+- [ROADMAP-116 — Нагрузка audiodg и lifecycle потоков вывода](./completed/116-audiodg-playback-stream-lifecycle.md)
 
 - [ROADMAP-109 — Качество вывода через THX Spatial Audio](./completed/109-thx-output-format-compatibility.md)
 
