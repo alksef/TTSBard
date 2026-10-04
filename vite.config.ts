@@ -41,7 +41,8 @@ export default defineConfig(async () => ({
         main: './index.html',
         soundpanel: './src-soundpanel/index.html',
         playback: './src-playback/index.html',
-        'ocr-selection': './src-ocr-selection/index.html'
+        'ocr-selection': './src-ocr-selection/index.html',
+        'settings-recovery': './src-settings-recovery/index.html'
       }
     }
   }

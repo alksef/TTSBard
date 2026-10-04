@@ -144,7 +144,7 @@ pub fn recover_corrupted_json<T: Serialize + Clone>(path: &Path, defaults: &T) -
     Ok(defaults.clone())
 }
 
-fn make_backup_path(path: &Path) -> Result<PathBuf> {
+pub(crate) fn make_backup_path(path: &Path) -> Result<PathBuf> {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .context("System clock is before UNIX_EPOCH")?
@@ -156,6 +156,39 @@ fn make_backup_path(path: &Path) -> Result<PathBuf> {
         .unwrap_or("config");
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("json");
     Ok(parent.join(format!("{}.bak.{}.{}", stem, stamp, ext)))
+}
+
+/// Create an exact byte-for-byte copy of `path` next to it with a unique
+/// `*.bak.<nanos>.json` name, leaving the source file untouched.
+///
+/// Used by the settings-load recovery flow (ROADMAP-123): the original file
+/// stays in place for manual editing while the copy preserves its content.
+/// Fails without modifying anything when the source cannot be read or the
+/// backup file cannot be written.
+pub fn backup_json_copy(path: &Path) -> Result<PathBuf> {
+    if !path.is_file() {
+        return Err(anyhow::anyhow!(
+            "Source file {:?} does not exist or is not a regular file",
+            path
+        ));
+    }
+
+    let _guard = config_write_lock().lock();
+    let backup_path = loop {
+        let candidate = make_backup_path(path)?;
+        if !candidate.exists() {
+            break candidate;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    };
+
+    fs::copy(path, &backup_path).with_context(|| {
+        format!(
+            "Failed to copy {:?} to backup file {:?}",
+            path, backup_path
+        )
+    })?;
+    Ok(backup_path)
 }
 
 #[cfg(test)]
@@ -387,6 +420,81 @@ mod tests {
             "replacement file must not be created when source is missing"
         );
 
+        cleanup(&dir);
+    }
+
+    // ---- backup_json_copy ----
+
+    #[test]
+    fn backup_copy_is_byte_exact_and_source_stays() {
+        let dir = tmp_dir("backup-copy");
+        let path = dir.join("settings.json");
+        let source = "{\n  \"trailing_comma\": true,\n}".as_bytes();
+
+        fs::write(&path, source).unwrap();
+        let backup = backup_json_copy(&path).unwrap();
+
+        assert_eq!(
+            fs::read(&backup).unwrap(),
+            source,
+            "backup must match the source byte-for-byte"
+        );
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            source,
+            "source file must remain untouched"
+        );
+        let backup_name = backup.file_name().unwrap().to_str().unwrap();
+        assert!(
+            backup_name.starts_with("settings.bak.") && backup_name.ends_with(".json"),
+            "unexpected backup name: {}",
+            backup_name
+        );
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn backup_copy_generates_unique_names() {
+        let dir = tmp_dir("backup-unique");
+        let path = dir.join("settings.json");
+        fs::write(&path, "same bytes").unwrap();
+
+        let first = backup_json_copy(&path).unwrap();
+        let second = backup_json_copy(&path).unwrap();
+
+        assert_ne!(first, second, "backup names must be unique");
+        assert_eq!(fs::read(&first).unwrap(), fs::read(&second).unwrap());
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn backup_copy_missing_source_fails_without_side_effects() {
+        let dir = tmp_dir("backup-missing");
+        let path = dir.join("absent.json");
+
+        let result = backup_json_copy(&path);
+
+        assert!(result.is_err());
+        let created: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name())
+            .collect();
+        assert!(
+            created.is_empty(),
+            "no files must appear for a missing source, found {:?}",
+            created
+        );
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn backup_copy_rejects_directory_source() {
+        let dir = tmp_dir("backup-dir-source");
+        let path = dir.join("as-directory");
+        fs::create_dir_all(&path).unwrap();
+
+        assert!(backup_json_copy(&path).is_err());
         cleanup(&dir);
     }
 

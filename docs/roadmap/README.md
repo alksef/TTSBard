@@ -49,6 +49,8 @@ related_tasks: []
 
 ## Завершённые направления
 
+- [ROADMAP-123 — Восстановление после ошибки загрузки настроек](./completed/123-settings-load-recovery.md) — `completed`.
+
 - [ROADMAP-122 — Сохранение настроек при запуске интеграций](./completed/122-integration-start-save-feedback.md) — `completed`.
 
 - [ROADMAP-103 — Сгруппированные панели настроек](./completed/103-grouped-general-settings.md)

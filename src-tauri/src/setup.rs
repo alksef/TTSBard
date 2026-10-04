@@ -9,6 +9,7 @@
 //
 // Refactored from lib.rs run() setup callback (2026-03-11)
 
+use anyhow::Context;
 use std::sync::mpsc;
 use std::thread;
 use tauri::image::Image;
@@ -36,6 +37,11 @@ use std::sync::Arc;
 /// Logger is initialized before this function with the same settings.
 pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std::error::Error>> {
     info!("=== Application setup started ===");
+
+    // Windows are declared in tauri.conf.json with "create": false and are
+    // built here so that the settings-recovery flow can boot a minimal
+    // process without them (ROADMAP-123).
+    create_configured_windows(app)?;
 
     // Get state managers
     let settings_manager = app.state::<SettingsManager>();
@@ -597,6 +603,35 @@ fn init_spellcheck(app: &App, app_state: &AppState) {
     *app_state.editor.spellcheck_manager.lock() = Some(manager);
     app.manage(spellcheck_state);
     info!("[spellcheck] initialized");
+}
+
+/// Build the windows of the ordinary startup from their `tauri.conf.json`
+/// entries. The `settings-recovery` entry is intentionally absent from this
+/// list: that window is created only by the recovery process.
+fn create_configured_windows(
+    app: &App,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for label in [
+        "main",
+        "soundpanel",
+        "playback-control",
+        "ocr-selection",
+    ] {
+        let config = app
+            .config()
+            .app
+            .windows
+            .iter()
+            .find(|window| window.label == label)
+            .cloned()
+            .ok_or_else(|| format!("window config for {label} is missing"))?;
+        tauri::WebviewWindowBuilder::from_config(app.handle(), &config)
+            .with_context(|| format!("failed to prepare window {label}"))?
+            .build()
+            .with_context(|| format!("failed to create window {label}"))?;
+        info!(label, "Window created from config");
+    }
+    Ok(())
 }
 
 /// Initialize application windows

@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "settings-recovery",
+  "description": "Window title and theme for the settings recovery dialog",
+  "windows": ["settings-recovery"],
+  "permissions": [
+    "core:window:allow-set-title",
+    "core:window:allow-set-theme"
+  ]
+}

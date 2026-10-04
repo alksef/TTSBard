@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::persistence;
+use super::recovery::{self, SettingsFailureStage, SettingsLoadFailure};
 
 use super::hotkeys::HotkeySettings;
 use super::validation::{validate_port, validate_volume};
@@ -1753,25 +1754,61 @@ impl SettingsManager {
     }
 
     /// Load settings from disk (internal method)
+    ///
+    /// A failure to read, parse, or deserialize an existing `settings.json`
+    /// never replaces the file with defaults: the error carries structured
+    /// [`SettingsLoadFailure`] diagnostics, including the outcome of a
+    /// byte-exact backup copy of the untouched source (ROADMAP-123).
     fn load_from_disk(config_dir: &Path) -> Result<AppSettings> {
         let path = config_dir.join("settings.json");
 
         if path.exists() {
-            let content = fs::read_to_string(&path).context("Failed to read settings file")?;
+            let content = fs::read_to_string(&path).map_err(|error| {
+                load_failure(
+                    &path,
+                    SettingsFailureStage::Read,
+                    error.to_string(),
+                    None,
+                    None,
+                    None,
+                )
+            })?;
 
             let json_value = match serde_json::from_str::<serde_json::Value>(&content) {
                 Ok(value) => value,
                 Err(e) => {
-                    warn!(error = %e, "settings.json is corrupted, recovering from backup");
-                    return persistence::recover_corrupted_json(&path, &AppSettings::default());
+                    warn!(error = %e, "settings.json is corrupted, starting recovery dialog");
+                    return Err(load_failure(
+                        &path,
+                        SettingsFailureStage::Syntax,
+                        e.to_string(),
+                        Some(e.line().max(1)),
+                        Some(e.column().max(1)),
+                        None,
+                    ));
                 }
             };
 
             let mut settings = match serde_json::from_value::<AppSettings>(json_value.clone()) {
                 Ok(parsed) => parsed,
                 Err(e) => {
-                    warn!(error = %e, "settings.json is corrupted, recovering from backup");
-                    return persistence::recover_corrupted_json(&path, &AppSettings::default());
+                    warn!(error = %e, "settings.json does not match the settings schema, starting recovery dialog");
+                    // The Value-based error carries no position; probe the
+                    // streaming parser for the line/column of the offending
+                    // value. The message itself may embed file content and is
+                    // therefore replaced by a secret-safe reason.
+                    let (line, column) = match serde_json::from_str::<AppSettings>(&content) {
+                        Err(probe) if probe.line() > 0 => (Some(probe.line()), Some(probe.column())),
+                        _ => (None, None),
+                    };
+                    return Err(load_failure(
+                        &path,
+                        SettingsFailureStage::Deserialize,
+                        recovery::sanitized_deserialize_reason(&e),
+                        line,
+                        column,
+                        Some(&content),
+                    ));
                 }
             };
 
@@ -1835,27 +1872,39 @@ impl SettingsManager {
                 || needs_input_token_migration
             {
                 // Save migrated settings
-                let content = serde_json::to_string_pretty(&settings)?;
-                let _guard = persistence::config_write_lock().lock();
-                persistence::write_json_atomically(&path, &content)?;
+                let migrated_content = serde_json::to_string_pretty(&settings)?;
+                let write_result = {
+                    let _guard = persistence::config_write_lock().lock();
+                    persistence::write_json_atomically(&path, &migrated_content)
+                };
+                // Failure diagnostics create a backup under the same mutex.
+                // Release the write guard before entering that path.
+                write_result.map_err(|error| {
+                    load_failure(
+                        &path,
+                        SettingsFailureStage::Write,
+                        error.to_string(),
+                        None,
+                        None,
+                        Some(&content),
+                    )
+                })?;
             }
 
             settings.validate();
             Ok(settings)
         } else {
             info!("Settings file not found, creating with defaults");
-            let mut settings = AppSettings::default();
-            // A fresh installation gets a LAN access token immediately: the
-            // input server defaults to not starting, so nothing is exposed, but
-            // the token is ready when the listener is enabled.
-            Self::ensure_input_server_access_token(&mut settings);
-            // Save defaults to disk for next time
-            let content =
-                serde_json::to_string_pretty(&settings).context("Failed to serialize settings")?;
-            let _guard = persistence::config_write_lock().lock();
-            persistence::write_json_atomically(&path, &content)
-                .context("Failed to write settings file")?;
-            Ok(settings)
+            write_default_settings(&path).map_err(|error| {
+                load_failure(
+                    &path,
+                    SettingsFailureStage::Write,
+                    error.to_string(),
+                    None,
+                    None,
+                    None,
+                )
+            })
         }
     }
 
@@ -3154,6 +3203,49 @@ impl SettingsManager {
     }
 }
 
+/// Canonical settings for a fresh installation: defaults plus a fresh
+/// input-server LAN access token.
+///
+/// The token is generated immediately even though the listener defaults to not
+/// starting, so non-loopback access is ready when the user enables it.
+pub(crate) fn fresh_default_settings() -> AppSettings {
+    let mut settings = AppSettings::default();
+    SettingsManager::ensure_input_server_access_token(&mut settings);
+    settings
+}
+
+/// Atomically write canonical default settings to `path` and return them.
+///
+/// Used by the first-run path in `load_from_disk` and by the explicit
+/// "restore standard settings" action of the recovery dialog (ROADMAP-123);
+/// the caller must have already secured a backup when a previous file exists.
+pub(crate) fn write_default_settings(path: &Path) -> Result<AppSettings> {
+    let settings = fresh_default_settings();
+    let content =
+        serde_json::to_string_pretty(&settings).context("Failed to serialize settings")?;
+    let _guard = persistence::config_write_lock().lock();
+    persistence::write_json_atomically(path, &content).context("Failed to write settings file")?;
+    Ok(settings)
+}
+
+/// Wrap a settings-load failure into structured recovery diagnostics.
+///
+/// The backup attempt happens here, once, at detection time: the source file
+/// is copied byte-exactly and left in place, and the dialog reports the actual
+/// outcome instead of an assumed success.
+fn load_failure(
+    path: &Path,
+    stage: SettingsFailureStage,
+    reason: String,
+    line: Option<usize>,
+    column: Option<usize>,
+    raw_content: Option<&str>,
+) -> anyhow::Error {
+    anyhow::Error::new(SettingsLoadFailure::diagnose(
+        path, stage, reason, line, column, raw_content,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4028,98 +4120,221 @@ mod tests {
     }
 
     #[test]
-    fn malformed_settings_json_recovery() {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let config_dir = std::env::temp_dir().join(format!(
-            "ttsbard-corrupt-settings-test-{}-{}",
-            std::process::id(),
-            unique
-        ));
-        std::fs::create_dir_all(&config_dir).unwrap();
+    fn malformed_settings_json_keeps_source_and_creates_backup() {
+        let (config_dir, settings_path) = unique_test_config_dir("corrupt-settings");
+        let corrupt = "{{{not valid json at all";
+        std::fs::write(&settings_path, corrupt).unwrap();
 
-        let settings_path = config_dir.join("settings.json");
-        std::fs::write(&settings_path, "{{{not valid json at all").unwrap();
+        let error = SettingsManager::load_from_disk(&config_dir)
+            .expect_err("corrupt settings must stop the ordinary load");
 
-        let settings = SettingsManager::load_from_disk(&config_dir).unwrap();
+        let failure = error
+            .downcast_ref::<SettingsLoadFailure>()
+            .expect("failure must carry recovery diagnostics");
+        assert_eq!(failure.stage, SettingsFailureStage::Syntax);
+        assert_eq!(failure.line, Some(1));
 
+        // The source file is untouched and no defaults replaced it.
         assert_eq!(
-            settings.audio.speaker_volume,
-            AppSettings::default().audio.speaker_volume,
-            "recovered settings should use defaults"
+            std::fs::read_to_string(&settings_path).unwrap(),
+            corrupt,
+            "settings.json must stay exactly as the user left it"
         );
 
-        // Verify backup file exists
-        let backup_count = std::fs::read_dir(&config_dir)
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.file_name()
-                    .to_str()
-                    .is_some_and(|n| n.contains(".bak.") && n.ends_with(".json"))
-            })
-            .count();
-        assert_eq!(backup_count, 1, "a single backup file should exist");
-
-        // Verify new settings.json contains valid defaults
-        let new_content = std::fs::read_to_string(&settings_path).unwrap();
-        let parsed: AppSettings =
-            serde_json::from_str(&new_content).expect("recovered settings.json must be valid JSON");
-        assert_eq!(parsed, AppSettings::default());
+        // Exactly one backup exists and matches the source byte-for-byte.
+        let backups = backup_files_in(&config_dir);
+        assert_eq!(backups.len(), 1, "a single backup file should exist");
+        assert_eq!(
+            std::fs::read_to_string(&backups[0]).unwrap(),
+            corrupt,
+            "backup must preserve the corrupted bytes"
+        );
 
         let _ = std::fs::remove_dir_all(&config_dir);
     }
 
     #[test]
-    fn empty_settings_json_recovery() {
+    fn empty_settings_json_keeps_source_and_creates_backup() {
+        let (config_dir, settings_path) = unique_test_config_dir("empty-settings");
+        std::fs::write(&settings_path, "").unwrap();
+
+        let error = SettingsManager::load_from_disk(&config_dir)
+            .expect_err("an empty settings file must stop the ordinary load");
+
+        let failure = error
+            .downcast_ref::<SettingsLoadFailure>()
+            .expect("failure must carry recovery diagnostics");
+        assert_eq!(failure.stage, SettingsFailureStage::Syntax);
+
+        assert_eq!(
+            std::fs::read_to_string(&settings_path).unwrap(),
+            "",
+            "settings.json must stay exactly as the user left it"
+        );
+
+        let backups = backup_files_in(&config_dir);
+        assert_eq!(backups.len(), 1);
+        assert_eq!(std::fs::read_to_string(&backups[0]).unwrap(), "");
+
+        let _ = std::fs::remove_dir_all(&config_dir);
+    }
+
+    #[test]
+    fn incompatible_field_type_reports_sanitized_position() {
+        let (config_dir, settings_path) = unique_test_config_dir("wrong-type");
+        let secret = "sk-secret-token-value-77";
+        // A known numeric field carrying a secret-looking string: the raw
+        // serde message quotes that value, so the sanitized reason must not.
+        let broken = format!(r#"{{"audio": {{"speaker_volume": "{secret}"}}}}"#);
+        std::fs::write(&settings_path, &broken).unwrap();
+
+        let error = SettingsManager::load_from_disk(&config_dir)
+            .expect_err("an incompatible field type must stop the ordinary load");
+
+        let failure = error
+            .downcast_ref::<SettingsLoadFailure>()
+            .expect("failure must carry recovery diagnostics");
+        assert_eq!(failure.stage, SettingsFailureStage::Deserialize);
+        assert!(
+            !failure.reason.contains(secret),
+            "diagnostics must not embed the offending value: {}",
+            failure.reason
+        );
+        assert_eq!(
+            failure.line,
+            Some(1),
+            "the streaming probe must report the offending position"
+        );
+
+        // The original file is preserved and backed up byte-for-byte.
+        assert_eq!(std::fs::read_to_string(&settings_path).unwrap(), broken);
+        let backups = backup_files_in(&config_dir);
+        assert_eq!(backups.len(), 1);
+        assert_eq!(std::fs::read_to_string(&backups[0]).unwrap(), broken);
+
+        let _ = std::fs::remove_dir_all(&config_dir);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn migration_write_failure_returns_without_deadlock_and_preserves_source() {
+        let (config_dir, settings_path) = unique_test_config_dir("migration-write-failure");
+        let mut legacy = serde_json::to_value(fresh_default_settings()).unwrap();
+        legacy.as_object_mut().unwrap().remove("ui_language");
+        let original = serde_json::to_vec_pretty(&legacy).unwrap();
+        std::fs::write(&settings_path, &original).unwrap();
+        let original_permissions = std::fs::metadata(&settings_path).unwrap().permissions();
+        let mut readonly = original_permissions.clone();
+        readonly.set_readonly(true);
+        std::fs::set_permissions(&settings_path, readonly).unwrap();
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let worker_dir = config_dir.clone();
+        let worker = std::thread::spawn(move || {
+            let result = SettingsManager::load_from_disk(&worker_dir);
+            let _ = sender.send(result);
+        });
+        let result = receiver.recv_timeout(std::time::Duration::from_secs(5));
+        std::fs::set_permissions(&settings_path, original_permissions.clone()).unwrap();
+        let backups = backup_files_in(&config_dir);
+        // Windows copies the read-only attribute to the backup as well.
+        for backup in &backups {
+            std::fs::set_permissions(backup, original_permissions.clone()).unwrap();
+        }
+        let result = result.expect("migration failure must return instead of locking itself");
+        worker.join().unwrap();
+        let error = result.expect_err("read-only settings must reject migration writes");
+        let failure = error.downcast_ref::<SettingsLoadFailure>().unwrap();
+        assert_eq!(failure.stage, SettingsFailureStage::Write);
+        assert!(matches!(failure.backup, crate::config::BackupOutcome::Created { .. }));
+        assert_eq!(std::fs::read(&settings_path).unwrap(), original);
+        assert_eq!(backups.len(), 1);
+        assert_eq!(std::fs::read(&backups[0]).unwrap(), original);
+        std::fs::remove_dir_all(&config_dir).unwrap();
+    }
+
+    #[test]
+    fn missing_settings_file_first_run_writes_defaults() {
+        let (config_dir, settings_path) = unique_test_config_dir("first-run");
+
+        let settings = SettingsManager::load_from_disk(&config_dir)
+            .expect("a missing settings file is the ordinary first-run path");
+
+        // First-run settings are the defaults plus a fresh access token.
+        let mut expected = AppSettings::default();
+        let token = settings
+            .input_server
+            .access_token
+            .clone()
+            .expect("first run must provision the input-server access token");
+        assert!(!token.is_empty());
+        expected.input_server.access_token = Some(token);
+        assert_eq!(settings, expected);
+
+        let persisted: AppSettings = serde_json::from_str(
+            &std::fs::read_to_string(&settings_path).unwrap(),
+        )
+        .expect("first run must persist parseable defaults");
+        assert_eq!(persisted, settings);
+        assert!(backup_files_in(&config_dir).is_empty());
+
+        let _ = std::fs::remove_dir_all(&config_dir);
+    }
+
+    #[test]
+    fn write_default_settings_produces_tokenized_parseable_file() {
+        let (config_dir, settings_path) = unique_test_config_dir("write-defaults");
+
+        let written = write_default_settings(&settings_path)
+            .expect("default settings must write successfully");
+        let parsed: AppSettings = serde_json::from_str(
+            &std::fs::read_to_string(&settings_path).unwrap(),
+        )
+        .expect("written defaults must parse back");
+        assert_eq!(parsed, written);
+        assert!(parsed
+            .input_server
+            .access_token
+            .as_deref()
+            .is_some_and(|token| !token.is_empty()));
+
+        let _ = std::fs::remove_dir_all(&config_dir);
+    }
+
+    fn unique_test_config_dir(tag: &str) -> (PathBuf, PathBuf) {
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
         let config_dir = std::env::temp_dir().join(format!(
-            "ttsbard-empty-settings-test-{}-{}",
+            "ttsbard-{}-test-{}-{}",
+            tag,
             std::process::id(),
             unique
         ));
         std::fs::create_dir_all(&config_dir).unwrap();
-
         let settings_path = config_dir.join("settings.json");
-        std::fs::write(&settings_path, "").unwrap();
+        (config_dir, settings_path)
+    }
 
-        let settings = SettingsManager::load_from_disk(&config_dir).unwrap();
-
-        assert_eq!(settings, AppSettings::default());
-
-        let backup_count = std::fs::read_dir(&config_dir)
+    fn backup_files_in(config_dir: &Path) -> Vec<PathBuf> {
+        let mut backups: Vec<PathBuf> = std::fs::read_dir(config_dir)
             .unwrap()
             .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.file_name()
-                    .to_str()
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
                     .is_some_and(|n| n.contains(".bak.") && n.ends_with(".json"))
             })
-            .count();
-        assert_eq!(backup_count, 1);
-
-        let _ = std::fs::remove_dir_all(&config_dir);
+            .collect();
+        backups.sort();
+        backups
     }
 
     #[test]
     fn persist_error_preserves_cache() {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let config_dir = std::env::temp_dir().join(format!(
-            "ttsbard-persist-err-test-{}-{}",
-            std::process::id(),
-            unique
-        ));
-        std::fs::create_dir_all(&config_dir).unwrap();
-
-        let settings_path = config_dir.join("settings.json");
+        let (config_dir, settings_path) = unique_test_config_dir("persist-err");
         let default_settings = AppSettings::default();
         std::fs::write(
             &settings_path,

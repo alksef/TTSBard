@@ -20,6 +20,7 @@ mod preprocessor;
 mod rate_limiter;
 mod secret_log;
 mod servers;
+mod settings_recovery;
 mod setup;
 mod signalsmith;
 #[cfg(windows)]
@@ -157,8 +158,13 @@ pub fn run() {
     #[cfg(windows)]
     crate::single_instance::acquire_lock_or_exit();
 
-    // Инициализируем менеджеры ДО setup
-    let settings_manager = SettingsManager::new().expect("Failed to create settings manager");
+    // Инициализируем менеджеры ДО setup. Ошибка загрузки settings.json больше
+    // не сбрасывает конфиг молча: обычный запуск не продолжается, вместо него
+    // открывается минимальный диалог восстановления (ROADMAP-123).
+    let settings_manager = match SettingsManager::new() {
+        Ok(manager) => manager,
+        Err(error) => crate::settings_recovery::run_recovery_app(error),
+    };
 
     let windows_manager = WindowsManager::new().expect("Failed to create windows manager");
 

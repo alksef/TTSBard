@@ -21,7 +21,8 @@
         "decorations": false,
         "transparent": true,
         "resizable": true,
-        "visible": false
+        "visible": false,
+        "create": false
       },
       {
         "label": "soundpanel",
@@ -35,7 +36,8 @@
         "skipTaskbar": true,
         "resizable": false,
         "visible": false,
-        "hiddenTitle": true
+        "hiddenTitle": true,
+        "create": false
       },
       {
         "label": "playback-control",
@@ -49,7 +51,8 @@
         "skipTaskbar": true,
         "resizable": false,
         "visible": false,
-        "hiddenTitle": true
+        "hiddenTitle": true,
+        "create": false
       },
       {
         "label": "ocr-selection",
@@ -63,7 +66,26 @@
         "skipTaskbar": true,
         "resizable": false,
         "visible": false,
-        "hiddenTitle": true
+        "hiddenTitle": true,
+        "create": false
+      },
+      {
+        "label": "settings-recovery",
+        "url": "src-settings-recovery/index.html",
+        "title": "TTSBard",
+        "width": 640,
+        "height": 520,
+        "minWidth": 460,
+        "minHeight": 400,
+        "minimizable": false,
+        "maximizable": false,
+        "decorations": true,
+        "transparent": false,
+        "resizable": true,
+        "center": true,
+        "visible": true,
+        "theme": "Light",
+        "create": false
       }
     ],
     "security": {

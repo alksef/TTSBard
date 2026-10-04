@@ -91,7 +91,7 @@ related_tasks: []
 
 - [Последовательное сохранение WebView и VTube Studio](../completed/115-settings-save-consistency-followup.md).
 - [Карта UI](../../development/ui-map.md).
-- [Правила проверки UI](../../development/ui-guidelines.md).
+- [Ручные тест-кейсы](../../development/test-cases.md).
 - [AI-assisted workflow](../../development/ai-workflow.md).
 
 ## Outcome

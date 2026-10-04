@@ -31,6 +31,7 @@ pub mod twitch;
 pub mod vtube_studio;
 pub mod webview;
 pub mod window;
+pub mod settings_recovery;
 
 pub use self::ai::*;
 pub use self::playback::*;

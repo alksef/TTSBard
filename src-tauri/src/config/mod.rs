@@ -6,6 +6,7 @@ mod constants;
 pub mod dto;
 mod hotkeys;
 mod persistence;
+mod recovery;
 mod settings;
 mod validation;
 mod windows;
@@ -15,7 +16,11 @@ pub use dto::{
     AllSourcesParams, AppSettingsDto, TtsProviderInfoDto, VTubeStudioSettingsDto, VtsHotkeyInfoDto,
 };
 pub use hotkeys::{EditorHotkeySettings, Hotkey, HotkeyModifier, HotkeySettings};
-pub use persistence::{config_write_lock, replace_file_atomically};
+pub use persistence::{backup_json_copy, config_write_lock, replace_file_atomically};
+pub use recovery::{
+    normalize_detected_locale, normalize_detected_theme, BackupOutcome, SettingsFailureStage,
+    SettingsLoadFailure,
+};
 pub use settings::{
     normalize_typing_idle_timeout_ms, AiCustomSettings, AiDeepSeekSettings, AiOpenAiSettings,
     AiProviderType, AiSettings, AiZAiSettings, AppSettings, AudioEffectsSettings,
@@ -26,4 +31,5 @@ pub use settings::{
     VTubeStudioTypingMode, validate_vtube_host,
 };
 pub use validation::{is_valid_hex_color, validate_port};
+pub(crate) use settings::write_default_settings;
 pub use windows::{WindowsManager, WindowsSettings};
