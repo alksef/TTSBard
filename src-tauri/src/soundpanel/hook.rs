@@ -60,7 +60,8 @@ fn intercept_binding_for_key(intercept: &InterceptSettings, vk_code: u32) -> Opt
     if !intercept.enabled {
         return None;
     }
-    let key_name = crate::soundpanel::intercept::vk_to_name(vk_code)?;
+    let key_name =
+        crate::soundpanel::intercept::vk_to_name_for_mode(vk_code, intercept.allow_any_key)?;
     intercept
         .bindings
         .iter()
@@ -369,6 +370,7 @@ mod tests {
                 key: "NUMPAD1".into(),
                 action: "play_sound".into(),
             }],
+            allow_any_key: false,
         };
         assert_eq!(
             intercept_binding_for_key(&intercept, 0x61),
@@ -384,6 +386,7 @@ mod tests {
                 key: "NUMPAD1".into(),
                 action: "play_sound".into(),
             }],
+            allow_any_key: false,
         };
         assert_eq!(intercept_binding_for_key(&intercept, 0x61), None);
     }
@@ -396,10 +399,176 @@ mod tests {
                 key: "F5".into(),
                 action: "mute_mic".into(),
             }],
+            allow_any_key: false,
         };
         // NUMPAD1 not bound
         assert_eq!(intercept_binding_for_key(&intercept, 0x61), None);
         // 'A' is outside the interceptable key range
+        assert_eq!(intercept_binding_for_key(&intercept, 0x41), None);
+    }
+
+    #[test]
+    fn vk_to_name_maps_navigation_keys() {
+        assert_eq!(
+            crate::soundpanel::intercept::vk_to_name(0x21),
+            Some("PAGEUP".into())
+        );
+        assert_eq!(
+            crate::soundpanel::intercept::vk_to_name(0x22),
+            Some("PAGEDOWN".into())
+        );
+        assert_eq!(
+            crate::soundpanel::intercept::vk_to_name(0x23),
+            Some("END".into())
+        );
+    }
+
+    #[test]
+    fn intercept_binding_navigation_keys_resolved_when_enabled_and_bound() {
+        let intercept = InterceptSettings {
+            enabled: true,
+            bindings: vec![
+                InterceptBinding {
+                    key: "PAGEUP".into(),
+                    action: "playback_pause".into(),
+                },
+                InterceptBinding {
+                    key: "PAGEDOWN".into(),
+                    action: "playback_stop".into(),
+                },
+                InterceptBinding {
+                    key: "END".into(),
+                    action: "playback_repeat".into(),
+                },
+            ],
+            allow_any_key: false,
+        };
+        assert_eq!(
+            intercept_binding_for_key(&intercept, 0x21),
+            Some(("PAGEUP", "playback_pause"))
+        );
+        assert_eq!(
+            intercept_binding_for_key(&intercept, 0x22),
+            Some(("PAGEDOWN", "playback_stop"))
+        );
+        assert_eq!(
+            intercept_binding_for_key(&intercept, 0x23),
+            Some(("END", "playback_repeat"))
+        );
+        // 'A' is outside the interceptable key range
+        assert_eq!(intercept_binding_for_key(&intercept, 0x41), None);
+    }
+
+    #[test]
+    fn intercept_binding_navigation_key_none_when_unbound() {
+        let intercept = InterceptSettings {
+            enabled: true,
+            bindings: vec![InterceptBinding {
+                key: "PAGEUP".into(),
+                action: "playback_pause".into(),
+            }],
+            allow_any_key: false,
+        };
+        // END is recognized but not bound
+        assert_eq!(intercept_binding_for_key(&intercept, 0x23), None);
+        // PAGEDOWN is recognized but not bound
+        assert_eq!(intercept_binding_for_key(&intercept, 0x22), None);
+    }
+
+    #[test]
+    fn intercept_binding_navigation_key_none_when_disabled() {
+        let intercept = InterceptSettings {
+            enabled: false,
+            bindings: vec![InterceptBinding {
+                key: "PAGEUP".into(),
+                action: "playback_pause".into(),
+            }],
+            allow_any_key: false,
+        };
+        assert_eq!(intercept_binding_for_key(&intercept, 0x21), None);
+    }
+
+    #[test]
+    fn unrestricted_resolves_and_binds_home_and_insert() {
+        let intercept = InterceptSettings {
+            enabled: true,
+            bindings: vec![
+                InterceptBinding {
+                    key: "HOME".into(),
+                    action: "playback_stop".into(),
+                },
+                InterceptBinding {
+                    key: "INSERT".into(),
+                    action: "playback_pause".into(),
+                },
+            ],
+            allow_any_key: true,
+        };
+        assert_eq!(
+            intercept_binding_for_key(&intercept, 0x24),
+            Some(("HOME", "playback_stop"))
+        );
+        assert_eq!(
+            intercept_binding_for_key(&intercept, 0x2D),
+            Some(("INSERT", "playback_pause"))
+        );
+    }
+
+    #[test]
+    fn restricted_mode_makes_letter_binding_inactive_without_deleting_it() {
+        // A letter is not canonical, so restricted mode (allow_any_key=false)
+        // resolves it to None even though a binding named VK_41 exists.
+        let intercept = InterceptSettings {
+            enabled: true,
+            bindings: vec![InterceptBinding {
+                key: "VK_41".into(),
+                action: "play_sound".into(),
+            }],
+            allow_any_key: false,
+        };
+        assert_eq!(intercept_binding_for_key(&intercept, 0x41), None);
+    }
+
+    #[test]
+    fn unrestricted_resolves_non_canonical_vk_binding() {
+        let intercept = InterceptSettings {
+            enabled: true,
+            bindings: vec![InterceptBinding {
+                key: "VK_41".into(),
+                action: "play_sound".into(),
+            }],
+            allow_any_key: true,
+        };
+        assert_eq!(
+            intercept_binding_for_key(&intercept, 0x41),
+            Some(("VK_41", "play_sound"))
+        );
+    }
+
+    #[test]
+    fn unrestricted_but_unbound_key_returns_none() {
+        let intercept = InterceptSettings {
+            enabled: true,
+            bindings: vec![InterceptBinding {
+                key: "VK_41".into(),
+                action: "play_sound".into(),
+            }],
+            allow_any_key: true,
+        };
+        // 'B' resolves to VK_42 in unrestricted mode but is not bound.
+        assert_eq!(intercept_binding_for_key(&intercept, 0x42), None);
+    }
+
+    #[test]
+    fn unrestricted_disabled_keeps_pass_through() {
+        let intercept = InterceptSettings {
+            enabled: false,
+            bindings: vec![InterceptBinding {
+                key: "VK_41".into(),
+                action: "play_sound".into(),
+            }],
+            allow_any_key: true,
+        };
         assert_eq!(intercept_binding_for_key(&intercept, 0x41), None);
     }
 }

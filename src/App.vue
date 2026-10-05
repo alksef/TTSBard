@@ -554,7 +554,7 @@ onUnmounted(() => {
           <OcrPanel v-show="currentPanel === 'ocr'" />
           <SettingsPanel v-show="currentPanel === 'settings'" />
           <HotkeysPanel v-show="currentPanel === 'hotkeys'" :active="currentPanel === 'hotkeys'" />
-          <InterceptPanel v-show="currentPanel === 'intercept'" />
+          <InterceptPanel v-show="currentPanel === 'intercept'" :active="currentPanel === 'intercept'" />
         </main>
       </div>
 

@@ -612,6 +612,31 @@ impl SoundPanelState {
         Ok(())
     }
 
+    /// Включить/выключить unrestricted-перехват (persist + publish).
+    ///
+    /// Меняет только `allow_any_key`, сохраняя `enabled` и `bindings`.
+    /// Persist выполняется до публикации в runtime, поэтому при ошибке записи
+    /// runtime-состояние остаётся неизменным. Фронтенд после вызова сеттера
+    /// дожидается результата и перечитывает настройки через `get_intercept_settings`.
+    pub fn set_intercept_allow_any_key(&self, allow_any_key: bool) -> Result<(), String> {
+        let appdata_path = self
+            .appdata_path
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?
+            .clone();
+        let mut val = self
+            .intercept
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        let mut new_settings = val.clone();
+        new_settings.allow_any_key = allow_any_key;
+        crate::soundpanel::intercept::save(&appdata_path, &new_settings)?;
+        *val = new_settings;
+        drop(val);
+        info!(allow_any_key, "Intercept allow_any_key set");
+        Ok(())
+    }
+
     /// Установить биндинг перехвата (persist)
     pub fn set_intercept_binding(&self, key: String, action: String) -> Result<(), String> {
         let appdata_path = self
@@ -867,6 +892,46 @@ mod tests {
         let result = state.clear_intercept_binding("NUMPAD1".into());
         assert!(result.is_err());
         assert_eq!(state.get_intercept().bindings.len(), 1);
+    }
+
+    #[test]
+    fn set_intercept_allow_any_key_persist_failure_leaves_state_unchanged() {
+        let path = bad_path("allow_any_fail");
+        let state = SoundPanelState::new(path);
+        assert!(!state.get_intercept().allow_any_key);
+
+        let result = state.set_intercept_allow_any_key(true);
+        assert!(result.is_err());
+        assert!(!state.get_intercept().allow_any_key);
+    }
+
+    #[test]
+    fn set_intercept_allow_any_key_preserves_enabled_and_bindings() {
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard_state_allow_any_ok_{}_{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.to_string_lossy().to_string();
+
+        let state = SoundPanelState::new(path.clone());
+        state.set_intercept_enabled(true).unwrap();
+        state
+            .set_intercept_binding("HOME".into(), "playback_stop".into())
+            .unwrap();
+
+        state.set_intercept_allow_any_key(true).unwrap();
+
+        let settings = state.get_intercept();
+        assert!(settings.allow_any_key);
+        assert!(settings.enabled);
+        assert_eq!(settings.bindings.len(), 1);
+        assert_eq!(settings.bindings[0].key, "HOME");
+        assert_eq!(settings.bindings[0].action, "playback_stop");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // ── SoundPanel playback queue ────────────────────────────────────────

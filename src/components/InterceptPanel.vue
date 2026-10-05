@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
+import { resolveInterceptKey, formatInterceptKey } from '../utils/interceptKeys'
+import { normalizeCommandError } from '../ipc/commandError'
 import { Crosshair, Trash2, Keyboard, Plus, X } from 'lucide-vue-next'
 import { t } from '../i18n'
+
+const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true })
 
 interface InterceptBindingDto {
   key: string
@@ -13,6 +17,7 @@ interface InterceptBindingDto {
 
 interface InterceptSettingsDto {
   enabled: boolean
+  allow_any_key: boolean
   bindings: InterceptBindingDto[]
 }
 
@@ -20,6 +25,7 @@ const isLoading = ref(false)
 const settings = ref<InterceptSettingsDto | null>(null)
 const recordingKey = ref(false)
 const recordingKeyFor = ref<string | null>(null)
+const savingAllowAnyKey = ref(false)
 const newBindingAction = ref<string>('show_main_window')
 const errorMessage = ref<string | null>(null)
 const messageState = ref<'error' | 'success' | 'warning' | null>(null)
@@ -60,51 +66,73 @@ async function toggleEnabled() {
   }
 }
 
+async function toggleAllowAnyKey(event: Event) {
+  const input = event.target as HTMLInputElement
+  if (!settings.value || !props.active || isLoading.value || savingAllowAnyKey.value || recordingKey.value || recordingKeyFor.value) {
+    input.checked = settings.value?.allow_any_key ?? false
+    return
+  }
+  const next = !settings.value.allow_any_key
+  input.checked = settings.value.allow_any_key
+  savingAllowAnyKey.value = true
+  try {
+    await invoke('set_intercept_allow_any_key', { allowAnyKey: next })
+    settings.value.allow_any_key = next
+    await loadSettings()
+  } catch (e) {
+    showMessage(t('intercept.error.generic', { detail: normalizeCommandError(e).message }), 'error')
+  } finally {
+    savingAllowAnyKey.value = false
+  }
+}
+
 function startRecordingKey() {
+  if (!settings.value || !props.active || isLoading.value || savingAllowAnyKey.value) return
   recordingKey.value = true
   recordingKeyFor.value = null
   errorMessage.value = null
-  document.addEventListener('keydown', handleKeyDown)
+  document.addEventListener('keydown', handleKeyDown, true)
 }
 
 function cancelRecordingKey() {
   recordingKey.value = false
   recordingKeyFor.value = null
-  document.removeEventListener('keydown', handleKeyDown)
+  document.removeEventListener('keydown', handleKeyDown, true)
 }
 
-function handleKeyDown(e: KeyboardEvent) {
-  if (!recordingKey.value) return
+watch(() => props.active, (active) => {
+  if (!active) {
+    cancelRecordingKey()
+    recordingKeyFor.value = null
+    newBindingAction.value = 'show_main_window'
+  }
+})
 
-  if (e.key === 'Escape') {
+function handleKeyDown(e: KeyboardEvent) {
+  if (!recordingKey.value || !props.active) return
+
+  e.preventDefault()
+  e.stopImmediatePropagation()
+  if (e.repeat) return
+
+  const allowAnyKey = settings.value?.allow_any_key ?? false
+
+  if (e.key === 'Escape' && !allowAnyKey) {
     cancelRecordingKey()
     return
   }
 
-  e.preventDefault()
-
-  let canonicalName = ''
-  if (e.code.startsWith('Numpad')) {
-    const num = e.code.replace('Numpad', '')
-    if (num === 'Multiply') canonicalName = 'NUMPAD_MULTIPLY'
-    else if (num === 'Add') canonicalName = 'NUMPAD_ADD'
-    else if (num === 'Subtract') canonicalName = 'NUMPAD_SUBTRACT'
-    else if (num === 'Decimal') canonicalName = 'NUMPAD_DECIMAL'
-    else if (num === 'Divide') canonicalName = 'NUMPAD_DIVIDE'
-    else if (/^\d$/.test(num)) canonicalName = 'NUMPAD' + num
-    else return
-  } else if (e.code.startsWith('F')) {
-    const fNum = parseInt(e.code.substring(1))
-    if (fNum >= 1 && fNum <= 24) canonicalName = e.code
-    else return
-  } else {
-    showMessage(t('intercept.error.numpad_only'), 'warning')
+  const canonicalName = resolveInterceptKey(e, allowAnyKey)
+  if (canonicalName === null) {
+    if (!allowAnyKey) {
+      showMessage(t('intercept.error.numpad_only'), 'warning')
+    }
     return
   }
 
   recordingKeyFor.value = canonicalName
   recordingKey.value = false
-  document.removeEventListener('keydown', handleKeyDown)
+  document.removeEventListener('keydown', handleKeyDown, true)
 }
 
 async function saveBinding() {
@@ -170,7 +198,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (messageTimeoutId !== null) clearTimeout(messageTimeoutId)
-  document.removeEventListener('keydown', handleKeyDown)
+  document.removeEventListener('keydown', handleKeyDown, true)
   listenerScope.dispose()
 })
 </script>
@@ -199,7 +227,23 @@ onUnmounted(() => {
       </div>
 
       <p class="hint-text ui-description">
-        {{ t('intercept.hint') }}
+        {{ settings?.allow_any_key ? t('intercept.hint_unrestricted') : t('intercept.hint') }}
+      </p>
+
+      <div class="unrestricted-row">
+        <label class="ui-choice-label">
+          <input
+            type="checkbox"
+            class="ui-choice-input"
+            :checked="settings?.allow_any_key ?? false"
+      :disabled="!settings || isLoading || savingAllowAnyKey || recordingKey || !!recordingKeyFor"
+            @change="toggleAllowAnyKey"
+          />
+          <span>{{ t('intercept.allow_any_key') }}</span>
+        </label>
+      </div>
+      <p class="unrestricted-warning ui-hint">
+        {{ t('intercept.allow_any_key_warning') }}
       </p>
 
       <!-- Bindings list -->
@@ -209,6 +253,7 @@ onUnmounted(() => {
           <button
             v-if="!recordingKey && !recordingKeyFor"
             @click="startRecordingKey"
+      :disabled="!settings || isLoading || savingAllowAnyKey"
             class="record-btn ui-button"
           >
             <Keyboard :size="18" />
@@ -219,13 +264,13 @@ onUnmounted(() => {
             @click="cancelRecordingKey"
             class="record-btn recording ui-button"
           >
-            {{ t('intercept.recording_prompt') }}
+            {{ settings?.allow_any_key ? t('intercept.recording_prompt_unrestricted') : t('intercept.recording_prompt') }}
           </button>
         </div>
 
         <!-- New binding confirmation -->
         <div v-if="recordingKeyFor" class="new-binding-row">
-          <span class="key-badge">{{ recordingKeyFor }}</span>
+          <span class="key-badge">{{ formatInterceptKey(recordingKeyFor) }}</span>
           <span class="arrow">→</span>
           <select v-model="newBindingAction" class="ui-select action-select">
             <option v-for="a in ACTIONS" :key="a.value" :value="a.value">
@@ -241,12 +286,12 @@ onUnmounted(() => {
         </div>
 
         <div v-if="settings && settings.bindings.length === 0 && !recordingKeyFor" class="empty-hint ui-hint">
-          {{ t('intercept.empty_hint') }}
+          {{ settings.allow_any_key ? t('intercept.empty_hint_unrestricted') : t('intercept.empty_hint') }}
         </div>
 
         <div v-if="settings?.bindings.length" class="ui-menu ui-menu--embedded">
         <div v-for="binding in settings?.bindings ?? []" :key="binding.key" class="binding-row">
-          <span class="key-badge">{{ binding.key }}</span>
+          <span class="key-badge">{{ formatInterceptKey(binding.key) }}</span>
           <span class="arrow">→</span>
           <select
             :value="binding.action"
@@ -378,6 +423,14 @@ onUnmounted(() => {
 }
 
 .hint-text {
+  margin: 0 0 var(--ui-row-gap);
+}
+
+.unrestricted-row {
+  margin-bottom: 6px;
+}
+
+.unrestricted-warning {
   margin: 0 0 var(--ui-row-gap);
 }
 

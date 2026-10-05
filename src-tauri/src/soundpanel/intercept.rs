@@ -1,4 +1,4 @@
-//! Intercept Settings: NumPad / F-keys → actions
+//! Intercept Settings: NumPad / F-keys / navigation keys → actions
 //!
 //! Persisted config stored in %APPDATA%/ttsbard/intercept.json
 
@@ -13,6 +13,8 @@ pub const INTERCEPT_FILE: &str = "intercept.json";
 pub struct InterceptSettings {
     pub enabled: bool,
     pub bindings: Vec<InterceptBinding>,
+    #[serde(default)]
+    pub allow_any_key: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,7 +53,7 @@ pub fn save(appdata_path: &str, settings: &InterceptSettings) -> Result<(), Stri
 }
 
 /// Convert a Windows virtual key code to a canonical key name.
-/// Returns None for keys outside the supported range (NumPad + F-keys).
+/// Returns None for keys outside the supported range (NumPad + F-keys + navigation keys).
 pub fn vk_to_name(vk_code: u32) -> Option<String> {
     match vk_code {
         0x60..=0x69 => Some(format!("NUMPAD{}", vk_code - 0x60)),
@@ -61,8 +63,35 @@ pub fn vk_to_name(vk_code: u32) -> Option<String> {
         0x6E => Some("NUMPAD_DECIMAL".to_string()),
         0x6F => Some("NUMPAD_DIVIDE".to_string()),
         0x70..=0x87 => Some(format!("F{}", vk_code - 0x6F)),
+        0x21 => Some("PAGEUP".to_string()),
+        0x22 => Some("PAGEDOWN".to_string()),
+        0x23 => Some("END".to_string()),
+        0x24 => Some("HOME".to_string()),
+        0x2D => Some("INSERT".to_string()),
         _ => None,
     }
+}
+
+/// Convert a Windows virtual key code to a canonical key name, taking the
+/// unrestricted interception mode into account.
+///
+/// Canonical names (NumPad / F-keys / navigation keys, resolved by
+/// [`vk_to_name`]) always win. When `allow_any_key` is true, any other
+/// keyboard VK in `0x08..=0xFE` is resolved to `VK_XX` (uppercase two-digit
+/// hex). Restricted mode returns `None` for those keys. Values outside the
+/// keyboard VK range (including `0` and `255`) are always `None`.
+///
+/// Sided modifier VKs (`0xA0..=0xA5`) are intentionally not collapsed into
+/// generic modifiers: the Windows hook reports them distinctly, so each side
+/// keeps its own `VK_XX` name.
+pub fn vk_to_name_for_mode(vk_code: u32, allow_any_key: bool) -> Option<String> {
+    if let Some(name) = vk_to_name(vk_code) {
+        return Some(name);
+    }
+    if allow_any_key && (0x08..=0xFE).contains(&vk_code) {
+        return Some(format!("VK_{:02X}", vk_code));
+    }
+    None
 }
 
 #[cfg(test)]
@@ -124,6 +153,66 @@ mod tests {
         assert_eq!(vk_to_name(0x6C), None);
     }
 
+    #[test]
+    fn vk_to_name_maps_home_and_insert() {
+        assert_eq!(vk_to_name(0x24), Some("HOME".into()));
+        assert_eq!(vk_to_name(0x2D), Some("INSERT".into()));
+    }
+
+    // ── vk_to_name_for_mode ─────────────────────────────────────────────
+
+    #[test]
+    fn vk_to_name_for_mode_prefers_canonical_names() {
+        // Canonical names win in both restricted and unrestricted mode.
+        assert_eq!(vk_to_name_for_mode(0x24, false), Some("HOME".into()));
+        assert_eq!(vk_to_name_for_mode(0x24, true), Some("HOME".into()));
+        assert_eq!(vk_to_name_for_mode(0x2D, false), Some("INSERT".into()));
+        assert_eq!(vk_to_name_for_mode(0x2D, true), Some("INSERT".into()));
+        assert_eq!(vk_to_name_for_mode(0x61, true), Some("NUMPAD1".into()));
+        assert_eq!(vk_to_name_for_mode(0x70, true), Some("F1".into()));
+    }
+
+    #[test]
+    fn vk_to_name_for_mode_restricted_returns_none_for_other_keys() {
+        assert_eq!(vk_to_name_for_mode(0x41, false), None); // A
+        assert_eq!(vk_to_name_for_mode(0x2E, false), None); // Delete
+        assert_eq!(vk_to_name_for_mode(0x20, false), None); // Space
+        assert_eq!(vk_to_name_for_mode(0xA0, false), None); // LShift
+        assert_eq!(vk_to_name_for_mode(0xBB, false), None); // OEM +
+        assert_eq!(vk_to_name_for_mode(0xB0, false), None); // media Next
+    }
+
+    #[test]
+    fn vk_to_name_for_mode_unrestricted_resolves_other_keys_as_vk_hex() {
+        assert_eq!(vk_to_name_for_mode(0x41, true), Some("VK_41".into())); // A
+        assert_eq!(vk_to_name_for_mode(0x2E, true), Some("VK_2E".into())); // Delete
+        assert_eq!(vk_to_name_for_mode(0x20, true), Some("VK_20".into())); // Space
+        assert_eq!(vk_to_name_for_mode(0xA0, true), Some("VK_A0".into())); // LShift
+        assert_eq!(vk_to_name_for_mode(0xA1, true), Some("VK_A1".into())); // RShift
+        assert_eq!(vk_to_name_for_mode(0xBB, true), Some("VK_BB".into())); // OEM +
+        assert_eq!(vk_to_name_for_mode(0xB0, true), Some("VK_B0".into())); // media Next
+    }
+
+    #[test]
+    fn vk_to_name_for_mode_does_not_collapse_sided_modifiers() {
+        assert_eq!(vk_to_name_for_mode(0xA0, true), Some("VK_A0".into()));
+        assert_eq!(vk_to_name_for_mode(0xA1, true), Some("VK_A1".into()));
+        assert_eq!(vk_to_name_for_mode(0xA2, true), Some("VK_A2".into()));
+        assert_eq!(vk_to_name_for_mode(0xA3, true), Some("VK_A3".into()));
+        assert_eq!(vk_to_name_for_mode(0xA4, true), Some("VK_A4".into()));
+        assert_eq!(vk_to_name_for_mode(0xA5, true), Some("VK_A5".into()));
+    }
+
+    #[test]
+    fn vk_to_name_for_mode_rejects_out_of_range_and_boundaries() {
+        assert_eq!(vk_to_name_for_mode(0x00, true), None);
+        assert_eq!(vk_to_name_for_mode(0x07, true), None); // below 0x08
+        assert_eq!(vk_to_name_for_mode(0xFF, true), None); // 255
+        assert_eq!(vk_to_name_for_mode(0x100, true), None); // out of range
+        assert_eq!(vk_to_name_for_mode(0x08, true), Some("VK_08".into())); // backspace
+        assert_eq!(vk_to_name_for_mode(0xFE, true), Some("VK_FE".into()));
+    }
+
     // ── load / save ─────────────────────────────────────────────────────
 
     #[test]
@@ -149,16 +238,36 @@ mod tests {
                     key: "F5".into(),
                     action: "mute_mic".into(),
                 },
+                InterceptBinding {
+                    key: "PAGEUP".into(),
+                    action: "playback_pause".into(),
+                },
+                InterceptBinding {
+                    key: "END".into(),
+                    action: "playback_stop".into(),
+                },
+                InterceptBinding {
+                    key: "PAGEDOWN".into(),
+                    action: "playback_repeat".into(),
+                },
             ],
+            allow_any_key: true,
         };
         save(dir.to_str().unwrap(), &original).unwrap();
         let loaded = load(dir.to_str().unwrap());
         assert!(loaded.enabled);
-        assert_eq!(loaded.bindings.len(), 2);
+        assert!(loaded.allow_any_key);
+        assert_eq!(loaded.bindings.len(), 5);
         assert_eq!(loaded.bindings[0].key, "NUMPAD1");
         assert_eq!(loaded.bindings[0].action, "play_sound");
         assert_eq!(loaded.bindings[1].key, "F5");
         assert_eq!(loaded.bindings[1].action, "mute_mic");
+        assert_eq!(loaded.bindings[2].key, "PAGEUP");
+        assert_eq!(loaded.bindings[2].action, "playback_pause");
+        assert_eq!(loaded.bindings[3].key, "END");
+        assert_eq!(loaded.bindings[3].action, "playback_stop");
+        assert_eq!(loaded.bindings[4].key, "PAGEDOWN");
+        assert_eq!(loaded.bindings[4].action, "playback_repeat");
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -179,11 +288,46 @@ mod tests {
         let original = InterceptSettings {
             enabled: false,
             bindings: vec![],
+            allow_any_key: false,
         };
         save(dir.to_str().unwrap(), &original).unwrap();
         let loaded = load(dir.to_str().unwrap());
         assert!(!loaded.enabled);
         assert!(loaded.bindings.is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn old_json_without_allow_any_key_loads_with_false_and_bindings_intact() {
+        let dir = tempdir();
+        let file_path = dir.join(INTERCEPT_FILE);
+        fs::write(
+            &file_path,
+            r#"{"enabled":true,"bindings":[{"key":"NUMPAD1","action":"play_sound"},{"key":"HOME","action":"playback_stop"}]}"#,
+        )
+        .unwrap();
+        let settings = load(dir.to_str().unwrap());
+        assert!(settings.enabled);
+        assert!(!settings.allow_any_key);
+        assert_eq!(settings.bindings.len(), 2);
+        assert_eq!(settings.bindings[0].key, "NUMPAD1");
+        assert_eq!(settings.bindings[0].action, "play_sound");
+        assert_eq!(settings.bindings[1].key, "HOME");
+        assert_eq!(settings.bindings[1].action, "playback_stop");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn allow_any_key_true_roundtrips() {
+        let dir = tempdir();
+        let original = InterceptSettings {
+            enabled: true,
+            bindings: vec![],
+            allow_any_key: true,
+        };
+        save(dir.to_str().unwrap(), &original).unwrap();
+        let loaded = load(dir.to_str().unwrap());
+        assert!(loaded.allow_any_key);
         let _ = fs::remove_dir_all(&dir);
     }
 }

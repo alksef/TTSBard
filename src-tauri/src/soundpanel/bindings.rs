@@ -501,6 +501,15 @@ pub fn clear_intercept_binding(
     state.clear_intercept_binding(key)
 }
 
+/// Включить/выключить unrestricted-перехват (любая клавиша)
+#[tauri::command]
+pub fn set_intercept_allow_any_key(
+    allow_any_key: bool,
+    state: State<'_, SoundPanelState>,
+) -> Result<(), String> {
+    state.set_intercept_allow_any_key(allow_any_key)
+}
+
 // ---- Set management commands ----
 
 /// Получить все наборы звуков
