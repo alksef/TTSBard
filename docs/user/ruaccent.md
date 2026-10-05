@@ -14,7 +14,8 @@ RUAccent — локальная модель для русского текст�
 Веса распространяет автор RUAccent на [Hugging Face
 `ruaccent/accentuator`](https://huggingface.co/ruaccent/accentuator). Создайте
 для модели отдельную папку в корне моделей TTSBard — по умолчанию это
-«Данные программы»:
+«Данные программы». Откройте **Настройки → Общие → Папки**, нажмите
+**«Открыть»** у **«Данные программы»** и создайте внутри неё `models\ruaccent`:
 
 ```text
 %LOCALAPPDATA%\ttsbard\models\ruaccent\

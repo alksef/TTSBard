@@ -6,6 +6,9 @@ Telegram/Silero. Эти параметры не имеют UI-элементов
 
 ## Где находится `settings.json`
 
+Откройте **Настройки → Общие → Папки** и нажмите **«Открыть»** у
+**«Конфигурация»**. Файл настроек — `settings.json` в открывшейся папке.
+
 Windows: `%APPDATA%\ttsbard\settings.json`
 
 Например: `C:\Users\<Имя>\AppData\Roaming\ttsbard\settings.json`
