@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { Ellipsis } from 'lucide-vue-next'
 import { t } from '../../i18n'
 
 const emit = defineEmits<{
@@ -70,7 +71,7 @@ function run(fn: () => void) { close(); fn() }
 <template>
   <div class="editor-menu" data-editor-menu>
     <button
-      class="menu-trigger"
+      class="menu-trigger ui-icon-button ui-icon-button--round"
       :class="{ compact }"
       :aria-expanded="open"
       aria-haspopup="true"
@@ -78,7 +79,7 @@ function run(fn: () => void) { close(); fn() }
       :aria-label="t('editor.menu.title')"
       @click="onTriggerClick"
     >
-      ⋯
+      <Ellipsis :size="18" />
     </button>
     <div v-if="open" class="menu-dropdown">
       <button
@@ -131,23 +132,7 @@ function run(fn: () => void) { close(); fn() }
 }
 
 .menu-trigger {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  background: var(--color-bg-elevated);
-  color: var(--color-text-primary);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 50%;
-  cursor: pointer;
   transition: all 0.2s ease;
-}
-
-.menu-trigger:hover {
-  background: var(--color-accent);
-  color: var(--color-text-on-accent, #ffffff);
 }
 
 /* Compact (minimal) mode: translucent so it overlaps text less, full on hover. */

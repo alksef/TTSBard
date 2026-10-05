@@ -505,8 +505,9 @@ defineExpose({ focus, openSpellMenu })
 }
 
 .spell-unavailable {
-  margin-top: 6px;
-  font-size: 0.78rem;
+  margin-top: var(--ui-hint-gap);
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   color: var(--color-text-muted);
   font-family: var(--font-mono);
   opacity: 0.7;

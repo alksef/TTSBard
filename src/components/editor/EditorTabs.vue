@@ -133,6 +133,7 @@ const pinnedCountText = computed(() => {
   border-bottom: none;
   color: var(--color-text-muted);
   font-size: 0.85rem;
+  font-weight: 500;
   cursor: pointer;
   user-select: none;
   transition: background 0.15s, color 0.15s;

@@ -542,7 +542,7 @@ onUnmounted(() => {
       <div class="app-content-wrapper">
         <Sidebar v-if="!isMinimalMode" :current-panel="currentPanel" @set-panel="setPanel" />
 
-        <main class="main-content" :class="{ 'minimal-content': isMinimalMode }">
+        <main class="main-content" :class="{ 'minimal-content': isMinimalMode, 'input-content': currentPanel === 'input' }">
           <InputPanel ref="inputPanelRef" v-show="currentPanel === 'input'" />
           <TtsPanel v-show="currentPanel === 'tts'" />
           <AudioPanel v-show="currentPanel === 'audio'" />
@@ -802,5 +802,9 @@ onUnmounted(() => {
     border-left: none;
     border-top: 1px solid var(--color-border);
   }
+}
+
+.main-content.input-content:not(.minimal-content) {
+  padding-top: 1rem;
 }
 </style>

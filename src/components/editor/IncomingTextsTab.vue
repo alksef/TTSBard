@@ -157,7 +157,7 @@ function onAutoPlayChange(event: Event) {
   align-items: center;
   gap: 0.5rem;
   flex-shrink: 0;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   min-width: 0;
   padding: 0.35rem 0.25rem;
   border-bottom: 1px solid var(--color-border-weak);
@@ -168,10 +168,13 @@ function onAutoPlayChange(event: Event) {
   align-items: center;
   gap: 0.4rem;
   cursor: pointer;
-  font-size: 0.82rem;
+  font-size: 0.85rem;
+  font-weight: 500;
   font-family: var(--font-mono);
   color: var(--color-text-secondary);
   user-select: none;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .autoplay-toggle:hover {
@@ -188,9 +191,9 @@ function onAutoPlayChange(event: Event) {
   flex-shrink: 0;
   margin: 0.4rem 0.25rem 0;
   padding: 0.4rem 0.5rem;
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   font-family: var(--font-mono);
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   background: var(--color-bg-field);
   border: 1px solid var(--color-border-weak);
   border-radius: 6px;
@@ -201,7 +204,7 @@ function onAutoPlayChange(event: Event) {
   flex-shrink: 0;
   padding: 0.75rem;
   text-align: center;
-  font-size: 0.82rem;
+  font-size: 0.85rem;
   color: var(--color-danger);
   font-family: var(--font-mono);
 }
@@ -209,7 +212,7 @@ function onAutoPlayChange(event: Event) {
 .incoming-empty {
   padding: 1rem;
   text-align: center;
-  font-size: 0.82rem;
+  font-size: 0.85rem;
   color: var(--color-text-muted);
   font-family: var(--font-mono);
 }

@@ -193,12 +193,14 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  padding: 0.22rem 0.55rem;
+  padding: 0.3rem 0.55rem;
+  min-height: 1.75rem;
   background: var(--color-bg-elevated);
   color: var(--color-text-primary);
   border: 1px solid var(--color-border-strong);
   border-radius: 6px;
-  font-size: 0.8rem;
+  font-size: 0.85rem;
+  font-weight: 500;
   font-family: var(--font-mono);
   cursor: pointer;
   transition: all 0.2s ease;
@@ -218,12 +220,14 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
 }
 
 .incoming-route-selector.compact .incoming-route-btn {
-  padding: 0.18rem 0.45rem;
+  padding: 0.25rem 0.45rem;
   gap: 0.2rem;
 }
 
 .dest-icon {
   flex-shrink: 0;
+  width: 1rem;
+  height: 1rem;
 }
 
 .dest-icon.is-disconnected {
@@ -232,11 +236,15 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
 
 .alert-icon {
   flex-shrink: 0;
+  width: 0.875rem;
+  height: 0.875rem;
   color: var(--color-warning, var(--color-text-secondary));
 }
 
 .chevron {
   flex-shrink: 0;
+  width: 1rem;
+  height: 1rem;
   opacity: 0.8;
   transition: transform 0.15s ease;
 }
@@ -288,11 +296,13 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
 }
 
 .option-label {
-  font-size: 0.8rem;
+  font-size: 0.85rem;
+  font-weight: 500;
 }
 
 .option-desc {
-  font-size: 0.7rem;
+  font-size: 0.8rem;
+  font-weight: 400;
   color: var(--color-text-secondary);
   opacity: 0.8;
   margin-left: auto;
