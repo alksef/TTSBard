@@ -8,6 +8,7 @@ import { t } from '../i18n'
 export const OCR_FAILURE_REASONS = [
   'emptyResult',
   'noMonitors',
+  'monitorUnavailable',
   'captureFailed',
   'overlayOpenFailed',
   'overlayHideFailed',
@@ -55,6 +56,10 @@ const PRESENTATION_BY_REASON: Record<OcrFailureReason, OcrFailurePresentation> =
   noMonitors: {
     severity: 'error',
     messageKey: 'ocr.failure.no_monitors',
+  },
+  monitorUnavailable: {
+    severity: 'error',
+    messageKey: 'ocr.failure.monitor_unavailable',
   },
   captureFailed: {
     severity: 'error',

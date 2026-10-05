@@ -21,7 +21,7 @@
 | `webview` | WebView | `WebViewPanel.vue` | Сервер, адреса, отображение текста, UPnP |
 | `twitch` | Twitch | `TwitchPanel.vue` | Подключение и настройки отправки |
 | `vtube-studio` | VTube Studio | `VTubeStudioPanel.vue` | Адрес/порт, параметры и действия при наборе, тестирование |
-| `ocr` | OCR | `OcrPanel.vue` | Настройки распознавания и выбор области |
+| `ocr` | OCR | `OcrPanel.vue` | Настройки распознавания, выбор экрана захвата и выбор области |
 | `input-server` | Входящий сервер | `InputServerPanel.vue` | Подключение и маршрутизация входящего текста |
 | `hotkeys` | Горячие клавиши | `HotkeysPanel.vue` | Назначение сочетаний |
 | `intercept` | Перехват | `InterceptPanel.vue` | Настройки перехвата |

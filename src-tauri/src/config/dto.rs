@@ -1883,6 +1883,7 @@ mod tests {
         let ocr = OcrSettingsDto {
             enabled: true,
             model_id: Some("silero-ocr".to_string()),
+            capture_target: crate::ocr::monitors::CaptureTarget::Primary,
         };
 
         let logging = LoggingSettingsDto {
@@ -2287,6 +2288,7 @@ mod tests {
         let ocr = OcrSettingsDto {
             enabled: false,
             model_id: None,
+            capture_target: crate::ocr::monitors::CaptureTarget::All,
         };
 
         let logging = LoggingSettingsDto {
@@ -2514,9 +2516,10 @@ mod tests {
         assert_eq!(json1, json2, "Round-trip produced different JSON");
     }
 
-    /// OCR is exposed as exactly `{"enabled":..., "model_id":...}` — the
-    /// persisted desired state only, with no runtime status, capture paths,
-    /// engine internals or hotkeys leaking into the wire shape.
+    /// OCR is exposed as exactly `{"enabled":..., "model_id":...,
+    /// "capture_target":...}` — the persisted desired state only, with no
+    /// runtime status, capture paths, engine internals or hotkeys leaking into
+    /// the wire shape.
     #[test]
     fn app_settings_dto_ocr_wire_shape_is_desired_state_only() {
         let dto = build_populated();
@@ -2529,13 +2532,16 @@ mod tests {
             .unwrap_or_else(|| panic!("`ocr` must serialize as a JSON object"));
         let mut keys: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
         keys.sort_unstable();
-        assert_eq!(keys, vec!["enabled", "model_id"]);
+        assert_eq!(keys, vec!["capture_target", "enabled", "model_id"]);
         assert_eq!(obj["enabled"], serde_json::json!(true));
         assert_eq!(obj["model_id"], serde_json::json!("silero-ocr"));
+        assert_eq!(obj["capture_target"], serde_json::json!({ "type": "primary" }));
 
         let compact = serde_json::to_string(&dto).expect("serialize compact");
         assert!(
-            compact.contains(r#""ocr":{"enabled":true,"model_id":"silero-ocr"}"#),
+            compact.contains(
+                r#""ocr":{"enabled":true,"model_id":"silero-ocr","capture_target":{"type":"primary"}}"#
+            ),
             "unexpected compact OCR wire shape: {compact}"
         );
     }

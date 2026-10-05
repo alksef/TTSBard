@@ -22,6 +22,10 @@ const EXPECTED_PRESENTATION: Record<OcrFailureReason, { severity: OcrFailureSeve
     severity: 'error',
     message: 'Не найдено ни одного монитора для захвата экрана',
   },
+  monitorUnavailable: {
+    severity: 'error',
+    message: 'Выбранный экран больше не подключён',
+  },
   captureFailed: {
     severity: 'error',
     message: 'Не удалось захватить изображение экрана',

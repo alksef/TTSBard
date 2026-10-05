@@ -1,4 +1,5 @@
 pub mod capture;
+pub mod monitors;
 pub mod packs;
 pub mod runtime;
 pub mod service;

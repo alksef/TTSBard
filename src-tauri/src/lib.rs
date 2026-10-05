@@ -650,6 +650,7 @@ pub fn run() {
             commands::ocr::save_ocr_settings,
             commands::ocr::get_ocr_status,
             commands::ocr::list_ocr_packs,
+            commands::ocr::list_ocr_monitors,
             commands::ocr::refresh_ocr_packs,
             commands::ocr::open_ocr_packs_folder,
             // OCR overlay lifecycle: preview (load the frozen frame), ready

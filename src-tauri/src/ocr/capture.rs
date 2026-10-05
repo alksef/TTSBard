@@ -7,7 +7,10 @@
 #![allow(dead_code)]
 
 use image::{RgbImage, Rgba, RgbaImage};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+use crate::ocr::monitors::{self, CaptureTarget, ResolvedTarget};
 
 /// Minimum accepted selection side in physical pixels.
 pub const MIN_SELECTION_SIDE: u32 = 8;
@@ -16,7 +19,7 @@ pub const MIN_SELECTION_SIDE: u32 = 8;
 ///
 /// Coordinates are relative to the virtual desktop, so `x`/`y` may be negative
 /// for monitors left of or above the primary monitor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MonitorRect {
     pub x: i32,
     pub y: i32,
@@ -56,6 +59,10 @@ pub enum CaptureError {
     /// The selection is smaller than [`MIN_SELECTION_SIDE`] on at least one side.
     #[error("selection is too small")]
     SelectionTooSmall,
+    /// The requested specific monitor is no longer attached or could not be
+    /// resolved against the current inventory. No fallback screen is used.
+    #[error("selected monitor is unavailable")]
+    MonitorUnavailable,
 }
 
 /// Compute the bounding union of the given monitors.
@@ -204,6 +211,56 @@ pub fn capture_virtual_desktop() -> Result<(VirtualScreenGeometry, RgbaImage), C
     let rects: Vec<MonitorRect> = captures.iter().map(|(rect, _)| *rect).collect();
     let geometry = virtual_screen_geometry(&rects)?;
     let frame = compose_virtual_frame(&captures, &geometry);
+
+    Ok((geometry, frame))
+}
+
+/// Capture the desktop for a [`CaptureTarget`] using a freshly enumerated
+/// inventory and fresh xcap objects.
+///
+/// `All` uses the existing whole-virtual-desktop capture. `Primary` and a
+/// specific `Monitor` capture exactly one monitor and return the geometry of
+/// that one monitor plus its image (frame origin equals the monitor origin, so
+/// negative origins are preserved). A disconnected specific target fails with
+/// [`CaptureError::MonitorUnavailable`] and never falls back to another screen.
+pub fn capture_desktop_for_target(
+    target: &CaptureTarget,
+) -> Result<(VirtualScreenGeometry, RgbaImage), CaptureError> {
+    // `All` must not depend on display-config enumeration: dispatch straight to
+    // the legacy whole-virtual-desktop capture so the default works on machines
+    // where QueryDisplayConfig is unavailable.
+    if matches!(target, CaptureTarget::All) {
+        return capture_virtual_desktop();
+    }
+
+    let handles = xcap::Monitor::all().map_err(capture_err)?;
+    let inventory = monitors::inventory_for_monitors(&handles)?;
+    match monitors::resolve_target(target, &inventory)? {
+        ResolvedTarget::All => capture_virtual_desktop(),
+        ResolvedTarget::Single { source_name } => capture_single_monitor(&source_name, &handles),
+    }
+}
+
+/// Capture exactly one monitor, resolved by GDI source name.
+fn capture_single_monitor(
+    source_name: &str,
+    monitors: &[xcap::Monitor],
+) -> Result<(VirtualScreenGeometry, RgbaImage), CaptureError> {
+    let monitor = monitors
+        .iter()
+        .find(|m| m.name().map(|n| n == source_name).unwrap_or(false))
+        .ok_or(CaptureError::MonitorUnavailable)?;
+
+    let rect = MonitorRect {
+        x: monitor.x().map_err(capture_err)?,
+        y: monitor.y().map_err(capture_err)?,
+        width: monitor.width().map_err(capture_err)?,
+        height: monitor.height().map_err(capture_err)?,
+    };
+    let image = monitor.capture_image().map_err(capture_err)?;
+
+    let geometry = virtual_screen_geometry(&[rect])?;
+    let frame = compose_virtual_frame(&[(rect, image)], &geometry);
 
     Ok((geometry, frame))
 }
@@ -491,6 +548,60 @@ mod tests {
         assert_eq!(cropped.dimensions(), (2, 1));
         assert_eq!(cropped.get_pixel(0, 0), &image::Rgb([255, 0, 0]));
         assert_eq!(cropped.get_pixel(1, 0), &image::Rgb([0, 0, 0]));
+    }
+
+    /// A single monitor entirely left/above the primary (negative origin):
+    /// geometry is the monitor's own origin/size and the composed frame crops
+    /// correctly in virtual coordinates.
+    #[test]
+    fn single_negative_origin_monitor_geometry_and_crop() {
+        let rect = rect(-1920, -1080, 1920, 1080);
+
+        let geometry = virtual_screen_geometry(&[rect]).unwrap();
+        assert_eq!(geometry.origin, (-1920, -1080));
+        assert_eq!(geometry.size, (1920, 1080));
+
+        let frame = compose_virtual_frame(&[(rect, solid(1920, 1080, GREEN))], &geometry);
+        assert_eq!(frame.dimensions(), (1920, 1080));
+
+        // Virtual (-1910, -1070) maps to frame pixel (10, 10).
+        let cropped = crop_to_rgb(&frame, &geometry, selection(-1910, -1070, 2, 2));
+        assert_eq!(cropped.dimensions(), (2, 2));
+        assert_eq!(cropped.get_pixel(0, 0), &image::Rgb([0, 255, 0]));
+    }
+
+    /// Exercise real inventory and both single-monitor production capture modes.
+    /// No images are saved and no pixel data leaves the test process.
+    #[cfg(windows)]
+    #[test]
+    #[ignore]
+    fn smoke_capture_selected_monitor() {
+        let inventory = monitors::enumerate_monitors().expect("real monitor inventory");
+        let primary = inventory
+            .iter()
+            .find(|monitor| monitor.is_primary)
+            .expect("primary monitor");
+        for target in [
+            CaptureTarget::Primary,
+            CaptureTarget::Monitor {
+                device_path: primary.device_path.clone(),
+            },
+        ] {
+            let (geometry, frame) = capture_desktop_for_target(&target).expect("target capture");
+            assert_eq!(geometry.monitors, vec![primary.geometry]);
+            assert_eq!(geometry.origin, (primary.geometry.x, primary.geometry.y));
+            assert_eq!(
+                frame.dimensions(),
+                (primary.geometry.width, primary.geometry.height)
+            );
+            assert_eq!(geometry.size, frame.dimensions());
+        }
+        assert!(matches!(
+            capture_desktop_for_target(&CaptureTarget::Monitor {
+                device_path: "not-a-connected-monitor".to_string()
+            }),
+            Err(CaptureError::MonitorUnavailable)
+        ));
     }
 
     /// Real-machine smoke of the xcap path. Excluded from standard runs:

@@ -569,15 +569,37 @@ export interface SceneItemRecord {
 // ============================================================================
 
 /**
+ * Discriminator of a persisted capture target. Mirrors the Rust `CaptureTarget`
+ * tag: `all`, `primary` or a specific `monitor` (identified by its persistent
+ * Windows device path, never an index or temporary handle).
+ */
+export type CaptureTargetType = 'all' | 'primary' | 'monitor'
+
+/**
+ * Persisted capture target DTO.
+ *
+ * The Rust enum is internally tagged by `type`:
+ * `{"type":"all"}`, `{"type":"primary"}` and
+ * `{"type":"monitor","devicePath":"..."}`. `devicePath` is present only (and
+ * required) on the `monitor` variant.
+ */
+export interface CaptureTargetDto {
+  type: CaptureTargetType
+  devicePath?: string
+}
+
+/**
  * Persisted one-shot screen OCR settings DTO.
  *
  * Mirrors the Rust `OcrSettings`/`OcrSettingsDto`: only the persisted desired
- * state — `enabled` and nullable `model_id` — never runtime status, capture
- * paths, engine internals or hotkeys.
+ * state — `enabled`, nullable `model_id` and the capture target — never runtime
+ * status, capture paths, engine internals or hotkeys. Legacy settings without a
+ * `capture_target` deserialize to the default `{"type":"all"}`.
  */
 export interface OcrSettingsDto {
   enabled: boolean
   model_id: string | null
+  capture_target: CaptureTargetDto
 }
 
 // ============================================================================

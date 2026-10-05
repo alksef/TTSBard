@@ -2635,6 +2635,18 @@ impl SettingsManager {
         })
     }
 
+    /// Atomically replace the full desired OCR settings (enabled, model id and
+    /// capture target) as one section update for the user save path.
+    ///
+    /// One load → mutate → save cycle. Unlike [`Self::set_ocr_section`] — kept
+    /// for model refresh and the failed-start untick, which must retain the
+    /// persisted capture target — this persists the complete desired settings.
+    pub fn set_ocr_settings(&self, settings: OcrSettings) -> Result<()> {
+        self.update_settings_atomically(move |app_settings| {
+            app_settings.ocr = settings;
+        })
+    }
+
     // ========== Logging Settings ==========
 
     /// Update logging settings atomically
@@ -6945,6 +6957,83 @@ mod tests {
         let after = manager.load().unwrap();
         assert!(!after.ocr.enabled);
         assert_eq!(after.ocr.model_id.as_deref(), Some("com.example.ocr"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `set_ocr_section` (model refresh / failed-start untick) must retain a
+    /// previously persisted specific capture target.
+    #[test]
+    fn set_ocr_section_retains_capture_target() {
+        use crate::ocr::monitors::CaptureTarget;
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-ocr-section-target-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let manager = SettingsManager::with_config_dir(dir.clone()).unwrap();
+
+        let target = CaptureTarget::Monitor {
+            device_path: r"\\.\DISPLAY2\Monitor0".to_string(),
+        };
+        manager
+            .set_ocr_settings(OcrSettings {
+                enabled: false,
+                model_id: Some("com.example.ocr".to_string()),
+                capture_target: target.clone(),
+            })
+            .unwrap();
+
+        // Model refresh / failed-start untick only flip enabled/model_id.
+        manager
+            .set_ocr_section(true, Some("com.example.other".to_string()))
+            .unwrap();
+        let after = manager.load().unwrap();
+        assert!(after.ocr.enabled);
+        assert_eq!(after.ocr.model_id.as_deref(), Some("com.example.other"));
+        assert_eq!(after.ocr.capture_target, target);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The full setter persists the complete desired settings and keeps the
+    /// cache and disk in agreement.
+    #[test]
+    fn set_ocr_settings_persists_full_section_and_cache() {
+        use crate::ocr::monitors::CaptureTarget;
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-ocr-full-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let manager = SettingsManager::with_config_dir(dir.clone()).unwrap();
+
+        let desired = OcrSettings {
+            enabled: true,
+            model_id: Some("com.example.ocr".to_string()),
+            capture_target: CaptureTarget::Primary,
+        };
+        manager.set_ocr_settings(desired.clone()).unwrap();
+
+        let after = manager.load().unwrap();
+        assert_eq!(after.ocr, desired);
+
+        let disk: AppSettings =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap())
+                .unwrap();
+        assert_eq!(disk, after, "cache and disk must agree");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -206,7 +206,10 @@
   },
   "ocr": {
     "enabled": false,
-    "model_id": null
+    "model_id": null,
+    "capture_target": {
+      "type": "all"
+    }
   },
   "logging": {
     "enabled": false,

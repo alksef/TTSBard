@@ -859,7 +859,11 @@ impl OcrService {
                     *self.session.lock().await = Some(session);
                     return FinishOutcome::TooSmall;
                 }
-                Err(CaptureError::NoMonitors | CaptureError::CaptureFailed(_)) => {
+                Err(
+                    CaptureError::NoMonitors
+                    | CaptureError::CaptureFailed(_)
+                    | CaptureError::MonitorUnavailable,
+                ) => {
                     unreachable!("validate_selection only ever returns SelectionTooSmall")
                 }
             },
@@ -1354,10 +1358,12 @@ mod tests {
         let mut old = OcrSettings {
             enabled: true,
             model_id: Some("a".to_string()),
+            ..Default::default()
         };
         let mut new = OcrSettings {
             enabled: true,
             model_id: Some("b".to_string()),
+            ..Default::default()
         };
 
         assert_eq!(
@@ -1378,6 +1384,7 @@ mod tests {
         let settings = OcrSettings {
             enabled: true,
             model_id: Some("a".to_string()),
+            ..Default::default()
         };
         let old_hotkey = Hotkey::default_ocr_capture();
         let mut new_hotkey = old_hotkey.clone();
@@ -1412,6 +1419,7 @@ mod tests {
         let settings = OcrSettings {
             enabled: true,
             model_id: Some("a".to_string()),
+            ..Default::default()
         };
         let hotkey = Hotkey::default_ocr_capture();
         let error = OcrStatus::Error {
@@ -1444,6 +1452,45 @@ mod tests {
         let settings = OcrSettings::default();
         assert_eq!(
             decide_transition(&settings, &settings, None, None, &OcrStatus::Disabled),
+            OcrTransition::Noop
+        );
+    }
+
+    #[test]
+    fn decide_target_only_change_is_noop() {
+        use crate::ocr::monitors::CaptureTarget;
+
+        let hotkey = Hotkey::default_ocr_capture();
+        let old = OcrSettings {
+            enabled: true,
+            model_id: Some("a".to_string()),
+            capture_target: CaptureTarget::All,
+        };
+        let mut new = old.clone();
+        new.capture_target = CaptureTarget::Monitor {
+            device_path: r"\\.\DISPLAY2\Monitor0".to_string(),
+        };
+
+        // A target-only change must never restart the model, re-register the
+        // hotkey or disturb an in-flight selection.
+        assert_eq!(
+            decide_transition(
+                &old,
+                &new,
+                Some(&hotkey),
+                Some(&hotkey),
+                &OcrStatus::Ready
+            ),
+            OcrTransition::Noop
+        );
+        assert_eq!(
+            decide_transition(
+                &old,
+                &new,
+                Some(&hotkey),
+                Some(&hotkey),
+                &OcrStatus::SelectingArea
+            ),
             OcrTransition::Noop
         );
     }

@@ -1,9 +1,9 @@
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
 import { debugError } from '../utils/debug'
-import type { OcrSettingsDto } from '../types/settings'
+import type { CaptureTargetDto, OcrSettingsDto } from '../types/settings'
 import { t } from '../i18n'
 
 // ============================================================================
@@ -14,6 +14,26 @@ export interface OcrPackDto {
   id: string
   display_name: string
   languages: string[]
+}
+
+/** Position and size of a display in virtual-screen physical pixels. */
+export interface MonitorGeometryDto {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/**
+ * One selectable display, as returned by `list_ocr_monitors`. Mirrors the Rust
+ * `MonitorInfo` (`devicePath`, `label`, `sourceName`, `isPrimary`, `geometry`).
+ */
+export interface MonitorInfoDto {
+  devicePath: string
+  label: string
+  sourceName: string
+  isPrimary: boolean
+  geometry: MonitorGeometryDto
 }
 
 export const OCR_RUNTIME_STATES = [
@@ -36,7 +56,11 @@ export interface OcrStatusDto {
 const OCR_STATUS_CHANGED_EVENT = 'ocr-status-changed'
 const SETTINGS_CHANGED_EVENT = 'settings-changed'
 
-const DEFAULT_SETTINGS: OcrSettingsDto = { enabled: false, model_id: null }
+const DEFAULT_SETTINGS: OcrSettingsDto = {
+  enabled: false,
+  model_id: null,
+  capture_target: { type: 'all' },
+}
 
 // Last known display names of ever-seen packs, so a model held in memory after
 // its pack left the disk still renders a human-readable label.
@@ -75,17 +99,85 @@ export function convertOcrStatusFromRust(raw: unknown): OcrStatusDto {
   return typeof message === 'string' ? { state: 'error', message } : { state: 'error' }
 }
 
+/**
+ * Strict capture-target converter. A missing or malformed payload falls back to
+ * the default `{"type":"all"}`; a `monitor` variant without a non-empty device
+ * path is rejected the same way (backwards-compat default All).
+ */
+export function convertCaptureTargetFromRust(raw: unknown): CaptureTargetDto {
+  if (!isRecord(raw)) return { type: 'all' }
+  const type = raw.type
+  if (type === 'all') return { type: 'all' }
+  if (type === 'primary') return { type: 'primary' }
+  if (type === 'monitor') {
+    const devicePath = raw.devicePath
+    return isNonEmptyString(devicePath) ? { type: 'monitor', devicePath } : { type: 'all' }
+  }
+  return { type: 'all' }
+}
+
 export function convertOcrSettingsFromRust(raw: unknown): OcrSettingsDto {
   if (!isRecord(raw)) return { ...DEFAULT_SETTINGS }
   const modelId = raw.model_id
   return {
     enabled: typeof raw.enabled === 'boolean' ? raw.enabled : DEFAULT_SETTINGS.enabled,
     model_id: isNonEmptyString(modelId) ? modelId : null,
+    capture_target: convertCaptureTargetFromRust(raw.capture_target),
   }
 }
 
+function captureTargetsEqual(a: CaptureTargetDto, b: CaptureTargetDto): boolean {
+  if (a.type !== b.type) return false
+  if (a.type === 'monitor') return a.devicePath === b.devicePath
+  return true
+}
+
 function ocrSettingsEqual(a: OcrSettingsDto, b: OcrSettingsDto): boolean {
-  return a.enabled === b.enabled && a.model_id === b.model_id
+  return (
+    a.enabled === b.enabled
+    && a.model_id === b.model_id
+    && captureTargetsEqual(a.capture_target, b.capture_target)
+  )
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+/**
+ * Strict monitor-inventory converter. Only the whitelisted fields are carried
+ * into state; malformed entries are rejected and arbitrary extra fields are
+ * never accepted as trusted state.
+ */
+export function convertOcrMonitorListFromRust(raw: unknown): MonitorInfoDto[] {
+  if (!Array.isArray(raw)) return []
+  const monitors: MonitorInfoDto[] = []
+  for (const entry of raw) {
+    if (!isRecord(entry)) continue
+    if (!isNonEmptyString(entry.devicePath)) continue
+    if (!isNonEmptyString(entry.label)) continue
+    if (!isNonEmptyString(entry.sourceName)) continue
+    if (typeof entry.isPrimary !== 'boolean') continue
+    const geometry = entry.geometry
+    if (!isRecord(geometry)) continue
+    if (!isFiniteNumber(geometry.x) || !Number.isInteger(geometry.x) || geometry.x < -2147483648 || geometry.x > 2147483647) continue
+    if (!isFiniteNumber(geometry.y) || !Number.isInteger(geometry.y) || geometry.y < -2147483648 || geometry.y > 2147483647) continue
+    if (!isFiniteNumber(geometry.width) || !Number.isInteger(geometry.width) || geometry.width <= 0 || geometry.width > 4294967295) continue
+    if (!isFiniteNumber(geometry.height) || !Number.isInteger(geometry.height) || geometry.height <= 0 || geometry.height > 4294967295) continue
+    monitors.push({
+      devicePath: entry.devicePath,
+      label: entry.label,
+      sourceName: entry.sourceName,
+      isPrimary: entry.isPrimary,
+      geometry: {
+        x: geometry.x,
+        y: geometry.y,
+        width: geometry.width,
+        height: geometry.height,
+      },
+    })
+  }
+  return monitors
 }
 
 function isNonEmptyStringArray(value: unknown): value is string[] {
@@ -123,11 +215,15 @@ export function convertOcrPackListFromRust(raw: unknown): OcrPackDto[] {
  * runtime status (authoritative — never inferred from `settings.enabled`),
  * the discovered model packs, and the rescan / open-folder actions.
  */
-export function useOcr() {
+export function useOcr(active?: () => boolean) {
   const settings = ref<OcrSettingsDto>({ ...DEFAULT_SETTINGS })
   let confirmedSettings: OcrSettingsDto = { ...DEFAULT_SETTINGS }
   const status = ref<OcrStatusDto>({ state: 'disabled' })
   const packs = ref<OcrPackDto[]>([])
+  const monitors = ref<MonitorInfoDto[]>([])
+  const monitorListPending = ref(false)
+  const monitorListError = ref(false)
+  const monitorListLoaded = ref(false)
   const message = ref<string | null>(null)
   const messageType = ref<'success' | 'error' | null>(null)
   const savePending = ref(false)
@@ -144,6 +240,9 @@ export function useOcr() {
   // snapshot never overwrites a newer refresh that started while it was
   // pending (out-of-order guard, mirrors statusLoadToken).
   let settingsLoadToken = 0
+  // Bumped by every monitor inventory load so a stale reply can never update
+  // state after unmount or after a newer load started.
+  let monitorListLoadToken = 0
 
   const isEnabled = computed(() => settings.value.enabled)
   const isReady = computed(() => status.value.state === 'ready')
@@ -201,6 +300,19 @@ export function useOcr() {
     return packLabelMemo.get(modelId) ?? modelId
   })
 
+  /**
+   * True only when the saved capture target is a specific monitor whose device
+   * path is absent from a successfully loaded inventory. Deliberately `false`
+   * while the inventory is loading or has failed, so an enumeration failure
+   * never masquerades as a missing monitor.
+   */
+  const selectedMonitorMissing = computed(() => {
+    const target = settings.value.capture_target
+    if (target.type !== 'monitor' || target.devicePath === undefined) return false
+    if (!monitorListLoaded.value || monitorListPending.value || monitorListError.value) return false
+    return !monitors.value.some((monitor) => monitor.devicePath === target.devicePath)
+  })
+
   function showMessage(text: string, type: 'success' | 'error' = 'success') {
     message.value = text
     messageType.value = type
@@ -256,6 +368,37 @@ export function useOcr() {
       debugError('[Ocr] Failed to load packs:', e)
     }
   }
+
+  async function loadMonitors(): Promise<void> {
+    monitorListLoadToken += 1
+    const token = monitorListLoadToken
+    monitorListPending.value = true
+    monitorListError.value = false
+    try {
+      const payload = await invoke<unknown>('list_ocr_monitors')
+      if (disposed || token !== monitorListLoadToken) return
+      monitors.value = convertOcrMonitorListFromRust(payload)
+      monitorListLoaded.value = true
+    } catch (e) {
+      if (disposed || token !== monitorListLoadToken) return
+      debugError('[Ocr] Failed to load monitors:', e)
+      // A persistent error stays visible until a later successful retry.
+      monitorListError.value = true
+    } finally {
+      if (!disposed && token === monitorListLoadToken) {
+        monitorListPending.value = false
+      }
+    }
+  }
+
+  async function refreshMonitors(): Promise<void> {
+    if (monitorListPending.value) return
+    await loadMonitors()
+  }
+
+  const stopActivationWatch = active ? watch(active, (isActive) => {
+    if (isActive && !disposed) void refreshMonitors()
+  }) : undefined
 
   async function saveSettings(): Promise<void> {
     // A concurrent call while a save is in flight is not dropped: the drain
@@ -344,10 +487,12 @@ export function useOcr() {
     await refreshSettings()
     await refreshStatus()
     await refreshPacks()
+    await loadMonitors()
   })
 
   onUnmounted(() => {
     disposed = true
+    stopActivationWatch?.()
     if (messageTimeout !== null) {
       clearTimeout(messageTimeout)
       messageTimeout = null
@@ -359,6 +504,9 @@ export function useOcr() {
     settings,
     status,
     packs,
+    monitors,
+    monitorListPending,
+    monitorListError,
     message,
     messageType,
     savePending,
@@ -371,11 +519,13 @@ export function useOcr() {
     missingModelError,
     runtimeHoldsModel,
     runtimeModelLabel,
+    selectedMonitorMissing,
     saveSettings,
     rescanPacks,
     openPacksFolder,
     refreshSettings,
     refreshStatus,
     refreshPacks,
+    refreshMonitors,
   }
 }

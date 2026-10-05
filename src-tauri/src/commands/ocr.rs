@@ -8,7 +8,8 @@ use image::{ImageEncoder, RgbImage, RgbaImage};
 use crate::commands::input_server::accept_external_text;
 use crate::commands::speech_queue::SpeechQueueState;
 use crate::config::{Hotkey, SettingsManager};
-use crate::ocr::capture::{capture_virtual_desktop, CaptureError, VirtualScreenGeometry};
+use crate::ocr::capture::{capture_desktop_for_target, CaptureError, VirtualScreenGeometry};
+use crate::ocr::monitors::{enumerate_monitors, MonitorInfo};
 use crate::ocr::service::{
     decide_ocr_refresh_reconcile, decide_transition, BeginOutcome, FinishOutcome,
     OcrRefreshReconcile, OcrTransition, SelectionCorners,
@@ -81,6 +82,7 @@ pub struct PreviewDto {
 fn capture_failed_reason(error: &CaptureError) -> &'static str {
     match error {
         CaptureError::NoMonitors => "noMonitors",
+        CaptureError::MonitorUnavailable => "monitorUnavailable",
         CaptureError::CaptureFailed(_) | CaptureError::SelectionTooSmall => "captureFailed",
     }
 }
@@ -160,8 +162,12 @@ fn handle_ocr_capture(app_handle: &AppHandle, app_state: &AppState) {
     let runtime = app_state.runtime.clone();
     runtime.spawn(async move {
         let service = app_state.ocr.clone();
+        // Capture the CURRENT desired target with a fresh enumeration. The
+        // target is cloned from the service snapshot, never from the UI monitor
+        // list, so a hotkey press always uses the last saved selection.
+        let target = service.settings.read().await.capture_target.clone();
         let emit = |status: &OcrStatus| emit_ocr_status(&app_handle, status);
-        let capture = capture_virtual_desktop;
+        let capture = move || capture_desktop_for_target(&target);
         // PREPARE only: hide, position, size and exclude the overlay while the
         // begin lock is held. The window is revealed later by `present_selection`
         // through `ocr_selection_ready`, once the frame preview is loaded.
@@ -848,9 +854,9 @@ pub async fn save_ocr_settings(
         .try_state::<SettingsManager>()
         .ok_or_else(|| "SettingsManager not available".to_string())?;
 
-    let (enabled, model_id) = (settings.enabled, settings.model_id.clone());
+    let settings_for_persist = settings.clone();
     super::persist_blocking(settings_manager.inner(), move |mgr| {
-        mgr.set_ocr_section(enabled, model_id)
+        mgr.set_ocr_settings(settings_for_persist)
     })
     .await?;
 
@@ -871,6 +877,7 @@ pub async fn save_ocr_settings(
         let mut snapshot = service.settings.write().await;
         snapshot.enabled = settings.enabled;
         snapshot.model_id = settings.model_id.clone();
+        snapshot.capture_target = settings.capture_target.clone();
     }
 
     let decision = decide_transition(
@@ -930,6 +937,42 @@ pub fn list_ocr_packs(state: State<'_, AppState>) -> Vec<OcrPackDto> {
             languages: pack.languages,
         })
         .collect()
+}
+
+/// Fixed safe user-facing reason for a monitor inventory failure. Distinct from
+/// [`capture_failed_reason`]: inventory is a user-facing list load, so a
+/// genuinely empty inventory keeps the `noMonitors` meaning while every other
+/// enumeration failure surfaces as `monitorListFailed` (never a raw OS error).
+fn monitor_list_failed_reason(error: &CaptureError) -> &'static str {
+    match error {
+        CaptureError::NoMonitors => "noMonitors",
+        _ => "monitorListFailed",
+    }
+}
+
+/// Enumerate the currently attached displays for the OCR capture-target picker.
+///
+/// Runs on the blocking pool (enumeration touches Windows display APIs and the
+/// xcap monitor list) and returns the safe [`MonitorInfo`] inventory DTO
+/// (`devicePath`, `label`, `sourceName`, `isPrimary`, `geometry`). Every failure
+/// surfaces a fixed safe reason — `noMonitors` for a genuinely empty inventory
+/// and `monitorListFailed` for any enumeration error — so the frontend never
+/// receives OS-level detail.
+#[tauri::command]
+pub async fn list_ocr_monitors() -> Result<Vec<MonitorInfo>, String> {
+    let inventory = tokio::task::spawn_blocking(enumerate_monitors).await;
+
+    match inventory {
+        Ok(Ok(monitors)) => Ok(monitors),
+        Ok(Err(error)) => {
+            tracing::warn!(error = %error, "OCR monitor inventory failed");
+            Err(monitor_list_failed_reason(&error).to_string())
+        }
+        Err(join_error) => {
+            tracing::warn!(error = %join_error, "OCR monitor inventory worker panicked");
+            Err("monitorListFailed".to_string())
+        }
+    }
 }
 
 /// Re-scan the OCR packs roots and reconcile the persisted selection.
@@ -1082,6 +1125,25 @@ mod tests {
         assert!(!is_blank_ocr_text("привет"));
         assert!(!is_blank_ocr_text("  hello world  "));
         assert!(!is_blank_ocr_text("\n\nпервая строка\n\n"));
+    }
+
+    #[test]
+    fn capture_failure_reason_maps_every_category() {
+        use super::{capture_failed_reason, CaptureError};
+
+        assert_eq!(capture_failed_reason(&CaptureError::NoMonitors), "noMonitors");
+        assert_eq!(
+            capture_failed_reason(&CaptureError::MonitorUnavailable),
+            "monitorUnavailable"
+        );
+        assert_eq!(
+            capture_failed_reason(&CaptureError::CaptureFailed("boom".to_string())),
+            "captureFailed"
+        );
+        assert_eq!(
+            capture_failed_reason(&CaptureError::SelectionTooSmall),
+            "captureFailed"
+        );
     }
 
     #[test]

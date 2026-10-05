@@ -232,7 +232,10 @@
   },
   "ocr": {
     "enabled": true,
-    "model_id": "silero-ocr"
+    "model_id": "silero-ocr",
+    "capture_target": {
+      "type": "primary"
+    }
   },
   "logging": {
     "enabled": true,

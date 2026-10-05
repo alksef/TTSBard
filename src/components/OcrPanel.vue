@@ -2,12 +2,18 @@
 import { computed } from 'vue'
 import { AlertTriangle, Info, RefreshCw } from 'lucide-vue-next'
 import { useOcr } from '../composables/useOcr'
+import type { MonitorInfoDto } from '../composables/useOcr'
 import { t } from '../i18n'
+
+const props = defineProps<{ active?: boolean }>()
 
 const {
   settings,
   status,
   packs,
+  monitors,
+  monitorListPending,
+  monitorListError,
   message,
   messageType,
   savePending,
@@ -16,9 +22,11 @@ const {
   statusErrorMessage,
   saveSettings,
   rescanPacks,
+  refreshMonitors,
   runtimeHoldsModel,
   runtimeModelLabel,
-} = useOcr()
+  selectedMonitorMissing,
+} = useOcr(() => props.active === true)
 
 const statusClass = computed(() => {
   switch (status.value.state) {
@@ -47,6 +55,42 @@ const noPacks = computed(() => packs.value.length === 0)
 
 const showRuntimeError = computed(() => status.value.state === 'error')
 
+const captureTargetValue = computed(() => {
+  const target = settings.value.capture_target
+  if (target.type === 'all') return 'all'
+  if (target.type === 'primary') return 'primary'
+  return `monitor:${target.devicePath ?? ''}`
+})
+
+const selectedMonitorLabel = computed(() => {
+  const target = settings.value.capture_target
+  return monitors.value.find((monitor) => monitor.devicePath === target.devicePath)?.label
+    ?? t('ocr.capture_target_selected_monitor')
+})
+
+const captureTargetSelectDisabled = computed(
+  () => controlsDisabled.value || monitorListPending.value,
+)
+
+const selectableMonitors = computed(() =>
+  monitorListPending.value || monitorListError.value ? [] : monitors.value,
+)
+
+const needsSelectedMonitorOption = computed(() => {
+  const target = settings.value.capture_target
+  return target.type === 'monitor'
+    && !selectableMonitors.value.some((monitor) => monitor.devicePath === target.devicePath)
+})
+
+function monitorOptionValue(monitor: MonitorInfoDto): string {
+  return `monitor:${monitor.devicePath}`
+}
+
+function formatMonitorLabel(monitor: MonitorInfoDto): string {
+  const primary = monitor.isPrimary ? ` ${t('ocr.monitor_primary_marker')}` : ''
+  return `${monitor.label} — ${monitor.geometry.width}×${monitor.geometry.height}${primary}`
+}
+
 function formatPackLanguages(languages: string[]): string {
   return languages.map((language) => language.toUpperCase()).join(', ')
 }
@@ -54,6 +98,18 @@ function formatPackLanguages(languages: string[]): string {
 function onModelChange(event: Event) {
   const value = (event.target as HTMLSelectElement).value
   settings.value.model_id = value === '' ? null : value
+  void saveSettings()
+}
+
+function onCaptureTargetChange(event: Event) {
+  const value = (event.target as HTMLSelectElement).value
+  if (value === 'all') {
+    settings.value.capture_target = { type: 'all' }
+  } else if (value === 'primary') {
+    settings.value.capture_target = { type: 'primary' }
+  } else if (value.startsWith('monitor:')) {
+    settings.value.capture_target = { type: 'monitor', devicePath: value.slice('monitor:'.length) }
+  }
   void saveSettings()
 }
 </script>
@@ -142,6 +198,67 @@ function onModelChange(event: Event) {
         >
           {{ t('ocr.model_missing_hint', { model: savedModelId ?? '' }) }}
           <code>%APPDATA%\ttsbard\models\ocr</code>
+        </p>
+      </div>
+
+      <div class="model-field capture-target-field">
+        <label for="ocr-capture-target" class="model-label ui-label">
+          {{ t('ocr.capture_target_label') }}
+        </label>
+        <div class="model-row">
+          <select
+            id="ocr-capture-target"
+            class="ui-select model-select"
+            :value="captureTargetValue"
+            :disabled="captureTargetSelectDisabled"
+            @change="onCaptureTargetChange"
+          >
+            <option value="all">{{ t('ocr.capture_target_all') }}</option>
+            <option value="primary">{{ t('ocr.capture_target_primary') }}</option>
+            <option
+              v-for="monitor in selectableMonitors"
+              :key="monitor.devicePath"
+              :value="monitorOptionValue(monitor)"
+            >
+              {{ formatMonitorLabel(monitor) }}
+            </option>
+            <option v-if="needsSelectedMonitorOption" :value="captureTargetValue" disabled>
+              {{ selectedMonitorMissing
+                ? t('ocr.capture_target_monitor_unavailable', { name: selectedMonitorLabel })
+                : selectedMonitorLabel }}
+            </option>
+          </select>
+          <button
+            class="ui-icon-button ui-icon-button--adjacent refresh-button"
+            :disabled="monitorListPending || controlsDisabled"
+            @click="refreshMonitors"
+            :title="t('ocr.refresh_monitors')"
+            :aria-label="t('ocr.refresh_monitors')"
+          >
+            <RefreshCw :size="18" :class="{ 'button-spinner': monitorListPending }" />
+          </button>
+        </div>
+        <p
+          v-if="monitorListPending"
+          class="path-hint"
+          role="status"
+          aria-live="polite"
+        >
+          {{ t('ocr.monitor_list_loading') }}
+        </p>
+        <p v-else-if="monitorListError" class="path-hint" role="alert">
+          {{ t('ocr.monitor_list_error') }}
+        </p>
+        <p
+          v-else-if="selectedMonitorMissing"
+          class="path-hint"
+          role="status"
+          aria-live="polite"
+        >
+          {{ t('ocr.capture_target_missing_hint') }}
+        </p>
+        <p class="capture-target-hint ui-hint">
+          {{ t('ocr.capture_target_hint') }}
         </p>
       </div>
     </section>
@@ -298,7 +415,7 @@ h2 {
 }
 
 .model-label {
-  flex: 0 1 auto;
+  flex: 0 0 5em;
   min-width: 0;
   color: var(--color-text-secondary);
 }
@@ -314,6 +431,12 @@ h2 {
 .model-select {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+.capture-target-hint {
+  flex: 0 0 100%;
+  min-width: 0;
+  overflow-wrap: break-word;
 }
 
 .refresh-button {
