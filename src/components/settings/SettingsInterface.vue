@@ -6,6 +6,7 @@ import type { Theme } from '../../types/settings';
 import { useGeneralSettings, useWindowsSettings } from '../../composables/useAppSettings';
 import { presentCommandError } from '../../ipc/commandError';
 import { t } from '../../i18n';
+import InterfaceFontSettings from './InterfaceFontSettings.vue';
 
 const generalSettings = useGeneralSettings();
 const windowsSettings = useWindowsSettings();
@@ -209,6 +210,9 @@ watch(
         </label>
       </div>
     </section>
+
+    <!-- Interface font -->
+    <InterfaceFontSettings />
 
     <!-- Main window -->
     <section class="settings-section">

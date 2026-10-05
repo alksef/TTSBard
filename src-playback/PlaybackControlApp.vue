@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted, computed } from 'vue'
+import { useInterfaceFontSync } from '../src/composables/useInterfaceFontSync';
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -18,6 +19,8 @@ import {
   activityStatusLabel,
   mergeWithStaleProtection,
 } from './speechQueue'
+
+useInterfaceFontSync();
 
 const opacity = ref(94)
 const bgColor = ref('#10131a')
@@ -592,8 +595,13 @@ html, body {
   margin: 0;
 }
 
+html {
+  --font-sans: 'Manrope', 'Segoe UI', sans-serif;
+  font-size: var(--ui-font-size, 16px);
+}
+
 body {
-  font-family: 'Manrope', 'Segoe UI', sans-serif;
+  font-family: var(--ui-font-family, var(--font-sans));
   background: transparent;
   color: var(--text);
   user-select: none;

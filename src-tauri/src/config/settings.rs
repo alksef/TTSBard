@@ -1130,6 +1130,52 @@ where
     })
 }
 
+/// Default UI font selection. Other values are installed Windows font family
+/// names; `"default"` keeps the built-in CSS stack (`var(--font-sans)`).
+fn default_ui_font_family() -> String {
+    "default".to_string()
+}
+
+/// Keep a valid persisted UI family name; blank and non-string values recover
+/// safely like the editor family.
+fn deserialize_ui_font_family<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(match value {
+        serde_json::Value::String(value) if !value.trim().is_empty() => value,
+        _ => default_ui_font_family(),
+    })
+}
+
+/// Minimum/maximum/default interface font size in pixels. The size sets the
+/// `html` rem base of the main window, so the range stays narrow (14..=20).
+pub const UI_FONT_SIZE_MIN_PX: u32 = 14;
+pub const UI_FONT_SIZE_MAX_PX: u32 = 20;
+const UI_FONT_SIZE_DEFAULT_PX: u32 = 16;
+
+fn default_ui_font_size_px() -> u32 {
+    UI_FONT_SIZE_DEFAULT_PX
+}
+
+/// Forgiving deserializer for `ui_font_size_px`: any value that is not an
+/// integer within `14..=20` falls back to the default `16`.
+fn deserialize_ui_font_size_px<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(match value {
+        serde_json::Value::Number(n) => n
+            .as_u64()
+            .filter(|v| *v >= UI_FONT_SIZE_MIN_PX as u64 && *v <= UI_FONT_SIZE_MAX_PX as u64)
+            .map(|v| v as u32)
+            .unwrap_or(UI_FONT_SIZE_DEFAULT_PX),
+        _ => UI_FONT_SIZE_DEFAULT_PX,
+    })
+}
+
 /// Quick editor behavior mode
 ///
 /// Controls how the main window reacts after Enter/Esc in the quick editor.
@@ -1549,6 +1595,19 @@ pub struct AppSettings {
     pub editor: EditorSettings,
     #[serde(default = "default_theme")]
     pub theme: Theme,
+    /// Interface font family: `"default"` keeps the built-in CSS stack, other
+    /// values are installed Windows family names.
+    #[serde(
+        default = "default_ui_font_family",
+        deserialize_with = "deserialize_ui_font_family"
+    )]
+    pub ui_font_family: String,
+    /// Interface font size: the `html` rem base of the main window in px.
+    #[serde(
+        default = "default_ui_font_size_px",
+        deserialize_with = "deserialize_ui_font_size_px"
+    )]
+    pub ui_font_size_px: u32,
     /// Язык интерфейса: простой ASCII-тег (`en`, `ru`, `pt-BR`, `zh-Hant`).
     /// Отсутствующее в старом файле поле даёт `ru`; некорректное значение
     /// нормализуется к `en`.
@@ -1598,6 +1657,8 @@ impl Default for AppSettings {
             hotkey_enabled: true,
             editor: EditorSettings::default(),
             theme: Theme::Dark,
+            ui_font_family: default_ui_font_family(),
+            ui_font_size_px: UI_FONT_SIZE_DEFAULT_PX,
             ui_language: "en".to_string(),
             twitch: TwitchSettings::default(),
             webview: WebViewSettings::default(),
@@ -2690,6 +2751,35 @@ impl SettingsManager {
     /// Set theme
     pub fn set_theme(&self, theme: Theme) -> Result<()> {
         self.update_field("/theme", &theme)
+    }
+
+    // ========== Interface Font Settings ==========
+
+    /// Set the interface font family.
+    pub fn set_ui_font_family(&self, family: String) -> Result<()> {
+        if family.trim().is_empty() {
+            return Err(anyhow::anyhow!("UI font family must not be blank"));
+        }
+        self.update_field("/ui_font_family", &family)
+    }
+
+    /// Get the interface font family.
+    pub fn get_ui_font_family(&self) -> String {
+        self.cache.read().ui_font_family.clone()
+    }
+
+    /// Set the interface font size (px), strict: rejects out-of-range values
+    /// without writing.
+    pub fn set_ui_font_size_px(&self, size_px: u32) -> Result<()> {
+        if !(UI_FONT_SIZE_MIN_PX..=UI_FONT_SIZE_MAX_PX).contains(&size_px) {
+            return Err(anyhow::anyhow!("Invalid UI font size: {}", size_px));
+        }
+        self.update_field("/ui_font_size_px", &size_px)
+    }
+
+    /// Get the interface font size (px).
+    pub fn get_ui_font_size_px(&self) -> u32 {
+        self.cache.read().ui_font_size_px
     }
 
     // ========== UI Language Settings ==========
@@ -7103,6 +7193,219 @@ mod tests {
             manager.load().unwrap().editor.font_size_px,
             18,
             "family setter must not clobber size"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ==================== UI font tests ====================
+
+    /// AppSettings default UI font is the built-in stack selector and 16 px.
+    #[test]
+    fn ui_font_defaults() {
+        let s = AppSettings::default();
+        assert_eq!(s.ui_font_family, "default");
+        assert_eq!(s.ui_font_size_px, 16);
+    }
+
+    /// Old settings missing both UI font fields deserialize to the default
+    /// family and 16 px.
+    #[test]
+    fn ui_font_deserializes_without_fields() {
+        let mut json = serde_json::to_value(AppSettings::default()).unwrap();
+        if let Some(obj) = json.as_object_mut() {
+            obj.remove("ui_font_family");
+            obj.remove("ui_font_size_px");
+        }
+        let back: AppSettings =
+            serde_json::from_value(json).expect("must deserialize without UI font fields");
+        assert_eq!(back.ui_font_family, "default");
+        assert_eq!(back.ui_font_size_px, 16);
+    }
+
+    /// The stable default id and arbitrary installed-family names round-trip
+    /// through serde, so a custom font survives config reads and writes.
+    #[test]
+    fn ui_font_family_round_trip() {
+        for family in ["default", "system", "Segoe UI", "PT Sans"] {
+            let s = AppSettings {
+                ui_font_family: family.to_owned(),
+                ..AppSettings::default()
+            };
+            let json = serde_json::to_string(&s).unwrap();
+            let back: AppSettings = serde_json::from_str(&json).unwrap();
+            assert_eq!(back.ui_font_family, family, "round-trip failed for {}", json);
+        }
+    }
+
+    /// UI font size boundaries (14 and 20) round-trip through serde.
+    #[test]
+    fn ui_font_size_boundaries_round_trip() {
+        for size in [UI_FONT_SIZE_MIN_PX, 17, UI_FONT_SIZE_MAX_PX] {
+            let s = AppSettings {
+                ui_font_size_px: size,
+                ..AppSettings::default()
+            };
+            let json = serde_json::to_string(&s).unwrap();
+            let back: AppSettings = serde_json::from_str(&json).unwrap();
+            assert_eq!(back.ui_font_size_px, size);
+        }
+    }
+
+    /// Malformed UI font values fall back individually without losing
+    /// unrelated settings or failing the whole deserialization.
+    #[test]
+    fn ui_font_malformed_values_fall_back_individually() {
+        let base = serde_json::to_value(AppSettings::default()).unwrap();
+
+        // Custom family is kept; out-of-range size falls back to 16.
+        let mut json = base.clone();
+        json["theme"] = serde_json::json!("light");
+        json["ui_font_family"] = serde_json::json!("PT Sans");
+        json["ui_font_size_px"] = serde_json::json!(99);
+        let settings: AppSettings = serde_json::from_value(json)
+            .expect("custom family / out-of-range size must not fail deserialization");
+        assert_eq!(settings.ui_font_family, "PT Sans");
+        assert_eq!(settings.ui_font_size_px, 16);
+        assert_eq!(settings.theme, Theme::Light, "unrelated value preserved");
+
+        // Blank, whitespace-only and wrong-type family -> default; wrong-type
+        // size (string) -> 16.
+        for raw in [
+            serde_json::json!("   "),
+            serde_json::json!(42),
+            serde_json::json!(null),
+            serde_json::json!(true),
+        ] {
+            let mut json = base.clone();
+            json["ui_font_family"] = raw;
+            json["ui_font_size_px"] = serde_json::json!("big");
+            let settings: AppSettings = serde_json::from_value(json)
+                .expect("blank or wrong-type family must not fail deserialization");
+            assert_eq!(settings.ui_font_family, "default", "family must fall back");
+            assert_eq!(settings.ui_font_size_px, 16);
+        }
+
+        // Below-min, above-max, negative, float and null sizes fall back to 16.
+        for raw in [
+            serde_json::json!(13),
+            serde_json::json!(21),
+            serde_json::json!(-5),
+            serde_json::json!(16.5),
+            serde_json::json!(null),
+        ] {
+            let mut json = base.clone();
+            json["ui_font_size_px"] = raw;
+            let settings: AppSettings = serde_json::from_value(json)
+                .expect("out-of-range or wrong-type size must not fail deserialization");
+            assert_eq!(
+                settings.ui_font_size_px, 16,
+                "size must fall back to 16"
+            );
+        }
+    }
+
+    /// An invalid UI size setter is rejected and changes neither cache nor
+    /// disk. Reuses the shared temp-manager helper.
+    #[test]
+    fn ui_font_invalid_size_setter_changes_nothing() {
+        let (manager, dir) = editor_font_tmp_manager("ui-invalid-size");
+
+        manager.set_ui_font_size_px(18).unwrap();
+        assert_eq!(manager.get_ui_font_size_px(), 18);
+
+        for invalid in [13, 21, 0, u32::MAX] {
+            let result = manager.set_ui_font_size_px(invalid);
+            assert!(result.is_err(), "size {} must be rejected", invalid);
+            assert_eq!(
+                manager.get_ui_font_size_px(),
+                18,
+                "cache must keep 18 after rejected size {}",
+                invalid
+            );
+            assert_eq!(
+                read_disk_settings(&dir).ui_font_size_px,
+                18,
+                "disk must keep 18 after rejected size {}",
+                invalid
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A blank UI family is rejected and changes neither cache nor disk, while
+    /// any non-empty name (including fonts later uninstalled) is accepted.
+    #[test]
+    fn ui_font_blank_family_setter_changes_nothing() {
+        let (manager, dir) = editor_font_tmp_manager("ui-blank-family");
+
+        manager.set_ui_font_family("Georgia".to_owned()).unwrap();
+        assert_eq!(manager.get_ui_font_family(), "Georgia");
+
+        for blank in ["", "   ", "\t"] {
+            let result = manager.set_ui_font_family(blank.to_owned());
+            assert!(result.is_err(), "family {:?} must be rejected", blank);
+            assert_eq!(
+                manager.get_ui_font_family(),
+                "Georgia",
+                "cache must keep Georgia after rejected family {:?}",
+                blank
+            );
+            assert_eq!(
+                read_disk_settings(&dir).ui_font_family,
+                "Georgia",
+                "disk must keep Georgia after rejected family {:?}",
+                blank
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Valid UI font writes survive a reload (new manager over the same dir).
+    #[test]
+    fn ui_font_valid_writes_survive_reload() {
+        let (manager, dir) = editor_font_tmp_manager("ui-reload");
+
+        manager.set_ui_font_family("Segoe UI".to_owned()).unwrap();
+        manager.set_ui_font_size_px(20).unwrap();
+
+        let manager2 = SettingsManager::with_config_dir(dir.clone()).unwrap();
+        let after = manager2.load().unwrap();
+        assert_eq!(after.ui_font_family, "Segoe UI");
+        assert_eq!(after.ui_font_size_px, 20);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Each UI font setter only touches its own field, and neither clobbers
+    /// the editor font fields.
+    #[test]
+    fn ui_font_setters_preserve_other_fields() {
+        let (manager, dir) = editor_font_tmp_manager("ui-independent");
+
+        manager.set_ui_font_family("georgia".to_owned()).unwrap();
+        manager.set_ui_font_size_px(18).unwrap();
+
+        manager
+            .set_editor_font_family("consolas".to_owned())
+            .unwrap();
+        manager.set_editor_font_size_px(24).unwrap();
+
+        let after = manager.load().unwrap();
+        assert_eq!(after.ui_font_family, "georgia");
+        assert_eq!(after.ui_font_size_px, 18);
+        assert_eq!(after.editor.font_family, "consolas");
+        assert_eq!(after.editor.font_size_px, 24);
+
+        manager
+            .set_editor_font_family("arial".to_owned())
+            .unwrap();
+        assert_eq!(
+            manager.load().unwrap().ui_font_size_px,
+            18,
+            "editor family setter must not clobber UI size"
         );
 
         let _ = std::fs::remove_dir_all(&dir);

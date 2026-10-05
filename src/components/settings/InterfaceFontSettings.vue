@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { RotateCcw } from 'lucide-vue-next'
-import { EDITOR_FONT_SIZE_MAX } from '../../utils/editorFont'
+import { INTERFACE_FONT_SIZE_MAX } from '../../utils/interfaceFont'
 import { t } from '../../i18n'
-import { useEditorFontSettings } from '../../composables/useEditorFontSettings'
+import { useInterfaceFontSettings } from '../../composables/useInterfaceFontSettings'
 
 const {
   fontOptions,
@@ -16,7 +16,7 @@ const {
   onFamilyChange,
   onSizeChange,
   onReset,
-} = useEditorFontSettings()
+} = useInterfaceFontSettings()
 
 const open = ref(false)
 const pickerRoot = ref<HTMLElement | null>(null)
@@ -29,8 +29,8 @@ const previewStyle = computed(() => ({
 }))
 
 function builtinFontLabel(id: string): string {
-  if (id === 'default') return t('settings.editor.font.default')
-  if (id === 'system') return t('settings.editor.font.system')
+  if (id === 'default') return t('settings.interface.font.default')
+  if (id === 'system') return t('settings.interface.font.system')
   return id
 }
 
@@ -91,16 +91,16 @@ function onSizeInput(event: Event): void {
 
 <template>
   <section
-    class="settings-section editor-font-settings"
+    class="settings-section interface-font-settings"
     :class="{ 'is-popup-open': open }"
   >
     <div class="card-header">
-      <h3 class="card-title">{{ t('settings.editor.font.title') }}</h3>
+      <h3 class="card-title">{{ t('settings.interface.font.title') }}</h3>
       <button
         type="button"
         class="font-reset"
-        :title="t('settings.editor.font.reset')"
-        :aria-label="t('settings.editor.font.reset')"
+        :title="t('settings.interface.font.reset')"
+        :aria-label="t('settings.interface.font.reset')"
         :disabled="saving"
         @click="onReset"
       >
@@ -109,17 +109,17 @@ function onSizeInput(event: Event): void {
     </div>
     <div class="font-controls-row">
       <div class="font-field font-family-field">
-        <label class="font-field-label" for="editor-font-family">{{ t('settings.editor.font.label_family') }}</label>
+        <label class="font-field-label" for="interface-font-family">{{ t('settings.interface.font.label_family') }}</label>
         <div ref="pickerRoot" class="font-picker">
           <button
-            id="editor-font-family"
+            id="interface-font-family"
             type="button"
             class="font-trigger"
             :class="{ 'is-open': open }"
             :disabled="saving"
             aria-haspopup="listbox"
             :aria-expanded="open"
-            :aria-controls="open ? 'editor-font-options' : undefined"
+            :aria-controls="open ? 'interface-font-options' : undefined"
             @click="onTriggerClick"
           >
             <span class="font-trigger-label">{{ selectedLabel }}</span>
@@ -128,18 +128,18 @@ function onSizeInput(event: Event): void {
 
           <div
             v-if="open"
-            id="editor-font-options"
+            id="interface-font-options"
             class="font-popup"
             role="listbox"
-            :aria-label="t('settings.editor.font.label_family')"
+            :aria-label="t('settings.interface.font.label_family')"
           >
             <input
               ref="searchInput"
               v-model="search"
               type="search"
               class="font-search"
-              :placeholder="t('settings.editor.font.search_placeholder')"
-              :aria-label="t('settings.editor.font.search_placeholder')"
+              :placeholder="t('settings.interface.font.search_placeholder')"
+              :aria-label="t('settings.interface.font.search_placeholder')"
               @click.stop
             />
             <button
@@ -155,22 +155,22 @@ function onSizeInput(event: Event): void {
             >
               {{ opt.label }}
             </button>
-            <p v-if="filteredFontOptions.length === 0" class="font-empty">{{ t('settings.editor.font.empty') }}</p>
+            <p v-if="filteredFontOptions.length === 0" class="font-empty">{{ t('settings.interface.font.empty') }}</p>
           </div>
         </div>
       </div>
 
       <div class="font-field font-size-field">
-        <label class="font-field-label" for="editor-font-size">{{ t('settings.editor.font.label_size') }}</label>
+        <label class="font-field-label" for="interface-font-size">{{ t('settings.interface.font.label_size') }}</label>
         <div class="font-size-wrap">
           <input
-            id="editor-font-size"
+            id="interface-font-size"
             v-model="sizeInput"
             type="number"
             class="font-size-input"
             :disabled="saving"
-            min="12"
-            :max="EDITOR_FONT_SIZE_MAX"
+            min="14"
+            :max="INTERFACE_FONT_SIZE_MAX"
             step="1"
             @change="onSizeInput"
           />
@@ -180,18 +180,20 @@ function onSizeInput(event: Event): void {
     </div>
 
     <div v-if="saving || saveError" class="font-status" aria-live="polite">
-      <span v-if="saving" class="font-saving" role="status">{{ t('settings.editor.font.saving') }}</span>
+      <span v-if="saving" class="font-saving" role="status">{{ t('settings.interface.font.saving') }}</span>
       <span v-else-if="saveError" class="font-error" role="alert">{{ saveError }}</span>
     </div>
 
     <p class="font-sample" :style="previewStyle">
-      {{ t('settings.editor.font.sample') }}
+      {{ t('settings.interface.font.sample') }}
     </p>
+
+    <p class="font-note">{{ t('settings.interface.font.coverage_note') }}</p>
   </section>
 </template>
 
 <style scoped>
-.editor-font-settings {
+.interface-font-settings {
   padding: 12px 16px;
   background: var(--color-bg-field);
   border: 1px solid var(--color-border);
@@ -201,7 +203,7 @@ function onSizeInput(event: Event): void {
 
 /* Lift the whole card while the popup is open so the list paints above the
    nearby setting sections below and is never covered or clipped. */
-.editor-font-settings.is-popup-open {
+.interface-font-settings.is-popup-open {
   z-index: 40;
 }
 
@@ -489,5 +491,13 @@ function onSizeInput(event: Event): void {
   line-height: 1.6;
   overflow-wrap: break-word;
   word-break: break-word;
+}
+
+.font-note {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  font-weight: 400;
+  color: var(--color-text-muted);
+  line-height: 1.4;
 }
 </style>

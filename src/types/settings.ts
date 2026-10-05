@@ -377,6 +377,10 @@ export interface GeneralSettingsDto {
   hotkey_enabled: boolean
   theme?: Theme
   ui_language: string
+  /** Interface font family: `'default'` keeps the built-in CSS stack. */
+  ui_font_family: string
+  /** Interface font size: the `html` rem base of the main window in px. */
+  ui_font_size_px: number
   show_playback_on_start: boolean
   start_compact: boolean
   hide_on_minimize: boolean
@@ -399,6 +403,9 @@ export type QuickEditorMode = 'disabled' | 'collapse' | 'return_focus'
 
 /** Editor typography font family: a built-in choice or an installed Windows family name. */
 export type EditorFontFamily = string
+
+/** Interface typography font family: a built-in choice or an installed Windows family name. */
+export type InterfaceFontFamily = string
 
 export interface ContextualRuAccentSettingsDto {
   enabled: boolean

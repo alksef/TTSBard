@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
+import { useInterfaceFontSync } from '../src/composables/useInterfaceFontSync';
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -9,6 +10,8 @@ import { createFrameSession } from './frameSession'
 import type { LoadedFrame, PreviewDto } from './frameSession'
 import { isWithinBlurIgnoreWindow, selectionFromDrag } from './selection'
 import type { PhysicalPoint } from './selection'
+
+useInterfaceFontSync();
 
 interface CssPoint {
   x: number
@@ -343,6 +346,11 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
 }
 
+html {
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: var(--ui-font-size, 16px);
+}
+
 html,
 body {
   margin: 0;
@@ -415,7 +423,7 @@ body {
   background: rgba(0, 0, 0, 0.6);
   border: 1px solid rgba(255, 255, 255, 0.25);
   color: #ffffff;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--ui-font-family, var(--font-sans));
   font-size: 13px;
   line-height: 1.4;
   text-align: center;
@@ -437,7 +445,7 @@ body {
   background: rgba(0, 0, 0, 0.6);
   border: 1px solid rgba(255, 255, 255, 0.25);
   color: #ffd7d7;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--ui-font-family, var(--font-sans));
   font-size: 13px;
   line-height: 1.4;
   text-align: center;

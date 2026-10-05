@@ -976,6 +976,10 @@ pub struct GeneralSettingsDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
     pub ui_language: String,
+    /// Interface font family: `"default"` keeps the built-in CSS stack.
+    pub ui_font_family: String,
+    /// Interface font size: the `html` rem base of the main window in px.
+    pub ui_font_size_px: u32,
     pub show_playback_on_start: bool,
     pub start_compact: bool,
     pub hide_on_minimize: bool,
@@ -990,6 +994,8 @@ impl GeneralSettingsDto {
                 crate::config::settings::Theme::Light => "light".to_string(),
             }),
             ui_language: config.ui_language.clone(),
+            ui_font_family: config.ui_font_family.clone(),
+            ui_font_size_px: config.ui_font_size_px,
             show_playback_on_start: config.show_playback_on_start,
             start_compact: config.start_compact,
             hide_on_minimize: config.hide_on_minimize,
@@ -1846,6 +1852,8 @@ mod tests {
             hotkey_enabled: true,
             theme: Some("dark".into()),
             ui_language: "ru".into(),
+            ui_font_family: "default".into(),
+            ui_font_size_px: 16,
             show_playback_on_start: false,
             start_compact: false,
             hide_on_minimize: true,
@@ -2248,6 +2256,8 @@ mod tests {
             hotkey_enabled: false,
             theme: None,
             ui_language: "ru".into(),
+            ui_font_family: "default".into(),
+            ui_font_size_px: 16,
             show_playback_on_start: false,
             start_compact: false,
             hide_on_minimize: false,

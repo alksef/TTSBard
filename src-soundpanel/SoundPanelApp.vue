@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { useInterfaceFontSync } from '../src/composables/useInterfaceFontSync';
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { open, confirm } from '@tauri-apps/plugin-dialog'
 import { t } from '../src/i18n'
 import { createAsyncCleanupScope } from '../src/utils/asyncCleanup'
 import { registerSoundPanelAppListeners, installSoundPanelKeydown } from '../src/playback/listeners'
+
+useInterfaceFontSync();
 
 interface SoundBinding {
   key: string
@@ -781,6 +784,8 @@ onMounted(async () => {
 }
 
 html {
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: var(--ui-font-size, 16px);
   margin: 0;
   padding: 0;
   width: 100%;
@@ -793,7 +798,7 @@ body {
   padding: 0;
   width: 100%;
   height: 100%;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--ui-font-family, var(--font-sans));
   background: transparent;
   overflow: hidden;
 }

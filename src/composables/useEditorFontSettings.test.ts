@@ -328,4 +328,52 @@ describe('useEditorFontSettings', () => {
     expect(c.family.value).toBe('PT Sans')
     expect(c.previewFontFamily.value).toBe("'PT Sans', var(--font-mono)")
   })
+
+  it('reset restores both fields through the regular setters', async () => {
+    mockInvoke.mockImplementation((command: unknown) =>
+      Promise.resolve(
+        command === 'get_system_font_families'
+          ? []
+          : command === 'set_editor_font_size'
+            ? 16
+            : 'default',
+      ),
+    )
+    const c = useEditorFontSettings(
+      ref(createSettings({ font_family: 'georgia', font_size_px: 24 })),
+    )
+    await c.onReset()
+    expect(invokeCalls('set_editor_font_family')).toEqual([
+      ['set_editor_font_family', { family: 'default' }],
+    ])
+    expect(invokeCalls('set_editor_font_size')).toEqual([['set_editor_font_size', { sizePx: 16 }]])
+    expect(c.family.value).toBe('default')
+    expect(c.sizeInput.value).toBe(16)
+    expect(c.saveError.value).toBeNull()
+  })
+
+  it('reset does nothing when both fields are already at their defaults', async () => {
+    const c = useEditorFontSettings(ref(createSettings()))
+    await c.onReset()
+    expect(invokeCalls('set_editor_font_family')).toHaveLength(0)
+    expect(invokeCalls('set_editor_font_size')).toHaveLength(0)
+  })
+
+  it('reset keeps the failed field and still resets the other one', async () => {
+    mockInvoke.mockImplementation((command: unknown) =>
+      command === 'set_editor_font_family'
+        ? Promise.reject(new Error('disk failure'))
+        : command === 'set_editor_font_size'
+          ? Promise.resolve(16)
+          : Promise.resolve([]),
+    )
+    const c = useEditorFontSettings(
+      ref(createSettings({ font_family: 'georgia', font_size_px: 24 })),
+    )
+    await c.onReset()
+    expect(c.family.value).toBe('georgia')
+    expect(c.saveError.value).toContain('disk failure')
+    expect(c.sizeInput.value).toBe(16)
+    expect(c.saving.value).toBe(false)
+  })
 })

@@ -564,6 +564,56 @@ pub fn get_editor_font_size_px(settings_manager: State<'_, SettingsManager>) -> 
     settings_manager.get_editor_font_size_px()
 }
 
+/// Set the interface font family. `"default"` keeps the built-in CSS stack;
+/// any non-empty name is preserved so an uninstalled font cannot corrupt
+/// settings.
+#[tauri::command]
+pub async fn set_ui_font_family(
+    family: String,
+    app_handle: AppHandle,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<String, String> {
+    let selected_family = family.clone();
+    persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_ui_font_family(selected_family)
+    })
+    .await?;
+
+    emit_settings_changed(&app_handle);
+
+    Ok(family)
+}
+
+/// Set the interface font size in pixels (strict: an invalid size is rejected
+/// without writes). The size becomes the `html` rem base of the main window.
+#[tauri::command]
+pub async fn set_ui_font_size(
+    size_px: u32,
+    app_handle: AppHandle,
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<u32, String> {
+    persist_blocking(settings_manager.inner(), move |mgr| {
+        mgr.set_ui_font_size_px(size_px)
+    })
+    .await?;
+
+    emit_settings_changed(&app_handle);
+
+    Ok(size_px)
+}
+
+/// Get the interface font family
+#[tauri::command]
+pub fn get_ui_font_family(settings_manager: State<'_, SettingsManager>) -> String {
+    settings_manager.get_ui_font_family()
+}
+
+/// Get the interface font size in pixels
+#[tauri::command]
+pub fn get_ui_font_size_px(settings_manager: State<'_, SettingsManager>) -> u32 {
+    settings_manager.get_ui_font_size_px()
+}
+
 /// ROADMAP-119: block Piper model loading when eSpeak NG phonemization is
 /// unusable. Built-in providers pass through unchanged. The readiness probe
 /// (file I/O plus the one-time eSpeak initialization) runs on the blocking

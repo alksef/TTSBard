@@ -6,12 +6,15 @@
   box-sizing: border-box;
 }
 
+/* The interface font settings set these on <html> inline; the defaults keep
+   this stylesheet authoritative (16 px rem base, built-in sans stack). */
 html {
   background: transparent !important;
+  font-size: var(--ui-font-size, 16px);
 }
 
 body {
-  font-family: var(--font-sans);
+  font-family: var(--ui-font-family, var(--font-sans));
   -webkit-font-smoothing: antialiased;
   -moz-osx-osx-font-smoothing: grayscale;
   background: transparent !important;

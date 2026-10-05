@@ -21,6 +21,7 @@ import ErrorToasts from './components/ErrorToasts.vue'
 import MinimalModeButton from './components/MinimalModeButton.vue'
 import IntegrationStatusCluster from './components/titlebar/IntegrationStatusCluster.vue'
 import { t } from './i18n'
+import { interfaceFontCssStack, parseInterfaceFontSize, toInterfaceFontFamily, INTERFACE_FONT_SIZE_DEFAULT } from './utils/interfaceFont'
 import { useTelegramAuth, TELEGRAM_AUTH_KEY } from './composables/useTelegramAuth'
 import { provideAppSettings } from './composables/useAppSettings'
 import { useRuAccentRuntime } from './composables/useRuAccentRuntime'
@@ -267,6 +268,32 @@ watch(() => appSettings.settings.value?.general?.theme, (newTheme, oldTheme) => 
   document.documentElement.setAttribute('data-theme', newTheme)
   debugLog('[App] Theme applied:', document.documentElement.getAttribute('data-theme'))
 }, { immediate: true })
+
+// Watch for interface font changes and apply the `html` rem base plus the body
+// font stack. At the defaults the inline properties are removed so the
+// base.css fallbacks (16 px, var(--font-sans)) stay authoritative.
+watch(
+  () => [
+    appSettings.settings.value?.general?.ui_font_family,
+    appSettings.settings.value?.general?.ui_font_size_px,
+  ],
+  ([rawFamily, rawSize]) => {
+    const rootStyle = document.documentElement.style
+    const family = toInterfaceFontFamily(rawFamily)
+    const size = parseInterfaceFontSize(rawSize) ?? INTERFACE_FONT_SIZE_DEFAULT
+    if (family === 'default') {
+      rootStyle.removeProperty('--ui-font-family')
+    } else {
+      rootStyle.setProperty('--ui-font-family', interfaceFontCssStack(family))
+    }
+    if (size === INTERFACE_FONT_SIZE_DEFAULT) {
+      rootStyle.removeProperty('--ui-font-size')
+    } else {
+      rootStyle.setProperty('--ui-font-size', `${size}px`)
+    }
+  },
+  { immediate: true },
+)
 
 function keyToCode(key: string): string {
   if (key === 'SPACE') return 'Space'
