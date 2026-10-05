@@ -35,6 +35,26 @@ function isEditorHotkeyName(name: string): name is EditorHotkeyName {
 type HotkeyMessageType = 'error' | 'success' | 'warning' | null
 
 const recordingFor = ref<HotkeyName | EditorHotkeyName | null>(null)
+const keyOccupied = ref(false)
+let occupiedTimeoutId: ReturnType<typeof setTimeout> | null = null
+
+function clearOccupied() {
+  if (occupiedTimeoutId !== null) clearTimeout(occupiedTimeoutId)
+  occupiedTimeoutId = null
+  keyOccupied.value = false
+}
+
+function bindingOccupied(candidate: HotkeyDto): boolean {
+  if (!hotkeys.value) return false
+  const matches = (binding: HotkeyDto) => binding.key.toUpperCase() === candidate.key.toUpperCase()
+    && binding.modifiers.length === candidate.modifiers.length
+    && binding.modifiers.every(modifier => candidate.modifiers.includes(modifier))
+  return Object.entries(hotkeys.value).some(([name, binding]) =>
+    name !== 'editor' && name !== recordingFor.value && matches(binding as HotkeyDto),
+  ) || Object.entries(hotkeys.value.editor).some(([name, binding]) =>
+    name !== recordingFor.value && matches(binding),
+  )
+}
 const errorMessage = ref<string | null>(null)
 const messageState = ref<HotkeyMessageType>(null)
 const currentRecording = ref<{ modifiers: HotkeyDto['modifiers']; key: string } | null>(null)
@@ -111,6 +131,7 @@ async function startEditorRecording(name: EditorHotkeyName) {
 }
 
 async function cancelRecording() {
+  clearOccupied()
   const wasEditor = recordingFor.value !== null && isEditorHotkeyName(recordingFor.value)
   recordingFor.value = null
   currentRecording.value = null
@@ -175,6 +196,14 @@ function handleKeyUp(e: KeyboardEvent) {
   if (releasedKey === '') return
   // Only finish if we're releasing the main key we captured
   if (currentRecording.value.key !== '' && releasedKey === currentRecording.value.key) {
+    if (bindingOccupied(currentRecording.value)) {
+      clearOccupied()
+      keyOccupied.value = true
+      occupiedTimeoutId = setTimeout(clearOccupied, 2000)
+      currentRecording.value = { modifiers: [], key: '' }
+      return
+    }
+    clearOccupied()
     // Save the hotkey
     saveHotkey(recordingFor.value, {
       modifiers: currentRecording.value.modifiers,
@@ -276,6 +305,7 @@ function showMessage(msg: string, type: Exclude<HotkeyMessageType, null>) {
 
 // Cleanup on unmount
 onUnmounted(async () => {
+  clearOccupied()
   recordingGeneration++
   if (messageTimeoutId !== null) {
     clearTimeout(messageTimeoutId)
@@ -328,17 +358,16 @@ onUnmounted(async () => {
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'main_window' && currentRecording" class="hotkey-value recording">
-            {{ formatCurrentRecording() }}
+            {{ keyOccupied ? t('intercept.key_occupied') : formatCurrentRecording() }}
           </div>
 
           <button
+            v-if="recordingFor !== 'main_window'"
             @click="startRecording('main_window')"
             :disabled="recordingFor !== null || isLoading"
             class="record-btn ui-icon-button"
-            :class="{ recording: recordingFor === 'main_window' }"
            :title="t('hotkeys.action.change')" :aria-label="t('hotkeys.action.change')">
             <Keyboard :size="18" />
-            <span v-if="recordingFor === 'main_window'">{{ currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press') }}</span>
           </button>
 
           <button
@@ -373,17 +402,16 @@ onUnmounted(async () => {
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'sound_panel' && currentRecording" class="hotkey-value recording">
-            {{ formatCurrentRecording() }}
+            {{ keyOccupied ? t('intercept.key_occupied') : formatCurrentRecording() }}
           </div>
 
           <button
+            v-if="recordingFor !== 'sound_panel'"
             @click="startRecording('sound_panel')"
             :disabled="recordingFor !== null || isLoading"
             class="record-btn ui-icon-button"
-            :class="{ recording: recordingFor === 'sound_panel' }"
            :title="t('hotkeys.action.change')" :aria-label="t('hotkeys.action.change')">
             <Keyboard :size="18" />
-            <span v-if="recordingFor === 'sound_panel'">{{ currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press') }}</span>
           </button>
 
           <button
@@ -418,17 +446,16 @@ onUnmounted(async () => {
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'playback_control_window' && currentRecording" class="hotkey-value recording">
-            {{ formatCurrentRecording() }}
+            {{ keyOccupied ? t('intercept.key_occupied') : formatCurrentRecording() }}
           </div>
 
           <button
+            v-if="recordingFor !== 'playback_control_window'"
             @click="startRecording('playback_control_window')"
             :disabled="recordingFor !== null || isLoading"
             class="record-btn ui-icon-button"
-            :class="{ recording: recordingFor === 'playback_control_window' }"
            :title="t('hotkeys.action.change')" :aria-label="t('hotkeys.action.change')">
             <Keyboard :size="18" />
-            <span v-if="recordingFor === 'playback_control_window'">{{ currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press') }}</span>
           </button>
 
           <button
@@ -463,17 +490,16 @@ onUnmounted(async () => {
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'ocr_capture' && currentRecording" class="hotkey-value recording">
-            {{ formatCurrentRecording() }}
+            {{ keyOccupied ? t('intercept.key_occupied') : formatCurrentRecording() }}
           </div>
 
           <button
+            v-if="recordingFor !== 'ocr_capture'"
             @click="startRecording('ocr_capture')"
             :disabled="recordingFor !== null || isLoading"
             class="record-btn ui-icon-button"
-            :class="{ recording: recordingFor === 'ocr_capture' }"
            :title="t('hotkeys.action.change')" :aria-label="t('hotkeys.action.change')">
             <Keyboard :size="18" />
-            <span v-if="recordingFor === 'ocr_capture'">{{ currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press') }}</span>
           </button>
 
           <button
@@ -515,17 +541,16 @@ onUnmounted(async () => {
           <span v-else-if="!hotkeys" class="hotkey-value placeholder">{{ t('hotkeys.loading') }}</span>
 
           <div v-if="recordingFor === 'toggle_minimal_mode' && currentRecording" class="hotkey-value recording">
-            {{ formatCurrentRecording() }}
+            {{ keyOccupied ? t('intercept.key_occupied') : formatCurrentRecording() }}
           </div>
 
           <button
+            v-if="recordingFor !== 'toggle_minimal_mode'"
             @click="startRecording('toggle_minimal_mode')"
             :disabled="recordingFor !== null || isLoading"
             class="record-btn ui-icon-button"
-            :class="{ recording: recordingFor === 'toggle_minimal_mode' }"
            :title="t('hotkeys.action.change')" :aria-label="t('hotkeys.action.change')">
             <Keyboard :size="18" />
-            <span v-if="recordingFor === 'toggle_minimal_mode'">{{ currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press') }}</span>
           </button>
 
           <button
@@ -558,17 +583,16 @@ onUnmounted(async () => {
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'return_previous_window' && currentRecording" class="hotkey-value recording">
-            {{ formatCurrentRecording() }}
+            {{ keyOccupied ? t('intercept.key_occupied') : formatCurrentRecording() }}
           </div>
 
           <button
+            v-if="recordingFor !== 'return_previous_window'"
             @click="startRecording('return_previous_window')"
             :disabled="recordingFor !== null || isLoading"
             class="record-btn ui-icon-button"
-            :class="{ recording: recordingFor === 'return_previous_window' }"
            :title="t('hotkeys.action.change')" :aria-label="t('hotkeys.action.change')">
             <Keyboard :size="18" />
-            <span v-if="recordingFor === 'return_previous_window'">{{ currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press') }}</span>
           </button>
 
           <button
@@ -614,17 +638,16 @@ onUnmounted(async () => {
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'edit_word' && currentRecording" class="hotkey-value recording">
-            {{ formatCurrentRecording() }}
+            {{ keyOccupied ? t('intercept.key_occupied') : formatCurrentRecording() }}
           </div>
 
           <button
+            v-if="recordingFor !== 'edit_word'"
             @click="startEditorRecording('edit_word')"
             :disabled="recordingFor !== null || isLoading"
             class="record-btn ui-icon-button"
-            :class="{ recording: recordingFor === 'edit_word' }"
            :title="t('hotkeys.action.change')" :aria-label="t('hotkeys.action.change')">
             <Keyboard :size="18" />
-            <span v-if="recordingFor === 'edit_word'">{{ currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press') }}</span>
           </button>
 
           <button
@@ -658,17 +681,16 @@ onUnmounted(async () => {
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'submit_continue' && currentRecording" class="hotkey-value recording">
-            {{ formatCurrentRecording() }}
+            {{ keyOccupied ? t('intercept.key_occupied') : formatCurrentRecording() }}
           </div>
 
           <button
+            v-if="recordingFor !== 'submit_continue'"
             @click="startEditorRecording('submit_continue')"
             :disabled="recordingFor !== null || isLoading"
             class="record-btn ui-icon-button"
-            :class="{ recording: recordingFor === 'submit_continue' }"
            :title="t('hotkeys.action.change')" :aria-label="t('hotkeys.action.change')">
             <Keyboard :size="18" />
-            <span v-if="recordingFor === 'submit_continue'">{{ currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press') }}</span>
           </button>
 
           <button
@@ -702,17 +724,16 @@ onUnmounted(async () => {
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'submit_keep_text' && currentRecording" class="hotkey-value recording">
-            {{ formatCurrentRecording() }}
+            {{ keyOccupied ? t('intercept.key_occupied') : formatCurrentRecording() }}
           </div>
 
           <button
+            v-if="recordingFor !== 'submit_keep_text'"
             @click="startEditorRecording('submit_keep_text')"
             :disabled="recordingFor !== null || isLoading"
             class="record-btn ui-icon-button"
-            :class="{ recording: recordingFor === 'submit_keep_text' }"
            :title="t('hotkeys.action.change')" :aria-label="t('hotkeys.action.change')">
             <Keyboard :size="18" />
-            <span v-if="recordingFor === 'submit_keep_text'">{{ currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press') }}</span>
           </button>
 
           <button
@@ -746,17 +767,16 @@ onUnmounted(async () => {
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'submit_keep_focus' && currentRecording" class="hotkey-value recording">
-            {{ formatCurrentRecording() }}
+            {{ keyOccupied ? t('intercept.key_occupied') : formatCurrentRecording() }}
           </div>
 
           <button
+            v-if="recordingFor !== 'submit_keep_focus'"
             @click="startEditorRecording('submit_keep_focus')"
             :disabled="recordingFor !== null || isLoading"
             class="record-btn ui-icon-button"
-            :class="{ recording: recordingFor === 'submit_keep_focus' }"
            :title="t('hotkeys.action.change')" :aria-label="t('hotkeys.action.change')">
             <Keyboard :size="18" />
-            <span v-if="recordingFor === 'submit_keep_focus'">{{ currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press') }}</span>
           </button>
 
           <button
@@ -790,17 +810,16 @@ onUnmounted(async () => {
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'next_spelling_error' && currentRecording" class="hotkey-value recording">
-            {{ formatCurrentRecording() }}
+            {{ keyOccupied ? t('intercept.key_occupied') : formatCurrentRecording() }}
           </div>
 
           <button
+            v-if="recordingFor !== 'next_spelling_error'"
             @click="startEditorRecording('next_spelling_error')"
             :disabled="recordingFor !== null || isLoading"
             class="record-btn ui-icon-button"
-            :class="{ recording: recordingFor === 'next_spelling_error' }"
            :title="t('hotkeys.action.change')" :aria-label="t('hotkeys.action.change')">
             <Keyboard :size="18" />
-            <span v-if="recordingFor === 'next_spelling_error'">{{ currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press') }}</span>
           </button>
 
           <button
@@ -834,17 +853,16 @@ onUnmounted(async () => {
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'previous_spelling_error' && currentRecording" class="hotkey-value recording">
-            {{ formatCurrentRecording() }}
+            {{ keyOccupied ? t('intercept.key_occupied') : formatCurrentRecording() }}
           </div>
 
           <button
+            v-if="recordingFor !== 'previous_spelling_error'"
             @click="startEditorRecording('previous_spelling_error')"
             :disabled="recordingFor !== null || isLoading"
             class="record-btn ui-icon-button"
-            :class="{ recording: recordingFor === 'previous_spelling_error' }"
            :title="t('hotkeys.action.change')" :aria-label="t('hotkeys.action.change')">
             <Keyboard :size="18" />
-            <span v-if="recordingFor === 'previous_spelling_error'">{{ currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press') }}</span>
           </button>
 
           <button
@@ -878,17 +896,16 @@ onUnmounted(async () => {
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'next_tab' && currentRecording" class="hotkey-value recording">
-            {{ formatCurrentRecording() }}
+            {{ keyOccupied ? t('intercept.key_occupied') : formatCurrentRecording() }}
           </div>
 
           <button
+            v-if="recordingFor !== 'next_tab'"
             @click="startEditorRecording('next_tab')"
             :disabled="recordingFor !== null || isLoading"
             class="record-btn ui-icon-button"
-            :class="{ recording: recordingFor === 'next_tab' }"
            :title="t('hotkeys.action.change')" :aria-label="t('hotkeys.action.change')">
             <Keyboard :size="18" />
-            <span v-if="recordingFor === 'next_tab'">{{ currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press') }}</span>
           </button>
 
           <button
@@ -922,17 +939,16 @@ onUnmounted(async () => {
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'previous_tab' && currentRecording" class="hotkey-value recording">
-            {{ formatCurrentRecording() }}
+            {{ keyOccupied ? t('intercept.key_occupied') : formatCurrentRecording() }}
           </div>
 
           <button
+            v-if="recordingFor !== 'previous_tab'"
             @click="startEditorRecording('previous_tab')"
             :disabled="recordingFor !== null || isLoading"
             class="record-btn ui-icon-button"
-            :class="{ recording: recordingFor === 'previous_tab' }"
            :title="t('hotkeys.action.change')" :aria-label="t('hotkeys.action.change')">
             <Keyboard :size="18" />
-            <span v-if="recordingFor === 'previous_tab'">{{ currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press') }}</span>
           </button>
 
           <button
@@ -966,17 +982,16 @@ onUnmounted(async () => {
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'cycle_route' && currentRecording" class="hotkey-value recording">
-            {{ formatCurrentRecording() }}
+            {{ keyOccupied ? t('intercept.key_occupied') : formatCurrentRecording() }}
           </div>
 
           <button
+            v-if="recordingFor !== 'cycle_route'"
             @click="startEditorRecording('cycle_route')"
             :disabled="recordingFor !== null || isLoading"
             class="record-btn ui-icon-button"
-            :class="{ recording: recordingFor === 'cycle_route' }"
            :title="t('hotkeys.action.change')" :aria-label="t('hotkeys.action.change')">
             <Keyboard :size="18" />
-            <span v-if="recordingFor === 'cycle_route'">{{ currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press') }}</span>
           </button>
 
           <button
@@ -1010,17 +1025,16 @@ onUnmounted(async () => {
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'toggle_typing' && currentRecording" class="hotkey-value recording">
-            {{ formatCurrentRecording() }}
+            {{ keyOccupied ? t('intercept.key_occupied') : formatCurrentRecording() }}
           </div>
 
           <button
+            v-if="recordingFor !== 'toggle_typing'"
             @click="startEditorRecording('toggle_typing')"
             :disabled="recordingFor !== null || isLoading"
             class="record-btn ui-icon-button"
-            :class="{ recording: recordingFor === 'toggle_typing' }"
            :title="t('hotkeys.action.change')" :aria-label="t('hotkeys.action.change')">
             <Keyboard :size="18" />
-            <span v-if="recordingFor === 'toggle_typing'">{{ currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press') }}</span>
           </button>
 
           <button
@@ -1054,17 +1068,16 @@ onUnmounted(async () => {
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'cycle_quick_mode' && currentRecording" class="hotkey-value recording">
-            {{ formatCurrentRecording() }}
+            {{ keyOccupied ? t('intercept.key_occupied') : formatCurrentRecording() }}
           </div>
 
           <button
+            v-if="recordingFor !== 'cycle_quick_mode'"
             @click="startEditorRecording('cycle_quick_mode')"
             :disabled="recordingFor !== null || isLoading"
             class="record-btn ui-icon-button"
-            :class="{ recording: recordingFor === 'cycle_quick_mode' }"
            :title="t('hotkeys.action.change')" :aria-label="t('hotkeys.action.change')">
             <Keyboard :size="18" />
-            <span v-if="recordingFor === 'cycle_quick_mode'">{{ currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press') }}</span>
           </button>
 
           <button
@@ -1098,17 +1111,16 @@ onUnmounted(async () => {
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'toggle_history' && currentRecording" class="hotkey-value recording">
-            {{ formatCurrentRecording() }}
+            {{ keyOccupied ? t('intercept.key_occupied') : formatCurrentRecording() }}
           </div>
 
           <button
+            v-if="recordingFor !== 'toggle_history'"
             @click="startEditorRecording('toggle_history')"
             :disabled="recordingFor !== null || isLoading"
             class="record-btn ui-icon-button"
-            :class="{ recording: recordingFor === 'toggle_history' }"
            :title="t('hotkeys.action.change')" :aria-label="t('hotkeys.action.change')">
             <Keyboard :size="18" />
-            <span v-if="recordingFor === 'toggle_history'">{{ currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press') }}</span>
           </button>
 
           <button
@@ -1142,17 +1154,16 @@ onUnmounted(async () => {
 
           <!-- Recording state -->
           <div v-if="recordingFor === 'accent_homographs' && currentRecording" class="hotkey-value recording">
-            {{ formatCurrentRecording() }}
+            {{ keyOccupied ? t('intercept.key_occupied') : formatCurrentRecording() }}
           </div>
 
           <button
+            v-if="recordingFor !== 'accent_homographs'"
             @click="startEditorRecording('accent_homographs')"
             :disabled="recordingFor !== null || isLoading"
             class="record-btn ui-icon-button"
-            :class="{ recording: recordingFor === 'accent_homographs' }"
            :title="t('hotkeys.action.change')" :aria-label="t('hotkeys.action.change')">
             <Keyboard :size="18" />
-            <span v-if="recordingFor === 'accent_homographs'">{{ currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press') }}</span>
           </button>
 
           <button
@@ -1188,17 +1199,16 @@ onUnmounted(async () => {
 
             <!-- Recording state -->
             <div v-if="recordingFor === 'approve_next_incoming' && currentRecording" class="hotkey-value recording">
-              {{ formatCurrentRecording() }}
+              {{ keyOccupied ? t('intercept.key_occupied') : formatCurrentRecording() }}
             </div>
 
             <button
+              v-if="recordingFor !== 'approve_next_incoming'"
               @click="startEditorRecording('approve_next_incoming')"
               :disabled="recordingFor !== null || isLoading"
               class="record-btn ui-icon-button"
-              :class="{ recording: recordingFor === 'approve_next_incoming' }"
              :title="t('hotkeys.action.change')" :aria-label="t('hotkeys.action.change')">
-              <Keyboard :size="18" />
-            <span v-if="recordingFor === 'approve_next_incoming'">{{ currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press') }}</span>
+            <Keyboard :size="18" />
             </button>
 
             <button
@@ -1232,17 +1242,16 @@ onUnmounted(async () => {
 
             <!-- Recording state -->
             <div v-if="recordingFor === 'edit_next_incoming' && currentRecording" class="hotkey-value recording">
-              {{ formatCurrentRecording() }}
+              {{ keyOccupied ? t('intercept.key_occupied') : formatCurrentRecording() }}
             </div>
 
             <button
+              v-if="recordingFor !== 'edit_next_incoming'"
               @click="startEditorRecording('edit_next_incoming')"
               :disabled="recordingFor !== null || isLoading"
               class="record-btn ui-icon-button"
-              :class="{ recording: recordingFor === 'edit_next_incoming' }"
              :title="t('hotkeys.action.change')" :aria-label="t('hotkeys.action.change')">
-              <Keyboard :size="18" />
-            <span v-if="recordingFor === 'edit_next_incoming'">{{ currentRecording?.key ? t('hotkeys.action.release') : t('hotkeys.action.press') }}</span>
+            <Keyboard :size="18" />
             </button>
 
             <button
@@ -1393,14 +1402,6 @@ onUnmounted(async () => {
   50% { opacity: 0.7; }
 }
 
-.record-btn.recording {
-  width: auto;
-  gap: var(--ui-field-group-gap);
-  padding: 0 var(--ui-control-padding-x);
-  animation: pulse 1s infinite;
-  background: var(--warning-bg);
-  border-color: var(--warning-border);
-}
 
 .cancel-btn {
   padding: 0.35rem 0.5rem;

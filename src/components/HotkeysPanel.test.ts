@@ -9,16 +9,16 @@ const source = componentSource
   .replace(/^import .*$/gm, '')
 const script = ts.transpile(source, { target: ts.ScriptTarget.ES2022 })
 
-function setup() {
+function setup(hotkeys?: Record<string, unknown>) {
   const props = { active: true }
   let activeChanged: (active: boolean) => void = () => {}
   const invoke = vi.fn().mockResolvedValue(undefined)
   const reload = vi.fn().mockResolvedValue(undefined)
   const run = new Function('ref', 'computed', 'onUnmounted', 'invoke', 'useAppSettings',
     'debugError', 't', 'normalizeCommandError', 'document', 'defineProps', 'withDefaults', 'watch', `${script}
-    return { startRecording, handleKeyDown, handleKeyUp, recordingFor, errorMessage };`)
+    return { startRecording, handleKeyDown, handleKeyUp, recordingFor, errorMessage, keyOccupied };`)
   const panel = run((value: unknown) => ({ value }), (fn: () => unknown) => ({ get value() { return fn() } }),
-    () => {}, invoke, () => ({ settings: { value: {} }, reload }), () => {},
+    () => {}, invoke, () => ({ settings: { value: { hotkeys } }, reload }), () => {},
     (_key: string, args: { detail: string }) => `Ошибка: ${args.detail}`, normalizeCommandError,
     { addEventListener() {}, removeEventListener() {} }, () => props, (value: unknown) => value,
     (_source: unknown, callback: (active: boolean) => void) => { activeChanged = callback })
@@ -31,6 +31,30 @@ function setup() {
 }
 
 describe('global shortcut recording', () => {
+  it('keeps recording after a duplicate, clears its notice, and accepts another shortcut', async () => {
+    vi.useFakeTimers()
+    try {
+      const { panel, invoke, event } = setup({
+        sound_panel: { key: 'F', modifiers: ['shift', 'ctrl'] }, editor: {},
+      })
+      await panel.startRecording('main_window')
+      panel.handleKeyDown(event('F', 'KeyF'))
+      panel.handleKeyUp(event('F', 'KeyF'))
+      expect(panel.keyOccupied.value).toBe(true)
+      expect(panel.recordingFor.value).toBe('main_window')
+      expect(invoke).not.toHaveBeenCalledWith('set_hotkey', expect.anything())
+      vi.advanceTimersByTime(2000)
+      expect(panel.keyOccupied.value).toBe(false)
+      panel.handleKeyDown(event('G', 'KeyG'))
+      panel.handleKeyUp(event('G', 'KeyG'))
+      expect(invoke).toHaveBeenCalledWith('set_hotkey', {
+        name: 'main_window', hotkey: { key: 'G', modifiers: ['ctrl', 'shift'] },
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('cancels recording when the panel is hidden', async () => {
     const { panel, invoke, event, leavePanel } = setup()
     await panel.startRecording('main_window')

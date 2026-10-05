@@ -5,7 +5,7 @@ import { listen } from '@tauri-apps/api/event'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
 import { resolveInterceptKey, formatInterceptKey } from '../utils/interceptKeys'
 import { normalizeCommandError } from '../ipc/commandError'
-import { Crosshair, Trash2, Keyboard, Plus, X } from 'lucide-vue-next'
+import { Crosshair, Trash2, Keyboard, Check, X, TriangleAlert } from 'lucide-vue-next'
 import { t } from '../i18n'
 
 const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true })
@@ -24,6 +24,14 @@ interface InterceptSettingsDto {
 const isLoading = ref(false)
 const settings = ref<InterceptSettingsDto | null>(null)
 const recordingKey = ref(false)
+const keyOccupied = ref(false)
+let occupiedTimeoutId: ReturnType<typeof setTimeout> | null = null
+
+function clearOccupied() {
+  if (occupiedTimeoutId !== null) clearTimeout(occupiedTimeoutId)
+  occupiedTimeoutId = null
+  keyOccupied.value = false
+}
 const recordingKeyFor = ref<string | null>(null)
 const savingAllowAnyKey = ref(false)
 const newBindingAction = ref<string>('show_main_window')
@@ -89,12 +97,14 @@ async function toggleAllowAnyKey(event: Event) {
 function startRecordingKey() {
   if (!settings.value || !props.active || isLoading.value || savingAllowAnyKey.value) return
   recordingKey.value = true
+  clearOccupied()
   recordingKeyFor.value = null
   errorMessage.value = null
   document.addEventListener('keydown', handleKeyDown, true)
 }
 
 function cancelRecordingKey() {
+  clearOccupied()
   recordingKey.value = false
   recordingKeyFor.value = null
   document.removeEventListener('keydown', handleKeyDown, true)
@@ -130,6 +140,14 @@ function handleKeyDown(e: KeyboardEvent) {
     return
   }
 
+  if (settings.value?.bindings.some((binding) => binding.key === canonicalName)) {
+    clearOccupied()
+    keyOccupied.value = true
+    occupiedTimeoutId = setTimeout(clearOccupied, 2000)
+    return
+  }
+
+  clearOccupied()
   recordingKeyFor.value = canonicalName
   recordingKey.value = false
   document.removeEventListener('keydown', handleKeyDown, true)
@@ -197,6 +215,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  clearOccupied()
   if (messageTimeoutId !== null) clearTimeout(messageTimeoutId)
   document.removeEventListener('keydown', handleKeyDown, true)
   listenerScope.dispose()
@@ -227,6 +246,10 @@ onUnmounted(() => {
       </div>
 
       <p class="hint-text ui-description">
+        {{ t('intercept.description') }}
+      </p>
+
+      <p class="hint-text ui-description">
         {{ settings?.allow_any_key ? t('intercept.hint_unrestricted') : t('intercept.hint') }}
       </p>
 
@@ -242,7 +265,7 @@ onUnmounted(() => {
           <span>{{ t('intercept.allow_any_key') }}</span>
         </label>
       </div>
-      <p class="unrestricted-warning ui-hint">
+      <p class="unrestricted-warning ui-hint ui-hint--choice">
         {{ t('intercept.allow_any_key_warning') }}
       </p>
 
@@ -250,22 +273,37 @@ onUnmounted(() => {
       <div class="bindings-section">
         <div class="bindings-header">
           <span class="section-title ui-group-title">{{ t('intercept.bindings') }}</span>
+          <div class="record-actions">
           <button
             v-if="!recordingKey && !recordingKeyFor"
             @click="startRecordingKey"
       :disabled="!settings || isLoading || savingAllowAnyKey"
-            class="record-btn ui-button"
+            class="record-btn ui-icon-button"
+            :title="t('intercept.record')"
+            :aria-label="t('intercept.record')"
           >
             <Keyboard :size="18" />
-            {{ t('intercept.record') }}
+          </button>
+          <button
+            v-if="recordingKey"
+            class="record-btn recording ui-icon-button"
+            disabled
+            aria-live="polite"
+          >
+            <TriangleAlert v-if="keyOccupied" :size="18" />
+            <Keyboard v-else :size="18" />
+            <span>{{ keyOccupied ? t('intercept.key_occupied') : t('hotkeys.action.press') }}</span>
           </button>
           <button
             v-if="recordingKey"
             @click="cancelRecordingKey"
-            class="record-btn recording ui-button"
+            class="ui-icon-button"
+            :title="t('common.cancel')"
+            :aria-label="t('common.cancel')"
           >
-            {{ settings?.allow_any_key ? t('intercept.recording_prompt_unrestricted') : t('intercept.recording_prompt') }}
+            <X :size="18" />
           </button>
+          </div>
         </div>
 
         <!-- New binding confirmation -->
@@ -278,7 +316,7 @@ onUnmounted(() => {
             </option>
           </select>
           <button @click="saveBinding" class="ui-icon-button" :title="t('common.add')" :aria-label="t('common.add')">
-            <Plus :size="18" />
+            <Check :size="18" />
           </button>
           <button @click="(recordingKeyFor = null, newBindingAction = 'show_main_window')" class="ui-icon-button" :title="t('common.cancel')" :aria-label="t('common.cancel')">
             <X :size="18" />
@@ -427,11 +465,12 @@ onUnmounted(() => {
 }
 
 .unrestricted-row {
-  margin-bottom: 6px;
+  margin-bottom: var(--ui-hint-gap);
 }
 
 .unrestricted-warning {
-  margin: 0 0 var(--ui-row-gap);
+  margin-top: 0;
+  margin-bottom: var(--ui-row-gap);
 }
 
 .bindings-section {
@@ -453,10 +492,22 @@ onUnmounted(() => {
   gap: var(--ui-field-group-gap);
 }
 
+.record-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-field-group-gap);
+}
+
 .record-btn.recording {
+  width: auto;
+  padding: 0 var(--ui-control-padding-x);
   animation: pulse 1s infinite;
   background: var(--warning-bg);
   border-color: var(--warning-border);
+}
+
+.record-btn.recording:disabled {
+  opacity: 1;
 }
 
 .new-binding-row {
