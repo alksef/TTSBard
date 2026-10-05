@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, watch, ref, onMounted, onUnmounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
-import { Play, Loader2, Check, RefreshCw, ListRestart } from 'lucide-vue-next';
+import { Play, Loader2, Check, RefreshCw } from 'lucide-vue-next';
 import { useEditorSettings } from '../../composables/useAppSettings';
 import { useRuAccentRuntime } from '../../composables/useRuAccentRuntime';
 import type { HomographAccentorPackDto, QuickEditorMode } from '../../types/settings';
@@ -277,35 +277,35 @@ watch(editorSettings, (newSettings) => {
 
     <section class="settings-section">
       <div class="card-header">
-        <h3 class="card-title">{{ t('settings.editor.quick.title') }}</h3>
+        <h3 class="card-title ui-group-title">{{ t('settings.editor.quick.title') }}</h3>
         <p class="card-desc">{{ t('settings.editor.quick.desc') }}</p>
       </div>
-      <div class="setting-row" v-for="opt in quickModeOptions" :key="opt.value">
-        <label class="setting-label radio-label">
+      <div class="editor-row" v-for="opt in quickModeOptions" :key="opt.value">
+        <label class="ui-choice-label setting-label radio-label">
           <input
             type="radio"
             :value="opt.value"
             :checked="quickEditorMode === opt.value"
-            class="radio-input"
+            class="ui-choice-input"
             @change="setQuickMode(opt.value)"
           />
           <span>{{ opt.label }}</span>
         </label>
-        <span v-if="opt.value === 'return_focus'" class="setting-hint">
+        <span v-if="opt.value === 'return_focus'" class="setting-hint ui-hint">
           {{ t('settings.editor.quick.return_focus.hint') }}
         </span>
       </div>
-      <div class="setting-row">
-        <label class="setting-label checkbox-label">
+      <div class="editor-row">
+        <label class="ui-choice-label setting-label checkbox-label">
           <input
             :checked="keepTextAfterSend"
             type="checkbox"
-            class="checkbox-input"
+            class="ui-choice-input"
             @change="toggleKeepText"
           />
           <span>{{ t('settings.editor.keep_text_after_send') }}</span>
         </label>
-        <span class="setting-hint">
+        <span class="setting-hint ui-hint">
           {{ t('settings.editor.keep_text_after_send.hint') }}
         </span>
       </div>
@@ -313,34 +313,34 @@ watch(editorSettings, (newSettings) => {
 
     <section class="settings-section">
       <div class="card-header">
-        <h3 class="card-title">{{ t('settings.editor.proofing.title') }}</h3>
+        <h3 class="card-title ui-group-title">{{ t('settings.editor.proofing.title') }}</h3>
       </div>
-      <div class="setting-row">
-        <label class="setting-label checkbox-label">
+      <div class="editor-row">
+        <label class="ui-choice-label setting-label checkbox-label">
           <input
             :checked="spellcheckEnabled"
             type="checkbox"
-            class="checkbox-input"
+            class="ui-choice-input"
             @change="toggleSpellcheck"
           />
           <span>{{ t('settings.editor.spellcheck') }}</span>
         </label>
-        <span class="setting-hint">
+        <span class="setting-hint ui-hint">
           {{ t('settings.editor.spellcheck.hint') }}
         </span>
       </div>
-      <div class="setting-row">
-        <label class="setting-label checkbox-label">
+      <div class="editor-row">
+        <label class="ui-choice-label setting-label checkbox-label">
           <input
             v-model="autocompleteEnabled"
             type="checkbox"
-            class="checkbox-input"
+            class="ui-choice-input"
             :disabled="autocompletePending"
             @change="saveAutocompleteEnabled"
           />
           <span>{{ t('settings.editor.autocomplete_enabled') }}</span>
         </label>
-        <span class="setting-hint">
+        <span class="setting-hint ui-hint">
           {{ t('settings.editor.autocomplete_enabled.hint') }}
         </span>
       </div>
@@ -348,21 +348,21 @@ watch(editorSettings, (newSettings) => {
 
     <section class="settings-section">
       <div class="card-header">
-        <h3 class="card-title">{{ t('settings.editor.typing.title') }}</h3>
+        <h3 class="card-title ui-group-title">{{ t('settings.editor.typing.title') }}</h3>
         <p class="card-desc">{{ t('settings.editor.typing.desc') }}</p>
       </div>
-      <div class="setting-row typing-row">
-        <label class="setting-label">{{ t('settings.editor.typing.label') }}</label>
+      <div class="editor-row typing-row">
+        <label class="ui-label setting-label">{{ t('settings.editor.typing.label') }}</label>
         <input
           type="number"
           v-model="typingTimeoutInput"
           @change="onTypingTimeoutChange"
-          class="number-input"
+          class="ui-input number-input"
           :min="200"
           :max="5000"
           :step="100"
         />
-        <span class="setting-hint typing-hint">
+        <span class="setting-hint ui-hint typing-hint">
           {{ t('settings.editor.typing.hint') }}
         </span>
       </div>
@@ -370,17 +370,17 @@ watch(editorSettings, (newSettings) => {
 
     <section class="settings-section">
       <div class="card-header">
-        <h3 class="card-title">{{ t('settings.editor.accentor.title') }}</h3>
+        <h3 class="card-title ui-group-title">{{ t('settings.editor.accentor.title') }}</h3>
         <p class="card-desc">
           {{ t('settings.editor.accentor.desc') }}
         </p>
       </div>
 
-      <div class="setting-row accentor-select-row">
-        <label class="setting-label" for="accentor-select">{{ t('settings.editor.accentor.model_label') }}</label>
+      <div class="editor-row accentor-select-row">
+        <label class="ui-label setting-label" for="accentor-select">{{ t('settings.editor.accentor.model_label') }}</label>
         <select
           id="accentor-select"
-          class="accentor-select"
+          class="ui-select accentor-select"
           :value="noPacks && !accentorInMemory ? '' : selectedPackId"
           :disabled="noPacks || accentorRuntimeStatus === 'loading'"
           @change="onPackSelect"
@@ -398,7 +398,7 @@ watch(editorSettings, (newSettings) => {
         </select>
         <button
           type="button"
-          class="accentor-load-btn"
+          class="ui-icon-button ui-icon-button--adjacent accentor-load-btn"
           :disabled="
             !selectedPackId ||
             accentorSelectedMissing ||
@@ -409,61 +409,62 @@ watch(editorSettings, (newSettings) => {
           :aria-label="accentorLoadTitle"
           @click="loadSelectedModel"
         >
-          <Loader2 v-if="accentorRuntimeStatus === 'loading'" :size="16" class="accentor-spin" />
-          <Check v-else-if="accentorRuntimeStatus === 'ready'" :size="16" />
-          <RefreshCw v-else-if="accentorRuntimeStatus === 'failed'" :size="16" />
-          <Play v-else :size="16" />
+          <Loader2 v-if="accentorRuntimeStatus === 'loading'" :size="18" class="accentor-spin" />
+          <Check v-else-if="accentorRuntimeStatus === 'ready'" :size="18" />
+          <RefreshCw v-else-if="accentorRuntimeStatus === 'failed'" :size="18" />
+          <Play v-else :size="18" />
         </button>
         <button
           type="button"
-          class="accentor-rescan-btn"
+          class="ui-icon-button ui-icon-button--adjacent accentor-rescan-btn"
           :disabled="accentorRescanPending"
           @click="rescanAccentorPacks"
           :title="t('settings.editor.accentor.rescan')"
           :aria-label="t('settings.editor.accentor.rescan')"
         >
-          <ListRestart :size="16" :class="{ 'accentor-spin': accentorRescanPending }" />
+          <RefreshCw :size="18" :class="{ 'accentor-spin': accentorRescanPending }" />
         </button>
       </div>
       <span
         v-if="selectedPackId"
-        class="setting-hint accentor-status"
+        class="setting-hint ui-hint accentor-status"
         role="status"
         aria-live="polite"
       >
-        {{ t('settings.editor.accentor.status_prefix') }}{{ accentorStatusText }}
+        <span>{{ t('settings.editor.accentor.status_prefix') }}</span>
+        <span>{{ accentorStatusText }}</span>
       </span>
-      <p v-if="noPacks" class="setting-hint accentor-empty" role="status" aria-live="polite">
+      <p v-if="noPacks" class="setting-hint ui-hint accentor-empty" role="status" aria-live="polite">
         {{ t('settings.editor.accentor.no_models.empty') }}
         <code>%APPDATA%\ttsbard\models\ruaccent</code>
       </p>
-      <div class="setting-row accentor-load-on-start-row">
-        <label class="setting-label checkbox-label">
+      <div class="editor-row accentor-load-on-start-row">
+        <label class="ui-choice-label setting-label checkbox-label">
           <input
             :checked="accentorLoadOnStart"
             :disabled="noPacks || !selectedPackId || accentorRuntimeStatus === 'loading'"
             type="checkbox"
-            class="checkbox-input"
+            class="ui-choice-input"
             @change="toggleLoadOnStart"
           />
           <span>{{ t('settings.editor.accentor.load_on_start') }}</span>
         </label>
-        <span class="setting-hint">
+        <span class="setting-hint ui-hint">
           {{ t('settings.editor.accentor.load_on_start.hint') }}
         </span>
       </div>
-      <div class="setting-row accentor-enable-row">
-        <label class="setting-label checkbox-label">
+      <div class="editor-row accentor-enable-row">
+        <label class="ui-choice-label setting-label checkbox-label">
           <input
             :checked="accentorEnabled"
             :disabled="!accentorReady"
             type="checkbox"
-            class="checkbox-input"
+            class="ui-choice-input"
             @change="toggleAccentor"
           />
           <span>{{ t('settings.editor.accentor.enabled') }}</span>
         </label>
-        <span class="setting-hint">
+        <span class="setting-hint ui-hint">
           {{ t('settings.editor.accentor.enabled.hint') }}
         </span>
       </div>
@@ -475,7 +476,7 @@ watch(editorSettings, (newSettings) => {
 .settings-editor {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--ui-section-gap);
 }
 
 .settings-section {
@@ -492,64 +493,34 @@ watch(editorSettings, (newSettings) => {
 
 .card-title {
   margin: 0 0 0.25rem;
-  font-size: 1rem;
-  font-weight: 700;
-  color: var(--color-text-primary);
 }
 
 .card-desc {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   color: var(--color-text-muted);
   line-height: 1.4;
 }
 
-.settings-editor .setting-row {
+.settings-editor .editor-row {
   display: block;
-  margin-bottom: 0.5rem;
+  margin-bottom: var(--ui-row-gap);
 }
 
+.settings-editor .editor-row:last-child,
 .setting-row:last-child {
   margin-bottom: 0;
 }
 
 .setting-label {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  cursor: pointer;
-  user-select: none;
-  font-size: 0.95rem;
-  font-weight: 600;
   color: var(--color-text-primary);
-}
-
-.radio-label {
-  font-weight: 500;
-  padding: 0.25rem 0;
-}
-
-.checkbox-input {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  accent-color: var(--color-accent);
-}
-
-.radio-input {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  accent-color: var(--color-accent);
+  user-select: none;
 }
 
 .setting-hint {
   display: block;
-  margin-top: 0.4rem;
   margin-left: 2.4rem;
-  font-size: 0.85rem;
-  color: var(--color-text-muted);
-  line-height: 1.4;
 }
 
 .setting-hint code {
@@ -569,25 +540,11 @@ watch(editorSettings, (newSettings) => {
 
 .typing-row label {
   min-width: 110px;
-  font-weight: 500;
   color: var(--color-text-secondary);
-  font-size: 14px;
 }
 
 .typing-row .number-input {
   width: 88px;
-  padding: 0.5rem;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
-  font-size: 14px;
-  background: var(--color-bg-field);
-  color: var(--color-text-primary);
-}
-
-.typing-row .number-input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
 .typing-hint {
@@ -601,6 +558,9 @@ watch(editorSettings, (newSettings) => {
 
 .accentor-status {
   margin-left: 0 !important;
+  display: flex;
+  gap: var(--ui-hint-gap);
+  margin-bottom: var(--ui-row-gap);
 }
 
 .settings-editor .accentor-select-row {
@@ -610,36 +570,13 @@ watch(editorSettings, (newSettings) => {
 }
 
 .accentor-select-row label {
-  min-width: 110px;
-  font-weight: 500;
+  flex-shrink: 0;
   color: var(--color-text-secondary);
-  font-size: 14px;
 }
 
 .accentor-select {
   flex: 1 1 auto;
   min-width: 0;
-  width: auto;
-  height: 36px;
-  box-sizing: border-box;
-  padding: 0 0.6rem;
-  background: var(--color-bg-field-hover);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 6px;
-  font-size: 14px;
-  color: var(--color-text-primary);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.accentor-select:hover {
-  background: var(--btn-neutral-bg);
-  border-color: var(--color-border-strong);
-}
-
-.accentor-select:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }
 
 .accentor-enable-row {
@@ -650,35 +587,7 @@ watch(editorSettings, (newSettings) => {
   margin-top: 0.25rem;
 }
 
-.accentor-load-btn,
-.accentor-rescan-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 36px;
-  flex-shrink: 0;
-  box-sizing: border-box;
-  padding: 0;
-  background: var(--color-bg-field-hover);
-  color: var(--color-text-primary);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
 
-.accentor-load-btn:hover:not(:disabled),
-.accentor-rescan-btn:hover:not(:disabled) {
-  background: var(--btn-neutral-hover);
-  border-color: var(--color-border-strong);
-}
-
-.accentor-load-btn:disabled,
-.accentor-rescan-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
 
 .accentor-spin {
   animation: accentor-spin 1s linear infinite;
@@ -691,12 +600,6 @@ watch(editorSettings, (newSettings) => {
   to {
     transform: rotate(360deg);
   }
-}
-
-.accentor-select:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
 </style>

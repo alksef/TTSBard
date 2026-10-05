@@ -216,24 +216,24 @@ watch(
 
     <!-- Main window -->
     <section class="settings-section">
-      <h2 class="section-title">{{ t('settings.interface.main.title') }}</h2>
+      <h2 class="section-title ui-section-title">{{ t('settings.interface.main.title') }}</h2>
 
-      <div class="setting-row">
-        <label class="setting-label checkbox-label">
+      <div class="interface-row">
+        <label class="ui-choice-label setting-label">
           <input
             :checked="mainCustomBackground"
             type="checkbox"
-            class="checkbox-input"
+            class="ui-choice-input"
             @change="toggleMainCustomBackground"
           />
           <span>{{ t('settings.interface.use_custom_color') }}</span>
         </label>
-        <span class="setting-hint">{{ t('settings.interface.use_custom_color.main_hint') }}</span>
+        <span class="setting-hint ui-hint">{{ t('settings.interface.use_custom_color.main_hint') }}</span>
       </div>
 
       <div class="appearance-grid" style="margin-bottom: 0.5rem">
         <div class="appearance-column">
-          <label class="setting-label">{{ t('settings.interface.color') }}</label>
+          <label class="ui-label setting-label">{{ t('settings.interface.color') }}</label>
           <div class="appearance-controls">
             <input
               v-model="mainBgColor"
@@ -246,7 +246,7 @@ watch(
               v-model="mainBgColor"
               type="text"
               placeholder="#10131a"
-              class="text-input color-text"
+              class="ui-input text-input color-text"
               maxlength="7"
               :disabled="!mainCustomBackground"
               @blur="saveMainBgColor"
@@ -256,7 +256,7 @@ watch(
         </div>
 
         <div class="appearance-column">
-          <label class="setting-label">{{ t('settings.interface.transparency') }}</label>
+          <label class="ui-label setting-label">{{ t('settings.interface.transparency') }}</label>
           <div class="appearance-controls">
             <input
               v-model.number="mainTransparency"
@@ -272,40 +272,40 @@ watch(
         </div>
       </div>
 
-      <div class="setting-row indent-row">
-        <label class="setting-label checkbox-label">
+      <div class="interface-row">
+        <label class="ui-choice-label setting-label">
           <input
             :checked="mainOpacityCompactOnly"
             type="checkbox"
-            class="checkbox-input"
+            class="ui-choice-input"
             @change="toggleMainOpacityCompactOnly"
           />
           <span>{{ t('settings.interface.opacity_compact_only') }}</span>
         </label>
-        <span class="setting-hint">{{ t('settings.interface.opacity_compact_only.hint') }}</span>
+        <span class="setting-hint ui-hint">{{ t('settings.interface.opacity_compact_only.hint') }}</span>
       </div>
     </section>
 
     <!-- Sound panel -->
     <section class="settings-section">
-      <h2 class="section-title">{{ t('settings.interface.soundpanel.title') }}</h2>
+      <h2 class="section-title ui-section-title">{{ t('settings.interface.soundpanel.title') }}</h2>
 
-      <div class="setting-row">
-        <label class="setting-label checkbox-label">
+      <div class="interface-row">
+        <label class="ui-choice-label setting-label">
           <input
             :checked="spSource === 'own'"
             type="checkbox"
-            class="checkbox-input"
+            class="ui-choice-input"
             @change="setSpSource(($event.target as HTMLInputElement).checked ? 'own' : 'main')"
           />
           <span>{{ t('settings.interface.use_custom_color') }}</span>
         </label>
-        <span class="setting-hint">{{ t('settings.interface.use_custom_color.linked_hint') }}</span>
+        <span class="setting-hint ui-hint">{{ t('settings.interface.use_custom_color.linked_hint') }}</span>
       </div>
 
       <div class="appearance-grid">
         <div class="appearance-column">
-          <label class="setting-label">{{ t('settings.interface.color') }}</label>
+          <label class="ui-label setting-label">{{ t('settings.interface.color') }}</label>
           <div class="appearance-controls">
             <input
               v-model="spBgColor"
@@ -318,7 +318,7 @@ watch(
               v-model="spBgColor"
               type="text"
               placeholder="#2a2a2a"
-              class="text-input color-text"
+              class="ui-input text-input color-text"
               maxlength="7"
               :disabled="spColorDisabled"
               @blur="saveSpBgColor"
@@ -328,7 +328,7 @@ watch(
         </div>
 
         <div class="appearance-column">
-          <label class="setting-label">{{ t('settings.interface.transparency') }}</label>
+          <label class="ui-label setting-label">{{ t('settings.interface.transparency') }}</label>
           <div class="appearance-controls">
             <input
               v-model.number="spTransparency"
@@ -348,24 +348,24 @@ watch(
 
     <!-- Playback control -->
     <section class="settings-section">
-      <h2 class="section-title">{{ t('settings.interface.playback.title') }}</h2>
+      <h2 class="section-title ui-section-title">{{ t('settings.interface.playback.title') }}</h2>
 
-      <div class="setting-row">
-        <label class="setting-label checkbox-label">
+      <div class="interface-row">
+        <label class="ui-choice-label setting-label">
           <input
             :checked="pbSource === 'own'"
             type="checkbox"
-            class="checkbox-input"
+            class="ui-choice-input"
             @change="setPbSource(($event.target as HTMLInputElement).checked ? 'own' : 'main')"
           />
           <span>{{ t('settings.interface.use_custom_color') }}</span>
         </label>
-        <span class="setting-hint">{{ t('settings.interface.use_custom_color.linked_hint') }}</span>
+        <span class="setting-hint ui-hint">{{ t('settings.interface.use_custom_color.linked_hint') }}</span>
       </div>
 
       <div class="appearance-grid">
         <div class="appearance-column">
-          <label class="setting-label">{{ t('settings.interface.color') }}</label>
+          <label class="ui-label setting-label">{{ t('settings.interface.color') }}</label>
           <div class="appearance-controls">
             <input
               v-model="pbBgColor"
@@ -378,7 +378,7 @@ watch(
               v-model="pbBgColor"
               type="text"
               placeholder="#10131a"
-              class="text-input color-text"
+              class="ui-input text-input color-text"
               maxlength="7"
               :disabled="pbColorDisabled"
               @blur="savePbBgColor"
@@ -388,7 +388,7 @@ watch(
         </div>
 
         <div class="appearance-column">
-          <label class="setting-label">{{ t('settings.interface.transparency') }}</label>
+          <label class="ui-label setting-label">{{ t('settings.interface.transparency') }}</label>
           <div class="appearance-controls">
             <input
               v-model.number="pbTransparency"
@@ -411,7 +411,7 @@ watch(
 .settings-interface {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: var(--ui-section-gap);
 }
 
 .settings-section {
@@ -424,25 +424,18 @@ watch(
 
 .section-title {
   margin: 0 0 1rem;
-  font-size: 1.05rem;
-  color: var(--color-text-primary);
 }
 
-.setting-row {
+.interface-row {
   display: block;
-  margin-bottom: 1rem;
+  margin-bottom: var(--ui-row-gap);
 }
 
-.setting-row:last-child {
+.interface-row:last-child {
   margin-bottom: 0;
 }
 
 .setting-label {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  font-size: 0.95rem;
-  font-weight: 600;
   color: var(--color-text-primary);
   margin-bottom: 0.5rem;
 }
@@ -453,20 +446,9 @@ watch(
   margin-bottom: 0;
 }
 
-.checkbox-input {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  accent-color: var(--color-accent);
-}
-
 .setting-hint {
   display: block;
-  margin-top: 0.4rem;
   margin-left: 2.4rem;
-  font-size: 0.85rem;
-  color: var(--color-text-muted);
-  line-height: 1.4;
 }
 
 .appearance-grid {
@@ -511,30 +493,6 @@ watch(
   text-transform: uppercase;
 }
 
-.text-input {
-  padding: 0.6rem;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
-  font-size: 1rem;
-  background: var(--color-bg-field);
-  color: var(--color-text-primary);
-}
-
-.text-input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-glow);
-}
-
-.text-input.color-text {
-  font-size: 14px;
-}
-
-.text-input:disabled {
-  cursor: not-allowed;
-  opacity: 0.4;
-}
-
 .slider-input {
   cursor: pointer;
   accent-color: var(--color-accent);
@@ -555,28 +513,6 @@ watch(
   font-size: 0.9rem;
   color: var(--color-text-secondary);
   min-width: 45px;
-}
-
-.source-select {
-  padding: 0.4rem 0.6rem;
-  background: var(--color-bg-field-hover);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 6px;
-  color: var(--color-text-primary);
-  font-size: 0.9rem;
-  cursor: pointer;
-  min-width: 200px;
-}
-
-.source-select:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-glow);
-}
-
-.source-select option {
-  background: var(--select-bg);
-  color: var(--color-text-primary);
 }
 
 /* Theme selector */
@@ -616,12 +552,4 @@ watch(
   display: none;
 }
 
-.indent-row {
-  margin-left: 1.6rem;
-}
-
-.row-disabled {
-  opacity: 0.4;
-  pointer-events: none;
-}
 </style>

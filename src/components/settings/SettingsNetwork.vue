@@ -434,48 +434,53 @@ onUnmounted(() => {
 
     <div v-if="isLoadingNetwork" class="loading-state">
       <Loader2 :size="24" class="spinner" />
-      <span>{{ t('settings.network.loading') }}</span>
+      <span class="ui-status">{{ t('settings.network.loading') }}</span>
     </div>
 
     <div v-else class="network-content">
       <!-- SOCKS5 Section -->
-      <section class="settings-section">
-        <h2>SOCKS5</h2>
+      <section class="settings-section ui-section">
+        <h2 class="ui-section-title">SOCKS5</h2>
 
         <div class="network-form">
-          <!-- Host and Port Row -->
-          <div class="form-row">
-            <label>{{ t('settings.network.host') }}</label>
+          <div class="network-grid">
+            <label class="ui-label ui-label--secondary network-host-label">
+              <span>{{ t('settings.network.host') }}</span>
+              <span class="network-label-sizer" aria-hidden="true">{{ t('settings.network.login') }}</span>
+              <span class="network-label-sizer" aria-hidden="true">{{ t('settings.network.secret') }}</span>
+              <span class="network-label-sizer" aria-hidden="true">DC ID</span>
+            </label>
             <input
               v-model="host"
               type="text"
-              class="network-input network-input-host"
+              class="ui-input network-input"
             />
-            <label>{{ t('settings.network.port') }}</label>
+            <label class="ui-label ui-label--secondary network-host-label">
+              <span>{{ t('settings.network.port') }}</span>
+              <span class="network-label-sizer" aria-hidden="true">{{ t('settings.network.password') }}</span>
+            </label>
             <input
               v-model="port"
               type="number"
               min="1"
               max="65535"
-              class="network-input network-input-port"
+              class="ui-input network-input"
             />
-          </div>
 
-          <!-- Username and Password Row -->
-          <div class="form-row">
-            <label>{{ t('settings.network.login') }}</label>
+            <label class="ui-label ui-label--secondary">{{ t('settings.network.login') }}</label>
             <input
               v-model="username"
               type="text"
               :placeholder="t('settings.network.optional')"
-              class="network-input network-input-host"
+              class="ui-input network-input"
             />
-            <label>{{ t('settings.network.password') }}</label>
+            <label class="ui-label ui-label--secondary">{{ t('settings.network.password') }}</label>
             <InputWithToggle
               v-model="password"
               type="password"
               :placeholder="t('settings.network.optional')"
-              class="network-input-wide"
+              class="network-secret-field"
+              ui
             />
           </div>
 
@@ -484,10 +489,9 @@ onUnmounted(() => {
             <button
               @click="testConnection"
               :disabled="isTestingSocks5 || !hasProxyData"
-              class="test-button"
-              :class="{ disabled: isTestingSocks5 || !hasProxyData }"
+              class="ui-button"
             >{{ isTestingSocks5 ? t('settings.network.testing') : t('settings.network.test') }}</button>
-            <button @click="saveNetworkSettings" :disabled="isSavingNetwork" class="save-button-inline">{{ t('settings.network.save') }}</button>
+            <button @click="saveNetworkSettings" :disabled="isSavingNetwork" class="ui-button ui-button--primary">{{ t('settings.network.save') }}</button>
           </div>
 
           <!-- Test Result -->
@@ -496,44 +500,46 @@ onUnmounted(() => {
       </section>
 
       <!-- MTProxy Section -->
-      <section class="settings-section">
-        <h2>MTProxy</h2>
+      <section class="settings-section ui-section">
+        <h2 class="ui-section-title">MTProxy</h2>
 
         <div class="network-form">
-          <!-- Host and Port Row -->
-          <div class="form-row">
-            <label>{{ t('settings.network.host') }}</label>
+          <div class="network-grid">
+            <label class="ui-label ui-label--secondary network-host-label">
+              <span>{{ t('settings.network.host') }}</span>
+              <span class="network-label-sizer" aria-hidden="true">{{ t('settings.network.login') }}</span>
+              <span class="network-label-sizer" aria-hidden="true">{{ t('settings.network.secret') }}</span>
+              <span class="network-label-sizer" aria-hidden="true">DC ID</span>
+            </label>
             <input
               v-model="mtHost"
               type="text"
-              class="network-input network-input-host"
+              class="ui-input network-input"
             />
-            <label>{{ t('settings.network.port') }}</label>
+            <label class="ui-label ui-label--secondary network-host-label">
+              <span>{{ t('settings.network.port') }}</span>
+              <span class="network-label-sizer" aria-hidden="true">{{ t('settings.network.password') }}</span>
+            </label>
             <input
               v-model="mtPort"
               type="number"
               min="1"
               max="65535"
-              class="network-input network-input-port"
+              class="ui-input network-input"
             />
-          </div>
 
-          <!-- Secret Row -->
-          <div class="form-row">
-            <label>{{ t('settings.network.secret') }}</label>
+            <label class="ui-label ui-label--secondary">{{ t('settings.network.secret') }}</label>
             <InputWithToggle
               v-model="mtSecret"
               type="password"
-              class="network-input-key-wide"
+              class="network-secret-field network-secret-field--wide"
+              ui
             />
-          </div>
 
-          <!-- DC ID Row (Optional) -->
-          <div class="form-row">
-            <label>DC ID</label>
+            <label class="ui-label ui-label--secondary">DC ID</label>
             <select
               v-model="mtDcId"
-              class="network-select dc-id-select"
+              class="ui-select dc-id-select"
             >
               <option v-for="opt in dcIdOptions" :key="opt.value" :value="opt.value">
                 {{ opt.label }}
@@ -546,10 +552,9 @@ onUnmounted(() => {
             <button
               @click="testMtProxyConnection"
               :disabled="isTestingMtProxy || !hasMtProxyData"
-              class="test-button"
-              :class="{ disabled: isTestingMtProxy || !hasMtProxyData }"
+              class="ui-button"
             >{{ isTestingMtProxy ? t('settings.network.testing') : t('settings.network.test') }}</button>
-            <button @click="saveMtProxySettings" :disabled="isSavingNetwork" class="save-button-inline">{{ t('settings.network.save') }}</button>
+            <button @click="saveMtProxySettings" :disabled="isSavingNetwork" class="ui-button ui-button--primary">{{ t('settings.network.save') }}</button>
           </div>
 
           <!-- Test Result -->
@@ -567,9 +572,8 @@ onUnmounted(() => {
   position: relative;
 }
 
+/* Card skin stays local; section padding/rhythm come from ui-section. */
 .settings-section {
-  margin-bottom: 1.5rem;
-  padding: 12px 16px;
   background: var(--color-bg-field);
   border: 1px solid var(--color-border);
   border-radius: 12px;
@@ -580,11 +584,8 @@ onUnmounted(() => {
   margin-bottom: 0;
 }
 
-.settings-section h2 {
-  margin: 0 0 0.25rem;
-  font-size: 1rem;
-  font-weight: 700;
-  color: var(--color-text-primary);
+.settings-section .ui-section-title {
+  margin: 0 0 0.5rem;
 }
 
 .network-content {
@@ -595,98 +596,55 @@ onUnmounted(() => {
 .network-form {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--ui-row-gap);
+  container-type: inline-size;
+  container-name: network-form;
 }
 
-.form-row {
-  display: flex;
+/* Label and field columns share one grid so groups start on the same line;
+   first field column uses 48% of available field space. 8px between related fields,
+   12px from label text to its field (8px gap + 4px label padding). */
+.network-grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1.44fr) max-content minmax(0, 1.56fr);
+  column-gap: var(--ui-field-group-gap);
+  row-gap: var(--ui-row-gap);
   align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
 }
 
-.form-row label {
-  font-size: 13px;
-  color: var(--color-text-secondary);
-  font-weight: 500;
-  min-width: 50px;
+.network-grid > .ui-label {
+  padding-right: 4px;
 }
 
+/* Both proxy forms reserve the same translated label widths in each column. */
+.network-host-label {
+  display: grid;
+}
+
+.network-host-label > span {
+  grid-area: 1 / 1;
+}
+
+.network-label-sizer {
+  visibility: hidden;
+}
+
+/* Proxy values keep the deliberate mono presentation; ui-* never sets family. */
 .network-input {
-  flex: 1;
-  padding: 8px 12px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 8px;
-  background: var(--color-bg-field);
-  color: var(--color-text-primary);
-  font-size: 14px;
   font-family: var(--font-mono);
-  transition: all 0.15s ease;
+}
+
+/* MTProxy-only exception: the secret field spans the field columns, but its
+   intrinsic minimum must not feed into track sizing — otherwise the shared
+   fr columns grow and host/port widths drift away from the SOCKS5 reference. */
+.network-grid .network-secret-field--wide {
+  grid-column: 2 / -1;
   min-width: 0;
-  box-sizing: border-box;
 }
 
-.network-input-host {
-  max-width: 150px;
-}
-
-.network-input-port {
-  max-width: 100px;
-}
-
-.network-input-wide {
-  flex: 1;
-  max-width: 200px;
-}
-
-.network-input-key-wide {
-  flex: 1;
-  max-width: 372px;
-}
-
-.network-input:hover {
-  background: var(--color-bg-field-hover);
-  border-color: var(--color-border-strong);
-}
-
-.network-input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-glow);
-}
-
-.network-input::placeholder {
-  color: var(--color-text-muted);
-  font-size: 13px;
-  font-family: var(--font-sans);
-}
-
-.network-select {
-  padding: 10px 12px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
-  background: var(--color-bg-field);
-  color: var(--color-text-primary);
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.network-select:hover {
-  background: var(--color-bg-field-hover);
-  border-color: var(--color-border-strong);
-}
-
-.network-select:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-glow);
-}
-
-.network-select option {
-  background: var(--select-bg);
-  color: var(--color-text-primary);
-  padding: 0.3rem 0.5rem;
+/* Password/secret fields keep mono inside the shared ui-input frame. */
+.network-secret-field :deep(.input-with-toggle-input.ui-input) {
+  font-family: var(--font-mono);
 }
 
 .dc-id-select {
@@ -696,57 +654,12 @@ onUnmounted(() => {
 /* Buttons */
 .button-row {
   display: flex;
-  gap: 0.75rem;
+  gap: var(--ui-field-group-gap);
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
-  margin-top: 0.5rem;
   padding-top: 0.5rem;
   border-top: 1px solid var(--color-border);
-}
-
-.test-button,
-.save-button-inline {
-  padding: 0.6rem 1.2rem;
-  border: none;
-  border-radius: 10px;
-  cursor: pointer;
-  font-weight: 600;
-  font-size: 14px;
-  transition: all 0.2s;
-}
-
-.save-button-inline {
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: var(--color-text-white);
-}
-
-.save-button-inline:hover:not(:disabled) {
-  filter: brightness(1.06);
-}
-
-.save-button-inline:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.test-button {
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: var(--color-text-white);
-}
-
-.test-button:hover:not(:disabled) {
-  filter: brightness(1.1);
-}
-
-.test-button.disabled {
-  background: var(--btn-disabled-bg);
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.test-button.disabled:hover {
-  background: var(--btn-disabled-bg);
 }
 
 /* Loading State */
@@ -769,9 +682,27 @@ onUnmounted(() => {
   to { transform: rotate(360deg); }
 }
 
-@media (max-width: 600px) {
-  .form-row {
-    grid-template-columns: 1fr;
+/* Only very narrow containers collapse field pairs and stack labels above fields:
+   label gap 8px inside a pair,
+   16px between pairs via the field bottom margin. */
+@container network-form (max-width: 400px) {
+  .network-grid {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: var(--ui-row-label-gap-stack);
+  }
+
+  .network-grid > .ui-label {
+    padding-right: 0;
+  }
+
+  .network-grid > :not(.ui-label) {
+    margin-bottom: var(--ui-row-label-gap-stack);
+  }
+
+  /* Compound selector beats the span rule by specificity, not source order:
+     in a single-column grid `2 / -1` would open a phantom second column. */
+  .network-grid .network-secret-field.network-secret-field--wide {
+    grid-column: auto;
   }
 }
 </style>

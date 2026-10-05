@@ -415,60 +415,59 @@ function dismissStatus() {
       @dismiss="dismissStatus"
     />
 
-    <!-- AI Enable Section -->
-    <div class="ai-enable-section">
-      <label class="setting-label checkbox-label">
-        <input
-          type="checkbox"
-          v-model="aiEnabled"
-          @change="saveAiEnabled"
-          class="checkbox-input"
-          :disabled="!isCurrentProviderConfigured"
-        />
-        <span>{{ t('settings.ai.auto_correct.label') }}</span>
-      </label>
-      <span v-if="!isCurrentProviderConfigured" class="setting-hint warning">
-        ⚠️ {{ t('settings.ai.provider_unconfigured') }}
-      </span>
-      <span v-else class="setting-hint">
-        {{ t('settings.ai.auto_correct.hint') }}
-      </span>
-    </div>
+    <!-- AI Toggles Section -->
+    <div class="ai-enable-section ui-section">
+      <div class="ai-toggle-group">
+        <label class="ui-choice-label setting-label">
+          <input
+            type="checkbox"
+            v-model="aiEnabled"
+            @change="saveAiEnabled"
+            class="ui-choice-input"
+            :disabled="!isCurrentProviderConfigured"
+          />
+          <span>{{ t('settings.ai.auto_correct.label') }}</span>
+        </label>
+        <span class="setting-hint ui-hint">
+          {{ t('settings.ai.auto_correct.hint') }}
+        </span>
+      </div>
 
-    <!-- AI Completion Section -->
-    <div class="ai-enable-section">
-      <label class="setting-label checkbox-label">
-        <input
-          type="checkbox"
-          v-model="aiCompletionEnabled"
-          @change="saveAiCompletionEnabled"
-          class="checkbox-input"
-          :disabled="!isCurrentProviderConfigured"
-        />
-        <span>{{ t('settings.ai.auto_complete.label') }}</span>
-      </label>
-      <span v-if="!isCurrentProviderConfigured" class="setting-hint warning">
+      <div class="ai-toggle-group">
+        <label class="ui-choice-label setting-label">
+          <input
+            type="checkbox"
+            v-model="aiCompletionEnabled"
+            @change="saveAiCompletionEnabled"
+            class="ui-choice-input"
+            :disabled="!isCurrentProviderConfigured"
+          />
+          <span>{{ t('settings.ai.auto_complete.label') }}</span>
+        </label>
+        <span class="setting-hint ui-hint">
+          {{ t('settings.ai.auto_complete.hint') }}
+        </span>
+      </div>
+
+      <span v-if="!isCurrentProviderConfigured" class="setting-hint ui-hint warning">
         ⚠️ {{ t('settings.ai.provider_unconfigured') }}
-      </span>
-      <span v-else class="setting-hint">
-        {{ t('settings.ai.auto_complete.hint') }}
       </span>
     </div>
 
     <!-- Global Prompt Section -->
-    <div class="global-prompt-section">
+    <div class="global-prompt-section ui-section">
       <div class="prompt-header">
-        <h3 class="prompt-title">{{ t('settings.ai.prompt.title') }}</h3>
+        <h3 class="prompt-title ui-section-title">{{ t('settings.ai.prompt.title') }}</h3>
       </div>
       <div class="prompt-content">
         <textarea
           v-model="globalPrompt"
-          class="prompt-textarea"
+          class="ui-textarea prompt-textarea"
           placeholder="Ты - корректор русского текста для TTS. Исправь орфографию, раскладку (ghbdtn→привет), замени числа на слова. Выведи только исправленный текст."
           rows="4"
         ></textarea>
         <div class="button-row">
-          <button @click="saveGlobalPrompt" class="save-button-inline">
+          <button @click="saveGlobalPrompt" class="ui-button ui-button--primary">
             {{ t('common.save') }}
           </button>
         </div>
@@ -490,11 +489,11 @@ function dismissStatus() {
           <!-- URL -->
           <div class="setting-group">
             <div class="zai-form-row">
-              <label>{{ t('settings.ai.url') }}</label>
+              <label class="ui-label ui-label--secondary">{{ t('settings.ai.url') }}</label>
               <input
                 v-model="zaiUrl"
                 type="text"
-                class="zai-input"
+                class="ui-input zai-input"
               />
             </div>
           </div>
@@ -502,18 +501,19 @@ function dismissStatus() {
           <!-- API Key -->
           <div class="setting-group">
             <div class="zai-form-row">
-              <label>{{ t('tts.api_key') }}</label>
+              <label class="ui-label ui-label--secondary">{{ t('tts.api_key') }}</label>
               <InputWithToggle
                 v-model="zaiApiKey"
                 type="password"
                 class="zai-input-wide"
+                ui
               />
             </div>
           </div>
 
           <!-- Buttons Row -->
           <div class="button-row">
-            <button @click="saveZaiSettings" class="save-button-inline zai-save-button">{{ t('common.save') }}</button>
+            <button @click="saveZaiSettings" class="ui-button ui-button--primary zai-save-button">{{ t('common.save') }}</button>
           </div>
         </div>
       </ProviderCard>
@@ -531,14 +531,15 @@ function dismissStatus() {
           <!-- API Key -->
           <div class="setting-group">
             <div class="openai-api-row">
-              <label>{{ t('tts.api_key') }}</label>
+              <label class="ui-label ui-label--secondary">{{ t('tts.api_key') }}</label>
               <InputWithToggle
                 v-model="openaiApiKey"
                 type="password"
                 placeholder="sk-..."
                 class="openai-input-wide"
+                ui
               />
-              <button @click="saveOpenAiSettings" class="save-settings-button">{{ t('common.save') }}</button>
+              <button @click="saveOpenAiSettings" class="ui-button ui-button--primary save-settings-button">{{ t('common.save') }}</button>
             </div>
           </div>
 
@@ -550,9 +551,9 @@ function dismissStatus() {
                 type="checkbox"
                 v-model="openaiUseProxy"
                 @change="toggleOpenAiUseProxy"
-                class="proxy-checkbox"
+                class="ui-choice-input"
               />
-              <label for="ai-openai-use-proxy" class="proxy-checkbox-label">
+              <label for="ai-openai-use-proxy" class="ui-choice-label">
                 {{ t('tts.use_socks5') }}
               </label>
             </div>
@@ -573,14 +574,15 @@ function dismissStatus() {
           <!-- API Key -->
           <div class="setting-group">
             <div class="openai-api-row">
-              <label>{{ t('tts.api_key') }}</label>
+              <label class="ui-label ui-label--secondary">{{ t('tts.api_key') }}</label>
               <InputWithToggle
                 v-model="deepseekApiKey"
                 type="password"
                 placeholder="sk-..."
                 class="openai-input-wide"
+                ui
               />
-              <button @click="saveDeepSeekSettings" class="save-settings-button">{{ t('common.save') }}</button>
+              <button @click="saveDeepSeekSettings" class="ui-button ui-button--primary save-settings-button">{{ t('common.save') }}</button>
             </div>
           </div>
 
@@ -592,9 +594,9 @@ function dismissStatus() {
                 type="checkbox"
                 v-model="deepseekUseProxy"
                 @change="toggleDeepSeekUseProxy"
-                class="proxy-checkbox"
+                class="ui-choice-input"
               />
-              <label for="ai-deepseek-use-proxy" class="proxy-checkbox-label">
+              <label for="ai-deepseek-use-proxy" class="ui-choice-label">
                 {{ t('tts.use_socks5') }}
               </label>
             </div>
@@ -615,11 +617,11 @@ function dismissStatus() {
           <!-- URL -->
           <div class="setting-group">
             <div class="zai-form-row">
-              <label>{{ t('settings.ai.api_url') }}</label>
+              <label class="ui-label ui-label--secondary">{{ t('settings.ai.api_url') }}</label>
               <input
                 v-model="customUrl"
                 type="text"
-                class="zai-input"
+                class="ui-input zai-input"
                 placeholder="http://127.0.0.1:8080/v1"
               />
             </div>
@@ -628,11 +630,12 @@ function dismissStatus() {
           <!-- API Key -->
           <div class="setting-group">
             <div class="zai-form-row">
-              <label>{{ t('tts.api_key') }}</label>
+              <label class="ui-label ui-label--secondary">{{ t('tts.api_key') }}</label>
               <InputWithToggle
                 v-model="customApiKey"
                 type="password"
                 class="zai-input-wide"
+                ui
               />
             </div>
           </div>
@@ -640,11 +643,11 @@ function dismissStatus() {
           <!-- Model -->
           <div class="setting-group">
             <div class="zai-form-row">
-              <label>{{ t('settings.ai.model') }}</label>
+              <label class="ui-label ui-label--secondary">{{ t('settings.ai.model') }}</label>
               <input
                 v-model="customModel"
                 type="text"
-                class="zai-input"
+                class="ui-input zai-input"
               />
             </div>
           </div>
@@ -657,13 +660,13 @@ function dismissStatus() {
                 type="checkbox"
                 v-model="customUseProxy"
                 @change="toggleCustomUseProxy"
-                class="proxy-checkbox"
+                class="ui-choice-input"
               />
-              <label for="ai-custom-use-proxy" class="proxy-checkbox-label">
+              <label for="ai-custom-use-proxy" class="ui-choice-label">
                 {{ t('tts.use_socks5') }}
               </label>
             </div>
-            <button @click="saveCustomSettings" class="save-button-inline zai-save-button">{{ t('common.save') }}</button>
+            <button @click="saveCustomSettings" class="ui-button ui-button--primary zai-save-button">{{ t('common.save') }}</button>
           </div>
         </div>
       </ProviderCard>
@@ -677,58 +680,40 @@ function dismissStatus() {
   margin: 0 auto;
 }
 
-/* AI Enable Section */
+/* AI Toggles Section */
 .ai-enable-section {
   border: 1px solid var(--color-border);
   border-radius: 12px;
   background: var(--color-bg-field);
   backdrop-filter: blur(8px);
-  padding: 16px;
-  margin-bottom: 24px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--ui-field-group-gap);
+}
+
+.ai-toggle-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .setting-label {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  cursor: pointer;
-  user-select: none;
-  font-size: 0.95rem;
-  font-weight: 600;
   color: var(--color-text-primary);
+  user-select: none;
 }
 
-.checkbox-input {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  accent-color: var(--color-accent);
-}
-
-.checkbox-input:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.setting-label:has(.checkbox-input:disabled) {
+.setting-label:has(.ui-choice-input:disabled) {
   opacity: 0.6;
   cursor: not-allowed;
 }
 
 .setting-hint {
   display: block;
-  margin-top: 0.4rem;
   margin-left: 2.4rem;
-  font-size: 0.85rem;
-  color: var(--color-text-muted);
-  line-height: 1.4;
 }
 
 .setting-hint.warning {
-  color: #f59e0b;
+  color: var(--warning-text-bright);
 }
 
 /* Global Prompt Section */
@@ -737,8 +722,6 @@ function dismissStatus() {
   border-radius: 12px;
   background: var(--color-bg-field);
   backdrop-filter: blur(8px);
-  padding: 16px;
-  margin-bottom: 24px;
 }
 
 .prompt-header {
@@ -747,80 +730,32 @@ function dismissStatus() {
 
 .prompt-title {
   margin: 0;
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: var(--color-text-primary);
 }
 
 .prompt-content {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--ui-row-gap);
 }
 
 .prompt-textarea {
   width: 100%;
-  padding: 12px;
-  background: var(--color-bg-field-hover);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
-  color: var(--color-text-primary);
-  font-size: 14px;
-  font-family: inherit;
-  resize: vertical;
   min-height: 100px;
-  box-sizing: border-box;
-}
-
-.prompt-textarea:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-glow);
-}
-
-.prompt-textarea::placeholder {
-  color: var(--color-text-disabled);
 }
 
 /* Buttons - matches Network panel button-row pattern */
 .button-row {
   display: flex;
-  gap: 0.75rem;
+  gap: var(--ui-field-group-gap);
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
-  margin-top: 0.5rem;
   padding-top: 0.5rem;
   border-top: 1px solid var(--color-border);
 }
 
 .custom-actions-row {
   justify-content: space-between;
-}
-
-.custom-actions-row .proxy-checkbox-container {
-  margin-bottom: 0;
-}
-
-.save-button-inline {
-  padding: 0.6rem 1.2rem;
-  border: none;
-  border-radius: 10px;
-  cursor: pointer;
-  font-weight: 600;
-  font-size: 14px;
-  transition: all 0.2s;
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: var(--color-text-white);
-}
-
-.save-button-inline:hover:not(:disabled) {
-  filter: brightness(1.06);
-}
-
-.save-button-inline:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 /* Provider Cards */
@@ -832,172 +767,95 @@ function dismissStatus() {
 
 .card-content-inner {
   padding-top: 8px;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) auto;
+  column-gap: var(--ui-row-label-gap-side);
+  row-gap: var(--ui-row-gap);
+  align-items: center;
+  container-type: inline-size;
 }
 
 .setting-group {
-  margin-top: 16px;
-  margin-bottom: 12px;
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  min-width: 0;
 }
 
-.setting-group:last-child {
-  margin-bottom: 0;
+.card-content-inner > .button-row {
+  grid-column: 1 / -1;
 }
 
-.setting-group label {
-  display: block;
-  color: var(--color-text-primary);
-  font-size: 14px;
-}
-
-.setting-group input[type="text"],
-.setting-group input[type="password"],
-.setting-group select {
+.setting-group .ui-input {
   width: 100%;
-  padding: 10px;
-  background: var(--color-bg-field);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
-  color: var(--color-text-primary);
-  font-size: 14px;
-  margin-bottom: 8px;
-  box-sizing: border-box;
-}
-
-.setting-group input:focus,
-.setting-group select:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-glow);
-}
-
-.setting-group button {
-  padding: 8px 16px;
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  border: none;
-  border-radius: 10px;
-  color: var(--color-text-white);
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.setting-group button:hover {
-  filter: brightness(1.06);
-}
-
-.save-settings-button {
-  padding: 0.6rem 1.2rem;
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  border: none;
-  border-radius: 10px;
-  color: var(--color-text-white);
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: filter 0.2s;
-}
-
-.save-settings-button:hover {
-  filter: brightness(1.06);
 }
 
 /* Proxy checkbox container */
 .proxy-checkbox-container {
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
 }
 
-.proxy-checkbox {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  accent-color: var(--color-accent);
-}
-
-.proxy-checkbox-label {
-  cursor: pointer;
-  user-select: none;
-  font-size: 14px;
-  color: var(--color-text-primary);
-}
-
-.setting-group .proxy-checkbox-label {
-  margin-bottom: 0;
-}
-
-/* OpenAI API row - label, input with toggle and save button in one line */
+/* OpenAI/DeepSeek row: label, key field and save button share one grid line */
 .openai-api-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
   align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.openai-api-row label {
-  min-width: fit-content;
-  font-size: 13px;
-  color: var(--color-text-secondary);
-  font-weight: 500;
 }
 
 .openai-input-wide {
-  flex: 1;
-  min-width: 200px;
+  grid-column: 2;
+  min-width: 0;
 }
 
-.openai-api-row .save-settings-button {
-  flex-shrink: 0;
-  padding: 0.6rem 1.2rem !important;
+.openai-api-row .ui-button {
+  grid-column: 3;
 }
 
-/* Z.ai form row - matches MTProxy form-row pattern */
+/* Z.ai/Custom rows: label column shared by all rows of the card */
 .zai-form-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
   align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.zai-form-row label {
-  font-size: 13px;
-  color: var(--color-text-secondary);
-  font-weight: 500;
-  min-width: 60px;
 }
 
 .zai-input {
-  flex: 1;
-  padding: 8px 12px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 8px;
-  background: var(--color-bg-field);
-  color: var(--color-text-primary);
-  font-size: 14px;
-  font-family: var(--font-mono);
-  transition: all 0.15s ease;
+  grid-column: 2 / -1;
   min-width: 0;
-  box-sizing: border-box;
-}
-
-.zai-input:hover {
-  background: var(--color-bg-field-hover);
-  border-color: var(--color-border-strong);
-}
-
-.zai-input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-glow);
+  font-family: var(--font-mono);
 }
 
 .zai-input-wide {
-  flex: 1;
-  min-width: 200px;
+  grid-column: 2 / -1;
+  min-width: 0;
 }
 
-.zai-save-button {
-  margin-bottom: 8px;
+/* Narrow cards stack labels above fields; save button wraps under the key */
+@container (max-width: 400px) {
+  .setting-group {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: var(--ui-row-gap);
+  }
+
+  .openai-api-row,
+  .zai-form-row {
+    row-gap: var(--ui-row-label-gap-stack);
+  }
+
+  .openai-input-wide,
+  .zai-input,
+  .zai-input-wide {
+    grid-column: 1;
+  }
+
+  .openai-api-row .ui-button {
+    grid-column: 1;
+    justify-self: start;
+  }
 }
+
 </style>

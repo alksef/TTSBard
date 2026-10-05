@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { Settings, Network, Type, Sparkles, Palette } from 'lucide-vue-next'
+import { Settings, Network, Type, Sparkles, PanelsTopLeft } from 'lucide-vue-next'
 import { t } from '../i18n'
 import SettingsGeneral from './settings/SettingsGeneral.vue'
 import SettingsInterface from './settings/SettingsInterface.vue'
@@ -48,24 +48,24 @@ function handleMessage(message: string, severity: MessageSeverity = 'info') {
     </div>
 
     <!-- Tabs Navigation -->
-    <div class="settings-tabs">
-      <button :class="{ active: activeTab === 'general' }" @click="activeTab = 'general'">
+    <div class="settings-tabs ui-tabs" role="tablist">
+      <button class="ui-tab" role="tab" :aria-selected="activeTab === 'general'" @click="activeTab = 'general'">
         <Settings :size="18" />
         <span>{{ t('settings.tabs.general') }}</span>
       </button>
-      <button :class="{ active: activeTab === 'interface' }" @click="activeTab = 'interface'">
-        <Palette :size="18" />
+      <button class="ui-tab" role="tab" :aria-selected="activeTab === 'interface'" @click="activeTab = 'interface'">
+        <PanelsTopLeft :size="18" />
         <span>{{ t('settings.tabs.interface') }}</span>
       </button>
-      <button :class="{ active: activeTab === 'editor' }" @click="activeTab = 'editor'">
+      <button class="ui-tab" role="tab" :aria-selected="activeTab === 'editor'" @click="activeTab = 'editor'">
         <Type :size="18" />
         <span>{{ t('settings.tabs.editor') }}</span>
       </button>
-      <button :class="{ active: activeTab === 'network' }" @click="activeTab = 'network'">
+      <button class="ui-tab" role="tab" :aria-selected="activeTab === 'network'" @click="activeTab = 'network'">
         <Network :size="18" />
         <span>{{ t('settings.tabs.network') }}</span>
       </button>
-      <button :class="{ active: activeTab === 'ai' }" @click="activeTab = 'ai'">
+      <button class="ui-tab" role="tab" :aria-selected="activeTab === 'ai'" @click="activeTab = 'ai'">
         <Sparkles :size="18" />
         <span>{{ t('settings.tabs.ai') }}</span>
       </button>
@@ -105,8 +105,8 @@ function handleMessage(message: string, severity: MessageSeverity = 'info') {
   transform: translateX(-50%);
   padding: 0.4rem 0.75rem;
   border-radius: 8px;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   z-index: 1000;
   box-shadow: var(--dialog-shadow);
   backdrop-filter: blur(10px);
@@ -149,40 +149,8 @@ function handleMessage(message: string, severity: MessageSeverity = 'info') {
  * ============================================================================
  */
 
-.settings-tabs {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 1.5rem;
-  border-bottom: 1px solid var(--color-border);
-  padding-bottom: 0.5rem;
-}
-
-.settings-tabs button {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  background: transparent;
-  border: none;
-  border-radius: 8px 8px 0 0;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  transition: all 0.2s;
-  font-size: 0.9rem;
-  font-weight: 500;
-}
-
-.settings-tabs button:hover {
-  color: var(--color-text-primary);
-  background: var(--color-bg-field-hover);
-}
-
-.settings-tabs button.active {
-  color: var(--color-accent);
-  background: var(--color-bg-field);
-  border-bottom: 2px solid var(--color-accent);
-}
-
+/* Tabs keep the shared ui-tab role; wrapping keeps every tab reachable at
+   narrow width and large base sizes without horizontal overflow. */
 .tab-content {
   animation: fadeIn 0.2s ease;
 }

@@ -95,26 +95,17 @@ function onSizeInput(event: Event): void {
     :class="{ 'is-popup-open': open }"
   >
     <div class="card-header">
-      <h3 class="card-title">{{ t('settings.editor.font.title') }}</h3>
-      <button
-        type="button"
-        class="font-reset"
-        :title="t('settings.editor.font.reset')"
-        :aria-label="t('settings.editor.font.reset')"
-        :disabled="saving"
-        @click="onReset"
-      >
-        <RotateCcw :size="14" aria-hidden="true" />
-      </button>
+      <h3 class="card-title ui-group-title">{{ t('settings.editor.font.title') }}</h3>
+
     </div>
     <div class="font-controls-row">
       <div class="font-field font-family-field">
-        <label class="font-field-label" for="editor-font-family">{{ t('settings.editor.font.label_family') }}</label>
+        <label class="font-field-label ui-label" for="editor-font-family">{{ t('settings.editor.font.label_family') }}</label>
         <div ref="pickerRoot" class="font-picker">
           <button
             id="editor-font-family"
             type="button"
-            class="font-trigger"
+            class="font-trigger ui-input"
             :class="{ 'is-open': open }"
             :disabled="saving"
             aria-haspopup="listbox"
@@ -129,7 +120,7 @@ function onSizeInput(event: Event): void {
           <div
             v-if="open"
             id="editor-font-options"
-            class="font-popup"
+            class="font-popup ui-menu"
             role="listbox"
             :aria-label="t('settings.editor.font.label_family')"
           >
@@ -137,7 +128,7 @@ function onSizeInput(event: Event): void {
               ref="searchInput"
               v-model="search"
               type="search"
-              class="font-search"
+              class="font-search ui-input"
               :placeholder="t('settings.editor.font.search_placeholder')"
               :aria-label="t('settings.editor.font.search_placeholder')"
               @click.stop
@@ -146,7 +137,7 @@ function onSizeInput(event: Event): void {
               v-for="opt in filteredFontOptions"
               :key="opt.id"
               type="button"
-              class="font-option"
+              class="font-option ui-menu-item"
               :class="{ 'is-active': opt.id === family }"
               role="option"
               :aria-selected="opt.id === family"
@@ -161,13 +152,13 @@ function onSizeInput(event: Event): void {
       </div>
 
       <div class="font-field font-size-field">
-        <label class="font-field-label" for="editor-font-size">{{ t('settings.editor.font.label_size') }}</label>
+        <label class="font-field-label ui-label" for="editor-font-size">{{ t('settings.editor.font.label_size') }}</label>
         <div class="font-size-wrap">
           <input
             id="editor-font-size"
             v-model="sizeInput"
             type="number"
-            class="font-size-input"
+            class="font-size-input ui-input"
             :disabled="saving"
             min="12"
             :max="EDITOR_FONT_SIZE_MAX"
@@ -177,6 +168,16 @@ function onSizeInput(event: Event): void {
           <span class="font-size-unit">px</span>
         </div>
       </div>
+      <button
+        type="button"
+        class="font-reset ui-icon-button ui-icon-button--adjacent"
+        :title="t('settings.editor.font.reset')"
+        :aria-label="t('settings.editor.font.reset')"
+        :disabled="saving"
+        @click="onReset"
+      >
+        <RotateCcw :size="18" aria-hidden="true" />
+      </button>
     </div>
 
     <div v-if="saving || saveError" class="font-status" aria-live="polite">
@@ -210,44 +211,11 @@ function onSizeInput(event: Event): void {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
+  margin-bottom: 0.75rem;
 }
 
 .card-title {
-  margin: 0 0 0.25rem;
-  font-size: 1rem;
-  font-weight: 700;
-  color: var(--color-text-primary);
-}
-
-.font-reset {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  flex-shrink: 0;
-  margin-bottom: 0.25rem;
-  background: transparent;
-  border: none;
-  border-radius: 6px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-
-.font-reset:hover:not(:disabled) {
-  background: var(--color-bg-field-hover);
-  color: var(--color-text-primary);
-}
-
-.font-reset:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--focus-glow);
-}
-
-.font-reset:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  margin: 0;
 }
 
 .font-controls-row {
@@ -260,12 +228,12 @@ function onSizeInput(event: Event): void {
 .font-field {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--ui-row-label-gap-side);
   min-width: 0;
 }
 
 .font-family-field {
-  flex: 0 1 270px;
+  flex: 1 1 200px;
 }
 
 .font-size-field {
@@ -274,9 +242,7 @@ function onSizeInput(event: Event): void {
 
 .font-field-label {
   flex-shrink: 0;
-  font-weight: 500;
   color: var(--color-text-secondary);
-  font-size: 14px;
 }
 
 .font-picker {
@@ -288,40 +254,14 @@ function onSizeInput(event: Event): void {
 .font-trigger {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--ui-field-group-gap);
   width: 100%;
-  height: 36px;
-  box-sizing: border-box;
-  padding: 0 0.6rem;
-  background: var(--color-bg-field-hover);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 6px;
-  font-size: 14px;
   font-family: inherit;
-  color: var(--color-text-primary);
   cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.font-trigger:hover:not(:disabled) {
-  background: var(--btn-neutral-bg);
-  border-color: var(--color-border-strong);
 }
 
 .font-trigger.is-open {
-  background: var(--btn-neutral-bg);
   border-color: var(--color-accent);
-}
-
-.font-trigger:focus-visible {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px var(--focus-glow);
-}
-
-.font-trigger:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }
 
 .font-trigger-label {
@@ -354,85 +294,27 @@ function onSizeInput(event: Event): void {
   left: 0;
   z-index: 1000;
   min-width: 100%;
-  box-sizing: border-box;
-  max-height: 360px;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  padding: 4px;
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 8px;
   box-shadow: var(--shadow-soft);
 }
 
 .font-search {
   flex: 0 0 auto;
-  height: 32px;
-  box-sizing: border-box;
-  margin: 0 0 4px;
-  padding: 0 0.55rem;
-  background: var(--color-bg-field-hover);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 5px;
-  color: var(--color-text-primary);
-  font: inherit;
-}
-
-.font-search:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-glow);
+  margin: 0 0 var(--ui-menu-padding);
+  font-family: inherit;
 }
 
 .font-empty {
   margin: 0;
   padding: 0.5rem 0.6rem;
   color: var(--color-text-muted);
-  font-size: 14px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
 }
 
 .font-option {
-  display: block;
-  width: 100%;
-  box-sizing: border-box;
-  padding: 0.5rem 0.6rem;
-  background: transparent;
-  border: none;
-  border-radius: 6px;
-  font-size: 14px;
   font-family: inherit;
-  color: var(--color-text-primary);
-  text-align: left;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-
-.font-option:hover:not(:disabled),
-.font-option:focus-visible {
-  background: var(--color-bg-field-hover);
-}
-
-.font-option.is-active {
-  background: var(--btn-accent-bg);
-  color: var(--color-accent);
-  font-weight: 600;
-}
-
-.font-option.is-active:hover:not(:disabled),
-.font-option.is-active:focus-visible {
-  background: var(--color-accent);
-  color: var(--color-text-on-accent, #ffffff);
-}
-
-.font-option:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 2px var(--color-accent);
-}
-
-.font-option:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }
 
 .font-size-wrap {
@@ -443,30 +325,11 @@ function onSizeInput(event: Event): void {
 
 .font-size-input {
   width: 72px;
-  height: 36px;
-  box-sizing: border-box;
-  padding: 0 0.5rem;
-  background: var(--color-bg-field-hover);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 6px;
-  font-size: 14px;
-  color: var(--color-text-primary);
-  transition: all 0.15s ease;
-}
-
-.font-size-input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-glow);
-}
-
-.font-size-input:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }
 
 .font-size-unit {
-  font-size: 14px;
+  font-size: var(--ui-text-size-control);
+  font-weight: var(--ui-text-weight-control);
   color: var(--color-text-secondary);
 }
 
@@ -485,7 +348,7 @@ function onSizeInput(event: Event): void {
 
 .font-sample {
   margin: 0.5rem 0 0;
-  color: var(--color-text-secondary);
+  color: var(--color-text-primary);
   line-height: 1.6;
   overflow-wrap: break-word;
   word-break: break-word;

@@ -163,7 +163,7 @@ onUnmounted(() => {
         tabindex="-1"
         @keydown.stop
       >
-        <h2 :id="titleId" class="data-transfer-title">{{ t('dataTransfer.title') }}</h2>
+        <h2 :id="titleId" class="data-transfer-title ui-section-title">{{ t('dataTransfer.title') }}</h2>
 
         <!-- Preparing (initial) -->
         <div v-if="stage === 'preparing'" class="data-transfer-body">
@@ -179,7 +179,7 @@ onUnmounted(() => {
           </div>
           <p class="data-transfer-phase">{{ t('dataTransfer.phase.preparing') }}</p>
           <div class="data-transfer-actions">
-            <button type="button" class="data-transfer-btn neutral" @click="emit('close')">
+            <button type="button" class="ui-button data-transfer-btn neutral" @click="emit('close')">
               {{ t('common.cancel') }}
             </button>
           </div>
@@ -193,10 +193,10 @@ onUnmounted(() => {
           <p class="data-transfer-path muted">{{ transfer.sourcePath.value }}</p>
           <p class="data-transfer-size">{{ t('dataTransfer.total_size', { total: formatTransferBytes(transfer.totalBytes.value) }) }}</p>
           <div class="data-transfer-actions">
-            <button type="button" class="data-transfer-btn neutral" @click="emit('close')">
+            <button type="button" class="ui-button data-transfer-btn neutral" @click="emit('close')">
               {{ t('common.cancel') }}
             </button>
-            <button type="button" class="data-transfer-btn primary" @click="transfer.confirm()">
+            <button type="button" class="ui-button ui-button--primary data-transfer-btn primary" @click="transfer.confirm()">
               {{ t('dataTransfer.transfer') }}
             </button>
           </div>
@@ -233,10 +233,10 @@ onUnmounted(() => {
             {{ transfer.errorMessage.value }}
           </div>
           <div class="data-transfer-actions">
-            <button type="button" class="data-transfer-btn neutral" @click="transfer.retry()">
+            <button type="button" class="ui-button data-transfer-btn neutral" @click="transfer.retry()">
               {{ t('dataTransfer.retry') }}
             </button>
-            <button type="button" class="data-transfer-btn neutral" @click="emit('close')">
+            <button type="button" class="ui-button data-transfer-btn neutral" @click="emit('close')">
               {{ t('common.close') }}
             </button>
           </div>
@@ -274,9 +274,6 @@ onUnmounted(() => {
 
 .data-transfer-title {
   margin: 0 0 16px;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--color-text-primary);
 }
 
 .data-transfer-body {
@@ -287,8 +284,8 @@ onUnmounted(() => {
 
 .data-transfer-line {
   margin: 0;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   color: var(--color-text-secondary);
 }
 
@@ -367,7 +364,8 @@ onUnmounted(() => {
   border-left: 4px solid var(--status-disconnected);
   border-radius: 8px;
   color: var(--danger-text-weak);
-  font-size: 14px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
@@ -380,31 +378,14 @@ onUnmounted(() => {
 }
 
 .data-transfer-btn {
-  padding: 10px 18px;
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
+  white-space: nowrap;
 }
 
-.data-transfer-btn.neutral {
-  background: var(--btn-neutral-bg);
-  color: var(--color-text-primary);
-  border: 1px solid var(--color-border-strong);
-}
-
-.data-transfer-btn.neutral:hover {
-  background: var(--btn-neutral-hover);
+.data-transfer-btn.neutral:hover:not(:disabled) {
   border-color: var(--color-accent);
 }
 
-.data-transfer-btn.primary {
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: var(--color-text-white);
-  border: none;
-  font-weight: 600;
-}
+
 
 .data-transfer-btn.primary:hover {
   filter: brightness(1.06);

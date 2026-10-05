@@ -118,7 +118,7 @@ function handleRadioChange(event: Event) {
 }
 
 .card-content {
-  padding: 0 16px 8px;
+  padding: 0 16px 12px;
   border-top: 1px solid var(--color-border);
 }
 </style>

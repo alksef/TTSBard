@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { open as openDirectoryDialog } from '@tauri-apps/plugin-dialog';
-import { AlertTriangle, FolderOpen, RotateCcw } from 'lucide-vue-next';
+import { AlertTriangle, FolderOpen, FolderCog, RotateCcw } from 'lucide-vue-next';
 import { useGeneralSettings, useWindowsSettings, useLoggingSettings } from '../../composables/useAppSettings';
 import { presentCommandError } from '../../ipc/commandError';
 import { availableLanguages, locale, setLanguage, t } from '../../i18n';
@@ -254,13 +254,13 @@ watch(loggingSettings, (newSettings) => {
 <template>
   <div class="settings-general">
     <!-- Language -->
-    <section class="settings-group">
-      <h3 class="settings-group-title">{{ t('general.groups.language') }}</h3>
-      <div class="setting-row">
+    <section class="settings-group ui-section">
+      <h3 class="settings-group-title ui-group-title">{{ t('general.groups.language') }}</h3>
+      <div class="general-row">
         <label class="sr-only" for="ui-language">{{ t('settings.language') }}</label>
         <select
           id="ui-language"
-          class="level-select language-select"
+          class="ui-select level-select language-select"
           :value="selectedLanguage"
           :disabled="languageSaving"
           @change="onLanguageChange"
@@ -269,92 +269,92 @@ watch(loggingSettings, (newSettings) => {
             {{ language.name }}
           </option>
         </select>
-        <span class="setting-hint language-hint">{{ t('settings.language.restart_hint') }}</span>
+        <span class="setting-hint ui-hint language-hint">{{ t('settings.language.restart_hint') }}</span>
         <span v-if="languageSaved" class="setting-warning"><AlertTriangle :size="14" /> {{ t('settings.language.saved.restart') }}</span>
         <span v-if="languageError" class="setting-warning">{{ languageError }}</span>
       </div>
     </section>
 
     <!-- Window behavior -->
-    <section class="settings-group">
-      <h3 class="settings-group-title">{{ t('general.groups.window') }}</h3>
+    <section class="settings-group ui-section">
+      <h3 class="settings-group-title ui-group-title">{{ t('general.groups.window') }}</h3>
 
-      <div class="setting-row">
-        <label class="setting-label checkbox-label">
+      <div class="general-row">
+        <label class="ui-choice-label setting-label">
           <input
             :checked="showPlaybackOnStart"
             @change="toggleShowPlaybackOnStart"
             type="checkbox"
-            class="checkbox-input"
+            class="ui-choice-input"
           />
           <span>{{ t('general.show_playback.label') }}</span>
         </label>
-        <span class="setting-hint">{{ t('general.show_playback.hint') }}</span>
+        <span class="setting-hint ui-hint">{{ t('general.show_playback.hint') }}</span>
       </div>
 
-      <div class="setting-row">
-        <label class="setting-label checkbox-label">
+      <div class="general-row">
+        <label class="ui-choice-label setting-label">
           <input
             :checked="startCompact"
             @change="toggleStartCompact"
             type="checkbox"
-            class="checkbox-input"
+            class="ui-choice-input"
           />
           <span>{{ t('general.start_compact.label') }}</span>
         </label>
-        <span class="setting-hint">{{ t('general.start_compact.hint') }}</span>
+        <span class="setting-hint ui-hint">{{ t('general.start_compact.hint') }}</span>
       </div>
 
-      <div class="setting-row">
-        <label class="setting-label checkbox-label">
+      <div class="general-row">
+        <label class="ui-choice-label setting-label">
           <input
             :checked="hideOnMinimize"
             :disabled="hideOnMinimizeSaving"
             @change="toggleHideOnMinimize"
             type="checkbox"
-            class="checkbox-input"
+            class="ui-choice-input"
           />
           <span>{{ t('general.hide_on_minimize.label') }}</span>
         </label>
-        <span class="setting-hint">{{ t('general.hide_on_minimize.hint') }}</span>
+        <span class="setting-hint ui-hint">{{ t('general.hide_on_minimize.hint') }}</span>
       </div>
 
-      <div class="setting-row">
-        <label class="setting-label checkbox-label">
+      <div class="general-row">
+        <label class="ui-choice-label setting-label">
           <input
             :checked="excludeFromCapture"
             type="checkbox"
-            class="checkbox-input"
+            class="ui-choice-input"
             @change="toggleExcludeFromCapture"
           />
           <span>{{ t('general.exclude_capture.label') }}</span>
         </label>
-        <span class="setting-hint">{{ t('general.exclude_capture.hint') }}</span>
+        <span class="setting-hint ui-hint">{{ t('general.exclude_capture.hint') }}</span>
         <span class="setting-warning"><AlertTriangle :size="14" /> {{ t('general.restart_required') }}</span>
       </div>
     </section>
 
     <!-- Diagnostics -->
-    <section class="settings-group">
-      <h3 class="settings-group-title">{{ t('general.groups.diagnostics') }}</h3>
+    <section class="settings-group ui-section">
+      <h3 class="settings-group-title ui-group-title">{{ t('general.groups.diagnostics') }}</h3>
 
-      <div class="setting-row logging-controls-row">
-        <label class="setting-label checkbox-label">
+      <div class="general-row logging-controls-row">
+        <label class="ui-choice-label setting-label">
           <input
             :checked="loggingEnabled"
             @change="(e) => setLoggingEnabled((e.target as HTMLInputElement).checked)"
             type="checkbox"
-            class="checkbox-input"
+            class="ui-choice-input"
           />
           <span>{{ t('general.logging.enabled') }}</span>
         </label>
 
         <div v-if="loggingEnabled" class="logging-level-control">
-          <label>{{ t('general.logging.level.label') }}</label>
+          <label class="ui-label ui-label--secondary">{{ t('general.logging.level.label') }}</label>
           <select
             :value="loggingLevel"
             @change="onLoggingLevelChange"
-            class="level-select"
+            class="ui-select level-select"
           >
             <option v-for="level in loggingLevels" :key="level.value" :value="level.value">
               {{ level.label }}
@@ -363,69 +363,69 @@ watch(loggingSettings, (newSettings) => {
         </div>
       </div>
 
-      <span class="setting-warning">
+      <span class="setting-warning logging-warning">
         <AlertTriangle :size="14" />
         {{ t('general.restart_required') }}
       </span>
     </section>
 
     <!-- Folders -->
-    <section class="settings-group">
-      <h3 class="settings-group-title">{{ t('general.folders.title') }}</h3>
+    <section class="settings-group ui-section">
+      <h3 class="settings-group-title ui-group-title">{{ t('general.folders.title') }}</h3>
 
       <div class="folder-row">
         <div class="folder-info">
-          <span class="folder-name">{{ t('general.folders.configuration') }}</span>
-          <span class="folder-path">{{ DEFAULT_CONFIG_DIR_DISPLAY }}</span>
+          <span class="folder-name ui-label ui-label--secondary">{{ t('general.folders.configuration') }}</span>
+          <span class="folder-path ui-metadata">{{ DEFAULT_CONFIG_DIR_DISPLAY }}</span>
         </div>
         <div class="folder-actions">
           <button
             type="button"
-            class="folder-button"
+            class="ui-icon-button"
             :disabled="folderOpening"
+            :title="t('general.folders.open')"
             :aria-label="t('general.folders.open')"
             @click="openAppFolder"
           >
-            <FolderOpen :size="16" />
-            <span>{{ t('general.folders.open') }}</span>
+            <FolderOpen :size="18" />
           </button>
         </div>
       </div>
 
       <div class="folder-row">
         <div class="folder-info">
-          <span class="folder-name">{{ t('general.folders.program_data') }}</span>
-          <span class="folder-path" :title="dataPathTooltip">{{ dataPathDisplay }}</span>
-          <span class="folder-hint">{{ t('general.folders.data_hint') }}</span>
+          <span class="folder-name ui-label ui-label--secondary">{{ t('general.folders.program_data') }}</span>
+          <span class="folder-path ui-metadata" :title="dataPathTooltip">{{ dataPathDisplay }}</span>
         </div>
         <div class="folder-actions">
           <button
             type="button"
-            class="folder-button"
+            class="ui-icon-button"
             :disabled="localDataOpening"
+            :title="t('general.folders.open')"
             :aria-label="t('general.folders.open')"
             @click="openLocalDataFolder"
           >
-            <FolderOpen :size="16" />
-            <span>{{ t('general.folders.open') }}</span>
+            <FolderOpen :size="18" />
           </button>
           <button
             type="button"
-            class="folder-button"
+            class="ui-icon-button"
+            :title="t('general.folders.change')"
             :aria-label="t('general.folders.change')"
             @click="changeDataDir"
           >
-            <span>{{ t('general.folders.change') }}</span>
+            <FolderCog :size="18" />
           </button>
           <button
             type="button"
-            class="folder-button folder-button-icon"
+            class="ui-icon-button"
             :disabled="dataInfo?.is_default !== false"
             :title="t('general.folders.reset')"
             :aria-label="t('general.folders.reset')"
             @click="resetDataDir"
           >
-            <RotateCcw :size="16" />
+            <RotateCcw :size="18" />
           </button>
         </div>
       </div>
@@ -444,7 +444,6 @@ watch(loggingSettings, (newSettings) => {
 .settings-general {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
 }
 
 .sr-only {
@@ -459,55 +458,39 @@ watch(loggingSettings, (newSettings) => {
   border: 0;
 }
 
+/* Card skin stays local; section padding/rhythm come from ui-section. */
 .settings-group {
-  padding: 16px 18px;
   background: var(--color-bg-field);
   border: 1px solid var(--color-border);
   border-radius: 12px;
   backdrop-filter: blur(8px);
 }
 
+.settings-group:last-of-type {
+  margin-bottom: 0;
+}
+
 .settings-group-title {
-  margin: 0 0 0.25rem;
-  font-size: 1rem;
-  font-weight: 700;
-  color: var(--color-text-primary);
+  margin: 0 0 0.5rem;
 }
 
-.setting-row {
+.general-row {
   display: block;
-  margin-bottom: 1rem;
+  margin-bottom: var(--ui-row-gap);
 }
 
-.setting-row:last-child {
+.general-row:last-child {
   margin-bottom: 0;
 }
 
 .setting-label {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  cursor: pointer;
-  user-select: none;
-  font-size: 0.95rem;
-  font-weight: 600;
   color: var(--color-text-primary);
-}
-
-.checkbox-input {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  accent-color: var(--color-accent);
+  user-select: none;
 }
 
 .setting-hint {
   display: block;
-  margin-top: 0.4rem;
   margin-left: 2.4rem;
-  font-size: 0.85rem;
-  color: var(--color-text-muted);
-  line-height: 1.4;
 }
 
 .language-hint {
@@ -516,11 +499,6 @@ watch(loggingSettings, (newSettings) => {
 
 .language-select {
   width: min(100%, 180px);
-  background: var(--color-bg);
-}
-
-.language-select:hover {
-  background: var(--color-bg);
 }
 
 .setting-warning {
@@ -529,70 +507,35 @@ watch(loggingSettings, (newSettings) => {
   gap: 0.4rem;
   margin-top: 0.5rem;
   margin-left: 2.4rem;
-  font-size: 0.82rem;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   color: var(--warning-text-bright);
 }
 
 .logging-controls-row {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.6rem 1rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ui-field-group-gap);
 }
 
 .logging-level-control {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: var(--ui-row-label-gap-side);
 }
 
-.logging-level-control label {
-  display: inline-block;
-  margin-right: 0;
-  min-width: 0;
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--color-text-primary);
+.setting-warning.logging-warning {
+  margin-left: 0;
 }
 
 .level-select {
-  box-sizing: border-box;
-  height: 34px;
-  padding: 0.4rem 0.6rem;
-  background: var(--color-bg-field-hover);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 6px;
-  color: var(--color-text-primary);
-  font-size: 0.9rem;
-  cursor: pointer;
-  transition: all 0.15s ease;
   min-width: 140px;
 }
 
 .logging-level-control .level-select {
   width: 180px;
   flex: 0 0 auto;
-}
-
-.level-select:hover {
-  background: var(--btn-neutral-bg);
-  border-color: var(--color-border-strong);
-}
-
-.level-select:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-glow);
-}
-
-.level-select option {
-  background: var(--select-bg);
-  color: var(--color-text-primary);
-  padding: 0.3rem 0.5rem;
-}
-
-.level-select option:hover {
-  background: var(--select-bg-hover);
 }
 
 .folder-row {
@@ -608,87 +551,38 @@ watch(loggingSettings, (newSettings) => {
   border-top: 1px solid var(--color-border);
 }
 
+.folder-row:last-child {
+  padding-bottom: 0;
+}
+
 .folder-info {
-  flex: 1 1 220px;
+  flex: 1 1 160px;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
 }
 
-.folder-name {
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--color-text-primary);
-}
-
-.folder-hint {
-  font-size: 0.82rem;
-  color: var(--color-text-muted);
-  line-height: 1.4;
-}
-
 .folder-path {
+  color: var(--color-text-primary);
   flex: 0 1 auto;
   min-width: 0;
   font-family: var(--font-mono);
-  font-size: 0.85rem;
-  color: var(--color-text-muted);
-  line-height: 1.4;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
 
 .folder-actions {
   display: flex;
+  justify-content: flex-end;
+  margin-left: auto;
   align-items: center;
   gap: 0.5rem;
   flex: 0 0 auto;
   flex-wrap: wrap;
 }
 
-.folder-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex: 0 0 auto;
-  padding: 0.4rem 0.8rem;
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 8px;
-  color: var(--color-text-primary);
-  font-size: 0.9rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.folder-button-icon {
-  padding: 0.4rem;
-  justify-content: center;
-  min-width: 34px;
-}
-
-.folder-button:hover:not(:disabled) {
-  background: var(--color-bg-field);
-}
-
-.folder-button:focus-visible {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px var(--focus-glow);
-}
-
-.folder-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
 @media (max-width: 520px) {
-  .settings-group {
-    padding: 14px 14px;
-  }
-
   .language-select {
     width: 100%;
   }
@@ -696,7 +590,7 @@ watch(loggingSettings, (newSettings) => {
   .logging-controls-row {
     align-items: stretch;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: var(--ui-field-group-gap);
   }
 
   .logging-level-control {
@@ -711,13 +605,5 @@ watch(loggingSettings, (newSettings) => {
     flex: 1 1 100%;
   }
 
-  .folder-actions {
-    width: 100%;
-    justify-content: flex-start;
-  }
-
-  .folder-button {
-    justify-content: center;
-  }
 }
 </style>
