@@ -142,8 +142,8 @@ async function handleSignOut() {
     <div class="modal-container">
       <!-- Header -->
       <div class="modal-header">
-        <h2>{{ t('tts.telegram.auth.title') }}</h2>
-        <button class="close-button" @click="close">×</button>
+        <h2 class="ui-section-title">{{ t('tts.telegram.auth.title') }}</h2>
+        <button class="ui-icon-button close-button" @click="close" :aria-label="t('common.close')" :title="t('common.close')">×</button>
       </div>
 
       <!-- Error Message -->
@@ -169,7 +169,7 @@ async function handleSignOut() {
           </div>
 
           <div class="form-group">
-            <label for="phone">{{ t('tts.telegram.auth.phone') }}</label>
+            <label class="ui-label" for="phone">{{ t('tts.telegram.auth.phone') }}</label>
             <div class="input-with-toggle">
               <input
                 id="phone"
@@ -192,7 +192,7 @@ async function handleSignOut() {
           </div>
 
           <div class="form-group password-group">
-            <label for="api_id">{{ t('tts.telegram.auth.api_id') }}</label>
+            <label class="ui-label" for="api_id">{{ t('tts.telegram.auth.api_id') }}</label>
             <div class="input-with-toggle">
               <input
                 id="api_id"
@@ -215,7 +215,7 @@ async function handleSignOut() {
           </div>
 
           <div class="form-group password-group">
-            <label for="api_hash">{{ t('tts.telegram.auth.api_hash') }}</label>
+            <label class="ui-label" for="api_hash">{{ t('tts.telegram.auth.api_hash') }}</label>
             <div class="input-with-toggle">
               <input
                 id="api_hash"
@@ -238,7 +238,7 @@ async function handleSignOut() {
           </div>
 
           <button
-            class="submit-button"
+            class="ui-button ui-button--primary submit-button"
             :disabled="isLoading"
             @click="handleRequestCode"
           >
@@ -253,7 +253,7 @@ async function handleSignOut() {
           </div>
 
           <div class="form-group">
-            <label for="code">{{ t('tts.telegram.auth.code_label') }}</label>
+            <label class="ui-label" for="code">{{ t('tts.telegram.auth.code_label') }}</label>
             <input
               id="code"
               v-model="code"
@@ -266,14 +266,14 @@ async function handleSignOut() {
           </div>
 
           <button
-            class="submit-button"
+            class="ui-button ui-button--primary submit-button"
             :disabled="isLoading"
             @click="handleSignIn"
           >
             {{ isLoading ? t('tts.telegram.auth.checking') : t('tts.telegram.auth.sign_in') }}
           </button>
 
-          <button class="back-button" :disabled="isLoading" @click="reset">
+          <button class="ui-button back-button" :disabled="isLoading" @click="reset">
             {{ t('tts.telegram.auth.back') }}
           </button>
         </div>
@@ -309,14 +309,14 @@ async function handleSignOut() {
           </div>
 
           <button
-            class="submit-button"
+            class="ui-button ui-button--primary submit-button"
             :disabled="isLoading"
             @click="handleCheckPassword"
           >
             {{ isLoading ? t('tts.telegram.auth.checking') : t('tts.telegram.auth.confirm') }}
           </button>
 
-          <button class="back-button" :disabled="isLoading" @click="handleRetry">
+          <button class="ui-button back-button" :disabled="isLoading" @click="handleRetry">
             {{ t('tts.telegram.auth.back') }}
           </button>
         </div>
@@ -335,10 +335,10 @@ async function handleSignOut() {
           </div>
 
           <div class="button-group">
-            <button class="retry-button" @click="handleRetry">
+            <button class="ui-button ui-button--primary retry-button" @click="handleRetry">
               {{ t('tts.telegram.auth.retry') }}
             </button>
-            <button class="disable-button" @click="handleDisableAndClose">
+            <button class="ui-button disable-button" @click="handleDisableAndClose">
               {{ t('tts.telegram.auth.disable') }}
             </button>
           </div>
@@ -365,10 +365,10 @@ async function handleSignOut() {
           </div>
 
           <div class="button-group">
-            <button class="disconnect-button" @click="handleSignOut">
+            <button class="ui-button ui-action--danger disconnect-button" @click="handleSignOut">
               {{ t('tts.telegram.auth.disconnect') }}
             </button>
-            <button class="close-button-primary" @click="close">
+            <button class="ui-button ui-button--primary close-button-primary" @click="close">
               {{ t('tts.telegram.auth.close') }}
             </button>
           </div>
@@ -421,30 +421,11 @@ async function handleSignOut() {
 
 .modal-header h2 {
   margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--color-text-primary);
 }
 
 .close-button {
-  background: transparent;
-  border: none;
-  font-size: 24px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  padding: 4px;
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  transition: background 0.2s, color 0.2s;
-}
-
-.close-button:hover {
-  background: var(--btn-neutral-bg);
-  color: var(--color-text-primary);
+  font-size: 20px;
+  line-height: 1;
 }
 
 .modal-content {
@@ -459,7 +440,8 @@ async function handleSignOut() {
   border-left: 4px solid var(--status-disconnected);
   border-radius: 8px;
   color: var(--danger-text-weak);
-  font-size: 14px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
 }
 
 .auth-form {
@@ -472,9 +454,10 @@ async function handleSignOut() {
   padding: 16px;
   background: var(--color-bg-field);
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: 8px;
   color: var(--color-text-secondary);
-  font-size: 14px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   line-height: 1.5;
 }
 
@@ -508,19 +491,20 @@ async function handleSignOut() {
   gap: 8px;
 }
 
-.form-group label {
-  font-size: 13px;
-  font-weight: 500;
+.form-group .ui-label {
   color: var(--color-text-secondary);
 }
 
 .form-group input {
-  padding: 10px 12px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 8px;
+  min-height: var(--ui-control-min-height);
+  box-sizing: border-box;
+  padding: var(--ui-control-padding-y) var(--ui-control-padding-x);
+  border: var(--ui-border-width) solid var(--color-border-strong);
+  border-radius: var(--ui-radius);
   background: var(--color-bg-field);
   color: var(--color-text-primary);
-  font-size: 14px;
+  font-size: var(--ui-text-size-control);
+  font-weight: var(--ui-text-weight-control);
   font-family: var(--font-mono);
   transition: all 0.15s ease;
 }
@@ -558,7 +542,7 @@ async function handleSignOut() {
 
 .form-group input:-webkit-autofill::first-line {
   font-family: var(--font-mono);
-  font-size: 14px;
+  font-size: var(--ui-text-size-control);
 }
 
 .password-group {
@@ -599,50 +583,21 @@ async function handleSignOut() {
 }
 
 .submit-button {
-  padding: 12px 20px;
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: var(--color-text-white);
-  border: none;
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
   margin-top: 8px;
 }
 
 .submit-button:hover:not(:disabled) {
   filter: brightness(1.06);
-  transform: translateY(-1px);
-}
-
-.submit-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .back-button {
-  padding: 12px 20px;
-  background: transparent;
   color: var(--color-text-secondary);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
   margin-top: 8px;
 }
 
 .back-button:hover:not(:disabled) {
-  background: var(--color-bg-field);
   border-color: var(--color-accent);
   color: var(--color-text-primary);
-}
-
-.back-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .connected-state {
@@ -681,20 +636,22 @@ async function handleSignOut() {
 
 .user-name {
   margin: 0;
-  font-size: 16px;
-  font-weight: 600;
+  font-size: var(--ui-text-size-section-title);
+  font-weight: var(--ui-text-weight-section-title);
   color: var(--color-text-primary);
 }
 
 .user-username {
   margin: 4px 0 0;
-  font-size: 14px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   color: var(--color-text-secondary);
 }
 
 .user-phone {
   margin: 4px 0 0;
-  font-size: 14px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   color: var(--color-text-secondary);
 }
 
@@ -707,7 +664,8 @@ async function handleSignOut() {
   padding-top: 8px;
   border-top: 1px solid var(--color-border);
   color: var(--color-text-muted);
-  font-size: 13px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
 }
 
 .button-group {
@@ -718,33 +676,10 @@ async function handleSignOut() {
 
 .disconnect-button {
   flex: 1;
-  padding: 12px 20px;
-  background: linear-gradient(135deg, var(--danger-gradient-start) 0%, var(--danger-gradient-end) 100%);
-  color: var(--color-text-white);
-  border: none;
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.disconnect-button:hover {
-  filter: brightness(1.1);
-  transform: translateY(-1px);
 }
 
 .close-button-primary {
   flex: 1;
-  padding: 12px 20px;
-  background: var(--btn-neutral-bg);
-  color: var(--color-text-primary);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
 }
 
 .close-button-primary:hover {
@@ -812,7 +747,8 @@ async function handleSignOut() {
   border-left: 4px solid var(--status-disconnected);
   border-radius: 8px;
   color: var(--danger-text-weak);
-  font-size: 14px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   margin-bottom: 16px;
   text-align: left;
 }
@@ -825,15 +761,6 @@ async function handleSignOut() {
 
 .retry-button {
   flex: 1;
-  padding: 12px 20px;
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: var(--color-text-white);
-  border: none;
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
 }
 
 .retry-button:hover:not(:disabled) {
@@ -843,15 +770,7 @@ async function handleSignOut() {
 
 .disable-button {
   flex: 1;
-  padding: 12px 20px;
-  background: var(--btn-neutral-bg);
   color: var(--color-text-secondary);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
 }
 
 .disable-button:hover {

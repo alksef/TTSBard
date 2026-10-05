@@ -79,7 +79,7 @@ function handleProxyChange(event: Event) {
           <p class="error-message">{{ errorMessage }}</p>
         </div>
       </div>
-      <button class="fix-button" @click="$emit('connect')">
+      <button class="ui-button fix-button" @click="$emit('connect')">
         {{ t('tts.silero.error.fix') }}
       </button>
     </div>
@@ -89,7 +89,7 @@ function handleProxyChange(event: Event) {
       <div v-if="connected" class="status-connected">
         <div class="status-indicator connected"></div>
         <div class="status-info">
-          <p class="status-text">{{ t('tts.silero.connected') }}</p>
+          <p class="status-text ui-label">{{ t('tts.silero.connected') }}</p>
           <p v-if="telegramStatus" class="status-details">
             {{ telegramStatus.first_name }} {{ telegramStatus.last_name }}
             <span v-if="telegramStatus.username">@{{ telegramStatus.username }}</span>
@@ -99,14 +99,14 @@ function handleProxyChange(event: Event) {
             {{ currentProxyStatus.proxy_url }}
           </p>
         </div>
-        <button class="status-signout-button" @click="$emit('disconnect')" :title="t('tts.silero.sign_out')" :aria-label="t('tts.silero.sign_out')">
-          <LogOut :size="16" />
+        <button class="ui-icon-button ui-action--danger status-signout-button" @click="$emit('disconnect')" :title="t('tts.silero.sign_out')" :aria-label="t('tts.silero.sign_out')">
+          <LogOut :size="18" />
         </button>
       </div>
       <div v-else class="status-disconnected">
         <div class="status-indicator disconnected"></div>
         <div class="status-info">
-          <p class="status-text">{{ t('tts.silero.not_connected') }}</p>
+          <p class="status-text ui-label">{{ t('tts.silero.not_connected') }}</p>
           <p class="status-details">{{ t('tts.silero.not_connected_hint') }}</p>
         </div>
       </div>
@@ -117,11 +117,11 @@ function handleProxyChange(event: Event) {
       <div class="proxy-settings-row">
         <div class="proxy-select-row">
           <div class="form-field">
-            <label>{{ t('tts.proxy') }}</label>
+            <label class="ui-label">{{ t('tts.proxy') }}</label>
             <select
               :value="proxyMode"
               @change="handleProxyChange"
-              class="network-select"
+              class="ui-select network-select"
             >
               <option
                 v-for="mode in proxyModeOptions"
@@ -137,11 +137,11 @@ function handleProxyChange(event: Event) {
           v-if="connected"
           @click="$emit('reconnect')"
           :disabled="reconnecting"
-          class="reconnect-button-fixed"
+          class="ui-button ui-button--primary reconnect-button-fixed"
           :title="t('tts.silero.reconnect')"
         >
-          <RefreshCw v-if="reconnecting" :size="14" class="spin-icon" />
-          <RefreshCw v-else :size="14" />
+          <RefreshCw v-if="reconnecting" :size="18" class="spin-icon" />
+          <RefreshCw v-else :size="18" />
           {{ reconnecting ? t('tts.silero.reconnecting') : t('tts.silero.reconnect') }}
         </button>
       </div>
@@ -150,7 +150,7 @@ function handleProxyChange(event: Event) {
     <!-- Connect Button -->
     <div v-if="!connected" class="setting-group">
       <button
-        class="telegram-connect-button"
+        class="ui-button ui-button--primary telegram-connect-button"
         @click="$emit('connect')"
       >
         {{ t('tts.silero.connect_telegram') }}
@@ -159,7 +159,7 @@ function handleProxyChange(event: Event) {
 
     <!-- Info Section -->
     <div v-if="!connected" class="telegram-info">
-      <p class="info-title">{{ t('tts.silero.info.title') }}</p>
+      <p class="info-title ui-label">{{ t('tts.silero.info.title') }}</p>
       <ul class="info-list">
         <li>{{ t('tts.silero.info.line1') }}</li>
         <li>{{ t('tts.silero.info.line2_prefix') }}<a href="https://my.telegram.org/apps" target="_blank" rel="noopener noreferrer">my.telegram.org</a></li>
@@ -209,31 +209,26 @@ function handleProxyChange(event: Event) {
 
 .error-title {
   margin: 0 0 4px;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   color: var(--danger-text-bright);
 }
 
 .error-message {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   color: var(--danger-text-weak);
 }
 
 .fix-button {
-  padding: 8px 16px;
   background: var(--danger-bg-hover);
   color: var(--color-text-white);
   border: none;
-  border-radius: 10px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
   white-space: nowrap;
-  transition: background 0.2s;
 }
 
-.fix-button:hover {
+.fix-button:hover:not(:disabled) {
   background: var(--danger-border-strong);
 }
 
@@ -277,42 +272,21 @@ function handleProxyChange(event: Event) {
 
 .status-text {
   margin: 0;
-  font-size: 14px;
-  font-weight: 600;
   color: var(--color-text-primary);
 }
 
 .status-details {
   margin: 4px 0 0;
-  font-size: 13px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   color: var(--color-text-secondary);
 }
 
 .status-proxy {
   margin: 2px 0 0;
-  font-size: 12px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   color: var(--color-accent);
-  font-weight: 500;
-}
-
-/* Sign out button */
-.status-signout-button {
-  padding: 6px;
-  background: var(--danger-border);
-  border: 1px solid var(--danger-border);
-  border-radius: 8px;
-  color: var(--color-danger);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-  flex-shrink: 0;
-}
-
-.status-signout-button:hover {
-  background: var(--danger-bg-weak);
-  color: var(--danger-text-bright);
 }
 
 /* Setting group */
@@ -343,67 +317,20 @@ function handleProxyChange(event: Event) {
   gap: 10px;
 }
 
-.proxy-select-row label {
+.proxy-select-row .ui-label {
   min-width: fit-content;
-  font-size: 13px;
   color: var(--color-text-secondary);
-  font-weight: 500;
 }
 
 .network-select {
-  padding: 10px 12px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
-  background: var(--color-bg-field-hover);
-  color: var(--color-text-primary);
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.15s ease;
   width: fit-content;
   min-width: 100px;
 }
 
-.network-select:hover {
-  background: var(--input-bg-strong);
-  border-color: var(--color-border-strong);
-}
-
-.network-select:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-glow);
-}
-
-.network-select option {
-  background: var(--select-bg);
-  color: var(--color-text-primary);
-  padding: 0.3rem 0.5rem;
-}
-
 /* Reconnect button */
 .reconnect-button-fixed {
-  padding: 0.6rem 1.2rem;
   margin-bottom: 8px;
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  border: none;
-  color: var(--color-text-white);
-  border-radius: 10px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 600;
-  transition: all 0.2s;
-  display: inline-flex;
-  align-items: center;
   gap: 8px;
-}
-
-.reconnect-button-fixed:hover:not(:disabled) {
-  filter: brightness(1.06);
-}
-
-.reconnect-button-fixed:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .spin-icon {
@@ -418,23 +345,6 @@ function handleProxyChange(event: Event) {
 /* Connect button */
 .telegram-connect-button {
   width: 100%;
-  padding: 12px 20px;
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: var(--color-text-white);
-  border: none;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.2s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-
-.telegram-connect-button:hover {
-  filter: brightness(1.06);
 }
 
 /* Info section */
@@ -447,15 +357,14 @@ function handleProxyChange(event: Event) {
 
 .info-title {
   margin: 0 0 8px;
-  font-size: 14px;
-  font-weight: 600;
   color: var(--color-text-primary);
 }
 
 .info-list {
   margin: 0;
   padding-left: 20px;
-  font-size: 13px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   color: var(--color-text-secondary);
   line-height: 1.6;
 }

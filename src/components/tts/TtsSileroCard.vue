@@ -183,8 +183,9 @@ function handleSelectVoice(voiceId: string) {
     />
 
     <div v-if="connected && limits" class="limits-row">
-      <span class="limits-counters">
-        {{ t('tts.silero.limits.characters') }} {{ limitsVoicesFormatted }}
+      <span class="limits-counters ui-label">
+        <span class="ui-label ui-label--secondary">{{ t('tts.silero.limits.characters') }}</span>
+        {{ limitsVoicesFormatted }}
         <template v-if="limitsResetFormatted">
           · <span :title="limitsTooltip">{{ t('tts.silero.limits.will_reset', { when: limitsResetFormatted }) }}</span>
         </template>
@@ -194,7 +195,7 @@ function handleSelectVoice(voiceId: string) {
         <span v-if="limitsError" class="limits-stale-cue" :title="t('tts.silero.limits.stale')">⚠</span>
       </span>
       <button
-        class="limits-refresh"
+        class="ui-icon-button"
         :disabled="limitsLoading"
         :title="limitsError || t('tts.silero.limits.refresh')"
         :aria-label="limitsError || t('tts.silero.limits.refresh')"
@@ -206,9 +207,9 @@ function handleSelectVoice(voiceId: string) {
     </div>
 
     <div v-else-if="connected && !limits && !limitsLoading" class="limits-row limits-row-unavailable">
-      <span class="limits-counters">{{ t('tts.silero.limits.characters') }} —</span>
+      <span class="limits-counters ui-label"><span class="ui-label ui-label--secondary">{{ t('tts.silero.limits.characters') }}</span> —</span>
       <button
-        class="limits-refresh"
+        class="ui-icon-button"
         :title="limitsError || t('tts.silero.limits.load')"
         :aria-label="limitsError || t('tts.silero.limits.load')"
         @click="$emit('refresh-limits')"
@@ -219,7 +220,7 @@ function handleSelectVoice(voiceId: string) {
 
     <div v-else-if="connected && limitsLoading && !limits" class="limits-row limits-row-loading">
       <Loader2 :size="14" class="spinner" />
-      <span class="limits-counters">{{ t('tts.silero.limits.loading') }}</span>
+      <span class="limits-counters ui-label">{{ t('tts.silero.limits.loading') }}</span>
     </div>
 
     <!-- Voice Management Section (shown when connected) -->
@@ -227,38 +228,36 @@ function handleSelectVoice(voiceId: string) {
       <!-- Saved Voices List -->
       <div class="saved-voices-section">
         <div class="voice-header">
-          <label>{{ t('tts.voices') }}</label>
+          <label class="ui-label ui-label--secondary">{{ t('tts.voices') }}</label>
           <div class="voice-header-buttons">
             <button
               @click="$emit('refresh-voice')"
               :disabled="voiceLoading"
-              class="add-button"
+              class="ui-button ui-button--leading-icon ui-button--compact"
               :title="t('tts.silero.refresh_voice')"
             >
               <Loader2 v-if="voiceLoading" :size="16" class="spinner" />
               <RefreshCw v-else :size="16" />
               <span>{{ t('tts.silero.refresh_voice') }}</span>
             </button>
-            <button @click="handleOpenAddVoiceDialog" class="add-button">
-              <Plus :size="16" />
-              <span>{{ t('tts.add') }}</span>
+            <button @click="handleOpenAddVoiceDialog" class="ui-icon-button" :title="t('tts.add_voice')" :aria-label="t('tts.add_voice')">
+              <Plus :size="18" />
             </button>
           </div>
         </div>
 
-        <div v-if="savedVoices.length > 0" class="voice-list">
+        <div v-if="savedVoices.length > 0" class="voice-list ui-menu ui-menu--embedded">
           <div
             v-for="voice in savedVoices"
             :key="voice.id"
-            :class="['voice-item', { active: currentVoice?.id === voice.id }]"
-            @click="handleSelectVoice(voice.id)"
+            :class="['voice-item', { 'ui-menu-item--selected': currentVoice?.id === voice.id }]"
           >
-            <div class="voice-info">
-              <div class="voice-id">{{ voice.id }}{{ voice.description ? ` (${voice.description})` : '' }}</div>
-            </div>
+            <button class="voice-info ui-menu-item" @click="handleSelectVoice(voice.id)">
+              {{ voice.id }}{{ voice.description ? ` (${voice.description})` : '' }}
+            </button>
             <button
               @click.stop="handleRemoveVoice(voice.id)"
-              class="remove-button"
+              class="ui-icon-button ui-action--danger remove-button"
               :title="t('tts.delete')"
               :aria-label="t('tts.delete')"
             >
@@ -275,12 +274,12 @@ function handleSelectVoice(voiceId: string) {
     <!-- Add Voice Dialog -->
     <div v-if="showAddVoiceDialog" class="dialog-overlay" @click.self="handleCloseAddVoiceDialog">
       <div class="dialog">
-        <h3>{{ t('tts.add_voice') }}</h3>
+        <h3 class="ui-section-title">{{ t('tts.add_voice') }}</h3>
         <input
           v-model="voiceCodeInput"
           :placeholder="t('tts.silero.add_voice.code_placeholder')"
           @keyup.enter="handleAddVoice"
-          class="voice-input"
+          class="ui-input voice-input"
           ref="voiceInput"
           :class="{ 'has-error': duplicateError || addVoiceError }"
         />
@@ -288,7 +287,7 @@ function handleSelectVoice(voiceId: string) {
           v-model="voiceDescriptionInput"
           :placeholder="t('tts.silero.add_voice.desc_placeholder')"
           @keyup.enter="handleAddVoice"
-          class="voice-input"
+          class="ui-input voice-input"
           :class="{ 'has-error': duplicateError || addVoiceError }"
         />
         <!-- Duplicate error -->
@@ -300,13 +299,13 @@ function handleSelectVoice(voiceId: string) {
           {{ addVoiceError }}
         </div>
         <div class="dialog-buttons">
-          <button @click="handleCloseAddVoiceDialog" class="cancel-button">
+          <button @click="handleCloseAddVoiceDialog" class="ui-button">
             {{ t('common.cancel') }}
           </button>
           <button
             @click="handleAddVoice"
             :disabled="!voiceCodeInput.trim() || isAddingVoice"
-            class="add-button-confirm"
+            class="ui-button ui-button--primary add-button-confirm"
           >
             <Loader2 v-if="isAddingVoice" :size="16" class="spinner" />
             {{ isAddingVoice ? t('tts.adding') : t('tts.add') }}
@@ -341,12 +340,6 @@ function handleSelectVoice(voiceId: string) {
   margin-bottom: 12px;
 }
 
-.voice-header label {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--color-text-primary);
-}
-
 .voice-header-buttons {
   display: flex;
   gap: 8px;
@@ -355,98 +348,47 @@ function handleSelectVoice(voiceId: string) {
 
 /* Add Button */
 .add-button {
-  display: flex;
-  align-items: center;
   gap: 6px;
-  padding: 0.5rem 1rem;
-  background: var(--color-accent);
-  border: none;
-  border-radius: 8px;
-  color: var(--color-text-white);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: filter 0.2s;
-}
-
-.add-button:hover:not(:disabled) {
-  filter: brightness(1.1);
-}
-
-.add-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 /* Voice List */
 .voice-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
   max-height: 250px;
   overflow-y: auto;
-  margin-bottom: 8px;
 }
 
 .voice-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 0.75rem;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
+  padding-right: 4px;
+  border-radius: var(--ui-radius-menu-item);
 }
 
 .voice-item:hover {
-  background: var(--color-bg-tertiary);
-}
-
-.voice-item.active {
-  border-color: var(--color-accent);
-  background: var(--color-accent-alpha);
+  background: var(--color-bg-field-hover);
 }
 
 .voice-info {
   flex: 1;
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
-.voice-id {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  font-family: monospace;
-}
-
-.remove-button {
-  margin: 0;
-  padding: 0;
-  background: var(--danger-bg-weak);
-  color: var(--color-text-white);
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.2s;
-  width: 32px;
-  height: 32px;
-  flex-shrink: 0;
-}
-
-.remove-button:hover {
-  background: var(--danger-bg-hover);
+.voice-item.ui-menu-item--selected .voice-info {
+  color: inherit;
+  font-weight: inherit;
 }
 
 .empty-voices {
   padding: 1rem;
   text-align: center;
   color: var(--color-text-secondary);
-  font-size: 13px;
-  background: var(--color-bg-secondary);
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
+  background: var(--color-bg-field);
   border-radius: 8px;
 }
 
@@ -475,27 +417,11 @@ function handleSelectVoice(voiceId: string) {
 
 .dialog h3 {
   margin: 0 0 8px;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--color-text-primary);
 }
 
 .voice-input {
   width: 100%;
-  padding: 10px 12px;
-  background: var(--color-bg-field);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 8px;
-  color: var(--color-text-primary);
-  font-size: 14px;
   margin-bottom: 8px;
-  transition: border-color 0.2s, box-shadow 0.2s;
-}
-
-.voice-input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
 .voice-input.has-error {
@@ -511,7 +437,8 @@ function handleSelectVoice(voiceId: string) {
 .dialog-error {
   padding: 10px 12px;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   margin-bottom: 12px;
   line-height: 1.4;
 }
@@ -534,44 +461,8 @@ function handleSelectVoice(voiceId: string) {
   justify-content: flex-end;
 }
 
-.cancel-button {
-  padding: 10px 20px;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  color: var(--color-text-primary);
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.cancel-button:hover {
-  background: var(--color-bg-tertiary);
-}
-
 .add-button-confirm {
-  padding: 10px 20px;
-  background: var(--color-accent);
-  border: none;
-  border-radius: 8px;
-  color: var(--color-text-white);
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
   gap: 8px;
-}
-
-.add-button-confirm:hover:not(:disabled) {
-  filter: brightness(1.1);
-}
-
-.add-button-confirm:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .spinner {
@@ -586,51 +477,22 @@ function handleSelectVoice(voiceId: string) {
 .limits-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  flex-wrap: wrap;
   padding: 6px 0;
   gap: 8px;
   overflow: hidden;
 }
 
 .limits-counters {
-  font-size: 13px;
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  color: var(--color-text-primary);
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .limits-stale-cue {
   color: var(--color-warning, #e67e22);
   cursor: help;
   margin-left: 4px;
-}
-
-.limits-refresh {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: 4px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  transition: color 0.2s, background 0.2s;
-}
-
-.limits-refresh:hover:not(:disabled) {
-  color: var(--color-text-primary);
-  background: var(--color-bg-tertiary);
-}
-
-.limits-refresh:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
 }
 
 .limits-row-unavailable,
@@ -640,7 +502,8 @@ function handleSelectVoice(voiceId: string) {
 }
 
 .limits-row-unavailable .limits-counters {
-  color: var(--color-text-tertiary);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .limits-row-loading {
@@ -648,8 +511,8 @@ function handleSelectVoice(voiceId: string) {
 }
 
 .limits-row-loading .limits-counters {
-  font-size: 13px;
-  color: var(--color-text-tertiary);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 </style>

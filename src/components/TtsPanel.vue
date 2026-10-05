@@ -17,6 +17,7 @@ import { debugLog, debugError } from '../utils/debug';
 import { t } from '../i18n';
 import { LocalizedError, presentCommandError } from '../ipc/commandError';
 import { useErrorHandler } from '../composables/useErrorHandler';
+import { Ellipsis } from 'lucide-vue-next';
 import { isPiperPhonemizationError } from './ttsProviderSelection';
 import { TELEGRAM_AUTH_KEY, type UseTelegramAuthReturn } from '../composables/useTelegramAuth';
 import TelegramAuthModal from './TelegramAuthModal.vue';
@@ -910,11 +911,13 @@ function dismissStatus() {
       <button
         ref="visibilityButtonRef"
         type="button"
-        class="visibility-button"
+        class="ui-icon-button ui-icon-button--round visibility-button"
         :title="t('tts.visibility.configure')"
         :aria-label="t('tts.visibility.configure')"
         @click="toggleVisibilityPopover"
-      >⋯</button>
+      >
+        <Ellipsis :size="18" />
+      </button>
 
       <div
         v-if="visibilityOpen"
@@ -934,7 +937,7 @@ function dismissStatus() {
               :disabled="entry.id === activeProviderId"
               @change="onVisibilityToggle(entry.id)"
             />
-            <span class="visibility-entry-label">{{ entry.label }}</span>
+            <span class="visibility-entry-label ui-choice-label">{{ entry.label }}</span>
             <span v-if="entry.id === activeProviderId" class="visibility-active">{{ t('tts.visibility.active') }}</span>
           </label>
         </div>
@@ -952,7 +955,7 @@ function dismissStatus() {
               :disabled="entry.id === activeProviderId"
               @change="onVisibilityToggle(entry.id)"
             />
-            <span class="visibility-entry-label">{{ entry.label }}</span>
+            <span class="visibility-entry-label ui-choice-label">{{ entry.label }}</span>
             <span v-if="entry.id === activeProviderId" class="visibility-active">{{ t('tts.visibility.active') }}</span>
           </label>
         </div>
@@ -970,7 +973,7 @@ function dismissStatus() {
               :disabled="entry.id === activeProviderId"
               @change="onVisibilityToggle(entry.id)"
             />
-            <span class="visibility-entry-label">{{ entry.label }}</span>
+            <span class="visibility-entry-label ui-choice-label">{{ entry.label }}</span>
             <span v-if="entry.id === activeProviderId" class="visibility-active">{{ t('tts.visibility.active') }}</span>
           </label>
         </div>
@@ -1096,8 +1099,8 @@ function dismissStatus() {
         class="piper-block"
         :class="{ active: activePiperId !== null }"
       >
-        <div class="piper-block-title">{{ t('tts.piper.title') }}</div>
-        <div class="piper-block-subtitle">{{ t('tts.piper.local_models') }}</div>
+        <div class="piper-block-title ui-section-title">{{ t('tts.piper.title') }}</div>
+        <div class="ui-menu ui-menu--embedded">
         <label
           v-for="p in visiblePiperProviders"
           :key="p.id"
@@ -1110,13 +1113,14 @@ function dismissStatus() {
             :disabled="!!piperLoading[p.id]"
             @change="selectPiperProvider(p.id)"
           />
-          <span class="piper-row-name">{{ p.display_name }}</span>
+          <span class="piper-row-name ui-choice-label">{{ p.display_name }}</span>
           <span
             class="piper-row-status"
             :class="`piper-row-status--${piperRowStatus(p).kind}`"
             :title="piperRowStatus(p).title"
           >{{ piperRowStatus(p).text }}</span>
         </label>
+        </div>
       </div>
     </div>
 
@@ -1138,26 +1142,6 @@ function dismissStatus() {
   margin-bottom: 8px;
 }
 
-.visibility-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.3));
-  border-radius: 50%;
-  background: var(--color-surface, transparent);
-  color: var(--color-text, inherit);
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.visibility-button:hover {
-  border-color: var(--color-text-secondary, rgba(128, 128, 128, 0.6));
-}
-
 .visibility-popover {
   position: absolute;
   top: calc(100% + 6px);
@@ -1166,7 +1150,7 @@ function dismissStatus() {
   min-width: 260px;
   padding: 8px;
   border: 1px solid var(--color-border, rgba(128, 128, 128, 0.3));
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--color-bg-elevated);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
 }
@@ -1203,12 +1187,11 @@ function dismissStatus() {
 
 .visibility-entry-label {
   flex: 1;
-  font-size: 14px;
-  color: var(--color-text, inherit);
 }
 
 .visibility-active {
-  font-size: 12px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   color: var(--color-text-secondary, #888888);
 }
 
@@ -1235,17 +1218,8 @@ function dismissStatus() {
 }
 
 .piper-block-title {
-  margin-bottom: 2px;
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--color-text, inherit);
-}
-
-.piper-block-subtitle {
-  margin-bottom: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text-secondary, #888888);
+  /* With the block's 2px gap, matches its 12px bottom padding. */
+  margin-bottom: 10px;
 }
 
 .piper-row {
@@ -1267,12 +1241,11 @@ function dismissStatus() {
 
 .piper-row-name {
   flex: 1;
-  font-size: 14px;
-  color: var(--color-text, inherit);
 }
 
 .piper-row-status {
-  font-size: 12px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   white-space: nowrap;
 }
 

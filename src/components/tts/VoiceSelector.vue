@@ -28,13 +28,13 @@ function handleChange(event: Event) {
 
 <template>
   <div class="voice-selector">
-    <label>{{ label || t('tts.voice') }}</label>
+    <label class="ui-label">{{ label || t('tts.voice') }}</label>
     <div class="voice-select-wrapper">
       <select
         :value="selectedVoiceId"
         @change="handleChange"
         :disabled="loading"
-        class="voice-select"
+        class="ui-select voice-select"
       >
         <option v-for="voice in voices" :key="voice" :value="voice">
           {{ voice }}
@@ -48,14 +48,12 @@ function handleChange(event: Event) {
 .voice-selector {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--ui-row-label-gap-side);
   flex-wrap: wrap;
 }
 
-.voice-selector label {
-  font-size: 13px;
+.voice-selector .ui-label {
   color: var(--color-text-secondary);
-  font-weight: 500;
   min-width: 60px;
 }
 
@@ -66,35 +64,5 @@ function handleChange(event: Event) {
 
 .voice-select {
   width: 100%;
-  padding: 10px 12px;
-  background: var(--color-bg-field);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
-  color: var(--color-text-primary);
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.voice-select:hover {
-  background: var(--color-bg-field-hover);
-  border-color: var(--color-border-strong);
-}
-
-.voice-select:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-glow);
-}
-
-.voice-select:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.voice-select option {
-  background: var(--select-bg);
-  color: var(--color-text-primary);
-  padding: 0.3rem 0.5rem;
 }
 </style>

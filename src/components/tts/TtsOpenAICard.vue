@@ -70,14 +70,15 @@ function handleProxyToggle(event: Event) {
       <!-- API Key -->
       <div class="setting-group">
         <div class="openai-form-row">
-          <label>{{ t('tts.api_key') }}</label>
+          <label class="ui-label">{{ t('tts.api_key') }}</label>
           <InputWithToggle
             v-model="localApiKey"
             type="password"
             placeholder="sk-..."
             class="openai-input-wide"
+            ui
           />
-          <button @click="handleSaveApiKey" class="save-settings-button">{{ t('common.save') }}</button>
+          <button @click="handleSaveApiKey" class="ui-button ui-button--primary save-settings-button">{{ t('common.save') }}</button>
         </div>
       </div>
 
@@ -100,9 +101,9 @@ function handleProxyToggle(event: Event) {
             type="checkbox"
             :checked="useProxy"
             @change="handleProxyToggle"
-            class="proxy-checkbox"
+            class="ui-choice-input"
           />
-          <label for="openai-use-proxy" class="proxy-checkbox-label">
+          <label for="openai-use-proxy" class="ui-choice-label">
             {{ t('tts.use_socks5') }}
           </label>
         </div>
@@ -114,11 +115,38 @@ function handleProxyToggle(event: Event) {
 <style scoped>
 .card-content-inner {
   padding-top: 8px;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) auto;
+  column-gap: var(--ui-row-label-gap-side);
+  row-gap: var(--ui-row-gap);
 }
 
 .setting-group {
-  margin-top: 16px;
-  margin-bottom: 12px;
+  grid-column: 1 / -1;
+}
+
+.card-content-inner > .setting-group:nth-child(-n + 2),
+.card-content-inner .openai-form-row {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  margin-bottom: 0;
+}
+
+.card-content-inner :deep(.voice-selector) {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  gap: var(--ui-row-label-gap-side);
+}
+
+.card-content-inner :deep(.voice-select-wrapper) {
+  width: 50%;
+  min-width: min(100px, 100%);
+}
+
+.setting-group {
+  margin-bottom: var(--ui-row-gap);
 }
 
 .setting-group:last-child {
@@ -127,17 +155,14 @@ function handleProxyToggle(event: Event) {
 
 /* OpenAI form row */
 .openai-form-row {
-  display: flex;
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
 }
 
-.openai-form-row label {
+.openai-form-row .ui-label {
   min-width: 60px;
-  font-size: 13px;
   color: var(--color-text-secondary);
-  font-weight: 500;
 }
 
 .openai-input-wide {
@@ -146,20 +171,7 @@ function handleProxyToggle(event: Event) {
 }
 
 .save-settings-button {
-  padding: 0.6rem 1.2rem;
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  border: none;
-  border-radius: 10px;
-  color: var(--color-text-white);
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: filter 0.2s;
   flex-shrink: 0;
-}
-
-.save-settings-button:hover {
-  filter: brightness(1.06);
 }
 
 /* Proxy checkbox container */
@@ -167,20 +179,5 @@ function handleProxyToggle(event: Event) {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
-}
-
-.proxy-checkbox {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  accent-color: var(--color-accent);
-}
-
-.proxy-checkbox-label {
-  cursor: pointer;
-  user-select: none;
-  font-size: 14px;
-  color: var(--color-text-primary);
 }
 </style>

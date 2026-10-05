@@ -224,27 +224,24 @@ function handleProxyToggle(event: Event) {
   >
     <div class="card-content-inner">
       <!-- API Key -->
-      <div class="setting-group">
+      <div class="setting-group api-key-group">
         <div class="key-row">
-          <label class="key-label">{{ t('tts.api_key') }}</label>
+          <label class="key-label ui-label">{{ t('tts.api_key') }}</label>
           <InputWithToggle
             :model-value="localApiKey"
             @update:model-value="localApiKey = $event"
             type="password"
             :placeholder="t('tts.api_key_placeholder')"
             class="input-wide"
+            ui
           />
-        </div>
-
-        <div class="key-actions-row">
           <button
-            class="save-button-inline"
-            :class="{ disabled: isSavingKey || !localApiKey.trim() || busy }"
+            class="ui-button ui-button--primary save-button-inline"
             :disabled="isSavingKey || !localApiKey.trim() || busy"
             @click="handleSaveKey"
           >
             <Loader2 v-if="isSavingKey" :size="16" class="spinner" />
-            {{ t('tts.elevenlabs.save_key') }}
+            {{ t('common.save') }}
           </button>
         </div>
 
@@ -258,12 +255,12 @@ function handleProxyToggle(event: Event) {
       <div class="setting-group">
         <div class="model-output-row">
           <div class="control-group">
-            <label>{{ t('tts.elevenlabs.model') }}</label>
+            <label class="ui-label">{{ t('tts.elevenlabs.model') }}</label>
             <select
               v-if="models.length > 0"
               :value="localModelId"
               @change="localModelId = ($event.target as HTMLSelectElement).value"
-              class="setting-select"
+              class="ui-select setting-select"
               :aria-label="t('tts.elevenlabs.model')"
             >
               <option v-if="selectedModelMissing" :value="localModelId" disabled>
@@ -274,23 +271,23 @@ function handleProxyToggle(event: Event) {
               </option>
             </select>
             <button
-              class="catalog-refresh"
+              class="ui-icon-button ui-icon-button--adjacent model-refresh"
               :disabled="modelsLoading || firstLoadLoading || !props.apiKey"
               :title="t('tts.elevenlabs.refresh_models')"
               :aria-label="t('tts.elevenlabs.refresh_models')"
               @click="$emit('refresh-models')"
             >
-              <Loader2 v-if="modelsLoading" :size="14" class="spinner" />
-              <RefreshCw v-else :size="14" />
+              <Loader2 v-if="modelsLoading" :size="18" class="spinner" />
+              <RefreshCw v-else :size="18" />
             </button>
           </div>
 
           <div class="control-group">
-            <label>{{ t('tts.elevenlabs.output_format') }}</label>
+            <label class="ui-label">{{ t('tts.elevenlabs.output_format') }}</label>
             <select
               :value="localOutputFormat"
               @change="localOutputFormat = ($event.target as HTMLSelectElement).value"
-              class="setting-select"
+              class="ui-select setting-select"
             >
               <option v-for="f in outputFormats" :key="f.value" :value="f.value">{{ f.label }}</option>
             </select>
@@ -309,7 +306,7 @@ function handleProxyToggle(event: Event) {
 
         <div class="slider-row">
           <div class="slider-setting">
-            <label>{{ t('tts.elevenlabs.stability') }} {{ localStability.toFixed(2) }}</label>
+            <label class="ui-label"><span>{{ t('tts.elevenlabs.stability') }}</span><span class="slider-value">{{ localStability.toFixed(2) }}</span></label>
             <input
               type="range"
               :value="localStability"
@@ -322,7 +319,7 @@ function handleProxyToggle(event: Event) {
           </div>
 
           <div class="slider-setting">
-            <label>{{ t('tts.elevenlabs.similarity_boost') }} {{ localSimilarityBoost.toFixed(2) }}</label>
+            <label class="ui-label"><span>{{ t('tts.elevenlabs.similarity_boost') }}</span><span class="slider-value">{{ localSimilarityBoost.toFixed(2) }}</span></label>
             <input
               type="range"
               :value="localSimilarityBoost"
@@ -335,7 +332,7 @@ function handleProxyToggle(event: Event) {
           </div>
 
           <div class="slider-setting" :class="{ disabled: !canUseStyle }">
-            <label>{{ t('tts.elevenlabs.style') }} {{ effectiveStyle.toFixed(2) }}</label>
+            <label class="ui-label"><span>{{ t('tts.elevenlabs.style') }}</span><span class="slider-value">{{ effectiveStyle.toFixed(2) }}</span></label>
             <input
               type="range"
               :value="effectiveStyle"
@@ -356,9 +353,9 @@ function handleProxyToggle(event: Event) {
             :checked="effectiveSpeakerBoost"
             :disabled="!canUseSpeakerBoost"
             @change="localUseSpeakerBoost = ($event.target as HTMLInputElement).checked"
-            class="checkbox-input"
+            class="ui-choice-input"
           />
-          <label for="elevenlabs-speaker-boost" class="checkbox-label">
+          <label for="elevenlabs-speaker-boost" class="ui-choice-label" :aria-disabled="!canUseSpeakerBoost">
             {{ t('tts.elevenlabs.use_speaker_boost') }}
           </label>
         </div>
@@ -366,8 +363,7 @@ function handleProxyToggle(event: Event) {
         <div class="apply-row">
           <span v-if="generationDirty" class="dirty-indicator">{{ t('tts.elevenlabs.unsaved_changes') }}</span>
           <button
-            class="save-button-inline"
-            :class="{ disabled: !canApply || isApplying }"
+            class="ui-button ui-button--primary save-button-inline"
             :disabled="!canApply || isApplying"
             @click="handleApply"
           >
@@ -385,9 +381,9 @@ function handleProxyToggle(event: Event) {
             type="checkbox"
             :checked="useProxy"
             @change="handleProxyToggle"
-            class="checkbox-input"
+            class="ui-choice-input"
           />
-          <label for="elevenlabs-use-proxy" class="checkbox-label">
+          <label for="elevenlabs-use-proxy" class="ui-choice-label">
             {{ t('tts.use_socks5') }}
           </label>
         </div>
@@ -396,12 +392,12 @@ function handleProxyToggle(event: Event) {
       <!-- Voice Management -->
       <div class="setting-group">
         <div class="catalog-row">
-          <label class="catalog-label">{{ t('tts.voice') }}</label>
+          <label class="catalog-label ui-label ui-label--secondary">{{ t('tts.voice') }}</label>
           <select
             v-if="voices.length > 0"
             :value="voiceId"
             @change="handleVoiceChange"
-            class="setting-select"
+            class="ui-select setting-select"
             :aria-label="t('tts.voice')"
           >
             <option v-if="selectedVoiceMissing" :value="voiceId" disabled>
@@ -412,14 +408,14 @@ function handleProxyToggle(event: Event) {
             </option>
           </select>
           <button
-            class="catalog-refresh"
+            class="ui-icon-button ui-icon-button--adjacent"
             :disabled="voicesLoading || firstLoadLoading || !props.apiKey"
             :title="t('tts.elevenlabs.refresh_voices')"
             :aria-label="t('tts.elevenlabs.refresh_voices')"
             @click="$emit('refresh-voices')"
           >
-            <Loader2 v-if="voicesLoading" :size="14" class="spinner" />
-            <RefreshCw v-else :size="14" />
+            <Loader2 v-if="voicesLoading" :size="18" class="spinner" />
+            <RefreshCw v-else :size="18" />
           </button>
         </div>
 
@@ -445,19 +441,16 @@ function handleProxyToggle(event: Event) {
 }
 
 .setting-group {
-  margin-top: 16px;
-  margin-bottom: 12px;
+  margin-bottom: var(--ui-row-gap);
 }
 
 .setting-group:last-child {
   margin-bottom: 0;
 }
 
-.setting-group > label {
+.setting-group > .ui-label {
   display: block;
-  font-size: 13px;
   color: var(--color-text-secondary);
-  font-weight: 500;
   margin-bottom: 8px;
 }
 
@@ -468,17 +461,13 @@ function handleProxyToggle(event: Event) {
   flex-wrap: wrap;
 }
 
-.key-actions-row {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 8px;
+.api-key-group {
+  padding-bottom: var(--ui-row-gap);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .key-label {
-  min-width: 60px;
-  font-size: 13px;
   color: var(--color-text-secondary);
-  font-weight: 500;
   flex-shrink: 0;
 }
 
@@ -502,9 +491,6 @@ function handleProxyToggle(event: Event) {
 
 .catalog-label {
   flex-shrink: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--color-text-primary);
 }
 
 .catalog-state {
@@ -521,9 +507,10 @@ function handleProxyToggle(event: Event) {
   gap: 8px;
   padding: 10px 12px;
   border: 1px dashed var(--color-border-strong);
-  border-radius: 10px;
+  border-radius: 8px;
   color: var(--color-text-secondary);
-  font-size: 13px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
 }
 
 .catalog-error {
@@ -532,7 +519,8 @@ function handleProxyToggle(event: Event) {
   border-radius: 8px;
   background: var(--danger-bg-weak);
   color: var(--color-error, #e74c3c);
-  font-size: 13px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
 }
 
 .first-load-hint {
@@ -540,57 +528,92 @@ function handleProxyToggle(event: Event) {
   align-items: center;
   gap: 8px;
   margin-top: 8px;
-  font-size: 13px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   color: var(--color-text-secondary);
+}
+
+.card-content-inner {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) auto max-content minmax(0, 1fr);
+  column-gap: var(--ui-row-label-gap-side);
+}
+
+.card-content-inner > .setting-group {
+  grid-column: 1 / -1;
+}
+
+.card-content-inner > .setting-group:nth-child(-n + 2) {
+  display: grid;
+  grid-template-columns: subgrid;
+}
+
+.card-content-inner > .setting-group:nth-child(-n + 2) > * {
+  grid-column: 1 / -1;
+}
+
+.card-content-inner .key-row {
+  display: grid;
+  grid-template-columns: subgrid;
+}
+
+.key-row .input-wide {
+  grid-column: 2 / 5;
+  min-width: 0;
 }
 
 .model-output-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: 12px 16px;
+  gap: 12px;
   min-width: 0;
 }
 
 .model-output-row .control-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  display: contents;
   min-width: 0;
 }
 
-.model-output-row .control-group > label {
+.model-output-row .model-refresh {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.model-output-row .control-group:first-child > .ui-label {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.model-output-row .control-group:first-child > .setting-select {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.model-output-row .control-group:last-child > .ui-label {
+  grid-column: 4;
+  grid-row: 1;
+}
+
+.model-output-row .control-group:last-child > .setting-select {
+  grid-column: 5;
+  grid-row: 1;
+}
+
+.model-output-row .control-group > .ui-label {
   flex-shrink: 0;
-  font-size: 13px;
   color: var(--color-text-secondary);
-  font-weight: 500;
 }
 
 .model-output-row .setting-select {
   flex: 1;
   min-width: 0;
+  width: 100%;
 }
 
 .setting-select {
   flex: 1;
   min-width: 0;
-  padding: 10px 12px;
-  background: var(--color-bg-field);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
-  color: var(--color-text-primary);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.setting-select:focus {
-  outline: none;
-  border-color: var(--color-accent);
-}
-
-.setting-select option {
-  background: var(--select-bg);
-  color: var(--color-text-primary);
 }
 
 .slider-row {
@@ -606,11 +629,21 @@ function handleProxyToggle(event: Event) {
   gap: 12px;
 }
 
-.slider-setting label {
-  min-width: 140px;
-  font-size: 13px;
+.slider-setting .ui-label {
+  width: 170px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
   color: var(--color-text-secondary);
-  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.slider-value {
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+  width: 4ch;
+  text-align: right;
   flex-shrink: 0;
 }
 
@@ -628,19 +661,7 @@ function handleProxyToggle(event: Event) {
   margin-top: 12px;
 }
 
-.checkbox-input {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  accent-color: var(--color-accent);
-}
 
-.checkbox-label {
-  cursor: pointer;
-  user-select: none;
-  font-size: 14px;
-  color: var(--color-text-primary);
-}
 
 .apply-row {
   display: flex;
@@ -649,39 +670,24 @@ function handleProxyToggle(event: Event) {
   align-items: center;
   justify-content: flex-end;
   margin-top: 0.5rem;
-  padding-top: 0.5rem;
+  padding-top: 8px;
   border-top: 1px solid var(--color-border);
+}
+
+.card-content-inner > .setting-group:nth-child(2) {
+  margin-bottom: var(--ui-section-gap);
 }
 
 .dirty-indicator {
   margin-right: auto;
-  font-size: 13px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   color: var(--color-warning, #e67e22);
 }
 
 .save-button-inline {
-  padding: 0.6rem 1.2rem;
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  border: none;
-  border-radius: 10px;
-  color: var(--color-text-white);
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-  display: inline-flex;
-  align-items: center;
   gap: 8px;
   white-space: nowrap;
-}
-
-.save-button-inline:hover:not(:disabled) {
-  filter: brightness(1.06);
-}
-
-.save-button-inline:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .spinner {
@@ -693,37 +699,13 @@ function handleProxyToggle(event: Event) {
   to { transform: rotate(360deg); }
 }
 
-.catalog-refresh {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  background: var(--color-accent);
-  border: none;
-  border-radius: 8px;
-  color: var(--color-text-white);
-  cursor: pointer;
-  transition: filter 0.2s;
-}
-
-.catalog-refresh:hover:not(:disabled) {
-  filter: brightness(1.1);
-}
-
-.catalog-refresh:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
 .empty-voices {
   padding: 1rem;
   text-align: center;
   color: var(--color-text-secondary);
-  font-size: 13px;
-  background: var(--color-bg-secondary);
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
+  background: var(--color-bg-field);
   border-radius: 8px;
 }
 
@@ -732,9 +714,10 @@ function handleProxyToggle(event: Event) {
   min-width: 0;
   padding: 10px 12px;
   border: 1px dashed var(--color-border-strong);
-  border-radius: 10px;
+  border-radius: 8px;
   color: var(--color-text-secondary);
-  font-size: 13px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
 }
 
 .slider-setting.disabled,
@@ -743,7 +726,7 @@ function handleProxyToggle(event: Event) {
 }
 
 .setting-slider:disabled,
-.checkbox-input:disabled {
+.checkbox-container .ui-choice-input:disabled {
   cursor: not-allowed;
 }
 
@@ -753,11 +736,17 @@ function handleProxyToggle(event: Event) {
     row-gap: 10px;
   }
 
+  .model-output-row .control-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
   .slider-setting {
     flex-wrap: wrap;
   }
 
-  .slider-setting label {
+  .slider-setting .ui-label {
     min-width: 0;
     width: 100%;
   }

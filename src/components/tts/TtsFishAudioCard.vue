@@ -140,13 +140,14 @@ function handleProxyToggle(event: Event) {
       <!-- API Key -->
       <div class="setting-group">
         <div class="form-row">
-          <label>{{ t('tts.api_key') }}</label>
+          <label class="ui-label">{{ t('tts.api_key') }}</label>
           <InputWithToggle
             :model-value="localApiKey"
             @update:model-value="localApiKey = $event"
             type="password"
             :placeholder="t('tts.api_key_placeholder')"
             class="input-wide"
+            ui
           />
         </div>
       </div>
@@ -156,11 +157,11 @@ function handleProxyToggle(event: Event) {
         <!-- Format and Sample Rate in one row -->
         <div class="audio-settings-row">
           <div class="audio-setting">
-            <label>{{ t('tts.format') }}</label>
+            <label class="ui-label">{{ t('tts.format') }}</label>
             <select
               :value="localFormat"
               @change="localFormat = ($event.target as HTMLSelectElement).value"
-              class="setting-select"
+              class="ui-select setting-select"
             >
               <option v-for="f in audioFormats" :key="f.value" :value="f.value">
                 {{ f.label }}
@@ -169,11 +170,11 @@ function handleProxyToggle(event: Event) {
           </div>
 
           <div class="audio-setting">
-            <label>{{ t('tts.sample_rate') }}</label>
+            <label class="ui-label">{{ t('tts.sample_rate') }}</label>
             <select
               :value="localSampleRate"
               @change="localSampleRate = Number(($event.target as HTMLSelectElement).value)"
-              class="setting-select"
+              class="ui-select setting-select"
             >
               <option v-for="sr in sampleRates" :key="sr.value" :value="sr.value">
                 {{ sr.label }}
@@ -185,7 +186,7 @@ function handleProxyToggle(event: Event) {
         <!-- Temperature in separate row -->
         <div class="audio-settings-row">
           <div class="audio-setting">
-            <label>{{ t('tts.temperature') }} {{ localTemperature }}</label>
+            <label class="ui-label"><span class="ui-label--secondary">{{ t('tts.temperature') }}</span> <span class="temperature-value">{{ localTemperature }}</span></label>
             <input
               type="range"
               :value="localTemperature"
@@ -203,8 +204,7 @@ function handleProxyToggle(event: Event) {
           <button
             @click="handleSaveAll"
             :disabled="isSaving"
-            class="save-button-inline"
-            :class="{ disabled: isSaving }"
+            class="ui-button ui-button--primary save-button-inline"
           >
             <Loader2 v-if="isSaving" :size="16" class="spinner" />
             {{ isSaving ? t('tts.saving') : t('common.save') }}
@@ -220,9 +220,9 @@ function handleProxyToggle(event: Event) {
             type="checkbox"
             :checked="useProxy"
             @change="handleProxyToggle"
-            class="proxy-checkbox"
+            class="ui-choice-input"
           />
-          <label for="fish-use-proxy" class="proxy-checkbox-label">
+          <label for="fish-use-proxy" class="ui-choice-label">
             {{ t('tts.use_socks5') }}
           </label>
         </div>
@@ -231,21 +231,19 @@ function handleProxyToggle(event: Event) {
       <!-- Voice Management -->
       <div class="setting-group">
         <div class="voice-header">
-          <label>{{ t('tts.voices') }}</label>
-          <button @click="handleOpenModelPicker" class="add-model-button">
-            <Plus :size="16" />
-            {{ t('tts.add') }}
+          <label class="ui-label ui-label--secondary">{{ t('tts.voices') }}</label>
+          <button @click="handleOpenModelPicker" class="ui-icon-button" :title="t('tts.add_voice')" :aria-label="t('tts.add_voice')">
+            <Plus :size="18" />
           </button>
         </div>
 
-        <div v-if="voices.length > 0" class="voice-list">
+        <div v-if="voices.length > 0" class="voice-list ui-menu ui-menu--embedded">
           <div
             v-for="voice in voices"
             :key="voice.id"
-            :class="['voice-item', { active: referenceId === voice.id }]"
-            @click="$emit('select-voice', voice.id)"
+            :class="['voice-item', { 'ui-menu-item--selected': referenceId === voice.id }]"
           >
-            <div class="voice-info">
+            <button class="voice-info ui-menu-item" @click="$emit('select-voice', voice.id)">
               <div class="voice-title">{{ voice.title }}</div>
               <div class="voice-details">
                 <span v-if="voice.languages.length" class="voice-languages">
@@ -253,11 +251,11 @@ function handleProxyToggle(event: Event) {
                 </span>
                 <span v-if="voice.description" class="voice-description">{{ voice.description }}</span>
               </div>
-            </div>
+            </button>
 
             <button
               @click="handleRemoveVoice(voice.id, voice.title, $event)"
-              class="remove-button"
+              class="ui-icon-button ui-action--danger remove-button"
               :title="t('tts.delete')"
               :aria-label="t('tts.delete')"
             >
@@ -287,19 +285,16 @@ function handleProxyToggle(event: Event) {
 }
 
 .setting-group {
-  margin-top: 16px;
-  margin-bottom: 12px;
+  margin-bottom: var(--ui-row-gap);
 }
 
 .setting-group:last-child {
   margin-bottom: 0;
 }
 
-.setting-group > label {
+.setting-group > .ui-label {
   display: block;
-  font-size: 13px;
   color: var(--color-text-secondary);
-  font-weight: 500;
   margin-bottom: 8px;
 }
 
@@ -310,11 +305,8 @@ function handleProxyToggle(event: Event) {
   flex-wrap: wrap;
 }
 
-.form-row label {
-  min-width: 60px;
-  font-size: 13px;
+.form-row .ui-label {
   color: var(--color-text-secondary);
-  font-weight: 500;
 }
 
 .input-wide {
@@ -334,27 +326,7 @@ function handleProxyToggle(event: Event) {
 }
 
 .save-button-inline {
-  padding: 0.6rem 1.2rem;
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  border: none;
-  border-radius: 10px;
-  color: var(--color-text-white);
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
   gap: 8px;
-}
-
-.save-button-inline:hover:not(:disabled) {
-  filter: brightness(1.06);
-}
-
-.save-button-inline:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .spinner {
@@ -373,60 +345,27 @@ function handleProxyToggle(event: Event) {
   margin-bottom: 12px;
 }
 
-.voice-header label {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--color-text-primary);
+.voice-header .ui-label {
   margin-bottom: 0;
-}
-
-.add-model-button {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0.5rem 1rem;
-  background: var(--color-accent);
-  border: none;
-  border-radius: 8px;
-  color: var(--color-text-white);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: filter 0.2s;
-}
-
-.add-model-button:hover {
-  filter: brightness(1.1);
 }
 
 .voice-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
   max-height: 300px;
   overflow-y: auto;
-  margin-bottom: 8px;
 }
 
 .voice-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 0.75rem;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
+  padding-right: 4px;
+  border-radius: var(--ui-radius-menu-item);
 }
 
 .voice-item:hover {
-  background: var(--color-bg-tertiary);
-}
-
-.voice-item.active {
-  border-color: var(--color-accent);
-  background: var(--color-accent-alpha);
+  background: var(--color-bg-field-hover);
 }
 
 .voice-info {
@@ -435,10 +374,13 @@ function handleProxyToggle(event: Event) {
 }
 
 .voice-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--color-text-primary);
+  color: inherit;
   margin-bottom: 2px;
+}
+
+.voice-item.ui-menu-item--selected .voice-info {
+  color: inherit;
+  font-weight: inherit;
 }
 
 .voice-details {
@@ -450,7 +392,7 @@ function handleProxyToggle(event: Event) {
 .voice-languages {
   font-size: 11px;
   text-transform: uppercase;
-  color: var(--color-text-tertiary);
+  color: var(--color-text-muted);
   flex-shrink: 0;
 }
 
@@ -464,33 +406,13 @@ function handleProxyToggle(event: Event) {
   min-width: 0;
 }
 
-.remove-button {
-  margin: 0;
-  padding: 0;
-  background: var(--danger-bg-weak);
-  color: var(--color-text-white);
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.2s;
-  width: 32px;
-  height: 32px;
-  flex-shrink: 0;
-}
-
-.remove-button:hover {
-  background: var(--danger-bg-hover);
-}
-
 .empty-voices {
   padding: 1rem;
   text-align: center;
   color: var(--color-text-secondary);
-  font-size: 13px;
-  background: var(--color-bg-secondary);
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
+  background: var(--color-bg-field);
   border-radius: 8px;
 }
 
@@ -511,37 +433,50 @@ function handleProxyToggle(event: Event) {
   flex: 1;
 }
 
-.audio-setting label {
-  min-width: 60px;
-  font-size: 13px;
+.audio-setting .ui-label {
   color: var(--color-text-secondary);
-  font-weight: 500;
+}
+
+.card-content-inner {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content minmax(0, 1fr);
+  column-gap: var(--ui-row-label-gap-side);
+}
+
+.card-content-inner > .setting-group {
+  grid-column: 1 / -1;
+}
+
+.card-content-inner > .setting-group:nth-child(-n + 2),
+.card-content-inner > .setting-group:first-child .form-row,
+.card-content-inner > .setting-group:nth-child(2) > .audio-settings-row:first-child {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  align-items: center;
+}
+
+.card-content-inner > .setting-group:first-child .input-wide {
+  grid-column: 2 / -1;
+  min-width: 0;
+}
+
+.card-content-inner > .setting-group:nth-child(2) > .audio-settings-row:first-child .audio-setting {
+  display: contents;
+}
+
+.card-content-inner > .setting-group:nth-child(2) > .audio-settings-row:not(:first-child),
+.card-content-inner > .setting-group:nth-child(2) > .button-row {
+  grid-column: 1 / -1;
 }
 
 .setting-select {
   flex: 1;
-  padding: 10px 12px;
-  background: var(--color-bg-field);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
+}
+
+.temperature-value {
   color: var(--color-text-primary);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.setting-select:focus {
-  outline: none;
-  border-color: var(--color-accent);
-}
-
-.setting-select option {
-  background: var(--select-bg);
-  color: var(--color-text-primary);
-  padding: 0.3rem 0.5rem;
-}
-
-.setting-select option:hover {
-  background: var(--select-bg-hover);
+  font-variant-numeric: tabular-nums;
 }
 
 .temperature-slider {
@@ -554,20 +489,5 @@ function handleProxyToggle(event: Event) {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
-}
-
-.proxy-checkbox {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  accent-color: var(--color-accent);
-}
-
-.proxy-checkbox-label {
-  cursor: pointer;
-  user-select: none;
-  font-size: 14px;
-  color: var(--color-text-primary);
 }
 </style>

@@ -137,7 +137,7 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
     <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="fish-model-picker-title">
       <div class="modal-header">
         <h2 id="fish-model-picker-title">{{ t('tts.add_voice') }}</h2>
-        <button type="button" @click="handleClose" class="close-button" :aria-label="t('tts.fish.picker.close_aria')">&times;</button>
+        <button type="button" @click="handleClose" class="ui-icon-button close-button" :aria-label="t('tts.fish.picker.close_aria')" title="×">&times;</button>
       </div>
 
       <div class="modal-body">
@@ -151,7 +151,7 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
             class="search-input"
             @keyup.enter="handleSearch"
           />
-          <button type="button" @click="handleSearch" class="search-button">{{ t('tts.fish.picker.search') }}</button>
+          <button type="button" @click="handleSearch" class="ui-button ui-button--primary search-button">{{ t('tts.fish.picker.search') }}</button>
         </div>
 
         <!-- Models list -->
@@ -209,7 +209,7 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
 
           <!-- Load more -->
           <div v-if="hasMore && !loading" class="load-more-container">
-            <button @click.stop="loadMore" class="load-more-button">
+            <button @click.stop="loadMore" class="ui-button load-more-button">
               {{ t('tts.fish.picker.load_more') }}
             </button>
           </div>
@@ -259,25 +259,19 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
 }
 
 .modal-header h2 {
-  font-size: 1.25rem;
-  font-weight: 600;
+  font-size: var(--ui-text-size-section-title);
+  font-weight: var(--ui-text-weight-section-title);
   color: var(--color-text-primary);
   margin: 0;
 }
 
 .close-button {
-  background: none;
-  border: none;
-  font-size: 2rem;
-  color: var(--color-text-secondary);
-  cursor: pointer;
+  font-size: 1.1rem;
   line-height: 1;
-  padding: 0;
-  width: 2rem;
-  height: 2rem;
+  color: var(--color-text-secondary);
 }
 
-.close-button:hover {
+.close-button:hover:not(:disabled) {
   color: var(--color-text-primary);
 }
 
@@ -306,12 +300,16 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
 
 .search-input {
   flex: 1;
-  padding: 0.75rem 1rem 0.75rem 2.5rem;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
+  min-height: var(--ui-control-min-height);
+  box-sizing: border-box;
+  padding: var(--ui-control-padding-y) var(--ui-control-padding-x) var(--ui-control-padding-y) 2.5rem;
+  background: var(--color-bg-field);
+  border: var(--ui-border-width) solid var(--color-border);
+  border-radius: var(--ui-radius);
   color: var(--color-text-primary);
-  font-size: 14px;
+  font-size: var(--ui-text-size-control);
+  font-weight: var(--ui-text-weight-control);
+  font-family: inherit;
 }
 
 .search-input:focus {
@@ -320,20 +318,7 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
 }
 
 .search-button {
-  padding: 0.75rem 1.5rem;
-  background: var(--color-accent);
-  border: none;
-  border-radius: 8px;
-  color: var(--color-text-white);
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: filter 0.2s;
   flex-shrink: 0;
-}
-
-.search-button:hover {
-  filter: brightness(1.1);
 }
 
 .error-message {
@@ -341,7 +326,7 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
   background: rgba(239, 68, 68, 0.1);
   border: 1px solid rgba(239, 68, 68, 0.3);
   border-radius: 8px;
-  color: var(--color-error);
+  color: var(--danger-text-bright);
   text-align: center;
 }
 
@@ -382,7 +367,7 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
   display: flex;
   gap: 1rem;
   padding: 1rem;
-  background: var(--color-bg-secondary);
+  background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
   border-radius: 8px;
   cursor: pointer;
@@ -390,7 +375,7 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
 }
 
 .model-item:hover {
-  background: var(--color-bg-tertiary);
+  background: var(--color-bg-field-hover);
   border-color: var(--color-accent);
 }
 
@@ -422,7 +407,7 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--color-bg-secondary);
+  background: var(--color-bg-field);
 }
 
 .model-info {
@@ -431,14 +416,15 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
 }
 
 .model-title {
-  font-size: 1rem;
-  font-weight: 600;
+  font-size: var(--ui-text-size-label);
+  font-weight: var(--ui-text-weight-label);
   color: var(--color-text-primary);
   margin-bottom: 0.25rem;
 }
 
 .model-description {
-  font-size: 0.875rem;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   color: var(--color-text-secondary);
   margin-bottom: 0.5rem;
   overflow: hidden;
@@ -449,7 +435,8 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
 .model-meta {
   display: flex;
   gap: 0.75rem;
-  font-size: 0.75rem;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
 }
 
 .model-languages {
@@ -457,7 +444,7 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
 }
 
 .model-author {
-  color: var(--color-text-tertiary);
+  color: var(--color-text-muted);
 }
 
 .load-more-container {
@@ -467,18 +454,11 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
 }
 
 .load-more-button {
-  padding: 0.75rem 1.5rem;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  color: var(--color-text-primary);
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.2s;
+  background: var(--btn-neutral-bg);
 }
 
 .load-more-button:hover {
-  background: var(--color-bg-tertiary);
+  background: var(--btn-neutral-hover);
   border-color: var(--color-accent);
 }
 

@@ -54,15 +54,15 @@ function handleSave() {
       <div class="card-subtitle">{{ t('tts.local.desc') }}</div>
       <div class="setting-group">
         <div class="local-url-row">
-          <label>URL</label>
+          <label class="ui-label">URL</label>
           <input
             v-model="inputUrl"
             @keydown="handleUrlKeydown"
             type="text"
             placeholder="http://127.0.0.1:8124"
-            class="local-url-input"
+            class="ui-input local-url-input"
           />
-          <button @click="handleSave" class="save-url-button">{{ t('common.save') }}</button>
+          <button @click="handleSave" class="ui-button ui-button--primary save-url-button">{{ t('common.save') }}</button>
         </div>
       </div>
     </div>
@@ -75,15 +75,14 @@ function handleSave() {
 }
 
 .card-subtitle {
-  font-size: 12px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   color: var(--color-text-secondary);
-  font-weight: 400;
   margin-bottom: 16px;
 }
 
 .setting-group {
-  margin-top: 16px;
-  margin-bottom: 12px;
+  margin-bottom: var(--ui-row-gap);
 }
 
 .setting-group:last-child {
@@ -99,55 +98,18 @@ function handleSave() {
   margin-bottom: 8px;
 }
 
-.local-url-row label {
+.local-url-row .ui-label {
   min-width: 60px;
-  font-size: 13px;
   color: var(--color-text-secondary);
-  font-weight: 500;
 }
 
 .local-url-input {
   flex: 1;
   min-width: 200px;
-  width: auto;
-  padding: 10px 12px;
-  margin: 0;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
-  background: var(--color-bg-field-hover);
-  color: var(--color-text-primary);
-  font-size: 14px;
-  transition: all 0.15s ease;
-  box-sizing: border-box;
-}
-
-.local-url-input:hover {
-  background: var(--input-bg-strong);
-  border-color: var(--color-border-strong);
-}
-
-.local-url-input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
 .save-url-button {
-  padding: 0.6rem 1.2rem;
-  margin: 0;
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  border: none;
-  border-radius: 10px;
-  color: var(--color-text-white);
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
   white-space: nowrap;
-  transition: filter 0.2s;
   flex-shrink: 0;
-}
-
-.save-url-button:hover {
-  filter: brightness(1.06);
 }
 </style>
