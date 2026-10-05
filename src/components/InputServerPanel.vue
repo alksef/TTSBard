@@ -42,16 +42,16 @@ const messageBoxClass = computed(() => (message.value ? messageType.value : ''))
 
 <template>
   <div class="input-server-panel">
-    <div v-if="message" class="message-box" :class="messageBoxClass">
+    <div v-if="message" class="message-box ui-status" :class="messageBoxClass">
       {{ message }}
     </div>
 
-    <section class="settings-section">
+    <section class="settings-section ui-section">
       <div class="section-header server-header">
-        <h2>{{ t('input_server.server') }}</h2>
+        <h2 class="ui-section-title">{{ t('input_server.server') }}</h2>
         <div class="server-status">
           <span
-            class="status-indicator"
+            class="status-indicator ui-status"
             :class="{
               running: isRunning,
               starting: status.state === 'starting',
@@ -62,191 +62,193 @@ const messageBoxClass = computed(() => (message.value ? messageType.value : ''))
           </span>
           <template v-if="status.state === 'running' || status.state === 'starting'">
             <button
-              class="status-button stop"
+              class="status-button stop ui-icon-button ui-action--stop"
               :disabled="stopPending"
               :title="t('input_server.stop')"
               :aria-label="t('input_server.stop')"
               @click="stopInputServer"
             >
-              <Square :size="14" />
+              <Square :size="18" />
             </button>
           </template>
           <template v-else>
             <button
-              class="status-button start"
+              class="status-button start ui-icon-button ui-icon-button--accent"
               :class="{ disabled: !isPortValid }"
               :disabled="!isPortValid || startPending"
               :title="t('input_server.start')"
               :aria-label="t('input_server.start')"
               @click="startInputServer"
             >
-              <Play :size="14" />
+              <Play :size="18" />
             </button>
             <button
-              class="status-button stop disabled"
+              class="status-button stop disabled ui-icon-button ui-action--stop"
               :title="t('input_server.stop')"
               :aria-label="t('input_server.stop')"
               disabled
             >
-              <Square :size="14" />
+              <Square :size="18" />
             </button>
           </template>
         </div>
       </div>
 
-      <div v-if="statusError" class="external-access-warning">
+      <div v-if="statusError" class="external-access-warning ui-status">
         <AlertTriangle :size="14" />
         <span>{{ statusError }}</span>
       </div>
 
-      <div class="setting-row">
-        <label class="checkbox-label">
+      <div class="ui-row">
+        <label class="ui-choice-label">
           <input
             type="checkbox"
             v-model="settings.start_on_boot"
             :disabled="loading"
             @change="saveSettings"
+            class="ui-choice-input"
           />
           <span>{{ t('input_server.start_on_boot') }}</span>
         </label>
       </div>
 
-      <div class="setting-row">
-        <label>{{ t('input_server.port') }}</label>
-        <div class="address-inputs">
+      <div class="ui-row port-setting-row">
+        <label class="ui-label">{{ t('input_server.port') }}</label>
+        <div class="address-inputs ui-field-group">
           <input
             type="number"
             v-model.number="settings.port"
             min="1024"
             max="65535"
-            class="address-port"
-            :class="{ 'input-error': !isPortValid }"
+            class="ui-input address-port"
+            :aria-invalid="!isPortValid ? 'true' : undefined"
             :disabled="isStartingOrRunning"
             placeholder="10101"
           />
-          <button class="save-button-inline" :disabled="loading" @click="saveSettings">
+          <button class="save-button-inline ui-button ui-button--primary" :disabled="loading" @click="saveSettings">
             {{ t('common.save') }}
           </button>
         </div>
-        <span v-if="!isPortValid" class="error-text">{{ t('input_server.port_error') }}</span>
+        <span v-if="!isPortValid" class="error-text ui-status">{{ t('input_server.port_error') }}</span>
       </div>
     </section>
 
-    <div class="info-callout">
+    <div class="info-callout ui-status">
       <Info :size="16" class="info-icon" />
       <span>
         {{ t('input_server.info_callout') }}
       </span>
     </div>
 
-    <section class="settings-section">
-      <h2>{{ t('input_server.connection') }}</h2>
+    <section class="settings-section ui-section">
+      <h2 class="ui-section-title">{{ t('input_server.connection') }}</h2>
 
-      <h3 class="subsection-heading">{{ t('input_server.web_form') }}</h3>
+      <h3 class="subsection-heading ui-group-title">{{ t('input_server.web_form') }}</h3>
 
       <div class="connection-grid">
         <div class="connection-row">
-          <label class="row-label">{{ t('input_server.local_url_label') }}</label>
-          <div class="url-display url-display-full">
-            <label class="url-code url-code-wide">{{ overlayUrl }}</label>
+          <label class="row-label ui-label ui-label--secondary">{{ t('input_server.local_url_label') }}</label>
+          <div class="url-display url-display-full ui-composite">
+            <label class="ui-input url-code url-code-wide ui-composite-field">{{ overlayUrl }}</label>
             <button
-              class="icon-button"
+              class="ui-icon-button ui-icon-button--adjacent ui-composite-action"
               :title="t('input_server.copy_overlay')"
               :aria-label="t('input_server.copy_overlay')"
               @click="copyOverlayUrl"
             >
-              <Copy :size="16" />
+              <Copy :size="18" />
             </button>
           </div>
         </div>
 
         <div class="connection-row">
-          <label class="row-label">{{ t('input_server.lan_url_label') }}</label>
-          <div class="url-display url-display-full">
-            <label class="url-code url-code-wide">
+          <label class="row-label ui-label ui-label--secondary">{{ t('input_server.lan_url_label') }}</label>
+          <div class="url-display url-display-full ui-composite">
+            <label class="ui-input url-code url-code-wide ui-composite-field">
               {{ lanUrl ?? t('input_server.lan_url_unavailable') }}
             </label>
             <button
-              class="icon-button"
+              class="ui-icon-button ui-icon-button--adjacent ui-composite-action"
               :title="t('input_server.copy_lan_url')"
               :aria-label="t('input_server.copy_lan_url')"
               :disabled="!lanUrl"
               :class="{ disabled: !lanUrl }"
               @click="copyLanUrl"
             >
-              <Copy :size="16" />
+              <Copy :size="18" />
             </button>
           </div>
         </div>
 
         <div class="connection-row connection-token-row">
-          <label class="row-label">{{ t('input_server.token.label') }}</label>
-          <div class="token-field-group">
+          <label class="row-label ui-label ui-label--secondary">{{ t('input_server.token.label') }}</label>
+          <div class="token-field-group ui-composite">
             <InputWithToggle
               :model-value="accessToken ?? ''"
               :label="t('input_server.token.label')"
               type="password"
               readonly
+              ui
               :placeholder="t('input_server.token.not_generated')"
               :disabled="!tokenAvailable"
-              class="token-field"
+              class="token-field ui-composite-field"
             />
             <button
-              class="icon-button"
+              class="ui-icon-button ui-icon-button--adjacent ui-composite-action"
               :title="t('input_server.token.copy')"
               :aria-label="t('input_server.token.copy')"
               :disabled="!tokenAvailable || regeneratePending"
               :class="{ disabled: !tokenAvailable || regeneratePending }"
               @click="copyToken"
             >
-              <Copy :size="16" />
+              <Copy :size="18" />
             </button>
           </div>
           <button
-            class="icon-button danger-button"
+            class="ui-icon-button ui-icon-button--adjacent danger-button ui-action--danger"
             :title="t('input_server.token.regenerate')"
             :aria-label="t('input_server.token.regenerate')"
             :disabled="regeneratePending"
             :class="{ disabled: regeneratePending }"
             @click="regenerateToken"
           >
-            <RefreshCw :size="16" />
+            <RefreshCw :size="18" />
           </button>
         </div>
       </div>
 
       <div class="subsection-divider"></div>
 
-      <h3 class="subsection-heading">{{ t('input_server.speech_api') }}</h3>
+      <h3 class="subsection-heading ui-group-title">{{ t('input_server.speech_api') }}</h3>
       <p class="api-summary">
         <span>POST <code class="inline-code">&lt;url&gt;/v1/speech</code></span>
         <span>JSON <code class="inline-code">{"text":"реплика"}</code></span>
       </p>
     </section>
 
-    <section class="settings-section">
-      <h2>{{ t('input_server.test.title') }}</h2>
-      <div class="setting-row">
+    <section class="settings-section ui-section">
+      <h2 class="ui-section-title">{{ t('input_server.test.title') }}</h2>
+      <div class="ui-row">
         <input
           type="text"
           v-model="testText"
           :placeholder="t('input_server.test.placeholder')"
-          class="test-input"
+          class="ui-input test-input"
           @keyup.enter="sendTest"
         />
         <button
-          class="test-button"
+          class="test-button ui-button ui-button--primary"
           :disabled="!testText.trim() || testPending"
           @click="sendTest"
         >
           {{ testPending ? t('input_server.test.sending') : t('input_server.test.send') }}
         </button>
       </div>
-      <div v-if="testResult" class="test-result" :class="testResult.status">
+      <div v-if="testResult" class="test-result ui-status" :class="testResult.status">
         <template v-if="testResult.status === 'queued'">{{ t('input_server.test.queued') }}</template>
         <template v-else>{{ t('input_server.test.pending_review') }}</template>
       </div>
-      <div v-else-if="testError" class="test-result error">{{ testError }}</div>
+      <div v-else-if="testError" class="test-result error ui-status">{{ testError }}</div>
     </section>
   </div>
 </template>
@@ -260,9 +262,7 @@ const messageBoxClass = computed(() => (message.value ? messageType.value : ''))
 h2 {
   margin-top: 0;
   margin-bottom: 1rem;
-  font-size: 1.1rem;
   color: var(--color-text-primary);
-  font-weight: 600;
 }
 
 .message-box {
@@ -272,8 +272,6 @@ h2 {
   transform: translateX(-50%);
   padding: 0.4rem 0.75rem;
   border-radius: 8px;
-  font-size: 12px;
-  font-weight: 500;
   z-index: 1000;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   backdrop-filter: blur(10px);
@@ -317,14 +315,12 @@ h2 {
   }
 }
 
+/* Decorative card surface stays local; padding and rhythm come from ui-section. */
 .settings-section {
-  margin-bottom: 1.5rem;
-  padding: 12px 16px;
   background: var(--color-bg-field);
   border: 1px solid var(--color-border);
   border-radius: 12px;
   backdrop-filter: blur(8px);
-  font-size: 0.95rem;
 }
 
 .section-header {
@@ -336,14 +332,14 @@ h2 {
 
 .server-header {
   padding-top: 0;
-  padding-bottom: 0.75rem;
+  padding-bottom: 8px;
   border-bottom: 1px solid var(--color-border);
   margin-bottom: 1rem;
   align-items: flex-start;
 }
 
 .server-header h2 {
-  margin-top: 0;
+  margin: 0;
 }
 
 .server-status {
@@ -353,10 +349,8 @@ h2 {
   margin-top: -2px;
 }
 
+/* Connection badge: local colors and compact surface, shared typography. */
 .status-indicator {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--color-text-secondary);
   padding: 0.15rem 0.5rem;
   background: var(--color-bg-field);
   border-radius: 5px;
@@ -384,40 +378,7 @@ h2 {
   border-color: var(--danger-border);
 }
 
-.status-button {
-  width: 32px;
-  height: 32px;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-  color: var(--color-text-white);
-  padding: 0;
-}
-
-.status-button.start {
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-}
-
-.status-button.start:hover:not(.disabled) {
-  filter: brightness(1.06);
-  transform: translateY(-1px);
-}
-
-.status-button.stop {
-  background: var(--btn-neutral-bg);
-  color: var(--color-danger);
-}
-
-.status-button.stop:hover:not(.disabled) {
-  background: var(--status-disconnected);
-  color: var(--color-text-white);
-}
-
-.status-button.disabled {
+.status-button.disabled:not(.stop) {
   background: var(--btn-disabled-bg);
   cursor: not-allowed;
   opacity: 0.6;
@@ -432,51 +393,41 @@ h2 {
   background: var(--warning-bg-weak);
   border: 1px solid var(--warning-border);
   border-radius: 8px;
-  font-size: 0.85rem;
   color: var(--warning-text-bright);
   line-height: 1.4;
 }
 
-.setting-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
+/* Rows use ui-row; only wrap behavior and the last-row reset stay local.
+   The legacy .setting-row name is gone so global AudioPanel rules cannot
+   reach this panel. */
+.ui-row {
   flex-wrap: wrap;
 }
 
-.setting-row:last-child {
+.ui-row:last-child {
   margin-bottom: 0;
 }
 
-.setting-row label {
-  min-width: 60px;
-  font-weight: 500;
+.ui-row label {
   color: var(--color-text-secondary);
-  font-size: 14px;
 }
 
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  cursor: pointer;
-  min-width: auto !important;
+.ui-row .ui-choice-label {
+  min-width: 0;
 }
 
-.checkbox-label input[type='checkbox'] {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-}
-
-.checkbox-label input[type='checkbox']:disabled {
+.ui-choice-label .ui-choice-input:disabled {
   cursor: not-allowed;
 }
 
+/* Port keeps its narrow by-purpose width; geometry and states come from
+   ui-input. */
+.port-setting-row {
+  padding-top: var(--ui-row-gap);
+  border-top: 1px solid var(--color-border);
+}
+
 .address-inputs {
-  display: flex;
-  gap: 8px;
   min-width: 0;
 }
 
@@ -485,36 +436,6 @@ h2 {
   width: 100px;
   min-width: 100px;
   max-width: 100px;
-  padding: 0.5rem;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
-  font-size: 14px;
-  background: var(--color-bg-field);
-  color: var(--color-text-primary);
-  box-sizing: border-box;
-  height: 38px;
-}
-
-.address-inputs .address-port:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-glow);
-}
-
-.address-inputs .address-port.input-error {
-  border-color: var(--danger-border-strong);
-  background: var(--card-error-bg);
-}
-
-.address-inputs .address-port.input-error:focus {
-  border-color: var(--danger-gradient-start);
-  box-shadow: none;
-  outline: none;
-}
-
-.address-inputs .address-port:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }
 
 .address-inputs .address-port::-webkit-inner-spin-button,
@@ -529,92 +450,38 @@ h2 {
 
 .error-text {
   color: var(--danger-text-weak);
-  font-size: 13px;
-  font-weight: 500;
   width: 100%;
 }
 
+/* URL display: one composite field — readonly value plus adjacent actions. */
 .url-display {
   flex: 0;
-  display: flex;
-  gap: 0;
-  align-items: center;
   width: auto;
 }
 
 .url-display-full {
   flex: 1;
   width: 100%;
-  min-width: 0;
 }
 
+/* URL typography comes from ui-input; local sizing and ellipsis handle long
+   values. Joined borders and corners come from ui-composite. */
 .url-code {
-  display: inline-flex !important;
+  display: inline-flex;
   align-items: center;
-  flex: 0;
-  width: 280px !important;
-  min-width: 250px !important;
-  height: 38px;
-  padding: 0 0.75rem;
-  background: var(--color-bg-field);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px 0 0 10px;
-  border-right: none;
+  padding-right: var(--ui-control-padding-x);
   font-family: var(--font-mono);
-  font-size: 13px;
-  color: var(--color-text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  box-sizing: border-box;
   cursor: text;
   user-select: text;
 }
 
 .url-code-wide {
-  flex: 1 !important;
-  width: auto !important;
-  min-width: 0 !important;
-}
-
-.icon-button {
-  padding: 0;
-  width: 38px;
-  height: 38px;
-  background: var(--color-bg-field-hover);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
-  cursor: pointer;
-  transition: all 0.2s;
-  color: var(--color-text-primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  flex-shrink: 0;
-}
-
-.icon-button:hover {
-  background: var(--btn-neutral-hover);
-  border-color: var(--color-border-strong);
-}
-
-.url-display .icon-button {
-  border-radius: 0 10px 10px 0;
-  border-left: none;
-}
-
-.icon-button.disabled:disabled,
-.icon-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.subsection-heading {
-  margin: 0 0 0.75rem;
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--color-text-primary);
+  flex: 1;
+  width: auto;
+  min-width: 0;
 }
 
 .subsection-divider {
@@ -622,11 +489,17 @@ h2 {
   margin: 1.25rem 0;
 }
 
+.subsection-heading {
+  margin: 0 0 0.75rem;
+  color: var(--color-text-primary);
+}
+
+/* Shared label column aligns connection fields; column gap stays 12 px. */
 .connection-grid {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr) auto;
-  column-gap: 12px;
-  row-gap: 1rem;
+  column-gap: var(--ui-row-label-gap-side);
+  row-gap: var(--ui-row-gap);
   align-items: center;
 }
 
@@ -640,9 +513,6 @@ h2 {
 
 .connection-token-row .token-field-group {
   grid-column: 2;
-  display: flex;
-  align-items: center;
-  gap: 0;
   min-width: 0;
 }
 
@@ -651,36 +521,9 @@ h2 {
   min-width: 0;
 }
 
-.token-field :deep(.input-with-toggle-input) {
-  height: 38px;
-  padding: 0 40px 0 0.75rem;
+/* InputWithToggle keeps mono text here; shared roles own its field and joins. */
+.token-field :deep(.input-with-toggle-input.ui-input) {
   font-family: var(--font-mono);
-  font-size: 13px;
-  line-height: 36px;
-  box-sizing: border-box;
-}
-
-.url-code-wide {
-  display: block !important;
-  line-height: 36px;
-}
-
-.connection-row .row-label {
-  font-weight: 500;
-  color: var(--color-text-secondary);
-  font-size: 14px;
-  min-width: 0;
-}
-
-.icon-button.danger-button {
-  background: var(--danger-bg-weak);
-  border-color: var(--danger-border);
-  color: var(--danger-text-bright);
-}
-
-.icon-button.danger-button:hover:not(:disabled) {
-  background: var(--danger-bg-hover);
-  border-color: var(--danger-border-strong);
 }
 
 @media (max-width: 440px) {
@@ -689,7 +532,7 @@ h2 {
   }
   .connection-row {
     display: grid;
-    gap: 12px;
+    gap: var(--ui-row-label-gap-stack);
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: stretch;
     margin-bottom: 1rem;
@@ -709,96 +552,25 @@ h2 {
   }
 }
 
-.format-hint {
-  margin: 0.5rem 0 0;
-  font-size: 0.82rem;
-  color: var(--color-text-muted);
-  line-height: 1.4;
-}
-
 .inline-code {
   font-family: var(--font-mono);
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   color: inherit;
   background: var(--info-bg-weak);
   border-radius: 3px;
   padding: 0.1rem 0.3rem;
 }
 
+/* Text actions keep their local accent surfaces; typography and geometry
+   come from ui-button. */
 .test-input {
   flex: 1;
   min-width: 0;
-  padding: 0.5rem;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
-  font-size: 14px;
-  background: var(--color-bg-field);
-  color: var(--color-text-primary);
-}
-
-.test-input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-glow);
-}
-
-.test-button {
-  padding: 0.6rem 1.2rem;
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: var(--color-text-white);
-  border: none;
-  border-radius: 10px;
-  cursor: pointer;
-  font-weight: 500;
-  font-size: 14px;
-  transition: all 0.2s;
-}
-
-.test-button:hover:not(:disabled) {
-  filter: brightness(1.06);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px var(--focus-glow);
-}
-
-.test-button:disabled {
-  background: var(--btn-disabled-bg);
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.save-button-inline {
-  padding: 0.6rem 1.2rem;
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: var(--color-text-white);
-  border: none;
-  border-radius: 10px;
-  cursor: pointer;
-  font-weight: 500;
-  font-size: 14px;
-  transition: all 0.2s;
-}
-
-.save-button-inline:hover {
-  filter: brightness(1.06);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px var(--focus-glow);
-}
-
-.save-button-inline:active {
-  transform: translateY(0);
-}
-
-.save-button-inline:disabled {
-  background: var(--color-border);
-  color: var(--color-text-secondary);
-  cursor: not-allowed;
-  opacity: 0.6;
 }
 
 .test-result {
   padding: 0.5rem 0.75rem;
   border-radius: 8px;
-  font-size: 0.85rem;
   line-height: 1.4;
 }
 
@@ -825,12 +597,11 @@ h2 {
   align-items: flex-start;
   gap: 0.6rem;
   padding: 0.75rem 1rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: var(--ui-section-gap);
   background: var(--info-bg-weak);
   border: 1px solid var(--info-border);
   border-left: 4px solid var(--info-accent, var(--color-accent));
   border-radius: 10px;
-  font-size: 0.85rem;
   color: var(--info-text-bright);
   line-height: 1.5;
 }
@@ -841,17 +612,6 @@ h2 {
   color: var(--info-text-bright);
 }
 
-/* Join the token input and copy button like the URL control. */
-.token-field :deep(.input-with-toggle-input) {
-  min-width: 0;
-  border-radius: 10px 0 0 10px;
-}
-
-.token-field-group > .icon-button {
-  border-left: none;
-  border-radius: 0 10px 10px 0;
-  flex-shrink: 0;
-}
 .api-summary {
   display: flex;
   flex-wrap: wrap;
@@ -859,6 +619,7 @@ h2 {
   gap: 0.5rem;
   margin: 0;
   font-size: 0.85rem;
+  font-weight: 400;
   color: var(--color-text-secondary);
 }
 </style>

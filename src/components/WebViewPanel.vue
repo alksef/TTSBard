@@ -43,54 +43,54 @@ const {
 <template>
   <div class="webview-panel">
     <!-- Error/Info Message Display -->
-    <div v-if="errorMessage" class="message-box" :class="messageBoxClass">
+    <div v-if="errorMessage" class="message-box ui-status" :class="messageBoxClass">
       {{ errorMessage }}
     </div>
 
-    <section class="settings-section">
+    <section class="settings-section ui-section">
       <div class="section-header server-header">
-        <h2>{{ t('webview.server') }}</h2>
+        <h2 class="ui-section-title">{{ t('webview.server') }}</h2>
         <div class="server-status">
-          <span class="status-indicator" :class="{ running: serverStatus.state === 'running' }">
+          <span class="status-indicator ui-status" :class="{ running: serverStatus.state === 'running' }">
             {{ serverStatus.state === 'running' ? t('webview.status.running') : serverStatus.state === 'starting' ? t('webview.status.starting') : serverStatus.state === 'error' ? t('webview.status.error') : t('webview.status.stopped') }}
           </span>
           <template v-if="serverStatus.state === 'running' || serverStatus.state === 'starting'">
-            <button @click="restartServer" class="status-button restart" :title="t('webview.restart')" :aria-label="t('webview.restart')">
-              <RotateCw :size="14" />
+            <button @click="restartServer" class="status-button restart ui-icon-button ui-icon-button--accent" :title="t('webview.restart')" :aria-label="t('webview.restart')">
+              <RotateCw :size="18" />
             </button>
-            <button @click="stopServer" class="status-button stop" :title="t('webview.stop')" :aria-label="t('webview.stop')">
-              <Square :size="14" />
+            <button @click="stopServer" class="status-button stop ui-icon-button ui-action--stop" :title="t('webview.stop')" :aria-label="t('webview.stop')">
+              <Square :size="18" />
             </button>
           </template>
           <template v-else>
-            <button @click="startServer" class="status-button start" :disabled="!isPortValid || startPending" :class="{ disabled: !isPortValid || startPending }" :title="t('webview.start')" :aria-label="t('webview.start')">
-              <Play :size="14" />
+            <button @click="startServer" class="status-button start ui-icon-button ui-icon-button--accent" :disabled="!isPortValid || startPending" :class="{ disabled: !isPortValid || startPending }" :title="t('webview.start')" :aria-label="t('webview.start')">
+              <Play :size="18" />
             </button>
-            <button @click="stopServer" class="status-button stop disabled" :title="t('webview.stop')" :aria-label="t('webview.stop')" disabled>
-              <Square :size="14" />
+            <button @click="stopServer" class="status-button stop disabled ui-icon-button ui-action--stop" :title="t('webview.stop')" :aria-label="t('webview.stop')" disabled>
+              <Square :size="18" />
             </button>
           </template>
         </div>
       </div>
 
-      <div class="setting-row">
-        <label class="checkbox-label">
-          <input type="checkbox" v-model="settings.start_on_boot" @change="saveStartOnBoot" />
+      <div class="ui-row">
+        <label class="ui-choice-label">
+          <input type="checkbox" v-model="settings.start_on_boot" @change="saveStartOnBoot" class="ui-choice-input" />
           <span>{{ t('webview.start_on_boot') }}</span>
         </label>
       </div>
 
-      <div class="setting-row">
-        <label class="checkbox-label">
-          <input type="checkbox" v-model="settings.send_original_text" @change="saveSendOriginalText" />
+      <div class="ui-row">
+        <label class="ui-choice-label">
+          <input type="checkbox" v-model="settings.send_original_text" @change="saveSendOriginalText" class="ui-choice-input" />
           <span>{{ t('webview.send_original_text') }}</span>
         </label>
       </div>
 
-      <div class="setting-row" style="margin-bottom: 8px;">
-        <label>{{ t('webview.address') }}</label>
-        <div class="address-inputs">
-          <select v-model="settings.bind_address" class="address-bind" :disabled="serverStatus.state === 'running' || serverStatus.state === 'starting'">
+      <div class="ui-row address-row">
+        <label class="ui-label">{{ t('webview.address') }}</label>
+        <div class="address-inputs ui-field-group">
+          <select v-model="settings.bind_address" class="ui-select address-bind" :disabled="serverStatus.state === 'running' || serverStatus.state === 'starting'">
             <option value="0.0.0.0">0.0.0.0 ({{ t('webview.bind.all_interfaces') }})</option>
             <option value="127.0.0.1">127.0.0.1 ({{ t('webview.bind.local_only') }})</option>
           </select>
@@ -99,115 +99,116 @@ const {
             v-model.number="settings.port"
             min="1024"
             max="65535"
-            class="address-port"
-            :class="{ 'input-error': !isPortValid }"
+            class="ui-input address-port"
+            :aria-invalid="!isPortValid ? 'true' : undefined"
             :disabled="serverStatus.state === 'running' || serverStatus.state === 'starting'"
             placeholder="10100"
           />
-          <button @click="saveServerSettings" class="save-button-inline" :disabled="serverStatus.state === 'running' || serverStatus.state === 'starting'">{{ t('common.save') }}</button>
+          <button @click="saveServerSettings" class="save-button-inline ui-button ui-button--primary" :disabled="serverStatus.state === 'running' || serverStatus.state === 'starting'">{{ t('common.save') }}</button>
         </div>
-        <span v-if="!isPortValid" class="error-text">{{ t('webview.port_error') }}</span>
+        <span v-if="!isPortValid" class="error-text ui-status">{{ t('webview.port_error') }}</span>
       </div>
     </section>
 
-    <section class="settings-section">
-      <h2>URL</h2>
-      <div class="setting-row" style="margin-bottom: 8px;">
-        <div class="url-display">
-          <label class="url-code">{{ displayUrl }}</label>
-          <button @click="copyUrl" class="icon-button" :title="t('webview.copy_url')" :aria-label="t('webview.copy_url')">
-            <Copy :size="16" />
+    <section class="settings-section ui-section">
+      <h2 class="ui-section-title">URL</h2>
+      <div class="ui-row" style="margin-bottom: 8px;">
+        <div class="url-display ui-composite">
+          <label class="ui-input url-code ui-composite-field">{{ displayUrl }}</label>
+          <button @click="copyUrl" class="ui-icon-button ui-icon-button--adjacent ui-composite-action" :title="t('webview.copy_url')" :aria-label="t('webview.copy_url')">
+            <Copy :size="18" />
           </button>
         </div>
       </div>
     </section>
 
-    <section class="settings-section">
-      <h2>{{ t('webview.templates.title') }}</h2>
-      <div class="setting-row">
-        <button @click="openTemplateFolder" class="action-button">
+    <section class="settings-section ui-section">
+      <h2 class="ui-section-title">{{ t('webview.templates.title') }}</h2>
+      <div class="ui-row">
+        <button @click="openTemplateFolder" class="ui-button">
           {{ t('webview.templates.open_folder') }}
         </button>
-        <button @click="reloadTemplates" class="action-button secondary">
+        <button @click="reloadTemplates" class="ui-button">
           {{ t('webview.templates.reload') }}
         </button>
       </div>
-      <span class="setting-warning"><AlertTriangle :size="14" /> {{ t('webview.templates.hint') }}</span>
+      <span class="setting-warning ui-hint"><AlertTriangle :size="14" /> {{ t('webview.templates.hint') }}</span>
     </section>
 
-    <section class="settings-section">
-      <h2>{{ t('webview.test.title') }}</h2>
-      <div class="setting-row" style="margin-bottom: 8px;">
+    <section class="settings-section ui-section">
+      <h2 class="ui-section-title">{{ t('webview.test.title') }}</h2>
+      <div class="ui-row" style="margin-bottom: 8px;">
         <input
           type="text"
           v-model="testMessage"
           :placeholder="t('webview.test.placeholder')"
-          class="test-input"
+          class="ui-input test-input"
           @keyup.enter="sendTest"
         />
-        <button @click="sendTest" class="test-button" :disabled="serverStatus.state !== 'running' || !testMessage">
+        <button @click="sendTest" class="test-button ui-button ui-button--primary" :disabled="serverStatus.state !== 'running' || !testMessage">
           {{ t('webview.test.send') }}
         </button>
       </div>
     </section>
 
-    <section class="settings-section" :class="{ 'section-disabled': !isUpnpAvailable }">
-      <h2>{{ t('webview.external.title') }}</h2>
+    <section class="settings-section ui-section" :class="{ 'section-disabled': !isUpnpAvailable }">
+      <h2 class="ui-section-title">{{ t('webview.external.title') }}</h2>
 
       <!-- Warning for local address -->
-      <div v-if="!isUpnpAvailable" class="external-access-warning">
+      <div v-if="!isUpnpAvailable" class="external-access-warning ui-status">
         <AlertTriangle :size="14" />
         <span>{{ t('webview.external.local_only_warning') }}</span>
       </div>
 
       <!-- External URL display (shows full URL with token if available) -->
-      <div class="setting-row setting-row-full" v-if="hasToken">
-        <div class="url-display url-display-full">
-          <label class="url-code url-code-wide">{{ externalDisplay }}</label>
-          <button @click="copyExternalUrl" class="icon-button" :title="t('webview.external.copy_url')" :aria-label="t('webview.external.copy_url')" :disabled="!isUpnpAvailable || !externalDisplay">
-            <Copy :size="16" />
+      <div class="ui-row" v-if="hasToken">
+        <div class="url-display url-display-full ui-composite">
+          <label class="ui-input url-code url-code-wide ui-composite-field">{{ externalDisplay }}</label>
+          <button @click="copyExternalUrl" class="ui-icon-button ui-icon-button--adjacent ui-composite-action" :title="t('webview.external.copy_url')" :aria-label="t('webview.external.copy_url')" :disabled="!isUpnpAvailable || !externalDisplay">
+            <Copy :size="18" />
           </button>
-          <button @click="showExternalUrl" class="icon-button" :title="t('webview.external.refresh_ip')" :aria-label="t('webview.external.refresh_ip')" :disabled="!isUpnpAvailable">
-            <Globe :size="16" />
+          <button @click="showExternalUrl" class="ui-icon-button ui-icon-button--adjacent ui-composite-action" :title="t('webview.external.refresh_ip')" :aria-label="t('webview.external.refresh_ip')" :disabled="!isUpnpAvailable">
+            <Globe :size="18" />
           </button>
         </div>
       </div>
 
       <!-- Token access -->
-      <div class="setting-row token-row">
-        <label>{{ t('webview.token.label') }}</label>
-        <div class="token-field">
+      <div class="token-row">
+        <label class="ui-label ui-label--secondary">{{ t('webview.token.label') }}</label>
+        <div class="token-field ui-composite">
           <InputWithToggle
             :model-value="settings.access_token ?? ''"
             :label="t('webview.token.label')"
             type="password"
             readonly
+            ui
             :placeholder="t('webview.token.not_generated')"
             :disabled="!hasToken"
-            class="token-field-input"
+            class="token-field-input ui-composite-field"
           />
-          <button @click="copyToken" class="icon-button" :title="t('webview.token.copy')" :aria-label="t('webview.token.copy')" :disabled="!hasToken || !isUpnpAvailable">
-            <Copy :size="16" />
+          <button @click="copyToken" class="ui-icon-button ui-icon-button--adjacent ui-composite-action" :title="t('webview.token.copy')" :aria-label="t('webview.token.copy')" :disabled="!hasToken || !isUpnpAvailable">
+            <Copy :size="18" />
           </button>
         </div>
-        <button @click="regenerateAccessToken" class="icon-button danger-button" :title="t('webview.token.regenerate')" :aria-label="t('webview.token.regenerate')" :disabled="!isUpnpAvailable">
-          <RotateCw :size="16" />
+        <button @click="regenerateAccessToken" class="ui-icon-button ui-icon-button--adjacent danger-button ui-action--danger" :title="t('webview.token.regenerate')" :aria-label="t('webview.token.regenerate')" :disabled="!isUpnpAvailable">
+          <RotateCw :size="18" />
         </button>
       </div>
 
       <!-- UPnP status -->
-      <div class="setting-row" style="margin-bottom: 8px;">
-        <label class="checkbox-label" :class="{ disabled: !isUpnpAvailable }" :title="t('webview.upnp.tooltip')">
-          <input type="checkbox" v-model="settings.upnp_enabled" @change="saveUpnpEnabled" :disabled="!isUpnpAvailable || upnpPending" />
+      <div class="ui-row" style="margin-bottom: 8px;">
+        <label class="ui-choice-label" :class="{ disabled: !isUpnpAvailable }" :title="t('webview.upnp.tooltip')">
+          <input type="checkbox" v-model="settings.upnp_enabled" @change="saveUpnpEnabled" :disabled="!isUpnpAvailable || upnpPending" class="ui-choice-input" />
           <span>{{ t('webview.upnp.enable') }}</span>
         </label>
       </div>
 
       <!-- Actual runtime UPnP status: mapping is a fact, not a preference. -->
-      <div v-if="upnpForwardOpen" class="upnp-status upnp-status-open">
+      <div v-if="upnpForwardOpen" class="upnp-status upnp-status-open ui-status">
         {{ t('webview.upnp.status.open') }}
       </div>
-      <div v-else-if="upnpForwardFailureText" class="upnp-status upnp-status-failed">
+      <div v-else-if="upnpForwardFailureText" class="upnp-status upnp-status-failed ui-status">
         {{ upnpForwardFailureText }}
       </div>
     </section>
@@ -223,9 +224,7 @@ const {
 h2 {
   margin-top: 0;
   margin-bottom: 1rem;
-  font-size: 1.1rem;
   color: var(--color-text-primary);
-  font-weight: 600;
 }
 
 .message-box {
@@ -235,8 +234,6 @@ h2 {
   transform: translateX(-50%);
   padding: 0.4rem 0.75rem;
   border-radius: 8px;
-  font-size: 12px;
-  font-weight: 500;
   z-index: 1000;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   backdrop-filter: blur(10px);
@@ -280,14 +277,12 @@ h2 {
   }
 }
 
+/* Decorative card surface stays local; padding and rhythm come from ui-section. */
 .settings-section {
-  margin-bottom: 1.5rem;
-  padding: 12px 16px;
   background: var(--color-bg-field);
   border: 1px solid var(--color-border);
   border-radius: 12px;
   backdrop-filter: blur(8px);
-  font-size: 0.95rem;
 }
 
 .settings-section.section-disabled {
@@ -307,7 +302,6 @@ h2 {
   background: var(--warning-bg-weak);
   border: 1px solid var(--warning-border);
   border-radius: 8px;
-  font-size: 0.85rem;
   color: var(--warning-text-bright);
   line-height: 1.4;
 }
@@ -319,7 +313,6 @@ h2 {
   padding: 0.4rem 0.75rem;
   margin-bottom: 0.75rem;
   border-radius: 8px;
-  font-size: 0.82rem;
   line-height: 1.35;
 }
 
@@ -345,14 +338,14 @@ h2 {
 /* Server header with status */
 .server-header {
   padding-top: 0;
-  padding-bottom: 0.75rem;
+  padding-bottom: 8px;
   border-bottom: 1px solid var(--color-border);
   margin-bottom: 1rem;
   align-items: flex-start;
 }
 
 .server-header h2 {
-  margin-top: 0;
+  margin: 0;
 }
 
 .server-status {
@@ -362,10 +355,8 @@ h2 {
   margin-top: -2px;
 }
 
+/* Connection badge: local colors and compact surface, shared typography. */
 .status-indicator {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--color-text-secondary);
   padding: 0.15rem 0.5rem;
   background: var(--color-bg-field);
   border-radius: 5px;
@@ -381,208 +372,62 @@ h2 {
   border-color: var(--success-shadow);
 }
 
-.status-button {
-  width: 32px;
-  height: 32px;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-  color: var(--color-text-white);
-  padding: 0;
-}
-
-.status-button.start {
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-}
-
-.status-button.start:hover:not(.disabled) {
-  filter: brightness(1.06);
-  transform: translateY(-1px);
-}
-
-.status-button.stop {
-  background: var(--btn-neutral-bg);
-  color: var(--color-danger);
-}
-
-.status-button.stop:hover:not(.disabled) {
-  background: var(--status-disconnected);
-  color: var(--color-text-white);
-}
-
-.status-button.restart {
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-}
-
-.status-button.restart:hover:not(.disabled) {
-  filter: brightness(1.06);
-}
-
-.status-button.disabled {
+.status-button.disabled:not(.stop) {
   background: var(--btn-disabled-bg);
   cursor: not-allowed;
   opacity: 0.6;
 }
 
-.setting-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
+/* Rows use ui-row; only wrap behavior and the last-row reset stay local.
+   The legacy .setting-row name is gone so global AudioPanel rules cannot
+   reach this panel. */
+.ui-row {
   flex-wrap: wrap;
 }
 
-.setting-row:last-child {
+.ui-row:last-child {
   margin-bottom: 0;
 }
 
-.setting-row label {
-  min-width: 60px;
-  font-weight: 500;
+.ui-row label {
   color: var(--color-text-secondary);
-  font-size: 14px;
 }
 
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  cursor: pointer;
-  min-width: auto !important;
+.ui-row .ui-choice-label {
+  min-width: 0;
 }
 
-.checkbox-label input[type="checkbox"] {
-  width: 18px;
-  height: 18px;
-  min-width: 18px;
-  flex-shrink: 0;
-  cursor: pointer;
-}
-
-.checkbox-label.disabled {
+.ui-choice-label.disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.checkbox-label.disabled input[type="checkbox"] {
+.ui-choice-label.disabled .ui-choice-input {
   cursor: not-allowed;
 }
 
-.setting-hint {
-  font-size: 0.85rem;
-  color: var(--color-text-secondary);
-  margin: 0;
-  width: 100%;
+/* Address inputs group (bind address + port): the bind select stays wider
+   than the port by purpose. Geometry and states come from ui-select/ui-input. */
+.address-row {
+  padding-top: var(--ui-row-gap);
+  border-top: 1px solid var(--color-border);
 }
 
-.number-input,
-.select-input {
-  flex: 1;
-  max-width: 200px;
-  padding: 0.5rem;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
-  font-size: 14px;
-  background: var(--color-bg-field);
-  color: var(--color-text-primary);
-}
-
-.number-input.input-error {
-  border-color: var(--danger-border-strong);
-  background: var(--card-error-bg);
-}
-
-.number-input.input-error:focus {
-  border-color: var(--danger-gradient-start);
-  box-shadow: none;
-  outline: none;
-}
-
-.error-text {
-  color: var(--danger-text-weak);
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.number-input:focus,
-.select-input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-glow);
-}
-
-/* Address inputs group (bind address + port) */
 .address-inputs {
-  display: flex;
-  gap: 8px;
+  flex: 1 1 360px;
+  min-width: 0;
 }
 
 .address-inputs .address-bind {
   flex: 2;
-  padding: 0.4rem 0.6rem;
-  background: var(--color-bg-field-hover);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 6px;
-  color: var(--color-text-primary);
-  font-size: 14px;
   cursor: pointer;
-  transition: all 0.15s ease;
   min-width: 200px;
-  height: 38px;
-}
-
-.address-inputs .address-bind:hover {
-  background: var(--btn-neutral-hover);
-  border-color: var(--color-border-strong);
-}
-
-.address-inputs .address-bind:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-glow);
-}
-
-.address-inputs .address-bind option {
-  background: var(--select-bg);
-  color: var(--color-text-primary);
-  padding: 0.3rem 0.5rem;
-}
-
-.address-inputs .address-bind option:hover {
-  background: var(--select-bg-hover);
 }
 
 .address-inputs .address-port {
-  flex: 1;
-  padding: 0.5rem;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
-  font-size: 14px;
-  background: var(--color-bg-field);
-  color: var(--color-text-primary);
-  box-sizing: border-box;
-  height: 38px;
-}
-
-.address-inputs .address-port:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-glow);
-}
-
-.address-inputs .address-port.input-error {
-  border-color: var(--danger-border-strong);
-  background: var(--card-error-bg);
-}
-
-.address-inputs .address-port.input-error:focus {
-  border-color: var(--danger-gradient-start);
-  box-shadow: none;
-  outline: none;
+  flex: 0 0 84px;
+  width: 84px;
+  max-width: 84px;
 }
 
 /* Remove spinner from number input */
@@ -596,12 +441,11 @@ h2 {
   -moz-appearance: textfield;
 }
 
+/* URL display: one composite field — readonly value plus adjacent actions. */
 .url-display {
-  flex: 0;
-  display: flex;
-  gap: 0;
-  align-items: center;
-  width: auto;
+  flex: 0 1 auto;
+  width: 318px;
+  max-width: 100%;
 }
 
 .url-display-full {
@@ -609,48 +453,43 @@ h2 {
   width: 100%;
 }
 
+/* URL typography comes from ui-input; sizing and monospace stay local.
+   Joined borders and corners come from ui-composite. */
 .url-code {
-  display: inline-flex !important;
+  display: inline-flex;
   align-items: center;
-  flex: 0;
-  width: 280px !important;
-  min-width: 250px !important;
-  height: 38px;
-  padding: 0 0.75rem;
-  background: var(--color-bg-field);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px 0 0 10px;
-  border-right: none;
+  flex: 1;
+  min-width: 0;
+  padding-right: var(--ui-control-padding-x);
   font-family: var(--font-mono);
-  font-size: 13px;
-  color: var(--color-text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  box-sizing: border-box;
   cursor: text;
   user-select: text;
 }
 
 .url-code-wide {
-  flex: 1 !important;
-  width: auto !important;
-  min-width: 300px !important;
+  flex: 1;
+  width: auto;
+  min-width: 0;
 }
 
-/* Token row: grid keeps the token field shrinkable next to regenerate */
+/* Token row: grid keeps the token field shrinkable next to regenerate. */
 .token-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 0.75rem;
+  column-gap: var(--ui-row-label-gap-side);
+  row-gap: var(--ui-row-label-gap-stack);
+  margin-bottom: var(--ui-row-gap);
+}
+
+.token-row .ui-label {
+  min-width: 60px;
 }
 
 .token-field {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  min-width: 0;
   width: auto;
 }
 
@@ -659,13 +498,9 @@ h2 {
   min-width: 0;
 }
 
-.token-field :deep(.input-with-toggle-input) {
-  height: 38px;
-  padding: 0 40px 0 0.75rem;
+/* InputWithToggle keeps mono text here; shared roles own its field and joins. */
+.token-field :deep(.input-with-toggle-input.ui-input) {
   font-family: var(--font-mono);
-  font-size: 13px;
-  line-height: 36px;
-  box-sizing: border-box;
 }
 
 @media (max-width: 440px) {
@@ -678,128 +513,8 @@ h2 {
   }
 }
 
-.icon-button {
-  padding: 0;
-  width: 38px;
-  height: 38px;
-  background: var(--color-bg-field-hover);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
-  cursor: pointer;
-  transition: all 0.2s;
-  color: var(--color-text-primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-}
-
-.icon-button:hover {
-  background: var(--btn-neutral-hover);
-  border-color: var(--color-border-strong);
-}
-
-.action-button {
-  padding: 0.6rem 1.2rem;
-  background: var(--color-bg-field-hover);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
-  cursor: pointer;
-  font-size: 14px;
-  color: var(--color-text-primary);
-  transition: all 0.2s;
-}
-
-.action-button:hover {
-  background: var(--btn-neutral-hover);
-  border-color: var(--color-border-strong);
-}
-
-.action-button.secondary {
-  background: var(--info-bg-weak);
-  border-color: var(--info-border);
-}
-
-.action-button.secondary:hover {
-  background: var(--btn-accent-bg);
-  border-color: var(--card-active-border);
-}
-
 .test-input {
   flex: 1;
-  padding: 0.5rem;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
-  font-size: 14px;
-  background: var(--color-bg-field);
-  color: var(--color-text-primary);
-}
-
-.test-input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-glow);
-}
-
-.test-button {
-  padding: 0.6rem 1.2rem;
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: var(--color-text-white);
-  border: none;
-  border-radius: 10px;
-  cursor: pointer;
-  font-weight: 500;
-  font-size: 14px;
-  transition: all 0.2s;
-}
-
-.test-button:hover:not(:disabled) {
-  filter: brightness(1.06);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px var(--focus-glow);
-}
-
-.test-button:disabled {
-  background: var(--btn-disabled-bg);
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.save-row {
-  justify-content: flex-end;
-  margin-top: 0.5rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid var(--color-border);
-  gap: 0.75rem;
-}
-
-.save-button-inline {
-  padding: 0.6rem 1.2rem;
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  color: var(--color-text-white);
-  border: none;
-  border-radius: 10px;
-  cursor: pointer;
-  font-weight: 500;
-  font-size: 14px;
-  transition: all 0.2s;
-}
-
-.save-button-inline:hover {
-  filter: brightness(1.06);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px var(--focus-glow);
-}
-
-.save-button-inline:active {
-  transform: translateY(0);
-}
-
-.save-button-inline:disabled {
-  background: var(--color-border);
-  color: var(--color-text-secondary);
-  cursor: not-allowed;
-  opacity: 0.6;
 }
 
 .setting-warning {
@@ -807,83 +522,10 @@ h2 {
   align-items: center;
   gap: 0.4rem;
   margin-top: 0.5rem;
-  font-size: 0.82rem;
   color: var(--warning-text-bright);
 }
 
-.danger-button {
-  background: var(--danger-bg-weak);
-  border-color: var(--danger-border);
-  color: var(--danger-text-bright);
-}
-
-.danger-button:hover {
-  background: var(--danger-bg-hover);
-  border-color: var(--danger-border-strong);
-}
-
-.icon-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.icon-button:disabled:hover {
-  background: var(--color-bg-field-hover);
-  border-color: var(--color-border-strong);
-}
-
-.url-display .icon-button {
-  width: 38px;
-  height: 38px;
-  border-radius: 0;
-  border-left: 1px solid var(--color-border-strong);
-}
-
-.url-display .icon-button:only-child {
-  border-radius: 0 10px 10px 0;
-  border-left: none;
-}
-
-/* URL display with multiple buttons */
-.url-display:not(.url-display-full) .icon-button:last-child {
-  border-radius: 0 10px 10px 0;
-}
-
-/* URL display full with 2 buttons - only last has right border radius */
-.url-display-full .icon-button:last-child {
-  border-radius: 0 10px 10px 0;
-}
-
-.icon-button.danger-button {
-  background: var(--danger-bg-weak);
-  border-color: var(--danger-border);
-  color: var(--danger-text-bright);
-}
-
-.icon-button.danger-button:hover {
-  background: var(--danger-bg-hover);
-  border-color: var(--danger-border-strong);
-}
-
-.icon-button.secondary {
-  background: var(--info-bg-weak);
-  border-color: var(--info-border);
-}
-
-.icon-button.secondary:hover {
-  background: var(--btn-accent-bg);
-  border-color: var(--card-active-border);
-}
-
-/* Join the token input and copy button like the URL control. */
-.token-field :deep(.input-with-toggle-input) {
-  min-width: 0;
-  border-radius: 10px 0 0 10px;
-}
-
-.token-field > .icon-button {
-  border-left: none;
-  border-radius: 0 10px 10px 0;
-  flex-shrink: 0;
+.error-text {
+  color: var(--danger-text-weak);
 }
 </style>
