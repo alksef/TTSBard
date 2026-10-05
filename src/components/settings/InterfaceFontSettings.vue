@@ -2,6 +2,13 @@
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { RotateCcw } from 'lucide-vue-next'
 import { INTERFACE_FONT_SIZE_MAX } from '../../utils/interfaceFont'
+import {
+  FONT_POPUP_GAP,
+  FONT_POPUP_MARGIN,
+  FONT_POPUP_MAX_HEIGHT,
+  FONT_POPUP_MIN_HEIGHT,
+  computeFontPopupPlacement,
+} from '../../utils/fontPopupPlacement'
 import { t } from '../../i18n'
 import { useInterfaceFontSettings } from '../../composables/useInterfaceFontSettings'
 
@@ -20,8 +27,15 @@ const {
 
 const open = ref(false)
 const pickerRoot = ref<HTMLElement | null>(null)
+const triggerEl = ref<HTMLButtonElement | null>(null)
+const popupEl = ref<HTMLElement | null>(null)
 const search = ref('')
 const searchInput = ref<HTMLInputElement | null>(null)
+
+/** Unclamped content height measured on open; cached for scroll/resize. */
+let naturalHeight = 0
+let placementFrame = 0
+const popupStyle = ref<Record<string, string>>({})
 
 const previewStyle = computed(() => ({
   fontFamily: previewFontFamily.value,
@@ -44,43 +58,128 @@ const filteredFontOptions = computed(() => {
   return fontOptions.value.filter((option) => option.label.toLocaleLowerCase().includes(query))
 })
 
+/** Reads the popup's full content height while its max-height is disabled. */
+function measureNaturalHeight(popup: HTMLElement): number {
+  const previous = popup.style.maxHeight
+  popup.style.maxHeight = 'none'
+  const height = popup.scrollHeight
+  popup.style.maxHeight = previous
+  return height
+}
+
+function updatePlacement(): void {
+  const trigger = triggerEl.value
+  const popup = popupEl.value
+  if (!open.value || !trigger || !popup) return
+
+  const rect = trigger.getBoundingClientRect()
+  const placement = computeFontPopupPlacement({
+    anchor: { top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width },
+    viewport: {
+      width: document.documentElement.clientWidth,
+      height: document.documentElement.clientHeight,
+    },
+    naturalHeight: naturalHeight || FONT_POPUP_MIN_HEIGHT,
+    maxHeight: FONT_POPUP_MAX_HEIGHT,
+    minHeight: FONT_POPUP_MIN_HEIGHT,
+    gap: FONT_POPUP_GAP,
+    margin: FONT_POPUP_MARGIN,
+  })
+
+  popupStyle.value = {
+    top: `${placement.top}px`,
+    left: `${placement.left}px`,
+    maxHeight: `${placement.maxHeight}px`,
+    minWidth: `${placement.minWidth}px`,
+    maxWidth: `${placement.maxWidth}px`,
+  }
+}
+
+function schedulePlacement(): void {
+  if (!open.value || placementFrame) return
+  placementFrame = requestAnimationFrame(() => {
+    placementFrame = 0
+    updatePlacement()
+  })
+}
+
+function scrollActiveOptionIntoView(): void {
+  const options = popupEl.value?.querySelector<HTMLElement>('.font-options')
+  const active = popupEl.value?.querySelector<HTMLElement>('.font-option.is-active')
+  if (!options || !active) return
+  // Scroll only the internal options list, never the surrounding page.
+  const optionsTop = options.getBoundingClientRect().top
+  const deltaTop = active.getBoundingClientRect().top - optionsTop
+  const deltaBottom = active.getBoundingClientRect().bottom - optionsTop
+  if (deltaTop < 0) {
+    options.scrollTop += deltaTop
+  } else if (deltaBottom > options.clientHeight) {
+    options.scrollTop += deltaBottom - options.clientHeight
+  }
+}
+
 function onTriggerClick(): void {
   if (saving.value) return
   open.value = !open.value
   if (open.value) {
     search.value = ''
-    void nextTick(() => searchInput.value?.focus())
+    void nextTick(() => {
+      const popup = popupEl.value
+      if (popup) naturalHeight = measureNaturalHeight(popup)
+      updatePlacement()
+      searchInput.value?.focus()
+      scrollActiveOptionIntoView()
+    })
+  } else {
+    naturalHeight = 0
   }
 }
 
 function selectFamily(id: string): void {
   if (saving.value) return
   open.value = false
+  naturalHeight = 0
   void onFamilyChange(id)
+}
+
+function closePopup(): void {
+  open.value = false
+  naturalHeight = 0
+  triggerEl.value?.focus()
 }
 
 function onDocumentPointerDown(event: PointerEvent): void {
   if (!open.value) return
-  const root = pickerRoot.value
-  if (root && !root.contains(event.target as Node)) {
-    open.value = false
-  }
+  const target = event.target as Node
+  if (pickerRoot.value?.contains(target)) return
+  if (popupEl.value?.contains(target)) return
+  open.value = false
+  naturalHeight = 0
 }
 
 function onDocumentKeydown(event: KeyboardEvent): void {
   if (event.key === 'Escape' && open.value) {
-    open.value = false
+    closePopup()
   }
+}
+
+function onWindowScrollOrResize(): void {
+  schedulePlacement()
 }
 
 onMounted(() => {
   document.addEventListener('pointerdown', onDocumentPointerDown)
   document.addEventListener('keydown', onDocumentKeydown)
+  window.addEventListener('resize', onWindowScrollOrResize)
+  window.addEventListener('scroll', onWindowScrollOrResize, true)
 })
 
 onUnmounted(() => {
   document.removeEventListener('pointerdown', onDocumentPointerDown)
   document.removeEventListener('keydown', onDocumentKeydown)
+  window.removeEventListener('resize', onWindowScrollOrResize)
+  window.removeEventListener('scroll', onWindowScrollOrResize, true)
+  if (placementFrame) cancelAnimationFrame(placementFrame)
 })
 
 function onSizeInput(event: Event): void {
@@ -104,6 +203,7 @@ function onSizeInput(event: Event): void {
         <div ref="pickerRoot" class="font-picker">
           <button
             id="interface-font-family"
+            ref="triggerEl"
             type="button"
             class="font-trigger ui-input"
             :class="{ 'is-open': open }"
@@ -117,37 +217,43 @@ function onSizeInput(event: Event): void {
             <span class="font-trigger-chevron" aria-hidden="true" />
           </button>
 
-          <div
-            v-if="open"
-            id="interface-font-options"
-            class="font-popup ui-menu"
-            role="listbox"
-            :aria-label="t('settings.interface.font.label_family')"
-          >
-            <input
-              ref="searchInput"
-              v-model="search"
-              type="search"
-              class="font-search ui-input"
-              :placeholder="t('settings.interface.font.search_placeholder')"
-              :aria-label="t('settings.interface.font.search_placeholder')"
-              @click.stop
-            />
-            <button
-              v-for="opt in filteredFontOptions"
-              :key="opt.id"
-              type="button"
-              class="font-option ui-menu-item"
-              :class="{ 'is-active': opt.id === family }"
-              role="option"
-              :aria-selected="opt.id === family"
-              :disabled="saving"
-              @click="selectFamily(opt.id)"
+          <Teleport to="body">
+            <div
+              v-if="open"
+              id="interface-font-options"
+              ref="popupEl"
+              class="font-popup ui-menu"
+              role="listbox"
+              :style="popupStyle"
+              :aria-label="t('settings.interface.font.label_family')"
             >
-              {{ opt.label }}
-            </button>
-            <p v-if="filteredFontOptions.length === 0" class="font-empty">{{ t('settings.interface.font.empty') }}</p>
-          </div>
+              <input
+                ref="searchInput"
+                v-model="search"
+                type="search"
+                class="font-search ui-input"
+                :placeholder="t('settings.interface.font.search_placeholder')"
+                :aria-label="t('settings.interface.font.search_placeholder')"
+                @click.stop
+              />
+              <div class="font-options">
+                <button
+                  v-for="opt in filteredFontOptions"
+                  :key="opt.id"
+                  type="button"
+                  class="font-option ui-menu-item"
+                  :class="{ 'is-active': opt.id === family }"
+                  role="option"
+                  :aria-selected="opt.id === family"
+                  :disabled="saving"
+                  @click="selectFamily(opt.id)"
+                >
+                  {{ opt.label }}
+                </button>
+                <p v-if="filteredFontOptions.length === 0" class="font-empty">{{ t('settings.interface.font.empty') }}</p>
+              </div>
+            </div>
+          </Teleport>
         </div>
       </div>
 
@@ -291,14 +397,18 @@ function onSizeInput(event: Event): void {
 }
 
 .font-popup {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
+  position: fixed;
   z-index: 1000;
-  min-width: 100%;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   box-shadow: var(--shadow-soft);
+}
+
+/* Only the options scroll; the search stays pinned at the top. */
+.font-options {
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .font-search {

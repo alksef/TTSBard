@@ -8,6 +8,3 @@ implementation plans и не задания AI-агентам.
 
 - [ROADMAP-125 — Перехват клавиш и снятие ограничения](./125-intercept-key-restriction.md) — `in_progress`, реализовано; ожидает ручной проверки пользователя.
 
-- [ROADMAP-124 — Согласованное управление жизненным циклом интеграций](./124-integration-lifecycle-consistency.md) — `in_progress`.
-
-- [ROADMAP-121 — Согласованность оформления UI](./121-ui-visual-consistency.md) — `in_progress`.

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
-import { Bot, Plus, Trash2, Loader2, RefreshCw } from 'lucide-vue-next';
+import { computed, ref, onBeforeUnmount } from 'vue';
+import { Bot, Plus, Trash2, Loader2, RefreshCw, X } from 'lucide-vue-next';
 import { confirm } from '@tauri-apps/plugin-dialog';
 import ProviderCard from '../shared/ProviderCard.vue';
 import PanelEasterEgg from '../shared/PanelEasterEgg.vue';
@@ -8,6 +8,7 @@ import TelegramConnectionStatus from './TelegramConnectionStatus.vue';
 import type { VoiceCode } from '../../types/settings';
 import type { CurrentVoice, Limits } from '../../composables/useTelegramAuth';
 import { parseLimitsResetTimestamp, formatLimitCounter } from '../../utils/sileroLimits';
+import { useModalFocus } from '../../composables/useModalFocus';
 import { t } from '../../i18n';
 
 interface Props {
@@ -93,24 +94,49 @@ const voiceDescriptionInput = ref('');
 const isAddingVoice = ref(false);
 const addVoiceError = ref<string | null>(null);
 const duplicateError = ref<string | null>(null);
+const voiceInput = ref<HTMLInputElement | null>(null);
+const voiceDialogRef = ref<HTMLElement | null>(null);
+
+// Increments every time the dialog is opened, closed or unmounted. A pending
+// add-voice callback only mutates form state while its epoch is still current,
+// so a stale response from a previous open cannot corrupt a fresh form.
+let addVoiceEpoch = 0;
+
+useModalFocus({
+  active: showAddVoiceDialog,
+  container: voiceDialogRef,
+  initialFocus: () => voiceInput.value,
+  closeOnEscape: true,
+  onEscape: handleCloseAddVoiceDialog,
+})
+
+onBeforeUnmount(() => {
+  addVoiceEpoch++
+})
 
 function handleOpenAddVoiceDialog() {
+  addVoiceEpoch++
   showAddVoiceDialog.value = true;
   voiceCodeInput.value = '';
   voiceDescriptionInput.value = '';
+  isAddingVoice.value = false;
   addVoiceError.value = null;
   duplicateError.value = null;
 }
 
 function handleCloseAddVoiceDialog() {
+  addVoiceEpoch++
   showAddVoiceDialog.value = false;
   voiceCodeInput.value = '';
   voiceDescriptionInput.value = '';
+  isAddingVoice.value = false;
   addVoiceError.value = null;
   duplicateError.value = null;
 }
 
 async function handleAddVoice() {
+  if (isAddingVoice.value || !showAddVoiceDialog.value) return;
+
   const code = voiceCodeInput.value.trim().toLowerCase();
   if (!code) return;
 
@@ -126,8 +152,10 @@ async function handleAddVoice() {
   duplicateError.value = null;
 
   const description = voiceDescriptionInput.value.trim() || undefined;
+  const epoch = addVoiceEpoch;
 
   emit('add-voice', { code, description }, (success: boolean, error?: string) => {
+    if (epoch !== addVoiceEpoch) return;
     isAddingVoice.value = false;
     if (success) {
       // Успешно добавлено - закрываем диалог
@@ -275,47 +303,66 @@ function handleSelectVoice(voiceId: string) {
     </div>
 
     <!-- Add Voice Dialog -->
-    <div v-if="showAddVoiceDialog" class="dialog-overlay" @click.self="handleCloseAddVoiceDialog">
-      <div class="dialog">
-        <h3 class="ui-section-title">{{ t('tts.add_voice') }}</h3>
-        <input
-          v-model="voiceCodeInput"
-          :placeholder="t('tts.silero.add_voice.code_placeholder')"
-          @keyup.enter="handleAddVoice"
-          class="ui-input voice-input"
-          ref="voiceInput"
-          :class="{ 'has-error': duplicateError || addVoiceError }"
-        />
-        <input
-          v-model="voiceDescriptionInput"
-          :placeholder="t('tts.silero.add_voice.desc_placeholder')"
-          @keyup.enter="handleAddVoice"
-          class="ui-input voice-input"
-          :class="{ 'has-error': duplicateError || addVoiceError }"
-        />
-        <!-- Duplicate error -->
-        <div v-if="duplicateError" class="dialog-error duplicate-error">
-          {{ duplicateError }}
-        </div>
-        <!-- Bot error -->
-        <div v-if="addVoiceError" class="dialog-error bot-error">
-          {{ addVoiceError }}
-        </div>
-        <div class="dialog-buttons">
-          <button @click="handleCloseAddVoiceDialog" class="ui-button">
-            {{ t('common.cancel') }}
-          </button>
-          <button
-            @click="handleAddVoice"
-            :disabled="!voiceCodeInput.trim() || isAddingVoice"
-            class="ui-button ui-button--primary add-button-confirm"
-          >
-            <Loader2 v-if="isAddingVoice" :size="16" class="spinner" />
-            {{ isAddingVoice ? t('tts.adding') : t('tts.add') }}
-          </button>
+    <Teleport to="body">
+      <div v-if="showAddVoiceDialog" class="dialog-overlay" @click.self="handleCloseAddVoiceDialog">
+        <div
+          ref="voiceDialogRef"
+          class="dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="silero-add-voice-title"
+          tabindex="-1"
+        >
+          <div class="ui-modal-header">
+            <h3 id="silero-add-voice-title" class="ui-section-title">{{ t('tts.add_voice') }}</h3>
+            <button
+              type="button"
+              class="ui-icon-button dialog-close"
+              :title="t('common.close')"
+              :aria-label="t('common.close')"
+              @click="handleCloseAddVoiceDialog"
+            >
+              <X :size="18" />
+            </button>
+          </div>
+          <div class="ui-modal-body">
+            <input
+              v-model="voiceCodeInput"
+              :placeholder="t('tts.silero.add_voice.code_placeholder')"
+              @keyup.enter="handleAddVoice"
+              class="ui-input voice-input"
+              ref="voiceInput"
+              :class="{ 'has-error': duplicateError || addVoiceError }"
+            />
+            <input
+              v-model="voiceDescriptionInput"
+              :placeholder="t('tts.silero.add_voice.desc_placeholder')"
+              @keyup.enter="handleAddVoice"
+              class="ui-input voice-input"
+              :class="{ 'has-error': duplicateError || addVoiceError }"
+            />
+            <!-- Duplicate error -->
+            <div v-if="duplicateError" class="dialog-error duplicate-error">
+              {{ duplicateError }}
+            </div>
+            <!-- Bot error -->
+            <div v-if="addVoiceError" class="dialog-error bot-error">
+              {{ addVoiceError }}
+            </div>
+            <div class="dialog-buttons">
+              <button
+                @click="handleAddVoice"
+                :disabled="!voiceCodeInput.trim() || isAddingVoice"
+                class="ui-button ui-button--primary add-button-confirm"
+              >
+                <Loader2 v-if="isAddingVoice" :size="16" class="spinner" />
+                {{ isAddingVoice ? t('tts.adding') : t('tts.add') }}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
+    </Teleport>
   </ProviderCard>
 </template>
 
@@ -411,19 +458,21 @@ function handleSelectVoice(voiceId: string) {
   align-items: center;
   justify-content: center;
   z-index: 1000;
+  padding: 20px;
+  box-sizing: border-box;
 }
 
 .dialog {
   background: var(--color-bg-panel-strong);
   border-radius: 12px;
-  padding: 20px;
-  min-width: 400px;
-  max-width: 90vw;
+  padding: 0;
+  width: 100%;
+  max-width: 400px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-sizing: border-box;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
-}
-
-.dialog h3 {
-  margin: 0 0 8px;
+  outline: none;
 }
 
 .voice-input {

@@ -1095,7 +1095,7 @@
     "tts.telegram.auth.phone": "Phone number",
     "tts.telegram.auth.api_id": "API ID",
     "tts.telegram.auth.api_hash": "API Hash",
-    "tts.telegram.auth.api_hash_placeholder": "your_api_hash",
+    "tts.telegram.auth.api_hash_placeholder": "API Hash",
     "tts.telegram.auth.password_placeholder": "Your 2FA password",
     "tts.telegram.auth.show": "Show",
     "tts.telegram.auth.hide": "Hide",

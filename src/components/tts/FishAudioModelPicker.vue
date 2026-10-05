@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { VoiceModel } from '../../types/settings';
 import { Search, Loader2 } from 'lucide-vue-next';
 import { fetchFishImage } from '../../composables/useFishImage';
+import { useModalFocus } from '../../composables/useModalFocus';
 import { debugError } from '../../utils/debug';
 import { t } from '../../i18n';
 import { presentCommandError } from '../../ipc/commandError';
@@ -20,6 +21,23 @@ interface Emits {
 
 const props = defineProps<Props>();
 const emit = defineEmits<Emits>();
+
+const modalContentRef = ref<HTMLElement | null>(null);
+const searchInputRef = ref<HTMLInputElement | null>(null);
+
+function handleClose() {
+  emit('close');
+}
+
+// The picker is mounted only while open (v-if), so it is active for its whole
+// lifetime. Escape closes; Tab/Shift+Tab stay trapped inside the dialog.
+useModalFocus({
+  active: () => true,
+  container: modalContentRef,
+  initialFocus: () => searchInputRef.value,
+  closeOnEscape: true,
+  onEscape: handleClose,
+})
 
 const searchQuery = ref('');
 const loading = ref(false);
@@ -123,28 +141,33 @@ function selectModel(model: VoiceModel) {
   emit('select', model);
 }
 
-function handleClose() {
-  emit('close');
-}
-
 function getModelImageUrl(model: VoiceModel): string | undefined {
   return imageUrls.value.get(model.id);
 }
 </script>
 
 <template>
-  <div class="modal-overlay" @click.self="handleClose">
-    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="fish-model-picker-title">
-      <div class="modal-header">
-        <h2 id="fish-model-picker-title">{{ t('tts.add_voice') }}</h2>
-        <button type="button" @click="handleClose" class="ui-icon-button close-button" :aria-label="t('tts.fish.picker.close_aria')" title="×">&times;</button>
+  <Teleport to="body">
+    <div class="modal-overlay" @click.self="handleClose">
+      <div
+        ref="modalContentRef"
+        class="modal-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="fish-model-picker-title"
+        tabindex="-1"
+      >
+      <div class="ui-modal-header">
+        <h2 id="fish-model-picker-title" class="ui-section-title">{{ t('tts.add_voice') }}</h2>
+        <button type="button" @click="handleClose" class="ui-icon-button close-button" :aria-label="t('tts.fish.picker.close_aria')" :title="t('tts.fish.picker.close_aria')">&times;</button>
       </div>
 
-      <div class="modal-body">
+      <div class="ui-modal-body modal-body">
         <!-- Search -->
         <div class="search-container">
           <Search :size="18" class="search-icon" />
           <input
+            ref="searchInputRef"
             v-model="searchQuery"
             type="text"
             :placeholder="t('tts.fish.picker.search_placeholder')"
@@ -220,7 +243,8 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
         </div>
       </div>
     </div>
-  </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -250,21 +274,6 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
   flex-direction: column;
 }
 
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1.5rem;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.modal-header h2 {
-  font-size: var(--ui-text-size-section-title);
-  font-weight: var(--ui-text-weight-section-title);
-  color: var(--color-text-primary);
-  margin: 0;
-}
-
 .close-button {
   font-size: 1.1rem;
   line-height: 1;
@@ -276,7 +285,6 @@ function getModelImageUrl(model: VoiceModel): string | undefined {
 }
 
 .modal-body {
-  padding: 1.5rem;
   overflow-y: auto;
   flex: 1;
 }

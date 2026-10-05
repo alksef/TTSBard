@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref, watch, inject } from 'vue'
+import { ref, watch, computed, inject } from 'vue'
 import { Eye, EyeOff } from 'lucide-vue-next'
 import { type TelegramCredentials, TELEGRAM_AUTH_KEY, type UseTelegramAuthReturn } from '../composables/useTelegramAuth'
+import { useModalFocus } from '../composables/useModalFocus'
+import { resolveDisplayStep, actionStepFromState, type TelegramAuthActionStep } from '../utils/telegramAuthDisplayStep'
 import { t } from '../i18n'
 
 interface Props {
@@ -21,12 +23,7 @@ const {
   state,
   status,
   errorMessage,
-  isConnected,
   isLoading,
-  needsCode,
-  needsPassword,
-  hasError,
-  canInit,
   requestCode,
   signIn,
   checkPassword,
@@ -49,10 +46,48 @@ const showPhone = ref(false)
 const showApiId = ref(false)
 const showApiHash = ref(false)
 
+// Retain the last actionable step while the backend is in `loading`, so the
+// code/password form does not flicker back to the credentials form mid-flight.
+const rememberedStep = ref<TelegramAuthActionStep>('credentials')
+
+const displayStep = computed(() => resolveDisplayStep(state.value, rememberedStep.value))
+
+watch(state, (value) => {
+  const step = actionStepFromState(value)
+  if (step) {
+    rememberedStep.value = step
+  }
+})
+
+const dialogRef = ref<HTMLElement | null>(null)
+
+// Focus the primary control of whichever step is currently rendered. Only one
+// step is mounted at a time, so the first matching selector is the right one.
+function initialFocusTarget(): HTMLElement | null {
+  const el = dialogRef.value
+  if (!el) return null
+  const selectors = ['#phone', '#code', '#tg-password', '.retry-button', '.close-button-primary']
+  for (const selector of selectors) {
+    const target = el.querySelector<HTMLElement>(selector)
+    if (target) return target
+  }
+  return null
+}
+
+// Focus trap + background inert. Escape is deliberately swallowed here: the
+// connection flow must never close, cancel or go back on Escape at any step.
+useModalFocus({
+  active: () => props.modelValue,
+  container: dialogRef,
+  initialFocus: initialFocusTarget,
+  closeOnEscape: false,
+})
+
 // Watch for modal open to init status
 watch(() => props.modelValue, async (isOpen) => {
   if (isOpen) {
     await reset()
+    rememberedStep.value = 'credentials'
     credentials.value = { phone: '', api_id: '', api_hash: '' }
     code.value = ''
     password.value = ''
@@ -71,6 +106,8 @@ async function close() {
 }
 
 async function handleRequestCode() {
+  if (isLoading.value) return
+
   // Validate credentials
   if (!credentials.value.phone.trim()) {
     errorMessage.value = t('tts.telegram.auth.error.phone_required')
@@ -92,6 +129,8 @@ async function handleRequestCode() {
 }
 
 async function handleSignIn() {
+  if (isLoading.value) return
+
   if (!code.value.trim()) {
     errorMessage.value = t('tts.telegram.auth.error.code_required')
     return
@@ -104,6 +143,8 @@ async function handleSignIn() {
 }
 
 async function handleCheckPassword() {
+  if (isLoading.value) return
+
   if (!password.value.trim()) {
     errorMessage.value = t('tts.telegram.auth.error.password_required')
     return
@@ -118,15 +159,10 @@ async function handleCheckPassword() {
 
 async function handleRetry() {
   reset()
+  rememberedStep.value = 'credentials'
   credentials.value = { phone: '', api_id: '', api_hash: '' }
   code.value = ''
   password.value = ''
-}
-
-async function handleDisableAndClose() {
-  // Sign out and close modal
-  await signOut()
-  close()
 }
 
 async function handleSignOut() {
@@ -138,250 +174,241 @@ async function handleSignOut() {
 </script>
 
 <template>
-  <div v-if="modelValue" class="modal-overlay">
-    <div class="modal-container">
-      <!-- Header -->
-      <div class="modal-header">
-        <h2 class="ui-section-title">{{ t('tts.telegram.auth.title') }}</h2>
-        <button class="ui-icon-button close-button" @click="close" :aria-label="t('common.close')" :title="t('common.close')">×</button>
-      </div>
+  <Teleport to="body">
+    <div v-if="modelValue" class="modal-overlay">
+      <div
+        ref="dialogRef"
+        class="modal-container"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="tg-auth-title"
+        tabindex="-1"
+      >
+        <!-- Header -->
+        <div class="ui-modal-header">
+          <h2 id="tg-auth-title" class="ui-section-title">{{ t('tts.telegram.auth.title') }}</h2>
+          <button class="ui-icon-button close-button" @click="close" :aria-label="t('common.close')" :title="t('common.close')">×</button>
+        </div>
 
-      <!-- Error Message -->
-      <div v-if="errorMessage" class="error-message">
-        {{ errorMessage }}
-      </div>
+        <!-- Error Message -->
+        <div v-if="errorMessage" class="error-message">
+          {{ errorMessage }}
+        </div>
 
-      <!-- Content -->
-      <div class="modal-content">
-        <!-- State 1: Form Input -->
-        <div v-if="canInit || state === 'loading'" class="auth-form">
-          <div class="form-info">
-            <p class="info-link">
-              {{ t('tts.telegram.auth.credentials_hint') }}
-              <a
-                href="https://my.telegram.org/apps"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                my.telegram.org
-              </a>
-            </p>
-          </div>
+        <!-- Content -->
+        <div class="ui-modal-body modal-content">
+          <!-- State 1: Form Input -->
+          <div v-if="displayStep === 'credentials'" class="auth-form">
+            <div class="form-info">
+              <p class="info-link">
+                {{ t('tts.telegram.auth.credentials_hint') }}
+                <a
+                  href="https://my.telegram.org/apps"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  my.telegram.org
+                </a>
+              </p>
+            </div>
 
-          <div class="form-group">
-            <label class="ui-label" for="phone">{{ t('tts.telegram.auth.phone') }}</label>
-            <div class="input-with-toggle">
-              <input
-                id="phone"
-                v-model="credentials.phone"
-                :type="showPhone ? 'tel' : 'password'"
-                placeholder="+79991234567"
-                :disabled="isLoading"
-                @keypress.enter="handleRequestCode"
-              />
+            <div class="auth-grid">
+              <label class="ui-label ui-label--secondary" for="phone">{{ t('tts.telegram.auth.phone') }}</label>
+              <div class="input-with-toggle">
+                <input
+                  id="phone"
+                  v-model="credentials.phone"
+                  class="ui-input"
+                  :type="showPhone ? 'tel' : 'password'"
+                  placeholder="+79991234567"
+                  :disabled="isLoading"
+                  @keypress.enter="handleRequestCode"
+                />
+                <button
+                  type="button"
+                  class="ui-icon-button ui-icon-button--inset toggle-button"
+                  @click="showPhone = !showPhone"
+                  :title="showPhone ? t('tts.telegram.auth.hide') : t('tts.telegram.auth.show')"
+                  :aria-label="showPhone ? t('tts.telegram.auth.hide') : t('tts.telegram.auth.show')"
+                  :aria-pressed="showPhone ? 'true' : 'false'"
+                >
+                  <Eye v-if="!showPhone" :size="18" />
+                  <EyeOff v-else :size="18" />
+                </button>
+              </div>
+
+              <label class="ui-label ui-label--secondary" for="api_id">{{ t('tts.telegram.auth.api_id') }}</label>
+              <div class="input-with-toggle">
+                <input
+                  id="api_id"
+                  v-model="credentials.api_id"
+                  class="ui-input"
+                  :type="showApiId ? 'text' : 'password'"
+                  placeholder="12345678"
+                  :disabled="isLoading"
+                  @keypress.enter="handleRequestCode"
+                />
+                <button
+                  type="button"
+                  class="ui-icon-button ui-icon-button--inset toggle-button"
+                  @click="showApiId = !showApiId"
+                  :title="showApiId ? t('tts.telegram.auth.hide') : t('tts.telegram.auth.show')"
+                  :aria-label="showApiId ? t('tts.telegram.auth.hide') : t('tts.telegram.auth.show')"
+                  :aria-pressed="showApiId ? 'true' : 'false'"
+                >
+                  <Eye v-if="!showApiId" :size="18" />
+                  <EyeOff v-else :size="18" />
+                </button>
+              </div>
+
+              <label class="ui-label ui-label--secondary" for="api_hash">{{ t('tts.telegram.auth.api_hash') }}</label>
+              <div class="input-with-toggle">
+                <input
+                  id="api_hash"
+                  v-model="credentials.api_hash"
+                  class="ui-input"
+                  :type="showApiHash ? 'text' : 'password'"
+                  :placeholder="t('tts.telegram.auth.api_hash_placeholder')"
+                  :disabled="isLoading"
+                  @keypress.enter="handleRequestCode"
+                />
+                <button
+                  type="button"
+                  class="ui-icon-button ui-icon-button--inset toggle-button"
+                  @click="showApiHash = !showApiHash"
+                  :title="showApiHash ? t('tts.telegram.auth.hide') : t('tts.telegram.auth.show')"
+                  :aria-label="showApiHash ? t('tts.telegram.auth.hide') : t('tts.telegram.auth.show')"
+                  :aria-pressed="showApiHash ? 'true' : 'false'"
+                >
+                  <Eye v-if="!showApiHash" :size="18" />
+                  <EyeOff v-else :size="18" />
+                </button>
+              </div>
+            </div>
+
+            <div class="auth-actions">
               <button
-                type="button"
-                class="toggle-button"
-                @click="showPhone = !showPhone"
-                :title="showPhone ? t('tts.telegram.auth.hide') : t('tts.telegram.auth.show')"
+                class="ui-button ui-button--primary submit-button"
+                :disabled="isLoading"
+                @click="handleRequestCode"
               >
-                <Eye v-if="!showPhone" :size="16" />
-                <EyeOff v-else :size="16" />
+                {{ isLoading ? t('tts.telegram.auth.sending') : t('tts.telegram.auth.send_code') }}
               </button>
             </div>
           </div>
 
-          <div class="form-group password-group">
-            <label class="ui-label" for="api_id">{{ t('tts.telegram.auth.api_id') }}</label>
-            <div class="input-with-toggle">
+          <!-- State 2: Enter Code -->
+          <div v-else-if="displayStep === 'code'" class="auth-form">
+            <div class="form-info">
+              <p>{{ t('tts.telegram.auth.code_hint') }}</p>
+            </div>
+
+            <div class="auth-grid">
+              <label class="ui-label ui-label--secondary" for="code">{{ t('tts.telegram.auth.code_label') }}</label>
               <input
-                id="api_id"
-                v-model="credentials.api_id"
-                :type="showApiId ? 'text' : 'password'"
-                placeholder="12345678"
+                id="code"
+                v-model="code"
+                class="ui-input"
+                type="text"
+                placeholder="12345"
                 :disabled="isLoading"
-                @keypress.enter="handleRequestCode"
+                @keypress.enter="handleSignIn"
               />
+            </div>
+
+            <div class="auth-actions">
+              <button class="ui-button back-button" :disabled="isLoading" @click="reset">
+                {{ t('tts.telegram.auth.back') }}
+              </button>
               <button
-                type="button"
-                class="toggle-button"
-                @click="showApiId = !showApiId"
-                :title="showApiId ? t('tts.telegram.auth.hide') : t('tts.telegram.auth.show')"
+                class="ui-button ui-button--primary submit-button"
+                :disabled="isLoading"
+                @click="handleSignIn"
               >
-                <Eye v-if="!showApiId" :size="16" />
-                <EyeOff v-else :size="16" />
+                {{ isLoading ? t('tts.telegram.auth.checking') : t('tts.telegram.auth.sign_in') }}
               </button>
             </div>
           </div>
 
-          <div class="form-group password-group">
-            <label class="ui-label" for="api_hash">{{ t('tts.telegram.auth.api_hash') }}</label>
-            <div class="input-with-toggle">
-              <input
-                id="api_hash"
-                v-model="credentials.api_hash"
-                :type="showApiHash ? 'text' : 'password'"
-                :placeholder="t('tts.telegram.auth.api_hash_placeholder')"
-                :disabled="isLoading"
-                @keypress.enter="handleRequestCode"
-              />
+          <!-- State 2.5: Enter 2FA Password -->
+          <div v-else-if="displayStep === 'password'" class="auth-form">
+            <div class="form-info">
+              <p>{{ t('tts.telegram.auth.password_hint') }}</p>
+            </div>
+
+            <div class="auth-grid">
+              <label class="ui-label ui-label--secondary" for="tg-password">{{ t('tts.telegram.auth.password_label') }}</label>
+              <div class="input-with-toggle">
+                <input
+                  id="tg-password"
+                  v-model="password"
+                  class="ui-input"
+                  :type="showPassword ? 'text' : 'password'"
+                  :placeholder="t('tts.telegram.auth.password_placeholder')"
+                  :disabled="isLoading"
+                  @keypress.enter="handleCheckPassword"
+                />
+                <button
+                  type="button"
+                  class="ui-icon-button ui-icon-button--inset toggle-button"
+                  @click="showPassword = !showPassword"
+                  :title="showPassword ? t('tts.telegram.auth.hide') : t('tts.telegram.auth.show')"
+                  :aria-label="showPassword ? t('tts.telegram.auth.hide') : t('tts.telegram.auth.show')"
+                  :aria-pressed="showPassword ? 'true' : 'false'"
+                >
+                  <Eye v-if="!showPassword" :size="18" />
+                  <EyeOff v-else :size="18" />
+                </button>
+              </div>
+            </div>
+
+            <div class="auth-actions">
+              <button class="ui-button back-button" :disabled="isLoading" @click="handleRetry">
+                {{ t('tts.telegram.auth.back') }}
+              </button>
               <button
-                type="button"
-                class="toggle-button"
-                @click="showApiHash = !showApiHash"
-                :title="showApiHash ? t('tts.telegram.auth.hide') : t('tts.telegram.auth.show')"
+                class="ui-button ui-button--primary submit-button"
+                :disabled="isLoading"
+                @click="handleCheckPassword"
               >
-                <Eye v-if="!showApiHash" :size="16" />
-                <EyeOff v-else :size="16" />
+                {{ isLoading ? t('tts.telegram.auth.checking') : t('tts.telegram.auth.confirm') }}
               </button>
             </div>
           </div>
 
-          <button
-            class="ui-button ui-button--primary submit-button"
-            :disabled="isLoading"
-            @click="handleRequestCode"
-          >
-            {{ isLoading ? t('tts.telegram.auth.sending') : t('tts.telegram.auth.send_code') }}
-          </button>
-        </div>
+          <!-- State 3: Connected -->
+          <div v-else-if="displayStep === 'connected'" class="connected-state">
+            <div class="connected-icon">✓</div>
+            <h3>{{ t('tts.telegram.auth.connected_title') }}</h3>
 
-        <!-- State 2: Enter Code -->
-        <div v-else-if="needsCode" class="auth-form">
-          <div class="form-info">
-            <p>{{ t('tts.telegram.auth.code_hint') }}</p>
-          </div>
+            <div v-if="status" class="user-info">
+              <p v-if="status.first_name || status.last_name" class="user-name">
+                {{ status.first_name }} {{ status.last_name }}
+              </p>
+              <p v-if="status.username" class="user-username">@{{ status.username }}</p>
+              <p v-if="status.phone" class="user-phone">{{ status.phone }}</p>
+            </div>
 
-          <div class="form-group">
-            <label class="ui-label" for="code">{{ t('tts.telegram.auth.code_label') }}</label>
-            <input
-              id="code"
-              v-model="code"
-              type="text"
-              placeholder="12345"
-              :disabled="isLoading"
-              @keypress.enter="handleSignIn"
-              autofocus
-            />
-          </div>
+            <div class="form-info success-info">
+              <p>{{ t('tts.telegram.auth.success_info') }}</p>
+              <p class="info-hint">
+                {{ t('tts.telegram.auth.success_hint') }}
+              </p>
+            </div>
 
-          <button
-            class="ui-button ui-button--primary submit-button"
-            :disabled="isLoading"
-            @click="handleSignIn"
-          >
-            {{ isLoading ? t('tts.telegram.auth.checking') : t('tts.telegram.auth.sign_in') }}
-          </button>
-
-          <button class="ui-button back-button" :disabled="isLoading" @click="reset">
-            {{ t('tts.telegram.auth.back') }}
-          </button>
-        </div>
-
-        <!-- State 2.5: Enter 2FA Password -->
-        <div v-else-if="needsPassword" class="auth-form">
-          <div class="form-info">
-            <p>{{ t('tts.telegram.auth.password_hint') }}</p>
-          </div>
-
-          <div class="form-group password-group">
-            <label for="tg-password">{{ t('tts.telegram.auth.password_label') }}</label>
-            <div class="input-with-toggle">
-              <input
-                id="tg-password"
-                v-model="password"
-                :type="showPassword ? 'text' : 'password'"
-                :placeholder="t('tts.telegram.auth.password_placeholder')"
-                :disabled="isLoading"
-                @keypress.enter="handleCheckPassword"
-                autofocus
-              />
-              <button
-                type="button"
-                class="toggle-button"
-                @click="showPassword = !showPassword"
-                :title="showPassword ? t('tts.telegram.auth.hide') : t('tts.telegram.auth.show')"
-              >
-                <Eye v-if="!showPassword" :size="16" />
-                <EyeOff v-else :size="16" />
+            <div class="button-group">
+              <button class="ui-button ui-action--danger disconnect-button" @click="handleSignOut">
+                {{ t('tts.telegram.auth.disconnect') }}
+              </button>
+              <button class="ui-button ui-button--primary close-button-primary" @click="close">
+                {{ t('tts.telegram.auth.close') }}
               </button>
             </div>
           </div>
-
-          <button
-            class="ui-button ui-button--primary submit-button"
-            :disabled="isLoading"
-            @click="handleCheckPassword"
-          >
-            {{ isLoading ? t('tts.telegram.auth.checking') : t('tts.telegram.auth.confirm') }}
-          </button>
-
-          <button class="ui-button back-button" :disabled="isLoading" @click="handleRetry">
-            {{ t('tts.telegram.auth.back') }}
-          </button>
-        </div>
-
-        <!-- State 3: Error -->
-        <div v-else-if="hasError" class="error-state">
-          <div class="error-icon-modal">⚠</div>
-          <h3>{{ t('tts.telegram.auth.error_title') }}</h3>
-
-          <div v-if="errorMessage" class="error-message-modal">
-            {{ errorMessage }}
-          </div>
-
-          <div class="form-info error-info">
-            <p>{{ t('tts.telegram.auth.error_hint') }}</p>
-          </div>
-
-          <div class="button-group">
-            <button class="ui-button ui-button--primary retry-button" @click="handleRetry">
-              {{ t('tts.telegram.auth.retry') }}
-            </button>
-            <button class="ui-button disable-button" @click="handleDisableAndClose">
-              {{ t('tts.telegram.auth.disable') }}
-            </button>
-          </div>
-        </div>
-
-        <!-- State 4: Connected -->
-        <div v-else-if="isConnected" class="connected-state">
-          <div class="connected-icon">✓</div>
-          <h3>{{ t('tts.telegram.auth.connected_title') }}</h3>
-
-          <div v-if="status" class="user-info">
-            <p v-if="status.first_name || status.last_name" class="user-name">
-              {{ status.first_name }} {{ status.last_name }}
-            </p>
-            <p v-if="status.username" class="user-username">@{{ status.username }}</p>
-            <p v-if="status.phone" class="user-phone">{{ status.phone }}</p>
-          </div>
-
-          <div class="form-info success-info">
-            <p>{{ t('tts.telegram.auth.success_info') }}</p>
-            <p class="info-hint">
-              {{ t('tts.telegram.auth.success_hint') }}
-            </p>
-          </div>
-
-          <div class="button-group">
-            <button class="ui-button ui-action--danger disconnect-button" @click="handleSignOut">
-              {{ t('tts.telegram.auth.disconnect') }}
-            </button>
-            <button class="ui-button ui-button--primary close-button-primary" @click="close">
-              {{ t('tts.telegram.auth.close') }}
-            </button>
-          </div>
-        </div>
-
-        <!-- Loading State -->
-        <div v-else-if="isLoading && !needsCode && !isConnected" class="loading-state">
-          <div class="spinner"></div>
-          <p>{{ t('tts.telegram.auth.loading') }}</p>
         </div>
       </div>
     </div>
-  </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -409,27 +436,12 @@ async function handleSignOut() {
   max-height: 90vh;
   overflow-y: auto;
   box-shadow: var(--shadow-soft);
-}
-
-.modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 20px 24px;
-  border-bottom: 1px solid var(--color-border-strong);
-}
-
-.modal-header h2 {
-  margin: 0;
+  outline: none;
 }
 
 .close-button {
   font-size: 20px;
   line-height: 1;
-}
-
-.modal-content {
-  padding: 24px;
 }
 
 .error-message {
@@ -448,6 +460,8 @@ async function handleSignOut() {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  container-type: inline-size;
+  container-name: auth-form;
 }
 
 .form-info {
@@ -479,85 +493,45 @@ async function handleSignOut() {
   text-decoration: underline;
 }
 
-.phone-display {
-  font-weight: 600;
-  color: var(--color-text-primary);
-  margin-top: 8px;
+/* Label/field grid matching the network/general form: labels left, fields
+   right, stacking labels above fields on a narrow modal. */
+.auth-grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: var(--ui-field-group-gap);
+  row-gap: var(--ui-row-gap);
+  align-items: center;
 }
 
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.form-group .ui-label {
-  color: var(--color-text-secondary);
-}
-
-.form-group input {
-  min-height: var(--ui-control-min-height);
-  box-sizing: border-box;
-  padding: var(--ui-control-padding-y) var(--ui-control-padding-x);
-  border: var(--ui-border-width) solid var(--color-border-strong);
-  border-radius: var(--ui-radius);
-  background: var(--color-bg-field);
-  color: var(--color-text-primary);
-  font-size: var(--ui-text-size-control);
-  font-weight: var(--ui-text-weight-control);
-  font-family: var(--font-mono);
-  transition: all 0.15s ease;
-}
-
-.form-group input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-glow);
-}
-
-.form-group input:disabled {
-  background: var(--color-border-weak);
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.form-group input::placeholder {
-  color: var(--color-text-muted);
-}
-
-/* Use the app's visibility toggle instead of WebView2's native reveal icon. */
-.form-group input[type='password']::-ms-reveal {
-  display: none;
-}
-
-/* Override browser autofill styles */
-.form-group input:-webkit-autofill,
-.form-group input:-webkit-autofill:hover,
-.form-group input:-webkit-autofill:focus,
-.form-group input:-webkit-autofill:active {
-  -webkit-box-shadow: 0 0 0 1000px var(--color-bg-field) inset !important;
-  -webkit-text-fill-color: var(--color-text-primary) !important;
-  transition: background-color 5000s ease-in-out 0s;
-}
-
-.form-group input:-webkit-autofill::first-line {
-  font-family: var(--font-mono);
-  font-size: var(--ui-text-size-control);
-}
-
-.password-group {
-  position: relative;
+.auth-grid > .ui-label {
+  padding-right: 4px;
 }
 
 .input-with-toggle {
   position: relative;
   display: flex;
   align-items: center;
+  min-width: 0;
 }
 
 .input-with-toggle input {
   flex: 1;
+  width: 100%;
   padding-right: 40px;
+}
+
+/* Hide WebView2's native reveal icon in favor of the app's own toggle. */
+.input-with-toggle input[type='password']::-ms-reveal {
+  display: none;
+}
+
+.input-with-toggle input:-webkit-autofill,
+.input-with-toggle input:-webkit-autofill:hover,
+.input-with-toggle input:-webkit-autofill:focus,
+.input-with-toggle input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px var(--color-bg-field) inset !important;
+  -webkit-text-fill-color: var(--color-text-primary) !important;
+  transition: background-color 5000s ease-in-out 0s;
 }
 
 .toggle-button {
@@ -565,39 +539,43 @@ async function handleSignOut() {
   right: 8px;
   top: 50%;
   transform: translateY(-50%);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  color: var(--color-text-secondary);
+}
+
+.auth-actions {
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 4px;
-  border-radius: 4px;
-  transition: color 0.2s, background 0.2s;
+  justify-content: flex-end;
+  gap: var(--ui-field-group-gap);
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--color-border);
 }
 
-.toggle-button:hover {
-  color: var(--color-accent);
-  background: var(--color-bg-field);
+.auth-actions .back-button {
+  margin-right: auto;
 }
 
-.submit-button {
-  margin-top: 8px;
+.auth-actions .back-button:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-text-primary);
 }
 
 .submit-button:hover:not(:disabled) {
   filter: brightness(1.06);
 }
 
-.back-button {
-  color: var(--color-text-secondary);
-  margin-top: 8px;
-}
+@container auth-form (max-width: 400px) {
+  .auth-grid {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: var(--ui-row-label-gap-stack);
+  }
 
-.back-button:hover:not(:disabled) {
-  border-color: var(--color-accent);
-  color: var(--color-text-primary);
+  .auth-grid > .ui-label {
+    padding-right: 0;
+  }
+
+  .auth-grid > :not(.ui-label) {
+    margin-bottom: var(--ui-row-label-gap-stack);
+  }
 }
 
 .connected-state {

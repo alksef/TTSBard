@@ -47,11 +47,13 @@ related_tasks: []
 
 - [ROADMAP-125 — Перехват клавиш и снятие ограничения](./active/125-intercept-key-restriction.md) — `in_progress`, реализовано; ожидает ручной проверки пользователя.
 
-- [ROADMAP-124 — Согласованное управление жизненным циклом интеграций](./active/124-integration-lifecycle-consistency.md) — `in_progress`.
 
-- [ROADMAP-121 — Согласованность оформления UI](./active/121-ui-visual-consistency.md) — `in_progress`.
 
 ## Завершённые направления
+
+- [ROADMAP-124 — Согласованное управление жизненным циклом интеграций](./completed/124-integration-lifecycle-consistency.md) — `completed`: закрыто пользователем 2026-10-06.
+
+- [ROADMAP-121 — Согласованность оформления UI](./completed/121-ui-visual-consistency.md) — `completed`: текущий UI-пакет принят; отложенный объём указан в Outcome.
 
 - [ROADMAP-123 — Восстановление после ошибки загрузки настроек](./completed/123-settings-load-recovery.md) — `completed`.
 

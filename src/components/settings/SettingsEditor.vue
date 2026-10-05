@@ -291,7 +291,7 @@ watch(editorSettings, (newSettings) => {
           />
           <span>{{ opt.label }}</span>
         </label>
-        <span v-if="opt.value === 'return_focus'" class="setting-hint ui-hint">
+        <span v-if="opt.value === 'return_focus'" class="setting-hint ui-hint ui-hint--choice">
           {{ t('settings.editor.quick.return_focus.hint') }}
         </span>
       </div>
@@ -305,7 +305,7 @@ watch(editorSettings, (newSettings) => {
           />
           <span>{{ t('settings.editor.keep_text_after_send') }}</span>
         </label>
-        <span class="setting-hint ui-hint">
+        <span class="setting-hint ui-hint ui-hint--choice">
           {{ t('settings.editor.keep_text_after_send.hint') }}
         </span>
       </div>
@@ -325,7 +325,7 @@ watch(editorSettings, (newSettings) => {
           />
           <span>{{ t('settings.editor.spellcheck') }}</span>
         </label>
-        <span class="setting-hint ui-hint">
+        <span class="setting-hint ui-hint ui-hint--choice">
           {{ t('settings.editor.spellcheck.hint') }}
         </span>
       </div>
@@ -340,7 +340,7 @@ watch(editorSettings, (newSettings) => {
           />
           <span>{{ t('settings.editor.autocomplete_enabled') }}</span>
         </label>
-        <span class="setting-hint ui-hint">
+        <span class="setting-hint ui-hint ui-hint--choice">
           {{ t('settings.editor.autocomplete_enabled.hint') }}
         </span>
       </div>
@@ -449,7 +449,7 @@ watch(editorSettings, (newSettings) => {
           />
           <span>{{ t('settings.editor.accentor.load_on_start') }}</span>
         </label>
-        <span class="setting-hint ui-hint">
+        <span class="setting-hint ui-hint ui-hint--choice">
           {{ t('settings.editor.accentor.load_on_start.hint') }}
         </span>
       </div>
@@ -464,7 +464,7 @@ watch(editorSettings, (newSettings) => {
           />
           <span>{{ t('settings.editor.accentor.enabled') }}</span>
         </label>
-        <span class="setting-hint ui-hint">
+        <span class="setting-hint ui-hint ui-hint--choice">
           {{ t('settings.editor.accentor.enabled.hint') }}
         </span>
       </div>
@@ -520,7 +520,6 @@ watch(editorSettings, (newSettings) => {
 
 .setting-hint {
   display: block;
-  margin-left: 2.4rem;
 }
 
 .setting-hint code {
@@ -548,16 +547,10 @@ watch(editorSettings, (newSettings) => {
 }
 
 .typing-hint {
-  margin-left: 0 !important;
   width: 100%;
 }
 
-.accentor-empty {
-  margin-left: 0 !important;
-}
-
 .accentor-status {
-  margin-left: 0 !important;
   display: flex;
   gap: var(--ui-hint-gap);
   margin-bottom: var(--ui-row-gap);

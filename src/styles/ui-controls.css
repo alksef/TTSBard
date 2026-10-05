@@ -52,6 +52,10 @@
   margin-top: var(--ui-hint-gap);
 }
 
+.ui-hint--choice {
+  margin-left: 2.4rem;
+}
+
 .ui-description {
   font-size: var(--ui-text-size-control);
   font-weight: var(--ui-text-weight-control);
@@ -550,4 +554,26 @@
   font-weight: 600;
   color: var(--color-accent);
   background: var(--card-active-bg);
+}
+
+/* ========== Modal ========== */
+
+/* Shared modal header/body geometry for dialogs that use a top title row and
+   a divider. Titles keep their existing ui-section-title tokens; only the
+   margin is owned here. The close control stays a plain ui-icon-button. */
+.ui-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.ui-modal-header > :is(h1, h2, h3, h4, h5, h6) {
+  margin: 0;
+}
+
+.ui-modal-body {
+  padding: 12px 20px 20px;
 }

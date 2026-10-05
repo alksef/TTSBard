@@ -1137,9 +1137,10 @@ function dismissStatus() {
 
 .visibility-control {
   position: relative;
+  top: -12px;
   display: flex;
   justify-content: flex-end;
-  margin-bottom: 8px;
+  margin-bottom: -4px;
 }
 
 .visibility-popover {
