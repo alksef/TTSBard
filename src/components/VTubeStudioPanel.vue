@@ -2,6 +2,7 @@
 import { Play, RefreshCw, RotateCw, Square } from 'lucide-vue-next'
 import { useVTubeStudio, SAVED_HOTKEY_TYPE } from '../composables/useVTubeStudio'
 import { t } from '../i18n'
+import PanelEasterEgg from './shared/PanelEasterEgg.vue'
 
 const {
   settings,
@@ -53,7 +54,8 @@ const {
       {{ errorMessage }}
     </div>
 
-    <section class="settings-section ui-section">
+    <section class="settings-section ui-section easter-egg-host">
+      <PanelEasterEgg kind="cursor" />
       <div class="section-header server-header">
         <h2 class="ui-section-title">{{ t('vtube.connection') }}</h2>
         <div class="server-status">
@@ -282,6 +284,10 @@ const {
 </template>
 
 <style scoped>
+.easter-egg-host {
+  position: relative;
+}
+
 .vtube-panel {
   max-width: 900px;
   margin: 0 auto;

@@ -2,6 +2,7 @@
 import { Eye, EyeOff, Play, Square, RotateCw } from 'lucide-vue-next'
 import { useTwitch } from '../composables/useTwitch'
 import { t } from '../i18n'
+import PanelEasterEgg from './shared/PanelEasterEgg.vue'
 
 const {
   settings,
@@ -35,6 +36,7 @@ const {
     <p v-if="connectionError" class="connection-error ui-status" role="alert">{{ connectionError }}</p>
 
     <section class="settings-section ui-section connection-section">
+      <PanelEasterEgg kind="cassette" />
       <div class="section-header server-header">
         <h2 class="ui-section-title">{{ t('twitch.connection') }}</h2>
         <div class="server-status">
@@ -179,6 +181,10 @@ const {
 </template>
 
 <style scoped>
+.connection-section {
+  position: relative;
+}
+
 .twitch-panel {
   max-width: 900px;
   margin: 0 auto;

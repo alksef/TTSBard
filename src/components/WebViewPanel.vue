@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { Copy, RotateCw, Play, Square, AlertTriangle, Globe } from 'lucide-vue-next'
 import { useWebView } from '../composables/useWebView'
 import { t } from '../i18n'
+import PanelEasterEgg from './shared/PanelEasterEgg.vue'
 import InputWithToggle from './shared/InputWithToggle.vue'
 
 const messageBoxClass = computed(() => (errorMessage.value ? errorMessageType.value : ''))
@@ -47,7 +48,8 @@ const {
       {{ errorMessage }}
     </div>
 
-    <section class="settings-section ui-section">
+    <section class="settings-section ui-section easter-egg-host">
+      <PanelEasterEgg kind="tail" />
       <div class="section-header server-header">
         <h2 class="ui-section-title">{{ t('webview.server') }}</h2>
         <div class="server-status">
@@ -216,6 +218,10 @@ const {
 </template>
 
 <style scoped>
+.easter-egg-host {
+  position: relative;
+}
+
 .webview-panel {
   max-width: 900px;
   margin: 0 auto;

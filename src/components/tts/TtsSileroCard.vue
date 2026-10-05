@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 import { Bot, Plus, Trash2, Loader2, RefreshCw } from 'lucide-vue-next';
 import { confirm } from '@tauri-apps/plugin-dialog';
 import ProviderCard from '../shared/ProviderCard.vue';
+import PanelEasterEgg from '../shared/PanelEasterEgg.vue';
 import TelegramConnectionStatus from './TelegramConnectionStatus.vue';
 import type { VoiceCode } from '../../types/settings';
 import type { CurrentVoice, Limits } from '../../composables/useTelegramAuth';
@@ -160,6 +161,7 @@ function handleSelectVoice(voiceId: string) {
 
 <template>
   <ProviderCard
+    class="silero-easter-egg-host"
     title="Silero Bot"
     :icon="Bot"
     :active="active"
@@ -168,6 +170,7 @@ function handleSelectVoice(voiceId: string) {
     @select="$emit('select')"
     @toggle="$emit('toggle')"
   >
+    <PanelEasterEgg v-if="expanded" kind="cassette" />
     <TelegramConnectionStatus
       :connected="connected"
       :telegram-status="telegramStatus"
@@ -317,6 +320,10 @@ function handleSelectVoice(voiceId: string) {
 </template>
 
 <style scoped>
+.silero-easter-egg-host {
+  position: relative;
+}
+
 .error-state {
   border-color: var(--card-error-border) !important;
   background: var(--card-error-bg) !important;
