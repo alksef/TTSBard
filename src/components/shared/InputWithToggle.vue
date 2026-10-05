@@ -11,6 +11,8 @@ interface Props {
   readonly?: boolean;
   label?: string;
   class?: string;
+  /** Opt into the shared ui-input / ui-icon-button presentation. */
+  ui?: boolean;
 }
 
 interface Emits {
@@ -24,6 +26,7 @@ const props = withDefaults(defineProps<Props>(), {
   readonly: false,
   label: '',
   class: '',
+  ui: false,
 });
 
 const emit = defineEmits<Emits>();
@@ -56,11 +59,13 @@ function updateValue(event: Event) {
       :readonly="readonly"
       :aria-label="label || undefined"
       class="input-with-toggle-input"
+      :class="{ 'ui-input': ui }"
     />
     <button
       v-if="hasToggle"
       type="button"
       class="toggle-icon-button token-visibility-button"
+      :class="{ 'ui-icon-button': ui, 'ui-icon-button--inset': ui }"
       @click="showValue = !showValue"
       :title="showValue ? t('common.hide') : t('common.show')"
       :aria-label="showValue ? t('common.hide') : t('common.show')"
@@ -75,13 +80,19 @@ function updateValue(event: Event) {
 </template>
 
 <style scoped>
+/* WebView2 supplies its own reveal control; this component already owns one. */
+.input-with-toggle-input::-ms-reveal {
+  display: none;
+}
+
 .input-with-toggle {
   position: relative;
   display: flex;
   align-items: center;
 }
 
-.input-with-toggle-input {
+/* Legacy presentation (no opt-in): own typography and geometry, unchanged. */
+.input-with-toggle-input:not(.ui-input) {
   flex: 1;
   width: 100%;
   padding: 10px;
@@ -94,39 +105,54 @@ function updateValue(event: Event) {
   box-sizing: border-box;
 }
 
-.input-with-toggle-input:hover {
+.input-with-toggle-input:not(.ui-input):hover {
   background: var(--color-bg-field-hover);
   border-color: var(--color-border-strong);
 }
 
-.input-with-toggle-input:focus {
+.input-with-toggle-input:not(.ui-input):focus {
   outline: none;
   border-color: var(--color-accent);
   box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
-.input-with-toggle-input::placeholder {
+.input-with-toggle-input:not(.ui-input)::placeholder {
   color: var(--color-text-muted);
   font-size: 13px;
 }
 
-.input-with-toggle-input:disabled {
+.input-with-toggle-input:not(.ui-input):disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
 
+/* Opt-in presentation: the shared ui-input role supplies padding, border,
+   radius, typography and states. Only the layout and the space under the
+   32 px inset toggle stay local; padding-right keeps text clear of it. */
+.input-with-toggle-input.ui-input {
+  flex: 1;
+  width: 100%;
+  padding-right: 40px;
+}
+
+/* Toggle positioning is shared by both presentations; the vertical center
+   follows the input height as it grows. */
 .toggle-icon-button {
   position: absolute;
   right: 8px;
   top: 50%;
   transform: translateY(-50%);
-  padding: 6px;
-  border: none;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: color 0.2s;
   background: transparent !important;
+}
+
+/* Legacy toggle sizing applies only without the opt-in. */
+.toggle-icon-button:not(.ui-icon-button) {
+  padding: 6px;
+  border: none;
 }
 </style>

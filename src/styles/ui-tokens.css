@@ -1,0 +1,84 @@
+/* ui-tokens.css - Opt-in design tokens for the main forms foundation.
+
+   Geometry, typography and spacing scale from ROADMAP-121 and
+   docs/development/ui-guidelines.md. Text sizes are in rem (relative to the
+   html base), geometry and spacing in px. Colors are intentionally NOT
+   defined here: they come from the existing theme tokens in variables.css,
+   so no second palette is introduced.
+
+   User-controlled --ui-font-family / --ui-font-size (html base) and the
+   --font-sans / --font-mono stacks are deliberately left untouched. */
+
+:root {
+  /* ========== Typography roles ========== */
+
+  --ui-text-size-section-title: 1.1rem;
+  --ui-text-weight-section-title: 600;
+
+  --ui-text-size-group-title: 1rem;
+  --ui-text-weight-group-title: 600;
+
+  /* Labels, buttons and checkbox/radio captions */
+  --ui-text-size-label: 0.95rem;
+  --ui-text-weight-label: 500;
+
+  /* Text inside fields, selects, textareas and menu items */
+  --ui-text-size-control: 0.9rem;
+  --ui-text-weight-control: 400;
+
+  /* Hints, statuses and metadata */
+  --ui-text-size-hint: 0.85rem;
+  --ui-text-weight-hint: 400;
+
+  /* ========== Line heights ========== */
+
+  --ui-line-height-control: 1.25;
+  --ui-line-height-multiline: 1.4;
+
+  /* ========== Control geometry ========== */
+
+  --ui-border-width: 1px;
+  --ui-radius: 8px;
+  --ui-radius-menu-item: 6px;
+
+  --ui-control-min-height: 38px;
+  --ui-control-padding-y: 8px;
+  --ui-control-padding-x: 12px;
+
+  --ui-button-padding-x: 16px;
+
+  --ui-textarea-padding: 12px;
+
+  /* Extra right space in a native select so the arrow never overlaps text */
+  --ui-select-arrow-reserve: 16px;
+
+  --ui-icon-button-size: 32px;
+  --ui-icon-size: 18px;
+  --ui-icon-adjacent-width: 38px;
+
+  --ui-choice-size: 18px;
+  --ui-choice-gap: 8px;
+
+  --ui-tab-padding-y: 8px;
+  --ui-tab-padding-x: 12px;
+
+  --ui-menu-padding: 4px;
+  --ui-menu-max-height: 360px;
+  --ui-menu-item-padding-y: 8px;
+  --ui-menu-item-padding-x: 12px;
+
+  /* ========== Spacing ========== */
+
+  --ui-section-padding-y: 12px;
+  --ui-section-padding-x: 16px;
+  --ui-section-gap: 12px;
+
+  --ui-row-gap: 16px;
+  --ui-row-label-gap-side: 12px;
+  --ui-row-label-gap-stack: 8px;
+
+  --ui-hint-gap: 6px;
+
+  --ui-field-group-gap: 8px;
+  --ui-settings-group-gap: 16px;
+}

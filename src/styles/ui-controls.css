@@ -1,0 +1,553 @@
+/* ui-controls.css - Opt-in classes for the main forms foundation.
+
+   Every rule below is opt-in via an explicit .ui-* class: there are no bare
+   element selectors and no component selectors. Colors reference existing
+   theme tokens from variables.css. Monospace is intentionally not set here;
+   owners apply it as a local exception (e.g. replacement tables). Text size
+   of the main editor is never styled by these classes. */
+
+/* Ownership and exceptions: docs/development/ui-css-ownership.md.
+   Approved: circular TTS provider button; audio presets/subtabs and toggles.
+   Composite joins and danger/stop colors use explicit shared modifiers.
+   Preserve owner layout, composite field joins, monospace values and legacy
+   opt-in branches. Compact surfaces have pending sizing decisions.
+   This index does not apply those exceptions globally. */
+
+/* ========== Sections ========== */
+
+.ui-section {
+  padding: var(--ui-section-padding-y) var(--ui-section-padding-x);
+  margin-bottom: var(--ui-section-gap);
+}
+
+.ui-section-title {
+  font-size: var(--ui-text-size-section-title);
+  font-weight: var(--ui-text-weight-section-title);
+  line-height: var(--ui-line-height-control);
+}
+
+.ui-group-title {
+  font-size: var(--ui-text-size-group-title);
+  font-weight: var(--ui-text-weight-group-title);
+  line-height: var(--ui-line-height-control);
+}
+
+/* ========== Text roles ========== */
+
+.ui-label {
+  font-size: var(--ui-text-size-label);
+  font-weight: var(--ui-text-weight-label);
+  line-height: var(--ui-line-height-control);
+}
+
+.ui-label--secondary {
+  color: var(--color-text-secondary);
+}
+
+.ui-hint {
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
+  line-height: var(--ui-line-height-multiline);
+  color: var(--color-text-muted);
+  margin-top: var(--ui-hint-gap);
+}
+
+.ui-description {
+  font-size: var(--ui-text-size-control);
+  font-weight: var(--ui-text-weight-control);
+  line-height: var(--ui-line-height-multiline);
+  color: var(--color-text-secondary);
+}
+
+.ui-metadata {
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
+  line-height: var(--ui-line-height-control);
+  color: var(--color-text-muted);
+}
+
+.ui-status {
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
+  line-height: var(--ui-line-height-control);
+  color: var(--color-text-secondary);
+}
+
+/* ========== Layout ========== */
+
+.ui-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-row-label-gap-side);
+  margin-bottom: var(--ui-row-gap);
+}
+
+.ui-row--stack {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ui-row-label-gap-stack);
+}
+
+.ui-field-group {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-field-group-gap);
+}
+
+.ui-settings-group {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-settings-group-gap);
+}
+
+/* ========== Text controls ========== */
+
+.ui-input,
+.ui-select {
+  min-height: var(--ui-control-min-height);
+  padding: var(--ui-control-padding-y) var(--ui-control-padding-x);
+  border: var(--ui-border-width) solid var(--color-border-strong);
+  border-radius: var(--ui-radius);
+  background: var(--color-bg-field);
+  color: var(--color-text-primary);
+  font-size: var(--ui-text-size-control);
+  font-weight: var(--ui-text-weight-control);
+  line-height: var(--ui-line-height-control);
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+/* Native select keeps its arrow and behavior; only extra right space is
+   reserved so the arrow does not overlap the text. appearance is untouched. */
+.ui-select {
+  font-family: inherit;
+  padding-right: calc(var(--ui-control-padding-x) + var(--ui-select-arrow-reserve));
+}
+
+/* Native popup colors are independent of the translucent closed field.
+   ui-select-popup opts compact selects into colors only, without geometry. */
+.ui-select,
+.ui-select-popup {
+  color-scheme: var(--ui-select-color-scheme);
+}
+
+.ui-select option,
+.ui-select optgroup,
+.ui-select-popup option,
+.ui-select-popup optgroup {
+  background-color: var(--ui-select-popup-bg);
+  color: var(--color-text-primary);
+}
+
+.ui-select option:disabled,
+.ui-select-popup option:disabled {
+  color: var(--color-text-secondary);
+}
+
+.ui-textarea {
+  padding: var(--ui-textarea-padding);
+  border: var(--ui-border-width) solid var(--color-border-strong);
+  border-radius: var(--ui-radius);
+  background: var(--color-bg-field);
+  color: var(--color-text-primary);
+  font-size: var(--ui-text-size-control);
+  font-weight: var(--ui-text-weight-control);
+  line-height: var(--ui-line-height-multiline);
+  resize: vertical;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.ui-input::placeholder,
+.ui-select::placeholder,
+.ui-textarea::placeholder {
+  color: var(--color-text-muted);
+}
+
+.ui-input:hover:not(:disabled),
+.ui-select:hover:not(:disabled),
+.ui-textarea:hover:not(:disabled) {
+  background: var(--color-bg-field-hover);
+}
+
+.ui-input:focus-visible,
+.ui-select:focus-visible,
+.ui-textarea:focus-visible {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
+}
+
+.ui-input:disabled,
+.ui-select:disabled,
+.ui-textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Error state is driven by aria-invalid=true. The danger border is kept on
+   focus so validation never falls back to the normal accent ring. */
+.ui-input[aria-invalid='true'],
+.ui-select[aria-invalid='true'],
+.ui-textarea[aria-invalid='true'] {
+  border-color: var(--danger-border-strong);
+}
+
+.ui-input[aria-invalid='true']:focus-visible,
+.ui-select[aria-invalid='true']:focus-visible,
+.ui-textarea[aria-invalid='true']:focus-visible {
+  border-color: var(--danger-border-strong);
+  box-shadow: 0 0 0 3px var(--danger-bg-weak);
+}
+
+/* ========== Buttons ========== */
+
+.ui-spin {
+  animation: ui-spin 1s linear infinite;
+}
+
+@keyframes ui-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-spin { animation: none; }
+}
+
+.ui-button {
+  min-height: var(--ui-control-min-height);
+  padding: var(--ui-control-padding-y) var(--ui-button-padding-x);
+  border: var(--ui-border-width) solid var(--color-border-strong);
+  border-radius: var(--ui-radius);
+  background: var(--ui-icon-neutral-bg);
+  color: var(--color-text-primary);
+  font-size: var(--ui-text-size-label);
+  font-weight: var(--ui-text-weight-label);
+  line-height: var(--ui-line-height-control);
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.ui-button--leading-icon {
+  padding-left: var(--ui-control-padding-x);
+  gap: 6px;
+}
+
+.ui-button--compact {
+  min-height: 32px;
+  padding: 6px 12px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-label);
+}
+
+.ui-button--compact svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.ui-button:hover:not(:disabled) {
+  background: var(--ui-icon-neutral-hover-bg);
+}
+
+.ui-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.ui-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ui-button--primary {
+  background: var(--btn-accent-bg);
+  border-color: var(--color-accent);
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.ui-button--primary:hover:not(:disabled) {
+  background: var(--btn-accent-bg-hover);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-button--primary {
+    transition: none;
+  }
+}
+
+/* ========== Icon buttons ========== */
+
+.ui-icon-button {
+  width: var(--ui-icon-button-size);
+  height: var(--ui-icon-button-size);
+  flex-shrink: 0;
+  padding: 0;
+  border: var(--ui-border-width) solid var(--color-border-strong);
+  border-radius: var(--ui-radius);
+  background: var(--ui-icon-neutral-bg);
+  color: var(--color-text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+.ui-icon-button svg {
+  width: var(--ui-icon-size);
+  height: var(--ui-icon-size);
+  flex-shrink: 0;
+}
+
+.ui-icon-button--round {
+  border-radius: 50%;
+}
+
+.ui-icon-button:hover:not(:disabled) {
+  background: var(--ui-icon-neutral-hover-bg);
+}
+
+/* Filled accent skin; size, focus and disabled remain owned by ui-icon-button. */
+.ui-icon-button--accent {
+  background: var(--ui-icon-accent-bg);
+  border: none;
+  color: var(--ui-icon-accent-text);
+}
+
+.ui-icon-button--accent:hover:not(:disabled) {
+  background: var(--ui-icon-accent-hover-bg);
+}
+
+.ui-icon-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.ui-icon-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Beside a field: matches field height and can grow with a taller row. */
+.ui-icon-button--adjacent {
+  width: var(--ui-icon-adjacent-width);
+  height: auto;
+  min-height: var(--ui-control-min-height);
+  align-self: stretch;
+}
+
+/* Inside a field: transparent, no border. The owning wrapper must reserve
+   local space on the right of the input (e.g. padding-right) so text does
+   not run under the button; positioning depends on the wrapper and stays
+   with the migration task. title/aria-label are added by the component. */
+.ui-icon-button--inset {
+  background: transparent;
+  border: none;
+}
+
+.ui-icon-button--inset:hover:not(:disabled) {
+  background: transparent;
+  color: var(--color-accent);
+}
+
+/* ========== Composite fields ========== */
+
+.ui-composite {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  min-width: 0;
+}
+
+/* A plain readonly field or a component wrapping an opted-in input. */
+.ui-composite > .ui-composite-field.ui-input,
+.ui-composite > .ui-composite-field .ui-input {
+  border-right-width: 0;
+  border-radius: var(--ui-radius) 0 0 var(--ui-radius);
+}
+
+.ui-composite > .ui-composite-action {
+  border-radius: 0;
+  border-left: var(--ui-border-width) solid var(--color-border-strong);
+  border-right-width: 0;
+  background: var(--ui-composite-action-bg);
+}
+
+.ui-composite > .ui-composite-action:last-child {
+  border-right-width: var(--ui-border-width);
+  border-radius: 0 var(--ui-radius) var(--ui-radius) 0;
+}
+
+.ui-composite > .ui-composite-action:hover:not(:disabled) {
+  background: var(--ui-composite-action-hover-bg);
+}
+
+/* ========== Semantic action colors ========== */
+
+/* Color-only action variants: keep the owning text/icon/compact geometry. */
+.ui-action--danger {
+  background: var(--ui-icon-neutral-bg);
+  border-color: var(--color-border-strong);
+  color: var(--ui-action-danger-text);
+}
+
+.ui-action--danger:hover:not(:disabled) {
+  background: var(--danger-bg-weak);
+  border-color: var(--danger-border);
+  color: var(--ui-action-danger-hover-text);
+}
+
+.ui-action--stop {
+  background: var(--ui-icon-neutral-bg);
+  border-color: var(--color-border-strong);
+  color: var(--ui-action-danger-text);
+}
+
+.ui-action--stop:hover:not(:disabled) {
+  background: var(--danger-bg-weak);
+  border-color: var(--danger-border);
+  color: var(--ui-action-danger-hover-text);
+}
+
+.ui-action--danger:disabled,
+.ui-action--stop:disabled {
+  background: var(--btn-neutral-bg);
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ========== Checkbox / radio ========== */
+
+.ui-choice-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-choice-gap);
+  font-size: var(--ui-text-size-label);
+  font-weight: var(--ui-text-weight-label);
+  line-height: var(--ui-line-height-control);
+  cursor: pointer;
+}
+
+/* Native checkbox/radio form is kept; only size and accent are applied. */
+.ui-choice-input {
+  width: var(--ui-choice-size);
+  height: var(--ui-choice-size);
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.ui-choice-input:disabled,
+.ui-choice-label:has(.ui-choice-input:disabled),
+.ui-choice-label[aria-disabled='true'] {
+  cursor: not-allowed;
+}
+
+/* ========== Tabs ========== */
+
+.ui-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  margin-bottom: var(--ui-section-gap);
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.ui-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: var(--ui-tab-padding-y) var(--ui-tab-padding-x);
+  border: var(--ui-border-width) solid transparent;
+  border-bottom: none;
+  border-radius: var(--ui-radius) var(--ui-radius) 0 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--ui-text-size-label);
+  font-weight: var(--ui-text-weight-label);
+  line-height: var(--ui-line-height-control);
+  cursor: pointer;
+}
+
+.ui-tab:hover:not(:disabled):not([aria-selected='true']) {
+  color: var(--color-text-primary);
+  background: var(--color-bg-field-hover);
+}
+
+.ui-tab:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.ui-tab:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ui-tab[aria-selected='true'] {
+  color: var(--color-accent);
+  background: var(--color-bg-field);
+  border-color: var(--color-border);
+  border-bottom: 2px solid var(--color-accent);
+}
+
+/* ========== Menu ========== */
+
+.ui-menu {
+  max-height: var(--ui-menu-max-height);
+  overflow-y: auto;
+  padding: var(--ui-menu-padding);
+  border: var(--ui-border-width) solid var(--color-border);
+  border-radius: var(--ui-radius);
+  background: var(--color-bg-elevated);
+  box-sizing: border-box;
+}
+
+.ui-menu--embedded {
+  background: var(--color-bg-field);
+}
+
+.ui-menu-item {
+  display: block;
+  width: 100%;
+  padding: var(--ui-menu-item-padding-y) var(--ui-menu-item-padding-x);
+  border: none;
+  border-radius: var(--ui-radius-menu-item);
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: var(--ui-text-size-control);
+  font-weight: var(--ui-text-weight-control);
+  line-height: var(--ui-line-height-control);
+  text-align: left;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+.ui-menu-item:hover:not(:disabled) {
+  background: var(--color-bg-field-hover);
+}
+
+.ui-menu-item:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.ui-menu-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ui-menu-item[aria-selected='true'],
+.ui-menu-item--selected {
+  font-weight: 600;
+  color: var(--color-accent);
+  background: var(--card-active-bg);
+}
