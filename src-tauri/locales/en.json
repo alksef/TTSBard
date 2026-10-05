@@ -838,6 +838,7 @@
     "intercept.actions.playback_pause": "Pause / Resume",
     "intercept.actions.playback_stop": "Stop",
     "intercept.actions.playback_repeat": "Repeat",
+    "intercept.actions.ocr_capture": "OCR: capture area",
     "ocr.status.starting": "Starting",
     "ocr.status.ready": "Ready",
     "ocr.status.selecting_area": "Selecting area",

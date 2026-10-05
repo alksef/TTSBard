@@ -838,6 +838,7 @@
     "intercept.actions.playback_pause": "Пауза / Продолжить",
     "intercept.actions.playback_stop": "Остановить",
     "intercept.actions.playback_repeat": "Повторить",
+    "intercept.actions.ocr_capture": "OCR: захват области",
     "ocr.status.starting": "Запускается",
     "ocr.status.ready": "Готов",
     "ocr.status.selecting_area": "Выбор области",

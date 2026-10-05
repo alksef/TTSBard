@@ -182,6 +182,11 @@ pub fn run_action(app_handle: &AppHandle, action: &str) {
         "playback_repeat" => {
             handle_playback_repeat(app_handle.clone());
         }
+        "ocr_capture" => {
+            if let Some(app_state) = app_handle.try_state::<AppState>() {
+                crate::commands::ocr::handle_ocr_capture(app_handle, app_state.inner());
+            }
+        }
         other => {
             tracing::warn!(action = other, "Unknown intercept action");
         }

@@ -47,6 +47,7 @@ const ACTION_IDS = [
   'playback_pause',
   'playback_stop',
   'playback_repeat',
+  'ocr_capture',
 ] as const
 
 const ACTIONS = computed<{ value: string; label: string }[]>(() =>

@@ -149,7 +149,7 @@ async fn deliver_recognized_text(
 /// Guards match the existing global handlers: skip while hotkey recording is
 /// active and respect the global hotkeys-enabled flag. The one-shot flow runs
 /// on the app's Tokio runtime so the shortcut callback never blocks.
-fn handle_ocr_capture(app_handle: &AppHandle, app_state: &AppState) {
+pub(crate) fn handle_ocr_capture(app_handle: &AppHandle, app_state: &AppState) {
     if app_state.is_hotkey_recording() {
         return;
     }
