@@ -903,9 +903,7 @@ pub fn validate_vtube_host(host: &str) -> Result<(), String> {
     let invalid_label = |label: &str| {
         label.is_empty()
             || label.len() > 63
-            || !label
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-')
+            || !label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
             || label.starts_with('-')
             || label.ends_with('-')
     };
@@ -1798,7 +1796,9 @@ impl SettingsManager {
                     // value. The message itself may embed file content and is
                     // therefore replaced by a secret-safe reason.
                     let (line, column) = match serde_json::from_str::<AppSettings>(&content) {
-                        Err(probe) if probe.line() > 0 => (Some(probe.line()), Some(probe.column())),
+                        Err(probe) if probe.line() > 0 => {
+                            (Some(probe.line()), Some(probe.column()))
+                        }
                         _ => (None, None),
                     };
                     return Err(load_failure(
@@ -3242,7 +3242,12 @@ fn load_failure(
     raw_content: Option<&str>,
 ) -> anyhow::Error {
     anyhow::Error::new(SettingsLoadFailure::diagnose(
-        path, stage, reason, line, column, raw_content,
+        path,
+        stage,
+        reason,
+        line,
+        column,
+        raw_content,
     ))
 }
 
@@ -4246,7 +4251,10 @@ mod tests {
         let error = result.expect_err("read-only settings must reject migration writes");
         let failure = error.downcast_ref::<SettingsLoadFailure>().unwrap();
         assert_eq!(failure.stage, SettingsFailureStage::Write);
-        assert!(matches!(failure.backup, crate::config::BackupOutcome::Created { .. }));
+        assert!(matches!(
+            failure.backup,
+            crate::config::BackupOutcome::Created { .. }
+        ));
         assert_eq!(std::fs::read(&settings_path).unwrap(), original);
         assert_eq!(backups.len(), 1);
         assert_eq!(std::fs::read(&backups[0]).unwrap(), original);
@@ -4271,10 +4279,9 @@ mod tests {
         expected.input_server.access_token = Some(token);
         assert_eq!(settings, expected);
 
-        let persisted: AppSettings = serde_json::from_str(
-            &std::fs::read_to_string(&settings_path).unwrap(),
-        )
-        .expect("first run must persist parseable defaults");
+        let persisted: AppSettings =
+            serde_json::from_str(&std::fs::read_to_string(&settings_path).unwrap())
+                .expect("first run must persist parseable defaults");
         assert_eq!(persisted, settings);
         assert!(backup_files_in(&config_dir).is_empty());
 
@@ -4287,10 +4294,9 @@ mod tests {
 
         let written = write_default_settings(&settings_path)
             .expect("default settings must write successfully");
-        let parsed: AppSettings = serde_json::from_str(
-            &std::fs::read_to_string(&settings_path).unwrap(),
-        )
-        .expect("written defaults must parse back");
+        let parsed: AppSettings =
+            serde_json::from_str(&std::fs::read_to_string(&settings_path).unwrap())
+                .expect("written defaults must parse back");
         assert_eq!(parsed, written);
         assert!(parsed
             .input_server
@@ -7137,11 +7143,13 @@ mod tests {
         assert!(read_disk_settings(&dir).storage.legacy_audio_cache_migrated);
 
         let restarted = SettingsManager::with_config_dir(dir.clone()).unwrap();
-        assert!(restarted
-            .load()
-            .unwrap()
-            .storage
-            .legacy_audio_cache_migrated);
+        assert!(
+            restarted
+                .load()
+                .unwrap()
+                .storage
+                .legacy_audio_cache_migrated
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

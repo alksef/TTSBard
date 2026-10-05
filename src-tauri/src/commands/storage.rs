@@ -119,7 +119,9 @@ pub async fn storage_get_data_info() -> Result<DataInfo, String> {
 
 /// Разобрать `path: Option<String>` в целевой корень и persisted-значение
 /// `storage.data_dir` (`None` — сброс на дефолт).
-fn resolve_transfer_target(path: Option<String>) -> Result<(std::path::PathBuf, Option<String>), String> {
+fn resolve_transfer_target(
+    path: Option<String>,
+) -> Result<(std::path::PathBuf, Option<String>), String> {
     match path.map(|p| p.trim().to_string()).filter(|p| !p.is_empty()) {
         None => {
             let root = crate::paths::default_data_root()
@@ -146,26 +148,28 @@ fn current_transfer_inputs() -> Result<(std::path::PathBuf, std::path::PathBuf, 
 pub async fn storage_prepare_data_transfer(
     path: Option<String>,
 ) -> Result<TransferPrepareInfo, CommandError> {
-    tokio::task::spawn_blocking(move || -> Result<TransferPrepareInfo, TransferCommandFailure> {
-        let (target_root, _) = resolve_transfer_target(path)?;
-        let (source_root, audio_cache_source, legacy_audio_cache) = current_transfer_inputs()?;
-        let config_root = crate::paths::config_root()
-            .map_err(|e| format!("Не удалось определить корень конфигурации: {}", e))?;
+    tokio::task::spawn_blocking(
+        move || -> Result<TransferPrepareInfo, TransferCommandFailure> {
+            let (target_root, _) = resolve_transfer_target(path)?;
+            let (source_root, audio_cache_source, legacy_audio_cache) = current_transfer_inputs()?;
+            let config_root = crate::paths::config_root()
+                .map_err(|e| format!("Не удалось определить корень конфигурации: {}", e))?;
 
-        let plan = crate::storage_transfer::build_transfer_plan(
-            &source_root,
-            &target_root,
-            &audio_cache_source,
-            legacy_audio_cache,
-            &config_root,
-        )?;
+            let plan = crate::storage_transfer::build_transfer_plan(
+                &source_root,
+                &target_root,
+                &audio_cache_source,
+                legacy_audio_cache,
+                &config_root,
+            )?;
 
-        Ok(TransferPrepareInfo {
-            source_path: source_root.to_string_lossy().into_owned(),
-            target_path: target_root.to_string_lossy().into_owned(),
-            total_bytes: plan.total_bytes,
-        })
-    })
+            Ok(TransferPrepareInfo {
+                source_path: source_root.to_string_lossy().into_owned(),
+                target_path: target_root.to_string_lossy().into_owned(),
+                total_bytes: plan.total_bytes,
+            })
+        },
+    )
     .await
     .map_err(transfer_failed)?
     .map_err(TransferCommandFailure::into_command_error)
@@ -185,66 +189,69 @@ pub async fn storage_transfer_data(
     let app = app_handle.clone();
     let operation_id = operation_id.clone();
 
-    tokio::task::spawn_blocking(move || -> Result<TransferDataResult, TransferCommandFailure> {
-        let _guard = transfer_guard()
-            .try_lock()
-            .map_err(|_| "Передача данных уже выполняется".to_string())?;
-        let _cache_guard = crate::history::cache_io_lock().write();
+    tokio::task::spawn_blocking(
+        move || -> Result<TransferDataResult, TransferCommandFailure> {
+            let _guard = transfer_guard()
+                .try_lock()
+                .map_err(|_| "Передача данных уже выполняется".to_string())?;
+            let _cache_guard = crate::history::cache_io_lock().write();
 
-        let (target_root, new_data_dir) = resolve_transfer_target(path)?;
-        let (source_root, audio_cache_source, legacy_audio_cache) = current_transfer_inputs()?;
-        let config_root = crate::paths::config_root()
-            .map_err(|e| format!("Не удалось определить корень конфигурации: {}", e))?;
+            let (target_root, new_data_dir) = resolve_transfer_target(path)?;
+            let (source_root, audio_cache_source, legacy_audio_cache) = current_transfer_inputs()?;
+            let config_root = crate::paths::config_root()
+                .map_err(|e| format!("Не удалось определить корень конфигурации: {}", e))?;
 
-        let plan = crate::storage_transfer::build_transfer_plan(
-            &source_root,
-            &target_root,
-            &audio_cache_source,
-            legacy_audio_cache,
-            &config_root,
-        )?;
+            let plan = crate::storage_transfer::build_transfer_plan(
+                &source_root,
+                &target_root,
+                &audio_cache_source,
+                legacy_audio_cache,
+                &config_root,
+            )?;
 
-        let op = operation_id.clone();
-        let app_emit = app.clone();
-        let mut progress = move |phase: crate::storage_transfer::TransferPhase,
-                                 completed: u64,
-                                 total: u64| {
-            let _ = app_emit.emit(
-                "storage-transfer-progress",
-                TransferProgressPayload {
-                    operation_id: op.clone(),
-                    phase: phase.as_str(),
-                    completed_bytes: completed,
-                    total_bytes: total,
-                },
-            );
-        };
+            let op = operation_id.clone();
+            let app_emit = app.clone();
+            let mut progress =
+                move |phase: crate::storage_transfer::TransferPhase, completed: u64, total: u64| {
+                    let _ = app_emit.emit(
+                        "storage-transfer-progress",
+                        TransferProgressPayload {
+                            operation_id: op.clone(),
+                            phase: phase.as_str(),
+                            completed_bytes: completed,
+                            total_bytes: total,
+                        },
+                    );
+                };
 
-        let mgr = manager.clone();
-        let new_data_dir_clone = new_data_dir.clone();
-        let mut persist = move || {
-            mgr.set_storage_data_dir(new_data_dir_clone.clone(), None)?;
-            crate::paths::publish_data_root(new_data_dir_clone.as_ref().map(std::path::PathBuf::from));
-            crate::history::init_audio_cache_dir(None);
-            Ok(())
-        };
+            let mgr = manager.clone();
+            let new_data_dir_clone = new_data_dir.clone();
+            let mut persist = move || {
+                mgr.set_storage_data_dir(new_data_dir_clone.clone(), None)?;
+                crate::paths::publish_data_root(
+                    new_data_dir_clone.as_ref().map(std::path::PathBuf::from),
+                );
+                crate::history::init_audio_cache_dir(None);
+                Ok(())
+            };
 
-        let outcome = crate::storage_transfer::execute_transfer(plan, &mut progress, &mut persist)?;
+            let outcome =
+                crate::storage_transfer::execute_transfer(plan, &mut progress, &mut persist)?;
 
-        let root = crate::paths::data_root()
-            .map_err(|e| format!("Не удалось определить корень данных: {}", e))?;
-        Ok(TransferDataResult {
-            path: root.to_string_lossy().into_owned(),
-            is_default: crate::paths::data_root_is_default(),
-            restart_required: outcome.models_migrated || source_root != target_root,
-        })
-    })
+            let root = crate::paths::data_root()
+                .map_err(|e| format!("Не удалось определить корень данных: {}", e))?;
+            Ok(TransferDataResult {
+                path: root.to_string_lossy().into_owned(),
+                is_default: crate::paths::data_root_is_default(),
+                restart_required: outcome.models_migrated || source_root != target_root,
+            })
+        },
+    )
     .await
     .map_err(transfer_failed)?
     .map_err(TransferCommandFailure::into_command_error)
-    .map(|result| {
+    .inspect(|_| {
         crate::commands::emit_settings_changed(&app_handle);
-        result
     })
 }
 

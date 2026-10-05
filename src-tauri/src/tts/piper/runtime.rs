@@ -1180,13 +1180,9 @@ mod tests {
         let root = TestDir::new("root");
         write_valid_espeak_data(root.path());
 
-        let selected = resolve_espeak_data_parent(
-            Some(resource.path()),
-            Some(root.path()),
-            None,
-            None,
-        )
-        .expect("a valid resource candidate must be selected");
+        let selected =
+            resolve_espeak_data_parent(Some(resource.path()), Some(root.path()), None, None)
+                .expect("a valid resource candidate must be selected");
 
         assert_eq!(selected.0, EspeakDataSource::Resource);
         assert_eq!(selected.1, resource.path().to_path_buf());
@@ -1211,9 +1207,8 @@ mod tests {
         let cwd = TestDir::new("cwd");
         write_valid_espeak_data(cwd.path());
 
-        let selected =
-            resolve_espeak_data_parent(None, Some(root.path()), Some(cwd.path()), None)
-                .expect("cwd candidate must be selected after an incomplete data root");
+        let selected = resolve_espeak_data_parent(None, Some(root.path()), Some(cwd.path()), None)
+            .expect("cwd candidate must be selected after an incomplete data root");
 
         assert_eq!(selected.0, EspeakDataSource::Cwd);
         assert_eq!(selected.1, cwd.path().to_path_buf());
@@ -1226,9 +1221,8 @@ mod tests {
         let exe = TestDir::new("exe");
         write_valid_espeak_data(exe.path());
 
-        let selected =
-            resolve_espeak_data_parent(None, None, Some(cwd.path()), Some(exe.path()))
-                .expect("exe candidate must be selected after absent data root and cwd");
+        let selected = resolve_espeak_data_parent(None, None, Some(cwd.path()), Some(exe.path()))
+            .expect("exe candidate must be selected after absent data root and cwd");
 
         assert_eq!(selected.0, EspeakDataSource::ExeDir);
         assert_eq!(selected.1, exe.path().to_path_buf());

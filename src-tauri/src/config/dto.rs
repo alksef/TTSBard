@@ -2054,7 +2054,10 @@ mod tests {
             audio,
             audio_effects,
             dsp,
-            storage: StorageSettingsDto { data_dir: None, audio_cache_dir: None },
+            storage: StorageSettingsDto {
+                data_dir: None,
+                audio_cache_dir: None,
+            },
             general,
             editor,
             ocr,
@@ -2442,7 +2445,10 @@ mod tests {
             audio,
             audio_effects,
             dsp,
-            storage: StorageSettingsDto { data_dir: None, audio_cache_dir: None },
+            storage: StorageSettingsDto {
+                data_dir: None,
+                audio_cache_dir: None,
+            },
             general,
             editor,
             ocr,

@@ -90,17 +90,24 @@ impl std::fmt::Display for SettingsLoadFailure {
             (Some(path), Some(line), Some(column)) => write!(
                 f,
                 "settings load failed at {:?} ({}): {} (line {}, column {})",
-                path, self.stage.as_str(), self.reason, line, column
+                path,
+                self.stage.as_str(),
+                self.reason,
+                line,
+                column
             ),
             (Some(path), _, _) => write!(
                 f,
                 "settings load failed at {:?} ({}): {}",
-                path, self.stage.as_str(), self.reason
+                path,
+                self.stage.as_str(),
+                self.reason
             ),
             (None, _, _) => write!(
                 f,
                 "settings load failed ({}): {}",
-                self.stage.as_str(), self.reason
+                self.stage.as_str(),
+                self.reason
             ),
         }
     }
@@ -137,12 +144,7 @@ impl SettingsLoadFailure {
 
         let (detected_locale, detected_theme) = raw_content
             .and_then(|content| serde_json::from_str::<serde_json::Value>(content).ok())
-            .map(|value| {
-                (
-                    detect_locale(&value),
-                    detect_theme(&value),
-                )
-            })
+            .map(|value| (detect_locale(&value), detect_theme(&value)))
             .unwrap_or((None, None));
 
         Self {
@@ -360,8 +362,14 @@ mod tests {
 
         assert_eq!(failure.detected_locale, None);
         assert_eq!(failure.detected_theme, None);
-        assert_eq!(select_recovery_locale(failure.detected_locale.as_deref(), Some("ru")), "ru");
-        assert_eq!(normalize_detected_theme(failure.detected_theme.as_deref()), "dark");
+        assert_eq!(
+            select_recovery_locale(failure.detected_locale.as_deref(), Some("ru")),
+            "ru"
+        );
+        assert_eq!(
+            normalize_detected_theme(failure.detected_theme.as_deref()),
+            "dark"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -372,8 +380,7 @@ mod tests {
         // carry a string: the raw serde message quotes that value.
         let mut value = serde_json::to_value(AppSettings::default()).unwrap();
         value["audio"]["speaker_volume"] = serde_json::json!(secret);
-        let error = serde_json::from_value::<AppSettings>(value)
-            .expect_err("wrong type must fail");
+        let error = serde_json::from_value::<AppSettings>(value).expect_err("wrong type must fail");
 
         let raw = error.to_string();
         assert!(

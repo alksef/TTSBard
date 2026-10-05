@@ -21,15 +21,15 @@ pub use recovery::{
     normalize_detected_locale, normalize_detected_theme, BackupOutcome, SettingsFailureStage,
     SettingsLoadFailure,
 };
+pub(crate) use settings::write_default_settings;
 pub use settings::{
-    normalize_typing_idle_timeout_ms, AiCustomSettings, AiDeepSeekSettings, AiOpenAiSettings,
-    AiProviderType, AiSettings, AiZAiSettings, AppSettings, AudioEffectsSettings,
+    normalize_typing_idle_timeout_ms, validate_vtube_host, AiCustomSettings, AiDeepSeekSettings,
+    AiOpenAiSettings, AiProviderType, AiSettings, AiZAiSettings, AppSettings, AudioEffectsSettings,
     AudioOutputFormat, AudioSettings, DspCompressorSettings, DspEqBandSettings, DspEqSettings,
     DspLimiterSettings, DspSettings, EditorRoute, HomographAccentorSettings, LoggingSettings,
     MtProxySettings, NetworkSettings, ProxyMode, ProxyType, QuickEditorMode, SettingsManager,
     SpellSource, Theme, TwitchSettings, VTubeStudioSettings, VTubeStudioTypingAction,
-    VTubeStudioTypingMode, validate_vtube_host,
+    VTubeStudioTypingMode,
 };
 pub use validation::{is_valid_hex_color, validate_port};
-pub(crate) use settings::write_default_settings;
 pub use windows::{WindowsManager, WindowsSettings};

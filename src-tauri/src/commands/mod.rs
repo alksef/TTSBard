@@ -21,6 +21,7 @@ pub mod playback;
 pub mod playback_window;
 pub mod preprocessor;
 pub mod proxy;
+pub mod settings_recovery;
 pub mod speech_queue;
 pub mod spellcheck;
 pub mod storage;
@@ -31,7 +32,6 @@ pub mod twitch;
 pub mod vtube_studio;
 pub mod webview;
 pub mod window;
-pub mod settings_recovery;
 
 pub use self::ai::*;
 pub use self::playback::*;

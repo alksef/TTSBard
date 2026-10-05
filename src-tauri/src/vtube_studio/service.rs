@@ -3082,7 +3082,9 @@ mod tests {
         svc.set_error_decay_delay(Duration::from_millis(50));
         let port = unused_local_port();
         rt.block_on(async {
-            let result = svc.connect("127.0.0.1", port, None, ConnectOrigin::Manual).await;
+            let result = svc
+                .connect("127.0.0.1", port, None, ConnectOrigin::Manual)
+                .await;
             assert!(result.is_err());
             // Сразу после ручной ошибки desired_running жив — красный в titlebar.
             assert!(svc.is_desired_running());
@@ -3106,7 +3108,9 @@ mod tests {
         svc.set_error_decay_delay(Duration::from_millis(50));
         let port = unused_local_port();
         rt.block_on(async {
-            let result = svc.connect("127.0.0.1", port, None, ConnectOrigin::Autostart).await;
+            let result = svc
+                .connect("127.0.0.1", port, None, ConnectOrigin::Autostart)
+                .await;
             assert!(result.is_err());
             assert!(svc.is_desired_running());
             assert_eq!(
@@ -3129,7 +3133,9 @@ mod tests {
         svc.set_error_decay_delay(Duration::from_millis(50));
         let port = unused_local_port();
         rt.block_on(async {
-            let result = svc.connect("127.0.0.1", port, None, ConnectOrigin::Manual).await;
+            let result = svc
+                .connect("127.0.0.1", port, None, ConnectOrigin::Manual)
+                .await;
             assert!(result.is_err());
             assert!(svc.is_desired_running());
 
@@ -3467,7 +3473,9 @@ mod tests {
         let svc = VTubeStudioService::new();
         let port = unused_local_port();
         rt.block_on(async {
-            let result = svc.connect("127.0.0.1", port, None, ConnectOrigin::Autostart).await;
+            let result = svc
+                .connect("127.0.0.1", port, None, ConnectOrigin::Autostart)
+                .await;
             assert!(result.is_err());
         });
         // Ошибка сохраняет desired_running (красный бессрочно), но не оставляет
@@ -5645,7 +5653,9 @@ mod tests {
         });
 
         rt.block_on(async {
-            let result = svc.connect("127.0.0.1", port, None, ConnectOrigin::Autostart).await;
+            let result = svc
+                .connect("127.0.0.1", port, None, ConnectOrigin::Autostart)
+                .await;
             assert!(result.is_err());
             let inner = svc.inner.lock().await;
             assert!(

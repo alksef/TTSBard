@@ -776,7 +776,11 @@ fn migrate_legacy_wav_files(legacy: &Path, target: &Path) -> bool {
         let Some(name) = from.file_name().map(std::ffi::OsStr::to_os_string) else {
             continue;
         };
-        if !name.to_string_lossy().to_ascii_lowercase().ends_with(".wav") {
+        if !name
+            .to_string_lossy()
+            .to_ascii_lowercase()
+            .ends_with(".wav")
+        {
             continue;
         }
         let to = target.join(&name);
@@ -822,7 +826,8 @@ fn migrate_legacy_wav_files(legacy: &Path, target: &Path) -> bool {
 pub(crate) fn migrate_cache_dir(legacy: &Path, target: &Path) {
     if !legacy.is_dir() || legacy == target {
         return;
-    }    let entries = match fs::read_dir(legacy) {
+    }
+    let entries = match fs::read_dir(legacy) {
         Ok(entries) => entries,
         Err(e) => {
             tracing::warn!(
@@ -1478,11 +1483,8 @@ mod tests {
     fn migrate_cache_dir_moves_files_and_removes_legacy() {
         static SEQ: AtomicU64 = AtomicU64::new(0);
         let n = SEQ.fetch_add(1, Ordering::SeqCst);
-        let base = std::env::temp_dir().join(format!(
-            "ttsbard-hist-migrate-{}-{}",
-            std::process::id(),
-            n
-        ));
+        let base =
+            std::env::temp_dir().join(format!("ttsbard-hist-migrate-{}-{}", std::process::id(), n));
         let legacy = base.join("legacy");
         let target = base.join("target");
         fs::create_dir_all(&legacy).unwrap();

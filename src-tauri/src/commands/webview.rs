@@ -145,7 +145,8 @@ pub async fn save_webview_settings(
     let server_needs_apply = settings.enabled
         && !matches!(
             state.webview.status(),
-            crate::webview::WebViewServerStatus::Running | crate::webview::WebViewServerStatus::Starting,
+            crate::webview::WebViewServerStatus::Running
+                | crate::webview::WebViewServerStatus::Starting,
         );
     if enabled_changed || port_changed || server_needs_apply {
         tracing::info!("Sending RestartWebViewServer event to WebView server");

@@ -432,10 +432,7 @@ mod tests {
 
     #[test]
     fn clean_dir_contents_removes_files_and_subdirs() {
-        let dir = std::env::temp_dir().join(format!(
-            "ttsbard-paths-test-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("ttsbard-paths-test-{}", std::process::id()));
         let subdir = dir.join("nested");
         std::fs::create_dir_all(&subdir).unwrap();
         std::fs::write(dir.join("a.tmp"), b"x").unwrap();
@@ -450,11 +447,16 @@ mod tests {
 
     #[test]
     fn clean_dir_contents_missing_dir_is_zero() {
-        assert_eq!(clean_dir_contents(Path::new("Z:/definitely-missing-ttsbard")), 0);
+        assert_eq!(
+            clean_dir_contents(Path::new("Z:/definitely-missing-ttsbard")),
+            0
+        );
     }
 
     #[test]
     fn remove_dir_if_exists_is_false_for_missing() {
-        assert!(!remove_dir_if_exists(Path::new("Z:/definitely-missing-ttsbard")));
+        assert!(!remove_dir_if_exists(Path::new(
+            "Z:/definitely-missing-ttsbard"
+        )));
     }
 }

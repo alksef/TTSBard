@@ -21,12 +21,8 @@ use crate::config::{
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase", tag = "status")]
 pub enum RecoveryBackupDto {
-    Created {
-        path: String,
-    },
-    Failed {
-        error: String,
-    },
+    Created { path: String },
+    Failed { error: String },
     SourceMissing,
 }
 
@@ -193,12 +189,7 @@ pub async fn settings_recovery_open_settings_file(
     app_handle
         .opener()
         .open_path(display.clone(), None::<&str>)
-        .map_err(|error| {
-            format!(
-                "Failed to open the settings file {}: {}",
-                display, error
-            )
-        })
+        .map_err(|error| format!("Failed to open the settings file {}: {}", display, error))
 }
 
 /// Write canonical defaults over the broken file and close the application.
@@ -350,10 +341,7 @@ mod tests {
         assert_eq!(dto.column, Some(3));
         assert_eq!(dto.requested_locale, normalize_detected_locale(None));
         assert_eq!(dto.requested_theme, "dark");
-        assert!(matches!(
-            dto.backup,
-            RecoveryBackupDto::SourceMissing
-        ));
+        assert!(matches!(dto.backup, RecoveryBackupDto::SourceMissing));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

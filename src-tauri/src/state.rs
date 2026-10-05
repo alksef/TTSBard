@@ -900,9 +900,10 @@ where
     if count > 0 {
         return count;
     }
-    let models_dir_exists = search_roots
-        .iter()
-        .any(|root| root.join(crate::stress::packs::PRIMARY_MODELS_SUBDIR).is_dir());
+    let models_dir_exists = search_roots.iter().any(|root| {
+        root.join(crate::stress::packs::PRIMARY_MODELS_SUBDIR)
+            .is_dir()
+    });
     if !models_dir_exists {
         return count;
     }

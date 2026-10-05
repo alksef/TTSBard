@@ -182,12 +182,8 @@ pub fn backup_json_copy(path: &Path) -> Result<PathBuf> {
         std::thread::sleep(std::time::Duration::from_millis(1));
     };
 
-    fs::copy(path, &backup_path).with_context(|| {
-        format!(
-            "Failed to copy {:?} to backup file {:?}",
-            path, backup_path
-        )
-    })?;
+    fs::copy(path, &backup_path)
+        .with_context(|| format!("Failed to copy {:?} to backup file {:?}", path, backup_path))?;
     Ok(backup_path)
 }
 

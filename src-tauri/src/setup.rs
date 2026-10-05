@@ -608,15 +608,8 @@ fn init_spellcheck(app: &App, app_state: &AppState) {
 /// Build the windows of the ordinary startup from their `tauri.conf.json`
 /// entries. The `settings-recovery` entry is intentionally absent from this
 /// list: that window is created only by the recovery process.
-fn create_configured_windows(
-    app: &App,
-) -> Result<(), Box<dyn std::error::Error>> {
-    for label in [
-        "main",
-        "soundpanel",
-        "playback-control",
-        "ocr-selection",
-    ] {
+fn create_configured_windows(app: &App) -> Result<(), Box<dyn std::error::Error>> {
+    for label in ["main", "soundpanel", "playback-control", "ocr-selection"] {
         let config = app
             .config()
             .app
@@ -1145,11 +1138,7 @@ fn init_vtube_studio(app_state: &AppState, app_handle: AppHandle) {
     app_state.runtime.spawn(async move {
         let (host, port, stored_token) = {
             let settings = app_state_clone.vtube_studio.settings.read().await;
-            (
-                settings.host.clone(),
-                settings.port,
-                settings.token.clone(),
-            )
+            (settings.host.clone(), settings.port, settings.token.clone())
         };
 
         info!(
@@ -1161,7 +1150,12 @@ fn init_vtube_studio(app_state: &AppState, app_handle: AppHandle) {
 
         let result = app_state_clone
             .vtube_studio
-            .connect(&host, port, stored_token.as_deref(), ConnectOrigin::Autostart)
+            .connect(
+                &host,
+                port,
+                stored_token.as_deref(),
+                ConnectOrigin::Autostart,
+            )
             .await;
 
         let status = app_state_clone.vtube_studio.get_connection_status();
