@@ -825,6 +825,31 @@ describe('useTwitch start with save', () => {
     expect(twitch.errorMessage.value).toBe('Настройки сохранены. Подключено')
   })
 
+  it('ignores stop while a connect operation is in flight', async () => {
+    const { twitch } = await setupWithStatusEvents()
+    let resolveSave!: (value: string) => void
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_twitch_status') return Promise.resolve({ Disconnected: null })
+      if (cmd === 'save_twitch_settings') {
+        return new Promise<string>((resolve) => { resolveSave = resolve })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    twitch.settings.value.token = 'new_token'
+    const start = twitch.startTwitch()
+    await vi.waitFor(() => expect(resolveSave).toBeDefined())
+
+    // Стоп во время операции подключения недоступен: он отменил бы её посреди
+    // сохранения и переподключения.
+    await twitch.stopTwitch()
+    expect(mockInvoke).not.toHaveBeenCalledWith('disconnect_twitch')
+
+    resolveSave('saved_reconnecting')
+    await start
+    expect(mockInvoke).not.toHaveBeenCalledWith('disconnect_twitch')
+  })
+
   it('issues a single connect when saving did not trigger a reconnect', async () => {
     const { twitch, emitStatus } = await setupWithStatusEvents()
     mockInvoke.mockImplementation(async (cmd: string) => {

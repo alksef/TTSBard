@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { Eye, EyeOff, Play, Square, RotateCw } from 'lucide-vue-next'
 import { useTwitch } from '../composables/useTwitch'
 import { t } from '../i18n'
@@ -24,6 +25,12 @@ const {
   isSendingTest,
   sendTestMessage,
 } = useTwitch()
+
+// Управление и реквизиты блокируются на всю операцию подключения, включая
+// фоновое переподключение: правка в полёте гоняется с сохранением перед ним.
+const connectionBusy = computed(
+  () => connectPending.value || currentStatus.value === 'Connecting',
+)
 </script>
 
 <template>
@@ -51,15 +58,15 @@ const {
                t('twitch.status.disconnected') }}
           </span>
           <template v-if="currentStatus === 'Connected'">
-            <button @click="restartTwitch" class="status-button refresh ui-icon-button ui-icon-button--accent" :disabled="connectPending" :class="{ disabled: connectPending }" :title="t('twitch.restart')" :aria-label="t('twitch.restart')">
+            <button @click="restartTwitch" class="status-button refresh ui-icon-button ui-icon-button--accent" :disabled="connectionBusy" :class="{ disabled: connectionBusy }" :title="t('twitch.restart')" :aria-label="t('twitch.restart')">
               <RotateCw :size="18" />
             </button>
-            <button @click="stopTwitch" class="status-button stop ui-icon-button ui-action--stop" :title="t('twitch.disconnect')" :aria-label="t('twitch.disconnect')">
+            <button @click="stopTwitch" class="status-button stop ui-icon-button ui-action--stop" :disabled="connectPending" :class="{ disabled: connectPending }" :title="t('twitch.disconnect')" :aria-label="t('twitch.disconnect')">
               <Square :size="18" />
             </button>
           </template>
           <template v-else>
-            <button @click="startTwitch" class="status-button start ui-icon-button ui-icon-button--accent" :disabled="currentStatus === 'Connecting' || connectPending" :class="{ disabled: currentStatus === 'Connecting' || connectPending }" :title="t('twitch.connect')" :aria-label="t('twitch.connect')">
+            <button @click="startTwitch" class="status-button start ui-icon-button ui-icon-button--accent" :disabled="connectionBusy" :class="{ disabled: connectionBusy }" :title="t('twitch.connect')" :aria-label="t('twitch.connect')">
               <Play :size="18" />
             </button>
             <button @click="stopTwitch" class="status-button stop disabled ui-icon-button ui-action--stop" :title="t('twitch.disconnect')" :aria-label="t('twitch.disconnect')" disabled>
@@ -94,6 +101,7 @@ const {
           :aria-invalid="!!fieldErrors.username"
           :aria-describedby="fieldErrors.username ? 'twitch-username-feedback' : undefined"
           class="ui-input"
+          :disabled="connectionBusy"
           placeholder="your_bot_username"
         />
       </div>
@@ -106,6 +114,7 @@ const {
           :aria-invalid="!!fieldErrors.channel"
           :aria-describedby="fieldErrors.channel ? 'twitch-channel-feedback' : undefined"
           class="ui-input"
+          :disabled="connectionBusy"
           :placeholder="t('twitch.channel_placeholder')"
         />
       </div>
@@ -125,6 +134,7 @@ const {
             :aria-invalid="!!fieldErrors.token"
             :aria-describedby="fieldErrors.token ? 'twitch-token-feedback' : undefined"
             class="ui-input"
+            :disabled="connectionBusy"
             placeholder="xxxxxxxxxxxxxx"
           />
           <button
@@ -143,7 +153,7 @@ const {
 
       </div>
       <div class="ui-row button-row">
-        <button @click="save" class="save-button-inline ui-button ui-button--primary">{{ t('common.save') }}</button>
+        <button @click="save" class="save-button-inline ui-button ui-button--primary" :disabled="connectionBusy" :class="{ disabled: connectionBusy }">{{ t('common.save') }}</button>
       </div>
     </section>
 

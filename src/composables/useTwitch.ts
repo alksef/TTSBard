@@ -447,6 +447,9 @@ export function useTwitch() {
   }
 
   async function stopTwitch() {
+    // Стоп недоступен на время операции подключения/перезапуска: он отменил бы
+    // её посреди сохранения и переподключения.
+    if (connectPending.value) return
     pendingConnect = null
     ++settingsRequest
     try {

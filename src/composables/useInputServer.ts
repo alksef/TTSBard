@@ -26,7 +26,9 @@ export type InputServerTestResult =
   | { status: 'pending_review'; incoming_id: string }
 
 /** Итог одной последовательной записи секции настроек. */
-type PersistResult = 'ok' | 'invalid-draft' | 'error'
+type PersistOutcome =
+  | { ok: true; restarted: boolean }
+  | { ok: false; kind: 'invalid-draft' | 'error' }
 
 export const INPUT_SERVER_HOST = '127.0.0.1'
 export const INPUT_SERVER_PATH = '/v1/speech'
@@ -64,9 +66,20 @@ export function useInputServer() {
   const messageType = ref<UiMessageKind>('info')
   const startPending = ref(false)
   const stopPending = ref(false)
-  // Операция запуска, ожидающая runtime-подтверждения: backend остаётся
-  // единственным источником статуса, тосты резолвятся его событием.
-  let pendingStart: { saved: boolean } | null = null
+  const restartPending = ref(false)
+  // Слот операции запуска/перезапуска, ожидающей runtime-подтверждения:
+  // backend остаётся единственным источником статуса, тосты резолвятся его
+  // событием. Реактивность нужна панели: открытый слот держит блокировки и
+  // роли кнопок на промежуточном stopped перезапуска.
+  const pendingStart = ref<{ saved: boolean; restart: boolean } | null>(null)
+  // Любая незавершённая операция управления: фаза команды или ожидание слота.
+  const operationPending = computed(
+    () => startPending.value || stopPending.value || restartPending.value || pendingStart.value !== null,
+  )
+  const awaitingRestart = computed(() => pendingStart.value?.restart === true)
+  const awaitingStart = computed(
+    () => pendingStart.value !== null && pendingStart.value.restart === false,
+  )
 
   const testText = ref('')
   const testResult = ref<InputServerTestResult | null>(null)
@@ -89,7 +102,7 @@ export function useInputServer() {
   // Идущий drain записи секции: одновременно в полёте не более одной
   // `save_input_server_settings`, а более новое намерение пишется следующей
   // итерацией того же drain.
-  let persistDrain: Promise<PersistResult> | null = null
+  let persistDrain: Promise<PersistOutcome> | null = null
 
   // Per-field edit revisions. A field's revision changes only on a user edit:
   // internal rollback, settings echoes and baseline updates never bump it. A
@@ -196,7 +209,7 @@ export function useInputServer() {
    * появляется, а правка во время await уходит в следующую итерацию. Тексты
    * отказа (включая невалидный draft) показывает сам drain.
    */
-  function requestPersist(): Promise<PersistResult> {
+  function requestPersist(): Promise<PersistOutcome> {
     if (!persistDrain) {
       const run = runPersistDrain()
       persistDrain = run
@@ -213,7 +226,7 @@ export function useInputServer() {
     return persistDrain
   }
 
-  async function runPersistDrain(): Promise<PersistResult> {
+  async function runPersistDrain(): Promise<PersistOutcome> {
     // The request payload is fixed before the await: the confirmation below
     // reports what was actually sent, never the then-current editable value.
     // The edit revisions are snapshotted together with the payload so a later
@@ -222,11 +235,16 @@ export function useInputServer() {
     let payload = { ...settings.value }
     let payloadRevisions = { ...editRevisions }
     let skippedInvalidDraft = false
+    // `saved_restarting` от последней записи: сохранение с изменившимся портом
+    // уже само перебиндивает запрошенный listener, и перезапуск поверх него
+    // ставил бы второй цикл.
+    let restarting = false
     while (true) {
       try {
-        await invoke('save_input_server_settings', { settings: payload })
+        const result = await invoke<string>('save_input_server_settings', { settings: payload })
+        restarting = result === 'saved_restarting'
       } catch (e) {
-        if (disposed) return 'error'
+        if (disposed) return { ok: false, kind: 'error' }
         // Roll back only fields whose user edit has not changed since the failed
         // payload was submitted. A later edit stays visible and unsaved; internal
         // writes below must not count as a fresh user edit.
@@ -240,9 +258,9 @@ export function useInputServer() {
         applyingInternalState = false
         const errorMessage = e instanceof Error ? e.message : String(e)
         showMessage(t('input_server.error.save', { detail: errorMessage }), 'error')
-        return 'error'
+        return { ok: false, kind: 'error' }
       }
-      if (disposed) return 'error'
+      if (disposed) return { ok: false, kind: 'error' }
       // This persist owns the state: a refresh started earlier reflects an
       // older value and must not roll the form back to it.
       settingsLoadToken += 1
@@ -260,9 +278,9 @@ export function useInputServer() {
     }
     if (skippedInvalidDraft) {
       showMessage(t('input_server.port_error'), 'error')
-      return 'invalid-draft'
+      return { ok: false, kind: 'invalid-draft' }
     }
-    return 'ok'
+    return { ok: true, restarted: restarting }
   }
 
   async function saveSettings(): Promise<void> {
@@ -270,41 +288,45 @@ export function useInputServer() {
       showMessage(t('input_server.port_error'), 'error')
       return
     }
-    const result = await requestPersist()
+    const outcome = await requestPersist()
     if (disposed) return
-    if (result === 'ok') {
+    if (outcome.ok) {
       showMessage(t('input_server.saved'), 'success')
     }
   }
 
-  /** Завершить операцию запуска подтверждённым runtime-статусом сервера. */
+  /** Завершить операцию запуска/перезапуска подтверждённым runtime-статусом. */
   function resolvePendingStart(next: InputServerStatus): void {
-    const operation = pendingStart
+    const operation = pendingStart.value
     if (!operation) return
     if (next.state === 'running') {
-      pendingStart = null
-      showMessage(t(operation.saved ? 'input_server.run.started_saved' : 'input_server.run.started'), 'success')
+      pendingStart.value = null
+      const key = operation.restart
+        ? (operation.saved ? 'input_server.run.restarted_saved' : 'input_server.run.restarted')
+        : (operation.saved ? 'input_server.run.started_saved' : 'input_server.run.started')
+      showMessage(t(key), 'success')
       return
     }
     if (next.state === 'error') {
-      pendingStart = null
+      pendingStart.value = null
       // Успешно сохранённые настройки не откатываются: сообщается обе части.
       const detail = next.message ?? ''
-      showMessage(
-        t(operation.saved ? 'input_server.error.start_saved' : 'input_server.error.start', { detail }),
-        'error',
-      )
+      const key = operation.restart
+        ? (operation.saved ? 'input_server.error.restart_saved' : 'input_server.error.restart')
+        : (operation.saved ? 'input_server.error.start_saved' : 'input_server.error.start')
+      showMessage(t(key, { detail }), 'error')
       return
     }
-    if (next.state === 'stopped') {
+    if (next.state === 'stopped' && !operation.restart) {
       // Запуск отменён до перехода в starting: слот закрывается без сообщения,
-      // чтобы поздний статус не выдал его за результат запуска.
-      pendingStart = null
+      // чтобы поздний статус не выдал его за результат запуска. Перезапуск
+      // штатно проходит через stopped — его слот ждёт running дальше.
+      pendingStart.value = null
     }
   }
 
   async function startInputServer(): Promise<void> {
-    if (startPending.value || stopPending.value) return
+    if (startPending.value || stopPending.value || restartPending.value) return
     if (!isPortValid.value) {
       showMessage(t('input_server.port_error'), 'error')
       return
@@ -312,23 +334,23 @@ export function useInputServer() {
     startPending.value = true
     // Изменённые настройки определяются сравнением с подтверждённым
     // persisted-состоянием: галочка загрузки считается наравне с портом.
-    let saved = !inputServerSettingsEqual(settings.value, confirmedSettings)
+    const saved = !inputServerSettingsEqual(settings.value, confirmedSettings)
     // Слот открывается до сохранения: событие backend может прийти сразу после
     // записи (wake при смене порта) и должно найти операцию на месте.
-    pendingStart = { saved }
+    pendingStart.value = { saved, restart: false }
     showMessage(t('input_server.run.pending'), 'success')
     try {
       if (saved) {
-        const result = await requestPersist()
+        const outcome = await requestPersist()
         if (disposed) return
-        if (result !== 'ok') {
+        if (!outcome.ok) {
           // Ошибка сохранения блокирует запуск; текст уже показан drain'ом.
-          pendingStart = null
+          pendingStart.value = null
           return
         }
         // Слот мог быть закрыт ранним runtime-событием: подтверждённый
         // результат ожиданием не перезаписывается.
-        if (pendingStart) {
+        if (pendingStart.value) {
           showMessage(t('input_server.run.pending_saved'), 'success')
         }
       }
@@ -336,7 +358,7 @@ export function useInputServer() {
       // Runtime truth is owned by the backend: wait for the
       // `input-server-status-changed` event instead of claiming a state here.
     } catch (e) {
-      pendingStart = null
+      pendingStart.value = null
       if (disposed) return
       const errorMessage = e instanceof Error ? e.message : String(e)
       showMessage(
@@ -348,8 +370,51 @@ export function useInputServer() {
     }
   }
 
+  /**
+   * Перезапуск одним применением: черновик настроек сохраняется не более одного
+   * раза, а сам перезапуск — один wake supervisor'а при установленном запросе
+   * запуска (`start_input_server` на работающем сервере даёт ровно один цикл
+   * rebind). Если смена порта уже перебиндила listener (`saved_restarting`),
+   * вторая команда не отправляется.
+   */
+  async function restartInputServer(): Promise<void> {
+    if (startPending.value || stopPending.value || restartPending.value) return
+    restartPending.value = true
+    const saved = !inputServerSettingsEqual(settings.value, confirmedSettings)
+    pendingStart.value = { saved, restart: true }
+    showMessage(t('input_server.run.restarting'), 'info')
+    try {
+      if (saved) {
+        const outcome = await requestPersist()
+        if (disposed) return
+        if (!outcome.ok) {
+          // Ошибка сохранения блокирует перезапуск; текст уже показан drain'ом.
+          pendingStart.value = null
+          return
+        }
+        if (outcome.restarted) {
+          // Смена порта уже начала единственный rebind: вторая команда создала
+          // бы второй цикл поверх начатого.
+          return
+        }
+      }
+      await invoke('start_input_server')
+      // Runtime truth is owned by the backend: слот закроет событие статуса.
+    } catch (e) {
+      pendingStart.value = null
+      if (disposed) return
+      const errorMessage = e instanceof Error ? e.message : String(e)
+      showMessage(
+        t(saved ? 'input_server.error.restart_saved' : 'input_server.error.restart', { detail: errorMessage }),
+        'error',
+      )
+    } finally {
+      if (!disposed) restartPending.value = false
+    }
+  }
+
   async function stopInputServer(): Promise<void> {
-    if (startPending.value || stopPending.value) return
+    if (startPending.value || stopPending.value || restartPending.value) return
     stopPending.value = true
     try {
       await invoke('stop_input_server')
@@ -499,6 +564,10 @@ export function useInputServer() {
     testPending,
     startPending,
     stopPending,
+    restartPending,
+    operationPending,
+    awaitingRestart,
+    awaitingStart,
     isPortValid,
     isRunning,
     isStartingOrRunning,
@@ -517,6 +586,7 @@ export function useInputServer() {
     saveSettings,
     startInputServer,
     stopInputServer,
+    restartInputServer,
     sendTest,
     copyEndpoint,
     copyOverlayUrl,

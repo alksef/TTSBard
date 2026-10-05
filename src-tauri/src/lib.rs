@@ -584,6 +584,7 @@ pub fn run() {
             commands::webview::get_webview_settings,
             commands::webview::get_webview_server_status,
             commands::webview::save_webview_settings,
+            commands::webview::restart_webview_server,
             commands::webview::get_local_ip,
             commands::webview::get_webview_enabled,
             commands::webview::get_webview_start_on_boot,

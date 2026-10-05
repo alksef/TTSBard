@@ -1010,7 +1010,7 @@ describe('useWebView sequential settings persistence', () => {
     expect(hasToken.value).toBe(true)
   })
 
-  it('persists the restart snapshots sequentially as enabled false then true', async () => {
+  it('persists a single restart snapshot with enabled unchanged and sends one explicit restart command', async () => {
     mockWebViewSettingsRef.value = makeSettings({ enabled: true })
     const { settings, restartServer } = await setupAndMount()
     await nextTick()
@@ -1018,34 +1018,55 @@ describe('useWebView sequential settings persistence', () => {
 
     const restart = restartServer()
     await vi.waitFor(() => expect(saves).toHaveLength(1))
-    expect(payloads[0].enabled).toBe(false)
-
-    // Start не начинается, пока Stop не сохранён.
-    await flush()
-    expect(saves).toHaveLength(1)
+    // Один snapshot: переключение запуска не трогается, второй записи нет.
+    expect(payloads[0].enabled).toBe(true)
 
     saves[0].resolve('saved')
-    await vi.waitFor(() => expect(saves).toHaveLength(2))
-    expect(payloads[1].enabled).toBe(true)
-    saves[1].resolve('saved')
     await restart
 
+    // Перезапуск выполняет ровно одна явная backend-команда.
+    const restartCalls = mockInvoke.mock.calls.filter((call) => call[0] === 'restart_webview_server')
+    expect(restartCalls).toHaveLength(1)
+    expect(saves).toHaveLength(1)
     expect(persisted.enabled).toBe(true)
     expect(settings.value.enabled).toBe(true)
   })
 
-  it('does not start the server when the stop snapshot failed', async () => {
+  it('does not send the restart command when the save itself initiated the restart', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ enabled: true })
+    const { settings, restartServer } = await setupAndMount()
+    await nextTick()
+    const { payloads, saves } = queuePersistingSaveCalls({ enabled: true })
+
+    settings.value.port = 10500
+    const restart = restartServer()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+    saves[0].resolve('saved_restarting')
+    await restart
+
+    // Сохранение с изменившимся портом уже начало перезапуск: вторая операция
+    // не создаётся.
+    const restartCalls = mockInvoke.mock.calls.filter((call) => call[0] === 'restart_webview_server')
+    expect(restartCalls).toHaveLength(0)
+    expect(saves).toHaveLength(1)
+    expect(payloads[0]).toEqual(expect.objectContaining({ enabled: true, port: 10500 }))
+  })
+
+  it('does not restart when the draft save fails', async () => {
     mockWebViewSettingsRef.value = makeSettings({ enabled: true })
     const { settings, restartServer, errorMessage } = await setupAndMount()
     await nextTick()
     const { persisted, saves } = queuePersistingSaveCalls({ enabled: true })
 
+    settings.value.port = 10500
     const restart = restartServer()
     await vi.waitFor(() => expect(saves).toHaveLength(1))
-    saves[0].reject('stop failed')
+    saves[0].reject('backend down')
     await restart
 
-    // Ошибка Stop не запускает Start как успешный следующий шаг.
+    // Ошибка сохранения блокирует перезапуск: команды не было.
+    const restartCalls = mockInvoke.mock.calls.filter((call) => call[0] === 'restart_webview_server')
+    expect(restartCalls).toHaveLength(0)
     expect(saves).toHaveLength(1)
     expect(persisted.enabled).toBe(true)
     expect(settings.value.enabled).toBe(true)
@@ -1385,5 +1406,61 @@ describe('useWebView start with save', () => {
     listeners.get('webview-server-status-changed')?.({ payload: { state: 'starting' } })
     listeners.get('webview-server-status-changed')?.({ payload: { state: 'running' } })
     expect(webview.errorMessage.value).toBe('Сервер запущен')
+  })
+
+  it('resolves the restart slot with a restart-specific message across the intermediate stopped', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ enabled: true, port: 10100 })
+    const { webview, listeners } = await setupAndMountWithEvents()
+    const { saves } = queuePersistingStart({ enabled: true, port: 10100 })
+
+    const restart = webview.restartServer()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+    expect(webview.errorMessage.value).toBe('Перезапуск...')
+    saves[0].resolve('saved')
+    await restart
+    // Фаза команды завершена, но слот открыт до runtime-подтверждения:
+    // панель остаётся заблокированной на всю операцию.
+    expect(webview.restartPending.value).toBe(false)
+    expect(webview.operationPending.value).toBe(true)
+
+    // Промежуточный stopped цикла не закрывает слот и не отменяет результат.
+    listeners.get('webview-server-status-changed')?.({ payload: { state: 'stopped' } })
+    expect(webview.serverStatus.value).toEqual({ state: 'stopped' })
+    expect(webview.awaitingRestart.value).toBe(true)
+    listeners.get('webview-server-status-changed')?.({ payload: { state: 'running' } })
+    expect(webview.errorMessage.value).toBe('Сервер перезапущен')
+    expect(webview.awaitingRestart.value).toBe(false)
+    expect(webview.operationPending.value).toBe(false)
+  })
+
+  it('reports both outcomes when the runtime restart fails after a successful save', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ enabled: true, port: 10100 })
+    const { webview, listeners } = await setupAndMountWithEvents()
+    const { saves } = queuePersistingStart({ enabled: true, port: 10100 })
+
+    webview.settings.value.port = 10500
+    const restart = webview.restartServer()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+    saves[0].resolve('saved_restarting')
+    await restart
+
+    listeners.get('webview-server-status-changed')?.({ payload: { state: 'error', message: 'port busy' } })
+    expect(webview.errorMessage.value).toBe('Настройки сохранены. Не удалось перезапустить сервер: Сервер WebView сообщил об ошибке')
+  })
+
+  it('blocks start and stop while the restart operation is in flight', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ enabled: true, port: 10100 })
+    const { webview } = await setupAndMountWithEvents()
+    const { saves } = queuePersistingStart({ enabled: true, port: 10100 })
+
+    const restart = webview.restartServer()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+
+    await webview.startServer()
+    await webview.stopServer()
+    expect(saves).toHaveLength(1)
+
+    saves[0].resolve('saved')
+    await restart
   })
 })

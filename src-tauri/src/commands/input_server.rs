@@ -144,7 +144,7 @@ pub async fn save_input_server_settings(
     settings: InputServerSettings,
     state: State<'_, AppState>,
     app_handle: AppHandle,
-) -> Result<(), String> {
+) -> Result<String, String> {
     validate_port(settings.port).map_err(|e| e.to_string())?;
 
     let settings_manager = app_handle
@@ -166,12 +166,21 @@ pub async fn save_input_server_settings(
     super::emit_settings_changed(&app_handle);
 
     // A port change rebinds an active/requested listener. Toggling the persisted
-    // boot preference must not start/stop the server this session.
-    if port_changed {
+    // boot preference must not start/stop the server this session. `saved_restarting`
+    // tells the caller the save itself already initiated the rebind, so a
+    // restart command on top of it would queue a second cycle.
+    let restarting = if port_changed {
         state.input_server.wake();
-    }
+        state.input_server.run_requested()
+    } else {
+        false
+    };
 
-    Ok(())
+    if restarting {
+        Ok("saved_restarting".to_string())
+    } else {
+        Ok("saved".to_string())
+    }
 }
 
 // ==================== Input Server Security Commands ====================

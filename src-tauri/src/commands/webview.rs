@@ -161,6 +161,20 @@ pub async fn save_webview_settings(
     }
 }
 
+/// Перезапустить сервер WebView одним циклом без записи настроек.
+///
+/// Команда не меняет ни persisted-конфиг, ни runtime `enabled`: работающий
+/// сервер получает ровно один цикл stop→start, а отключённый остаётся
+/// отключённым (supervisor перечитает `enabled` и продолжит ждать).
+#[tauri::command]
+pub async fn restart_webview_server(state: State<'_, AppState>) -> Result<(), String> {
+    tracing::info!("Sending RestartWebViewServer event (explicit restart command)");
+    state
+        .webview
+        .send_event(crate::events::AppEvent::RestartWebViewServer);
+    Ok(())
+}
+
 /// Get local IP address using UDP socket trick
 #[tauri::command]
 pub fn get_local_ip() -> Result<String, String> {

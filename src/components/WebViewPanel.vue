@@ -3,8 +3,8 @@ import { computed } from 'vue'
 import { Copy, RotateCw, Play, Square, AlertTriangle, Globe } from 'lucide-vue-next'
 import { useWebView } from '../composables/useWebView'
 import { t } from '../i18n'
-import PanelEasterEgg from './shared/PanelEasterEgg.vue'
 import InputWithToggle from './shared/InputWithToggle.vue'
+import PanelEasterEgg from './shared/PanelEasterEgg.vue'
 
 const messageBoxClass = computed(() => (errorMessage.value ? errorMessageType.value : ''))
 
@@ -24,7 +24,9 @@ const {
   startServer,
   stopServer,
   restartServer,
-  startPending,
+  operationPending,
+  awaitingRestart,
+  awaitingStart,
   saveStartOnBoot,
   saveSendOriginalText,
   saveServerSettings,
@@ -39,6 +41,35 @@ const {
   sendTest,
   reloadTemplates,
 } = useWebView()
+
+// Управление блокируется не только по runtime-статусу, но и на всю
+// пользовательскую операцию: нажатая кнопка держит роль до фактического
+// завершения, промежуточный stopped перезапуска не открывает запуск.
+const serverBusy = computed(() => serverStatus.value.state === 'starting')
+const controlsLocked = computed(() => operationPending.value || serverBusy.value)
+// Поля адреса недоступны работающему/запускающемуся серверу и на время любой
+// операции: промежуточный stopped перезапуска не открывает правку.
+const fieldsLocked = computed(
+  () => serverStatus.value.state === 'running' || controlsLocked.value,
+)
+// Ветка перезапуска/стопа держится и на промежуточном stopped перезапуска.
+const showRunControls = computed(
+  () => serverStatus.value.state === 'running' || serverBusy.value || awaitingRestart.value,
+)
+const statusText = computed(() => {
+  if (awaitingRestart.value) return t('webview.status.restarting')
+  if (awaitingStart.value) return t('webview.status.starting')
+  switch (serverStatus.value.state) {
+    case 'running':
+      return t('webview.status.running')
+    case 'starting':
+      return t('webview.status.starting')
+    case 'error':
+      return t('webview.status.error')
+    default:
+      return t('webview.status.stopped')
+  }
+})
 </script>
 
 <template>
@@ -54,18 +85,18 @@ const {
         <h2 class="ui-section-title">{{ t('webview.server') }}</h2>
         <div class="server-status">
           <span class="status-indicator ui-status" :class="{ running: serverStatus.state === 'running' }">
-            {{ serverStatus.state === 'running' ? t('webview.status.running') : serverStatus.state === 'starting' ? t('webview.status.starting') : serverStatus.state === 'error' ? t('webview.status.error') : t('webview.status.stopped') }}
+            {{ statusText }}
           </span>
-          <template v-if="serverStatus.state === 'running' || serverStatus.state === 'starting'">
-            <button @click="restartServer" class="status-button restart ui-icon-button ui-icon-button--accent" :title="t('webview.restart')" :aria-label="t('webview.restart')">
+          <template v-if="showRunControls">
+            <button @click="restartServer" class="status-button restart ui-icon-button ui-icon-button--accent" :disabled="controlsLocked" :class="{ disabled: controlsLocked }" :title="t('webview.restart')" :aria-label="t('webview.restart')">
               <RotateCw :size="18" />
             </button>
-            <button @click="stopServer" class="status-button stop ui-icon-button ui-action--stop" :title="t('webview.stop')" :aria-label="t('webview.stop')">
+            <button @click="stopServer" class="status-button stop ui-icon-button ui-action--stop" :disabled="controlsLocked" :class="{ disabled: controlsLocked }" :title="t('webview.stop')" :aria-label="t('webview.stop')">
               <Square :size="18" />
             </button>
           </template>
           <template v-else>
-            <button @click="startServer" class="status-button start ui-icon-button ui-icon-button--accent" :disabled="!isPortValid || startPending" :class="{ disabled: !isPortValid || startPending }" :title="t('webview.start')" :aria-label="t('webview.start')">
+            <button @click="startServer" class="status-button start ui-icon-button ui-icon-button--accent" :disabled="!isPortValid || operationPending" :class="{ disabled: !isPortValid || operationPending }" :title="t('webview.start')" :aria-label="t('webview.start')">
               <Play :size="18" />
             </button>
             <button @click="stopServer" class="status-button stop disabled ui-icon-button ui-action--stop" :title="t('webview.stop')" :aria-label="t('webview.stop')" disabled>
@@ -92,7 +123,7 @@ const {
       <div class="ui-row address-row">
         <label class="ui-label">{{ t('webview.address') }}</label>
         <div class="address-inputs ui-field-group">
-          <select v-model="settings.bind_address" class="ui-select address-bind" :disabled="serverStatus.state === 'running' || serverStatus.state === 'starting'">
+          <select v-model="settings.bind_address" class="ui-select address-bind" :disabled="fieldsLocked">
             <option value="0.0.0.0">0.0.0.0 ({{ t('webview.bind.all_interfaces') }})</option>
             <option value="127.0.0.1">127.0.0.1 ({{ t('webview.bind.local_only') }})</option>
           </select>
@@ -103,10 +134,10 @@ const {
             max="65535"
             class="ui-input address-port"
             :aria-invalid="!isPortValid ? 'true' : undefined"
-            :disabled="serverStatus.state === 'running' || serverStatus.state === 'starting'"
+            :disabled="fieldsLocked"
             placeholder="10100"
           />
-          <button @click="saveServerSettings" class="save-button-inline ui-button ui-button--primary" :disabled="serverStatus.state === 'running' || serverStatus.state === 'starting'">{{ t('common.save') }}</button>
+          <button @click="saveServerSettings" class="save-button-inline ui-button ui-button--primary" :disabled="fieldsLocked">{{ t('common.save') }}</button>
         </div>
         <span v-if="!isPortValid" class="error-text ui-status">{{ t('webview.port_error') }}</span>
       </div>

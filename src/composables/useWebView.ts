@@ -104,13 +104,30 @@ export function useWebView() {
   const testMessage = ref('')
   const displayUrl = ref('')
   const serverStatus = ref<WebViewServerStatus>({ state: 'stopped' })
-  // Операция запуска, ожидающая runtime-подтверждения. Пока она не завершена,
-  // кнопка запуска заблокирована, а повторные клики не создают вторую операцию.
+  // Операция запуска/перезапуска/остановки в фазе команды. Пока она не
+  // завершена, повторные клики не создают вторую операцию.
   const startPending = ref(false)
+  const restartPending = ref(false)
+  const stopPending = ref(false)
   let startOpToken = 0
-  // `saved` — сохраняла ли операция изменённые настройки: от этого зависит
-  // префикс сообщений запуска. Статусные события ниже завершают операцию.
-  let pendingStart: { saved: boolean } | null = null
+  // Слот операции, ожидающей runtime-подтверждения. `saved` — сохраняла ли
+  // операция изменённые настройки, `restart` — перезапуск это или запуск:
+  // от пары зависит текст результата. Реактивность нужна панели: пока слот
+  // открыт, кнопки и поля держат свои роли и не переключаются на промежуточный
+  // stopped. Статусные события ниже закрывают слот.
+  const pendingStart = ref<{ saved: boolean; restart: boolean } | null>(null)
+  // Любая незавершённая операция управления: фаза команды или ожидание слота.
+  const operationPending = computed(
+    () => startPending.value || restartPending.value || stopPending.value || pendingStart.value !== null,
+  )
+  // Открытый слот перезапуска: панель держит ветку перезапуска/стопа и статус
+  // «Перезапускается» на промежуточном stopped.
+  const awaitingRestart = computed(() => pendingStart.value?.restart === true)
+  // Открытый слот запуска: статус показывает выполняющуюся операцию, а не
+  // устаревший stopped до прихода события starting.
+  const awaitingStart = computed(
+    () => pendingStart.value !== null && pendingStart.value.restart === false,
+  )
   // Фактический runtime-статус UPnP-проброса: mapping — факт, а не пожелание.
   const upnpForwardStatus = ref<UpnpForwardStatus>({ state: 'closed' })
   // Переключение UPnP ждёт router до 5 секунд: пока операция в полёте, второй
@@ -286,29 +303,40 @@ export function useWebView() {
   }
 
   /**
-   * Завершить операцию запуска подтверждённым runtime-статусом. Сообщение
-   * различает сохранение изменённых настроек и результат запуска; событие
-   * операции, чей слот уже закрыт, результат новой не перезаписывает.
+   * Завершить операцию запуска/перезапуска подтверждённым runtime-статусом.
+   * Сообщение различает сохранение изменённых настроек и результат операции;
+   * событие операции, чей слот уже закрыт, результат новой не перезаписывает.
    */
   function resolvePendingStart(status: WebViewServerStatus | undefined): void {
-    const operation = pendingStart
+    const operation = pendingStart.value
     if (!operation || !status) return
     if (status.state === 'running') {
-      pendingStart = null
-      showError(t(operation.saved ? 'webview.launch.started_saved' : 'webview.launch.started'), 'success')
+      pendingStart.value = null
+      if (operation.restart) {
+        showError(t(operation.saved ? 'webview.restart.done_saved' : 'webview.restart.done'), 'success')
+      } else {
+        showError(t(operation.saved ? 'webview.launch.started_saved' : 'webview.launch.started'), 'success')
+      }
       return
     }
     if (status.state === 'error') {
-      pendingStart = null
+      pendingStart.value = null
       const detail = presentCommandError(status.message, t('webview.error.runtime'))
-      showError(
-        t(operation.saved ? 'webview.launch.failed_saved' : 'webview.launch.failed', { detail }),
-        'error',
-      )
+      if (operation.restart) {
+        showError(
+          t(operation.saved ? 'webview.restart.failed_saved' : 'webview.restart.failed', { detail }),
+          'error',
+        )
+      } else {
+        showError(
+          t(operation.saved ? 'webview.launch.failed_saved' : 'webview.launch.failed', { detail }),
+          'error',
+        )
+      }
       return
     }
     // Restart штатно проходит через stopped. Явная остановка закрывает слот
-    // в stopServer; промежуточный runtime-статус не отменяет запуск.
+    // в stopServer; промежуточный runtime-статус не отменяет операцию.
   }
 
   function persistWebViewSettings(payload: WebViewSettings): Promise<string> {
@@ -408,7 +436,7 @@ export function useWebView() {
   }
 
   async function startServer(): Promise<boolean> {
-    if (startPending.value) return false
+    if (startPending.value || restartPending.value || stopPending.value) return false
     if (!isPortValid.value) {
       showError(t('webview.port_error'))
       return false
@@ -423,21 +451,21 @@ export function useWebView() {
     // Слот открывается до сохранения: статусные события, отправленные backend
     // сразу после записи, не могут завершиться до ответа invoke и должны найти
     // операцию на месте.
-    pendingStart = { saved }
+    pendingStart.value = { saved, restart: false }
     showError(t('webview.launch.pending'), 'info')
     try {
       const outcome = await requestPersist(PERSIST_CONTEXT.settings)
       if (listenerScope.disposed || gen !== startOpToken) {
-        pendingStart = null
+        pendingStart.value = null
         return false
       }
       if (!outcome.ok) {
         // Ошибка сохранения блокирует запуск: restart-события не было, слот
         // закрывается, текст ошибки уже показан persist-владельцем.
-        pendingStart = null
+        pendingStart.value = null
         return false
       }
-      if (saved && pendingStart) {
+      if (saved && pendingStart.value) {
         // Слот мог быть закрыт ранним runtime-событием: подтверждённый
         // результат ожиданием не перезаписывается.
         showError(t('webview.launch.pending_saved'), 'info')
@@ -461,46 +489,109 @@ export function useWebView() {
   }
 
   async function stopServer(): Promise<boolean> {
+    if (startPending.value || restartPending.value || stopPending.value) return false
     debugLog('[WebView] Stopping server...')
-    pendingStart = null
-    // Завершить идущий drain до записи стопа: иначе его следующий payload
-    // перезаписал бы persisted-состояние после переключения запуска.
-    if (persistDrain) {
-      await persistDrain.catch(() => undefined)
-      if (listenerScope.disposed) return false
-    }
-    // Стоп меняет только переключение запуска: несохранённые правки формы
-    // остаются видимым draft'ом и на диск не записываются.
-    const payload = { ...persistedSettings, enabled: false }
-    const formBeforeStop = settingsSnapshot()
-    internalSettingsWrite = true
-    settings.value = { ...settings.value, enabled: false }
-    internalSettingsWrite = false
+    pendingStart.value = null
+    stopPending.value = true
     try {
-      await persistWebViewSettings(payload)
-      if (listenerScope.disposed) return false
-      persistedSettings = payload
-      return true
-    } catch (e) {
-      if (!listenerScope.disposed) {
-        debugError('[WebView] Failed to stop server:', e)
-        // Запись не удалась: форма возвращается к до-остановленному draft'у.
-        internalSettingsWrite = true
-        settings.value = formBeforeStop
-        internalSettingsWrite = false
-        showError(presentCommandError(e, t('webview.error.save_settings')))
+      // Завершить идущий drain до записи стопа: иначе его следующий payload
+      // перезаписал бы persisted-состояние после переключения запуска.
+      if (persistDrain) {
+        await persistDrain.catch(() => undefined)
+        if (listenerScope.disposed) return false
+        if (startPending.value || restartPending.value) return false
       }
-      return false
+      // Стоп меняет только переключение запуска: несохранённые правки формы
+      // остаются видимым draft'ом и на диск не записываются.
+      const payload = { ...persistedSettings, enabled: false }
+      const formBeforeStop = settingsSnapshot()
+      internalSettingsWrite = true
+      settings.value = { ...settings.value, enabled: false }
+      internalSettingsWrite = false
+      try {
+        await persistWebViewSettings(payload)
+        if (listenerScope.disposed) return false
+        persistedSettings = payload
+        return true
+      } catch (e) {
+        if (!listenerScope.disposed) {
+          debugError('[WebView] Failed to stop server:', e)
+          // Запись не удалась: форма возвращается к до-остановленному draft'у.
+          internalSettingsWrite = true
+          settings.value = formBeforeStop
+          internalSettingsWrite = false
+          showError(presentCommandError(e, t('webview.error.save_settings')))
+        }
+        return false
+      }
+    } finally {
+      if (!listenerScope.disposed) stopPending.value = false
     }
   }
 
-  async function restartServer(): Promise<void> {
+  /**
+   * Перезапуск одним применением: черновик сохраняется один раз с уже
+   * включённым сервером, а сам перезапуск выполняется ровно один раз — событием
+   * от сохранения (если параметры сервера изменились) либо отдельной
+   * backend-командой. Второго цикла stop→start переключением `enabled` больше
+   * нет, промежуточный stopped не открывает запуск.
+   */
+  async function restartServer(): Promise<boolean> {
+    if (startPending.value || restartPending.value || stopPending.value) return false
+    if (!isPortValid.value) {
+      showError(t('webview.port_error'))
+      return false
+    }
     debugLog('[WebView] Restarting server...')
-    // Stop обязан быть сохранён до Start: ошибка Stop не должна запускать
-    // следующий шаг как успешный.
-    const stopped = await stopServer()
-    if (!stopped) return
-    await startServer()
+    restartPending.value = true
+    const gen = ++startOpToken
+    // Перезапуск обязан закончиться работающим сервером: черновик фиксируется
+    // с включённым состоянием, как и у запуска.
+    settings.value.enabled = true
+    const saved = userSettingsChanged(settings.value, persistedSettings)
+    pendingStart.value = { saved, restart: true }
+    showError(t('webview.restart.pending'), 'info')
+    try {
+      const outcome = await requestPersist(PERSIST_CONTEXT.settings)
+      if (listenerScope.disposed || gen !== startOpToken) {
+        pendingStart.value = null
+        return false
+      }
+      if (!outcome.ok) {
+        // Ошибка сохранения блокирует перезапуск: текст уже показан
+        // persist-владельцем, слот закрывается.
+        pendingStart.value = null
+        return false
+      }
+      if (saved && pendingStart.value) {
+        showError(t('webview.restart.pending_saved'), 'info')
+      }
+      if (outcome.result !== 'saved_restarting') {
+        // Сохранение не инициировало перезапуск (параметры сервера не
+        // менялись): ровно одна явная backend-операция перезапуска.
+        try {
+          await invoke('restart_webview_server')
+        } catch (e) {
+          pendingStart.value = null
+          showError(presentCommandError(e, t('webview.error.restart')))
+          return false
+        }
+        if (listenerScope.disposed || gen !== startOpToken) {
+          pendingStart.value = null
+          return false
+        }
+      }
+      // Результат подтверждает runtime-событие цикла stop→start; fallback-
+      // перечитывание статуса здесь не нужно: оно могло бы увидеть прежний
+      // running до начала цикла и выдать его за результат. Потеря события
+      // означает потерю всего канала: повторный вход на панель пересоздаёт
+      // состояние слота.
+      return true
+    } finally {
+      if (!listenerScope.disposed && gen === startOpToken) {
+        restartPending.value = false
+      }
+    }
   }
 
   async function saveStartOnBoot(): Promise<void> {
@@ -687,7 +778,7 @@ export function useWebView() {
     await listenerScope.track(
       listen<WebViewServerStatus>('webview-server-status-changed', (event) => {
         serverStatus.value = event.payload
-        if (pendingStart) {
+        if (pendingStart.value) {
           resolvePendingStart(event.payload)
         } else if (event.payload.state === 'error') {
           showError(presentCommandError(event.payload.message, t('webview.error.runtime')))
@@ -774,6 +865,11 @@ export function useWebView() {
     stopServer,
     restartServer,
     startPending,
+    restartPending,
+    stopPending,
+    operationPending,
+    awaitingRestart,
+    awaitingStart,
     saveStartOnBoot,
     saveSendOriginalText,
     saveServerSettings,

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Copy, AlertTriangle, Play, Square, Info, RefreshCw } from 'lucide-vue-next'
+import { Copy, AlertTriangle, Play, Square, Info, RefreshCw, RotateCw } from 'lucide-vue-next'
 import { useInputServer } from '../composables/useInputServer'
 import { t } from '../i18n'
 import InputWithToggle from './shared/InputWithToggle.vue'
@@ -15,8 +15,9 @@ const {
   testResult,
   testError,
   testPending,
-  startPending,
-  stopPending,
+  operationPending,
+  awaitingRestart,
+  awaitingStart,
   isPortValid,
   isRunning,
   isStartingOrRunning,
@@ -30,6 +31,7 @@ const {
   saveSettings,
   startInputServer,
   stopInputServer,
+  restartInputServer,
   sendTest,
   copyOverlayUrl,
   copyLanUrl,
@@ -38,6 +40,21 @@ const {
 } = useInputServer()
 
 const messageBoxClass = computed(() => (message.value ? messageType.value : ''))
+
+// Управление блокируется не только по runtime-статусу, но и на всю
+// пользовательскую операцию: промежуточный stopped перезапуска не открывает
+// запуск, нажатая кнопка держит роль до фактического завершения.
+const serverBusy = computed(() => status.value.state === 'starting')
+const controlsLocked = computed(() => operationPending.value || serverBusy.value)
+const showRunControls = computed(
+  () => isStartingOrRunning.value || awaitingRestart.value,
+)
+const fieldsLocked = computed(() => isStartingOrRunning.value || controlsLocked.value)
+const statusText = computed(() => {
+  if (awaitingRestart.value) return t('input_server.status.restarting')
+  if (awaitingStart.value) return t('input_server.status.starting')
+  return statusLabel.value
+})
 </script>
 
 <template>
@@ -58,12 +75,23 @@ const messageBoxClass = computed(() => (message.value ? messageType.value : ''))
               error: status.state === 'error',
             }"
           >
-            {{ statusLabel }}
+            {{ statusText }}
           </span>
-          <template v-if="status.state === 'running' || status.state === 'starting'">
+          <template v-if="showRunControls">
+            <button
+              class="status-button restart ui-icon-button ui-icon-button--accent"
+              :disabled="controlsLocked"
+              :class="{ disabled: controlsLocked }"
+              :title="t('input_server.restart')"
+              :aria-label="t('input_server.restart')"
+              @click="restartInputServer"
+            >
+              <RotateCw :size="18" />
+            </button>
             <button
               class="status-button stop ui-icon-button ui-action--stop"
-              :disabled="stopPending"
+              :disabled="controlsLocked"
+              :class="{ disabled: controlsLocked }"
               :title="t('input_server.stop')"
               :aria-label="t('input_server.stop')"
               @click="stopInputServer"
@@ -75,7 +103,7 @@ const messageBoxClass = computed(() => (message.value ? messageType.value : ''))
             <button
               class="status-button start ui-icon-button ui-icon-button--accent"
               :class="{ disabled: !isPortValid }"
-              :disabled="!isPortValid || startPending"
+              :disabled="!isPortValid || operationPending"
               :title="t('input_server.start')"
               :aria-label="t('input_server.start')"
               @click="startInputServer"
@@ -122,10 +150,10 @@ const messageBoxClass = computed(() => (message.value ? messageType.value : ''))
             max="65535"
             class="ui-input address-port"
             :aria-invalid="!isPortValid ? 'true' : undefined"
-            :disabled="isStartingOrRunning"
+            :disabled="fieldsLocked"
             placeholder="10101"
           />
-          <button class="save-button-inline ui-button ui-button--primary" :disabled="loading" @click="saveSettings">
+          <button class="save-button-inline ui-button ui-button--primary" :disabled="loading || operationPending" @click="saveSettings">
             {{ t('common.save') }}
           </button>
         </div>

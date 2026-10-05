@@ -188,6 +188,82 @@ describe('useInputServer', () => {
     expect(startCalls).toHaveLength(1)
   })
 
+  it('restartInputServer restarts through start_input_server and resolves on the runtime running event', async () => {
+    const { restartInputServer, message, messageType } = await setupAndMount()
+
+    await restartInputServer()
+    expect(mocks.mockInvoke).toHaveBeenCalledWith('start_input_server')
+
+    // Промежуточный stopped цикла rebind не закрывает слот перезапуска.
+    const callback = mocks.listenCallbacks.get('input-server-status-changed')
+    callback?.({ payload: { state: 'stopped' } })
+    expect(message.value).toBe('Перезапуск...')
+    callback?.({ payload: { state: 'running' } })
+    expect(message.value).toBe('Сервер перезапущен')
+    expect(messageType.value).toBe('success')
+  })
+
+  it('restartInputServer saves a changed draft once and skips the command when the save already rebound the listener', async () => {
+    const { settings, restartInputServer, message } = await setupAndMount()
+    mocks.mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'save_input_server_settings') return 'saved_restarting'
+      return undefined
+    })
+
+    settings.value.port = 12000
+    await restartInputServer()
+
+    expect(mocks.mockInvoke).toHaveBeenCalledWith('save_input_server_settings', {
+      settings: { start_on_boot: false, port: 12000 },
+    })
+    // Смена порта уже начала единственный rebind: вторая команда не отправляется.
+    const startCalls = mocks.mockInvoke.mock.calls.filter((call) => call[0] === 'start_input_server')
+    expect(startCalls).toHaveLength(0)
+
+    mocks.listenCallbacks.get('input-server-status-changed')?.({ payload: { state: 'running' } })
+    expect(message.value).toBe('Настройки сохранены. Сервер перезапущен')
+  })
+
+  it('restartInputServer does not restart when the draft save fails', async () => {
+    const { settings, restartInputServer, message, messageType } = await setupAndMount()
+    mocks.mockInvoke.mockRejectedValueOnce(new Error('port busy'))
+
+    settings.value.port = 12000
+    await restartInputServer()
+
+    const startCalls = mocks.mockInvoke.mock.calls.filter((call) => call[0] === 'start_input_server')
+    expect(startCalls).toHaveLength(0)
+    expect(messageType.value).toBe('error')
+    expect(message.value).toContain('Не удалось сохранить настройки')
+
+    // Слот закрыт: поздний running не выдаёт себя за результат перезапуска.
+    mocks.listenCallbacks.get('input-server-status-changed')?.({ payload: { state: 'running' } })
+    expect(message.value).toContain('Не удалось сохранить настройки')
+  })
+
+  it('blocks start and stop while a restart is in flight', async () => {
+    const { restartInputServer, startInputServer, stopInputServer } = await setupAndMount()
+
+    let resolveRestart!: (value: unknown) => void
+    mocks.mockInvoke.mockImplementationOnce((cmd: string) => {
+      if (cmd === 'start_input_server') {
+        return new Promise((resolve) => { resolveRestart = resolve })
+      }
+      return undefined
+    })
+
+    const restart = restartInputServer()
+    await vi.waitFor(() => expect(resolveRestart).toBeDefined())
+    await startInputServer()
+    await stopInputServer()
+    resolveRestart(undefined)
+    await restart
+
+    const startCalls = mocks.mockInvoke.mock.calls.filter((call) => call[0] === 'start_input_server')
+    expect(startCalls).toHaveLength(1)
+    expect(mocks.mockInvoke).not.toHaveBeenCalledWith('stop_input_server')
+  })
+
   it('saveSettings restores the loaded snapshot when the save is rejected', async () => {
     const { settings, saveSettings } = await setupAndMount()
     mocks.mockInvoke.mockRejectedValueOnce(new Error('port busy'))
