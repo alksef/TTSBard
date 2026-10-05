@@ -21,7 +21,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <div class="dsp-subsection">
+  <div class="dsp-subsection eq-settings">
     <div class="section-header">
       <span class="section-title">EQ</span>
       <label class="toggle-switch">
@@ -30,7 +30,7 @@ const emit = defineEmits<{
       </label>
     </div>
 
-    <div>
+    <div class="eq-parameters" tabindex="0" role="region" aria-label="EQ">
       <div class="setting-row" :class="{ disabled: !eq.enabled }">
         <label class="setting-label">Low Cut</label>
         <label class="toggle-switch">
@@ -108,3 +108,32 @@ const emit = defineEmits<{
     </div>
   </div>
 </template>
+
+<style scoped>
+.eq-settings {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.section-header {
+  flex-shrink: 0;
+}
+
+.eq-parameters {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+  padding-right: 12px;
+  box-sizing: border-box;
+}
+
+.eq-parameters:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+</style>

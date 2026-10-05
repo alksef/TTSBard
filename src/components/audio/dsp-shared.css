@@ -37,7 +37,8 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   color: var(--color-text-muted);
   margin-top: 4px;
   padding: 4px 8px;

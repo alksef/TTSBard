@@ -14,18 +14,22 @@ function onEffectsDirty(dirty: boolean) {
 </script>
 
 <template>
-  <div class="audio-panel">
+  <div class="audio-panel" :class="{ 'audio-panel--effects': activeTab === 'effects_dsp' }">
     <div class="audio-panel-inner">
-      <div class="audio-tabs">
+      <div class="audio-tabs ui-tabs" role="tablist">
         <button
-          :class="{ active: activeTab === 'devices' }"
+          class="ui-tab"
+          role="tab"
+          :aria-selected="activeTab === 'devices'"
           @click="activeTab = 'devices'"
         >
           <Volume2 :size="18" />
           <span>{{ t('audio.tabs.devices') }}</span>
         </button>
         <button
-          :class="{ active: activeTab === 'effects_dsp' }"
+          class="ui-tab"
+          role="tab"
+          :aria-selected="activeTab === 'effects_dsp'"
           :aria-label="effectsDirty ? t('audio.tabs.effects_dsp.dirty') : t('audio.tabs.effects_dsp')"
           @click="activeTab = 'effects_dsp'"
         >
@@ -46,6 +50,10 @@ function onEffectsDirty(dirty: boolean) {
 </template>
 
 <style>
+/* Global block: legacy style owner for the not-yet-migrated DSP surfaces
+   (DspSettings, EffectsSettings, Eq/Compressor/Limiter) and Hotkeys/Intercept
+   fallbacks. AudioDevicesTab no longer consumes these names; consumers move
+   off stage by stage. */
 .setting-section {
   padding: 12px 16px;
   background: var(--color-bg-field);
@@ -154,12 +162,6 @@ function onEffectsDirty(dirty: boolean) {
   cursor: not-allowed;
 }
 
-.setting-row select option {
-  background: var(--select-bg);
-  color: var(--color-text-primary);
-  padding: 0.3rem 0.5rem;
-}
-
 .setting-row select:focus {
   outline: none;
   border-color: var(--color-accent);
@@ -213,10 +215,9 @@ function onEffectsDirty(dirty: boolean) {
 .audio-panel {
   max-width: 900px;
   margin: 0 auto;
-  height: 100%;
+  min-height: 100%;
   display: flex;
   flex-direction: column;
-  min-height: 0;
 }
 
 .audio-panel-inner {
@@ -226,43 +227,18 @@ function onEffectsDirty(dirty: boolean) {
   min-height: 0;
 }
 
+.audio-panel--effects {
+  height: 100%;
+  min-height: 0;
+}
+
+/* Keep tabs in normal flow: cards must not scroll beneath a transparent band. */
 .audio-tabs {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 1.5rem;
-  border-bottom: 1px solid var(--color-border);
-  padding-bottom: 0.5rem;
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  background: transparent;
+  flex-shrink: 0;
 }
 
-.audio-tabs button {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  background: transparent;
-  border: none;
-  border-radius: 8px 8px 0 0;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  transition: all 0.2s;
-  font-size: 0.9rem;
-  font-weight: 500;
-  font-family: inherit;
-}
-
-.audio-tabs button:hover {
-  color: var(--color-text-primary);
-  background: var(--color-bg-field-hover);
-}
-
-.audio-tabs button.active {
-  color: var(--color-accent);
-  background: var(--color-bg-field);
-  border-bottom: 2px solid var(--color-accent);
+.audio-panel:not(.audio-panel--effects) .audio-tabs {
+  margin-bottom: 8px;
 }
 
 .dirty-dot {

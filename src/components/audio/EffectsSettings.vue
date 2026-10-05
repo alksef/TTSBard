@@ -261,6 +261,7 @@ function handleEffectTabKey(e: KeyboardEvent) {
   margin-bottom: 8px;
 }
 
+/* Effects subtabs: agreed audio role 0.8rem/500, padding 6x14, radius 6. */
 .effects-tabs button {
   padding: 6px 14px;
   background: transparent;
@@ -268,7 +269,7 @@ function handleEffectTabKey(e: KeyboardEvent) {
   border-radius: 6px;
   color: var(--color-text-secondary);
   cursor: pointer;
-  font-size: 13px;
+  font-size: 0.8rem;
   font-weight: 500;
   font-family: inherit;
   transition: all 0.15s;
@@ -365,8 +366,10 @@ input:checked + .toggle-slider:before {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
-  color: var(--color-text-muted);
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
+  line-height: var(--ui-line-height-multiline);
+  color: var(--color-text-secondary);
   margin-top: 4px;
   padding: 4px 8px;
   background: var(--info-bg-weak);

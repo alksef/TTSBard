@@ -49,8 +49,8 @@ watch(() => props.isPreviewPlaying, (val) => {
           <FileAudio class="bar-icon" :size="18" />
           <span class="bar-title">{{ t('audio.preview.title') }}</span>
         </div>
-        <button @click="emit('pickFile')" class="pick-btn">
-          <Upload :size="16" />
+        <button @click="emit('pickFile')" class="ui-button ui-button--primary pick-btn">
+          <Upload :size="18" />
           <span>{{ t('audio.preview.choose_file') }}</span>
         </button>
       </template>
@@ -159,31 +159,19 @@ watch(() => props.isPreviewPlaying, (val) => {
 }
 
 .bar-title {
-  font-size: 14px;
+  font-size: var(--ui-text-size-label);
+  font-weight: var(--ui-text-weight-label);
   color: var(--color-text-secondary);
   white-space: nowrap;
 }
 
 .pick-btn {
-  display: inline-flex;
-  align-items: center;
   gap: 6px;
   flex-shrink: 0;
-  padding: 6px 14px;
-  background: var(--btn-accent-bg);
-  border: 1px solid var(--color-accent);
-  color: var(--color-text-primary);
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 600;
-  font-family: inherit;
-  transition: all 0.15s;
 }
 
-.pick-btn:hover {
-  background: var(--color-bg-field-hover);
-  border-color: var(--color-border-strong);
+.pick-btn:hover:not(:disabled) {
+  background: var(--btn-accent-bg-hover, var(--color-bg-field-hover));
 }
 
 .pick-btn:focus-visible,
@@ -194,7 +182,8 @@ watch(() => props.isPreviewPlaying, (val) => {
 
 .file-name {
   margin-left: 8px;
-  font-size: 14px;
+  font-size: var(--ui-text-size-control);
+  font-weight: var(--ui-text-weight-control);
   color: var(--color-text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -311,7 +300,8 @@ watch(() => props.isPreviewPlaying, (val) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   color: var(--color-danger);
 }
 

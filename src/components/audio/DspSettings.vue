@@ -92,9 +92,9 @@ function handleDspTabKey(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="setting-section">
+  <div class="setting-section dsp-settings">
     <div class="dsp-presets">
-      <span class="dsp-presets-label">{{ t('dsp.mode') }}</span>
+      <span class="dsp-presets-label ui-label">{{ t('dsp.mode') }}</span>
       <div class="toggle-buttons">
         <button
           @click="emit('set-preset', 'natural')"
@@ -143,6 +143,8 @@ function handleDspTabKey(e: KeyboardEvent) {
 
     <div
       :id="`dsp-panel-${activeDspTab}`"
+      class="dsp-content"
+      :class="{ 'dsp-content--eq': activeDspTab === 'eq' }"
       role="tabpanel"
       :aria-labelledby="`dsp-tab-${activeDspTab}`"
     >
@@ -166,16 +168,41 @@ function handleDspTabKey(e: KeyboardEvent) {
 </template>
 
 <style scoped>
-.setting-section {
-  padding: 10px 14px;
+.dsp-settings {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
+.dsp-presets,
+.dsp-tabs {
+  flex-shrink: 0;
+}
+
+.dsp-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.dsp-content--eq {
+  display: flex;
+  overflow: hidden;
+}
+
+/* Card comes from the AudioPanel global .setting-section (12x16, radius 12);
+   the dense 10x14 override is gone per the agreed section padding. */
 .dsp-tabs {
   display: flex;
   gap: 2px;
   margin-bottom: 8px;
 }
 
+/* DSP subtabs: agreed audio role 0.8rem/500, padding 6x14, radius 6;
+   8x8 status dot and 6px gap preserved. */
 .dsp-tabs button {
   padding: 6px 14px;
   background: transparent;
@@ -183,7 +210,7 @@ function handleDspTabKey(e: KeyboardEvent) {
   border-radius: 6px;
   color: var(--color-text-secondary);
   cursor: pointer;
-  font-size: 13px;
+  font-size: 0.8rem;
   font-weight: 500;
   font-family: inherit;
   transition: all 0.15s;
@@ -232,9 +259,35 @@ function handleDspTabKey(e: KeyboardEvent) {
 }
 
 .dsp-presets-label {
-  font-size: 13px;
   color: var(--color-text-secondary);
-  font-weight: 500;
   white-space: nowrap;
+}
+
+/* Presets Natural/Clear/Custom: agreed audio preset role (0.8rem/500,
+   padding 6x14, radius 8); scoped rules beat the global .toggle-btn. */
+.toggle-btn {
+  padding: 6px 14px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-field);
+  color: var(--color-text-secondary);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 500;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: inherit;
+}
+
+.toggle-btn:hover:not(:disabled) {
+  background: var(--color-bg-field-hover);
+}
+
+.toggle-btn.active {
+  background: var(--btn-accent-bg);
+  border-color: var(--color-accent);
+  color: var(--color-text-primary);
 }
 </style>

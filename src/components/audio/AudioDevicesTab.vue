@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
-import { RefreshCw, Loader, Volume2, VolumeX, Mic, Info, Play } from 'lucide-vue-next';
+import { RefreshCw, Loader, Loader2, Volume2, VolumeX, Mic, Info, Play } from 'lucide-vue-next';
 import { useAudioSettings, useAppSettings } from '../../composables/useAppSettings';
 import { debugLog, debugError } from '../../utils/debug';
 import { t } from '../../i18n';
@@ -267,15 +267,29 @@ watch(audioSettingsFromComposable, (newSettings) => {
       <button @click="errorMessage = ''" class="close-btn" :aria-label="t('audio.close')" :title="t('audio.close')">&times;</button>
     </div>
 
+    <div class="devices-toolbar">
+      <button
+        @click="refreshData"
+        :disabled="isRefreshing"
+        class="ui-icon-button refresh-btn"
+        :class="{ refreshing: isRefreshing }"
+        :title="t('audio.refresh_devices')"
+        :aria-label="t('audio.refresh_devices')"
+      >
+        <RefreshCw v-if="!isRefreshing" :size="18" />
+        <Loader2 v-else :size="18" class="spinner" />
+      </button>
+    </div>
+
     <div v-if="isLoading" class="loading">
       {{ t('audio.loading') }}
     </div>
 
     <div v-else class="audio-settings">
-      <div class="setting-section">
-        <div class="section-header">
+      <div class="devices-card ui-section">
+        <div class="devices-header">
           <Volume2 class="section-icon" :size="20" />
-          <span class="section-title">{{ t('audio.speaker.title') }}</span>
+          <span class="ui-section-title section-title">{{ t('audio.speaker.title') }}</span>
           <div class="toggle-buttons">
             <button
               @click="setSpeakerEnabled(true)"
@@ -294,10 +308,11 @@ watch(audioSettingsFromComposable, (newSettings) => {
           </div>
         </div>
 
-        <div class="setting-row" :class="{ disabled: !audioSettings.speaker_enabled }">
-          <label>{{ t('audio.device') }}</label>
+        <div class="devices-row" :class="{ disabled: !audioSettings.speaker_enabled }">
+          <label class="ui-label">{{ t('audio.device') }}</label>
           <div class="input-with-action">
             <select
+              class="ui-select"
               :disabled="!audioSettings.speaker_enabled"
               @change="setSpeakerDevice(($event.target as HTMLSelectElement).value || null)"
             >
@@ -314,18 +329,18 @@ watch(audioSettingsFromComposable, (newSettings) => {
             <button
               @click="testSpeaker"
               :disabled="!audioSettings.speaker_enabled || isTestingSpeaker || isSettingFormat"
-              class="test-btn"
+              class="ui-icon-button ui-icon-button--adjacent test-btn"
               :title="t('audio.test_playback')"
               :aria-label="t('audio.test_playback')"
             >
               <Loader v-if="isTestingSpeaker" :size="16" class="spinner" />
-              <Play v-else :size="16" />
+              <Play v-else :size="18" />
             </button>
           </div>
         </div>
 
-        <div class="setting-row" :class="{ disabled: !audioSettings.speaker_enabled }">
-          <label>{{ t('audio.volume') }}</label>
+        <div class="devices-row" :class="{ disabled: !audioSettings.speaker_enabled }">
+          <label class="ui-label">{{ t('audio.volume') }}</label>
           <div class="volume-control">
             <input
               type="range"
@@ -340,10 +355,10 @@ watch(audioSettingsFromComposable, (newSettings) => {
         </div>
       </div>
 
-      <div class="setting-section">
-        <div class="section-header">
+      <div class="devices-card ui-section">
+        <div class="devices-header">
           <Mic class="section-icon" :size="20" />
-          <span class="section-title">{{ t('audio.mic.title') }}</span>
+          <span class="ui-section-title section-title">{{ t('audio.mic.title') }}</span>
           <div class="toggle-buttons">
             <button
               @click="enableVirtualMic()"
@@ -362,10 +377,11 @@ watch(audioSettingsFromComposable, (newSettings) => {
           </div>
         </div>
 
-        <div class="setting-row" :class="{ disabled: !audioSettings.virtual_mic_device }">
-          <label>{{ t('audio.device') }}</label>
+        <div class="devices-row" :class="{ disabled: !audioSettings.virtual_mic_device }">
+          <label class="ui-label">{{ t('audio.device') }}</label>
           <div class="input-with-action">
             <select
+              class="ui-select"
               :disabled="!audioSettings.virtual_mic_device"
               @change="setVirtualMicDevice(($event.target as HTMLSelectElement).value || null)"
             >
@@ -382,18 +398,18 @@ watch(audioSettingsFromComposable, (newSettings) => {
             <button
               @click="testVirtualMic"
               :disabled="!audioSettings.virtual_mic_device || isTestingVirtualMic || isSettingFormat"
-              class="test-btn"
+              class="ui-icon-button ui-icon-button--adjacent test-btn"
               :title="t('audio.test_playback')"
               :aria-label="t('audio.test_playback')"
             >
               <Loader v-if="isTestingVirtualMic" :size="16" class="spinner" />
-              <Play v-else :size="16" />
+              <Play v-else :size="18" />
             </button>
           </div>
         </div>
 
-        <div class="setting-row" :class="{ disabled: !audioSettings.virtual_mic_device }">
-          <label>{{ t('audio.volume') }}</label>
+        <div class="devices-row" :class="{ disabled: !audioSettings.virtual_mic_device }">
+          <label class="ui-label">{{ t('audio.volume') }}</label>
           <div class="volume-control">
             <input
               type="range"
@@ -411,16 +427,16 @@ watch(audioSettingsFromComposable, (newSettings) => {
           <Info :size="16" /> {{ t('audio.mic.not_found_info') }}
         </div>
       </div>
-      <div class="setting-section output-format-section">
-        <div class="setting-row output-format-row">
+      <div class="devices-card ui-section output-format-section">
+        <div class="devices-row output-format-row">
           <div class="output-format-label">
-            <label for="audio-output-format">{{ t('audio.output_format.label') }}</label>
+            <label class="ui-label" for="audio-output-format">{{ t('audio.output_format.label') }}</label>
             <button type="button" class="format-help" :title="t('audio.output_format.help')" :aria-label="t('audio.output_format.help')">
               <Info :size="16" />
             </button>
           </div>
           <div class="input-with-action">
-            <select id="audio-output-format" :value="outputFormat"
+            <select id="audio-output-format" class="ui-select" :value="outputFormat"
               :disabled="!audioSettingsFromComposable || isSettingFormat || isRefreshing || isTestingSpeaker || isTestingVirtualMic"
               @change="setOutputFormat(($event.target as HTMLSelectElement).value)">
               <option v-if="!outputFormat" value="" disabled>{{ t('audio.loading') }}</option>
@@ -434,31 +450,24 @@ watch(audioSettingsFromComposable, (newSettings) => {
       </div>
     </div>
 
-    <div class="panel-footer">
-      <button
-        @click="refreshData"
-        :disabled="isRefreshing"
-        class="refresh-btn"
-        :class="{ refreshing: isRefreshing }"
-        :title="t('audio.refresh_devices')"
-        :aria-label="t('audio.refresh_devices')"
-      >
-        <RefreshCw v-if="!isRefreshing" :size="18" />
-        <Loader v-else :size="18" class="spinner" />
-      </button>
-    </div>
+
   </div>
 </template>
 
 <style scoped>
+.devices-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
 .output-format-label { display: flex; align-items: center; gap: 6px; }
 .format-help { display: inline-flex; padding: 2px; background: none; border: none; color: var(--color-text-secondary); cursor: help; }
 .format-help:focus-visible { outline: 2px solid var(--card-active-border); outline-offset: 2px; border-radius: 4px; }
-.format-hint { margin: 8px 0 0; font-size: 12px; line-height: 1.5; color: var(--color-text-secondary); overflow-wrap: anywhere; }
+.format-hint { margin: var(--ui-hint-gap) 0 0; font-size: var(--ui-text-size-hint); font-weight: var(--ui-text-weight-hint); line-height: 1.5; color: var(--color-text-secondary); overflow-wrap: anywhere; }
 .output-format-section { min-width: 0; }
 .output-format-row { flex-wrap: wrap; gap: 8px; }
 .output-format-row .input-with-action { flex: 1 1 220px; }
-.output-format-row select { width: 100%; }
+.output-format-row .ui-select { width: 100%; }
 
 .error-box {
   background: var(--danger-bg-weak);
@@ -489,7 +498,85 @@ watch(audioSettingsFromComposable, (newSettings) => {
 .audio-settings {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+}
+
+/* Card skin stays local; padding/rhythm come from ui-section. */
+.devices-card {
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
+}
+
+/* Header row with icon + title + segmented toggles. */
+.devices-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.devices-header .section-title {
+  flex: 1;
+}
+
+/* Segmented On/Off: maps to the agreed audio preset role (0.8rem/500,
+   padding 6x14, radius 8); no separate 12px scale step is kept. */
+.devices-header .toggle-btn {
+  padding: 6px 14px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-field);
+  color: var(--color-text-secondary);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 500;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: inherit;
+}
+
+.devices-header .toggle-btn:hover {
+  background: var(--color-bg-field-hover);
+}
+
+.devices-header .toggle-btn.active {
+  background: var(--btn-accent-bg);
+  border-color: var(--color-accent);
+  color: var(--color-text-primary);
+}
+
+.devices-header .toggle-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+/* Local row: leaves the global .setting-row cascade (overflow:hidden and
+   14px select typography) owned by AudioPanel for the DSP surfaces. */
+.devices-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: var(--ui-row-gap);
+  min-width: 0;
+}
+
+.devices-row:last-child {
+  margin-bottom: 0;
+}
+
+.devices-row.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.devices-row > .ui-label {
+  min-width: 100px;
+  color: var(--color-text-secondary);
 }
 
 .input-with-action {
@@ -512,28 +599,6 @@ watch(audioSettingsFromComposable, (newSettings) => {
 
 .test-btn {
   flex-shrink: 0;
-  padding: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 36px;
-  height: 36px;
-  border: 1px solid var(--color-border);
-  background: var(--color-bg-field);
-  color: var(--color-text-secondary);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.test-btn:hover:not(:disabled) {
-  background: var(--color-bg-field-hover);
-  border-color: var(--color-border-strong);
-}
-
-.test-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .test-btn .spinner {
@@ -552,10 +617,11 @@ watch(audioSettingsFromComposable, (newSettings) => {
 .info-box {
   background: var(--info-bg-weak);
   border: 1px solid var(--info-border);
-  border-radius: 12px;
+  border-radius: 8px;
   padding: 12px;
   margin-top: 12px;
-  font-size: 13px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   color: var(--color-info);
   display: flex;
   align-items: center;
@@ -568,38 +634,7 @@ watch(audioSettingsFromComposable, (newSettings) => {
   margin-top: 1.5rem;
 }
 
-.refresh-btn {
-  background: var(--color-bg-field);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
-  padding: 8px 12px;
-  cursor: pointer;
-  font-size: 18px;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 40px;
-  height: 40px;
-  color: var(--color-text-primary);
-}
-
-.refresh-btn:hover:not(:disabled) {
-  background: var(--color-bg-field-hover);
-  border-color: var(--card-active-border);
-}
-
-.refresh-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .refresh-btn.refreshing .spinner {
-  animation: pulse 1s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  animation: spin 1s linear infinite;
 }
 </style>

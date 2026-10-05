@@ -407,7 +407,7 @@ watch(dspSettingsFromComposable, (newDsp) => {
       </div>
     </div>
 
-    <div class="effects-scroll">
+    <div class="effects-scroll" :class="{ 'effects-scroll--dsp': activeSection === 'dsp' }">
       <div
         v-if="activeSection === 'effects'"
         id="panel-effects"
@@ -446,10 +446,10 @@ watch(dspSettingsFromComposable, (newDsp) => {
         <span v-else-if="saveStatus === 'saved'" class="save-status saved">{{ t('audio.save.saved') }}</span>
         <span v-else-if="saveStatus === 'error'" class="save-status error">{{ saveError }}</span>
       </div>
-      <button @click="cancelAll" :disabled="(!isDirty && !dspDirty) || saveStatus === 'saving'" class="cancel-btn">
+      <button @click="cancelAll" :disabled="(!isDirty && !dspDirty) || saveStatus === 'saving'" class="ui-button cancel-btn">
         {{ t('common.cancel') }}
       </button>
-      <button @click="saveAll" :disabled="(!isDirty && !dspDirty) || saveStatus === 'saving'" class="save-btn">
+      <button @click="saveAll" :disabled="(!isDirty && !dspDirty) || saveStatus === 'saving'" class="ui-button ui-button--primary save-btn">
         <span v-if="saveStatus === 'saving'">{{ t('audio.save.saving') }}</span>
         <span v-else>{{ t('audio.save') }}</span>
       </button>
@@ -480,6 +480,7 @@ watch(dspSettingsFromComposable, (newDsp) => {
   gap: 2px;
 }
 
+/* Subtab role per the agreed audio block: 0.8rem/500, padding 6x14, radius 6. */
 .secondary-tabs button {
   padding: 6px 14px;
   background: transparent;
@@ -487,7 +488,7 @@ watch(dspSettingsFromComposable, (newDsp) => {
   border-radius: 6px;
   color: var(--color-text-secondary);
   cursor: pointer;
-  font-size: 13px;
+  font-size: 0.8rem;
   font-weight: 500;
   font-family: inherit;
   transition: all 0.15s;
@@ -518,8 +519,8 @@ watch(dspSettingsFromComposable, (newDsp) => {
   border: 1px solid var(--warning-border);
   border-radius: 20px;
   color: var(--warning-text-bright);
-  font-size: 12px;
-  font-weight: 500;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -555,6 +556,18 @@ watch(dspSettingsFromComposable, (newDsp) => {
   box-sizing: border-box;
 }
 
+.effects-scroll--dsp {
+  display: flex;
+  overflow: hidden;
+}
+
+.effects-scroll--dsp > [role="tabpanel"],
+.effects-scroll--dsp .dsp-settings-wrapper {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
 .save-section {
   display: flex;
   align-items: center;
@@ -574,7 +587,8 @@ watch(dspSettingsFromComposable, (newDsp) => {
 }
 
 .save-status {
-  font-size: 13px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -589,56 +603,19 @@ watch(dspSettingsFromComposable, (newDsp) => {
 }
 
 .cancel-btn {
-  padding: 0.6rem 1.2rem;
-  background: transparent;
-  border: 1px solid var(--color-border-strong);
   color: var(--color-text-secondary);
-  border-radius: 10px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 600;
-  font-family: inherit;
-  transition: all 0.2s;
   white-space: nowrap;
   flex-shrink: 0;
 }
 
 .cancel-btn:hover:not(:disabled) {
   color: var(--color-text-primary);
-  border-color: var(--color-accent);
-  background: var(--color-bg-field-hover);
-}
-
-.cancel-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .save-btn {
-  display: inline-flex;
-  align-items: center;
   gap: 8px;
-  padding: 0.6rem 1.2rem;
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-strong) 100%);
-  border: none;
-  color: var(--color-text-white);
-  border-radius: 10px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 600;
-  font-family: inherit;
-  transition: all 0.2s;
   white-space: nowrap;
   flex-shrink: 0;
-}
-
-.save-btn:hover:not(:disabled) {
-  filter: brightness(1.06);
-}
-
-.save-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 @media (max-width: 500px) {
