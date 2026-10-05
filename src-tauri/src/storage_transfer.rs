@@ -16,6 +16,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
+use tracing::{info, warn};
 
 pub(crate) const AUDIO_CACHE_DIR_NAME: &str = "audio_cache";
 pub(crate) const MODELS_DIR_NAME: &str = "models";
@@ -248,6 +249,348 @@ pub(crate) fn execute_transfer(
     Ok(TransferOutcome {
         models_migrated: plan.models_migrated,
     })
+}
+
+// ============================ legacy models migration ============================
+
+/// Одноразовый перенос legacy-моделей из Roaming (`<config_root>/models`) в
+/// эффективный корень данных (`<data_root>/models`).
+///
+/// Переносит только каталог моделей (`piper`, `ocr`, `ruaccent`) и никогда не
+/// трогает cwd или audio-кеш. Возвращает `true`, только когда перенос можно
+/// считать завершённым: источник отсутствует либо все его файлы перенесены и
+/// каталог источника удалён. Ошибки файловой системы, reparse-точки и
+/// пересечение путей дают `false` — маркер не ставится и попытка повторяется
+/// на следующем старте.
+pub(crate) fn migrate_legacy_models_from_config() -> bool {
+    let (Ok(config_root), Ok(data_root)) = (crate::paths::config_root(), crate::paths::data_root())
+    else {
+        warn!("Legacy models migration skipped: cannot resolve paths");
+        return false;
+    };
+    migrate_legacy_models(
+        &config_root.join(MODELS_DIR_NAME),
+        &data_root.join(MODELS_DIR_NAME),
+    )
+}
+
+/// Действие для одного файла модели после preflight.
+enum ModelFileAction {
+    /// Скопировать в назначение.
+    Copy,
+    /// Назначение уже содержит побайтово совпадающий файл — копировать не нужно.
+    AlreadyPresent,
+}
+
+/// Ядро переноса legacy-моделей с явными путями (для тестируемости).
+///
+/// Файлы назначения никогда не перезаписываются. Все конфликты проверяются до
+/// любых мутаций: различающийся файл назначения оставляет источник нетронутым
+/// и даёт `false`; побайтово совпадающие файлы считаются уже перенесёнными
+/// (безопасный повтор после частичного переноса). Оригиналы удаляются только
+/// после проверенного копирования, и перенос считается завершённым лишь при
+/// удалении (или отсутствии) каталога источника.
+pub(crate) fn migrate_legacy_models(source: &Path, target: &Path) -> bool {
+    if require_absolute(source, "legacy models source").is_err()
+        || require_absolute(target, "models target").is_err()
+    {
+        warn!("Legacy models migration skipped: paths must be absolute without parent traversal");
+        return false;
+    }
+    if ensure_no_reparse(source).is_err() {
+        warn!(
+            dir = %crate::secret_log::safe_path_for_log(source),
+            "Legacy models migration skipped: source is a symlink/junction"
+        );
+        return false;
+    }
+    if ensure_no_reparse(target).is_err() {
+        warn!(
+            dir = %crate::secret_log::safe_path_for_log(target),
+            "Legacy models migration skipped: target is a symlink/junction"
+        );
+        return false;
+    }
+    if reject_nested(source, target, "models").is_err() {
+        warn!(
+            source = %crate::secret_log::safe_path_for_log(source),
+            target = %crate::secret_log::safe_path_for_log(target),
+            "Legacy models migration skipped: overlapping paths"
+        );
+        return false;
+    }
+
+    // Отсутствие источника — завершённый перенос. Родитель проверяется на
+    // существование каталога: на Windows файл в пути-предке тоже даёт NotFound
+    // (ERROR_PATH_NOT_FOUND) и не должен считаться отсутствием источника.
+    let meta = match std::fs::symlink_metadata(source) {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let absent = confirmed_missing_directory(source);
+            if absent {
+                info!(
+                    dir = %crate::secret_log::safe_path_for_log(source),
+                    "Legacy models directory absent; migration complete"
+                );
+            } else {
+                warn!(
+                    dir = %crate::secret_log::safe_path_for_log(source),
+                    "Legacy models parent is not a directory; migration incomplete"
+                );
+            }
+            return absent;
+        }
+        Err(e) => {
+            warn!(
+                dir = %crate::secret_log::safe_path_for_log(source),
+                error = %e,
+                "Legacy models metadata unavailable; migration incomplete"
+            );
+            return false;
+        }
+    };
+    if !meta.is_dir() {
+        warn!(
+            dir = %crate::secret_log::safe_path_for_log(source),
+            "Legacy models source is not a directory; migration incomplete"
+        );
+        return false;
+    }
+
+    match std::fs::symlink_metadata(target) {
+        Ok(target_meta) if !target_meta.is_dir() => {
+            warn!(
+                dir = %crate::secret_log::safe_path_for_log(target),
+                "Legacy models target is not a directory; migration incomplete"
+            );
+            return false;
+        }
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            warn!(
+                dir = %crate::secret_log::safe_path_for_log(target),
+                error = %e,
+                "Legacy models target unavailable; migration incomplete"
+            );
+            return false;
+        }
+    }
+
+    let files = match collect_model_files(source) {
+        Ok(files) => files,
+        Err(e) => {
+            warn!(
+                dir = %crate::secret_log::safe_path_for_log(source),
+                error = %e,
+                "Legacy models scan failed; migration incomplete"
+            );
+            return false;
+        }
+    };
+
+    // Preflight: определить действие для каждого файла до любых мутаций.
+    let mut plan: Vec<(PathBuf, PathBuf, u64, ModelFileAction)> = Vec::new();
+    for file in &files {
+        let src = source.join(&file.rel);
+        let dst = target.join(&file.rel);
+        if ensure_no_reparse(&dst).is_err() {
+            warn!("Legacy models migration incomplete: destination contains a reparse point");
+            return false;
+        }
+        match std::fs::symlink_metadata(&dst) {
+            Ok(dst_meta) => {
+                if is_reparse_meta(&dst_meta) || !dst_meta.is_file() {
+                    warn!(
+                        file = %crate::secret_log::safe_path_for_log(&dst),
+                        "Legacy models migration incomplete: destination exists and is not a regular file"
+                    );
+                    return false;
+                }
+                if files_equal(&src, &dst) {
+                    plan.push((src, dst, file.size, ModelFileAction::AlreadyPresent));
+                } else {
+                    warn!(
+                        file = %crate::secret_log::safe_path_for_log(&dst),
+                        "Legacy models migration incomplete: destination differs"
+                    );
+                    return false;
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                plan.push((src, dst, file.size, ModelFileAction::Copy));
+            }
+            Err(e) => {
+                warn!(
+                    file = %crate::secret_log::safe_path_for_log(&dst),
+                    error = %e,
+                    "Legacy models destination unavailable; migration incomplete"
+                );
+                return false;
+            }
+        }
+    }
+
+    let mut created_dirs: Vec<PathBuf> = Vec::new();
+    let mut created_files: Vec<PathBuf> = Vec::new();
+    let mut snapshot: Vec<(PathBuf, PathBuf, u64, u64)> = Vec::new();
+
+    let copy_result = (|| -> Result<()> {
+        ensure_dir_created(target, &mut created_dirs)?;
+        for (src, dst, size, action) in &plan {
+            match action {
+                ModelFileAction::AlreadyPresent => {
+                    let hash = hash_file(src).context("Failed to hash existing model")?;
+                    snapshot.push((src.clone(), dst.clone(), *size, hash));
+                }
+                ModelFileAction::Copy => {
+                    if let Some(parent) = dst.parent() {
+                        ensure_dir_created(parent, &mut created_dirs)?;
+                    }
+                    ensure_no_reparse(src)?;
+                    ensure_no_reparse(dst)?;
+                    let mut writer = std::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(dst)
+                        .with_context(|| "Failed to create destination model")?;
+                    created_files.push(dst.clone());
+                    let (copied, hash) = copy_file_chunked(src, dst, &mut writer, |_| {})?;
+                    if copied != *size {
+                        bail!("Source model changed during transfer");
+                    }
+                    snapshot.push((src.clone(), dst.clone(), *size, hash));
+                }
+            }
+        }
+        Ok(())
+    })();
+
+    if copy_result.is_err() {
+        cleanup_created(&created_files, &created_dirs);
+        warn!(
+            dir = %crate::secret_log::safe_path_for_log(source),
+            "Legacy models migration failed; will retry on next start"
+        );
+        return false;
+    }
+
+    // Удалить исходные файлы только если они не изменились с момента снимка.
+    for (src, dst, size, hash) in &snapshot {
+        if ensure_no_reparse(src).is_ok()
+            && ensure_no_reparse(dst).is_ok()
+            && source_unchanged(src, *size, *hash)
+            && files_equal(src, dst)
+        {
+            let _ = std::fs::remove_file(src);
+        }
+    }
+    remove_empty_dirs_bottom_up(source);
+
+    match std::fs::symlink_metadata(source) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            info!("Migrated legacy models out of Roaming");
+            true
+        }
+        _ => {
+            warn!(
+                dir = %crate::secret_log::safe_path_for_log(source),
+                "Legacy models partially migrated; remaining files retry on next start"
+            );
+            false
+        }
+    }
+}
+
+/// Confirm absence through missing ancestors, without confusing inaccessible
+/// ancestors or a regular file in the path with an absent directory.
+fn confirmed_missing_directory(path: &Path) -> bool {
+    let mut current = path;
+    loop {
+        match std::fs::symlink_metadata(current) {
+            Ok(meta) => return meta.is_dir() && !is_reparse_meta(&meta),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let Some(parent) = current.parent() else {
+                    return false;
+                };
+                current = parent;
+            }
+            Err(_) => return false,
+        }
+    }
+}
+
+/// Собрать файлы моделей из `source` рекурсивно, отклоняя reparse-точки.
+/// Возвращает относительные пути и размеры. Ошибки — чистые `io::Error` без
+/// встроенных путей (безопасны для лога).
+fn collect_model_files(source: &Path) -> std::io::Result<Vec<FileToCopy>> {
+    let mut files = Vec::new();
+    collect_model_files_recursive(source, source, &mut files)?;
+    Ok(files)
+}
+
+fn collect_model_files_recursive(
+    base: &Path,
+    current: &Path,
+    out: &mut Vec<FileToCopy>,
+) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(current)? {
+        let entry = entry?;
+        let path = entry.path();
+        let meta = std::fs::symlink_metadata(&path)?;
+        if is_reparse_meta(&meta) {
+            return Err(std::io::Error::other(
+                "symlink/junction in legacy models tree",
+            ));
+        }
+        if meta.is_dir() {
+            collect_model_files_recursive(base, &path, out)?;
+        } else if meta.is_file() {
+            let rel = path
+                .strip_prefix(base)
+                .map_err(|_| std::io::Error::other("failed to relativize models path"))?
+                .to_path_buf();
+            out.push(FileToCopy {
+                rel,
+                size: meta.len(),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Побайтовое сравнение содержимого двух существующих файлов.
+fn files_equal(a: &Path, b: &Path) -> bool {
+    let (Ok(ma), Ok(mb)) = (std::fs::metadata(a), std::fs::metadata(b)) else {
+        return false;
+    };
+    if !ma.is_file() || !mb.is_file() || ma.len() != mb.len() {
+        return false;
+    }
+    let (Ok(mut fa), Ok(mut fb)) = (std::fs::File::open(a), std::fs::File::open(b)) else {
+        return false;
+    };
+    let mut ba = [0u8; 64 * 1024];
+    let mut bb = [0u8; 64 * 1024];
+    loop {
+        let na = match fa.read(&mut ba) {
+            Ok(n) => n,
+            Err(_) => return false,
+        };
+        let nb = match fb.read(&mut bb) {
+            Ok(n) => n,
+            Err(_) => return false,
+        };
+        if na != nb {
+            return false;
+        }
+        if na == 0 {
+            return true;
+        }
+        if ba[..na] != bb[..nb] {
+            return false;
+        }
+    }
 }
 
 // ============================ path validation ============================
@@ -1183,5 +1526,231 @@ mod tests {
         assert_eq!(max_completed, total);
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // ==================== legacy models migration ====================
+
+    #[test]
+    fn legacy_model_missing_source_completes() {
+        let root = tmp_dir("legacy-model-missing");
+        let src = root.join("does-not-exist");
+        let dst = root.join("data").join("models");
+
+        assert!(migrate_legacy_models(&src, &dst));
+        assert!(!dst.exists());
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn legacy_model_missing_config_root_completes() {
+        let root = tmp_dir("legacy-model-no-config");
+        let src = root.join("missing-config/models");
+        let dst = root.join("data/models");
+        assert!(migrate_legacy_models(&src, &dst));
+        assert!(!dst.exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn legacy_model_file_in_source_ancestor_is_not_absence() {
+        let root = tmp_dir("legacy-model-file-ancestor");
+        write_bytes(&root.join("config"), b"not a directory");
+        assert!(!migrate_legacy_models(
+            &root.join("config/models"),
+            &root.join("data/models")
+        ));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn legacy_model_transfers_piper_ocr_ruaccent() {
+        let root = tmp_dir("legacy-model-nested");
+        let src = root.join("models");
+        let dst = root.join("data").join("models");
+        write_bytes(&src.join("piper/en.onnx"), b"piper-en");
+        write_bytes(&src.join("piper/en.onnx.json"), b"{}");
+        write_bytes(&src.join("ocr/rus.pack"), b"ocr-rus");
+        write_bytes(&src.join("ruaccent/pack.bin"), b"ruaccent");
+        write_bytes(&root.join("audio_cache/a.wav"), b"leave-cache");
+
+        assert!(migrate_legacy_models(&src, &dst));
+
+        assert!(dst.join("piper/en.onnx").exists());
+        assert!(dst.join("piper/en.onnx.json").exists());
+        assert!(dst.join("ocr/rus.pack").exists());
+        assert!(dst.join("ruaccent/pack.bin").exists());
+        assert!(!src.exists(), "source must be removed after full transfer");
+        assert_eq!(
+            std::fs::read(root.join("audio_cache/a.wav")).unwrap(),
+            b"leave-cache"
+        );
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn legacy_model_custom_destination() {
+        let root = tmp_dir("legacy-model-custom");
+        let src = root.join("models");
+        let dst = root.join("custom").join("nested").join("models");
+        write_bytes(&src.join("piper/m.onnx"), b"m");
+
+        assert!(migrate_legacy_models(&src, &dst));
+        assert!(dst.join("piper/m.onnx").exists());
+        assert!(!src.exists());
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn legacy_model_differing_collision_no_mutation() {
+        let root = tmp_dir("legacy-model-conflict");
+        let src = root.join("models");
+        let dst = root.join("data").join("models");
+        write_bytes(&src.join("piper/m.onnx"), b"source-version");
+        write_bytes(&dst.join("piper/m.onnx"), b"destination-version");
+
+        assert!(!migrate_legacy_models(&src, &dst));
+
+        assert_eq!(
+            std::fs::read(src.join("piper/m.onnx")).unwrap(),
+            b"source-version"
+        );
+        assert_eq!(
+            std::fs::read(dst.join("piper/m.onnx")).unwrap(),
+            b"destination-version"
+        );
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn legacy_model_identical_existing_files_allow_safe_retry() {
+        let root = tmp_dir("legacy-model-retry");
+        let src = root.join("models");
+        let dst = root.join("data").join("models");
+        write_bytes(&src.join("piper/m.onnx"), b"model-data");
+        write_bytes(&src.join("ocr/o.onnx"), b"ocr-data");
+        // Simulate a previous attempt that copied piper but crashed before
+        // removing the source.
+        write_bytes(&dst.join("piper/m.onnx"), b"model-data");
+
+        assert!(migrate_legacy_models(&src, &dst));
+
+        assert!(dst.join("piper/m.onnx").exists());
+        assert!(dst.join("ocr/o.onnx").exists());
+        assert!(
+            !src.exists(),
+            "identical files count as already transferred"
+        );
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn legacy_model_empty_source_completes() {
+        let root = tmp_dir("legacy-model-empty");
+        let src = root.join("models");
+        std::fs::create_dir_all(&src).unwrap();
+        let dst = root.join("data").join("models");
+
+        assert!(migrate_legacy_models(&src, &dst));
+        assert!(!src.exists());
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn legacy_model_relative_source_rejected() {
+        let root = tmp_dir("legacy-model-relative");
+        let dst = root.join("data").join("models");
+
+        assert!(!migrate_legacy_models(Path::new("relative/models"), &dst));
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn legacy_model_overlapping_paths_rejected() {
+        let root = tmp_dir("legacy-model-overlap");
+        let src = root.join("models");
+        std::fs::create_dir_all(&src).unwrap();
+
+        assert!(
+            !migrate_legacy_models(&src, &src),
+            "same path must be rejected"
+        );
+        assert!(
+            !migrate_legacy_models(&src, &src.join("nested")),
+            "target inside source must be rejected"
+        );
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn legacy_model_rejects_junction_source() {
+        use std::process::Command;
+        let root = tmp_dir("legacy-model-junction");
+        let real = root.join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        let junction = root.join("junction");
+
+        let created = Command::new("cmd")
+            .args([
+                "/C",
+                "mklink",
+                "/J",
+                junction.to_str().unwrap(),
+                real.to_str().unwrap(),
+            ])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !created {
+            let _ = std::fs::remove_dir_all(&root);
+            return;
+        }
+
+        let dst = root.join("data").join("models");
+        assert!(!migrate_legacy_models(&junction, &dst));
+
+        let _ = std::fs::remove_dir(&junction);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn legacy_model_rejects_nested_destination_junction_even_if_identical() {
+        let root = tmp_dir("legacy-model-target-junction");
+        let src = root.join("source").join("models");
+        let dst = root.join("target").join("models");
+        let real = root.join("external");
+        write_bytes(&src.join("piper/m.onnx"), b"model");
+        write_bytes(&real.join("m.onnx"), b"model");
+        std::fs::create_dir_all(&dst).unwrap();
+        let junction = dst.join("piper");
+        let created = std::process::Command::new("cmd")
+            .args([
+                "/C",
+                "mklink",
+                "/J",
+                junction.to_str().unwrap(),
+                real.to_str().unwrap(),
+            ])
+            .status()
+            .unwrap()
+            .success();
+        assert!(
+            created,
+            "junction creation is required for this regression test"
+        );
+        assert!(!migrate_legacy_models(&src, &dst));
+        assert_eq!(std::fs::read(src.join("piper/m.onnx")).unwrap(), b"model");
+        assert_eq!(std::fs::read(real.join("m.onnx")).unwrap(), b"model");
+        std::fs::remove_dir(junction).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

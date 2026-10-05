@@ -1525,6 +1525,11 @@ pub struct StorageSettings {
     /// DTO не выводится.
     #[serde(default)]
     pub legacy_audio_cache_migrated: bool,
+    /// Одноразовый перенос legacy-моделей из Roaming уже выполнен. Не зависит
+    /// от маркера audio-кеша. Отсутствующее поле трактуется как `false`.
+    /// Backend-only маркер: в IPC DTO не выводится.
+    #[serde(default)]
+    pub legacy_models_migrated: bool,
 }
 
 // ==================== Main App Settings ====================
@@ -2716,6 +2721,19 @@ impl SettingsManager {
     pub fn set_legacy_audio_cache_migrated(&self) -> Result<()> {
         self.update_settings_atomically(move |settings| {
             settings.storage.legacy_audio_cache_migrated = true;
+        })
+    }
+
+    /// Пометить одноразовый перенос legacy-моделей выполненным.
+    ///
+    /// Атомарно читает текущие настройки с диска, ставит
+    /// `storage.legacy_models_migrated = true` и сохраняет их без потери
+    /// других полей (включая независимый маркер audio-кеша). Провал записи
+    /// возвращает ошибку, не меняя ни диск, ни кеш, — маркер можно повторить
+    /// на следующем старте.
+    pub fn set_legacy_models_migrated(&self) -> Result<()> {
+        self.update_settings_atomically(move |settings| {
+            settings.storage.legacy_models_migrated = true;
         })
     }
 
@@ -7124,6 +7142,7 @@ mod tests {
             data_dir: None,
             audio_cache_dir: None,
             legacy_audio_cache_migrated: true,
+            legacy_models_migrated: false,
         };
         let json = serde_json::to_string(&s).unwrap();
         let back: StorageSettings = serde_json::from_str(&json).unwrap();
@@ -7183,6 +7202,90 @@ mod tests {
 
         assert!(manager.set_legacy_audio_cache_migrated().is_err());
         assert!(!manager.load().unwrap().storage.legacy_audio_cache_migrated);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ==================== Storage legacy models marker ====================
+
+    /// The marker defaults to false, both for a fresh struct and for an empty
+    /// (or legacy) JSON that predates the field.
+    #[test]
+    fn legacy_model_migrated_defaults_false() {
+        assert!(!StorageSettings::default().legacy_models_migrated);
+        let s: StorageSettings = serde_json::from_str("{}").unwrap();
+        assert!(!s.legacy_models_migrated);
+    }
+
+    /// The marker survives a serde round-trip.
+    #[test]
+    fn legacy_model_migrated_round_trip() {
+        let s = StorageSettings {
+            data_dir: None,
+            audio_cache_dir: None,
+            legacy_audio_cache_migrated: false,
+            legacy_models_migrated: true,
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        let back: StorageSettings = serde_json::from_str(&json).unwrap();
+        assert!(back.legacy_models_migrated);
+    }
+
+    /// set_legacy_models_migrated persists `true` to disk and cache, and a
+    /// restarted manager over the same dir still reads `true`.
+    #[test]
+    fn legacy_model_migrated_persists_and_updates_cache() {
+        let (manager, dir) = storage_tmp_manager("legacy-model-persist");
+        assert!(!manager.load().unwrap().storage.legacy_models_migrated);
+
+        manager.set_legacy_models_migrated().unwrap();
+
+        assert!(manager.load().unwrap().storage.legacy_models_migrated);
+        assert!(read_disk_settings(&dir).storage.legacy_models_migrated);
+
+        let restarted = SettingsManager::with_config_dir(dir.clone()).unwrap();
+        assert!(restarted.load().unwrap().storage.legacy_models_migrated);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Setting the models marker must preserve the independent audio-cache
+    /// marker and unrelated settings on disk and in the cache.
+    #[test]
+    fn legacy_model_migrated_preserves_audio_marker_and_unrelated_settings() {
+        let (manager, dir) = storage_tmp_manager("legacy-model-preserved");
+        manager.set_legacy_audio_cache_migrated().unwrap();
+        manager.set_speaker_volume(42).unwrap();
+
+        manager.set_legacy_models_migrated().unwrap();
+
+        let disk = read_disk_settings(&dir);
+        assert!(disk.storage.legacy_models_migrated);
+        assert!(
+            disk.storage.legacy_audio_cache_migrated,
+            "audio-cache marker must survive the models-marker save"
+        );
+        assert_eq!(disk.audio.speaker_volume, 42);
+
+        let cache = manager.load().unwrap();
+        assert!(cache.storage.legacy_models_migrated);
+        assert!(cache.storage.legacy_audio_cache_migrated);
+        assert_eq!(cache.audio.speaker_volume, 42);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A failed marker write must not flip the in-memory or on-disk state, so a
+    /// later startup retries.
+    #[test]
+    fn legacy_model_migrated_failed_write_preserves_false() {
+        let (manager, dir) = storage_tmp_manager("legacy-model-failed");
+        let path = dir.join("settings.json");
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+
+        assert!(manager.set_legacy_models_migrated().is_err());
+        assert!(!manager.load().unwrap().storage.legacy_models_migrated);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

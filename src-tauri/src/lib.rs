@@ -153,6 +153,31 @@ fn migrate_legacy_audio_cache_once(
     }
 }
 
+/// Выполнить одноразовый перенос legacy-моделей и сохранить маркер.
+///
+/// Маркер `true` полностью отключает проверку legacy-каталога. Маркер ставится
+/// только после подтверждения полного переноса (либо подтверждённого отсутствия
+/// источника); провал сохранения логируется и оставляет попытку на следующем
+/// старте. Независим от маркера audio-кеша.
+fn migrate_legacy_models_once(
+    marker: bool,
+    migrate: impl FnOnce() -> bool,
+    persist_marker: impl FnOnce() -> anyhow::Result<()>,
+) {
+    if marker {
+        return;
+    }
+    if !migrate() {
+        return;
+    }
+    if let Err(e) = persist_marker() {
+        warn!(
+            error = %e,
+            "Failed to persist legacy models migration marker; will retry on next start"
+        );
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(windows)]
@@ -343,6 +368,13 @@ pub fn run() {
     // Корень данных: пользовательский override из настроек должен быть
     // применён до model discovery (Piper/OCR/RUAccent) и переноса legacy-кеша.
     crate::paths::init_data_root(settings.storage.data_dir.as_deref());
+    // Legacy-модели (piper/ocr/ruaccent) переносятся до model discovery, но
+    // после применения корня данных и независимо от маркера audio-кеша.
+    migrate_legacy_models_once(
+        settings.storage.legacy_models_migrated,
+        crate::storage_transfer::migrate_legacy_models_from_config,
+        || settings_manager.set_legacy_models_migrated(),
+    );
     // OCR and other services snapshot their model root at construction.
     let mut app_state = AppState::new();
     app_state.settings_cache = settings_manager.cache_arc();
@@ -994,5 +1026,71 @@ mod migrate_once_tests {
             },
         );
         assert!(!persisted.load(Ordering::SeqCst));
+    }
+
+    /// A completed models marker skips the migration entirely: even a recreated
+    /// legacy directory must not be probed.
+    #[test]
+    fn migrate_legacy_models_skips_when_marker_true() {
+        let ran = Arc::new(AtomicBool::new(false));
+        let ran_flag = Arc::clone(&ran);
+        migrate_legacy_models_once(
+            true,
+            || {
+                ran_flag.store(true, Ordering::SeqCst);
+                true
+            },
+            || Ok(()),
+        );
+        assert!(!ran.load(Ordering::SeqCst));
+    }
+
+    /// The models marker is persisted only after a completed migration.
+    #[test]
+    fn migrate_legacy_models_persists_marker_only_after_complete() {
+        let persisted = Arc::new(AtomicBool::new(false));
+        let persisted_flag = Arc::clone(&persisted);
+        migrate_legacy_models_once(
+            false,
+            || true,
+            || {
+                persisted_flag.store(true, Ordering::SeqCst);
+                Ok(())
+            },
+        );
+        assert!(persisted.load(Ordering::SeqCst));
+    }
+
+    /// An incomplete models migration must not persist the marker.
+    #[test]
+    fn migrate_legacy_models_incomplete_does_not_persist_marker() {
+        let persisted = Arc::new(AtomicBool::new(false));
+        let persisted_flag = Arc::clone(&persisted);
+        migrate_legacy_models_once(
+            false,
+            || false,
+            || {
+                persisted_flag.store(true, Ordering::SeqCst);
+                Ok(())
+            },
+        );
+        assert!(!persisted.load(Ordering::SeqCst));
+    }
+
+    /// A marker-persist failure is tolerated: migration runs, the error does not
+    /// propagate, and the next startup retries the save.
+    #[test]
+    fn migrate_legacy_models_persist_failure_is_tolerated() {
+        let migrated = Arc::new(AtomicBool::new(false));
+        let migrated_flag = Arc::clone(&migrated);
+        migrate_legacy_models_once(
+            false,
+            || {
+                migrated_flag.store(true, Ordering::SeqCst);
+                true
+            },
+            || anyhow::bail!("simulated save failure"),
+        );
+        assert!(migrated.load(Ordering::SeqCst));
     }
 }
