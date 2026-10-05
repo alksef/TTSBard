@@ -833,7 +833,7 @@
     "ocr.runtime_error_fallback": "An OCR runtime error occurred.",
     "ocr.enable": "Enable OCR",
     "ocr.enable_hint": "When enabled, OCR starts automatically on the next app launch.",
-    "ocr.model_label": "Recognition model",
+    "ocr.model_label": "Model",
     "ocr.no_models_option": "No models found",
     "ocr.select_model_option": "Select a model",
     "ocr.model_in_memory": "{name} (in memory)",

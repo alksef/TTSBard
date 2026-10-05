@@ -833,7 +833,7 @@
     "ocr.runtime_error_fallback": "Произошла ошибка OCR runtime.",
     "ocr.enable": "Включить OCR",
     "ocr.enable_hint": "Если включено, OCR будет запущен автоматически при следующем запуске приложения.",
-    "ocr.model_label": "Модель распознавания",
+    "ocr.model_label": "Модель",
     "ocr.no_models_option": "Модели не найдены",
     "ocr.select_model_option": "Выберите модель",
     "ocr.model_in_memory": "{name} (в памяти)",

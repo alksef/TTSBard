@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
-import { Crosshair, Trash2, Keyboard } from 'lucide-vue-next'
+import { Crosshair, Trash2, Keyboard, Plus, X } from 'lucide-vue-next'
 import { t } from '../i18n'
 
 interface InterceptBindingDto {
@@ -181,10 +181,10 @@ onUnmounted(() => {
       {{ errorMessage }}
     </div>
 
-    <div class="setting-section">
+    <div class="setting-section ui-section">
       <!-- Toggle -->
       <div class="toggle-row">
-        <div class="toggle-label">
+        <div class="toggle-label ui-section-title">
           <Crosshair :size="18" />
           <span>{{ t('intercept.title') }}</span>
         </div>
@@ -198,26 +198,26 @@ onUnmounted(() => {
         </label>
       </div>
 
-      <p class="hint-text">
+      <p class="hint-text ui-description">
         {{ t('intercept.hint') }}
       </p>
 
       <!-- Bindings list -->
       <div class="bindings-section">
         <div class="bindings-header">
-          <span class="section-title">{{ t('intercept.bindings') }}</span>
+          <span class="section-title ui-group-title">{{ t('intercept.bindings') }}</span>
           <button
             v-if="!recordingKey && !recordingKeyFor"
             @click="startRecordingKey"
-            class="record-btn"
+            class="record-btn ui-button"
           >
-            <Keyboard :size="14" />
+            <Keyboard :size="18" />
             {{ t('intercept.record') }}
           </button>
           <button
             v-if="recordingKey"
             @click="cancelRecordingKey"
-            class="record-btn recording"
+            class="record-btn recording ui-button"
           >
             {{ t('intercept.recording_prompt') }}
           </button>
@@ -227,26 +227,31 @@ onUnmounted(() => {
         <div v-if="recordingKeyFor" class="new-binding-row">
           <span class="key-badge">{{ recordingKeyFor }}</span>
           <span class="arrow">→</span>
-          <select v-model="newBindingAction" class="action-select">
+          <select v-model="newBindingAction" class="ui-select action-select">
             <option v-for="a in ACTIONS" :key="a.value" :value="a.value">
               {{ a.label }}
             </option>
           </select>
-          <button @click="saveBinding" class="save-btn">{{ t('common.save') }}</button>
-          <button @click="(recordingKeyFor = null, newBindingAction = 'show_main_window')" class="cancel-btn">{{ t('common.cancel') }}</button>
+          <button @click="saveBinding" class="ui-icon-button" :title="t('common.add')" :aria-label="t('common.add')">
+            <Plus :size="18" />
+          </button>
+          <button @click="(recordingKeyFor = null, newBindingAction = 'show_main_window')" class="ui-icon-button" :title="t('common.cancel')" :aria-label="t('common.cancel')">
+            <X :size="18" />
+          </button>
         </div>
 
-        <div v-if="settings && settings.bindings.length === 0 && !recordingKeyFor" class="empty-hint">
+        <div v-if="settings && settings.bindings.length === 0 && !recordingKeyFor" class="empty-hint ui-hint">
           {{ t('intercept.empty_hint') }}
         </div>
 
+        <div v-if="settings?.bindings.length" class="ui-menu ui-menu--embedded">
         <div v-for="binding in settings?.bindings ?? []" :key="binding.key" class="binding-row">
           <span class="key-badge">{{ binding.key }}</span>
           <span class="arrow">→</span>
           <select
             :value="binding.action"
             @change="updateBindingAction(binding, ($event.target as HTMLSelectElement).value)"
-            class="action-select"
+            class="ui-select action-select"
           >
             <option v-for="a in ACTIONS" :key="a.value" :value="a.value">
               {{ a.label }}
@@ -254,11 +259,13 @@ onUnmounted(() => {
           </select>
           <button
             @click="removeBinding(binding.key)"
-            class="remove-btn"
+            class="remove-btn ui-icon-button ui-icon-button--adjacent ui-action--danger"
             :title="t('intercept.clear_binding')"
+            :aria-label="t('intercept.clear_binding')"
           >
-            <Trash2 :size="14" />
+            <Trash2 :size="18" />
           </button>
+        </div>
         </div>
       </div>
     </div>
@@ -278,8 +285,8 @@ onUnmounted(() => {
   transform: translateX(-50%);
   padding: 0.4rem 0.75rem;
   border-radius: 8px;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   z-index: 1000;
   box-shadow: var(--dialog-shadow);
   backdrop-filter: blur(10px);
@@ -308,7 +315,6 @@ onUnmounted(() => {
   background: var(--color-bg-field);
   border: 1px solid var(--color-border);
   border-radius: 12px;
-  padding: 16px 20px;
   backdrop-filter: blur(8px);
 }
 
@@ -323,8 +329,6 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  font-size: 1.05rem;
-  font-weight: 600;
   color: var(--color-text-primary);
 }
 
@@ -374,10 +378,7 @@ onUnmounted(() => {
 }
 
 .hint-text {
-  font-size: 0.85rem;
-  color: var(--color-text-muted);
-  margin: 0 0 16px 0;
-  line-height: 1.4;
+  margin: 0 0 var(--ui-row-gap);
 }
 
 .bindings-section {
@@ -392,27 +393,11 @@ onUnmounted(() => {
 }
 
 .section-title {
-  font-size: 1rem;
-  font-weight: 600;
   color: var(--color-text-primary);
 }
 
 .record-btn {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.35rem 0.7rem;
-  background: var(--btn-accent-bg);
-  border: 1px solid var(--color-accent);
-  border-radius: 4px;
-  color: var(--color-text-primary);
-  cursor: pointer;
-  transition: all 0.2s ease;
-  font-size: 0.85rem;
-}
-
-.record-btn:hover {
-  background: var(--btn-accent-bg-hover);
+  gap: var(--ui-field-group-gap);
 }
 
 .record-btn.recording {
@@ -426,50 +411,30 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   margin-bottom: 12px;
-  padding: 8px 12px;
-  background: var(--color-bg-elevated);
+  padding: var(--ui-menu-item-padding-y) calc(var(--ui-menu-item-padding-x) + var(--ui-menu-padding));
+  background: var(--color-bg-field);
   border: 1px solid var(--color-accent);
   border-radius: 8px;
 }
 
-.save-btn {
-  padding: 0.3rem 0.7rem;
-  background: var(--color-accent);
-  color: var(--color-text-white);
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.85rem;
-}
-
-.cancel-btn {
-  padding: 0.3rem 0.5rem;
-  background: transparent;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  font-size: 0.85rem;
-}
-
 .empty-hint {
-  font-size: 0.85rem;
-  color: var(--color-text-muted);
   padding: 12px 0;
 }
 
 .binding-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
-  padding: 8px 12px;
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
+  gap: var(--ui-field-group-gap);
+  padding: var(--ui-menu-item-padding-y) var(--ui-menu-item-padding-x);
 }
 
 .key-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--ui-control-min-height);
+  box-sizing: border-box;
+  flex-shrink: 0;
   padding: 0.25rem 0.6rem;
   background: var(--color-bg-field);
   border: 1px solid var(--color-border);
@@ -488,42 +453,7 @@ onUnmounted(() => {
 
 .action-select {
   flex: 1;
-  padding: 0.3rem 0.5rem;
-  background: var(--color-bg-field);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  color: var(--color-text-primary);
-  font-size: 0.85rem;
-  cursor: pointer;
-}
-
-.action-select:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-glow);
-}
-
-.action-select option {
-  background: var(--select-bg);
-  color: var(--color-text-primary);
-}
-
-.remove-btn {
-  padding: 0.3rem 0.4rem;
-  background: transparent;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  transition: all 0.2s;
-}
-
-.remove-btn:hover {
-  background: var(--danger-bg-weak);
-  border-color: var(--danger-border);
-  color: var(--danger-text-bright);
+  min-width: 0;
 }
 
 @keyframes pulse {

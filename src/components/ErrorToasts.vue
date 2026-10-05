@@ -106,7 +106,8 @@ function getErrorClass(level: ErrorLevel): string {
 
 .toast-message {
   flex: 1;
-  font-size: 14px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   line-height: 1.4;
   word-break: break-word;
 }
@@ -128,6 +129,11 @@ function getErrorClass(level: ErrorLevel): string {
 
 .toast-close:hover {
   opacity: 1;
+}
+
+.toast-close:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
 }
 
 /* Animations */

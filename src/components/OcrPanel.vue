@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { AlertTriangle, Info, ListRestart } from 'lucide-vue-next'
+import { AlertTriangle, Info, RefreshCw } from 'lucide-vue-next'
 import { useOcr } from '../composables/useOcr'
 import { t } from '../i18n'
 
@@ -64,9 +64,9 @@ function onModelChange(event: Event) {
       {{ message }}
     </div>
 
-    <section class="settings-section">
+    <section class="settings-section ui-section">
       <div class="section-header server-header">
-        <h2>OCR</h2>
+        <h2 class="ui-section-title">OCR</h2>
         <span class="status-indicator" :class="statusClass">
           {{ status.state === 'ready' ? t('ocr.status.loaded') : statusLabel }}
         </span>
@@ -79,8 +79,8 @@ function onModelChange(event: Event) {
         </span>
       </div>
 
-      <div class="setting-row enable-row">
-        <label class="checkbox-label">
+      <div class="ocr-row enable-row">
+        <label class="ui-choice-label checkbox-label">
           <input
             type="checkbox"
             v-model="settings.enabled"
@@ -89,17 +89,17 @@ function onModelChange(event: Event) {
           />
           <span>{{ t('ocr.enable') }}</span>
         </label>
-        <p class="setting-hint">
+        <p class="setting-hint ui-hint">
           {{ t('ocr.enable_hint') }}
         </p>
       </div>
 
       <div class="model-field">
-        <label for="ocr-model" class="model-label">{{ t('ocr.model_label') }}</label>
+        <label for="ocr-model" class="model-label ui-label">{{ t('ocr.model_label') }}</label>
         <div class="model-row">
           <select
             id="ocr-model"
-            class="model-select"
+            class="ui-select model-select"
             :value="noPacks && !runtimeHoldsModel ? '' : (savedModelId ?? '')"
             :disabled="controlsDisabled || noPacks"
             @change="onModelChange"
@@ -121,13 +121,13 @@ function onModelChange(event: Event) {
             </option>
           </select>
           <button
-            class="refresh-button"
+            class="ui-icon-button ui-icon-button--adjacent refresh-button"
             :disabled="rescanPending || controlsDisabled"
             @click="rescanPacks"
             :title="t('ocr.refresh_models')"
             :aria-label="t('ocr.refresh_models')"
           >
-            <ListRestart :size="14" :class="{ 'button-spinner': rescanPending }" />
+            <RefreshCw :size="18" :class="{ 'button-spinner': rescanPending }" />
           </button>
         </div>
         <p v-if="noPacks" class="path-hint" role="status" aria-live="polite">
@@ -162,9 +162,6 @@ function onModelChange(event: Event) {
 h2 {
   margin-top: 0;
   margin-bottom: 1rem;
-  font-size: 1.1rem;
-  color: var(--color-text-primary);
-  font-weight: 600;
 }
 
 .message-box {
@@ -174,8 +171,8 @@ h2 {
   transform: translateX(-50%);
   padding: 0.4rem 0.75rem;
   border-radius: 8px;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   z-index: 1000;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   backdrop-filter: blur(10px);
@@ -211,13 +208,10 @@ h2 {
 }
 
 .settings-section {
-  margin-bottom: 1.5rem;
-  padding: 12px 16px;
   background: var(--color-bg-field);
   border: 1px solid var(--color-border);
   border-radius: 12px;
   backdrop-filter: blur(8px);
-  font-size: 0.95rem;
 }
 
 .section-header {
@@ -244,8 +238,8 @@ h2 {
 .status-indicator {
   display: inline-flex;
   align-items: center;
-  font-size: 14px;
-  font-weight: 500;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   color: var(--color-text-secondary);
   padding: 0.15rem 0.5rem;
   background: var(--color-bg-field);
@@ -273,11 +267,11 @@ h2 {
   border-color: var(--danger-border);
 }
 
-.setting-row {
+.ocr-row {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  margin-bottom: 1rem;
+  margin-bottom: var(--ui-row-gap);
   flex-wrap: wrap;
 }
 
@@ -286,30 +280,12 @@ h2 {
 }
 
 .checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  cursor: pointer;
   min-width: auto !important;
-}
-
-.checkbox-label input[type='checkbox'] {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-}
-
-.checkbox-label input[type='checkbox']:disabled {
-  cursor: not-allowed;
 }
 
 .setting-hint {
   display: block;
-  margin-top: 0.4rem;
   margin-left: 2.4rem;
-  font-size: 0.85rem;
-  color: var(--color-text-muted);
-  line-height: 1.4;
 }
 
 .model-field {
@@ -324,9 +300,7 @@ h2 {
 .model-label {
   flex: 0 1 auto;
   min-width: 0;
-  font-weight: 500;
   color: var(--color-text-secondary);
-  font-size: 14px;
 }
 
 .model-row {
@@ -340,70 +314,10 @@ h2 {
 .model-select {
   flex: 1 1 auto;
   min-width: 0;
-  width: auto;
-  height: 36px;
-  box-sizing: border-box;
-  padding: 0 0.6rem;
-  background: var(--color-bg-field-hover);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 6px;
-  font-size: 14px;
-  color: var(--color-text-primary);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.model-select:hover {
-  background: var(--btn-neutral-bg);
-  border-color: var(--color-border-strong);
-}
-
-.model-select:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-glow);
-}
-
-.model-select:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.model-select option {
-  background: var(--select-bg);
-  color: var(--color-text-primary);
-  padding: 0.3rem 0.5rem;
-}
-
-.model-select option:hover {
-  background: var(--select-bg-hover);
 }
 
 .refresh-button {
   flex: 0 0 auto;
-  width: 38px;
-  height: 36px;
-  padding: 0;
-  background: var(--color-bg-field-hover);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 6px;
-  color: var(--color-text-primary);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-  box-sizing: border-box;
-}
-
-.refresh-button:hover:not(:disabled) {
-  background: var(--btn-neutral-hover);
-  border-color: var(--color-border-strong);
-}
-
-.refresh-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }
 
 .callout {
@@ -480,8 +394,9 @@ h2 {
   background: var(--info-bg-weak);
   border: 1px solid var(--info-border);
   border-left: 4px solid var(--color-accent);
-  border-radius: 10px;
-  font-size: 0.85rem;
+  border-radius: 8px;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   color: var(--info-text-bright);
   line-height: 1.5;
 }

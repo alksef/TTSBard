@@ -1206,7 +1206,7 @@ defineExpose({ focusEditor })
   z-index: 1;
   max-width: 1120px;
   margin: 0;
-  padding: 0.2rem 0 2rem;
+  padding: 0 0 2rem;
   transition: all 0.3s ease;
 }
 
@@ -1475,11 +1475,11 @@ defineExpose({ focusEditor })
 
 .ai-editor-hint {
   margin-top: 0.5rem;
-  font-size: 0.8rem;
+  font-size: var(--ui-text-size-hint);
   color: var(--color-accent);
   opacity: 0.8;
   text-align: center;
-  font-weight: 600;
+  font-weight: var(--ui-text-weight-hint);
 }
 
 @keyframes pulse {

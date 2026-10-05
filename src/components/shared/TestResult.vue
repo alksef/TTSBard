@@ -37,8 +37,9 @@ defineProps<Props>();
   gap: 8px;
   padding: 8px 12px;
   border-radius: 8px;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
+  line-height: 1.4;
 }
 
 .test-result.success {
@@ -50,7 +51,7 @@ defineProps<Props>();
 .test-result.error {
   background: var(--danger-bg-weak);
   border: 1px solid var(--danger-border-strong);
-  color: var(--danger-text-weak);
+  color: var(--danger-text-bright);
 }
 
 .test-result span {

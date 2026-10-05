@@ -360,7 +360,9 @@ function toggleCollapse() {
 }
 
 .version-info {
-  font-size: 0.76rem;
+  /* Agreed metadata role: 0.85rem/400; mono kept as this surface's family. */
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
   color: var(--color-text-muted);
   font-family: var(--font-mono);
   padding: 0 1rem;

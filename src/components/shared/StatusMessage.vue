@@ -76,7 +76,7 @@ const icon = computed(() => {
     <div v-if="message" class="status-message" :class="type">
       <component :is="icon" :size="16" />
       <span>{{ message }}</span>
-      <button v-if="dismissible" class="status-close" @click="dismiss" :title="t('common.close')">
+      <button v-if="dismissible" class="status-close" @click="dismiss" :title="t('common.close')" :aria-label="t('common.close')">
         <X :size="14" />
       </button>
     </div>
@@ -95,12 +95,13 @@ const icon = computed(() => {
   padding: 0.4rem 0.75rem;
   padding-right: 2rem;
   border-radius: 8px;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: var(--ui-text-size-hint);
+  font-weight: var(--ui-text-weight-hint);
+  line-height: 1.4;
   z-index: 1000;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   backdrop-filter: blur(10px);
-  white-space: nowrap;
+  max-width: min(480px, calc(100vw - 40px));
 }
 
 .status-message.success {
@@ -142,6 +143,11 @@ const icon = computed(() => {
 
 .status-close:hover {
   opacity: 1;
+}
+
+.status-close:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
 }
 
 /* Fade-slide transition */
