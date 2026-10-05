@@ -26,7 +26,14 @@ task в `.work/ai/<work-id>/`, а не tracked prompt в `docs/`.
 
 ## Источники правил
 
+При изменениях UI сверяться с картой UI и правилами проверки ниже. При добавлении
+или переносе экранов обновлять карту. Соблюдать статус ориентиров: предложения
+не считать утверждённым общим стандартом. Проверять релевантные состояния и
+сценарии; путь к временному отчёту передавать в конкретном task-файле.
+
 - [Карта документации](docs/README.md)
+- [Карта UI](docs/development/ui-map.md)
+- [Проверка и согласование UI](docs/development/ui-guidelines.md)
 - [AI-assisted workflow](docs/development/ai-workflow.md)
 - [Сборка и проверки](docs/development/README.md)
 - [Архитектура](docs/development/architecture.md)

@@ -45,7 +45,11 @@ related_tasks: []
 
 ## Активные направления
 
-Нет активных направлений в этом релизном срезе.
+- [ROADMAP-125 — Перехват клавиш и снятие ограничения](./active/125-intercept-key-restriction.md) — `in_progress`, реализовано; ожидает ручной проверки пользователя.
+
+- [ROADMAP-124 — Согласованное управление жизненным циклом интеграций](./active/124-integration-lifecycle-consistency.md) — `in_progress`.
+
+- [ROADMAP-121 — Согласованность оформления UI](./active/121-ui-visual-consistency.md) — `in_progress`.
 
 ## Завершённые направления
 

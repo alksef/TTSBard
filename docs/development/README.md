@@ -157,6 +157,10 @@ Copy-Item scripts/build.local.example.psd1 scripts/build.local.psd1
 
 ## Документы
 
+- [Карта UI](./ui-map.md) — экраны, вложенные поверхности и владельцы оформления.
+- [Проверка и согласование UI](./ui-guidelines.md) — критерии UI-проверки,
+  артефакты прогона и статус визуальных ориентиров.
+
 - [AI-assisted development workflow](./ai-workflow.md) — постановка локальных
   задач DeepSeek, запуск OpenCode и независимая проверка результата.
 - [AI-workflow для Qwen3-Coder (локальный)](./ai-workflow-qwen.md) — отличия
