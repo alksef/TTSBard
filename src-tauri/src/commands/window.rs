@@ -702,6 +702,21 @@ pub fn get_main_compact_dims(windows_manager: State<'_, WindowsManager>) -> (u32
     windows_manager.get_main_compact_dims()
 }
 
+/// Set whether the extra floating-window buttons are hidden in the title bar
+#[tauri::command]
+pub async fn set_hide_extra_window_buttons(
+    value: bool,
+    app_handle: AppHandle,
+    windows_manager: State<'_, WindowsManager>,
+) -> Result<(), String> {
+    super::persist_blocking(windows_manager.inner(), move |mgr| {
+        mgr.set_hide_extra_window_buttons(value)
+    })
+    .await?;
+    super::emit_settings_changed(&app_handle);
+    Ok(())
+}
+
 // ========== Main Window Appearance ==========
 
 /// Resolve the effective main window appearance as `(opacity, bg_color)`.

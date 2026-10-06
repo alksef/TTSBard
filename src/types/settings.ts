@@ -334,6 +334,7 @@ export interface MainWindowSettingsDto {
   opacity_compact_only: boolean
   compact_width: number
   compact_height: number
+  hide_extra_window_buttons: boolean
 }
 
 export interface SoundPanelWindowSettingsDto {

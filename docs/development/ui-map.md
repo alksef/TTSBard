@@ -31,7 +31,7 @@
 
 | ID вкладки | Компонент | Связанные поверхности |
 |---|---|---|
-| `general` | `src/components/settings/SettingsGeneral.vue` | `DataTransferModal.vue` в том же каталоге |
+| `general` | `src/components/settings/SettingsGeneral.vue` | Язык, поведение окон, кнопки дополнительных окон (скрытие в заголовке), папки, диагностика; `DataTransferModal.vue` в том же каталоге |
 | `interface` | `src/components/settings/SettingsInterface.vue` | Тема и внешний вид окон |
 | `editor` | `src/components/settings/SettingsEditor.vue` | `EditorFontSettings.vue` в том же каталоге |
 | `network` | `src/components/settings/SettingsNetwork.vue` | Сетевые формы |

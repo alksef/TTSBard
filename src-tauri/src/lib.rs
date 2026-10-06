@@ -82,7 +82,8 @@ use commands::{
     set_editor_homograph_accentor_load_on_start, set_editor_hotkey, set_editor_keep_text,
     set_editor_quick, set_editor_spellcheck_enabled, set_editor_spellcheck_source,
     set_editor_typing_enabled, set_editor_typing_idle_timeout_ms, set_global_exclude_from_capture,
-    set_hide_on_minimize, set_hotkey, set_hotkey_enabled, set_hotkey_recording, set_local_tts_url,
+    set_hide_extra_window_buttons, set_hide_on_minimize, set_hotkey, set_hotkey_enabled,
+    set_hotkey_recording, set_local_tts_url,
     set_main_bg_color, set_main_compact_dims, set_main_custom_background, set_main_custom_opacity,
     set_main_opacity, set_main_opacity_compact_only, set_openai_api_key, set_openai_voice,
     set_playback_appearance_source, set_show_playback_on_start, set_soundpanel_appearance_source,
@@ -759,6 +760,7 @@ pub fn run() {
             get_show_playback_on_start,
             set_start_compact,
             set_hide_on_minimize,
+            set_hide_extra_window_buttons,
             // Window appearance commands
             get_main_appearance,
             set_main_custom_background,

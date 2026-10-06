@@ -52,7 +52,7 @@ function mockSettings(): AppSettingsDto {
     twitch: { enabled: false, username: '', token: '', channel: '', start_on_boot: false, send_original_text: true },
     windows: {
       global: { exclude_from_capture: false },
-      main: { x: null, y: null, custom_background: false, opacity: 100, bg_color: '', custom_opacity: false, opacity_compact_only: false, compact_width: 400, compact_height: 300 },
+      main: { x: null, y: null, custom_background: false, opacity: 100, bg_color: '', custom_opacity: false, opacity_compact_only: false, compact_width: 400, compact_height: 300, hide_extra_window_buttons: false },
       soundpanel: { x: null, y: null, opacity: 100, bg_color: '', clickthrough: false, stay_visible: false, hide_on_blur: false, appearance_source: '' },
       playback: { x: null, y: null, opacity: 100, bg_color: '', appearance_source: '' },
     },

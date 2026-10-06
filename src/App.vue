@@ -145,6 +145,10 @@ const playbackTitle = computed(() => {
   return hk ? `${playbackAction.value} (${hk})` : playbackAction.value
 })
 
+const hideExtraWindowButtons = computed(
+  () => appSettings.settings.value?.windows?.main?.hide_extra_window_buttons ?? false
+)
+
 async function toggleSoundPanel() {
   if (soundpanelPending.value) return
   soundpanelPending.value = true
@@ -527,6 +531,7 @@ onUnmounted(() => {
       <div class="titlebar-controls">
         <IntegrationStatusCluster class="integration-gap" />
         <button
+          v-if="!hideExtraWindowButtons"
           class="titlebar-btn floating-window"
           :class="{ active: soundpanelVisible }"
           @click="toggleSoundPanel"
@@ -537,6 +542,7 @@ onUnmounted(() => {
           <Music :size="14" />
         </button>
         <button
+          v-if="!hideExtraWindowButtons"
           class="titlebar-btn floating-window"
           :class="{ active: playbackVisible }"
           @click="togglePlaybackControl"

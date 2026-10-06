@@ -1772,6 +1772,7 @@ mod tests {
                 opacity_compact_only: false,
                 compact_width: 400,
                 compact_height: 500,
+                hide_extra_window_buttons: true,
             },
             soundpanel: SoundPanelWindowSettingsDto {
                 x: None,
@@ -2181,6 +2182,7 @@ mod tests {
                 opacity_compact_only: false,
                 compact_width: 400,
                 compact_height: 500,
+                hide_extra_window_buttons: false,
             },
             soundpanel: SoundPanelWindowSettingsDto {
                 x: None,

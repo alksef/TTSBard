@@ -16,6 +16,8 @@ const showPlaybackOnStart = ref(false);
 const startCompact = ref(false);
 const hideOnMinimize = ref(false);
 const hideOnMinimizeSaving = ref(false);
+const hideExtraWindowButtons = ref(false);
+const hideExtraWindowButtonsSaving = ref(false);
 const folderOpening = ref(false);
 const languageSaving = ref(false);
 const languageError = ref<string | null>(null);
@@ -235,6 +237,22 @@ async function toggleHideOnMinimize() {
   }
 }
 
+async function toggleHideExtraWindowButtons() {
+  if (hideExtraWindowButtonsSaving.value) return;
+  const previousValue = hideExtraWindowButtons.value;
+  const newValue = !previousValue;
+  hideExtraWindowButtons.value = newValue;
+  hideExtraWindowButtonsSaving.value = true;
+  try {
+    await invoke('set_hide_extra_window_buttons', { value: newValue });
+  } catch (e) {
+    hideExtraWindowButtons.value = previousValue;
+    showMessage(presentCommandError(e, t('general.error.save')), 'error');
+  } finally {
+    hideExtraWindowButtonsSaving.value = false;
+  }
+}
+
 // Watch for settings changes from composables
 watch(generalSettings, (newSettings) => {
   if (!newSettings) return;
@@ -245,6 +263,8 @@ watch(generalSettings, (newSettings) => {
 
 watch(windowsSettings, (newSettings) => {
   if (!newSettings) return;
+  if (hideExtraWindowButtonsSaving.value) return;
+  hideExtraWindowButtons.value = newSettings.main?.hide_extra_window_buttons ?? false;
 }, { immediate: true });
 
 watch(loggingSettings, (newSettings) => {
@@ -337,39 +357,23 @@ watch(loggingSettings, (newSettings) => {
       </div>
     </section>
 
-    <!-- Diagnostics -->
+    <!-- Additional window buttons -->
     <section class="settings-group ui-section">
-      <h3 class="settings-group-title ui-group-title">{{ t('general.groups.diagnostics') }}</h3>
+      <h3 class="settings-group-title ui-group-title">{{ t('general.groups.window_buttons') }}</h3>
 
-      <div class="general-row logging-controls-row">
+      <div class="general-row">
         <label class="ui-choice-label setting-label">
           <input
-            :checked="loggingEnabled"
-            @change="(e) => setLoggingEnabled((e.target as HTMLInputElement).checked)"
+            :checked="hideExtraWindowButtons"
+            :disabled="hideExtraWindowButtonsSaving || !windowsSettings"
+            @change="toggleHideExtraWindowButtons"
             type="checkbox"
             class="ui-choice-input"
           />
-          <span>{{ t('general.logging.enabled') }}</span>
+          <span>{{ t('general.hide_extra_window_buttons.label') }}</span>
         </label>
-
-        <div v-if="loggingEnabled" class="logging-level-control">
-          <label class="ui-label ui-label--secondary">{{ t('general.logging.level.label') }}</label>
-          <select
-            :value="loggingLevel"
-            @change="onLoggingLevelChange"
-            class="ui-select level-select"
-          >
-            <option v-for="level in loggingLevels" :key="level.value" :value="level.value">
-              {{ level.label }}
-            </option>
-          </select>
-        </div>
+        <span class="setting-hint ui-hint ui-hint--choice">{{ t('general.hide_extra_window_buttons.hint') }}</span>
       </div>
-
-      <span class="setting-warning logging-warning">
-        <AlertTriangle :size="14" />
-        {{ t('general.restart_required') }}
-      </span>
     </section>
 
     <!-- Folders -->
@@ -432,6 +436,41 @@ watch(loggingSettings, (newSettings) => {
           </button>
         </div>
       </div>
+    </section>
+
+    <!-- Diagnostics -->
+    <section class="settings-group ui-section">
+      <h3 class="settings-group-title ui-group-title">{{ t('general.groups.diagnostics') }}</h3>
+
+      <div class="general-row logging-controls-row">
+        <label class="ui-choice-label setting-label">
+          <input
+            :checked="loggingEnabled"
+            @change="(e) => setLoggingEnabled((e.target as HTMLInputElement).checked)"
+            type="checkbox"
+            class="ui-choice-input"
+          />
+          <span>{{ t('general.logging.enabled') }}</span>
+        </label>
+
+        <div v-if="loggingEnabled" class="logging-level-control">
+          <label class="ui-label ui-label--secondary">{{ t('general.logging.level.label') }}</label>
+          <select
+            :value="loggingLevel"
+            @change="onLoggingLevelChange"
+            class="ui-select level-select"
+          >
+            <option v-for="level in loggingLevels" :key="level.value" :value="level.value">
+              {{ level.label }}
+            </option>
+          </select>
+        </div>
+      </div>
+
+      <span class="setting-warning logging-warning">
+        <AlertTriangle :size="14" />
+        {{ t('general.restart_required') }}
+      </span>
     </section>
 
     <DataTransferModal

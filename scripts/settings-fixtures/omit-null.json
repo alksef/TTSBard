@@ -110,7 +110,8 @@
       "custom_opacity": false,
       "opacity_compact_only": false,
       "compact_width": 400,
-      "compact_height": 500
+      "compact_height": 500,
+      "hide_extra_window_buttons": false
     },
     "soundpanel": {
       "x": null,

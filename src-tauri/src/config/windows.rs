@@ -33,6 +33,8 @@ pub struct MainWindowSettings {
     pub compact_width: u32,
     #[serde(default = "default_compact_height")]
     pub compact_height: u32,
+    #[serde(default)]
+    pub hide_extra_window_buttons: bool,
 }
 
 /// Sound panel window settings
@@ -136,6 +138,7 @@ impl Default for MainWindowSettings {
             opacity_compact_only: false,
             compact_width: 450,
             compact_height: 400,
+            hide_extra_window_buttons: false,
         }
     }
 }
@@ -486,6 +489,13 @@ impl WindowsManager {
     pub fn get_main_compact_dims(&self) -> (u32, u32) {
         let s = self.cache.read();
         (s.main.compact_width, s.main.compact_height)
+    }
+
+    /// Set whether the extra floating-window buttons are hidden in the title bar
+    pub fn set_hide_extra_window_buttons(&self, value: bool) -> Result<()> {
+        self.update(|s| {
+            s.main.hide_extra_window_buttons = value;
+        })
     }
 
     // ========== Sound Panel Window ==========
@@ -942,6 +952,88 @@ mod tests {
             })
             .count();
         assert_eq!(backup_count, 1);
+
+        let _ = std::fs::remove_dir_all(&config_dir);
+    }
+
+    /// Legacy windows.json without `hide_extra_window_buttons` deserializes with
+    /// the field defaulting to `false` while unrelated settings stay intact.
+    #[test]
+    fn legacy_windows_json_missing_hide_extra_window_buttons_defaults_false() {
+        let legacy = serde_json::json!({
+            "main": {
+                "x": 10,
+                "y": 20,
+                "custom_background": true,
+                "opacity": 80,
+                "bg_color": "#123456",
+                "custom_opacity": true,
+                "opacity_compact_only": false,
+                "compact_width": 640,
+                "compact_height": 520
+            }
+        });
+
+        let settings: WindowsSettings = serde_json::from_value(legacy).unwrap();
+
+        assert!(!settings.main.hide_extra_window_buttons);
+        assert_eq!(settings.main.x, Some(10));
+        assert_eq!(settings.main.opacity, 80);
+        assert_eq!(settings.main.compact_width, 640);
+        assert_eq!(settings.main.compact_height, 520);
+    }
+
+    /// `set_hide_extra_window_buttons` persists true and false round-trips
+    /// without disturbing unrelated main-window settings.
+    #[test]
+    fn hide_extra_window_buttons_round_trips_true_and_false() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let config_dir = std::env::temp_dir().join(format!(
+            "ttsbard-windows-buttons-test-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let mut settings = WindowsSettings::default();
+        settings.main.custom_background = true;
+        settings.main.compact_width = 640;
+        settings.main.compact_height = 520;
+        let windows_path = config_dir.join("windows.json");
+        std::fs::write(
+            &windows_path,
+            serde_json::to_string_pretty(&settings).unwrap(),
+        )
+        .unwrap();
+
+        let manager = WindowsManager {
+            config_dir: config_dir.clone(),
+            cache: Arc::new(RwLock::new(settings)),
+        };
+
+        manager.set_hide_extra_window_buttons(true).unwrap();
+        assert!(manager.load().unwrap().main.hide_extra_window_buttons);
+
+        let content = std::fs::read_to_string(&windows_path).unwrap();
+        let persisted: WindowsSettings = serde_json::from_str(&content).unwrap();
+        assert!(persisted.main.hide_extra_window_buttons);
+        // Unrelated settings survive the update.
+        assert!(persisted.main.custom_background);
+        assert_eq!(persisted.main.compact_width, 640);
+        assert_eq!(persisted.main.compact_height, 520);
+
+        manager.set_hide_extra_window_buttons(false).unwrap();
+        assert!(!manager.load().unwrap().main.hide_extra_window_buttons);
+
+        let content = std::fs::read_to_string(&windows_path).unwrap();
+        let persisted: WindowsSettings = serde_json::from_str(&content).unwrap();
+        assert!(!persisted.main.hide_extra_window_buttons);
+        assert!(persisted.main.custom_background);
+        assert_eq!(persisted.main.compact_width, 640);
+        assert_eq!(persisted.main.compact_height, 520);
 
         let _ = std::fs::remove_dir_all(&config_dir);
     }
