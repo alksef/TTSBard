@@ -8,6 +8,7 @@ import {
   inputServerTone,
   inputServerStatusLabel,
   integrationStatusLabel,
+  isIntegrationVisible,
   type WebViewRuntime,
   type TwitchRuntime,
   type VtsRuntime,
@@ -97,7 +98,7 @@ const slots = computed<StatusSlot[]>(() => {
       icon: Tv,
       tone: vtsToneValue,
       label: integrationStatusLabel('vts', vtsToneValue, vtsRuntime.value),
-      connecting: vtsRuntime.value.state === 'Connecting',
+      connecting: vtsRuntime.value.state === 'Connecting' || (vtsRuntime.value.state === 'Connected' && !vtsRuntime.value.authenticated),
     },
     {
       service: 'inputServer',
@@ -108,12 +109,16 @@ const slots = computed<StatusSlot[]>(() => {
     },
   ]
 })
+
+const visibleSlots = computed<StatusSlot[]>(() =>
+  slots.value.filter((slot) => isIntegrationVisible(slot.tone, slot.connecting)),
+)
 </script>
 
 <template>
-  <div class="integration-status-cluster">
+  <div v-if="visibleSlots.length > 0" class="integration-status-cluster">
     <span
-      v-for="slot in slots"
+      v-for="slot in visibleSlots"
       :key="slot.service"
       class="integration-status"
       :class="[`tone-${slot.tone}`, { connecting: slot.connecting }]"

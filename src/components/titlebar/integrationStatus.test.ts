@@ -6,6 +6,7 @@ import {
   twitchTone,
   vtsTone,
   webviewTone,
+  isIntegrationVisible,
 } from './integrationStatus'
 import type {
   IntegrationTone,
@@ -245,5 +246,22 @@ describe('integrationStatusLabel', () => {
     expect(
       integrationStatusLabel('vts', 'gray', { state: 'Error', message: 'socket closed' }),
     ).toBe('VTube Studio — выключен')
+  })
+})
+
+describe('isIntegrationVisible', () => {
+  it('is visible when tone is green, red, or yellow', () => {
+    expect(isIntegrationVisible('green')).toBe(true)
+    expect(isIntegrationVisible('red')).toBe(true)
+    expect(isIntegrationVisible('yellow')).toBe(true)
+  })
+
+  it('is hidden when tone is gray and connecting is false or omitted', () => {
+    expect(isIntegrationVisible('gray')).toBe(false)
+    expect(isIntegrationVisible('gray', false)).toBe(false)
+  })
+
+  it('is visible when tone is gray but connecting is true', () => {
+    expect(isIntegrationVisible('gray', true)).toBe(true)
   })
 })

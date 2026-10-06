@@ -70,6 +70,10 @@ export function inputServerTone(runtime: InputServerRuntime): IntegrationTone {
   return 'gray'
 }
 
+export function isIntegrationVisible(tone: IntegrationTone, connecting = false): boolean {
+  return tone !== 'gray' || connecting
+}
+
 const INPUT_SERVER = 'integrations.status.input_server'
 
 function messageText(runtime: unknown): string | undefined {
