@@ -1078,7 +1078,7 @@ mod tests {
                 "de",
                 "Deutsch",
                 &[
-                    ("input_server.error.save", "Fehler beim Speichern: {detail}"),
+                    ("ocr.message.save_error", "Fehler beim Speichern: {detail}"),
                     ("tray.quit", "Beenden"),
                 ],
             ),
@@ -1086,7 +1086,7 @@ mod tests {
         let catalog = LocaleCatalog::load(Some(dir.as_path()), None);
         let de = catalog.snapshot("de");
         assert_eq!(
-            de.get("input_server.error.save"),
+            de.get("ocr.message.save_error"),
             Some("Fehler beim Speichern: {detail}")
         );
         assert_eq!(de.get("tray.quit"), Some("Beenden"));
@@ -1106,7 +1106,7 @@ mod tests {
                 "Deutsch",
                 &[
                     // Missing the `{detail}` parameter used by English.
-                    ("input_server.error.save", "Fehler beim Speichern"),
+                    ("input_server.error.start", "Fehler beim Starten"),
                     // Extra parameter that English does not use.
                     ("ocr.message.save_error", "Fehler: {detail} und {count}"),
                     // Unknown keys are still ignored, never merged.
@@ -1119,8 +1119,8 @@ mod tests {
         let catalog = LocaleCatalog::load(Some(dir.as_path()), None);
         let de = catalog.snapshot("de");
         assert_eq!(
-            de.get("input_server.error.save"),
-            Some("Could not save settings: {detail}")
+            de.get("input_server.error.start"),
+            Some("Could not start the server: {detail}")
         );
         assert_eq!(
             de.get("ocr.message.save_error"),
