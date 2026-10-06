@@ -60,6 +60,9 @@ export function useInputServer() {
   const settings = ref<InputServerSettings>({ ...DEFAULT_SETTINGS })
   let confirmedSettings: InputServerSettings = { ...DEFAULT_SETTINGS }
   let settingsLoadToken = 0
+  // Bumped by every runtime status event and refresh so an in-flight snapshot
+  // never overwrites a newer transition that arrived while it was pending.
+  let statusLoadToken = 0
   const status = ref<InputServerStatus>({ state: 'stopped' })
   const loading = ref(false)
   const message = ref<string | null>(null)
@@ -193,12 +196,13 @@ export function useInputServer() {
   }
 
   async function refreshStatus(): Promise<void> {
+    const token = ++statusLoadToken
     try {
       const next = await invoke<InputServerStatus>('get_input_server_status')
-      if (disposed) return
+      if (disposed || token !== statusLoadToken) return
       status.value = convertInputServerStatusFromRust(next)
     } catch (e) {
-      if (disposed) return
+      if (disposed || token !== statusLoadToken) return
       debugError('[InputServer] Failed to refresh status:', e)
     }
   }
@@ -526,6 +530,7 @@ export function useInputServer() {
     await listenerScope.track(
       listen<unknown>('input-server-status-changed', (event) => {
         const next = convertInputServerStatusFromRust(event.payload)
+        statusLoadToken += 1
         status.value = next
         resolvePendingStart(next)
       }),

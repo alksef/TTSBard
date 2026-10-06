@@ -139,6 +139,9 @@ export function useWebView() {
   // Bumped by every UPnP status event so an in-flight snapshot never overwrites
   // a newer transition that arrived while it was pending.
   let upnpStatusLoadToken = 0
+  // Independent token for the server runtime status: an event or a newer refresh
+  // invalidates any in-flight `get_webview_server_status` snapshot.
+  let serverStatusLoadToken = 0
   const listenerScope = createAsyncCleanupScope()
 
   function settingsSnapshot(): WebViewSettings {
@@ -718,11 +721,18 @@ export function useWebView() {
   }
 
   async function refreshServerStatus(): Promise<void> {
+    const token = ++serverStatusLoadToken
     for (let attempt = 0; attempt < 2; attempt++) {
+      // A newer refresh, a status event or unmount during the backoff makes this
+      // attempt stale: never issue the invoke, not even the retry.
+      if (listenerScope.disposed || token !== serverStatusLoadToken) return
       try {
-        serverStatus.value = await invoke<WebViewServerStatus>('get_webview_server_status')
+        const next = await invoke<WebViewServerStatus>('get_webview_server_status')
+        if (listenerScope.disposed || token !== serverStatusLoadToken) return
+        serverStatus.value = next
         return
       } catch (e) {
+        if (listenerScope.disposed || token !== serverStatusLoadToken) return
         debugError('[WebView] Failed to refresh server status:', e)
         if (attempt === 0) {
           await new Promise(resolve => setTimeout(resolve, 500))
@@ -777,6 +787,7 @@ export function useWebView() {
     }
     await listenerScope.track(
       listen<WebViewServerStatus>('webview-server-status-changed', (event) => {
+        serverStatusLoadToken += 1
         serverStatus.value = event.payload
         if (pendingStart.value) {
           resolvePendingStart(event.payload)
@@ -785,12 +796,20 @@ export function useWebView() {
         }
       }),
     )
+    // Listener first, then snapshot: either ordering observes the latest
+    // transition without a read/listen gap. The initial snapshot opens its own
+    // generation so a refresh started earlier during mount initialization can
+    // not overwrite this newer reading when it resolves late.
+    const serverToken = ++serverStatusLoadToken
     try {
-      // Listener first, then snapshot: either ordering observes the latest
-      // transition without a read/listen gap.
-      serverStatus.value = await invoke<WebViewServerStatus>('get_webview_server_status')
+      const payload = await invoke<WebViewServerStatus>('get_webview_server_status')
+      if (!listenerScope.disposed && serverToken === serverStatusLoadToken) {
+        serverStatus.value = payload
+      }
     } catch (e) {
-      debugError('[WebView] Failed to load runtime status:', e)
+      if (!listenerScope.disposed && serverToken === serverStatusLoadToken) {
+        debugError('[WebView] Failed to load runtime status:', e)
+      }
     }
     await listenerScope.track(
       listen<unknown>('webview-server-error', (event) => {

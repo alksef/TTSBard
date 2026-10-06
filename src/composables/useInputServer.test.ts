@@ -836,3 +836,146 @@ describe('useInputServer start with save', () => {
     expect(message.value).toBe('Порт должен быть от 1024 до 65535')
   })
 })
+
+describe('useInputServer runtime status snapshot protection', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.listenCallbacks.clear()
+    mocks.unlistenFns.clear()
+    capturedOnMountedCb = null
+    capturedOnUnmountedCb = null
+    mocks.mockNormalizeCommandError.mockReturnValue({ message: '' })
+  })
+
+  function emitStatus(state: string, message?: string) {
+    mocks.listenCallbacks.get('input-server-status-changed')?.({ payload: { state, message } })
+  }
+
+  it('keeps a newer running event over a late stopped snapshot', async () => {
+    const { status, refreshStatus } = await setupAndMount()
+
+    let resolveSnapshot!: (value: unknown) => void
+    mocks.mockInvoke.mockImplementationOnce((cmd: string) => {
+      if (cmd === 'get_input_server_status') {
+        return new Promise((resolve) => { resolveSnapshot = resolve })
+      }
+      return undefined
+    })
+
+    const pending = refreshStatus()
+    emitStatus('running')
+    resolveSnapshot({ state: 'stopped' })
+    await pending
+
+    expect(status.value).toEqual({ state: 'running' })
+  })
+
+  it('keeps a newer stopped event over a late running snapshot', async () => {
+    const { status, refreshStatus } = await setupAndMount()
+
+    let resolveSnapshot!: (value: unknown) => void
+    mocks.mockInvoke.mockImplementationOnce((cmd: string) => {
+      if (cmd === 'get_input_server_status') {
+        return new Promise((resolve) => { resolveSnapshot = resolve })
+      }
+      return undefined
+    })
+
+    const pending = refreshStatus()
+    emitStatus('stopped')
+    resolveSnapshot({ state: 'running' })
+    await pending
+
+    expect(status.value).toEqual({ state: 'stopped' })
+  })
+
+  it('keeps a newer error event over a late running snapshot', async () => {
+    const { status, refreshStatus } = await setupAndMount()
+
+    let resolveSnapshot!: (value: unknown) => void
+    mocks.mockInvoke.mockImplementationOnce((cmd: string) => {
+      if (cmd === 'get_input_server_status') {
+        return new Promise((resolve) => { resolveSnapshot = resolve })
+      }
+      return undefined
+    })
+
+    const pending = refreshStatus()
+    emitStatus('error', 'port busy')
+    resolveSnapshot({ state: 'running' })
+    await pending
+
+    expect(status.value).toEqual({ state: 'error', message: 'port busy' })
+  })
+
+  it('applies only the newest of two overlapping status snapshots', async () => {
+    const { status, refreshStatus } = await setupAndMount()
+
+    let resolveFirst!: (value: unknown) => void
+    let resolveSecond!: (value: unknown) => void
+    mocks.mockInvoke
+      .mockImplementationOnce((cmd: string) => {
+        if (cmd === 'get_input_server_status') {
+          return new Promise((resolve) => { resolveFirst = resolve })
+        }
+        return undefined
+      })
+      .mockImplementationOnce((cmd: string) => {
+        if (cmd === 'get_input_server_status') {
+          return new Promise((resolve) => { resolveSecond = resolve })
+        }
+        return undefined
+      })
+
+    const first = refreshStatus()
+    const second = refreshStatus()
+
+    resolveSecond({ state: 'running' })
+    await second
+    resolveFirst({ state: 'error', message: 'old' })
+    await first
+
+    expect(status.value).toEqual({ state: 'running' })
+  })
+
+  it('does not apply a status snapshot that resolves after unmount', async () => {
+    defaultInvoke()
+    const { status, refreshStatus } = useInputServer()
+
+    let resolveSnapshot!: (value: unknown) => void
+    mocks.mockInvoke.mockImplementationOnce((cmd: string) => {
+      if (cmd === 'get_input_server_status') {
+        return new Promise((resolve) => { resolveSnapshot = resolve })
+      }
+      return undefined
+    })
+
+    const pending = refreshStatus()
+    capturedOnUnmountedCb?.()
+    resolveSnapshot({ state: 'running' })
+    await pending
+
+    expect(status.value).toEqual({ state: 'stopped' })
+  })
+
+  it('keeps an event that arrives before the initial snapshot resolves', async () => {
+    let resolveInitial!: (value: unknown) => void
+    mocks.mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_input_server_settings') return Promise.resolve({ start_on_boot: false, port: 10101 })
+      if (cmd === 'get_input_server_status') return new Promise((resolve) => { resolveInitial = resolve })
+      if (cmd === 'get_input_server_connection_url') return Promise.resolve('http://127.0.0.1:10101/overlay')
+      if (cmd === 'get_input_server_token') return Promise.resolve(null)
+      return undefined
+    })
+
+    const composable = useInputServer()
+    const mount = capturedOnMountedCb!()
+    await vi.waitFor(() => expect(resolveInitial).toBeDefined())
+
+    emitStatus('running')
+    resolveInitial({ state: 'stopped' })
+    await mount
+
+    expect(composable.status.value).toEqual({ state: 'running' })
+  })
+})

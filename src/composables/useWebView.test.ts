@@ -1464,3 +1464,300 @@ describe('useWebView start with save', () => {
     await restart
   })
 })
+
+describe('useWebView runtime status snapshot protection', () => {
+  beforeEach(() => {
+    resetHarness()
+  })
+
+  function baseImpl(status: unknown = { state: 'stopped' }): InvokeImpl {
+    return async (cmd: string) => {
+      if (cmd === 'get_webview_token') return null
+      if (cmd === 'get_local_ip') return '192.168.1.25'
+      if (cmd === 'get_webview_server_status') return status
+      return undefined
+    }
+  }
+
+  // Mount without awaiting so the initial snapshot can be kept in flight.
+  function mountUnawaited(impl: InvokeImpl) {
+    const listeners = new Map<string, (event: { payload: unknown }) => void>()
+    listenMock.mockImplementation((async (event: string, callback: (event: { payload: unknown }) => void) => {
+      listeners.set(event, callback)
+      return vi.fn()
+    }) as never)
+    mockInvoke.mockImplementation(impl)
+    const scope = effectScope()
+    let composable!: ReturnType<typeof useWebView>
+    scope.run(() => {
+      composable = useWebView()
+    })
+    activeScopes.push(scope)
+    const onMounted = capturedOnMountedCbs.shift()
+    const mountPromise = onMounted ? onMounted() : Promise.resolve()
+    return { composable, listeners, mountPromise }
+  }
+
+  it('keeps a running event over a late stopped snapshot', async () => {
+    const { webview, listeners } = await setupAndMountWithEvents(baseImpl({ state: 'stopped' }))
+
+    let resolveSnapshot!: (value: unknown) => void
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_webview_server_status') return new Promise((resolve) => { resolveSnapshot = resolve })
+      if (cmd === 'send_test_message') return Promise.resolve(undefined)
+      return Promise.resolve(undefined)
+    })
+
+    webview.testMessage.value = 'hello'
+    const pending = webview.sendTest()
+    await vi.waitFor(() => expect(resolveSnapshot).toBeDefined())
+
+    listeners.get('webview-server-status-changed')?.({ payload: { state: 'running' } })
+    resolveSnapshot({ state: 'stopped' })
+    await pending
+
+    expect(webview.serverStatus.value).toEqual({ state: 'running' })
+  })
+
+  it('keeps a stopped event over a late running snapshot', async () => {
+    const { webview, listeners } = await setupAndMountWithEvents(baseImpl({ state: 'stopped' }))
+
+    let resolveSnapshot!: (value: unknown) => void
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_webview_server_status') return new Promise((resolve) => { resolveSnapshot = resolve })
+      if (cmd === 'send_test_message') return Promise.resolve(undefined)
+      return Promise.resolve(undefined)
+    })
+
+    webview.testMessage.value = 'hello'
+    const pending = webview.sendTest()
+    await vi.waitFor(() => expect(resolveSnapshot).toBeDefined())
+
+    listeners.get('webview-server-status-changed')?.({ payload: { state: 'stopped' } })
+    resolveSnapshot({ state: 'running' })
+    await pending
+
+    expect(webview.serverStatus.value).toEqual({ state: 'stopped' })
+  })
+
+  it('keeps an error event over a late running snapshot', async () => {
+    const { webview, listeners } = await setupAndMountWithEvents(baseImpl({ state: 'stopped' }))
+
+    let resolveSnapshot!: (value: unknown) => void
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_webview_server_status') return new Promise((resolve) => { resolveSnapshot = resolve })
+      if (cmd === 'send_test_message') return Promise.resolve(undefined)
+      return Promise.resolve(undefined)
+    })
+
+    webview.testMessage.value = 'hello'
+    const pending = webview.sendTest()
+    await vi.waitFor(() => expect(resolveSnapshot).toBeDefined())
+
+    listeners.get('webview-server-status-changed')?.({ payload: { state: 'error', message: 'port busy' } })
+    resolveSnapshot({ state: 'running' })
+    await pending
+
+    expect(webview.serverStatus.value).toEqual({ state: 'error', message: 'port busy' })
+  })
+
+  it('applies only the newest of two overlapping snapshots', async () => {
+    let resolveInitial!: (value: unknown) => void
+    let resolveRefresh!: (value: unknown) => void
+    let statusCalls = 0
+    const impl: InvokeImpl = (cmd: string) => {
+      if (cmd === 'get_webview_token') return Promise.resolve(null)
+      if (cmd === 'get_local_ip') return Promise.resolve('192.168.1.25')
+      if (cmd === 'get_webview_server_status') {
+        statusCalls += 1
+        if (statusCalls === 1) return new Promise((resolve) => { resolveInitial = resolve })
+        return new Promise((resolve) => { resolveRefresh = resolve })
+      }
+      if (cmd === 'send_test_message') return Promise.resolve(undefined)
+      return Promise.resolve(undefined)
+    }
+
+    const { composable, mountPromise } = mountUnawaited(impl)
+    await vi.waitFor(() => expect(resolveInitial).toBeDefined())
+
+    // Новый refresh перекрывает ещё не разрешившийся initial snapshot.
+    composable.testMessage.value = 'hello'
+    const send = composable.sendTest()
+    await vi.waitFor(() => expect(resolveRefresh).toBeDefined())
+
+    resolveRefresh({ state: 'running' })
+    await send
+    resolveInitial({ state: 'stopped' })
+    await mountPromise
+
+    expect(composable.serverStatus.value).toEqual({ state: 'running' })
+  })
+
+  it('keeps a running event that arrives before the initial snapshot resolves', async () => {
+    let resolveInitial!: (value: unknown) => void
+    const impl: InvokeImpl = (cmd: string) => {
+      if (cmd === 'get_webview_token') return Promise.resolve(null)
+      if (cmd === 'get_local_ip') return Promise.resolve('192.168.1.25')
+      if (cmd === 'get_webview_server_status') return new Promise((resolve) => { resolveInitial = resolve })
+      return Promise.resolve(undefined)
+    }
+
+    const { composable, listeners, mountPromise } = mountUnawaited(impl)
+    await vi.waitFor(() => expect(resolveInitial).toBeDefined())
+
+    listeners.get('webview-server-status-changed')?.({ payload: { state: 'running' } })
+    resolveInitial({ state: 'stopped' })
+    await mountPromise
+
+    expect(composable.serverStatus.value).toEqual({ state: 'running' })
+  })
+
+  it('does not apply the initial snapshot after unmount', async () => {
+    let resolveInitial!: (value: unknown) => void
+    const impl: InvokeImpl = (cmd: string) => {
+      if (cmd === 'get_webview_token') return Promise.resolve(null)
+      if (cmd === 'get_local_ip') return Promise.resolve('192.168.1.25')
+      if (cmd === 'get_webview_server_status') return new Promise((resolve) => { resolveInitial = resolve })
+      return Promise.resolve(undefined)
+    }
+
+    const { composable, mountPromise } = mountUnawaited(impl)
+    await vi.waitFor(() => expect(resolveInitial).toBeDefined())
+
+    const unmount = capturedOnUnmountedCbs.shift()
+    unmount?.()
+    resolveInitial({ state: 'running' })
+    await mountPromise
+
+    expect(composable.serverStatus.value).toEqual({ state: 'stopped' })
+  })
+
+  it('does not retry the server-status refresh after unmount', async () => {
+    const { webview } = await setupAndMountWithEvents(baseImpl({ state: 'stopped' }))
+
+    let rejectSnapshot!: (reason?: unknown) => void
+    let statusCalls = 0
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_webview_server_status') {
+        statusCalls += 1
+        return new Promise((_resolve, reject) => { rejectSnapshot = reject })
+      }
+      if (cmd === 'send_test_message') return Promise.resolve(undefined)
+      return Promise.resolve(undefined)
+    })
+
+    webview.testMessage.value = 'hello'
+    const pending = webview.sendTest()
+    await vi.waitFor(() => expect(rejectSnapshot).toBeDefined())
+
+    const unmount = capturedOnUnmountedCbs.shift()
+    unmount?.()
+    rejectSnapshot(new Error('boom'))
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    await pending
+
+    expect(statusCalls).toBe(1)
+  })
+
+  it('keeps the initial snapshot over a refresh that started before it and resolves late', async () => {
+    const tokenGate = deferred<null>()
+    const statusSnapshots: Array<Deferred<unknown>> = []
+    const impl: InvokeImpl = (cmd: string) => {
+      if (cmd === 'get_webview_token') return tokenGate.promise
+      if (cmd === 'get_local_ip') return Promise.resolve('192.168.1.25')
+      if (cmd === 'get_webview_server_status') {
+        const snapshot = deferred<unknown>()
+        statusSnapshots.push(snapshot)
+        return snapshot.promise
+      }
+      return Promise.resolve(undefined)
+    }
+
+    const { composable, mountPromise } = mountUnawaited(impl)
+    // Mount is held before its own initial snapshot (get_webview_token).
+    await vi.waitFor(() => expect(mockInvoke).toHaveBeenCalledWith('get_webview_token'))
+
+    // A refresh starts during the mount window, so its generation is older than
+    // the initial snapshot that will open the next generation.
+    composable.testMessage.value = 'hello'
+    const send = composable.sendTest()
+    await vi.waitFor(() => expect(statusSnapshots).toHaveLength(1))
+
+    tokenGate.resolve(null)
+    await vi.waitFor(() => expect(statusSnapshots).toHaveLength(2))
+
+    // The initial snapshot returns the newer status; the older refresh resolves
+    // afterwards with the old one and must not overwrite it.
+    statusSnapshots[1].resolve({ state: 'running' })
+    await flush()
+    statusSnapshots[0].resolve({ state: 'stopped' })
+    await send
+    await mountPromise
+
+    expect(composable.serverStatus.value).toEqual({ state: 'running' })
+  })
+
+  it('does not retry the server-status refresh when an event invalidates the backoff', async () => {
+    vi.useFakeTimers()
+    try {
+      const { webview, listeners } = await setupAndMountWithEvents(baseImpl({ state: 'stopped' }))
+
+      let statusCalls = 0
+      mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === 'get_webview_server_status') {
+          statusCalls += 1
+          return Promise.reject(new Error('boom'))
+        }
+        return Promise.resolve(undefined)
+      })
+
+      webview.testMessage.value = 'hello'
+      const pending = webview.sendTest()
+      expect(statusCalls).toBe(1)
+      // Let the reject settle so the 500ms backoff is armed.
+      await Promise.resolve()
+      await Promise.resolve()
+
+      listeners.get('webview-server-status-changed')?.({ payload: { state: 'running' } })
+
+      await vi.advanceTimersByTimeAsync(600)
+      await pending
+
+      expect(statusCalls).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not retry the server-status refresh when it unmounts during the backoff', async () => {
+    vi.useFakeTimers()
+    try {
+      const { webview } = await setupAndMountWithEvents(baseImpl({ state: 'stopped' }))
+
+      let statusCalls = 0
+      mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === 'get_webview_server_status') {
+          statusCalls += 1
+          return Promise.reject(new Error('boom'))
+        }
+        return Promise.resolve(undefined)
+      })
+
+      webview.testMessage.value = 'hello'
+      const pending = webview.sendTest()
+      expect(statusCalls).toBe(1)
+      await Promise.resolve()
+      await Promise.resolve()
+
+      const unmount = capturedOnUnmountedCbs.shift()
+      unmount?.()
+
+      await vi.advanceTimersByTimeAsync(600)
+      await pending
+
+      expect(statusCalls).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
