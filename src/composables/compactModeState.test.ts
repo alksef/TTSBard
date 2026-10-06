@@ -7,11 +7,17 @@ import {
   initCompactDims,
 } from './compactModeState'
 
-describe('compactModeState — localStorage start_compact synchronization', () => {
+describe('compactModeState — start_compact boot value and localStorage synchronization', () => {
   let store: Record<string, string> = {}
+  let getItemThrows = false
+  let setItemThrows = false
   const fakeStorage = {
-    getItem: vi.fn((key: string) => store[key] ?? null),
+    getItem: vi.fn((key: string) => {
+      if (getItemThrows) throw new Error('Storage disabled')
+      return store[key] ?? null
+    }),
     setItem: vi.fn((key: string, value: string) => {
+      if (setItemThrows) throw new Error('QuotaExceededError')
       store[key] = value
     }),
     clear: vi.fn(() => {
@@ -22,11 +28,20 @@ describe('compactModeState — localStorage start_compact synchronization', () =
     }),
   }
 
+  function stubWindow(bootValue: unknown, innerWidth = 800): void {
+    vi.stubGlobal('window', {
+      innerWidth,
+      __TTSBARD_START_COMPACT__: bootValue,
+    })
+  }
+
   beforeEach(() => {
     store = {}
+    getItemThrows = false
+    setItemThrows = false
     vi.clearAllMocks()
     vi.stubGlobal('localStorage', fakeStorage)
-    vi.stubGlobal('window', { innerWidth: 800 })
+    stubWindow(undefined)
   })
 
   afterEach(() => {
@@ -44,30 +59,42 @@ describe('compactModeState — localStorage start_compact synchronization', () =
     expect(getInitialCompactMode()).toBe(false)
   })
 
-  it('falls back to compact mode when unseeded and window width is <= 720', () => {
-    vi.stubGlobal('window', { innerWidth: 450 })
+  it('boot true wins with empty cache and width 780', () => {
+    stubWindow(true, 780)
     expect(getInitialCompactMode()).toBe(true)
   })
 
-  it('falls back to normal mode when unseeded and window width is > 720', () => {
-    vi.stubGlobal('window', { innerWidth: 800 })
+  it('boot true wins with empty cache and width 800', () => {
+    stubWindow(true, 800)
+    expect(getInitialCompactMode()).toBe(true)
+  })
+
+  it('boot false overrides a stale cached true', () => {
+    fakeStorage.setItem(START_COMPACT_STORAGE_KEY, 'true')
+    stubWindow(false, 800)
     expect(getInitialCompactMode()).toBe(false)
   })
 
-  it('prioritizes explicit localStorage value over window width heuristic', () => {
-    vi.stubGlobal('window', { innerWidth: 450 })
+  it('boot true wins over stale cached false even when storage throws', () => {
     fakeStorage.setItem(START_COMPACT_STORAGE_KEY, 'false')
-    expect(getInitialCompactMode()).toBe(false)
+    getItemThrows = true
+    stubWindow(true, 800)
+    expect(getInitialCompactMode()).toBe(true)
+  })
 
-    vi.stubGlobal('window', { innerWidth: 800 })
+  it('returns false without a window and with an absent cache', () => {
+    vi.stubGlobal('window', undefined)
+    expect(getInitialCompactMode()).toBe(false)
+  })
+
+  it('falls back to the cached value when no window flag is present', () => {
+    vi.stubGlobal('window', undefined)
     fakeStorage.setItem(START_COMPACT_STORAGE_KEY, 'true')
     expect(getInitialCompactMode()).toBe(true)
   })
 
   it('handles localStorage read exceptions gracefully', () => {
-    fakeStorage.getItem.mockImplementation(() => {
-      throw new Error('Storage disabled')
-    })
+    getItemThrows = true
     expect(getInitialCompactMode()).toBe(false)
   })
 
@@ -80,9 +107,7 @@ describe('compactModeState — localStorage start_compact synchronization', () =
   })
 
   it('handles localStorage write exceptions gracefully', () => {
-    fakeStorage.setItem.mockImplementation(() => {
-      throw new Error('QuotaExceededError')
-    })
+    setItemThrows = true
     expect(() => saveStartCompactToStorage(true)).not.toThrow()
   })
 

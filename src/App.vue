@@ -274,24 +274,13 @@ watch(() => appSettings.settings.value?.general?.theme, (newTheme, oldTheme) => 
   debugLog('[App] Theme applied:', document.documentElement.getAttribute('data-theme'))
 }, { immediate: true })
 
-// Keep start_compact in localStorage for instant access on next launch (prevents layout flash).
-// One-shot synchronization applies the setting on startup if localStorage was out of sync.
-let startCompactApplied = false
+// Keep start_compact cached for non-native previews.
+// The startup mode itself is supplied by the backend; changes apply at the next launch.
 watch(
   () => appSettings.settings.value?.general?.start_compact,
   (startCompact) => {
     if (typeof startCompact !== 'boolean') return
-
     saveStartCompactToStorage(startCompact)
-
-    if (!startCompactApplied) {
-      startCompactApplied = true
-      if (startCompact && !isMinimalMode.value) {
-        handleMinimalModeChange(true)
-      } else if (!startCompact && isMinimalMode.value) {
-        handleMinimalModeChange(false)
-      }
-    }
   },
   { immediate: true },
 )

@@ -14,10 +14,20 @@ export const START_COMPACT_STORAGE_KEY = 'app-start-compact'
 
 /**
  * Determine whether the application should immediately render in compact mode.
- * Reads the cached setting from localStorage; if unseeded (first run), checks whether
- * the backend already launched and resized the window into compact dimensions (<= 720px).
+ * The authoritative value is the validated boolean injected by the native
+ * backend at startup (`window.__TTSBARD_START_COMPACT__`); it wins over any
+ * cached value, including when it is `false`. In non-native/browser contexts
+ * the flag is absent, so fall back to the cached localStorage value (false when
+ * missing or unreadable).
  */
 export function getInitialCompactMode(): boolean {
+  if (typeof window !== 'undefined') {
+    const bootValue = (window as { __TTSBARD_START_COMPACT__?: unknown })
+      .__TTSBARD_START_COMPACT__
+    if (typeof bootValue === 'boolean') {
+      return bootValue
+    }
+  }
   try {
     if (typeof localStorage !== 'undefined') {
       const stored = localStorage.getItem(START_COMPACT_STORAGE_KEY)
@@ -25,10 +35,10 @@ export function getInitialCompactMode(): boolean {
         return stored === 'true'
       }
     }
-    return typeof window !== 'undefined' && window.innerWidth > 0 && window.innerWidth <= 720
   } catch {
-    return false
+    // Ignore storage errors in restricted contexts
   }
+  return false
 }
 
 /**
@@ -48,6 +58,3 @@ export function initCompactDims(w: number, h: number) {
   compactModeState.width = w
   compactModeState.height = h
 }
-
-
-

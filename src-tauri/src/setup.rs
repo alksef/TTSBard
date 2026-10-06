@@ -41,7 +41,7 @@ pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std:
     // Windows are declared in tauri.conf.json with "create": false and are
     // built here so that the settings-recovery flow can boot a minimal
     // process without them (ROADMAP-123).
-    create_configured_windows(app)?;
+    create_configured_windows(app, settings.start_compact)?;
 
     // Get state managers
     let settings_manager = app.state::<SettingsManager>();
@@ -620,7 +620,10 @@ fn init_spellcheck(app: &App, app_state: &AppState) {
 /// Build the windows of the ordinary startup from their `tauri.conf.json`
 /// entries. The `settings-recovery` entry is intentionally absent from this
 /// list: that window is created only by the recovery process.
-fn create_configured_windows(app: &App) -> Result<(), Box<dyn std::error::Error>> {
+fn create_configured_windows(
+    app: &App,
+    start_compact: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     for label in ["main", "soundpanel", "playback-control", "ocr-selection"] {
         let config = app
             .config()
@@ -630,8 +633,14 @@ fn create_configured_windows(app: &App) -> Result<(), Box<dyn std::error::Error>
             .find(|window| window.label == label)
             .cloned()
             .ok_or_else(|| format!("window config for {label} is missing"))?;
-        tauri::WebviewWindowBuilder::from_config(app.handle(), &config)
-            .with_context(|| format!("failed to prepare window {label}"))?
+        let mut builder = tauri::WebviewWindowBuilder::from_config(app.handle(), &config)
+            .with_context(|| format!("failed to prepare window {label}"))?;
+        if label == "main" {
+            builder = builder.initialization_script(format!(
+                "window.__TTSBARD_START_COMPACT__ = {start_compact};"
+            ));
+        }
+        builder
             .build()
             .with_context(|| format!("failed to create window {label}"))?;
         info!(label, "Window created from config");
