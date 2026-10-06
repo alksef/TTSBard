@@ -6,6 +6,7 @@ import { AlertTriangle, FolderOpen, FolderCog, RotateCcw } from 'lucide-vue-next
 import { useGeneralSettings, useWindowsSettings, useLoggingSettings } from '../../composables/useAppSettings';
 import { presentCommandError } from '../../ipc/commandError';
 import { availableLanguages, locale, setLanguage, t } from '../../i18n';
+import { saveStartCompactToStorage } from '../../composables/compactModeState';
 import DataTransferModal from './DataTransferModal.vue';
 
 const DEFAULT_CONFIG_DIR_DISPLAY = '%APPDATA%\\ttsbard';
@@ -199,8 +200,10 @@ async function toggleStartCompact() {
     const newValue = !startCompact.value;
     startCompact.value = newValue;
     await invoke('set_start_compact', { value: newValue });
+    saveStartCompactToStorage(newValue);
   } catch (e) {
     startCompact.value = !startCompact.value;
+    saveStartCompactToStorage(startCompact.value);
     showMessage(presentCommandError(e, t('general.error.save')), 'error');
   }
 }

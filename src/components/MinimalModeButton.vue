@@ -1,17 +1,17 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, inject, type Ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { Minimize2, Maximize2 } from 'lucide-vue-next'
-import { useGeneralSettings, useWindowsSettings } from '../composables/useAppSettings'
-import { compactModeState, initCompactDims } from '../composables/compactModeState'
+import { useWindowsSettings } from '../composables/useAppSettings'
+import { compactModeState, initCompactDims, getInitialCompactMode } from '../composables/compactModeState'
 import { debugError } from '../utils/debug'
 import { t } from '../i18n'
 
-const isMinimalMode = ref(false)
+const injectedMinimalMode = inject<Ref<boolean>>('isMinimalMode')
+const isMinimalMode = injectedMinimalMode ?? ref(getInitialCompactMode())
 const isAnimating = ref(false)
 
 const windowsSettings = useWindowsSettings()
-const generalSettings = useGeneralSettings()
 
 const emit = defineEmits<{
   minimalModeChanged: [isMinimal: boolean]
@@ -28,24 +28,6 @@ initCompactDims(
 const compactWidth = computed(() => compactModeState.width)
 
 const compactHeight = computed(() => compactModeState.height)
-
-// When the app was started in compact mode (the backend already resized the
-// window before showing it), adopt the compact UI state once settings load
-// without invoking a backend resize. The one-shot guard keeps later settings
-// reloads (e.g. toggling the setting) from re-entering compact mode.
-let startCompactApplied = false
-watch(
-  generalSettings,
-  (settings) => {
-    if (startCompactApplied || !settings) return
-    startCompactApplied = true
-    if (settings.start_compact) {
-      isMinimalMode.value = true
-      emit('minimalModeChanged', true)
-    }
-  },
-  { immediate: true },
-)
 
 async function toggleMinimalMode() {
   if (isAnimating.value) return
@@ -69,8 +51,9 @@ async function toggleMinimalMode() {
       await invoke('set_main_bounds')
       await invoke('resize_main_window', { width: compactWidth.value, height: compactHeight.value, compact: true })
     }
-    emit('minimalModeChanged', !isMinimalMode.value)
-    isMinimalMode.value = !isMinimalMode.value
+    const nextMode = !isMinimalMode.value
+    isMinimalMode.value = nextMode
+    emit('minimalModeChanged', nextMode)
   } catch (error) {
     debugError('Failed to toggle minimal mode:', error)
     if (acquiredGuard) {

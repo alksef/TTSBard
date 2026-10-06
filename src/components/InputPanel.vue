@@ -9,7 +9,7 @@ import { SETTINGS_CHANGED_EVENT, type QuickEditorMode } from '../types/settings'
 import { useErrorHandler } from '../composables/useErrorHandler'
 import { debugLog, debugError } from '../utils/debug'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
-import { compactModeState, initCompactDims } from '../composables/compactModeState'
+import { compactModeState, initCompactDims, getInitialCompactMode } from '../composables/compactModeState'
 import { useCompactWindowResize } from '../composables/useCompactWindowResize'
 import TtsEditor from './editor/TtsEditor.vue'
 import PhraseHistoryList from './PhraseHistoryList.vue'
@@ -133,7 +133,7 @@ const showHistory = ref(false)
 const saveStatusMessage = ref('')
 const replacements = ref<Map<string, string>>(new Map())
 const usernames = ref<Map<string, string>>(new Map())
-const isMinimalMode = inject<Ref<boolean>>('isMinimalMode', ref(false))
+const isMinimalMode = inject<Ref<boolean>>('isMinimalMode', ref(getInitialCompactMode()))
 
 const compactResize = useCompactWindowResize({ isMinimalMode, showHistory, getWindow: getCurrentWindow })
 

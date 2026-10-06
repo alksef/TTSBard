@@ -26,6 +26,7 @@ import { useTelegramAuth, TELEGRAM_AUTH_KEY } from './composables/useTelegramAut
 import { provideAppSettings } from './composables/useAppSettings'
 import { useRuAccentRuntime } from './composables/useRuAccentRuntime'
 import { debugLog, debugError } from './utils/debug'
+import { getInitialCompactMode, saveStartCompactToStorage } from './composables/compactModeState'
 import { createAsyncCleanupScope } from './utils/asyncCleanup'
 import { useErrorHandler } from './composables/useErrorHandler'
 import { useStartupNotifications } from './composables/useStartupNotifications'
@@ -49,7 +50,7 @@ const currentPanel = ref<Panel>('input')
 
 const inputPanelRef = ref<InstanceType<typeof InputPanel> | null>(null)
 
-const isMinimalMode = ref(false)
+const isMinimalMode = ref(getInitialCompactMode())
 
 const minimalModeButtonRef = ref<InstanceType<typeof MinimalModeButton> | null>(null)
 
@@ -268,6 +269,28 @@ watch(() => appSettings.settings.value?.general?.theme, (newTheme, oldTheme) => 
   document.documentElement.setAttribute('data-theme', newTheme)
   debugLog('[App] Theme applied:', document.documentElement.getAttribute('data-theme'))
 }, { immediate: true })
+
+// Keep start_compact in localStorage for instant access on next launch (prevents layout flash).
+// One-shot synchronization applies the setting on startup if localStorage was out of sync.
+let startCompactApplied = false
+watch(
+  () => appSettings.settings.value?.general?.start_compact,
+  (startCompact) => {
+    if (typeof startCompact !== 'boolean') return
+
+    saveStartCompactToStorage(startCompact)
+
+    if (!startCompactApplied) {
+      startCompactApplied = true
+      if (startCompact && !isMinimalMode.value) {
+        handleMinimalModeChange(true)
+      } else if (!startCompact && isMinimalMode.value) {
+        handleMinimalModeChange(false)
+      }
+    }
+  },
+  { immediate: true },
+)
 
 // Watch for interface font changes and apply the `html` rem base plus the body
 // font stack. At the defaults the inline properties are removed so the
