@@ -523,6 +523,13 @@ fn decide_sink(current: Option<&OutputKey>, desired: &OutputKey, is_broken: bool
     if is_broken {
         return SinkDecision::Reopen;
     }
+    // A system-default endpoint (device_id None) has no stable identity in
+    // cpal 0.15.3, so its selection must be re-resolved for every phrase.
+    // Reusing the holder would pin the previous default across an A→B switch
+    // or keep a vanished default alive. Explicit device ids still compare by key.
+    if desired.device_id.is_none() {
+        return SinkDecision::Reopen;
+    }
     match current {
         Some(key) if key == desired => SinkDecision::Reuse,
         _ => SinkDecision::Reopen,
@@ -1144,6 +1151,68 @@ mod tests {
         assert_eq!(
             decide_sink(Some(&current), &desired, true),
             SinkDecision::Reopen
+        );
+    }
+
+    #[test]
+    fn decide_sink_default_reopens_every_phrase() {
+        // Default→default keys are identical but must still Reopen so a changed
+        // or vanished system default is picked up for the next phrase.
+        let current = key(None, AudioOutputFormat::I32);
+        let desired = key(None, AudioOutputFormat::I32);
+        assert_eq!(
+            decide_sink(Some(&current), &desired, false),
+            SinkDecision::Reopen
+        );
+    }
+
+    #[test]
+    fn decide_sink_default_reopens_on_mode_change() {
+        let current = key(None, AudioOutputFormat::Default);
+        let desired = key(None, AudioOutputFormat::I32);
+        assert_eq!(
+            decide_sink(Some(&current), &desired, false),
+            SinkDecision::Reopen
+        );
+    }
+
+    #[test]
+    fn decide_sink_default_to_explicit_reopens() {
+        let current = key(None, AudioOutputFormat::I32);
+        let desired = key(Some("dev"), AudioOutputFormat::I32);
+        assert_eq!(
+            decide_sink(Some(&current), &desired, false),
+            SinkDecision::Reopen
+        );
+    }
+
+    #[test]
+    fn decide_sink_explicit_to_default_reopens() {
+        let current = key(Some("dev"), AudioOutputFormat::I32);
+        let desired = key(None, AudioOutputFormat::I32);
+        assert_eq!(
+            decide_sink(Some(&current), &desired, false),
+            SinkDecision::Reopen
+        );
+    }
+
+    #[test]
+    fn decide_sink_broken_default_reopens() {
+        let current = key(None, AudioOutputFormat::I32);
+        let desired = key(None, AudioOutputFormat::I32);
+        assert_eq!(
+            decide_sink(Some(&current), &desired, true),
+            SinkDecision::Reopen
+        );
+    }
+
+    #[test]
+    fn decide_sink_explicit_same_device_reuses() {
+        let current = key(Some("dev"), AudioOutputFormat::I32);
+        let desired = key(Some("dev"), AudioOutputFormat::I32);
+        assert_eq!(
+            decide_sink(Some(&current), &desired, false),
+            SinkDecision::Reuse
         );
     }
 
