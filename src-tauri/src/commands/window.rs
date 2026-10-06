@@ -1,5 +1,6 @@
 use crate::config::{
-    EditorHotkeySettings, Hotkey, HotkeySettings, SettingsManager, Theme, WindowsManager,
+    CompactView, EditorHotkeySettings, Hotkey, HotkeySettings, SettingsManager, Theme,
+    WindowsManager,
 };
 use crate::playback_window::update_playback_appearance;
 use crate::soundpanel_window::update_soundpanel_appearance;
@@ -700,6 +701,27 @@ pub async fn set_main_compact_dims(
 #[tauri::command]
 pub fn get_main_compact_dims(windows_manager: State<'_, WindowsManager>) -> (u32, u32) {
     windows_manager.get_main_compact_dims()
+}
+
+/// Set main window compact view ('compact' or 'mono')
+#[tauri::command]
+pub async fn set_main_compact_view(
+    view: CompactView,
+    app_handle: AppHandle,
+    windows_manager: State<'_, WindowsManager>,
+) -> Result<(), String> {
+    super::persist_blocking(windows_manager.inner(), move |mgr| {
+        mgr.set_main_compact_view(view)
+    })
+    .await?;
+    super::emit_settings_changed(&app_handle);
+    Ok(())
+}
+
+/// Get main window compact view
+#[tauri::command]
+pub fn get_main_compact_view(windows_manager: State<'_, WindowsManager>) -> CompactView {
+    windows_manager.get_main_compact_view()
 }
 
 /// Set whether the extra floating-window buttons are hidden in the title bar

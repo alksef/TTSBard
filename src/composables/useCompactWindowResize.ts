@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { debugError } from '../utils/debug'
 import { createAsyncCleanupScope, type Cleanup } from '../utils/asyncCleanup'
-import { compactModeState } from './compactModeState'
+import type { MainWindowModeController } from './mainWindowMode'
 
 const COMPACT_MIN = 300
 const COMPACT_MAX_LOGICAL_WIDTH = 800
@@ -25,7 +25,7 @@ export interface CompactResizeWindow {
 }
 
 export interface UseCompactWindowResizeOptions {
-  isMinimalMode: Ref<boolean>
+  controller: MainWindowModeController
   showHistory: Ref<boolean>
   getWindow?: () => CompactResizeWindow
 }
@@ -69,14 +69,15 @@ function clampHeight(value: number, bounds: Bounds): number {
 }
 
 export function useCompactWindowResize(options: UseCompactWindowResizeOptions): CompactWindowResizeController {
-  const { isMinimalMode, showHistory } = options
+  const { controller, showHistory } = options
+  const isMinimalMode = controller.isMinimalMode
   const getWin = options.getWindow ?? (getCurrentWindow as unknown as () => CompactResizeWindow)
 
   const scope = createAsyncCleanupScope()
 
   // Gesture state. A gesture is only ever owned by the compact-mode surface;
   // full-mode editor-height dragging is handled by the caller and never touches
-  // the shared appDrivenResize guard.
+  // the controller's resize suppression leases.
   const isResizing = ref(false)
   let gestureAxis: 'height' | 'corner' | null = null
   let gestureToken = 0
@@ -109,18 +110,17 @@ export function useCompactWindowResize(options: UseCompactWindowResizeOptions): 
   let saveTimer: ReturnType<typeof setTimeout> | null = null
   let disposed = false
   let initialized = false
+  let unregisterFlush: (() => void) | null = null
 
   function acquireGuard(): (() => void) | null {
     if (!isMinimalMode.value) return null
-    compactModeState.appDrivenResize++
+    const lease = controller.acquireSuppressionLease()
     let released = false
     const release = () => {
       if (released) return
       released = true
       ownedGuards.delete(release)
-      if (compactModeState.appDrivenResize > 0) {
-        compactModeState.appDrivenResize--
-      }
+      lease()
     }
     ownedGuards.add(release)
     return release
@@ -183,8 +183,7 @@ export function useCompactWindowResize(options: UseCompactWindowResizeOptions): 
     try {
       await invoke('set_main_compact_dims', { width: snapshot.width, height: snapshot.height })
       if (!disposed && token === sessionToken) {
-        compactModeState.width = snapshot.width
-        compactModeState.height = snapshot.height
+        controller.confirmCompactDimensions(snapshot.width, snapshot.height)
       }
       lastSaveError = null
     } catch (err) {
@@ -223,6 +222,7 @@ export function useCompactWindowResize(options: UseCompactWindowResizeOptions): 
 
   async function persistCurrentInnerSize(force = false): Promise<void> {
     const token = sessionToken
+    controller.invalidateCompactDimensions()
     let size: { width: number; height: number }
     let scaleFactor: number
     try {
@@ -242,8 +242,9 @@ export function useCompactWindowResize(options: UseCompactWindowResizeOptions): 
   function onResizedHandler(): void {
     if (disposed) return
     if (!isMinimalMode.value) return
-    if (compactModeState.appDrivenResize > 0) return
+    if (controller.suppressed.value) return
     if (showHistory.value) return
+    controller.invalidateCompactDimensions()
     scheduleSave()
   }
 
@@ -253,7 +254,7 @@ export function useCompactWindowResize(options: UseCompactWindowResizeOptions): 
       saveTimer = null
       if (disposed) return
       if (!isMinimalMode.value) return
-      if (compactModeState.appDrivenResize > 0) return
+      if (controller.suppressed.value) return
       if (showHistory.value) return
       void persistCurrentInnerSize().catch(() => {})
     }, SAVE_DEBOUNCE_MS)
@@ -292,6 +293,8 @@ export function useCompactWindowResize(options: UseCompactWindowResizeOptions): 
     if (disposed) return
     if (isResizing.value) return
     if (!isMinimalMode.value) return
+    if (controller.busy.value) return
+    if (controller.suppressed.value) return
     if (showHistory.value) return
     if (e.button !== 0 || e.isPrimary === false) return
     const target = e.currentTarget as HTMLElement | null
@@ -305,8 +308,8 @@ export function useCompactWindowResize(options: UseCompactWindowResizeOptions): 
     gestureAxis = axis
     startClientX = e.clientX
     startClientY = e.clientY
-    startWidth = compactModeState.width
-    startHeight = compactModeState.height
+    startWidth = controller.confirmedCompactDimensions.value.width
+    startHeight = controller.confirmedCompactDimensions.value.height
     scale = 1
     snapshotReady = false
     const token = ++gestureToken
@@ -314,7 +317,7 @@ export function useCompactWindowResize(options: UseCompactWindowResizeOptions): 
     void (async () => {
       try {
         const [size, scaleFactor] = await Promise.all([getWin().innerSize(), getWin().scaleFactor()])
-        if (token !== gestureToken || disposed) return
+        if (token !== gestureToken || disposed || controller.busy.value) return
         startWidth = size.width
         startHeight = size.height
         scale = computeBounds(scaleFactor).scale
@@ -338,7 +341,7 @@ export function useCompactWindowResize(options: UseCompactWindowResizeOptions): 
   function moveDrag(e: PointerEvent): void {
     if (e.pointerId !== activePointerId) return
     if (!isResizing.value || !snapshotReady) return
-    if (!isMinimalMode.value || showHistory.value) {
+    if (!isMinimalMode.value || showHistory.value || controller.busy.value) {
       cancelActiveGesture()
       return
     }
@@ -379,6 +382,7 @@ export function useCompactWindowResize(options: UseCompactWindowResizeOptions): 
 
   function onCornerKeydown(e: KeyboardEvent): Promise<void> {
     if (disposed || !isMinimalMode.value || showHistory.value || isResizing.value
+      || controller.busy.value || controller.suppressed.value
       || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return Promise.resolve()
     e.preventDefault()
     const token = sessionToken
@@ -391,7 +395,7 @@ export function useCompactWindowResize(options: UseCompactWindowResizeOptions): 
   async function performKeyboardResize(e: KeyboardEvent, token: number): Promise<void> {
     if (disposed) return
     if (token !== sessionToken || isResizing.value) return
-    if (!isMinimalMode.value || showHistory.value) return
+    if (!isMinimalMode.value || showHistory.value || controller.busy.value) return
     let dxLogical = 0
     let dyLogical = 0
     switch (e.key) {
@@ -415,9 +419,9 @@ export function useCompactWindowResize(options: UseCompactWindowResizeOptions): 
     if (!release) return
     try {
       await waitForResizeIdle()
-      if (token !== sessionToken || disposed || !isMinimalMode.value || showHistory.value) return
+      if (token !== sessionToken || disposed || !isMinimalMode.value || showHistory.value || controller.busy.value) return
       const [size, scaleFactor] = await Promise.all([getWin().innerSize(), getWin().scaleFactor()])
-      if (token !== sessionToken || disposed) return
+      if (token !== sessionToken || disposed || controller.busy.value) return
       if (!isMinimalMode.value || showHistory.value) return
       const bounds = computeBounds(scaleFactor)
       const dxPhys = Math.round(dxLogical * bounds.scale)
@@ -459,7 +463,7 @@ export function useCompactWindowResize(options: UseCompactWindowResizeOptions): 
     initialized = true
     await scope.track(getWin().onResized(onResizedHandler))
     if (disposed) return
-    compactModeState.flushPendingCompactSave = flushBeforeExit
+    unregisterFlush = controller.setResizeFlush(flushBeforeExit)
   }
 
   function dispose(): void {
@@ -471,9 +475,7 @@ export function useCompactWindowResize(options: UseCompactWindowResizeOptions): 
     discardPendingWork()
     for (const release of [...ownedGuards]) release()
     stopWatch()
-    if (compactModeState.flushPendingCompactSave === flushBeforeExit) {
-      compactModeState.flushPendingCompactSave = null
-    }
+    unregisterFlush?.()
     scope.dispose()
   }
 

@@ -32,6 +32,7 @@ vi.mock('../utils/debug', () => ({
 import { createAppSettings, provideAppSettings } from './useAppSettings'
 import { useStartupNotifications } from './useStartupNotifications'
 import { useErrorHandler, ErrorLevel } from './useErrorHandler'
+import { createMainWindowModeController, type MainWindowModeController, type MainWindowModeSnapshot } from './mainWindowMode'
 import type { AppSettingsDto } from '../types/settings'
 
 function mockSettings(): AppSettingsDto {
@@ -52,7 +53,7 @@ function mockSettings(): AppSettingsDto {
     twitch: { enabled: false, username: '', token: '', channel: '', start_on_boot: false, send_original_text: true },
     windows: {
       global: { exclude_from_capture: false },
-      main: { x: null, y: null, custom_background: false, opacity: 100, bg_color: '', custom_opacity: false, opacity_compact_only: false, compact_width: 400, compact_height: 300, hide_extra_window_buttons: false },
+      main: { x: null, y: null, custom_background: false, opacity: 100, bg_color: '', custom_opacity: false, opacity_compact_only: false, compact_width: 400, compact_height: 300, compact_view: 'compact', hide_extra_window_buttons: false },
       soundpanel: { x: null, y: null, opacity: 100, bg_color: '', clickthrough: false, stay_visible: false, hide_on_blur: false, appearance_source: '' },
       playback: { x: null, y: null, opacity: 100, bg_color: '', appearance_source: '' },
     },
@@ -378,5 +379,253 @@ describe('createAppSettings startup notification ownership', () => {
     main.cleanup?.()
     secondary.cleanup?.()
     useErrorHandler().clearAllErrors()
+  })
+
+  it('exposes compact_view on windows.main and updates upon reload', async () => {
+    let currentCompactView: 'compact' | 'mono' = 'compact'
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'is_backend_ready') return true
+      if (cmd === 'get_all_app_settings') {
+        const s = mockSettings()
+        s.windows.main.compact_view = currentCompactView
+        return s
+      }
+      throw new Error(`Unexpected command: ${cmd}`)
+    })
+
+    const context = createAppSettings()
+    await vi.waitFor(() => expect(context.settings.value).not.toBeNull())
+
+    expect(context.settings.value?.windows.main.compact_view).toBe('compact')
+
+    // Simulate backend update to mono
+    currentCompactView = 'mono'
+    await context.reload()
+
+    expect(context.settings.value?.windows.main.compact_view).toBe('mono')
+    context.cleanup?.()
+  })
+})
+
+describe('createAppSettings compact_view snapshot hydration', () => {
+  function makeController() {
+    const adapter = {
+      setBounds: vi.fn(async () => {}),
+      removeBounds: vi.fn(async () => {}),
+      resize: vi.fn(async () => {}),
+      persistCompactView: vi.fn(async () => {}),
+    }
+    const storage = { updateStoredView: vi.fn() }
+    const controller = createMainWindowModeController({
+      adapter,
+      storage,
+      boot: { startCompact: true, compactView: 'compact', compactWidth: 450, compactHeight: 400 },
+    })
+    return { controller, adapter, storage }
+  }
+
+  function controllerHooks(controller: MainWindowModeController) {
+    return {
+      captureSnapshotToken: () => controller.captureSnapshotRevision(),
+      applySnapshot: (snapshot: MainWindowModeSnapshot, token: number) => controller.applySettingsSnapshot(snapshot, token),
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    listenCallbacks.clear()
+    unlistenFns.clear()
+    mockInvoke.mockReset()
+  })
+
+  afterEach(() => {
+    useErrorHandler().clearAllErrors()
+  })
+
+  it('delayed initial snapshot after a local switch does not roll back view/cache', async () => {
+    let resolveSettings!: (s: AppSettingsDto) => void
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'is_backend_ready') return Promise.resolve(true)
+      if (cmd === 'get_all_app_settings') {
+        return new Promise<AppSettingsDto>((resolve) => { resolveSettings = resolve })
+      }
+      return Promise.reject(new Error(`Unexpected command: ${cmd}`))
+    })
+
+    const { controller, storage } = makeController()
+    const ctx = createAppSettings({ compactSnapshotHooks: controllerHooks(controller) })
+    await vi.waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith('get_all_app_settings', { consumeStartupNotifications: false }),
+    )
+
+    const ok = await controller.setCompactView('mono')
+    expect(ok).toBe(true)
+    expect(controller.rememberedView.value).toBe('mono')
+
+    const stale = mockSettings()
+    stale.windows.main.compact_view = 'compact'
+    resolveSettings(stale)
+    await vi.waitFor(() => expect(ctx.settings.value).not.toBeNull())
+
+    expect(controller.rememberedView.value).toBe('mono')
+    expect(storage.updateStoredView).toHaveBeenLastCalledWith('mono')
+    expect(controller.confirmedCompactDimensions.value).toEqual({ width: 450, height: 400 })
+    ctx.cleanup?.()
+  })
+
+  it('snapshot resolving during a switch does not roll back view/cache', async () => {
+    let resolveSettings!: (s: AppSettingsDto) => void
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'is_backend_ready') return Promise.resolve(true)
+      if (cmd === 'get_all_app_settings') {
+        return new Promise<AppSettingsDto>((resolve) => { resolveSettings = resolve })
+      }
+      return Promise.reject(new Error(`Unexpected command: ${cmd}`))
+    })
+
+    const { controller, adapter, storage } = makeController()
+    let resolveSetView!: () => void
+    adapter.persistCompactView.mockReturnValueOnce(new Promise<void>((resolve) => { resolveSetView = resolve }))
+
+    const ctx = createAppSettings({ compactSnapshotHooks: controllerHooks(controller) })
+    await vi.waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith('get_all_app_settings', { consumeStartupNotifications: false }),
+    )
+
+    const switchPromise = controller.setCompactView('mono')
+    expect(controller.busy.value).toBe(true)
+
+    const stale = mockSettings()
+    stale.windows.main.compact_view = 'compact'
+    resolveSettings(stale)
+    await vi.waitFor(() => expect(ctx.settings.value).not.toBeNull())
+
+    expect(controller.rememberedView.value).toBe('mono')
+
+    resolveSetView()
+    await switchPromise
+
+    expect(controller.rememberedView.value).toBe('mono')
+    expect(storage.updateStoredView).toHaveBeenLastCalledWith('mono')
+    ctx.cleanup?.()
+  })
+
+  it('a load that started during a setter and resolved after it cannot roll back the choice', async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'is_backend_ready') return Promise.resolve(true)
+      if (cmd === 'get_all_app_settings') return Promise.resolve(mockSettings())
+      return Promise.reject(new Error(`Unexpected command: ${cmd}`))
+    })
+
+    const { controller, adapter, storage } = makeController()
+    const ctx = createAppSettings({ compactSnapshotHooks: controllerHooks(controller) })
+    await vi.waitFor(() => expect(ctx.settings.value).not.toBeNull())
+    expect(controller.rememberedView.value).toBe('compact')
+
+    let resolveSettings!: (s: AppSettingsDto) => void
+    let resolveSetView!: () => void
+    adapter.persistCompactView.mockReturnValueOnce(new Promise<void>((resolve) => { resolveSetView = resolve }))
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'is_backend_ready') return Promise.resolve(true)
+      if (cmd === 'get_all_app_settings') {
+        return new Promise<AppSettingsDto>((resolve) => { resolveSettings = resolve })
+      }
+      return Promise.reject(new Error(`Unexpected command: ${cmd}`))
+    })
+
+    const switchPromise = controller.setCompactView('mono')
+    expect(controller.busy.value).toBe(true)
+
+    // A fresh settings load starts while the setter is in flight and captures
+    // the mid-setter revision.
+    const reloadPromise = ctx.reload()
+    await vi.waitFor(() => expect(resolveSettings).toBeDefined())
+
+    // Setter completes, invalidating any snapshot captured during the switch.
+    resolveSetView()
+    await switchPromise
+    expect(controller.busy.value).toBe(false)
+
+    // The stale snapshot resolves after the setter and must be rejected.
+    const stale = mockSettings()
+    stale.windows.main.compact_view = 'compact'
+    resolveSettings(stale)
+    await reloadPromise
+
+    expect(controller.rememberedView.value).toBe('mono')
+    expect(storage.updateStoredView).toHaveBeenLastCalledWith('mono')
+
+    // A genuinely fresh load is still applied.
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'is_backend_ready') return Promise.resolve(true)
+      if (cmd === 'get_all_app_settings') {
+        const s = mockSettings()
+        s.windows.main.compact_view = 'compact'
+        return Promise.resolve(s)
+      }
+      return Promise.reject(new Error(`Unexpected command: ${cmd}`))
+    })
+    await ctx.reload()
+    await vi.waitFor(() => expect(controller.rememberedView.value).toBe('compact'))
+    expect(storage.updateStoredView).toHaveBeenLastCalledWith('compact')
+
+    ctx.cleanup?.()
+  })
+
+  it('applies a fresh subsequent snapshot when no local switch intervened', async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'is_backend_ready') return Promise.resolve(true)
+      if (cmd === 'get_all_app_settings') return Promise.resolve(mockSettings())
+      return Promise.reject(new Error(`Unexpected command: ${cmd}`))
+    })
+
+    const { controller, storage } = makeController()
+    const ctx = createAppSettings({ compactSnapshotHooks: controllerHooks(controller) })
+    await vi.waitFor(() => expect(ctx.settings.value).not.toBeNull())
+    expect(controller.rememberedView.value).toBe('compact')
+
+    let currentView: 'compact' | 'mono' = 'mono'
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'is_backend_ready') return Promise.resolve(true)
+      if (cmd === 'get_all_app_settings') {
+        const s = mockSettings()
+        s.windows.main.compact_view = currentView
+        return Promise.resolve(s)
+      }
+      return Promise.reject(new Error(`Unexpected command: ${cmd}`))
+    })
+
+    await ctx.reload()
+
+    expect(controller.rememberedView.value).toBe('mono')
+    expect(storage.updateStoredView).toHaveBeenLastCalledWith('mono')
+    ctx.cleanup?.()
+  })
+
+  it('applies compact_view after a failed load is retried', async () => {
+    let failOnce = true
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'is_backend_ready') return Promise.resolve(true)
+      if (cmd === 'get_all_app_settings') {
+        if (failOnce) {
+          failOnce = false
+          return Promise.reject(new Error('boom'))
+        }
+        const s = mockSettings()
+        s.windows.main.compact_view = 'mono'
+        return Promise.resolve(s)
+      }
+      return Promise.reject(new Error(`Unexpected command: ${cmd}`))
+    })
+
+    const { controller } = makeController()
+    const ctx = createAppSettings({ compactSnapshotHooks: controllerHooks(controller) })
+    await vi.waitFor(() => expect(ctx.error.value).toBe('boom'))
+
+    await ctx.reload()
+    await vi.waitFor(() => expect(ctx.settings.value).not.toBeNull())
+
+    expect(controller.rememberedView.value).toBe('mono')
+    ctx.cleanup?.()
   })
 })

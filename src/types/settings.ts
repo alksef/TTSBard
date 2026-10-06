@@ -324,6 +324,8 @@ export interface LoggingSettingsDto {
 // Windows Settings Types
 // ============================================================================
 
+export type CompactView = 'compact' | 'mono'
+
 export interface MainWindowSettingsDto {
   x: number | null
   y: number | null
@@ -334,6 +336,7 @@ export interface MainWindowSettingsDto {
   opacity_compact_only: boolean
   compact_width: number
   compact_height: number
+  compact_view: CompactView
   hide_extra_window_buttons: boolean
 }
 

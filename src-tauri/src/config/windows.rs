@@ -12,6 +12,26 @@ use std::sync::Arc;
 use super::persistence;
 use super::validation::{is_valid_hex_color, validate_opacity};
 
+/// Compact view mode style
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactView {
+    #[default]
+    Compact,
+    Mono,
+}
+
+pub fn deserialize_compact_view<'de, D>(deserializer: D) -> Result<CompactView, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let val = serde_json::Value::deserialize(deserializer)?;
+    match val.as_str() {
+        Some("mono") => Ok(CompactView::Mono),
+        _ => Ok(CompactView::Compact),
+    }
+}
+
 /// Main window settings (position and appearance)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MainWindowSettings {
@@ -33,6 +53,8 @@ pub struct MainWindowSettings {
     pub compact_width: u32,
     #[serde(default = "default_compact_height")]
     pub compact_height: u32,
+    #[serde(default = "default_compact_view", deserialize_with = "deserialize_compact_view")]
+    pub compact_view: CompactView,
     #[serde(default)]
     pub hide_extra_window_buttons: bool,
 }
@@ -125,6 +147,9 @@ fn default_compact_width() -> u32 {
 fn default_compact_height() -> u32 {
     400
 }
+fn default_compact_view() -> CompactView {
+    CompactView::Compact
+}
 
 impl Default for MainWindowSettings {
     fn default() -> Self {
@@ -138,6 +163,7 @@ impl Default for MainWindowSettings {
             opacity_compact_only: false,
             compact_width: 450,
             compact_height: 400,
+            compact_view: CompactView::Compact,
             hide_extra_window_buttons: false,
         }
     }
@@ -489,6 +515,18 @@ impl WindowsManager {
     pub fn get_main_compact_dims(&self) -> (u32, u32) {
         let s = self.cache.read();
         (s.main.compact_width, s.main.compact_height)
+    }
+
+    /// Set main window compact view ('compact' or 'mono')
+    pub fn set_main_compact_view(&self, view: CompactView) -> Result<()> {
+        self.update(|s| {
+            s.main.compact_view = view;
+        })
+    }
+
+    /// Get main window compact view
+    pub fn get_main_compact_view(&self) -> CompactView {
+        self.cache.read().main.compact_view
     }
 
     /// Set whether the extra floating-window buttons are hidden in the title bar
@@ -1034,6 +1072,137 @@ mod tests {
         assert!(persisted.main.custom_background);
         assert_eq!(persisted.main.compact_width, 640);
         assert_eq!(persisted.main.compact_height, 520);
+
+        let _ = std::fs::remove_dir_all(&config_dir);
+    }
+
+    /// CompactView round-trips correctly for both compact and mono values.
+    #[test]
+    fn compact_view_round_trips_compact_and_mono() {
+        for (view, expected_json) in [
+            (CompactView::Compact, "\"compact\""),
+            (CompactView::Mono, "\"mono\""),
+        ] {
+            let serialized = serde_json::to_string(&view).unwrap();
+            assert_eq!(serialized, expected_json);
+            let deserialized: CompactView = serde_json::from_str(&serialized).unwrap();
+            assert_eq!(deserialized, view);
+        }
+    }
+
+    /// Legacy windows.json without `compact_view` deserializes with default Compact.
+    #[test]
+    fn legacy_windows_json_missing_compact_view_defaults_to_compact() {
+        let json = r#"{
+            "main": {
+                "compact_width": 640,
+                "compact_height": 520
+            }
+        }"#;
+        let settings: WindowsSettings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.main.compact_view, CompactView::Compact);
+        assert_eq!(settings.main.compact_width, 640);
+        assert_eq!(settings.main.compact_height, 520);
+    }
+
+    /// Unknown or corrupted `compact_view` values normalize safely to Compact.
+    #[test]
+    fn windows_json_unknown_compact_view_normalizes_to_compact() {
+        for raw in [
+            "\"unknown\"",
+            "\"ultra\"",
+            "\"\"",
+            "123",
+            "null",
+            "true",
+            "{\"invalid\": true}",
+        ] {
+            let json = format!(
+                r#"{{
+                    "main": {{
+                        "compact_view": {},
+                        "compact_width": 500,
+                        "compact_height": 450
+                    }}
+                }}"#,
+                raw
+            );
+            let settings: WindowsSettings = serde_json::from_str(&json).unwrap();
+            assert_eq!(
+                settings.main.compact_view,
+                CompactView::Compact,
+                "Failed for raw value: {}",
+                raw
+            );
+        }
+
+        // Explicit "mono" deserializes to Mono
+        let mono_json = r#"{
+            "main": {
+                "compact_view": "mono"
+            }
+        }"#;
+        let settings: WindowsSettings = serde_json::from_str(mono_json).unwrap();
+        assert_eq!(settings.main.compact_view, CompactView::Mono);
+    }
+
+    /// Unrelated setter calls preserve compact_view and shared compact dimensions.
+    #[test]
+    fn unrelated_windows_update_preserves_compact_view_and_enlarged_dims() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let config_dir = std::env::temp_dir().join(format!(
+            "ttsbard-windows-mono-test-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let mut settings = WindowsSettings::default();
+        settings.main.compact_width = 1200;
+        settings.main.compact_height = 945;
+        settings.main.compact_view = CompactView::Mono;
+        let windows_path = config_dir.join("windows.json");
+        std::fs::write(
+            &windows_path,
+            serde_json::to_string_pretty(&settings).unwrap(),
+        )
+        .unwrap();
+
+        let manager = WindowsManager {
+            config_dir: config_dir.clone(),
+            cache: Arc::new(RwLock::new(settings)),
+        };
+
+        // Unrelated update (opacity)
+        manager.set_main_opacity(75).unwrap();
+
+        let content = std::fs::read_to_string(&windows_path).unwrap();
+        let persisted: WindowsSettings = serde_json::from_str(&content).unwrap();
+        assert_eq!(persisted.main.compact_view, CompactView::Mono);
+        assert_eq!(persisted.main.compact_width, 1200);
+        assert_eq!(persisted.main.compact_height, 945);
+        assert_eq!(persisted.main.opacity, 75);
+
+        // Toggle compact_view through manager
+        manager.set_main_compact_view(CompactView::Compact).unwrap();
+        assert_eq!(manager.get_main_compact_view(), CompactView::Compact);
+
+        let content = std::fs::read_to_string(&windows_path).unwrap();
+        let persisted: WindowsSettings = serde_json::from_str(&content).unwrap();
+        assert_eq!(persisted.main.compact_view, CompactView::Compact);
+        assert_eq!(persisted.main.compact_width, 1200);
+        assert_eq!(persisted.main.compact_height, 945);
+
+        // Set back to Mono
+        manager.set_main_compact_view(CompactView::Mono).unwrap();
+        assert_eq!(manager.get_main_compact_view(), CompactView::Mono);
+
+        let content = std::fs::read_to_string(&windows_path).unwrap();
+        let persisted: WindowsSettings = serde_json::from_str(&content).unwrap();
+        assert_eq!(persisted.main.compact_view, CompactView::Mono);
 
         let _ = std::fs::remove_dir_all(&config_dir);
     }

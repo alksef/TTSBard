@@ -12,20 +12,27 @@ import type { AppSettingsDto, AppSettingsContext } from '../types/settings'
 import { APP_SETTINGS_KEY, SETTINGS_CHANGED_EVENT } from '../types/settings'
 import { debugLog, debugError, debugWarn } from '../utils/debug'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
+import type { MainWindowModeSnapshot } from './mainWindowMode'
 
 // Maximum number of retries for backend ready
 const MAX_RETRIES = 50
 const RETRY_INTERVAL_MS = 100
 
+export interface CompactSnapshotHooks {
+  captureSnapshotToken(): number
+  applySnapshot(snapshot: MainWindowModeSnapshot, token: number): void
+}
+
 export interface CreateAppSettingsOptions {
   consumeStartupNotifications?: boolean
+  compactSnapshotHooks?: CompactSnapshotHooks
 }
 
 /**
  * Create app settings context (for root component)
  */
 export function createAppSettings(options: CreateAppSettingsOptions = {}): AppSettingsContext {
-  const { consumeStartupNotifications = false } = options
+  const { consumeStartupNotifications = false, compactSnapshotHooks } = options
 
   const settings: Ref<AppSettingsDto | null> = ref<AppSettingsDto | null>(null)
   const isLoading: Ref<boolean> = ref(false)
@@ -71,6 +78,11 @@ export function createAppSettings(options: CreateAppSettingsOptions = {}): AppSe
     isLoading.value = true
     error.value = null
 
+    // Capture the compact snapshot token before awaiting the backend so a
+    // snapshot that resolves later cannot roll back a newer local choice.
+    const hooks = compactSnapshotHooks
+    const snapshotToken = hooks ? hooks.captureSnapshotToken() : null
+
     try {
       debugLog('[useAppSettings] 🔄 Loading all settings...')
       debugLog('[useAppSettings] Current error state:', error.value)
@@ -83,6 +95,21 @@ export function createAppSettings(options: CreateAppSettingsOptions = {}): AppSe
 
       const data = await invoke<AppSettingsDto>('get_all_app_settings', { consumeStartupNotifications })
       settings.value = data
+
+      // Consume the compact snapshot through the owner hooks only when no local
+      // switch/resize happened while this request was in flight. start_compact
+      // never changes the live mode.
+      if (hooks && snapshotToken !== null) {
+        hooks.applySnapshot(
+          {
+            compactView: data.windows.main.compact_view,
+            compactWidth: data.windows.main.compact_width,
+            compactHeight: data.windows.main.compact_height,
+            startCompact: data.general.start_compact,
+          },
+          snapshotToken,
+        )
+      }
 
       debugLog('[useAppSettings] ✅ Settings loaded successfully:', {
         tts_provider: data.tts.provider,
@@ -204,8 +231,8 @@ export function createAppSettings(options: CreateAppSettingsOptions = {}): AppSe
 /**
  * Provide app settings to child components
  */
-export function provideAppSettings(): AppSettingsContext {
-  const context = createAppSettings({ consumeStartupNotifications: true })
+export function provideAppSettings(compactSnapshotHooks?: CompactSnapshotHooks): AppSettingsContext {
+  const context = createAppSettings({ consumeStartupNotifications: true, compactSnapshotHooks })
   provide(APP_SETTINGS_KEY, context)
   return context
 }

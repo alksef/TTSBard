@@ -215,6 +215,23 @@ Frontend сначала подписывается на `webview-server-status-c
 `get_webview_server_status`, поэтому не теряет переход между snapshot и listen.
 Контролы отправки теста и запущенного сервера доступны только в `Running`.
 
+## Режимы главного окна
+
+`App.vue` создаёт один `mainWindowMode` controller и передаёт его потомкам
+через типизированный `MAIN_WINDOW_MODE_KEY`. Controller владеет текущим режимом
+`ordinary | compact | mono`, запомненным компактным видом и подтверждёнными
+компактными размерами. Компоненты читают производное состояние и отправляют
+действия; кнопка режима не выполняет IPC. `mainWindowModeAdapter` связывает
+переходы с существующими native-командами bounds, resize и persistence.
+
+`useCompactWindowResize` сохраняет владение жестами, debounce и очередями
+resize/save. Он явно регистрирует flush перед выходом и использует leases
+подавления сохранения служебных resize-событий. Настройки поступают controller
+через hooks загрузки с revision, снятой до запроса: устаревший snapshot не
+должен откатывать локальный выбор или размеры. `start_compact` определяет
+следующий запуск; загрузка настройки не переключает уже открытое окно.
+`compactModeState.ts` содержит только startup/cache helpers без mutable runtime.
+
 ## Concurrency
 
 - `std::sync::mpsc` связывает producers с главным обработчиком `AppEvent`.

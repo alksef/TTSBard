@@ -19,6 +19,7 @@ import InputServerPanel from './components/InputServerPanel.vue'
 import OcrPanel from './components/OcrPanel.vue'
 import ErrorToasts from './components/ErrorToasts.vue'
 import MinimalModeButton from './components/MinimalModeButton.vue'
+import MonoModeBar from './components/MonoModeBar.vue'
 import IntegrationStatusCluster from './components/titlebar/IntegrationStatusCluster.vue'
 import { t } from './i18n'
 import { interfaceFontCssStack, parseInterfaceFontSize, toInterfaceFontFamily, INTERFACE_FONT_SIZE_DEFAULT } from './utils/interfaceFont'
@@ -26,7 +27,9 @@ import { useTelegramAuth, TELEGRAM_AUTH_KEY } from './composables/useTelegramAut
 import { provideAppSettings } from './composables/useAppSettings'
 import { useRuAccentRuntime } from './composables/useRuAccentRuntime'
 import { debugLog, debugError } from './utils/debug'
-import { getInitialCompactMode, saveStartCompactToStorage } from './composables/compactModeState'
+import { getInitialCompactMode, getInitialCompactView, saveCompactViewToStorage, saveStartCompactToStorage } from './composables/compactModeState'
+import { createMainWindowModeController, MAIN_WINDOW_MODE_KEY } from './composables/mainWindowMode'
+import { createMainWindowModeAdapter } from './composables/mainWindowModeAdapter'
 import { createAsyncCleanupScope } from './utils/asyncCleanup'
 import { useErrorHandler } from './composables/useErrorHandler'
 import { useStartupNotifications } from './composables/useStartupNotifications'
@@ -50,22 +53,76 @@ const currentPanel = ref<Panel>('input')
 
 const inputPanelRef = ref<InstanceType<typeof InputPanel> | null>(null)
 
-const isMinimalMode = ref(getInitialCompactMode())
+const { showWarning, showError } = useErrorHandler()
 
-const minimalModeButtonRef = ref<InstanceType<typeof MinimalModeButton> | null>(null)
+// Single main-window mode owner: runtime mode, remembered compact view and
+// confirmed compact geometry all live here. Children read derived computeds and
+// send intents; no component owns mode-related IPC or mutable compact state.
+const modeController = createMainWindowModeController({
+  adapter: createMainWindowModeAdapter(),
+  storage: { updateStoredView: saveCompactViewToStorage },
+  boot: {
+    startCompact: getInitialCompactMode(),
+    compactView: getInitialCompactView(),
+    compactWidth: 450,
+    compactHeight: 400,
+  },
+  onWarning: (detail) => {
+    debugError('[App] Compact exit flush failed:', detail)
+    showWarning(t('shell.minimal.exit_warning'))
+  },
+  onViewWarning: (detail) => {
+    debugError('[App] Compact view persistence failed:', detail)
+    showWarning(t('general.error.save'))
+  },
+  onError: (detail) => {
+    debugError('[App] Minimal mode transition failed:', detail)
+    showError(t('shell.minimal.transition_error'))
+  },
+})
 
-function handleMinimalModeChange(minimal: boolean) {
-  isMinimalMode.value = minimal
-  if (minimal) {
+provide(MAIN_WINDOW_MODE_KEY, modeController)
+
+const isMinimalMode = modeController.isMinimalMode
+const isMono = modeController.isMono
+const isModeBusy = modeController.busy
+
+async function handleToggleMinimalMode() {
+  const entered = await modeController.toggleMinimalMode()
+  if (entered && modeController.isMinimalMode.value) {
     currentPanel.value = 'input'
   }
 }
 
-provide('isMinimalMode', isMinimalMode)
+async function handleReturnCompact() {
+  const ok = await modeController.setCompactView('compact')
+  if (ok) {
+    await nextTick()
+    inputPanelRef.value?.focusEditor()
+  }
+}
 
-// Create and provide app settings context
-const appSettings = provideAppSettings()
-const { showWarning, showError } = useErrorHandler()
+function handleFocusEditor() {
+  inputPanelRef.value?.focusEditor()
+}
+
+// Create and provide app settings context with compact snapshot hooks so the
+// owner controller consumes accepted settings snapshots (revision-safe).
+const needsModeReload = ref(false)
+const appSettings = provideAppSettings({
+  captureSnapshotToken: () => modeController.captureSnapshotRevision(),
+  applySnapshot: (snapshot, token) => {
+    if (!modeController.applySettingsSnapshot(snapshot, token)) needsModeReload.value = true
+  },
+})
+// Retry rejected hydration/import snapshots once the owner is idle. The settings
+// transport coalesces a reload requested while its current load is completing.
+watch([needsModeReload, modeController.busy, modeController.suppressed], ([needed, busy, suppressed]) => {
+  if (needed && !busy && !suppressed) {
+    needsModeReload.value = false
+    void appSettings.reload()
+  }
+})
 const { dispose: disposeRuAccentRuntime } = useRuAccentRuntime()
 
 // Show a global toast on OCR runtime startup failures even when the OCR panel
@@ -358,7 +415,7 @@ function handleToggleMinimalKeydown(event: KeyboardEvent) {
       return
     }
     event.preventDefault()
-    minimalModeButtonRef.value?.toggleMinimalMode()
+    void handleToggleMinimalMode()
   }
 }
 
@@ -507,13 +564,14 @@ onUnmounted(() => {
   document.removeEventListener('keydown', handleToggleMinimalKeydown)
   listenerScope.dispose()
   disposeRuAccentRuntime()
+  modeController.dispose()
 })
 </script>
 
 <template>
   <div class="app-container" :style="appStyle">
-    <!-- Custom title bar (frameless window) -->
-    <div class="app-titlebar" data-tauri-drag-region>
+    <!-- Custom title bar (frameless window) in normal/compact, MonoModeBar in mono -->
+    <div v-if="!isMono" class="app-titlebar" data-tauri-drag-region>
       <div class="titlebar-logo" data-tauri-drag-region>
         <span class="titlebar-text" data-tauri-drag-region>TTSBard</span>
       </div>
@@ -548,6 +606,7 @@ onUnmounted(() => {
         </button>
       </div>
     </div>
+    <MonoModeBar v-else @return-compact="handleReturnCompact" @focus-editor="handleFocusEditor" @minimize="minimizeWindow" />
 
     <!-- Show error if settings failed to load -->
     <div v-if="appSettings.error.value && appSettings.error.value.length > 0" class="error-container">
@@ -560,7 +619,7 @@ onUnmounted(() => {
       <div class="app-content-wrapper">
         <Sidebar v-if="!isMinimalMode" :current-panel="currentPanel" @set-panel="setPanel" />
 
-        <main class="main-content" :class="{ 'minimal-content': isMinimalMode, 'input-content': currentPanel === 'input' }">
+        <main class="main-content" :class="{ 'minimal-content': isMinimalMode, 'mono-content': isMono, 'input-content': currentPanel === 'input' }">
           <InputPanel ref="inputPanelRef" v-show="currentPanel === 'input'" />
           <TtsPanel v-show="currentPanel === 'tts'" />
           <AudioPanel v-show="currentPanel === 'audio'" />
@@ -576,8 +635,8 @@ onUnmounted(() => {
         </main>
       </div>
 
-      <!-- Minimal mode toggle button -->
-      <MinimalModeButton ref="minimalModeButtonRef" @minimal-mode-changed="handleMinimalModeChange" />
+      <!-- Minimal mode toggle button (also visible in mono to restore the ordinary window) -->
+      <MinimalModeButton :minimal="isMinimalMode" :busy="isModeBusy" @toggle="handleToggleMinimalMode" />
 
       <!-- Global error toasts -->
       <ErrorToasts />
@@ -771,6 +830,13 @@ onUnmounted(() => {
   overflow-y: hidden;
   scrollbar-width: none;
   transition: none;
+}
+
+.main-content.minimal-content.mono-content {
+  padding: 0 4px 2px !important;
+  border-left: none;
+  overflow: hidden;
+  height: calc(100% - 18px);
 }
 
 .main-content.minimal-content::-webkit-scrollbar {

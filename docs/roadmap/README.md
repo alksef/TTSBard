@@ -45,6 +45,8 @@ related_tasks: []
 
 ## Активные направления
 
+- [ROADMAP-129 — Режим «Моно»](./active/129-ultracompact-input-mode.md) — `planned`: концепция согласована, подготовка к реализации Gemini.
+
 
 
 

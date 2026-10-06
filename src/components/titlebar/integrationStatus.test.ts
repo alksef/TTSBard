@@ -7,6 +7,9 @@ import {
   vtsTone,
   webviewTone,
   isIntegrationVisible,
+  integrationServiceName,
+  integrationErrorReason,
+  isIntegrationActionableError,
 } from './integrationStatus'
 import type {
   IntegrationTone,
@@ -287,3 +290,66 @@ describe('isIntegrationVisible', () => {
     expect(isIntegrationVisible('gray', true)).toBe(true)
   })
 })
+
+describe('integrationServiceName', () => {
+  it('returns clean service names in Russian', () => {
+    expect(integrationServiceName('webview')).toBe('WebView')
+    expect(integrationServiceName('twitch')).toBe('Twitch')
+    expect(integrationServiceName('vts')).toBe('VTube Studio')
+    expect(integrationServiceName('inputServer')).toBe('Входящий сервер')
+  })
+})
+
+describe('integrationErrorReason', () => {
+  it('returns port occupied message for webview with port_in_use', () => {
+    expect(
+      integrationErrorReason('webview', { state: 'error', message: 'port_in_use:8080' }),
+    ).toContain('порт 8080 занят')
+  })
+
+  it('returns localized start error when webview has generic or no error message', () => {
+    expect(
+      integrationErrorReason('webview', { state: 'error' }),
+    ).toBe('WebView — ошибка запуска')
+  })
+
+  it('returns port occupied message for inputServer with port_in_use', () => {
+    expect(
+      integrationErrorReason('inputServer', { state: 'error', message: 'port_in_use:10101' }),
+    ).toContain('порт 10101 занят')
+  })
+
+  it('returns localized generic error for inputServer without port', () => {
+    expect(
+      integrationErrorReason('inputServer', { state: 'error' }),
+    ).toBe('Входящий сервер — ошибка')
+  })
+
+  it('returns custom message for twitch and vts', () => {
+    expect(
+      integrationErrorReason('twitch', { state: 'Error', message: 'token expired' }),
+    ).toBe('token expired')
+    expect(
+      integrationErrorReason('vts', { state: 'Error', message: 'connection refused' }),
+    ).toBe('connection refused')
+  })
+
+  it('returns default localized error if twitch/vts message is missing', () => {
+    expect(
+      integrationErrorReason('twitch', { state: 'Error' }),
+    ).toBe('Twitch — ошибка')
+    expect(
+      integrationErrorReason('vts', { state: 'Error' }),
+    ).toBe('VTube Studio — ошибка')
+  })
+})
+
+describe('isIntegrationActionableError', () => {
+  it('is actionable only when tone is red', () => {
+    expect(isIntegrationActionableError('red')).toBe(true)
+    expect(isIntegrationActionableError('green')).toBe(false)
+    expect(isIntegrationActionableError('yellow')).toBe(false)
+    expect(isIntegrationActionableError('gray')).toBe(false)
+  })
+})
+

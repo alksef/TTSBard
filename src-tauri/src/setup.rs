@@ -38,15 +38,17 @@ use std::sync::Arc;
 pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std::error::Error>> {
     info!("=== Application setup started ===");
 
-    // Windows are declared in tauri.conf.json with "create": false and are
-    // built here so that the settings-recovery flow can boot a minimal
-    // process without them (ROADMAP-123).
-    create_configured_windows(app, settings.start_compact)?;
-
     // Get state managers
     let settings_manager = app.state::<SettingsManager>();
     crate::audio::init_output_settings(settings_manager.cache_arc())?;
     let windows_manager = app.state::<WindowsManager>();
+    let windows = windows_manager.load()?;
+
+    // Windows are declared in tauri.conf.json with "create": false and are
+    // built here so that the settings-recovery flow can boot a minimal
+    // process without them (ROADMAP-123).
+    create_configured_windows(app, settings.start_compact, windows.main.compact_view)?;
+
     let app_state = app.state::<AppState>();
     let telegram_state = app.state::<TelegramState>();
     let soundpanel_state = app.state::<SoundPanelState>();
@@ -70,8 +72,6 @@ pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std:
     ));
 
     info!(tts_provider = ?settings.tts.provider, hotkey_enabled = settings.hotkey_enabled, "Settings loaded");
-
-    let windows = windows_manager.load()?;
 
     // Load Twitch settings into AppState
     info!("Loading Twitch settings...");
@@ -623,6 +623,7 @@ fn init_spellcheck(app: &App, app_state: &AppState) {
 fn create_configured_windows(
     app: &App,
     start_compact: bool,
+    compact_view: crate::config::CompactView,
 ) -> Result<(), Box<dyn std::error::Error>> {
     for label in ["main", "soundpanel", "playback-control", "ocr-selection"] {
         let config = app
@@ -636,8 +637,12 @@ fn create_configured_windows(
         let mut builder = tauri::WebviewWindowBuilder::from_config(app.handle(), &config)
             .with_context(|| format!("failed to prepare window {label}"))?;
         if label == "main" {
+            let view_str = match compact_view {
+                crate::config::CompactView::Mono => "mono",
+                crate::config::CompactView::Compact => "compact",
+            };
             builder = builder.initialization_script(format!(
-                "window.__TTSBARD_START_COMPACT__ = {start_compact};"
+                "window.__TTSBARD_START_COMPACT__ = {start_compact};\nwindow.__TTSBARD_COMPACT_VIEW__ = \"{view_str}\";"
             ));
         }
         builder
@@ -1527,6 +1532,27 @@ fn missing_piper_notification(model_name: &str) -> String {
     )
 }
 
+/// Resolved startup mode for main window
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum StartupWindowMode {
+    Ordinary,
+    Compact(crate::config::CompactView),
+}
+
+/// Authoritative decision matrix for startup window mode (ROADMAP-129)
+#[allow(dead_code)]
+pub fn resolve_startup_window_mode(
+    start_compact: bool,
+    compact_view: crate::config::CompactView,
+) -> StartupWindowMode {
+    if start_compact {
+        StartupWindowMode::Compact(compact_view)
+    } else {
+        StartupWindowMode::Ordinary
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1779,5 +1805,31 @@ mod tests {
             }
             other => panic!("unexpected twitch event: {other:?}"),
         }
+    }
+
+    #[test]
+    fn resolve_startup_window_mode_matrix() {
+        use super::{resolve_startup_window_mode, StartupWindowMode};
+        use crate::config::CompactView;
+
+        // start_compact = false boots ordinary window regardless of saved view
+        assert_eq!(
+            resolve_startup_window_mode(false, CompactView::Compact),
+            StartupWindowMode::Ordinary
+        );
+        assert_eq!(
+            resolve_startup_window_mode(false, CompactView::Mono),
+            StartupWindowMode::Ordinary
+        );
+
+        // start_compact = true boots the remembered compact view
+        assert_eq!(
+            resolve_startup_window_mode(true, CompactView::Compact),
+            StartupWindowMode::Compact(CompactView::Compact)
+        );
+        assert_eq!(
+            resolve_startup_window_mode(true, CompactView::Mono),
+            StartupWindowMode::Compact(CompactView::Mono)
+        );
     }
 }

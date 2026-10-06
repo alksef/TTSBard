@@ -167,3 +167,39 @@ export function integrationStatusLabel(
       return t('integrations.status.disabled', { service: name })
   }
 }
+
+export function integrationServiceName(service: IntegrationService | 'inputServer'): string {
+  if (service === 'inputServer') {
+    return t(INPUT_SERVER)
+  }
+  return SERVICE_NAMES[service]
+}
+
+export function integrationErrorReason(
+  service: IntegrationService | 'inputServer',
+  runtime: AnyRuntime | InputServerRuntime,
+): string {
+  const message = messageText(runtime)
+  if (service === 'webview') {
+    const error = parseServerStartError(message)
+    if (error.kind === 'port_in_use') {
+      return t('server.error.port_in_use', { port: error.port })
+    }
+    return t('integrations.status.start_error', { service: SERVICE_NAMES.webview })
+  }
+  if (service === 'inputServer') {
+    const error = parseServerStartError(message)
+    if (error.kind === 'port_in_use') {
+      return t('server.error.port_in_use', { port: error.port })
+    }
+    return t('integrations.status.error', { service: t(INPUT_SERVER) })
+  }
+  if (message) return message
+  const name = SERVICE_NAMES[service as IntegrationService]
+  return t('integrations.status.error', { service: name })
+}
+
+export function isIntegrationActionableError(tone: IntegrationTone): boolean {
+  return tone === 'red'
+}
+

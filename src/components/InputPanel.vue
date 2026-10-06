@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted as vueOnUnmounted, inject, nextTick, type Ref, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted as vueOnUnmounted, inject, nextTick, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -9,7 +9,7 @@ import { SETTINGS_CHANGED_EVENT, type QuickEditorMode } from '../types/settings'
 import { useErrorHandler } from '../composables/useErrorHandler'
 import { debugLog, debugError } from '../utils/debug'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
-import { compactModeState, initCompactDims, getInitialCompactMode } from '../composables/compactModeState'
+import { MAIN_WINDOW_MODE_KEY, type MainWindowModeController } from '../composables/mainWindowMode'
 import { useCompactWindowResize } from '../composables/useCompactWindowResize'
 import TtsEditor from './editor/TtsEditor.vue'
 import PhraseHistoryList from './PhraseHistoryList.vue'
@@ -104,6 +104,7 @@ async function onClose(id: string) {
 }
 
 async function onSelectPinned() {
+  if (isMono.value) return
   showIncomingTab.value = true
   await nextTick()
   focusEditor()
@@ -133,9 +134,31 @@ const showHistory = ref(false)
 const saveStatusMessage = ref('')
 const replacements = ref<Map<string, string>>(new Map())
 const usernames = ref<Map<string, string>>(new Map())
-const isMinimalMode = inject<Ref<boolean>>('isMinimalMode', ref(getInitialCompactMode()))
+const injectedModeController = inject<MainWindowModeController>(MAIN_WINDOW_MODE_KEY)
+if (!injectedModeController) {
+  throw new Error('InputPanel must be used within a component that provides MAIN_WINDOW_MODE_KEY')
+}
+const modeController: MainWindowModeController = injectedModeController
+const isMinimalMode = modeController.isMinimalMode
+const isMono = modeController.isMono
 
-const compactResize = useCompactWindowResize({ isMinimalMode, showHistory, getWindow: getCurrentWindow })
+async function handleEnableMono() {
+  const ok = await modeController.setCompactView('mono')
+  if (ok) {
+    await nextTick()
+    focusEditor()
+  }
+}
+
+// In mono mode, hide phrase history and incoming surface; keep active editor tab/route.
+watch(isMono, (mono) => {
+  if (mono) {
+    showHistory.value = false
+    showIncomingTab.value = false
+  }
+}, { immediate: true })
+
+const compactResize = useCompactWindowResize({ controller: modeController, showHistory, getWindow: getCurrentWindow })
 
 const editorSettings = useEditorSettings()
 const aiSettings = useAiSettings()
@@ -409,11 +432,6 @@ function onPreprocessorChanged() {
 onMounted(async () => {
   await initTabs()
 
-  initCompactDims(
-    appSettingsContext.settings.value?.windows?.main?.compact_width ?? 450,
-    appSettingsContext.settings.value?.windows?.main?.compact_height ?? 400,
-  )
-
   await listenerScope.track(
     listen(SETTINGS_CHANGED_EVENT, async () => {
       debugLog('[InputPanel] Settings changed event received')
@@ -567,13 +585,6 @@ watch(isMinimalMode, (minimal) => {
     showHistory.value = false
   }
 })
-
-watch(() => appSettingsContext.settings.value?.windows?.main, (main) => {
-  if (main) {
-    compactModeState.width = main.compact_width ?? 450
-    compactModeState.height = main.compact_height ?? 400
-  }
-}, { immediate: true })
 
 watch(() => text.value, () => {
   lastSubmitOutcome.value = 'none'
@@ -753,6 +764,7 @@ function onResizeLostPointerCapture(_e: PointerEvent) {
 const editorHeightPx = computed(() => `${editorHeight.value}px`)
 
 function toggleHistory() {
+  if (isMono.value) return
   showHistory.value = !showHistory.value
 }
 
@@ -765,6 +777,12 @@ async function focusEditor() {
 }
 
 function cycleTabs(direction: TabCycleDirection) {
+  if (isMono.value) {
+    showIncomingTab.value = false
+    if (direction === 'next') nextTab()
+    else previousTab()
+    return
+  }
   const transition = resolveIncomingTabTransition(
     tabs.value.map(t => t.id),
     activeId.value,
@@ -898,24 +916,27 @@ defineExpose({ focusEditor })
 </script>
 
 <template>
-  <div class="input-panel" :class="{ 'minimal-panel': isMinimalMode, 'history-open': showHistory }">
+  <div class="input-panel" :class="{ 'minimal-panel': isMinimalMode, 'mono-panel': isMono, 'history-open': showHistory }">
     <StatusMessage
       :message="saveStatusMessage"
       type="success"
       @dismiss="saveStatusMessage = ''"
     />
     <div class="input-group">
-      <div class="textarea-wrapper" :class="{ 'minimal-wrapper': isMinimalMode, 'incoming-wrapper': showIncomingTab }" @keydown.capture="handleEditorScopeKeydown">
+      <div class="textarea-wrapper" :class="{ 'minimal-wrapper': isMinimalMode, 'mono-wrapper': isMono, 'incoming-wrapper': showIncomingTab }" @keydown.capture="handleEditorScopeKeydown">
         <EditorTabs
+          v-if="!isMono"
           :tabs="tabs"
           :active-id="activeId"
           :pinned-title="incomingAvailable ? incomingTabTitle : undefined"
           :pinned-active="incomingAvailable && showIncomingTab"
+          :compact="isMinimalMode"
           @create="onCreate"
           @close="onClose"
           @select="onSelect"
           @rename="renameTab"
           @select-pinned="onSelectPinned"
+          @enable-mono="handleEnableMono"
         />
         <IncomingTextsTab
           ref="incomingTabRef"
@@ -968,7 +989,7 @@ defineExpose({ focusEditor })
         </template>
       </div>
 
-      <div v-if="!showIncomingTab" class="editor-action-bar" :class="{ 'compact-action-bar': isMinimalMode }">
+      <div v-if="!showIncomingTab && !isMono" class="editor-action-bar" :class="{ 'compact-action-bar': isMinimalMode }">
         <EditorMenu
           :is-ai-enabled="isAiButtonEnabled"
           :has-text="!!text.trim()"
@@ -1048,14 +1069,14 @@ defineExpose({ focusEditor })
       </div>
 
       <PhraseHistoryList
-        v-if="!showIncomingTab"
+        v-if="!showIncomingTab && !isMono"
         v-model:expanded="showHistory"
         :hide-toggle="true"
         @select="appendPhrase"
         @append="appendPhrase"
         @replace="replacePhrase"
       />
-      <div v-if="aiEditorEnabled && !showIncomingTab" class="ai-editor-hint">
+      <div v-if="aiEditorEnabled && !showIncomingTab && !isMono" class="ai-editor-hint">
         AI
       </div>
     </div>
@@ -1141,6 +1162,29 @@ defineExpose({ focusEditor })
 
 .input-panel.minimal-panel.history-open .textarea-wrapper.minimal-wrapper :deep(.cm-editor) {
   min-height: 80px;
+}
+
+/* Mono mode: pure clean editor with no headers or footers, filling the entire space */
+.input-panel.minimal-panel.mono-panel {
+  padding: 0 !important;
+  height: 100%;
+}
+
+.input-panel.minimal-panel.mono-panel .input-group {
+  flex: 1 1 100%;
+  height: 100%;
+  margin-bottom: 0;
+}
+
+.input-panel.minimal-panel.mono-panel .textarea-wrapper.minimal-wrapper {
+  flex: 1 1 100%;
+  min-height: 0;
+  height: 100%;
+}
+
+.input-panel.minimal-panel.mono-panel .textarea-wrapper.minimal-wrapper :deep(.cm-editor) {
+  min-height: 0 !important;
+  height: 100%;
 }
 
 /* Compact + open history: the editor keeps a floor and the history results

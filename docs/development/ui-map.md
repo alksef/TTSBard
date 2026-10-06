@@ -42,9 +42,10 @@
 | Поверхность | Источник |
 |---|---|
 | Titlebar и переключение дополнительных окон | `src/App.vue` |
-| Статусы интеграций | `src/components/titlebar/IntegrationStatusCluster.vue` |
+| Статусы интеграций | `src/components/titlebar/IntegrationStatusCluster.vue`, проекция статусов и ошибок — `src/composables/useIntegrationStatusSlots.ts` |
 | Уведомления | `src/components/ErrorToasts.vue`, `shared/StatusMessage.vue`, `shared/TestResult.vue` в `src/components/` |
-| Компактный режим | `src/components/MinimalModeButton.vue`, `src/composables/compactModeState.ts`, `src/composables/useCompactWindowResize.ts`, `src/components/InputPanel.vue` — изменение размера за края окна; внутренние захваты в компактном режиме отсутствуют, разделитель высоты редактора доступен в обычном режиме |
+| Компактный режим | `src/composables/mainWindowMode.ts` (единый владелец), `src/composables/mainWindowModeAdapter.ts` (native IPC), `src/components/MinimalModeButton.vue` (кнопка), `src/composables/useCompactWindowResize.ts`, `src/components/InputPanel.vue` — изменение размера за края окна; внутренние захваты в компактном режиме отсутствуют, разделитель высоты редактора доступен в обычном режиме. Кнопка `ChevronUp` в `src/components/editor/EditorTabs.vue` переключает стиль в режим «Моно» |
+| Режим «Моно» | `src/components/MonoModeBar.vue`, `src/composables/mainWindowMode.ts`, `src/composables/useIntegrationStatusSlots.ts`, `src/App.vue`, `src/components/InputPanel.vue` — стиль компактного режима: скрыты titlebar, вкладки, action bar и история. Угловая `MinimalModeButton` остаётся для прямого возврата в обычное окно. Сверху отображается `MonoModeBar` (18 px) с центральной ручкой, кнопкой `ChevronDown` для возврата в компактный вид, кнопкой сворачивания окна и значками только активных ошибок интеграций с popover подробностей без смещения редактора или расширения окна. Геометрия окна сохраняется без ресайза |
 | Звуковая панель | `src-soundpanel/main.ts` → `SoundPanelApp.vue` в том же каталоге |
 | Управление воспроизведением | `src-playback/main.ts` → `PlaybackControlApp.vue` в том же каталоге |
 | Выбор области OCR | `src-ocr-selection/main.ts` → `SelectionApp.vue` в том же каталоге |

@@ -12,7 +12,11 @@ vi.mock('../utils/debug', () => ({
 }))
 
 import { useCompactWindowResize } from './useCompactWindowResize'
-import { compactModeState } from './compactModeState'
+import {
+  createMainWindowModeController,
+  type MainWindowModeController,
+  type MainWindowModeAdapter,
+} from './mainWindowMode'
 
 let state: { width: number; height: number; scale: number }
 const controllers: ReturnType<typeof useCompactWindowResize>[] = []
@@ -25,11 +29,24 @@ function defaultInvoke(cmd: string, args?: Record<string, unknown>): Promise<unk
   return Promise.resolve(undefined)
 }
 
-function resetCompactState() {
-  compactModeState.appDrivenResize = 0
-  compactModeState.width = 450
-  compactModeState.height = 400
-  compactModeState.flushPendingCompactSave = null
+function makeAdapter(): MainWindowModeAdapter {
+  return {
+    setBounds: vi.fn(async () => {}),
+    removeBounds: vi.fn(async () => {}),
+    resize: vi.fn(async () => {}),
+    persistCompactView: vi.fn(async () => {}),
+  }
+}
+
+function makeController(): { controller: MainWindowModeController } {
+  const adapter = makeAdapter()
+  const storage = { updateStoredView: vi.fn() }
+  const controller = createMainWindowModeController({
+    adapter,
+    storage,
+    boot: { startCompact: true, compactView: 'compact', compactWidth: 450, compactHeight: 400 },
+  })
+  return { controller }
 }
 
 function makeWindow() {
@@ -43,11 +60,27 @@ function makeWindow() {
 function setup() {
   state = { width: 450, height: 400, scale: 1 }
   const w = makeWindow()
-  const isMinimalMode = ref(true)
   const showHistory = ref(false)
-  const ctrl = useCompactWindowResize({ isMinimalMode, showHistory, getWindow: () => w })
+  const { controller } = makeController()
+  const ctrl = useCompactWindowResize({ controller, showHistory, getWindow: () => w })
   controllers.push(ctrl)
-  return { ctrl, w, isMinimalMode, showHistory }
+  return { ctrl, w, showHistory, controller }
+}
+
+// Register the worker's flush through the controller while capturing it for
+// direct invocation in isolated flush tests.
+async function initAndCaptureFlush(
+  ctrl: ReturnType<typeof useCompactWindowResize>,
+  controller: MainWindowModeController,
+): Promise<() => Promise<void>> {
+  const captured: Array<() => Promise<void>> = []
+  const original = controller.setResizeFlush.bind(controller)
+  vi.spyOn(controller, 'setResizeFlush').mockImplementation((next) => {
+    if (next) captured.push(next)
+    return original(next)
+  })
+  await ctrl.init()
+  return captured[0]
 }
 
 const fakeTarget = {
@@ -81,7 +114,6 @@ function resizeCalls() {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  resetCompactState()
   mockInvoke.mockImplementation(defaultInvoke as unknown as typeof mockInvoke)
 })
 
@@ -92,23 +124,24 @@ afterEach(() => {
 
 describe('useCompactWindowResize — async lifecycle regressions', () => {
   it('does not publish a late save after disposal', async () => {
-    const { ctrl } = setup()
-    await ctrl.init()
+    const { ctrl, controller } = setup()
+    const flush = await initAndCaptureFlush(ctrl, controller)
     state.width = 610
     let finishSave!: () => void
     mockInvoke.mockImplementation(() => new Promise<void>(resolve => { finishSave = resolve }))
-    const flush = compactModeState.flushPendingCompactSave!()
+    const pending = flush()
     await flushPromises()
     ctrl.dispose()
-    compactModeState.width = 700 // replacement controller's cache
+    controller.confirmCompactDimensions(700, 700)
     finishSave()
-    await flush
-    expect(compactModeState.width).toBe(700)
-    expect(compactModeState.appDrivenResize).toBe(0)
+    await pending
+    expect(controller.confirmedCompactDimensions.value).toEqual({ width: 700, height: 700 })
+    expect(controller.suppressed.value).toBe(false)
   })
 
-  it('does not restore a flush callback when listener registration finishes after disposal', async () => {
-    const { ctrl, w } = setup()
+  it('does not register a flush callback when listener registration finishes after disposal', async () => {
+    const { ctrl, w, controller } = setup()
+    const setFlush = vi.spyOn(controller, 'setResizeFlush')
     let registered!: (cleanup: () => void) => void
     const unlisten = vi.fn()
     w.onResized.mockImplementation(() => new Promise(resolve => { registered = resolve }))
@@ -117,11 +150,11 @@ describe('useCompactWindowResize — async lifecycle regressions', () => {
     registered(unlisten)
     await init
     expect(unlisten).toHaveBeenCalledOnce()
-    expect(compactModeState.flushPendingCompactSave).toBeNull()
+    expect(setFlush).not.toHaveBeenCalled()
   })
 
   it.each(['history', 'dispose'] as const)('drops queued resize after %s', async action => {
-    const { ctrl, showHistory } = setup()
+    const { ctrl, showHistory, controller } = setup()
     let finishResize!: () => void
     mockInvoke.mockImplementation(() => new Promise<void>(resolve => { finishResize = resolve }))
     ctrl.onCornerPointerDown(ev(0, 0))
@@ -130,78 +163,74 @@ describe('useCompactWindowResize — async lifecycle regressions', () => {
     ctrl.onCornerPointerMove(ev(20, 20))
     if (action === 'history') showHistory.value = true
     else ctrl.dispose()
-    expect(compactModeState.appDrivenResize).toBe(0)
+    expect(controller.suppressed.value).toBe(false)
     finishResize()
     await flushPromises()
     expect(resizeCalls()).toHaveLength(1)
   })
 
   it('keeps another pointer from finishing the active drag', async () => {
-    const { ctrl } = setup()
+    const { ctrl, controller } = setup()
     ctrl.onCornerPointerDown(ev(0, 0))
     await flushPromises()
     ctrl.onCornerPointerUp({ ...ev(0, 0), pointerId: 2 })
-    expect(compactModeState.appDrivenResize).toBe(1)
+    expect(controller.suppressed.value).toBe(true)
     ctrl.onCornerPointerMove(ev(10, 10))
     await flushPromises()
     expect(resizeCalls()).toHaveLength(1)
     ctrl.onCornerPointerUp(ev(10, 10))
     await flushPromises()
-    expect(compactModeState.appDrivenResize).toBe(0)
+    expect(controller.suppressed.value).toBe(false)
   })
 
   it('rejects a non-primary pointer and ignores a second pointer-down without leaking guards', async () => {
-    const { ctrl } = setup()
+    const { ctrl, controller } = setup()
     ctrl.onCornerPointerDown({ ...ev(0, 0), isPrimary: false })
-    expect(compactModeState.appDrivenResize).toBe(0)
+    expect(controller.suppressed.value).toBe(false)
     ctrl.onCornerPointerDown(ev(0, 0))
     ctrl.onCornerPointerDown({ ...ev(0, 0), pointerId: 2 })
-    expect(compactModeState.appDrivenResize).toBe(1)
+    expect(controller.suppressed.value).toBe(true)
     ctrl.dispose()
-    expect(compactModeState.appDrivenResize).toBe(0)
+    expect(controller.suppressed.value).toBe(false)
   })
 
   it('serializes repeated arrow keys and prevents the default synchronously', async () => {
-    const { ctrl } = setup()
+    const { ctrl, controller } = setup()
     const first = keyEv('ArrowRight')
     const a = ctrl.onCornerKeydown(first)
     expect(first.preventDefault).toHaveBeenCalledOnce()
     const b = ctrl.onCornerKeydown(keyEv('ArrowRight'))
     await Promise.all([a, b])
     expect(state.width).toBe(482)
-    expect(compactModeState.width).toBe(482)
-    expect(compactModeState.appDrivenResize).toBe(0)
+    expect(controller.confirmedCompactDimensions.value.width).toBe(482)
+    expect(controller.suppressed.value).toBe(false)
   })
 
   it('handles a keyboard snapshot failure and allows retry', async () => {
-    const { ctrl, w } = setup()
+    const { ctrl, w, controller } = setup()
     w.innerSize.mockRejectedValueOnce(new Error('read failed'))
     await expect(ctrl.onCornerKeydown(keyEv('ArrowRight'))).resolves.toBeUndefined()
     expect(mockDebugError).toHaveBeenCalled()
-    expect(compactModeState.appDrivenResize).toBe(0)
+    expect(controller.suppressed.value).toBe(false)
     await ctrl.onCornerKeydown(keyEv('ArrowRight'))
     expect(state.width).toBe(466)
   })
 
-  it('flush waits for suspended keyboard work and saves before the ordinary resize', async () => {
-    const { ctrl, w, isMinimalMode } = setup()
-    await ctrl.init()
+  it('flush waits for suspended keyboard work and saves the inner size', async () => {
+    const { ctrl, w, controller } = setup()
+    const flush = await initAndCaptureFlush(ctrl, controller)
     let readSize!: (size: { width: number; height: number }) => void
     w.innerSize.mockImplementationOnce(() => new Promise(resolve => { readSize = resolve }))
     const keyboard = ctrl.onCornerKeydown(keyEv('ArrowRight'))
     await flushPromises()
-    const flush = compactModeState.flushPendingCompactSave!()
+    const pendingFlush = flush()
     readSize({ width: 450, height: 400 })
-    await flush
-    isMinimalMode.value = false
-    state.width = 800
-    state.height = 630
+    await pendingFlush
     await keyboard
     await flushPromises()
     expect(resizeCalls()).toHaveLength(0)
-    expect(compactModeState.width).toBe(450)
-    expect(compactModeState.height).toBe(400)
-    expect(compactModeState.appDrivenResize).toBe(0)
+    expect(controller.confirmedCompactDimensions.value).toEqual({ width: 450, height: 400 })
+    expect(controller.suppressed.value).toBe(false)
   })
 })
 
@@ -267,7 +296,7 @@ describe('useCompactWindowResize — height separator', () => {
 
 describe('useCompactWindowResize — persistence', () => {
   it('persists two-axis inner size and does not grow width on a second drag', async () => {
-    const { ctrl } = setup()
+    const { ctrl, controller } = setup()
     ctrl.onCornerPointerDown(ev(0, 0))
     await flushPromises()
     ctrl.onCornerPointerMove(ev(150, 50))
@@ -276,8 +305,7 @@ describe('useCompactWindowResize — persistence', () => {
     await flushPromises()
 
     expect(mockInvoke).toHaveBeenCalledWith('set_main_compact_dims', { width: 600, height: 450 })
-    expect(compactModeState.width).toBe(600)
-    expect(compactModeState.height).toBe(450)
+    expect(controller.confirmedCompactDimensions.value).toEqual({ width: 600, height: 450 })
 
     // Second drag starts from the inner snapshot (600x450), not an inflated
     // outer/frame read, so a +10px delta yields 610 — no cumulative width drift.
@@ -289,14 +317,14 @@ describe('useCompactWindowResize — persistence', () => {
   })
 
   it('flush right after a resize persists compact dims, never ordinary dims', async () => {
-    const { ctrl } = setup()
-    await ctrl.init()
+    const { ctrl, controller } = setup()
+    const flush = await initAndCaptureFlush(ctrl, controller)
     ctrl.onCornerPointerDown(ev(0, 0))
     await flushPromises()
     ctrl.onCornerPointerMove(ev(150, 50))
     ctrl.onCornerPointerUp(ev(150, 50))
 
-    await compactModeState.flushPendingCompactSave!()
+    await flush()
 
     const saves = mockInvoke.mock.calls.filter((c) => c[0] === 'set_main_compact_dims')
     expect(saves.pop()?.[1]).toEqual({ width: 600, height: 450 })
@@ -338,55 +366,55 @@ describe('useCompactWindowResize — ordering and coalescing', () => {
 
 describe('useCompactWindowResize — cancel and cleanup', () => {
   it('releases the guard exactly once on pointer cancel', async () => {
-    const { ctrl } = setup()
+    const { ctrl, controller } = setup()
     ctrl.onCornerPointerDown(ev(0, 0))
     await flushPromises()
-    expect(compactModeState.appDrivenResize).toBe(1)
+    expect(controller.suppressed.value).toBe(true)
 
     ctrl.onCornerPointerCancel(ev(0, 0))
     await flushPromises()
-    expect(compactModeState.appDrivenResize).toBe(0)
+    expect(controller.suppressed.value).toBe(false)
   })
 
   it('releases the guard when lost pointer capture cancels an active drag', async () => {
-    const { ctrl } = setup()
+    const { ctrl, controller } = setup()
     ctrl.onCornerPointerDown(ev(0, 0))
     await flushPromises()
-    expect(compactModeState.appDrivenResize).toBe(1)
+    expect(controller.suppressed.value).toBe(true)
 
     ctrl.onCornerLostPointerCapture(ev(0, 0))
     await flushPromises()
-    expect(compactModeState.appDrivenResize).toBe(0)
+    expect(controller.suppressed.value).toBe(false)
   })
 
   it('logs and releases the guard when the initial size read fails', async () => {
-    const { ctrl, w } = setup()
+    const { ctrl, w, controller } = setup()
     w.innerSize.mockRejectedValue(new Error('inner size failed'))
     ctrl.onCornerPointerDown(ev(0, 0))
     await flushPromises()
 
     expect(mockDebugError).toHaveBeenCalled()
-    expect(compactModeState.appDrivenResize).toBe(0)
+    expect(controller.suppressed.value).toBe(false)
     expect(resizeCalls()).toHaveLength(0)
   })
 
   it('does not start a drag with a non-primary button', async () => {
-    const { ctrl } = setup()
+    const { ctrl, controller } = setup()
     ctrl.onCornerPointerDown(ev(0, 0, 2))
     await flushPromises()
-    expect(compactModeState.appDrivenResize).toBe(0)
+    expect(controller.suppressed.value).toBe(false)
     expect(resizeCalls()).toHaveLength(0)
   })
 })
 
 describe('useCompactWindowResize — history lock', () => {
   it('blocks corner drag and keyboard resizing while history is open', async () => {
-    const { ctrl, showHistory } = setup()
+    const { ctrl, showHistory, controller } = setup()
     showHistory.value = true
 
     ctrl.onCornerPointerDown(ev(0, 0))
     await flushPromises()
-    expect(compactModeState.appDrivenResize).toBe(0)
+    expect(controller.suppressed.value).toBe(false)
     expect(resizeCalls()).toHaveLength(0)
 
     await ctrl.onCornerKeydown(keyEv('ArrowRight'))
@@ -394,14 +422,14 @@ describe('useCompactWindowResize — history lock', () => {
   })
 
   it('cancels an active gesture when history opens', async () => {
-    const { ctrl, showHistory } = setup()
+    const { ctrl, showHistory, controller } = setup()
     ctrl.onCornerPointerDown(ev(0, 0))
     await flushPromises()
-    expect(compactModeState.appDrivenResize).toBe(1)
+    expect(controller.suppressed.value).toBe(true)
 
     showHistory.value = true
     await nextTick()
-    expect(compactModeState.appDrivenResize).toBe(0)
+    expect(controller.suppressed.value).toBe(false)
   })
 })
 
@@ -431,60 +459,60 @@ describe('useCompactWindowResize — rejection and retry', () => {
   })
 
   it('a rejected save surfaces to flush and a retry succeeds', async () => {
-    const { ctrl } = setup()
-    await ctrl.init()
+    const { ctrl, controller } = setup()
+    const flush = await initAndCaptureFlush(ctrl, controller)
 
     mockInvoke.mockImplementationOnce((cmd: string) => {
       if (cmd === 'set_main_compact_dims') return Promise.reject(new Error('save failed'))
       return Promise.resolve(undefined)
     })
 
-    await expect(compactModeState.flushPendingCompactSave!()).rejects.toThrow('save failed')
+    await expect(flush()).rejects.toThrow('save failed')
 
-    await compactModeState.flushPendingCompactSave!()
+    await flush()
     expect(mockInvoke).toHaveBeenCalledWith('set_main_compact_dims', { width: 450, height: 400 })
   })
 })
 
 describe('useCompactWindowResize — disposal', () => {
-  it('a late snapshot result after dispose does not mutate state or leak the guard', async () => {
-    const { ctrl, w } = setup()
+  it('a late snapshot result after dispose does not resize or leak the guard', async () => {
+    const { ctrl, w, controller } = setup()
     let resolveInner!: (v: { width: number; height: number }) => void
     w.innerSize.mockImplementation(() => new Promise((resolve) => { resolveInner = resolve }))
     w.scaleFactor.mockResolvedValue(1)
 
     ctrl.onCornerPointerDown(ev(0, 0))
     await flushPromises()
-    expect(compactModeState.appDrivenResize).toBe(1)
+    expect(controller.suppressed.value).toBe(true)
 
     ctrl.dispose()
-    expect(compactModeState.appDrivenResize).toBe(0)
+    expect(controller.suppressed.value).toBe(false)
 
     resolveInner({ width: 999, height: 999 })
     await flushPromises()
 
     expect(resizeCalls()).toHaveLength(0)
-    expect(compactModeState.appDrivenResize).toBe(0)
-    expect(compactModeState.flushPendingCompactSave).toBeNull()
+    expect(controller.suppressed.value).toBe(false)
+    expect(controller.confirmedCompactDimensions.value).toEqual({ width: 450, height: 400 })
   })
 })
 
 describe('useCompactWindowResize — onResized debounced save', () => {
   it('debounces user resizes and skips programmatic ones and history', async () => {
     vi.useFakeTimers()
-    const { ctrl, w, showHistory } = setup()
+    const { ctrl, w, showHistory, controller } = setup()
     await ctrl.init()
     const handler = w.onResized.mock.calls[0][0] as () => void
 
-    // Programmatic resize (guard > 0) must not schedule a save.
-    compactModeState.appDrivenResize = 1
+    // Programmatic resize (suppression lease held) must not schedule a save.
+    const release = controller.acquireSuppressionLease()
     handler()
     vi.advanceTimersByTime(2000)
     await flushPromises()
     expect(mockInvoke).not.toHaveBeenCalledWith('set_main_compact_dims', expect.anything())
 
     // History open must not schedule a save.
-    compactModeState.appDrivenResize = 0
+    release()
     showHistory.value = true
     handler()
     vi.advanceTimersByTime(2000)
@@ -498,4 +526,74 @@ describe('useCompactWindowResize — onResized debounced save', () => {
     await flushPromises()
     expect(mockInvoke).toHaveBeenCalledWith('set_main_compact_dims', { width: 450, height: 400 })
   })
+})
+
+describe('useCompactWindowResize — shared geometry across compact view styles', () => {
+  it('preserves pending debounced save across view style change', async () => {
+    vi.useFakeTimers()
+    const { ctrl, w, controller } = setup()
+    await ctrl.init()
+    const handler = w.onResized.mock.calls[0][0] as () => void
+
+    state.width = 500
+    state.height = 420
+    handler()
+
+    // View style switches compact -> mono while save is debouncing
+    await controller.setCompactView('mono')
+
+    vi.advanceTimersByTime(1000)
+    await flushPromises()
+
+    expect(controller.rememberedView.value).toBe('mono')
+    expect(mockInvoke).toHaveBeenCalledWith('set_main_compact_dims', { width: 500, height: 420 })
+    expect(controller.confirmedCompactDimensions.value).toEqual({ width: 500, height: 420 })
+  })
+
+  it('unblocks resize when history is closed upon entering mono mode', async () => {
+    const { ctrl, showHistory } = setup()
+    await ctrl.init()
+
+    // In compact with history open: drag is blocked
+    showHistory.value = true
+    ctrl.onHeightPointerDown(ev(10, 10))
+    ctrl.onHeightPointerMove(ev(10, 50))
+    await ctrl.onHeightPointerUp(ev(10, 50))
+    expect(resizeCalls()).toHaveLength(0)
+
+    // Entering mono closes history
+    showHistory.value = false
+    ctrl.onHeightPointerDown(ev(10, 10))
+    await flushPromises()
+    ctrl.onHeightPointerMove(ev(10, 50))
+    await flushPromises()
+    await ctrl.onHeightPointerUp(ev(10, 50))
+    await flushPromises()
+
+    expect(resizeCalls().length).toBeGreaterThan(0)
+  })
+})
+
+it('does not start a pointer gesture while controller suppression is active', async () => {
+  const { ctrl, controller, w } = setup()
+  const release = controller.acquireSuppressionLease()
+  ctrl.onCornerPointerDown(ev(0, 0))
+  await flushPromises()
+  expect(w.innerSize).not.toHaveBeenCalled()
+  expect(resizeCalls()).toHaveLength(0)
+  release()
+})
+
+it('rejects pre-edge-resize snapshots before the debounce saves dimensions', async () => {
+  vi.useFakeTimers()
+  const { ctrl, controller, w } = setup()
+  await ctrl.init()
+  const revision = controller.captureSnapshotRevision()
+  state.width = 590
+  const handler = w.onResized.mock.calls[0][0] as () => void
+  handler()
+  expect(controller.applySettingsSnapshot({ compactView: 'mono', compactWidth: 300, compactHeight: 300, startCompact: true }, revision)).toBe(false)
+  vi.advanceTimersByTime(1000)
+  await flushPromises()
+  expect(controller.confirmedCompactDimensions.value.width).toBe(590)
 })

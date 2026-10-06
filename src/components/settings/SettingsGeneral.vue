@@ -326,6 +326,7 @@ watch(loggingSettings, (newSettings) => {
           <span>{{ t('general.start_compact.label') }}</span>
         </label>
         <span class="setting-hint ui-hint">{{ t('general.start_compact.hint') }}</span>
+        <span class="setting-hint ui-hint">{{ t('general.start_compact.view_hint') }}</span>
       </div>
 
       <div class="general-row">

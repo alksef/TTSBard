@@ -1,16 +1,9 @@
-import { reactive } from 'vue'
+import type { CompactView } from '../types/settings'
 
-export const compactModeState = reactive({
-  /** >0 means an app-driven resize is in progress; skip saving compact dims */
-  appDrivenResize: 0,
-  /** Cached compact dimensions (physical inner pixels) kept in sync with the backend by useCompactWindowResize */
-  width: 450,
-  height: 400,
-  /** Set by useCompactWindowResize; called before leaving compact mode to flush pending debounced save */
-  flushPendingCompactSave: null as (() => Promise<void>) | null,
-})
+export type { CompactView }
 
 export const START_COMPACT_STORAGE_KEY = 'app-start-compact'
+export const COMPACT_VIEW_STORAGE_KEY = 'app-compact-view'
 
 /**
  * Determine whether the application should immediately render in compact mode.
@@ -42,6 +35,35 @@ export function getInitialCompactMode(): boolean {
 }
 
 /**
+ * Determine the initial compact view style ('compact' | 'mono').
+ * The authoritative value is the validated string injected by the native
+ * backend at startup (`window.__TTSBARD_COMPACT_VIEW__`); it wins over any
+ * cached value, including 'compact'. In non-native/browser contexts the flag
+ * is absent, so fall back to the cached localStorage value ('compact' when
+ * missing, unreadable, or invalid).
+ */
+export function getInitialCompactView(): CompactView {
+  if (typeof window !== 'undefined') {
+    const bootValue = (window as { __TTSBARD_COMPACT_VIEW__?: unknown })
+      .__TTSBARD_COMPACT_VIEW__
+    if (bootValue === 'mono' || bootValue === 'compact') {
+      return bootValue
+    }
+  }
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const stored = localStorage.getItem(COMPACT_VIEW_STORAGE_KEY)
+      if (stored === 'mono' || stored === 'compact') {
+        return stored
+      }
+    }
+  } catch {
+    // Ignore storage errors in restricted contexts
+  }
+  return 'compact'
+}
+
+/**
  * Safely persist the start-compact preference to localStorage to avoid layout flashes on next launch.
  */
 export function saveStartCompactToStorage(value: boolean): void {
@@ -54,7 +76,15 @@ export function saveStartCompactToStorage(value: boolean): void {
   }
 }
 
-export function initCompactDims(w: number, h: number) {
-  compactModeState.width = w
-  compactModeState.height = h
+/**
+ * Safely persist the compact view preference to localStorage to avoid layout flashes on next launch.
+ */
+export function saveCompactViewToStorage(value: CompactView): void {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(COMPACT_VIEW_STORAGE_KEY, value)
+    }
+  } catch {
+    // Ignore storage errors in restricted contexts
+  }
 }
