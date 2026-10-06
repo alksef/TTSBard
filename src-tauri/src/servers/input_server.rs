@@ -12,6 +12,7 @@ use crate::input_server::{InputServerService, InputServerStatus};
 use crate::ipc::CommandError;
 use crate::speech_queue::SubmissionSource;
 use crate::state::AppState;
+use crate::webview::service::{port_in_use_message, START_FAILED_CODE};
 use axum::Router;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -74,13 +75,35 @@ fn listener_bind_addr(bind_address: &str, port: u16) -> Result<SocketAddr, Strin
         .map_err(|error| format!("Invalid bind address {addr}: {error}"))
 }
 
-/// Bind the input server listener, returning a user-facing error message on
-/// failure.
-async fn bind_listener(bind_address: &str, port: u16) -> Result<TcpListener, String> {
-    let addr = listener_bind_addr(bind_address, port)?;
-    TcpListener::bind(addr)
-        .await
-        .map_err(|error| format!("Failed to bind {addr}: {error}"))
+/// Bind the input server listener.
+///
+/// Returns a frontend-parseable failure on error: an occupied port yields
+/// `port_in_use:<port>` (classified from `ErrorKind::AddrInUse`, never from
+/// localized OS text), any other failure the generic `server_start_failed`
+/// code. The technical OS detail is carried separately so the supervisor can
+/// log it without leaking it to the frontend.
+async fn bind_listener(bind_address: &str, port: u16) -> Result<TcpListener, BindFailure> {
+    let addr = listener_bind_addr(bind_address, port).map_err(|detail| BindFailure {
+        message: START_FAILED_CODE.to_string(),
+        detail,
+    })?;
+    TcpListener::bind(addr).await.map_err(|error| {
+        let message = if error.kind() == std::io::ErrorKind::AddrInUse {
+            port_in_use_message(port)
+        } else {
+            START_FAILED_CODE.to_string()
+        };
+        BindFailure {
+            message,
+            detail: format!("Failed to bind {addr}: {error}"),
+        }
+    })
+}
+
+/// A failed listener bind: stable frontend message plus log-only technical text.
+struct BindFailure {
+    message: String,
+    detail: String,
 }
 
 /// Resolve the overlay language decision from the effective UI locale.
@@ -227,9 +250,9 @@ async fn run_input_server_core<E, S>(
         info!("Input server starting on {bind_address}:{port}");
         let listener = match bind_listener(&bind_address, port).await {
             Ok(listener) => listener,
-            Err(message) => {
-                error!(error = %message, "Input server bind failed");
-                service.publish_status(InputServerStatus::Error { message }, &mut emit);
+            Err(failure) => {
+                error!(error = %failure.detail, "Input server bind failed");
+                service.publish_status(InputServerStatus::Error { message: failure.message }, &mut emit);
                 tokio::select! {
                     _ = shutdown.cancelled() => {
                         service.publish_status(InputServerStatus::Stopped, &mut emit);
@@ -312,6 +335,23 @@ mod tests {
             "[::1]:10101".parse::<SocketAddr>().unwrap()
         );
         assert!(listener_bind_addr("not an address", 10101).is_err());
+    }
+
+    #[tokio::test]
+    async fn bind_listener_reports_port_in_use_for_occupied_port() {
+        let occupied = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = occupied.local_addr().unwrap().port();
+
+        let failure = bind_listener("127.0.0.1", port).await.unwrap_err();
+        assert_eq!(failure.message, format!("port_in_use:{port}"));
+        // Technical detail is kept for logs only, separate from the frontend code.
+        assert!(!failure.detail.is_empty());
+    }
+
+    #[tokio::test]
+    async fn bind_listener_reports_generic_code_for_invalid_address() {
+        let failure = bind_listener("not an address", 10101).await.unwrap_err();
+        assert_eq!(failure.message, "server_start_failed");
     }
 
     struct RecordingIntake;
@@ -524,7 +564,9 @@ mod tests {
 
         match service.status() {
             InputServerStatus::Error { message } => {
-                assert!(!message.is_empty(), "bind error must carry a message");
+                // Occupied port must be reported as the stable encoded code with
+                // the captured port, never the OS/localized bind text.
+                assert_eq!(message, format!("port_in_use:{port}"));
             }
             other => panic!("expected error status, got {other:?}"),
         }

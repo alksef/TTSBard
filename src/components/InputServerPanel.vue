@@ -72,7 +72,7 @@ const statusText = computed(() => {
             :class="{
               running: isRunning,
               starting: status.state === 'starting',
-              error: status.state === 'error',
+              error: status.state === 'error' && !controlsLocked,
             }"
           >
             {{ statusText }}
@@ -111,10 +111,12 @@ const statusText = computed(() => {
               <Play :size="18" />
             </button>
             <button
-              class="status-button stop disabled ui-icon-button ui-action--stop"
+              class="status-button stop ui-icon-button ui-action--stop"
+              :class="{ disabled: status.state !== 'error' || operationPending }"
               :title="t('input_server.stop')"
               :aria-label="t('input_server.stop')"
-              disabled
+              :disabled="status.state !== 'error' || operationPending"
+              @click="stopInputServer"
             >
               <Square :size="18" />
             </button>
@@ -122,7 +124,7 @@ const statusText = computed(() => {
         </div>
       </div>
 
-      <div v-if="statusError" class="external-access-warning ui-status">
+      <div v-if="statusError" class="status-error-banner ui-status">
         <AlertTriangle :size="14" />
         <span>{{ statusError }}</span>
       </div>
@@ -408,6 +410,11 @@ h2 {
   border-color: var(--danger-border);
 }
 
+:global([data-theme='light'] .input-server-panel .status-indicator.error),
+:global([data-theme='light'] .input-server-panel .message-box.error) {
+  color: var(--ui-action-danger-hover-text);
+}
+
 .status-button.disabled:not(.stop) {
   background: var(--btn-disabled-bg);
   cursor: not-allowed;
@@ -426,6 +433,23 @@ h2 {
   color: var(--warning-text-bright);
   line-height: 1.4;
 }
+
+/* Persistent-баннер отказа запуска: красная тема, общая типографика ui-status. */
+.status-error-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 1rem;
+  background: var(--danger-bg-weak);
+  border: 1px solid var(--danger-border);
+  border-radius: 8px;
+  color: var(--danger-text-bright);
+  line-height: 1.4;
+}
+
+.status-error-banner svg { flex-shrink: 0; }
+:global([data-theme='light'] .status-error-banner) { color: var(--ui-action-danger-hover-text); }
 
 /* Rows use ui-row; only wrap behavior and the last-row reset stay local.
    The legacy .setting-row name is gone so global AudioPanel rules cannot

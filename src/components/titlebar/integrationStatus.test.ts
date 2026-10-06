@@ -134,12 +134,20 @@ describe('inputServerTone', () => {
 })
 
 describe('inputServerStatusLabel', () => {
+  it('localizes captured occupied ports without exposing technical messages', () => {
+    expect(inputServerStatusLabel({ state: 'error', message: 'port_in_use:10101' })).toContain('порт 10101 занят')
+    expect(integrationStatusLabel('webview', 'red', { state: 'error', message: 'port_in_use:10101' })).toContain('порт 10101 занят')
+    for (const message of ['Failed to bind 0.0.0.0:10101: os error 10048', 'server_start_failed']) {
+      expect(inputServerStatusLabel({ state: 'error', message })).not.toContain(message)
+      expect(integrationStatusLabel('webview', 'red', { state: 'error', message })).not.toContain(message)
+    }
+  })
   it('produces the exact Russian status labels', () => {
     expect(inputServerStatusLabel({ state: 'running' })).toBe('Входящий сервер — запущен')
     expect(inputServerStatusLabel({ state: 'starting' })).toBe('Входящий сервер — запускается')
     expect(inputServerStatusLabel({ state: 'stopped' })).toBe('Входящий сервер — остановлен')
     expect(inputServerStatusLabel({ state: 'error', message: 'порт занят' })).toBe(
-      'Входящий сервер — ошибка: порт занят',
+      'Входящий сервер — ошибка',
     )
     expect(inputServerStatusLabel({ state: 'error' })).toBe('Входящий сервер — ошибка')
   })
@@ -167,7 +175,7 @@ describe('integrationStatusLabel', () => {
   it('error message reaches the label', () => {
     expect(
       integrationStatusLabel('webview', 'red', { state: 'error', message: 'порт занят' }),
-    ).toBe('WebView — ошибка запуска: порт занят')
+    ).toBe('WebView — ошибка запуска')
     expect(integrationStatusLabel('webview', 'red', { state: 'error' })).toBe(
       'WebView — ошибка запуска',
     )

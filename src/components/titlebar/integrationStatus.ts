@@ -1,4 +1,5 @@
 import { t } from '../../i18n'
+import { parseServerStartError } from '../../ipc/serverError'
 
 export type IntegrationTone = 'gray' | 'green' | 'red' | 'yellow'
 
@@ -81,9 +82,9 @@ export function inputServerStatusLabel(runtime: InputServerRuntime): string {
     case 'starting':
       return t('integrations.status.starting', { service })
     case 'error': {
-      const message = messageText(runtime)
-      return message
-        ? t('integrations.status.error_message', { service, message })
+      const error = parseServerStartError(messageText(runtime))
+      return error.kind === 'port_in_use'
+        ? t('integrations.status.error_message', { service, message: t('server.error.port_in_use', { port: error.port }) })
         : t('integrations.status.error', { service })
     }
     case 'stopped':
@@ -114,8 +115,9 @@ export function integrationStatusLabel(
   if (tone === 'red') {
     const message = messageText(runtime)
     if (service === 'webview') {
-      return message
-        ? t('integrations.status.start_error_message', { service: name, message })
+      const error = parseServerStartError(message)
+      return error.kind === 'port_in_use'
+        ? t('integrations.status.start_error_message', { service: name, message: t('server.error.port_in_use', { port: error.port }) })
         : t('integrations.status.start_error', { service: name })
     }
     return message

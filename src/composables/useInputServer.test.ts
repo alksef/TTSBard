@@ -44,7 +44,8 @@ vi.mock('../utils/debug', () => ({
   debugError: mocks.mockDebugError,
 }))
 
-vi.mock('../ipc/commandError', () => ({
+vi.mock('../ipc/commandError', async () => ({
+  ...(await vi.importActual<typeof import('../ipc/commandError')>('../ipc/commandError')),
   normalizeCommandError: mocks.mockNormalizeCommandError,
 }))
 
@@ -82,6 +83,20 @@ describe('useInputServer', () => {
     capturedOnMountedCb = null
     capturedOnUnmountedCb = null
     mocks.mockNormalizeCommandError.mockReturnValue({ message: '' })
+  })
+
+  it('hides the previous failure during retry and keeps command details out of the toast', async () => {
+    let rejectStart!: (reason: unknown) => void
+    mocks.mockInvoke.mockImplementation(() => new Promise((_resolve, reject) => { rejectStart = reject }))
+    const server = useInputServer()
+    server.status.value = { state: 'error', message: 'port_in_use:10101' }
+    expect(server.statusError.value).toContain('10101')
+    const retry = server.startInputServer()
+    expect(server.statusError.value).toBeNull()
+    rejectStart(new Error('private OS failure'))
+    await retry
+    expect(server.message.value).toBe('Не удалось запустить сервер. Попробуйте ещё раз.')
+    expect(server.statusError.value).toContain('10101')
   })
 
   it('starts with default settings, stopped status and derived endpoint', () => {
@@ -352,7 +367,7 @@ describe('useInputServer', () => {
     // сообщение об ошибке по-прежнему локализовано и честно.
     expect(settings.value).toEqual({ start_on_boot: false, port: 14000 })
     expect(messageType.value).toBe('error')
-    expect(message.value).toContain('port busy')
+    expect(message.value).toBe('Не удалось сохранить настройки')
   })
 
   it('rolls back an unchanged rejected field to the last confirmed value', async () => {
@@ -604,8 +619,7 @@ describe('useInputServer', () => {
     testText.value = 'привет'
     await sendTest()
 
-    expect(mocks.mockNormalizeCommandError).toHaveBeenCalled()
-    expect(testError.value).toBe('Входящие переполнены')
+    expect(testError.value).toBe('Входящая очередь заполнена')
   })
 
   it('updates status on input-server-status-changed event', async () => {
@@ -806,10 +820,10 @@ describe('useInputServer start with save', () => {
 
     // Ошибка сохранения блокирует запуск: start_input_server не вызван.
     expect(mocks.mockInvoke).not.toHaveBeenCalledWith('start_input_server')
-    expect(message.value).toBe('Не удалось сохранить настройки: disk full')
+    expect(message.value).toBe('Не удалось сохранить настройки')
   })
 
-  it('reports the runtime failure with the saved prefix', async () => {
+  it('reports the occupied port as the unified localized toast', async () => {
     const { settings, startInputServer, message } = await setupAndMount()
     mocks.mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === 'save_input_server_settings') return undefined
@@ -819,10 +833,38 @@ describe('useInputServer start with save', () => {
     settings.value.port = 12000
     const start = startInputServer()
     await vi.waitFor(() => expect(mocks.mockInvoke).toHaveBeenCalledWith('start_input_server'))
-    emitStatus('error', 'port busy')
+    emitStatus('error', 'port_in_use:12000')
     await start
 
-    expect(message.value).toBe('Настройки сохранены. Не удалось запустить сервер: port busy')
+    expect(message.value).toBe('Не удалось запустить сервер: порт 12000 занят')
+  })
+
+  it('reports any other startup failure as the generic localized toast', async () => {
+    const { startInputServer, message } = await setupAndMount()
+    const start = startInputServer()
+    await vi.waitFor(() => expect(mocks.mockInvoke).toHaveBeenCalledWith('start_input_server'))
+    emitStatus('error', 'server_start_failed')
+    await start
+
+    expect(message.value).toBe('Не удалось запустить сервер. Попробуйте ещё раз.')
+  })
+
+  it('derives the persistent banner from the captured port, not the draft', async () => {
+    const { settings, statusError } = await setupAndMount()
+    // Статус приносит занятый порт, а черновик формы уже изменён.
+    emitStatus('error', 'port_in_use:10101')
+    settings.value.port = 15000
+
+    expect(statusError.value).toBe(
+      'Не удалось запустить сервер: при последней попытке порт 10101 был занят. Повторите запуск или выберите другой порт.',
+    )
+  })
+
+  it('derives the generic persistent banner for non-port failures', async () => {
+    const { statusError } = await setupAndMount()
+    emitStatus('error', 'server_start_failed')
+
+    expect(statusError.value).toBe('Не удалось запустить сервер. Повторите запуск.')
   })
 
   it('blocks the start on an invalid port without saving', async () => {
@@ -977,5 +1019,24 @@ describe('useInputServer runtime status snapshot protection', () => {
     await mount
 
     expect(composable.status.value).toEqual({ state: 'running' })
+  })
+
+  it('restores an error snapshot without producing a failure toast', async () => {
+    mocks.mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_input_server_settings') return { start_on_boot: false, port: 10101 }
+      if (cmd === 'get_input_server_status') return { state: 'error', message: 'port_in_use:10101' }
+      if (cmd === 'get_input_server_connection_url') return 'http://127.0.0.1:10101/overlay'
+      if (cmd === 'get_input_server_token') return null
+      return undefined
+    })
+
+    const composable = useInputServer()
+    if (capturedOnMountedCb) await capturedOnMountedCb()
+
+    expect(composable.status.value).toEqual({ state: 'error', message: 'port_in_use:10101' })
+    expect(composable.message.value).toBeNull()
+    expect(composable.statusError.value).toBe(
+      'Не удалось запустить сервер: при последней попытке порт 10101 был занят. Повторите запуск или выберите другой порт.',
+    )
   })
 })

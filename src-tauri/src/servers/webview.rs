@@ -4,30 +4,15 @@
 // Refactored from lib.rs WebView server thread (2026-03-11)
 
 use crate::events::AppEvent;
-use crate::setup::parse_webview_server_error;
+use crate::webview::service::START_FAILED_CODE;
 use crate::webview::WebViewServer;
 use crate::webview::WebViewServerStatus;
 use crate::webview::WebViewSettings;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
-
-/// Delay between WebView server respawn attempts after a startup error.
-///
-/// Prevents a tight CPU-spinning respawn loop when the server cannot bind,
-/// e.g. a busy port (see `webview/server.rs`). Chosen within
-/// 1–3s: short enough to recover quickly after a transient failure, long
-/// enough to avoid a busy loop.
-const SERVER_RESPAWN_BACKOFF: Duration = Duration::from_secs(2);
-
-/// How many consecutive startup failures (readiness never reached) are
-/// tolerated before the supervisor gives up and waits for an explicit user
-/// action (start/restart/settings change). Without this cap, a persistent
-/// failure such as a busy port makes the status flap Starting↔Error forever,
-/// which the WebView settings UI renders as a blinking panel.
-const MAX_START_ATTEMPTS: u32 = 3;
 
 /// Период повтора `typing: true`, пока набор остаётся активным.
 ///
@@ -71,43 +56,32 @@ impl TypingHeartbeat {
     }
 }
 
-/// Wait for the respawn backoff, bailing out early if shutdown was requested.
-/// Returns `true` when the supervisor loop should keep running, `false` when
-/// it must exit.
-async fn respawn_backoff(shutdown: &CancellationToken, delay: Duration) -> bool {
-    tokio::select! {
-        _ = shutdown.cancelled() => false,
-        _ = tokio::time::sleep(delay) => true,
-    }
-}
-
-/// Decide what the supervisor does after a startup failure.
+/// Wait for an explicit restart or shutdown after a startup failure.
 ///
-/// While under [`MAX_START_ATTEMPTS`] consecutive failures: back off, then
-/// allow a respawn (transient failures still recover automatically). At the
-/// cap: stop retrying — the status stays `Error` (no flapping) — and wait
-/// for either shutdown or an explicit wake-up event (user start/restart or
-/// a settings change arriving via `webview_rx`), which resets the counter.
+/// A failed start never retries on a timer and never wakes on unrelated events
+/// (TTS text, typing, template reloads, etc.). Only `RestartWebViewServer` —
+/// an explicit user start/restart, or a settings change that re-applies the
+/// server — or shutdown resumes the supervisor. A manual stop also arrives as
+/// `RestartWebViewServer` (the `enabled` flip is persisted first), after which
+/// the supervisor re-reads `enabled == false` and goes to `Stopped`.
+///
 /// Returns `true` to continue the supervision loop, `false` to exit.
-async fn respawn_or_give_up(
+async fn wait_for_explicit_restart(
     shutdown: &CancellationToken,
-    start_attempts: &mut u32,
     webview_rx: &mut tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
 ) -> bool {
-    *start_attempts += 1;
-    if *start_attempts < MAX_START_ATTEMPTS {
-        return respawn_backoff(shutdown, SERVER_RESPAWN_BACKOFF).await;
-    }
-
-    warn!(
-        attempts = *start_attempts,
-        "WebView server failed to start repeatedly; giving up until an explicit restart"
-    );
-    tokio::select! {
-        _ = shutdown.cancelled() => false,
-        _ = webview_rx.recv() => {
-            *start_attempts = 0;
-            true
+    loop {
+        tokio::select! {
+            _ = shutdown.cancelled() => return false,
+            event = webview_rx.recv() => {
+                match event {
+                    Some(AppEvent::RestartWebViewServer) => return true,
+                    Some(AppEvent::Quit) => return false,
+                    // Unrelated events must not wake a failed server.
+                    Some(_) => continue,
+                    None => return false,
+                }
+            }
         }
     }
 }
@@ -120,10 +94,6 @@ pub async fn run_webview_server(
     mut webview_rx: tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
     shutdown: CancellationToken,
 ) {
-    // Consecutive startup failures (readiness never reached). Reset on a
-    // successful start or after an explicit wake-up event following a give-up.
-    let mut start_attempts: u32 = 0;
-
     {
         let settings = webview_settings.read().await;
         if settings.start_on_boot && !settings.enabled {
@@ -159,19 +129,19 @@ pub async fn run_webview_server(
             let server = match WebViewServer::new(Arc::clone(&webview_settings)).await {
                 Ok(s) => s,
                 Err(e) => {
-                    let error_msg = format!("Failed to create server: {}", e);
-                    error!("[WEBVIEW] ❌ {}", error_msg);
-                    let _ = app_handle.emit("webview-server-error", &error_msg);
+                    // Technical detail stays in logs; the frontend receives the
+                    // stable generic failure code only.
+                    error!(error = %e, "[WEBVIEW] Failed to create server");
                     state.webview.set_status(
                         &app_handle,
-                        WebViewServerStatus::Error { message: error_msg },
+                        WebViewServerStatus::Error {
+                            message: START_FAILED_CODE.to_string(),
+                        },
                     );
-                    // Do not spin on a persistent configuration error. Wait for
-                    // an explicit restart after the user fixes the settings.
-                    tokio::select! {
-                        _ = shutdown.cancelled() => return,
-                        _ = webview_rx.recv() => continue,
+                    if !wait_for_explicit_restart(&shutdown, &mut webview_rx).await {
+                        return;
                     }
+                    continue;
                 }
             };
 
@@ -181,7 +151,6 @@ pub async fn run_webview_server(
             // заранее. На остановке сервера владелец снимается.
             state.webview.set_upnp_manager(server.upnp_manager.clone());
             let server_clone = server.clone();
-            let app_handle_clone = app_handle.clone();
             let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
             let (upnp_error_tx, mut upnp_error_rx) =
                 tokio::sync::mpsc::unbounded_channel::<String>();
@@ -192,23 +161,9 @@ pub async fn run_webview_server(
                     .start(Some(ready_tx), Some(upnp_error_tx))
                     .await
                 {
-                    // Extract error details for user-friendly message
-                    let error_msg = format!("{}", e);
-                    let (user_friendly_msg, log_context) =
-                        parse_webview_server_error(&error_msg, port);
-
-                    // Log with full context
-                    error!("[WEBVIEW] ❌ Server startup failed:");
-                    error!("[WEBVIEW]   Context: {}", log_context);
-                    error!("[WEBVIEW]   Error: {}", error_msg);
-
-                    // Emit user-friendly error to frontend
-                    let _ = app_handle_clone.emit("webview-server-error", &user_friendly_msg);
-
-                    // Also emit via AppEvent system for consistency
-                    if let Some(state) = app_handle_clone.try_state::<crate::state::AppState>() {
-                        state.emit_event(AppEvent::WebViewServerError(user_friendly_msg));
-                    }
+                    // `e` is the stable encoded code for the frontend; the
+                    // technical detail was already logged at the bind site.
+                    warn!(error = %e, "[WEBVIEW] Server startup failed");
                 }
                 // Server task completed
                 info!("[WEBVIEW] Server task stopped");
@@ -216,7 +171,6 @@ pub async fn run_webview_server(
 
             match ready_rx.await {
                 Ok(Ok(())) => {
-                    start_attempts = 0;
                     state
                         .webview
                         .set_status(&app_handle, WebViewServerStatus::Running);
@@ -226,19 +180,24 @@ pub async fn run_webview_server(
                         .webview
                         .set_status(&app_handle, WebViewServerStatus::Error { message });
                     let _ = server_handle.await;
-                    if !respawn_or_give_up(&shutdown, &mut start_attempts, &mut webview_rx).await {
+                    server.stop().await;
+                    state.webview.clear_upnp_runtime(&app_handle);
+                    if !wait_for_explicit_restart(&shutdown, &mut webview_rx).await {
                         return;
                     }
                     continue;
                 }
                 Err(_) => {
+                    let _ = server_handle.await;
+                    server.stop().await;
+                    state.webview.clear_upnp_runtime(&app_handle);
                     state.webview.set_status(
                         &app_handle,
                         WebViewServerStatus::Error {
-                            message: "WebView server stopped before readiness".into(),
+                            message: START_FAILED_CODE.to_string(),
                         },
                     );
-                    if !respawn_or_give_up(&shutdown, &mut start_attempts, &mut webview_rx).await {
+                    if !wait_for_explicit_restart(&shutdown, &mut webview_rx).await {
                         return;
                     }
                     continue;
@@ -286,11 +245,17 @@ pub async fn run_webview_server(
                                 error!(%join_error, "WebView server task join failed");
                             }
                             // Сервер больше не обслуживает порт: владельца UPnP
-                            // в state быть не должно.
+                            // в state быть не должно. Незапланированный выход —
+                            // не повод автоматически перезапускаться: ждём явного
+                            // перезапуска или shutdown.
+                            server.stop().await;
                             state.webview.clear_upnp_runtime(&app_handle);
                             state.webview.set_status(&app_handle, WebViewServerStatus::Error {
-                                message: "WebView server stopped unexpectedly".into(),
+                                message: START_FAILED_CODE.to_string(),
                             });
+                            if !wait_for_explicit_restart(&shutdown, &mut webview_rx).await {
+                                return;
+                            }
                             server_running = false;
                         }
                         _ = shutdown.cancelled() => {
@@ -455,34 +420,51 @@ pub async fn run_webview_server(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::RoutedText;
     use std::time::{Duration, Instant};
 
-    #[test]
-    fn respawn_backoff_constant_is_within_1_to_3_seconds() {
-        // The backoff must be a bounded delay (1–3s): large enough to stop a
-        // CPU-spinning respawn loop on persistent startup errors, small enough
-        // to recover quickly after a transient failure.
-        let ms = SERVER_RESPAWN_BACKOFF.as_millis();
-        assert!((1000..=3000).contains(&ms), "backoff out of bounds: {ms}ms");
+    #[tokio::test]
+    async fn wait_for_explicit_restart_ignores_unrelated_events_and_returns_on_restart() {
+        let shutdown = CancellationToken::new();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
+        let mut rx = rx;
+        let mut task = tokio::spawn(async move { wait_for_explicit_restart(&shutdown, &mut rx).await });
+
+        // Unrelated events must not wake a failed server.
+        tx.send(AppEvent::TextSentToTts(RoutedText::broadcast("hi".into())))
+            .unwrap();
+        tx.send(AppEvent::WebViewTypingChanged(true)).unwrap();
+        tx.send(AppEvent::ReloadWebViewTemplates).unwrap();
+
+        let still_waiting = tokio::time::timeout(Duration::from_millis(100), &mut task).await;
+        assert!(
+            still_waiting.is_err(),
+            "unrelated events must not resume the supervisor"
+        );
+
+        tx.send(AppEvent::RestartWebViewServer).unwrap();
+        assert!(task.await.unwrap(), "an explicit restart must resume the supervisor");
     }
 
     #[tokio::test]
-    async fn respawn_backoff_waits_before_retry() {
+    async fn wait_for_explicit_restart_exits_on_shutdown() {
         let shutdown = CancellationToken::new();
-        let start = Instant::now();
-        let keep_running = respawn_backoff(&shutdown, Duration::from_millis(20)).await;
-        assert!(keep_running, "backoff must allow the loop to continue");
-        assert!(start.elapsed() >= Duration::from_millis(20));
-    }
-
-    #[tokio::test]
-    async fn respawn_backoff_exits_early_on_shutdown() {
-        let shutdown = CancellationToken::new();
+        let (_tx, rx) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
+        let mut rx = rx;
+        let task_shutdown = shutdown.clone();
+        let task = tokio::spawn(async move { wait_for_explicit_restart(&task_shutdown, &mut rx).await });
         shutdown.cancel();
-        let start = Instant::now();
-        let keep_running = respawn_backoff(&shutdown, Duration::from_secs(3600)).await;
-        assert!(!keep_running, "shutdown must abort the backoff wait");
-        assert!(start.elapsed() < Duration::from_secs(1));
+        assert!(!task.await.unwrap(), "shutdown must exit the supervisor");
+    }
+
+    #[tokio::test]
+    async fn wait_for_explicit_restart_exits_on_quit_event() {
+        let shutdown = CancellationToken::new();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
+        let mut rx = rx;
+        let task = tokio::spawn(async move { wait_for_explicit_restart(&shutdown, &mut rx).await });
+        tx.send(AppEvent::Quit).unwrap();
+        assert!(!task.await.unwrap(), "quit must exit the supervisor");
     }
 
     #[test]

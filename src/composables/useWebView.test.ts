@@ -754,50 +754,85 @@ describe('useWebView runtime error localization', () => {
     resetHarness()
   })
 
-  const runtimeRawMessage = 'Сервер WebView завершился с ошибкой'
+  it('hides the previous failure while a retry awaits runtime confirmation', async () => {
+    const { webview, listeners } = await setupAndMountWithEvents()
+    const statusChanged = listeners.get('webview-server-status-changed')!
+    statusChanged({ payload: { state: 'error', message: 'port_in_use:10101' } })
+    mockInvoke.mockResolvedValue('saved_restarting')
+    expect(webview.serverErrorText.value).toContain('10101')
+    const retry = webview.startServer()
+    expect(webview.serverErrorText.value).toBeNull()
+    await retry
+    expect(webview.serverErrorText.value).toBeNull()
+    statusChanged({ payload: { state: 'error', message: 'port_in_use:10102' } })
+    expect(webview.serverErrorText.value).toContain('10102')
+    expect(webview.serverErrorText.value).not.toContain('10101')
+  })
 
-  for (const locale of ['ru', 'en'] as const) {
-    const expected = locale === 'ru'
-      ? 'Сервер WebView сообщил об ошибке'
-      : 'The WebView server reported an error'
+  it('does not produce a toast for an error status without a pending operation', async () => {
+    const { webview, listeners } = await setupAndMountWithEvents()
+    const statusChanged = listeners.get('webview-server-status-changed')
+    expect(statusChanged).toBeDefined()
 
-    it(`localizes a raw runtime status error to the ${locale} fallback while preserving the state`, async () => {
-      const { webview, listeners } = await setupAndMountWithEvents()
-      const statusChanged = listeners.get('webview-server-status-changed')
-      expect(statusChanged).toBeDefined()
+    statusChanged?.({ payload: { state: 'error', message: 'port_in_use:10100' } })
 
-      await withLocale(locale, () => {
-        statusChanged?.({ payload: { state: 'error', message: runtimeRawMessage } })
-      })
+    expect(webview.serverStatus.value).toEqual({ state: 'error', message: 'port_in_use:10100' })
+    // Баннер панели покажет причину; тост без ожидающей операции не создаётся.
+    expect(webview.errorMessage.value).toBeNull()
+  })
 
-      expect(webview.serverStatus.value).toEqual({ state: 'error', message: runtimeRawMessage })
-      expect(webview.errorMessage.value).toBe(expected)
+  it('shows the localized persistent banner for an occupied port', async () => {
+    const { webview, listeners } = await setupAndMountWithEvents()
+    const statusChanged = listeners.get('webview-server-status-changed')
+    statusChanged?.({ payload: { state: 'error', message: 'port_in_use:10100' } })
+
+    expect(webview.serverErrorText.value).toBe(
+      'Не удалось запустить сервер: при последней попытке порт 10100 был занят. Повторите запуск или выберите другой порт.',
+    )
+  })
+
+  it('shows the localized generic banner for a non-port failure', async () => {
+    const { webview, listeners } = await setupAndMountWithEvents()
+    const statusChanged = listeners.get('webview-server-status-changed')
+    statusChanged?.({ payload: { state: 'error', message: 'server_start_failed' } })
+
+    expect(webview.serverErrorText.value).toBe('Не удалось запустить сервер. Повторите запуск.')
+  })
+
+  it('shows the English persistent banner for an occupied port', async () => {
+    const { webview, listeners } = await setupAndMountWithEvents()
+    const statusChanged = listeners.get('webview-server-status-changed')
+
+    withLocale('en', () => {
+      statusChanged?.({ payload: { state: 'error', message: 'port_in_use:10100' } })
+      expect(webview.serverErrorText.value).toBe(
+        'Failed to start the server: port 10100 was in use on the last attempt. Restart or choose another port.',
+      )
     })
+  })
 
-    it(`localizes a plain-string webview-server-error payload to the ${locale} fallback`, async () => {
-      const { webview, listeners } = await setupAndMountWithEvents()
-      const onServerError = listeners.get('webview-server-error')
-      expect(onServerError).toBeDefined()
+  it('does not register a webview-server-error listener (status is the source of truth)', async () => {
+    const { listeners } = await setupAndMountWithEvents()
+    expect(listeners.get('webview-server-error')).toBeUndefined()
+  })
 
-      await withLocale(locale, () => {
-        onServerError?.({ payload: runtimeRawMessage })
-      })
+  it('restores an error state from the initial snapshot without a new failure toast', async () => {
+    const impl: InvokeImpl = (cmd) => {
+      if (cmd === 'get_webview_token') return Promise.resolve(null)
+      if (cmd === 'get_local_ip') return Promise.resolve('192.168.1.25')
+      if (cmd === 'get_webview_server_status') {
+        return Promise.resolve({ state: 'error', message: 'port_in_use:10100' })
+      }
+      return Promise.resolve(undefined)
+    }
+    const { webview } = await setupAndMountWithEvents(impl)
 
-      expect(webview.errorMessage.value).toBe(expected)
-    })
-
-    it(`localizes a {"WebViewServerError"} webview-server-error payload to the ${locale} fallback`, async () => {
-      const { webview, listeners } = await setupAndMountWithEvents()
-      const onServerError = listeners.get('webview-server-error')
-      expect(onServerError).toBeDefined()
-
-      await withLocale(locale, () => {
-        onServerError?.({ payload: { WebViewServerError: runtimeRawMessage } })
-      })
-
-      expect(webview.errorMessage.value).toBe(expected)
-    })
-  }
+    expect(webview.serverStatus.value).toEqual({ state: 'error', message: 'port_in_use:10100' })
+    expect(webview.errorMessage.value).toBeNull()
+    expect(webview.serverErrorText.value).toBe(
+      'Не удалось запустить сервер: при последней попытке порт 10100 был занят. Повторите запуск или выберите другой порт.',
+    )
+  })
 })
 
 describe('useWebView action result localization', () => {
@@ -1422,7 +1457,7 @@ describe('useWebView start with save', () => {
     expect(webview.errorMessage.value).toBe('Не удалось сохранить настройки')
   })
 
-  it('reports both outcomes when the runtime start fails after a successful save', async () => {
+  it('reports the occupied port toast when the runtime start fails after a successful save', async () => {
     mockWebViewSettingsRef.value = makeSettings({ enabled: false, port: 10100 })
     const { webview, listeners } = await setupAndMountWithEvents()
     const { saves } = queuePersistingStart({ enabled: false, port: 10100 })
@@ -1433,9 +1468,23 @@ describe('useWebView start with save', () => {
     saves[0].resolve('saved_restarting')
     await start
 
-    listeners.get('webview-server-status-changed')?.({ payload: { state: 'error', message: 'port busy' } })
-    expect(webview.errorMessage.value).toBe('Настройки сохранены. Не удалось запустить сервер: Сервер WebView сообщил об ошибке')
-    expect(webview.serverStatus.value).toEqual({ state: 'error', message: 'port busy' })
+    listeners.get('webview-server-status-changed')?.({ payload: { state: 'error', message: 'port_in_use:10500' } })
+    expect(webview.errorMessage.value).toBe('Не удалось запустить сервер: порт 10500 занят')
+    expect(webview.serverStatus.value).toEqual({ state: 'error', message: 'port_in_use:10500' })
+  })
+
+  it('reports the generic toast when the runtime start fails with a non-port error', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ enabled: false, port: 10100 })
+    const { webview, listeners } = await setupAndMountWithEvents()
+    const { saves } = queuePersistingStart({ enabled: false, port: 10100 })
+
+    const start = webview.startServer()
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+    saves[0].resolve('saved_restarting')
+    await start
+
+    listeners.get('webview-server-status-changed')?.({ payload: { state: 'error', message: 'server_start_failed' } })
+    expect(webview.errorMessage.value).toBe('Не удалось запустить сервер. Попробуйте ещё раз.')
   })
 
   it('does not persist unrelated form edits when stopping', async () => {
@@ -1520,7 +1569,7 @@ describe('useWebView start with save', () => {
     expect(webview.operationPending.value).toBe(false)
   })
 
-  it('reports both outcomes when the runtime restart fails after a successful save', async () => {
+  it('reports the occupied port toast when the runtime restart fails after a successful save', async () => {
     mockWebViewSettingsRef.value = makeSettings({ enabled: true, port: 10100 })
     const { webview, listeners } = await setupAndMountWithEvents()
     const { saves } = queuePersistingStart({ enabled: true, port: 10100 })
@@ -1531,8 +1580,8 @@ describe('useWebView start with save', () => {
     saves[0].resolve('saved_restarting')
     await restart
 
-    listeners.get('webview-server-status-changed')?.({ payload: { state: 'error', message: 'port busy' } })
-    expect(webview.errorMessage.value).toBe('Настройки сохранены. Не удалось перезапустить сервер: Сервер WebView сообщил об ошибке')
+    listeners.get('webview-server-status-changed')?.({ payload: { state: 'error', message: 'port_in_use:10500' } })
+    expect(webview.errorMessage.value).toBe('Не удалось запустить сервер: порт 10500 занят')
   })
 
   it('blocks start and stop while the restart operation is in flight', async () => {

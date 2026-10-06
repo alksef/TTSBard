@@ -6,6 +6,7 @@ import { useWebViewSettings } from './useAppSettings'
 import { debugLog, debugError } from '../utils/debug'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
 import { presentCommandError } from '../ipc/commandError'
+import { parseServerStartError } from '../ipc/serverError'
 import {
   convertUpnpForwardStatus,
   upnpFailureKey,
@@ -296,6 +297,15 @@ export function useWebView() {
     return t('webview.error.upnp_forward', { reason: t(upnpFailureKey(status.code)) })
   })
 
+  /** Persistent-баннер отказа запуска, пока статус сервера — error. */
+  const serverErrorText = computed(() => {
+    if (serverStatus.value.state !== 'error' || operationPending.value) return null
+    const parsed = parseServerStartError(serverStatus.value.message)
+    return parsed.kind === 'port_in_use'
+      ? t('server.error.port_in_use_persistent', { port: parsed.port })
+      : t('server.error.start_generic_persistent')
+  })
+
   function showError(message: string, type: UiMessageKind = 'error') {
     // Defensive normalization: the backend emits this event both directly
     // (plain string) and via the AppEvent broadcast (externally tagged enum
@@ -339,18 +349,13 @@ export function useWebView() {
     }
     if (status.state === 'error') {
       pendingStart.value = null
-      const detail = presentCommandError(status.message, t('webview.error.runtime'))
-      if (operation.restart) {
-        showError(
-          t(operation.saved ? 'webview.restart.failed_saved' : 'webview.restart.failed', { detail }),
-          'error',
-        )
-      } else {
-        showError(
-          t(operation.saved ? 'webview.launch.failed_saved' : 'webview.launch.failed', { detail }),
-          'error',
-        )
-      }
+      // Занятый порт кодируется backend'ом как `port_in_use:<port>`; любой другой
+      // отказ — общий текст. Технический OS-текст в тост не попадает.
+      const parsed = parseServerStartError(status.message)
+      const text = parsed.kind === 'port_in_use'
+        ? t('server.error.port_in_use', { port: parsed.port })
+        : t('server.error.start_generic')
+      showError(text, 'error')
       return
     }
     // Restart штатно проходит через stopped. Явная остановка закрывает слот
@@ -822,9 +827,10 @@ export function useWebView() {
         serverStatus.value = event.payload
         if (pendingStart.value) {
           resolvePendingStart(event.payload)
-        } else if (event.payload.state === 'error') {
-          showError(presentCommandError(event.payload.message, t('webview.error.runtime')))
         }
+        // Ошибка без ожидающей операции не даёт тост: баннер панели показывает
+        // persistent-состояние, а возврат на панель/начальный snapshot не должен
+        // выглядеть как новый отказ запуска.
       }),
     )
     // Listener first, then snapshot: either ordering observes the latest
@@ -842,21 +848,6 @@ export function useWebView() {
         debugError('[WebView] Failed to load runtime status:', e)
       }
     }
-    await listenerScope.track(
-      listen<unknown>('webview-server-error', (event) => {
-        // Two emitters share this event name: the direct emit sends a plain
-        // string, the AppEvent broadcast sends {"WebViewServerError": "..."}.
-        // Neither shape is trusted for display: the raw backend text is replaced
-        // with a localized fallback.
-        const payload = event.payload
-        if (typeof payload === 'string') {
-          showError(presentCommandError(payload, t('webview.error.runtime')))
-        } else if (payload && typeof payload === 'object' && 'WebViewServerError' in payload) {
-          const raw = (payload as { WebViewServerError: unknown }).WebViewServerError
-          showError(presentCommandError(raw, t('webview.error.runtime')))
-        }
-      }),
-    )
   })
 
   watch(webviewSettingsFromComposable, (newSettings) => {
@@ -893,6 +884,7 @@ export function useWebView() {
     upnpForwardStatus,
     upnpForwardOpen,
     upnpForwardFailureText,
+    serverErrorText,
     externalUrl,
     externalDisplay,
     hasToken,

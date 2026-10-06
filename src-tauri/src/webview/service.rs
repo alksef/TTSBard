@@ -16,6 +16,21 @@ pub enum WebViewServerStatus {
     Error { message: String },
 }
 
+/// Stable, frontend-parseable prefix for an occupied-port startup failure.
+///
+/// The failed port follows the colon; the frontend parses this prefix and
+/// shows a localized message with the captured port. The OS error text is
+/// logged by the bind site and never reaches the frontend.
+pub const PORT_IN_USE_PREFIX: &str = "port_in_use:";
+
+/// Stable startup-failure code for every failure other than an occupied port.
+pub const START_FAILED_CODE: &str = "server_start_failed";
+
+/// Build the encoded occupied-port message carried by the `Error` status.
+pub fn port_in_use_message(port: u16) -> String {
+    format!("{PORT_IN_USE_PREFIX}{port}")
+}
+
 /// Результат переключения UPnP: настройка — пожелание, mapping — факт.
 ///
 /// UI показывает успех только когда проброс действительно подтверждён; причина
@@ -401,5 +416,16 @@ mod tests {
                 code: "webview.upnp.router_rejected".to_string()
             }
         );
+    }
+
+    #[test]
+    fn port_in_use_message_encodes_the_captured_port() {
+        assert_eq!(port_in_use_message(10100), "port_in_use:10100");
+        assert_eq!(port_in_use_message(65535), "port_in_use:65535");
+    }
+
+    #[test]
+    fn start_failed_code_is_stable_and_free_of_technical_text() {
+        assert_eq!(START_FAILED_CODE, "server_start_failed");
     }
 }

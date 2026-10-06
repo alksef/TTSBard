@@ -1,3 +1,4 @@
+use super::service::{port_in_use_message, START_FAILED_CODE};
 use super::upnp::{UpnpFailure, UpnpManager};
 use super::{
     templates::{default_css, default_html},
@@ -149,7 +150,8 @@ impl WebViewServer {
         upnp_error: Option<tokio::sync::mpsc::UnboundedSender<String>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let settings = self.settings.read().await;
-        let addr = format!("{}:{}", WEBVIEW_BIND_ADDRESS, settings.port);
+        let port = settings.port;
+        let addr = format!("{}:{}", WEBVIEW_BIND_ADDRESS, port);
 
         let access_token = settings.access_token.clone();
         let upnp_enabled = settings.upnp_enabled && access_token.is_some();
@@ -170,24 +172,35 @@ impl WebViewServer {
             .route("/sse", get(sse_handler))
             .with_state(state);
 
-        let socket_addr: SocketAddr = addr
-            .parse()
-            .map_err(|e| format!("Invalid address {}: {}", addr, e))?;
+        let socket_addr: SocketAddr = match addr.parse() {
+            Ok(socket_addr) => socket_addr,
+            Err(e) => {
+                tracing::error!(error = %e, addr = %addr, "WebView server address parse failed");
+                let encoded = START_FAILED_CODE.to_string();
+                if let Some(readiness) = readiness {
+                    let _ = readiness.send(Err(encoded.clone()));
+                }
+                return Err(encoded.into());
+            }
+        };
 
         let listener = match tokio::net::TcpListener::bind(socket_addr).await {
             Ok(listener) => listener,
             Err(e) => {
-                let message = if e.kind() == std::io::ErrorKind::AddrInUse {
-                    format!("Address {} is already in use.", addr)
-                } else if e.kind() == std::io::ErrorKind::PermissionDenied {
-                    format!("Permission denied to bind to {}.", addr)
+                // Classify from the OS error kind, never from localized OS text:
+                // only an occupied port carries the captured port to the
+                // frontend; every other failure is the generic code. The
+                // technical error stays in logs.
+                let encoded = if e.kind() == std::io::ErrorKind::AddrInUse {
+                    port_in_use_message(port)
                 } else {
-                    format!("Failed to bind to {}: {}", addr, e)
+                    START_FAILED_CODE.to_string()
                 };
+                tracing::error!(error = %e, addr = %addr, "WebView server bind failed");
                 if let Some(readiness) = readiness {
-                    let _ = readiness.send(Err(message.clone()));
+                    let _ = readiness.send(Err(encoded.clone()));
                 }
-                return Err(message.into());
+                return Err(encoded.into());
             }
         };
 
@@ -758,6 +771,23 @@ mod tests {
                 crate::webview::upnp::UPNP_REMOVE_TIMEOUT,
             ))),
         }
+    }
+
+    #[tokio::test]
+    async fn occupied_port_readiness_reports_captured_port_without_os_text() {
+        use crate::webview::upnp::test_support::FakeRouterPortMapper;
+
+        let occupied = tokio::net::TcpListener::bind("0.0.0.0:0").await.unwrap();
+        let port = occupied.local_addr().unwrap().port();
+        let (mapper, _started, _release) = FakeRouterPortMapper::gated_open();
+        let server = build_server_with_upnp(Arc::new(mapper), port);
+        server.settings.write().await.upnp_enabled = false;
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+
+        let error = server.start(Some(ready_tx), None).await.unwrap_err();
+        assert_eq!(error.to_string(), format!("port_in_use:{port}"));
+        assert_eq!(ready_rx.await.unwrap(), Err(format!("port_in_use:{port}")));
+        drop(occupied);
     }
 
     #[tokio::test]

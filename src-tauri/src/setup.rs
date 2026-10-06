@@ -1201,47 +1201,6 @@ fn init_vtube_studio(app_state: &AppState, app_handle: AppHandle) {
     });
 }
 
-/// Parse WebView server startup errors and provide user-friendly messages
-pub(crate) fn parse_webview_server_error(error_msg: &str, port: u16) -> (String, String) {
-    let log_context = format!(
-        "Failed to start WebView server on {}:{}",
-        crate::webview::WEBVIEW_BIND_ADDRESS,
-        port
-    );
-
-    let user_friendly_msg =
-        if error_msg.contains("addr in use") || error_msg.contains("port in use") {
-            format!(
-                "Порт {} уже занят. Пожалуйста, выберите другой порт в настройках WebView.",
-                port
-            )
-        } else if error_msg.contains("permission denied") {
-            format!(
-                "Нет прав для запуска сервера на порту {}. Попробуйте использовать порт выше 1024.",
-                port
-            )
-        } else if error_msg.contains("invalid input") || error_msg.contains("invalid address") {
-            format!(
-                "Некорректный адрес {}:{}. Пожалуйста, проверьте настройки WebView.",
-                crate::webview::WEBVIEW_BIND_ADDRESS,
-                port
-            )
-        } else if error_msg.contains("access denied") {
-            "Доступ запрещен. Возможно, брандмауэр блокирует соединение.".to_string()
-        } else {
-            format!(
-                "Не удалось запустить WebView сервер: {}",
-                if error_msg.len() > 100 {
-                    format!("{}...", &error_msg[..97])
-                } else {
-                    error_msg.to_string()
-                }
-            )
-        };
-
-    (user_friendly_msg, log_context)
-}
-
 fn q_state_dto(
     q: &Arc<parking_lot::Mutex<crate::speech_queue::SpeechQueue>>,
 ) -> crate::speech_queue::SpeechQueueStateDto {

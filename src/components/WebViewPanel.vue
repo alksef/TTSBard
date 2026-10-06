@@ -22,6 +22,7 @@ const {
   isUpnpAvailable,
   upnpForwardOpen,
   upnpForwardFailureText,
+  serverErrorText,
   startServer,
   stopServer,
   restartServer,
@@ -87,7 +88,7 @@ const statusText = computed(() => {
       <div class="section-header server-header">
         <h2 class="ui-section-title">{{ t('webview.server') }}</h2>
         <div class="server-status">
-          <span class="status-indicator ui-status" :class="{ running: serverStatus.state === 'running' }">
+          <span class="status-indicator ui-status" :class="{ running: serverStatus.state === 'running', error: serverStatus.state === 'error' && !controlsLocked }">
             {{ statusText }}
           </span>
           <template v-if="showRunControls">
@@ -102,11 +103,16 @@ const statusText = computed(() => {
             <button @click="startServer" class="status-button start ui-icon-button ui-icon-button--accent" :disabled="!isPortValid || operationPending" :class="{ disabled: !isPortValid || operationPending }" :title="t('webview.start')" :aria-label="t('webview.start')">
               <Play :size="18" />
             </button>
-            <button @click="stopServer" class="status-button stop disabled ui-icon-button ui-action--stop" :title="t('webview.stop')" :aria-label="t('webview.stop')" disabled>
+            <button @click="stopServer" class="status-button stop ui-icon-button ui-action--stop" :class="{ disabled: serverStatus.state !== 'error' || operationPending }" :title="t('webview.stop')" :aria-label="t('webview.stop')" :disabled="serverStatus.state !== 'error' || operationPending">
               <Square :size="18" />
             </button>
           </template>
         </div>
+      </div>
+
+      <div v-if="serverErrorText" class="status-error-banner ui-status">
+        <AlertTriangle :size="14" />
+        <span>{{ serverErrorText }}</span>
       </div>
 
       <div class="ui-row">
@@ -363,6 +369,23 @@ h2 {
   line-height: 1.4;
 }
 
+/* Persistent-баннер отказа запуска: красная тема, общая типографика ui-status. */
+.status-error-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 1rem;
+  background: var(--danger-bg-weak);
+  border: 1px solid var(--danger-border);
+  border-radius: 8px;
+  color: var(--danger-text-bright);
+  line-height: 1.4;
+}
+
+.status-error-banner svg { flex-shrink: 0; }
+:global([data-theme='light'] .status-error-banner) { color: var(--ui-action-danger-hover-text); }
+
 .upnp-status {
   display: flex;
   align-items: center;
@@ -427,6 +450,17 @@ h2 {
   color: var(--success-text-bright);
   background: var(--success-bg-weak);
   border-color: var(--success-shadow);
+}
+
+.status-indicator.error {
+  color: var(--danger-text-bright);
+  background: var(--danger-bg-weak);
+  border-color: var(--danger-border);
+}
+
+:global([data-theme='light'] .webview-panel .status-indicator.error),
+:global([data-theme='light'] .webview-panel .message-box.error) {
+  color: var(--ui-action-danger-hover-text);
 }
 
 .status-button.disabled:not(.stop) {

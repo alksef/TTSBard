@@ -2,7 +2,8 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { confirm } from '@tauri-apps/plugin-dialog'
-import { normalizeCommandError } from '../ipc/commandError'
+import { presentCommandError } from '../ipc/commandError'
+import { parseServerStartError } from '../ipc/serverError'
 import { debugError } from '../utils/debug'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
 import { t } from '../i18n'
@@ -147,9 +148,13 @@ export function useInputServer() {
     }
   })
 
-  const statusError = computed(() =>
-    status.value.state === 'error' ? status.value.message ?? null : null,
-  )
+  const statusError = computed(() => {
+    if (status.value.state !== 'error' || operationPending.value) return null
+    const parsed = parseServerStartError(status.value.message)
+    return parsed.kind === 'port_in_use'
+      ? t('server.error.port_in_use_persistent', { port: parsed.port })
+      : t('server.error.start_generic_persistent')
+  })
 
   const endpoint = computed(
     () => `http://${INPUT_SERVER_HOST}:${settings.value.port}${INPUT_SERVER_PATH}`,
@@ -260,8 +265,8 @@ export function useInputServer() {
           settings.value.port = confirmedSettings.port
         }
         applyingInternalState = false
-        const errorMessage = e instanceof Error ? e.message : String(e)
-        showMessage(t('input_server.error.save', { detail: errorMessage }), 'error')
+        debugError('[InputServer] Failed to save settings:', e)
+        showMessage(t('input_server.error.save'), 'error')
         return { ok: false, kind: 'error' }
       }
       if (disposed) return { ok: false, kind: 'error' }
@@ -313,12 +318,13 @@ export function useInputServer() {
     }
     if (next.state === 'error') {
       pendingStart.value = null
-      // Успешно сохранённые настройки не откатываются: сообщается обе части.
-      const detail = next.message ?? ''
-      const key = operation.restart
-        ? (operation.saved ? 'input_server.error.restart_saved' : 'input_server.error.restart')
-        : (operation.saved ? 'input_server.error.start_saved' : 'input_server.error.start')
-      showMessage(t(key, { detail }), 'error')
+      // Занятый порт кодируется backend'ом как `port_in_use:<port>`; любой другой
+      // отказ — общий текст. Технический OS-текст в тост не попадает.
+      const parsed = parseServerStartError(next.message)
+      const text = parsed.kind === 'port_in_use'
+        ? t('server.error.port_in_use', { port: parsed.port })
+        : t('server.error.start_generic')
+      showMessage(text, 'error')
       return
     }
     if (next.state === 'stopped' && !operation.restart) {
@@ -364,11 +370,8 @@ export function useInputServer() {
     } catch (e) {
       pendingStart.value = null
       if (disposed) return
-      const errorMessage = e instanceof Error ? e.message : String(e)
-      showMessage(
-        t(saved ? 'input_server.error.start_saved' : 'input_server.error.start', { detail: errorMessage }),
-        'error',
-      )
+      debugError('[InputServer] Failed to start server:', e)
+      showMessage(t('server.error.start_generic'), 'error')
     } finally {
       if (!disposed) startPending.value = false
     }
@@ -407,11 +410,8 @@ export function useInputServer() {
     } catch (e) {
       pendingStart.value = null
       if (disposed) return
-      const errorMessage = e instanceof Error ? e.message : String(e)
-      showMessage(
-        t(saved ? 'input_server.error.restart_saved' : 'input_server.error.restart', { detail: errorMessage }),
-        'error',
-      )
+      debugError('[InputServer] Failed to restart server:', e)
+      showMessage(t('server.error.start_generic'), 'error')
     } finally {
       if (!disposed) restartPending.value = false
     }
@@ -428,8 +428,8 @@ export function useInputServer() {
       showMessage(t('input_server.stopping'), 'info')
     } catch (e) {
       if (disposed) return
-      const errorMessage = e instanceof Error ? e.message : String(e)
-      showMessage(t('input_server.error.stop', { detail: errorMessage }), 'error')
+      debugError('[InputServer] Failed to stop server:', e)
+      showMessage(t('input_server.error.stop'), 'error')
     } finally {
       if (!disposed) stopPending.value = false
     }
@@ -447,7 +447,8 @@ export function useInputServer() {
       testResult.value = result
     } catch (e) {
       if (disposed) return
-      testError.value = normalizeCommandError(e).message
+      debugError('[InputServer] Failed to send test:', e)
+      testError.value = presentCommandError(e, t('input_server.error.send'))
     } finally {
       if (!disposed) testPending.value = false
     }
@@ -519,8 +520,8 @@ export function useInputServer() {
       await refreshConnectionInfo()
     } catch (e) {
       if (disposed) return
-      const errorMessage = normalizeCommandError(e).message
-      showMessage(t('input_server.error.regenerate_token', { detail: errorMessage }), 'error')
+      debugError('[InputServer] Failed to regenerate token:', e)
+      showMessage(t('input_server.error.regenerate_token'), 'error')
     } finally {
       if (!disposed) regeneratePending.value = false
     }
