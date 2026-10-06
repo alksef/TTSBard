@@ -1266,6 +1266,10 @@ defineExpose({ focusEditor })
   padding: 0.3rem 0.55rem;
 }
 
+.compact-action-bar .speak-btn {
+  margin-right: 16px;
+}
+
 .typing-toggle-btn {
   position: relative;
   flex-shrink: 0;

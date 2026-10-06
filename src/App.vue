@@ -771,14 +771,14 @@ onUnmounted(() => {
   flex: 1;
   min-width: 0;
   position: relative;
-  padding: 1.625rem 1.5rem 3rem;
+  padding: 12px 16px 3rem;
   overflow-y: auto;
   border-left: 1px solid var(--color-border);
   transition: all 0.3s ease;
 }
 
 .main-content.minimal-content {
-  padding: 1rem !important;
+  padding: 6px 8px 0 !important;
   overflow-y: hidden;
   scrollbar-width: none;
   transition: none;
@@ -827,13 +827,15 @@ onUnmounted(() => {
   }
 
   .main-content {
-    padding: 1rem 0.6rem 2.5rem;
+    padding: 12px 0.6rem 2.5rem;
     border-left: none;
     border-top: 1px solid var(--color-border);
   }
 }
 
 .main-content.input-content:not(.minimal-content) {
-  padding-top: 1rem;
+  padding-top: 8px;
+  padding-left: 12px;
+  padding-right: 12px;
 }
 </style>

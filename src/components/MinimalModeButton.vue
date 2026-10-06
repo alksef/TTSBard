@@ -92,8 +92,8 @@ async function toggleMinimalMode() {
     :title="isMinimalMode ? t('shell.minimal.exit') : t('shell.minimal.enter')"
     :aria-label="isMinimalMode ? t('shell.minimal.exit') : t('shell.minimal.enter')"
   >
-    <Minimize2 v-if="!isMinimalMode" :size="18" />
-    <Maximize2 v-else :size="18" />
+    <Minimize2 v-if="!isMinimalMode" :size="16" />
+    <Maximize2 v-else :size="16" />
   </button>
 </template>
 
@@ -102,8 +102,8 @@ async function toggleMinimalMode() {
   position: absolute;
   bottom: 0;
   right: 0;
-  width: 2.75rem;
-  height: 2.75rem;
+  width: 2.25rem;
+  height: 2.25rem;
   border: none;
   background: var(--color-bg-elevated);
   color: var(--color-text-secondary);
