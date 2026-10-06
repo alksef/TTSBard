@@ -2535,7 +2535,10 @@ mod tests {
         assert_eq!(keys, vec!["capture_target", "enabled", "model_id"]);
         assert_eq!(obj["enabled"], serde_json::json!(true));
         assert_eq!(obj["model_id"], serde_json::json!("silero-ocr"));
-        assert_eq!(obj["capture_target"], serde_json::json!({ "type": "primary" }));
+        assert_eq!(
+            obj["capture_target"],
+            serde_json::json!({ "type": "primary" })
+        );
 
         let compact = serde_json::to_string(&dto).expect("serialize compact");
         assert!(

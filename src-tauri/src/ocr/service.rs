@@ -1474,13 +1474,7 @@ mod tests {
         // A target-only change must never restart the model, re-register the
         // hotkey or disturb an in-flight selection.
         assert_eq!(
-            decide_transition(
-                &old,
-                &new,
-                Some(&hotkey),
-                Some(&hotkey),
-                &OcrStatus::Ready
-            ),
+            decide_transition(&old, &new, Some(&hotkey), Some(&hotkey), &OcrStatus::Ready),
             OcrTransition::Noop
         );
         assert_eq!(

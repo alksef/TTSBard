@@ -7323,7 +7323,11 @@ mod tests {
             };
             let json = serde_json::to_string(&s).unwrap();
             let back: AppSettings = serde_json::from_str(&json).unwrap();
-            assert_eq!(back.ui_font_family, family, "round-trip failed for {}", json);
+            assert_eq!(
+                back.ui_font_family, family,
+                "round-trip failed for {}",
+                json
+            );
         }
     }
 
@@ -7387,10 +7391,7 @@ mod tests {
             json["ui_font_size_px"] = raw;
             let settings: AppSettings = serde_json::from_value(json)
                 .expect("out-of-range or wrong-type size must not fail deserialization");
-            assert_eq!(
-                settings.ui_font_size_px, 16,
-                "size must fall back to 16"
-            );
+            assert_eq!(settings.ui_font_size_px, 16, "size must fall back to 16");
         }
     }
 
@@ -7488,9 +7489,7 @@ mod tests {
         assert_eq!(after.editor.font_family, "consolas");
         assert_eq!(after.editor.font_size_px, 24);
 
-        manager
-            .set_editor_font_family("arial".to_owned())
-            .unwrap();
+        manager.set_editor_font_family("arial".to_owned()).unwrap();
         assert_eq!(
             manager.load().unwrap().ui_font_size_px,
             18,

@@ -17,21 +17,16 @@ use crate::ocr::capture::{CaptureError, MonitorRect};
 /// `{"type":"monitor","devicePath":"..."}`. The `devicePath` is the persistent
 /// Windows device path of the selected display — never an xcap id, `HMONITOR`
 /// handle or list index.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum CaptureTarget {
+    #[default]
     All,
     Primary,
     Monitor {
         #[serde(rename = "devicePath")]
         device_path: String,
     },
-}
-
-impl Default for CaptureTarget {
-    fn default() -> Self {
-        CaptureTarget::All
-    }
 }
 
 /// Serializable description of one selectable display.

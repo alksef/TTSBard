@@ -1131,7 +1131,10 @@ mod tests {
     fn capture_failure_reason_maps_every_category() {
         use super::{capture_failed_reason, CaptureError};
 
-        assert_eq!(capture_failed_reason(&CaptureError::NoMonitors), "noMonitors");
+        assert_eq!(
+            capture_failed_reason(&CaptureError::NoMonitors),
+            "noMonitors"
+        );
         assert_eq!(
             capture_failed_reason(&CaptureError::MonitorUnavailable),
             "monitorUnavailable"
