@@ -244,6 +244,7 @@ mod tests {
         service.publish_status(
             InputServerStatus::Error {
                 message: "boom".into(),
+                attended: false,
             },
             |status| {
                 emitted.push(status.clone());
@@ -255,14 +256,16 @@ mod tests {
             vec![
                 InputServerStatus::Starting,
                 InputServerStatus::Error {
-                    message: "boom".into()
+                    message: "boom".into(),
+                    attended: false,
                 },
             ]
         );
         assert_eq!(
             service.status(),
             InputServerStatus::Error {
-                message: "boom".into()
+                message: "boom".into(),
+                attended: false,
             }
         );
     }
@@ -500,10 +503,11 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_value(InputServerStatus::Error {
-                message: "boom".to_string()
+                message: "boom".to_string(),
+                attended: false,
             })
             .unwrap(),
-            serde_json::json!({ "state": "error", "message": "boom" })
+            serde_json::json!({ "state": "error", "message": "boom", "attended": false })
         );
     }
 

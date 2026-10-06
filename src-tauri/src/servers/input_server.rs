@@ -219,6 +219,9 @@ async fn run_input_server_core<E, S>(
     E: FnMut(&InputServerStatus),
     S: Fn(TcpListener, Router, CancellationToken) -> JoinHandle<()>,
 {
+    // Первый проход цикла — boot-попытка (не инициирована пользователем).
+    let mut attempt_attended = false;
+
     loop {
         // Coalesce wake bursts: a rapid stop→start queues several wake messages
         // before this loop observes them. Draining here lets the loop process
@@ -241,6 +244,7 @@ async fn run_input_server_core<E, S>(
                     return;
                 }
                 _ = wake_rx.recv() => {
+                    attempt_attended = true;
                     continue;
                 }
             }
@@ -252,13 +256,22 @@ async fn run_input_server_core<E, S>(
             Ok(listener) => listener,
             Err(failure) => {
                 error!(error = %failure.detail, "Input server bind failed");
-                service.publish_status(InputServerStatus::Error { message: failure.message }, &mut emit);
+                service.publish_status(
+                    InputServerStatus::Error {
+                        message: failure.message,
+                        attended: attempt_attended,
+                    },
+                    &mut emit,
+                );
                 tokio::select! {
                     _ = shutdown.cancelled() => {
                         service.publish_status(InputServerStatus::Stopped, &mut emit);
                         return;
                     }
-                    _ = wake_rx.recv() => continue,
+                    _ = wake_rx.recv() => {
+                        attempt_attended = true;
+                        continue;
+                    }
                 }
             }
         };
@@ -283,6 +296,7 @@ async fn run_input_server_core<E, S>(
                 drain_server_task(&mut server_task).await;
                 service.publish_status(InputServerStatus::Stopped, &mut emit);
                 info!("Input server stopped on settings wake; rereading settings");
+                attempt_attended = true;
                 continue;
             }
             result = &mut server_task => {
@@ -290,9 +304,12 @@ async fn run_input_server_core<E, S>(
                     Ok(()) => warn!("Input server serve task finished unexpectedly"),
                     Err(join_error) => warn!(%join_error, "Input server serve task join failed"),
                 }
+                // Рантайм-падение после успешной работы — не пользовательская
+                // попытка: всегда красный навсегда.
                 service.publish_status(
                     InputServerStatus::Error {
                         message: "Input server stopped unexpectedly".into(),
+                        attended: false,
                     },
                     &mut emit,
                 );
@@ -301,7 +318,10 @@ async fn run_input_server_core<E, S>(
                         service.publish_status(InputServerStatus::Stopped, &mut emit);
                         return;
                     }
-                    _ = wake_rx.recv() => continue,
+                    _ = wake_rx.recv() => {
+                        attempt_attended = true;
+                        continue;
+                    }
                 }
             }
         }
@@ -563,10 +583,12 @@ mod tests {
         wait_for_error(&service).await;
 
         match service.status() {
-            InputServerStatus::Error { message } => {
+            InputServerStatus::Error { message, attended } => {
                 // Occupied port must be reported as the stable encoded code with
                 // the captured port, never the OS/localized bind text.
                 assert_eq!(message, format!("port_in_use:{port}"));
+                // Pre-seeded run_request is a boot attempt, not user-attended.
+                assert!(!attended, "boot bind failure must not be attended");
             }
             other => panic!("expected error status, got {other:?}"),
         }
@@ -585,6 +607,42 @@ mod tests {
         assert_eq!(states[0], InputServerStatus::Starting);
         assert!(matches!(states[1], InputServerStatus::Error { .. }));
         assert_eq!(states[2], InputServerStatus::Stopped);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn wake_triggered_bind_failure_is_attended() {
+        let occupied = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = occupied.local_addr().unwrap().port();
+
+        let service = Arc::new(InputServerService::new());
+        *service.settings.write().await = InputServerSettings {
+            start_on_boot: false,
+            port,
+            bind_address: "127.0.0.1".to_string(),
+            access_token: None,
+        };
+        // run_request stays false: the supervisor idles in stopped until woken.
+        let shutdown = CancellationToken::new();
+        let transitions = Arc::new(Mutex::new(Vec::new()));
+        let handle = spawn_core(service.clone(), shutdown.clone(), transitions.clone());
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(service.status(), InputServerStatus::Stopped);
+
+        service.set_run_request(true);
+        service.wake();
+        wait_for_error(&service).await;
+
+        match service.status() {
+            InputServerStatus::Error { message, attended } => {
+                assert_eq!(message, format!("port_in_use:{port}"));
+                assert!(attended, "a wake-triggered bind failure is user-attended");
+            }
+            other => panic!("expected error status, got {other:?}"),
+        }
+
+        shutdown.cancel();
+        handle.await.unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]

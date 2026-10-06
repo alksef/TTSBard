@@ -197,8 +197,14 @@ pub enum InputServerStatus {
     /// listener, and replaced with `Running` only after a successful bind.
     Starting,
     Running,
+    /// Слушатель не смог стартовать или упал в рантайме.
+    ///
+    /// `attended = true`, когда попытку запуска инициировал пользователь
+    /// (иконка заголовка не красная); `false` — boot-попытка или падение в
+    /// рантайме (красная навсегда).
     Error {
         message: String,
+        attended: bool,
     },
 }
 

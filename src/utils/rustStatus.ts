@@ -7,6 +7,7 @@ export type WebViewRuntimeState = 'stopped' | 'starting' | 'running' | 'error'
 export interface RustWebViewStatus {
   state: WebViewRuntimeState
   message?: string
+  attended?: boolean
 }
 
 const VALID_ENUM_STATUSES: TwitchStatus[] = ['Disconnected', 'Connecting', 'Connected', 'Error']
@@ -35,7 +36,10 @@ export function convertWebViewStatusFromRust(status: unknown): RustWebViewStatus
   const candidate = status as Partial<RustWebViewStatus>
   const state = candidate.state
   if (state === 'stopped' || state === 'starting' || state === 'running' || state === 'error') {
-    return candidate.message !== undefined ? { state, message: candidate.message } : { state }
+    const result: RustWebViewStatus = { state }
+    if (candidate.message !== undefined) result.message = candidate.message
+    if (typeof candidate.attended === 'boolean') result.attended = candidate.attended
+    return result
   }
   return { state: 'stopped' }
 }

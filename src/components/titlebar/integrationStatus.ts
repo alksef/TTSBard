@@ -8,7 +8,7 @@ export type WebViewRuntime =
   | { state: 'stopped' }
   | { state: 'starting' }
   | { state: 'running' }
-  | { state: 'error'; message?: string }
+  | { state: 'error'; message?: string; attended?: boolean }
 
 export type TwitchDesired = { enabled: boolean }
 export type TwitchRuntime =
@@ -28,7 +28,7 @@ export type InputServerRuntime =
   | { state: 'stopped' }
   | { state: 'starting' }
   | { state: 'running' }
-  | { state: 'error'; message?: string }
+  | { state: 'error'; message?: string; attended?: boolean }
 
 export type IntegrationService = 'webview' | 'twitch' | 'vts'
 export type AnyRuntime = WebViewRuntime | TwitchRuntime | VtsRuntime
@@ -41,7 +41,11 @@ function tone(desired: boolean, ready: boolean, failed: boolean): IntegrationTon
 }
 
 export function webviewTone(desired: WebViewDesired, runtime: WebViewRuntime): IntegrationTone {
-  return tone(desired.enabled, runtime.state === 'running', runtime.state === 'error')
+  return tone(
+    desired.enabled,
+    runtime.state === 'running',
+    runtime.state === 'error' && runtime.attended !== true,
+  )
 }
 
 export function twitchTone(desired: TwitchDesired, runtime: TwitchRuntime): IntegrationTone {
@@ -62,7 +66,7 @@ export function vtsTone(desired: VtsDesired, runtime: VtsRuntime): IntegrationTo
 
 export function inputServerTone(runtime: InputServerRuntime): IntegrationTone {
   if (runtime.state === 'running') return 'green'
-  if (runtime.state === 'error') return 'red'
+  if (runtime.state === 'error' && runtime.attended !== true) return 'red'
   return 'gray'
 }
 
@@ -82,6 +86,12 @@ export function inputServerStatusLabel(runtime: InputServerRuntime): string {
     case 'starting':
       return t('integrations.status.starting', { service })
     case 'error': {
+      if (runtime.attended === true) {
+        const error = parseServerStartError(messageText(runtime))
+        return error.kind === 'port_in_use'
+          ? t('integrations.status.start_failed_message', { service, message: t('server.error.port_in_use_short', { port: error.port }) })
+          : t('integrations.status.start_failed', { service })
+      }
       const error = parseServerStartError(messageText(runtime))
       return error.kind === 'port_in_use'
         ? t('integrations.status.error_message', { service, message: t('server.error.port_in_use', { port: error.port }) })
@@ -127,6 +137,13 @@ export function integrationStatusLabel(
 
   if (tone === 'yellow') {
     return t('integrations.status.connecting_short', { service: name })
+  }
+
+  if (service === 'webview' && runtime.state === 'error' && runtime.attended === true) {
+    const error = parseServerStartError(messageText(runtime))
+    return error.kind === 'port_in_use'
+      ? t('integrations.status.start_failed_message', { service: name, message: t('server.error.port_in_use_short', { port: error.port }) })
+      : t('integrations.status.start_failed', { service: name })
   }
 
   switch (runtime.state) {

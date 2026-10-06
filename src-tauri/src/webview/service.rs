@@ -13,7 +13,12 @@ pub enum WebViewServerStatus {
     Stopped,
     Starting,
     Running,
-    Error { message: String },
+    /// Сервер не смог стартовать.
+    ///
+    /// `attended = true`, когда попытку запуска инициировал пользователь
+    /// (иконка заголовка не красная); `false` — boot-попытка или падение в
+    /// рантайме (красная навсегда).
+    Error { message: String, attended: bool },
 }
 
 /// Stable, frontend-parseable prefix for an occupied-port startup failure.

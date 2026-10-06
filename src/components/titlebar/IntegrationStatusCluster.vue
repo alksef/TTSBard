@@ -27,10 +27,10 @@ import {
   useVTubeStudioSettings,
 } from '../../composables/useAppSettings'
 
-const { state: webviewState, errorMessage: webviewErrorMessage } = useWebViewRuntimeStatus()
+const { state: webviewState, errorMessage: webviewErrorMessage, errorAttended: webviewErrorAttended } = useWebViewRuntimeStatus()
 const { status: twitchStatus } = useTwitchRuntimeStatus()
 const { state: vtsState, authenticated: vtsAuthenticated, desiredRunning: vtsDesiredRunning } = useVtsRuntimeStatus()
-const { state: inputServerState, errorMessage: inputServerErrorMessage } = useInputServerRuntimeStatus()
+const { state: inputServerState, errorMessage: inputServerErrorMessage, errorAttended: inputServerErrorAttended } = useInputServerRuntimeStatus()
 
 const webviewSettings = useWebViewSettings()
 const twitchSettings = useTwitchSettings()
@@ -38,7 +38,7 @@ const vtsSettings = useVTubeStudioSettings()
 
 const webviewRuntime = computed<WebViewRuntime>(() =>
   webviewState.value === 'error'
-    ? { state: 'error', message: webviewErrorMessage.value ?? undefined }
+    ? { state: 'error', message: webviewErrorMessage.value ?? undefined, attended: webviewErrorAttended.value }
     : { state: webviewState.value },
 )
 
@@ -53,7 +53,7 @@ const vtsRuntime = computed<VtsRuntime>(() => {
 
 const inputServerRuntime = computed<InputServerRuntime>(() =>
   inputServerState.value === 'error'
-    ? { state: 'error', message: inputServerErrorMessage.value ?? undefined }
+    ? { state: 'error', message: inputServerErrorMessage.value ?? undefined, attended: inputServerErrorAttended.value }
     : { state: inputServerState.value },
 )
 

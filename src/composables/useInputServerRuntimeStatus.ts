@@ -16,11 +16,15 @@ const state = computed(() => source.state.value.state)
 const errorMessage = computed(() =>
   source.state.value.state === 'error' ? (source.state.value.message ?? null) : null,
 )
+const errorAttended = computed(() =>
+  source.state.value.state === 'error' && source.state.value.attended === true,
+)
 
 export function useInputServerRuntimeStatus(): {
   state: Ref<InputServerRuntimeState>
   errorMessage: Ref<string | null>
+  errorAttended: Ref<boolean>
 } {
   void source.ensureInit()
-  return { state, errorMessage }
+  return { state, errorMessage, errorAttended }
 }

@@ -103,6 +103,9 @@ pub async fn run_webview_server(
         }
     }
 
+    // Первый проход цикла — boot-попытка, пользователь её не инициировал.
+    let mut attempt_attended = false;
+
     loop {
         // Check current settings
         let settings = webview_settings.read().await;
@@ -136,11 +139,13 @@ pub async fn run_webview_server(
                         &app_handle,
                         WebViewServerStatus::Error {
                             message: START_FAILED_CODE.to_string(),
+                            attended: attempt_attended,
                         },
                     );
                     if !wait_for_explicit_restart(&shutdown, &mut webview_rx).await {
                         return;
                     }
+                    attempt_attended = true;
                     continue;
                 }
             };
@@ -178,13 +183,17 @@ pub async fn run_webview_server(
                 Ok(Err(message)) => {
                     state
                         .webview
-                        .set_status(&app_handle, WebViewServerStatus::Error { message });
+                        .set_status(&app_handle, WebViewServerStatus::Error {
+                            message,
+                            attended: attempt_attended,
+                        });
                     let _ = server_handle.await;
                     server.stop().await;
                     state.webview.clear_upnp_runtime(&app_handle);
                     if !wait_for_explicit_restart(&shutdown, &mut webview_rx).await {
                         return;
                     }
+                    attempt_attended = true;
                     continue;
                 }
                 Err(_) => {
@@ -195,11 +204,13 @@ pub async fn run_webview_server(
                         &app_handle,
                         WebViewServerStatus::Error {
                             message: START_FAILED_CODE.to_string(),
+                            attended: attempt_attended,
                         },
                     );
                     if !wait_for_explicit_restart(&shutdown, &mut webview_rx).await {
                         return;
                     }
+                    attempt_attended = true;
                     continue;
                 }
             }
@@ -229,6 +240,8 @@ pub async fn run_webview_server(
                     state
                         .webview
                         .set_status(&app_handle, WebViewServerStatus::Stopped);
+                    // Следующая попытка идёт от сохранения настроек.
+                    attempt_attended = true;
                     server_running = false;
                 } else {
                     // Пока набор активен, повторяем `typing: true`: клиент
@@ -250,12 +263,16 @@ pub async fn run_webview_server(
                             // перезапуска или shutdown.
                             server.stop().await;
                             state.webview.clear_upnp_runtime(&app_handle);
+                            // Рантайм-падение после успешной работы — не
+                            // пользовательская попытка: всегда красный навсегда.
                             state.webview.set_status(&app_handle, WebViewServerStatus::Error {
                                 message: START_FAILED_CODE.to_string(),
+                                attended: false,
                             });
                             if !wait_for_explicit_restart(&shutdown, &mut webview_rx).await {
                                 return;
                             }
+                            attempt_attended = true;
                             server_running = false;
                         }
                         _ = shutdown.cancelled() => {
@@ -312,6 +329,8 @@ pub async fn run_webview_server(
                                             state.webview.set_status(&app_handle, WebViewServerStatus::Stopped);
                                             // Wait a bit for the server to fully shut down
                                             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                                            // Явный рестарт пользователя: следующая попытка attended.
+                                            attempt_attended = true;
                                             server_running = false;
                                         }
                                         AppEvent::ReloadWebViewTemplates => {
@@ -383,6 +402,7 @@ pub async fn run_webview_server(
                             }
                             Ok(Some(AppEvent::RestartWebViewServer)) => {
                                 info!("[WEBVIEW] ⚠ Restart event received, exiting disabled state");
+                                attempt_attended = true;
                                 break;
                             }
                             Ok(Some(AppEvent::TextSentToTts(routed))) => {
@@ -398,6 +418,7 @@ pub async fn run_webview_server(
                                 if settings.enabled {
                                     drop(settings);
                                     info!("[WEBVIEW] ✓ Enabled detected via timeout!");
+                                    attempt_attended = true;
                                     break;
                                 }
                                 drop(settings);

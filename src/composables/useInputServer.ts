@@ -20,6 +20,7 @@ export type UiMessageKind = 'success' | 'info' | 'error'
 export interface InputServerStatus {
   state: InputServerRuntimeState
   message?: string
+  attended?: boolean
 }
 
 export type InputServerTestResult =
@@ -45,7 +46,10 @@ export function convertInputServerStatusFromRust(raw: unknown): InputServerStatu
   const candidate = raw as Partial<InputServerStatus>
   const state = candidate.state
   if (state === 'stopped' || state === 'starting' || state === 'running' || state === 'error') {
-    return typeof candidate.message === 'string' ? { state, message: candidate.message } : { state }
+    const result: InputServerStatus = { state }
+    if (typeof candidate.message === 'string') result.message = candidate.message
+    if (typeof candidate.attended === 'boolean') result.attended = candidate.attended
+    return result
   }
   return { state: 'stopped' }
 }

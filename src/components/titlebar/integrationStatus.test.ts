@@ -42,6 +42,12 @@ describe('webviewTone', () => {
       expect(webviewTone({ enabled: true }, r)).toBe(expected[i])
     })
   })
+
+  it('attended error is gray; unattended or missing flag stays red', () => {
+    expect(webviewTone({ enabled: true }, { state: 'error', attended: true })).toBe('gray')
+    expect(webviewTone({ enabled: true }, { state: 'error', attended: false })).toBe('red')
+    expect(webviewTone({ enabled: true }, { state: 'error' })).toBe('red')
+  })
 })
 
 describe('twitchTone', () => {
@@ -131,6 +137,11 @@ describe('inputServerTone', () => {
     expect(inputServerTone({ state: 'starting' })).toBe('gray')
     expect(inputServerTone({ state: 'stopped' })).toBe('gray')
   })
+
+  it('attended error is gray; unattended error stays red', () => {
+    expect(inputServerTone({ state: 'error', attended: true })).toBe('gray')
+    expect(inputServerTone({ state: 'error' })).toBe('red')
+  })
 })
 
 describe('inputServerStatusLabel', () => {
@@ -150,6 +161,12 @@ describe('inputServerStatusLabel', () => {
       'Входящий сервер — ошибка',
     )
     expect(inputServerStatusLabel({ state: 'error' })).toBe('Входящий сервер — ошибка')
+  })
+
+  it('attended error uses the start-failed label with the captured port', () => {
+    expect(
+      inputServerStatusLabel({ state: 'error', attended: true, message: 'port_in_use:10101' }),
+    ).toBe('Входящий сервер — запуск не удался: порт 10101 занят')
   })
 })
 
@@ -185,6 +202,16 @@ describe('integrationStatusLabel', () => {
     expect(
       integrationStatusLabel('vts', 'red', { state: 'Error', message: 'socket closed' }),
     ).toBe('VTube Studio — ошибка: socket closed')
+  })
+
+  it('attended webview error uses the start-failed label with the captured port', () => {
+    expect(
+      integrationStatusLabel('webview', 'gray', {
+        state: 'error',
+        attended: true,
+        message: 'port_in_use:10101',
+      }),
+    ).toBe('WebView — запуск не удался: порт 10101 занят')
   })
 
   it('connecting states have meaningful labels', () => {
