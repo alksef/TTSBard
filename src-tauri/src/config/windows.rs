@@ -199,6 +199,65 @@ impl Default for WindowsSettings {
     }
 }
 
+/// Physical inner dimensions contract for compact mode.
+///
+/// `compact_width` / `compact_height` in `windows.json` are stored as PHYSICAL
+/// pixels and describe the INNER size of the main window (Tauri `set_size` /
+/// `inner_size`), not the outer frame. The minimum is a physical floor of
+/// 300×300 on each axis. The maximum is expressed in LOGICAL pixels
+/// (800×630, matching the ordinary window size) and is converted to physical
+/// pixels at runtime using the main window's actual `scale_factor`, because
+/// config loading has no monitor/DPI context.
+pub const COMPACT_MIN_WIDTH_PX: u32 = 300;
+pub const COMPACT_MIN_HEIGHT_PX: u32 = 300;
+pub const COMPACT_MAX_LOGICAL_WIDTH: u32 = 800;
+pub const COMPACT_MAX_LOGICAL_HEIGHT: u32 = 630;
+
+/// Resolve a scale factor to a safe multiplier.
+///
+/// Non-finite or non-positive values fall back to `1.0` so the logical maximum
+/// maps 1:1 to physical pixels instead of producing garbage or panicking.
+fn valid_scale_factor(scale_factor: f64) -> f64 {
+    if scale_factor.is_finite() && scale_factor > 0.0 {
+        scale_factor
+    } else {
+        1.0
+    }
+}
+
+/// Convert a logical dimension to physical pixels at `scale_factor`.
+///
+/// Uses the same rounding as the rest of the app (`round` to nearest integer);
+/// invalid scales fall back to `1.0`.
+pub fn logical_to_physical(logical: u32, scale_factor: f64) -> u32 {
+    let factor = valid_scale_factor(scale_factor);
+    (f64::from(logical) * factor).round() as u32
+}
+
+/// Physical `(min_width, min_height, max_width, max_height)` compact bounds.
+///
+/// The maximum is the logical 800×630 scaled to physical pixels; it is never
+/// allowed to fall below the physical minimum, so the returned range is always
+/// a valid `clamp` target.
+pub fn compact_physical_bounds(scale_factor: f64) -> (u32, u32, u32, u32) {
+    let max_w = logical_to_physical(COMPACT_MAX_LOGICAL_WIDTH, scale_factor)
+        .max(COMPACT_MIN_WIDTH_PX);
+    let max_h = logical_to_physical(COMPACT_MAX_LOGICAL_HEIGHT, scale_factor)
+        .max(COMPACT_MIN_HEIGHT_PX);
+    (
+        COMPACT_MIN_WIDTH_PX,
+        COMPACT_MIN_HEIGHT_PX,
+        max_w,
+        max_h,
+    )
+}
+
+/// Clamp a physical inner `(width, height)` to the compact bounds at scale.
+pub fn clamp_compact_size(width: u32, height: u32, scale_factor: f64) -> (u32, u32) {
+    let (min_w, min_h, max_w, max_h) = compact_physical_bounds(scale_factor);
+    (width.clamp(min_w, max_w), height.clamp(min_h, max_h))
+}
+
 impl WindowsSettings {
     /// Validate all settings and fix invalid values
     pub fn validate(&mut self) {
@@ -207,9 +266,13 @@ impl WindowsSettings {
         self.soundpanel.opacity = validate_opacity(self.soundpanel.opacity);
         self.playback.opacity = validate_opacity(self.playback.opacity);
 
-        // Clamp compact dimensions to 300..500
-        self.main.compact_width = self.main.compact_width.clamp(300, 500);
-        self.main.compact_height = self.main.compact_height.clamp(300, 500);
+        // Compact dimensions are stored as physical inner pixels. Config
+        // loading has no monitor/scale context, so only the physical minimum
+        // is enforced here; the scale-aware maximum is applied at the runtime
+        // command/startup boundaries. Enlarged stored values must survive
+        // validation and unrelated settings updates untouched.
+        self.main.compact_width = self.main.compact_width.max(COMPACT_MIN_WIDTH_PX);
+        self.main.compact_height = self.main.compact_height.max(COMPACT_MIN_HEIGHT_PX);
 
         // Validate colors
         if !is_valid_hex_color(&self.main.bg_color) {
@@ -407,11 +470,15 @@ impl WindowsManager {
         })
     }
 
-    /// Set main window compact dimensions (clamped to 300..500)
+    /// Set main window compact dimensions (physical inner pixels).
+    ///
+    /// Only the physical minimum is enforced here; the scale-aware maximum is
+    /// applied by the command layer (`commands::window::set_main_compact_dims`)
+    /// against the actual main-window scale before this setter is called.
     pub fn set_main_compact_dims(&self, width: u32, height: u32) -> Result<()> {
         self.update(|s| {
-            s.main.compact_width = width.clamp(300, 500);
-            s.main.compact_height = height.clamp(300, 500);
+            s.main.compact_width = width.max(COMPACT_MIN_WIDTH_PX);
+            s.main.compact_height = height.max(COMPACT_MIN_HEIGHT_PX);
         })
     }
 
@@ -584,6 +651,126 @@ impl WindowsManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 100% / 150% / 200% scales convert the logical 800×630 maximum to the
+    /// expected physical pixels with integer rounding.
+    #[test]
+    fn compact_max_physical_conversion_at_common_scales() {
+        assert_eq!(logical_to_physical(800, 1.0), 800);
+        assert_eq!(logical_to_physical(630, 1.0), 630);
+
+        assert_eq!(logical_to_physical(800, 1.5), 1200);
+        assert_eq!(logical_to_physical(630, 1.5), 945);
+
+        assert_eq!(logical_to_physical(800, 2.0), 1600);
+        assert_eq!(logical_to_physical(630, 2.0), 1260);
+
+        assert_eq!(compact_physical_bounds(1.0), (300, 300, 800, 630));
+        assert_eq!(compact_physical_bounds(1.5), (300, 300, 1200, 945));
+        assert_eq!(compact_physical_bounds(2.0), (300, 300, 1600, 1260));
+    }
+
+    /// Invalid (non-finite / non-positive) scales fall back to 1.0.
+    #[test]
+    fn invalid_scale_factor_falls_back_to_1_0() {
+        for scale in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0, -1.5] {
+            assert_eq!(logical_to_physical(800, scale), 800, "scale {scale}");
+            assert_eq!(logical_to_physical(630, scale), 630, "scale {scale}");
+        }
+        assert_eq!(compact_physical_bounds(f64::NAN), (300, 300, 800, 630));
+    }
+
+    /// Compact clamping pulls too-small sizes up to the physical minimum and
+    /// too-large sizes down to the scale-aware maximum.
+    #[test]
+    fn clamp_compact_size_small_and_large() {
+        // Small sizes clamp to the physical minimum.
+        assert_eq!(clamp_compact_size(100, 100, 1.0), (300, 300));
+        // Large sizes clamp to the logical maximum scaled to physical.
+        assert_eq!(clamp_compact_size(5000, 5000, 1.0), (800, 630));
+        assert_eq!(clamp_compact_size(5000, 5000, 1.5), (1200, 945));
+        // In-range sizes pass through unchanged.
+        assert_eq!(clamp_compact_size(450, 400, 1.0), (450, 400));
+    }
+
+    /// A too-low maximum (scale < min/logical ratio) never dips below the
+    /// physical minimum, keeping the returned range clamp-safe.
+    #[test]
+    fn compact_bounds_max_never_below_min() {
+        let (min_w, min_h, max_w, max_h) = compact_physical_bounds(0.1);
+        assert!(max_w >= min_w);
+        assert!(max_h >= min_h);
+    }
+
+    /// Legacy 450×400 survives `validate` unchanged.
+    #[test]
+    fn legacy_compact_dims_survive_validate() {
+        let mut settings = WindowsSettings::default();
+        settings.main.compact_width = 450;
+        settings.main.compact_height = 400;
+        settings.validate();
+        assert_eq!(settings.main.compact_width, 450);
+        assert_eq!(settings.main.compact_height, 400);
+    }
+
+    /// `validate` enforces only the physical minimum, bumping tiny values up
+    /// but never capping enlarged values.
+    #[test]
+    fn validate_enforces_physical_minimum_only() {
+        let mut settings = WindowsSettings::default();
+        settings.main.compact_width = 100;
+        settings.main.compact_height = 200;
+        settings.validate();
+        assert_eq!(settings.main.compact_width, 300);
+        assert_eq!(settings.main.compact_height, 300);
+    }
+
+    /// Enlarged 1200×945 survives validation, an unrelated settings update,
+    /// and a serialize/reload round-trip without being rewritten back to 500.
+    #[test]
+    fn enlarged_compact_dims_survive_validate_update_and_reload() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let config_dir = std::env::temp_dir().join(format!(
+            "ttsbard-compact-test-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let mut settings = WindowsSettings::default();
+        settings.main.compact_width = 1200;
+        settings.main.compact_height = 945;
+        settings.validate();
+        assert_eq!(settings.main.compact_width, 1200);
+        assert_eq!(settings.main.compact_height, 945);
+
+        let windows_path = config_dir.join("windows.json");
+        std::fs::write(
+            &windows_path,
+            serde_json::to_string_pretty(&settings).unwrap(),
+        )
+        .unwrap();
+
+        let manager = WindowsManager {
+            config_dir: config_dir.clone(),
+            cache: Arc::new(RwLock::new(settings)),
+        };
+
+        // Unrelated update must not rewrite the enlarged compact dimensions.
+        manager.set_main_opacity(42).unwrap();
+
+        let content = std::fs::read_to_string(&windows_path).unwrap();
+        let reloaded: WindowsSettings = serde_json::from_str(&content).unwrap();
+        assert_eq!(reloaded.main.compact_width, 1200);
+        assert_eq!(reloaded.main.compact_height, 945);
+        assert_eq!(reloaded.main.opacity, 42);
+        assert!(reloaded.main.custom_opacity);
+
+        let _ = std::fs::remove_dir_all(&config_dir);
+    }
 
     #[test]
     fn soundpanel_pin_updates_visibility_flags_together() {

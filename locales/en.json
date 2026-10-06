@@ -1031,6 +1031,7 @@
     "editor.resize.history_open": "Phrase history is open — resizing is unavailable",
     "editor.resize.window_height": "Change the window height",
     "editor.resize.editor_height": "Change the editor height",
+    "editor.resize.window_size": "Change the window size",
     "history.toggle_show": "Show phrase history",
     "history.toggle_hide": "Hide phrase history",
     "history.replace_confirm": "Replace the current text with the selected phrase?",

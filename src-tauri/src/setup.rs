@@ -411,15 +411,28 @@ pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std:
             // Start directly in compact mode: enforce compact bounds and resize
             // to the saved compact dimensions before the window becomes visible
             // (no animation/guards needed since the window is still hidden).
-            let width = windows.main.compact_width;
-            let height = windows.main.compact_height;
+            //
+            // Compact dimensions are physical INNER pixels; the maximum is the
+            // logical 800×630 scaled by the current scale factor. Saved values
+            // are clamped here but NOT written back to disk (the stored number
+            // is preserved until the user saves a new size).
+            let scale = match main_window.scale_factor() {
+                Ok(scale) => scale,
+                Err(error) => {
+                    warn!(error = %error, "Failed to read scale factor, using 1.0 for compact bounds");
+                    1.0
+                }
+            };
+            let (min_w, min_h, max_w, max_h) = crate::config::compact_physical_bounds(scale);
+            let width = windows.main.compact_width.clamp(min_w, max_w);
+            let height = windows.main.compact_height.clamp(min_h, max_h);
             let min_size = tauri::Size::Physical(tauri::PhysicalSize {
-                width: 300,
-                height: 300,
+                width: min_w,
+                height: min_h,
             });
             let max_size = tauri::Size::Physical(tauri::PhysicalSize {
-                width: 500,
-                height: 500,
+                width: max_w,
+                height: max_h,
             });
             let _ = main_window.set_min_size(Some(min_size));
             let _ = main_window.set_max_size(Some(max_size));

@@ -44,7 +44,7 @@
 | Titlebar и переключение дополнительных окон | `src/App.vue` |
 | Статусы интеграций | `src/components/titlebar/IntegrationStatusCluster.vue` |
 | Уведомления | `src/components/ErrorToasts.vue`, `shared/StatusMessage.vue`, `shared/TestResult.vue` в `src/components/` |
-| Минимальный режим | `src/components/MinimalModeButton.vue`, `src/composables/compactModeState.ts`, `src/components/InputPanel.vue` |
+| Компактный режим | `src/components/MinimalModeButton.vue`, `src/composables/compactModeState.ts`, `src/composables/useCompactWindowResize.ts`, `src/components/InputPanel.vue` — изменение размера за края окна; внутренние захваты в компактном режиме отсутствуют, разделитель высоты редактора доступен в обычном режиме |
 | Звуковая панель | `src-soundpanel/main.ts` → `SoundPanelApp.vue` в том же каталоге |
 | Управление воспроизведением | `src-playback/main.ts` → `PlaybackControlApp.vue` в том же каталоге |
 | Выбор области OCR | `src-ocr-selection/main.ts` → `SelectionApp.vue` в том же каталоге |

@@ -32,4 +32,6 @@ pub use settings::{
     VTubeStudioTypingMode,
 };
 pub use validation::{is_valid_hex_color, validate_port};
-pub use windows::{WindowsManager, WindowsSettings};
+pub use windows::{
+    clamp_compact_size, compact_physical_bounds, WindowsManager, WindowsSettings,
+};

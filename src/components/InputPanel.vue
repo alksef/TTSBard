@@ -10,6 +10,7 @@ import { useErrorHandler } from '../composables/useErrorHandler'
 import { debugLog, debugError } from '../utils/debug'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
 import { compactModeState, initCompactDims } from '../composables/compactModeState'
+import { useCompactWindowResize } from '../composables/useCompactWindowResize'
 import TtsEditor from './editor/TtsEditor.vue'
 import PhraseHistoryList from './PhraseHistoryList.vue'
 import EditorMenu from './editor/EditorMenu.vue'
@@ -133,6 +134,8 @@ const saveStatusMessage = ref('')
 const replacements = ref<Map<string, string>>(new Map())
 const usernames = ref<Map<string, string>>(new Map())
 const isMinimalMode = inject<Ref<boolean>>('isMinimalMode', ref(false))
+
+const compactResize = useCompactWindowResize({ isMinimalMode, showHistory, getWindow: getCurrentWindow })
 
 const editorSettings = useEditorSettings()
 const aiSettings = useAiSettings()
@@ -314,7 +317,6 @@ const isAiButtonEnabled = computed(() => {
 })
 
 const listenerScope = createAsyncCleanupScope()
-let compactSaveTimer: ReturnType<typeof setTimeout> | null = null
 
 const typingBurst = useTypingBurst(
   () => editorSettings.value?.typing_idle_timeout_ms ?? 800,
@@ -428,64 +430,16 @@ onMounted(async () => {
   }
   await listenerScope.track(currentWindow.onCloseRequested(closeHandler))
 
-  const resizeHandler = currentWindow.onResized(async () => {
-    if (!isMinimalMode.value) return
-    if (compactModeState.appDrivenResize > 0) return
-    if (showHistory.value) return
-
-    if (compactSaveTimer) clearTimeout(compactSaveTimer)
-    compactSaveTimer = setTimeout(async () => {
-      if (!isMinimalMode.value) return
-      if (compactModeState.appDrivenResize > 0) return
-      try {
-        // Only the height is user-resizable in compact mode; keep the trusted
-        // saved width so any transient read-back drift never becomes durable.
-        const size = await currentWindow.outerSize()
-        const h = Math.max(300, Math.min(500, size.height))
-        const w = Math.max(300, Math.min(500, compactModeState.width))
-        await invoke('set_main_compact_dims', { width: w, height: h })
-        compactModeState.width = w
-        compactModeState.height = h
-      } catch {
-        // silently fail
-      }
-    }, 1000)
-  })
-  await listenerScope.track(resizeHandler)
-
-  compactModeState.flushPendingCompactSave = async () => {
-    if (!isMinimalMode.value) return
-    if (compactModeState.appDrivenResize > 0) return
-    if (showHistory.value) return
-    if (compactSaveTimer) {
-      clearTimeout(compactSaveTimer)
-      compactSaveTimer = null
-    }
-    try {
-      const size = await currentWindow.outerSize()
-      const h = Math.max(300, Math.min(500, size.height))
-      const w = Math.max(300, Math.min(500, compactModeState.width))
-      await invoke('set_main_compact_dims', { width: w, height: h })
-      compactModeState.width = w
-      compactModeState.height = h
-    } catch {
-      // silently fail
-    }
-  }
+  await compactResize.init()
 })
 
 vueOnUnmounted(async () => {
-  await flushTabsSave()
+  compactResize.dispose()
   listenerScope.dispose()
-  if (compactSaveTimer) clearTimeout(compactSaveTimer)
   clearSubmitOutcomeTimer()
-  if (resizeGuardRelease) {
-    resizeGuardRelease()
-    resizeGuardRelease = null
-  }
-  compactModeState.flushPendingCompactSave = null
   window.removeEventListener('preprocessor-data-changed', onPreprocessorChanged)
   typingBurst.dispose()
+  await flushTabsSave()
 })
 
 async function hideMainWindow() {
@@ -754,54 +708,12 @@ const usernamesRecord = computed(() => {
   return obj
 })
 
-// Editor resize state
+// Full-mode editor height resize state. The height separator drives only the
+// editor height setting (200..1200 CSS px), persisted via set_editor_height.
 const editorHeight = ref(editorSettings.value?.editor_height ?? 340)
 const isResizing = ref(false)
 const resizeStartY = ref(0)
 const resizeStartHeight = ref(0)
-
-// The resize handle is unavailable only while both minimal mode and history
-// are active: the compact window height must not be changed while history
-// occupies the viewport.
-const resizeHandleDisabled = computed(() => isMinimalMode.value && showHistory.value)
-
-const resizeHandleTitle = computed(() => {
-  if (resizeHandleDisabled.value) return t('editor.resize.history_open')
-  return isMinimalMode.value ? t('editor.resize.window_height') : t('editor.resize.editor_height')
-})
-
-// Ownership of the shared appDrivenResize guard. A compact drag pairs its
-// increment with exactly one release closure; only that closure may decrement
-// the counter it owns. Full-mode gestures acquire nothing, so their
-// cancel/termination can never decrement a guard owned by MinimalModeButton or
-// another operation.
-let resizeGuardRelease: (() => void) | null = null
-
-function acquireResizeGuard(): (() => void) | null {
-  if (!isMinimalMode.value) return null
-  compactModeState.appDrivenResize++
-  return () => {
-    if (compactModeState.appDrivenResize > 0) {
-      compactModeState.appDrivenResize--
-    }
-  }
-}
-
-function terminateResize() {
-  isResizing.value = false
-  resizeStartY.value = 0
-  resizeStartHeight.value = 0
-  if (resizeGuardRelease) {
-    resizeGuardRelease()
-    resizeGuardRelease = null
-  }
-}
-
-watch(resizeHandleDisabled, (disabled) => {
-  if (disabled && isResizing.value) {
-    terminateResize()
-  }
-})
 
 watch(() => editorSettings.value?.editor_height, (newVal) => {
   if (newVal !== undefined && newVal !== editorHeight.value && !isResizing.value) {
@@ -810,81 +722,32 @@ watch(() => editorSettings.value?.editor_height, (newVal) => {
 }, { immediate: true })
 
 function onResizePointerDown(e: PointerEvent) {
-  if (resizeHandleDisabled.value) return
+  if (e.button !== 0) return
   isResizing.value = true
   resizeStartY.value = e.clientY
-  // The frameless window has no native edge resize: in compact mode the same
-  // handle drives the window height (persisted as compact dims), in full mode
-  // it drives the editor height setting.
-  resizeStartHeight.value = isMinimalMode.value ? compactModeState.height : editorHeight.value
-  resizeGuardRelease = acquireResizeGuard()
-  if (isMinimalMode.value) {
-    // Base the height on the live window: compactModeState can drift. Width is
-    // never passed — the backend keeps the current one (re-applying a width
-    // read back from the window drifts it sideways on every call).
-    getCurrentWindow().outerSize().then((size) => {
-      if (isResizing.value) resizeStartHeight.value = size.height
-    }).catch(() => {})
-  }
+  resizeStartHeight.value = editorHeight.value
   ;(e.target as HTMLElement)?.setPointerCapture?.(e.pointerId)
 }
 
 function onResizePointerMove(e: PointerEvent) {
   if (!isResizing.value) return
-  if (resizeHandleDisabled.value) {
-    terminateResize()
-    return
-  }
   const dy = e.clientY - resizeStartY.value
-  if (isMinimalMode.value) {
-    const newHeight = Math.max(300, Math.min(500, resizeStartHeight.value + dy))
-    invoke('resize_main_window', { width: null, height: newHeight }).catch(() => {})
-  } else {
-    editorHeight.value = Math.max(200, Math.min(1200, resizeStartHeight.value + dy))
-  }
+  editorHeight.value = Math.max(200, Math.min(1200, resizeStartHeight.value + dy))
 }
 
 function onResizePointerUp(_e: PointerEvent) {
   if (!isResizing.value) return
   isResizing.value = false
-  if (isMinimalMode.value) {
-    // Transfer this gesture's owned increment to its delayed completion. If
-    // another gesture starts before the 900ms callback fires, it acquires and
-    // releases its own increment independently — no leak, no double release.
-    const release = resizeGuardRelease
-    resizeGuardRelease = null
-    setTimeout(async () => {
-      release?.()
-      if (resizeHandleDisabled.value) return
-      // Persist after the app-driven resize settles; the onResized handler skips
-      // saves while appDrivenResize > 0, so save explicitly here.
-      try {
-        const size = await getCurrentWindow().outerSize()
-        const h = Math.max(300, Math.min(500, size.height))
-        const w = Math.max(300, Math.min(500, compactModeState.width))
-        await invoke('set_main_compact_dims', { width: w, height: h })
-        compactModeState.width = w
-        compactModeState.height = h
-      } catch {
-        // silently fail — dims stay unsaved but the guard is already released
-      }
-    }, 900)
-  } else {
-    const heightToSave = editorHeight.value
-    invoke('set_editor_height', { height: heightToSave }).catch(() => {})
-  }
+  const heightToSave = editorHeight.value
+  invoke('set_editor_height', { height: heightToSave }).catch(() => {})
 }
 
-function onResizePointerCancel() {
-  if (isResizing.value) {
-    terminateResize()
-  }
+function onResizePointerCancel(_e: PointerEvent) {
+  isResizing.value = false
 }
 
-function onResizeLostPointerCapture() {
-  if (isResizing.value) {
-    terminateResize()
-  }
+function onResizeLostPointerCapture(_e: PointerEvent) {
+  isResizing.value = false
 }
 
 const editorHeightPx = computed(() => `${editorHeight.value}px`)
@@ -1090,13 +953,12 @@ defineExpose({ focusEditor })
             @esc="handleEsc"
           />
           <div
+            v-if="!isMinimalMode"
             class="editor-resize-handle"
-            :class="{ 'is-disabled': resizeHandleDisabled }"
             role="separator"
             aria-orientation="horizontal"
-            :aria-disabled="resizeHandleDisabled"
-            :aria-label="resizeHandleTitle"
-            :title="resizeHandleTitle"
+            :aria-label="t('editor.resize.editor_height')"
+            :title="t('editor.resize.editor_height')"
             @pointerdown="onResizePointerDown"
             @pointermove="onResizePointerMove"
             @pointerup="onResizePointerUp"
@@ -1268,11 +1130,10 @@ defineExpose({ focusEditor })
 }
 
 /* Minimal + open history: drop the CodeMirror floor to ~80px and give the
-   wrapper a floor that accounts for the tab row and the resize handle above
-   the editor, so tabs + editor + handle + action bar + history filter fit
-   inside the 300px compact viewport. Larger windows grow the wrapper and give
-   the editor more space naturally; the history list stays the region that
-   shrinks first and scrolls. */
+   wrapper a floor that accounts for the tab row above the editor, so
+   tabs + editor + action bar + history filter fit inside the 300px compact
+   viewport. Larger windows grow the wrapper and give the editor more space
+   naturally; the history list stays the region that shrinks first and scrolls. */
 .input-panel.minimal-panel.history-open .textarea-wrapper.minimal-wrapper {
   flex: 1 0 112px;
   min-height: 112px;
@@ -1323,15 +1184,6 @@ defineExpose({ focusEditor })
 .editor-resize-handle:hover {
   background: var(--color-accent);
   opacity: 0.4;
-}
-
-.editor-resize-handle.is-disabled {
-  cursor: default;
-}
-
-.editor-resize-handle.is-disabled:hover {
-  background: transparent;
-  opacity: 1;
 }
 
 .editor-action-bar {

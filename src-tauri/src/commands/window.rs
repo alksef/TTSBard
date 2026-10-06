@@ -89,8 +89,14 @@ pub async fn resize_main_window(
     app_handle: AppHandle,
     width: Option<u32>,
     height: u32,
+    compact: Option<bool>,
 ) -> Result<(), String> {
     if let Some(window) = app_handle.get_webview_window("main") {
+        if compact.unwrap_or(false) {
+            // Compact path: canonical physical INNER dimensions for both axes,
+            // clamped to the scale-aware compact bounds at the backend boundary.
+            return resize_main_window_compact(&window, width, height);
+        }
         if width.is_none() {
             // Height-only resize. `set_size` maps to `set_inner_size`, which on a
             // frameless shadowed window ADDS the invisible WS_THICKFRAME borders
@@ -142,6 +148,39 @@ pub async fn resize_main_window(
     } else {
         Err("Main window not found".to_string())
     }
+}
+
+/// Compact resize: both axes are treated as physical INNER dimensions.
+///
+/// Uses Tauri `set_size` (which maps to `set_inner_size`) together with
+/// `inner_size()` reads so width and height never mix outer/frame sizes — this
+/// avoids the WS_THICKFRAME outer/inner drift that affected the legacy
+/// outer-only height path. When `width` is `None`, the current INNER width is
+/// preserved. Dimensions are clamped to the scale-aware compact bounds.
+fn resize_main_window_compact(
+    window: &tauri::WebviewWindow,
+    width: Option<u32>,
+    height: u32,
+) -> Result<(), String> {
+    let scale = window
+        .scale_factor()
+        .map_err(|e| format!("Failed to read main window scale factor: {}", e))?;
+    let (min_w, min_h, max_w, max_h) = crate::config::compact_physical_bounds(scale);
+
+    let current_width = window
+        .inner_size()
+        .map_err(|e| format!("Failed to read main window inner size: {}", e))?
+        .width;
+    let target_width = width.unwrap_or(current_width).clamp(min_w, max_w);
+    let target_height = height.clamp(min_h, max_h);
+
+    window
+        .set_size(tauri::Size::Physical(tauri::PhysicalSize {
+            width: target_width,
+            height: target_height,
+        }))
+        .map_err(|e| format!("Failed to resize: {}", e))?;
+    Ok(())
 }
 
 /// Get hotkey enabled setting
@@ -575,28 +614,35 @@ fn emit_appearance_updates(app_handle: &AppHandle) {
     let _ = update_playback_appearance(app_handle);
 }
 
-/// Enforce compact bounds (min 300x300, max 500x500) on the main window
+/// Enforce compact bounds on the main window.
+///
+/// The minimum is a physical 300×300; the maximum is the logical 800×630
+/// scaled to physical pixels by the main window's current scale factor.
 #[tauri::command]
 pub fn set_main_bounds(app_handle: AppHandle) -> Result<(), String> {
-    if let Some(window) = app_handle.get_webview_window("main") {
-        let min_size = tauri::Size::Physical(tauri::PhysicalSize {
-            width: 300,
-            height: 300,
-        });
-        let max_size = tauri::Size::Physical(tauri::PhysicalSize {
-            width: 500,
-            height: 500,
-        });
-        window
-            .set_min_size(Some(min_size))
-            .map_err(|e| format!("Failed to set min size: {}", e))?;
-        window
-            .set_max_size(Some(max_size))
-            .map_err(|e| format!("Failed to set max size: {}", e))?;
-        Ok(())
-    } else {
-        Err("Main window not found".to_string())
-    }
+    let window = app_handle
+        .get_webview_window("main")
+        .ok_or_else(|| "Main window not found".to_string())?;
+    let scale = window
+        .scale_factor()
+        .map_err(|e| format!("Failed to read main window scale factor: {}", e))?;
+    let (min_w, min_h, max_w, max_h) = crate::config::compact_physical_bounds(scale);
+
+    let min_size = tauri::Size::Physical(tauri::PhysicalSize {
+        width: min_w,
+        height: min_h,
+    });
+    let max_size = tauri::Size::Physical(tauri::PhysicalSize {
+        width: max_w,
+        height: max_h,
+    });
+    window
+        .set_min_size(Some(min_size))
+        .map_err(|e| format!("Failed to set min size: {}", e))?;
+    window
+        .set_max_size(Some(max_size))
+        .map_err(|e| format!("Failed to set max size: {}", e))?;
+    Ok(())
 }
 
 /// Leave compact bounds and restore the full-mode layout floor.
@@ -620,7 +666,12 @@ pub fn remove_main_bounds(app_handle: AppHandle) -> Result<(), String> {
     }
 }
 
-/// Set main window compact dimensions (clamped 300..500)
+/// Set main window compact dimensions (physical inner pixels).
+///
+/// Input is clamped against the actual main-window scale (physical minimum,
+/// scale-aware logical maximum) before persistence. Persisted values are
+/// physical INNER dimensions; the new frontend reads and writes INNER size
+/// consistently, while legacy outer-read/inner-applied numbers are preserved.
 #[tauri::command]
 pub async fn set_main_compact_dims(
     width: u32,
@@ -628,6 +679,15 @@ pub async fn set_main_compact_dims(
     app_handle: AppHandle,
     windows_manager: State<'_, WindowsManager>,
 ) -> Result<(), String> {
+    let (width, height) = {
+        let window = app_handle
+            .get_webview_window("main")
+            .ok_or_else(|| "Main window not found".to_string())?;
+        let scale = window
+            .scale_factor()
+            .map_err(|e| format!("Failed to read main window scale factor: {}", e))?;
+        crate::config::clamp_compact_size(width, height, scale)
+    };
     super::persist_blocking(windows_manager.inner(), move |mgr| {
         mgr.set_main_compact_dims(width, height)
     })

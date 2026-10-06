@@ -50,32 +50,52 @@ watch(
 async function toggleMinimalMode() {
   if (isAnimating.value) return
   isAnimating.value = true
+  let acquiredGuard = false
 
   try {
     if (isMinimalMode.value) {
-      // Leaving compact mode: flush pending save before guard, remove bounds before resize
+      // Leaving compact mode: flush pending save before guard, remove bounds
+      // then resize to the ordinary 800x630. The ordinary exit keeps the
+      // compact flag omitted.
       await compactModeState.flushPendingCompactSave?.()
       compactModeState.appDrivenResize++
+      acquiredGuard = true
       await invoke('remove_main_bounds')
       await invoke('resize_main_window', { width: 800, height: 630 })
     } else {
-      // Entering compact mode: set bounds, then resize
+      // Entering compact mode: set bounds, then resize with compact:true.
       compactModeState.appDrivenResize++
+      acquiredGuard = true
       await invoke('set_main_bounds')
-      await invoke('resize_main_window', { width: compactWidth.value, height: compactHeight.value })
+      await invoke('resize_main_window', { width: compactWidth.value, height: compactHeight.value, compact: true })
     }
     emit('minimalModeChanged', !isMinimalMode.value)
     isMinimalMode.value = !isMinimalMode.value
   } catch (error) {
     debugError('Failed to toggle minimal mode:', error)
-    try { await invoke('remove_main_bounds') } catch { /* ignore */ }
-    compactModeState.appDrivenResize = 0
+    if (acquiredGuard) {
+      try {
+        if (isMinimalMode.value) {
+          await invoke('set_main_bounds')
+          await invoke('resize_main_window', { width: compactWidth.value, height: compactHeight.value, compact: true })
+        } else {
+          await invoke('remove_main_bounds')
+          await invoke('resize_main_window', { width: 800, height: 630 })
+        }
+      } catch (rollbackError) {
+        debugError('Failed to restore window bounds after mode switch:', rollbackError)
+      }
+    }
   } finally {
+    if (acquiredGuard) {
+      setTimeout(() => {
+        if (compactModeState.appDrivenResize > 0) {
+          compactModeState.appDrivenResize--
+        }
+      }, 500)
+    }
     setTimeout(() => {
       isAnimating.value = false
-      if (compactModeState.appDrivenResize > 0) {
-        compactModeState.appDrivenResize--
-      }
     }, 500)
   }
 }
