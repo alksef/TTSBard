@@ -14,7 +14,6 @@ import {
   type VtsRuntime,
   type InputServerRuntime,
   type WebViewDesired,
-  type TwitchDesired,
   type VtsDesired,
   type IntegrationTone,
 } from './integrationStatus'
@@ -24,7 +23,6 @@ import { useTwitchRuntimeStatus } from '../../composables/useTwitchRuntimeStatus
 import { useInputServerRuntimeStatus } from '../../composables/useInputServerRuntimeStatus'
 import {
   useWebViewSettings,
-  useTwitchSettings,
   useVTubeStudioSettings,
 } from '../../composables/useAppSettings'
 
@@ -34,7 +32,6 @@ const { state: vtsState, authenticated: vtsAuthenticated, desiredRunning: vtsDes
 const { state: inputServerState, errorMessage: inputServerErrorMessage, errorAttended: inputServerErrorAttended } = useInputServerRuntimeStatus()
 
 const webviewSettings = useWebViewSettings()
-const twitchSettings = useTwitchSettings()
 const vtsSettings = useVTubeStudioSettings()
 
 const webviewRuntime = computed<WebViewRuntime>(() =>
@@ -59,7 +56,6 @@ const inputServerRuntime = computed<InputServerRuntime>(() =>
 )
 
 const webviewDesired = computed<WebViewDesired>(() => ({ enabled: webviewSettings.value?.enabled ?? false }))
-const twitchDesired = computed<TwitchDesired>(() => ({ enabled: twitchSettings.value?.enabled ?? false }))
 const vtsDesired = computed<VtsDesired>(() => ({
   shouldRun: (vtsSettings.value?.enabled ?? false) || vtsDesiredRunning.value,
 }))
@@ -74,7 +70,7 @@ interface StatusSlot {
 
 const slots = computed<StatusSlot[]>(() => {
   const webviewToneValue = webviewTone(webviewDesired.value, webviewRuntime.value)
-  const twitchToneValue = twitchTone(twitchDesired.value, twitchRuntime.value)
+  const twitchToneValue = twitchTone(twitchRuntime.value)
   const vtsToneValue = vtsTone(vtsDesired.value, vtsRuntime.value)
   const inputServerToneValue = inputServerTone(inputServerRuntime.value)
 

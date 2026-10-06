@@ -10,7 +10,6 @@ export type WebViewRuntime =
   | { state: 'running' }
   | { state: 'error'; message?: string; attended?: boolean }
 
-export type TwitchDesired = { enabled: boolean }
 export type TwitchRuntime =
   | { state: 'Disconnected' }
   | { state: 'Connecting' }
@@ -48,8 +47,7 @@ export function webviewTone(desired: WebViewDesired, runtime: WebViewRuntime): I
   )
 }
 
-export function twitchTone(desired: TwitchDesired, runtime: TwitchRuntime): IntegrationTone {
-  if (!desired.enabled) return 'gray'
+export function twitchTone(runtime: TwitchRuntime): IntegrationTone {
   if (runtime.state === 'Connected') return 'green'
   if (runtime.state === 'Error') return 'red'
   if (runtime.state === 'Connecting') return 'yellow'

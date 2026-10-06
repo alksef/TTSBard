@@ -61,16 +61,40 @@ describe('twitchTone', () => {
   ]
   const expected: IntegrationTone[] = ['gray', 'yellow', 'green', 'red', 'red']
 
-  it('is gray for every runtime when disabled', () => {
-    for (const r of runtime) {
-      expect(twitchTone({ enabled: false }, r)).toBe('gray')
-    }
+  it('maps runtime states truthfully without any persisted desired flag', () => {
+    runtime.forEach((r, i) => {
+      expect(twitchTone(r)).toBe(expected[i])
+    })
   })
 
-  it('maps enabled runtime states truthfully', () => {
-    runtime.forEach((r, i) => {
-      expect(twitchTone({ enabled: true }, r)).toBe(expected[i])
-    })
+  it('regression: manual connect with persisted enabled=false keeps the icon green and visible', () => {
+    // Scenario: user clicks Connect manually. connect_twitch flips only the runtime
+    // `enabled` flag; the persisted config still has enabled=false. On a later settings
+    // reload the persisted flag is read as false while the runtime reports Connected.
+    // Tone must follow the runtime, so the signal stays green and visible instead of
+    // disappearing behind a disabled persisted flag.
+    const connected: TwitchRuntime = { state: 'Connected' }
+    const tone = twitchTone(connected)
+    expect(tone).toBe('green')
+    expect(isIntegrationVisible(tone)).toBe(true)
+  })
+
+  it('Connecting is visible yellow', () => {
+    const tone = twitchTone({ state: 'Connecting' })
+    expect(tone).toBe('yellow')
+    expect(isIntegrationVisible(tone, true)).toBe(true)
+  })
+
+  it('terminal Error is visible red', () => {
+    const tone = twitchTone({ state: 'Error', message: 'auth failed' })
+    expect(tone).toBe('red')
+    expect(isIntegrationVisible(tone)).toBe(true)
+  })
+
+  it('Disconnected is hidden gray after an actual stop', () => {
+    const tone = twitchTone({ state: 'Disconnected' })
+    expect(tone).toBe('gray')
+    expect(isIntegrationVisible(tone)).toBe(false)
   })
 })
 
@@ -117,10 +141,8 @@ describe('manual Stop after Error gives gray, not stale red', () => {
     )
   })
 
-  it('twitch: disabled with Error runtime is gray', () => {
-    expect(twitchTone({ enabled: false }, { state: 'Error', message: 'auth failed' })).toBe(
-      'gray',
-    )
+  it('twitch: after an actual stop the runtime is Disconnected and gray', () => {
+    expect(twitchTone({ state: 'Disconnected' })).toBe('gray')
   })
 
   it('vts: shouldRun false with Error runtime is gray', () => {
