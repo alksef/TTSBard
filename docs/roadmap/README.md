@@ -52,6 +52,8 @@ related_tasks: []
 
 ## Завершённые направления
 
+- [ROADMAP-127 — Упрощение панели WebView и локального подключения](./completed/127-webview-panel-simplification.md) — `completed`: реализовано и принято пользователем после ручной проверки.
+
 - [ROADMAP-126 — Выбор экрана захвата OCR](./completed/126-ocr-monitor-selection.md) — `completed`: реализовано и принято пользователем после ручной проверки.
 
 - [ROADMAP-125 — Перехват клавиш и снятие ограничения](./completed/125-intercept-key-restriction.md) — `completed`: расширенный выбор клавиш и обратная связь при занятой привязке.

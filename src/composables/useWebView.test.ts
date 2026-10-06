@@ -9,12 +9,16 @@ const {
   listenMock,
   mockDebugLog,
   mockDebugError,
+  mockWriteText,
 } = vi.hoisted(() => ({
   mockInvoke: vi.fn(),
   listenMock: vi.fn(async () => vi.fn()),
   mockDebugLog: vi.fn(),
   mockDebugError: vi.fn(),
+  mockWriteText: vi.fn(),
 }))
+
+vi.stubGlobal('navigator', { clipboard: { writeText: mockWriteText } })
 
 let capturedOnMountedCbs: Array<() => void> = []
 let capturedOnUnmountedCbs: Array<() => void> = []
@@ -69,7 +73,6 @@ function makeSettings(overrides: Partial<WebViewSettingsDto> = {}): WebViewSetti
     enabled: false,
     start_on_boot: false,
     port: 10100,
-    bind_address: '0.0.0.0',
     access_token: null,
     upnp_enabled: false,
     send_original_text: true,
@@ -144,175 +147,92 @@ afterEach(() => {
   activeScopes = []
 })
 
-describe('useWebView displayUrl', () => {
+describe('useWebView connection URLs', () => {
   beforeEach(() => {
     resetHarness()
   })
 
-  it('uses the local IP and configured port when bind is 0.0.0.0', async () => {
-    mockWebViewSettingsRef.value = makeSettings({ bind_address: '0.0.0.0', port: 10100 })
-    const { displayUrl, updateDisplayUrl } = await setupAndMount()
-    await nextTick()
-    await updateDisplayUrl()
-    expect(displayUrl.value).toBe('http://192.168.1.25:10100')
+  it('resolves the loopback and LAN URLs from the persisted port', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ port: 10100 })
+    const { loopbackUrl, lanUrl } = await setupAndMount()
+    await flush()
+    expect(loopbackUrl.value).toBe('http://127.0.0.1:10100')
+    expect(lanUrl.value).toBe('http://192.168.1.25:10100')
     expect(mockInvoke).toHaveBeenCalledWith('get_local_ip')
   })
 
-  it('uses 127.0.0.1 and the configured port when bind is 127.0.0.1', async () => {
-    mockWebViewSettingsRef.value = makeSettings({ bind_address: '127.0.0.1', port: 8080 })
-    const { displayUrl, updateDisplayUrl } = await setupAndMount()
-    await nextTick()
-    await updateDisplayUrl()
-    expect(displayUrl.value).toBe('http://127.0.0.1:8080')
-    expect(mockInvoke).not.toHaveBeenCalledWith('get_local_ip')
+  it('leaves the LAN URL empty when the local IP lookup fails', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ port: 10100 })
+    const failingIp: InvokeImpl = (cmd: string) => {
+      if (cmd === 'get_webview_token') return Promise.resolve(null)
+      if (cmd === 'get_local_ip') return Promise.reject(new Error('no route'))
+      return Promise.resolve(undefined)
+    }
+    const { lanUrl } = await setupAndMount(failingIp)
+    await flush()
+    expect(lanUrl.value).toBe('')
   })
 
-  it('falls back to loopback URL when getting the local IP fails', async () => {
-    mockWebViewSettingsRef.value = makeSettings({ bind_address: '0.0.0.0', port: 8080 })
-    const { displayUrl, errorMessage, updateDisplayUrl } = await setupAndMount()
-    mockInvoke.mockRejectedValueOnce(new Error('No network route'))
+  it.each(['127.0.0.1', '127.0.0.2', '0.0.0.0'])(
+    'does not present %s as the LAN address',
+    async (ip) => {
+      mockWebViewSettingsRef.value = makeSettings({ port: 10100 })
+      const impl: InvokeImpl = (cmd: string) => {
+        if (cmd === 'get_webview_token') return Promise.resolve(null)
+        if (cmd === 'get_local_ip') return Promise.resolve(ip)
+        return Promise.resolve(undefined)
+      }
+      const { lanUrl } = await setupAndMount(impl)
+      await flush()
+      expect(lanUrl.value).toBe('')
+    },
+  )
 
-    await updateDisplayUrl()
-
-    expect(displayUrl.value).toBe('http://127.0.0.1:8080')
-    expect(errorMessage.value).toBe('Не удалось получить локальный IP')
-  })
-
-  it('does not let an outdated local-IP lookup overwrite a newer URL', async () => {
-    mockWebViewSettingsRef.value = makeSettings({ bind_address: '127.0.0.1', port: 10100 })
-    const { displayUrl, settings, updateDisplayUrl } = await setupAndMount()
-    let resolveLocalIp: ((value: string) => void) | undefined
-    mockInvoke.mockImplementation((cmd: string) => {
+  it('recovers the LAN URL on a manual retry after a failure', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ port: 10100 })
+    let attempts = 0
+    const impl: InvokeImpl = (cmd: string) => {
+      if (cmd === 'get_webview_token') return Promise.resolve(null)
       if (cmd === 'get_local_ip') {
-        return new Promise<string>(resolve => { resolveLocalIp = resolve })
+        attempts += 1
+        return attempts === 1
+          ? Promise.reject(new Error('no route'))
+          : Promise.resolve('192.168.1.25')
       }
       return Promise.resolve(undefined)
-    })
+    }
+    const { lanUrl, resolveLanIp } = await setupAndMount(impl)
+    await flush()
+    expect(lanUrl.value).toBe('')
 
-    settings.value.bind_address = '0.0.0.0'
-    const outdatedLookup = updateDisplayUrl()
-    settings.value.bind_address = '127.0.0.1'
-    settings.value.port = 8080
-    await updateDisplayUrl()
-    resolveLocalIp?.('192.168.1.25')
-    await outdatedLookup
-
-    expect(displayUrl.value).toBe('http://127.0.0.1:8080')
-  })
-})
-
-describe('reactive displayUrl synchronization', () => {
-  beforeEach(() => {
-    resetHarness()
+    await resolveLanIp()
+    await flush()
+    expect(lanUrl.value).toBe('http://192.168.1.25:10100')
   })
 
-  it('switches to loopback URL immediately when bind_address selects 127.0.0.1', async () => {
-    mockWebViewSettingsRef.value = makeSettings({ bind_address: '0.0.0.0', port: 10100 })
-    const { displayUrl, settings } = await setupAndMount()
-    await nextTick()
-    await flush()
-    expect(displayUrl.value).toBe('http://192.168.1.25:10100')
-
-    settings.value.bind_address = '127.0.0.1'
-    await nextTick()
-
-    expect(displayUrl.value).toBe('http://127.0.0.1:10100')
-  })
-
-  it('resolves and applies the local IP when bind_address selects 0.0.0.0', async () => {
-    mockWebViewSettingsRef.value = makeSettings({ bind_address: '127.0.0.1', port: 8080 })
-    const { displayUrl, settings } = await setupAndMount()
-    await nextTick()
-    expect(displayUrl.value).toBe('http://127.0.0.1:8080')
-
-    settings.value.bind_address = '0.0.0.0'
-    await nextTick()
-    await flush()
-
-    expect(displayUrl.value).toBe('http://192.168.1.25:8080')
-  })
-
-  it('re-resolves the local IP URL when the port changes', async () => {
-    mockWebViewSettingsRef.value = makeSettings({ bind_address: '0.0.0.0', port: 10100 })
-    const { displayUrl, settings } = await setupAndMount()
-    await nextTick()
-    await flush()
-    expect(displayUrl.value).toBe('http://192.168.1.25:10100')
-
-    settings.value.port = 10200
-    await nextTick()
-    await flush()
-
-    expect(displayUrl.value).toBe('http://192.168.1.25:10200')
-  })
-
-  it('reflects asynchronously loaded loopback settings without a manual update', async () => {
-    mockWebViewSettingsRef.value = undefined
-    const { displayUrl } = await setupAndMount()
-    await nextTick()
-    await flush()
-
-    mockWebViewSettingsRef.value = makeSettings({ bind_address: '127.0.0.1', port: 7070 })
-    await nextTick()
-
-    expect(displayUrl.value).toBe('http://127.0.0.1:7070')
-  })
-
-  it('reflects asynchronously loaded wildcard settings and re-resolves the IP', async () => {
-    mockWebViewSettingsRef.value = undefined
-    const { displayUrl } = await setupAndMount()
-    await nextTick()
-    await flush()
-
-    mockWebViewSettingsRef.value = makeSettings({ bind_address: '0.0.0.0', port: 20300 })
-    await nextTick()
-    await flush()
-
-    expect(displayUrl.value).toBe('http://192.168.1.25:20300')
-  })
-
-  it('ignores a pending IP lookup when the user switches to loopback before it resolves', async () => {
-    mockWebViewSettingsRef.value = makeSettings({ bind_address: '0.0.0.0', port: 10100 })
+  it('does not let a stale LAN lookup overwrite a newer one', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ port: 10100 })
     const { lookups, impl } = createIpLookupQueue()
-    const { displayUrl, settings } = await setupAndMount(impl)
-    expect(displayUrl.value).toBe('http://127.0.0.1:10100')
+    const { lanUrl, resolveLanIp } = await setupAndMount(impl)
     expect(lookups).toHaveLength(1)
 
-    settings.value.bind_address = '127.0.0.1'
-    await nextTick()
-    expect(displayUrl.value).toBe('http://127.0.0.1:10100')
-
-    lookups[0].resolve('192.168.1.25')
-    await flush()
-
-    expect(displayUrl.value).toBe('http://127.0.0.1:10100')
-  })
-
-  it('applies only the lookup from after the port change, not the stale one', async () => {
-    mockWebViewSettingsRef.value = makeSettings({ bind_address: '0.0.0.0', port: 10100 })
-    const { lookups, impl } = createIpLookupQueue()
-    const { displayUrl, settings } = await setupAndMount(impl)
-    expect(lookups).toHaveLength(1)
-
-    settings.value.port = 10200
-    await nextTick()
+    const retry = resolveLanIp()
     expect(lookups).toHaveLength(2)
-    expect(displayUrl.value).toBe('http://127.0.0.1:10200')
 
-    lookups[0].resolve('192.168.1.25')
+    lookups[1].resolve('192.168.1.30')
     await flush()
-    expect(displayUrl.value).toBe('http://127.0.0.1:10200')
+    expect(lanUrl.value).toBe('http://192.168.1.30:10100')
 
-    lookups[1].resolve('192.168.1.25')
+    lookups[0].resolve('192.168.1.20')
+    await retry
     await flush()
-    expect(displayUrl.value).toBe('http://192.168.1.25:10200')
+    expect(lanUrl.value).toBe('http://192.168.1.30:10100')
   })
 
-  it('invalidates a pending IP lookup when the composable unmounts', async () => {
-    mockWebViewSettingsRef.value = makeSettings({ bind_address: '0.0.0.0', port: 10100 })
+  it('does not apply a LAN lookup that resolves after unmount', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ port: 10100 })
     const { lookups, impl } = createIpLookupQueue()
-    const { displayUrl } = await setupAndMount(impl)
-    expect(displayUrl.value).toBe('http://127.0.0.1:10100')
+    const { lanUrl } = await setupAndMount(impl)
     expect(lookups).toHaveLength(1)
 
     const unmount = capturedOnUnmountedCbs.shift()
@@ -320,8 +240,184 @@ describe('reactive displayUrl synchronization', () => {
 
     lookups[0].resolve('192.168.1.25')
     await flush()
+    expect(lanUrl.value).toBe('')
+  })
 
-    expect(displayUrl.value).toBe('http://127.0.0.1:10100')
+  it('keeps the saved port in the URLs when the draft port is edited without saving', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ port: 10100 })
+    const { loopbackUrl, lanUrl, settings } = await setupAndMount()
+    await flush()
+    expect(loopbackUrl.value).toBe('http://127.0.0.1:10100')
+    expect(lanUrl.value).toBe('http://192.168.1.25:10100')
+
+    settings.value.port = 12000
+    await nextTick()
+
+    expect(loopbackUrl.value).toBe('http://127.0.0.1:10100')
+    expect(lanUrl.value).toBe('http://192.168.1.25:10100')
+  })
+
+  it('updates the URLs after a successful server settings save', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ port: 10100 })
+    const { loopbackUrl, lanUrl, settings, saveServerSettings } = await setupAndMount()
+    await flush()
+
+    settings.value.port = 12000
+    await saveServerSettings()
+
+    expect(loopbackUrl.value).toBe('http://127.0.0.1:12000')
+    expect(lanUrl.value).toBe('http://192.168.1.25:12000')
+  })
+
+  it('keeps the previous URLs when a server settings save fails', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ port: 10100 })
+    const { loopbackUrl, lanUrl, settings, saveServerSettings } = await setupAndMount()
+    await flush()
+
+    settings.value.port = 12000
+    mockInvoke.mockRejectedValueOnce(new Error('backend down'))
+    await saveServerSettings()
+
+    expect(loopbackUrl.value).toBe('http://127.0.0.1:10100')
+    expect(lanUrl.value).toBe('http://192.168.1.25:10100')
+  })
+
+  it('updates the URLs when external settings load a new port', async () => {
+    mockWebViewSettingsRef.value = undefined
+    const { loopbackUrl, lanUrl } = await setupAndMount()
+    await flush()
+    expect(loopbackUrl.value).toBe('http://127.0.0.1:10100')
+
+    mockWebViewSettingsRef.value = makeSettings({ port: 7070 })
+    await nextTick()
+    await flush()
+
+    expect(loopbackUrl.value).toBe('http://127.0.0.1:7070')
+    expect(lanUrl.value).toBe('http://192.168.1.25:7070')
+  })
+})
+
+describe('useWebView URL copying', () => {
+  beforeEach(() => {
+    resetHarness()
+    mockWriteText.mockReset()
+  })
+
+  it('copies the loopback URL and reports success', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ port: 10100 })
+    const { loopbackUrl, copyLoopbackUrl, errorMessage, errorMessageType } = await setupAndMount()
+    await flush()
+
+    mockWriteText.mockResolvedValue(undefined)
+    await copyLoopbackUrl()
+
+    expect(mockWriteText).toHaveBeenCalledWith(loopbackUrl.value)
+    expect(errorMessage.value).toBe('URL скопирован')
+    expect(errorMessageType.value).toBe('info')
+  })
+
+  it('reports the loopback success only after the clipboard write resolves', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ port: 10100 })
+    const { copyLoopbackUrl, errorMessage } = await setupAndMount()
+    await flush()
+
+    const write = deferred<unknown>()
+    mockWriteText.mockReturnValueOnce(write.promise)
+
+    const pending = copyLoopbackUrl()
+    await flush()
+    expect(errorMessage.value).toBeNull()
+
+    write.resolve(undefined)
+    await pending
+    expect(errorMessage.value).toBe('URL скопирован')
+  })
+
+  it('reports a localized error when copying the loopback URL is rejected', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ port: 10100 })
+    const { copyLoopbackUrl, errorMessage, errorMessageType } = await setupAndMount()
+    await flush()
+
+    mockWriteText.mockRejectedValueOnce('Ошибка записи в буфер обмена')
+    await copyLoopbackUrl()
+
+    expect(errorMessage.value).toBe('Не удалось скопировать URL')
+    expect(errorMessageType.value).toBe('error')
+  })
+
+  it('copies the LAN URL and reports success', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ port: 10100 })
+    const { lanUrl, copyLanUrl, errorMessage, errorMessageType } = await setupAndMount()
+    await flush()
+
+    mockWriteText.mockResolvedValue(undefined)
+    await copyLanUrl()
+
+    expect(mockWriteText).toHaveBeenCalledWith(lanUrl.value)
+    expect(errorMessage.value).toBe('URL локальной сети скопирован')
+    expect(errorMessageType.value).toBe('info')
+  })
+
+  it('reports the LAN success only after the clipboard write resolves', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ port: 10100 })
+    const { copyLanUrl, errorMessage } = await setupAndMount()
+    await flush()
+
+    const write = deferred<unknown>()
+    mockWriteText.mockReturnValueOnce(write.promise)
+
+    const pending = copyLanUrl()
+    await flush()
+    expect(errorMessage.value).toBeNull()
+
+    write.resolve(undefined)
+    await pending
+    expect(errorMessage.value).toBe('URL локальной сети скопирован')
+  })
+
+  it('reports a localized error when copying the LAN URL is rejected', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ port: 10100 })
+    const { copyLanUrl, errorMessage, errorMessageType } = await setupAndMount()
+    await flush()
+
+    mockWriteText.mockRejectedValueOnce('Ошибка записи в буфер обмена')
+    await copyLanUrl()
+
+    expect(errorMessage.value).toBe('Не удалось скопировать URL локальной сети')
+    expect(errorMessageType.value).toBe('error')
+  })
+
+  it('does not copy the LAN URL when no address is resolved', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ port: 10100 })
+    const failingIp: InvokeImpl = (cmd: string) => {
+      if (cmd === 'get_webview_token') return Promise.resolve(null)
+      if (cmd === 'get_local_ip') return Promise.reject(new Error('no route'))
+      return Promise.resolve(undefined)
+    }
+    const { copyLanUrl } = await setupAndMount(failingIp)
+    await flush()
+
+    await copyLanUrl()
+
+    expect(mockWriteText).not.toHaveBeenCalled()
+  })
+
+  it('does not write a message after unmount', async () => {
+    mockWebViewSettingsRef.value = makeSettings({ port: 10100 })
+    const { copyLoopbackUrl, errorMessage } = await setupAndMount()
+    await flush()
+
+    const write = deferred<unknown>()
+    mockWriteText.mockReturnValueOnce(write.promise)
+
+    const pending = copyLoopbackUrl()
+    const unmount = capturedOnUnmountedCbs.shift()
+    unmount?.()
+
+    write.resolve(undefined)
+    await pending
+
+    expect(errorMessage.value).toBeNull()
   })
 })
 
@@ -580,15 +676,6 @@ const webviewFallbackCases: WebViewFallbackCase[] = [
       en: 'Could not refresh templates',
     },
   },
-  {
-    name: 'updateDisplayUrl',
-    rawMessage: 'Нет маршрута к сети',
-    trigger: async (webview) => { await webview.updateDisplayUrl() },
-    expected: {
-      ru: 'Не удалось получить локальный IP',
-      en: 'Could not get local IP',
-    },
-  },
 ]
 
 describe('useWebView command error localization', () => {
@@ -599,7 +686,7 @@ describe('useWebView command error localization', () => {
   for (const testCase of webviewFallbackCases) {
     for (const locale of ['ru', 'en'] as const) {
       it(`presents the ${locale} fallback instead of raw "${testCase.rawMessage}" in ${testCase.name}`, async () => {
-        mockWebViewSettingsRef.value = makeSettings({ bind_address: '0.0.0.0' })
+        mockWebViewSettingsRef.value = makeSettings()
         const webview = await setupAndMount()
         mockInvoke.mockRejectedValueOnce(testCase.rawMessage)
 
@@ -612,7 +699,7 @@ describe('useWebView command error localization', () => {
   }
 
   it('presents the English fallback when copying the external URL fails with a raw Russian clipboard error', async () => {
-    mockWebViewSettingsRef.value = makeSettings({ bind_address: '127.0.0.1' })
+    mockWebViewSettingsRef.value = makeSettings()
     const webview = await setupAndMount()
     webview.settings.value.access_token = 'token'
     webview.externalIp.value = '1.2.3.4'
@@ -749,7 +836,7 @@ describe('useWebView action result localization', () => {
   for (const testCase of actionCases) {
     for (const locale of ['ru', 'en'] as const) {
       it(`maps "${testCase.code}" to the ${locale} catalog message in ${testCase.name}`, async () => {
-        mockWebViewSettingsRef.value = makeSettings({ bind_address: '0.0.0.0' })
+        mockWebViewSettingsRef.value = makeSettings()
         const webview = await setupAndMount()
         mockInvoke.mockResolvedValueOnce(testCase.code)
 
@@ -762,7 +849,7 @@ describe('useWebView action result localization', () => {
   }
 
   it('falls back to webview.action.saved and logs debug on unknown code', async () => {
-    mockWebViewSettingsRef.value = makeSettings({ bind_address: '0.0.0.0' })
+    mockWebViewSettingsRef.value = makeSettings()
     const webview = await setupAndMount()
     mockInvoke.mockResolvedValueOnce('bogus_code')
 
@@ -1116,22 +1203,22 @@ describe('useWebView sequential settings persistence', () => {
   })
 
   it('preserves an independently edited neighbour while rolling back the rejected field', async () => {
-    mockWebViewSettingsRef.value = makeSettings({ enabled: false, bind_address: '0.0.0.0' })
+    mockWebViewSettingsRef.value = makeSettings({ enabled: false })
     const { settings, save, errorMessage } = await setupAndMount()
     await nextTick()
-    const { saves } = queuePersistingSaveCalls({ enabled: false, bind_address: '0.0.0.0' })
+    const { saves } = queuePersistingSaveCalls({ enabled: false })
 
     settings.value.enabled = true
     const pending = save()
     await vi.waitFor(() => expect(saves).toHaveLength(1))
 
-    settings.value.bind_address = '127.0.0.1'
+    settings.value.start_on_boot = true
 
     saves[0].reject('backend down')
     await pending
 
     expect(settings.value.enabled).toBe(false)
-    expect(settings.value.bind_address).toBe('127.0.0.1')
+    expect(settings.value.start_on_boot).toBe(true)
     expect(errorMessage.value).toBe('Не удалось сохранить настройки')
   })
 

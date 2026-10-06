@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Copy, RotateCw, Play, Square, AlertTriangle, Globe } from 'lucide-vue-next'
+import { Copy, RotateCw, Play, Square, AlertTriangle, Globe, RefreshCw } from 'lucide-vue-next'
 import { useWebView } from '../composables/useWebView'
 import { t } from '../i18n'
 import InputWithToggle from './shared/InputWithToggle.vue'
@@ -13,7 +13,8 @@ const {
   errorMessage,
   errorMessageType,
   testMessage,
-  displayUrl,
+  loopbackUrl,
+  lanUrl,
   serverStatus,
   externalDisplay,
   hasToken,
@@ -30,7 +31,9 @@ const {
   saveStartOnBoot,
   saveSendOriginalText,
   saveServerSettings,
-  copyUrl,
+  copyLoopbackUrl,
+  copyLanUrl,
+  resolveLanIp,
   copyToken,
   regenerateAccessToken,
   saveUpnpEnabled,
@@ -121,17 +124,15 @@ const statusText = computed(() => {
       </div>
 
       <div class="ui-row address-row">
-        <label class="ui-label">{{ t('webview.address') }}</label>
+        <label class="ui-label">{{ t('webview.port') }}</label>
         <div class="address-inputs ui-field-group">
-          <select v-model="settings.bind_address" class="ui-select address-bind" :disabled="fieldsLocked">
-            <option value="0.0.0.0">0.0.0.0 ({{ t('webview.bind.all_interfaces') }})</option>
-            <option value="127.0.0.1">127.0.0.1 ({{ t('webview.bind.local_only') }})</option>
-          </select>
           <input
             type="number"
             v-model.number="settings.port"
             min="1024"
             max="65535"
+            step="1"
+            inputmode="numeric"
             class="ui-input address-port"
             :aria-invalid="!isPortValid ? 'true' : undefined"
             :disabled="fieldsLocked"
@@ -143,14 +144,33 @@ const statusText = computed(() => {
       </div>
     </section>
 
-    <section class="settings-section ui-section">
-      <h2 class="ui-section-title">URL</h2>
-      <div class="ui-row" style="margin-bottom: 8px;">
-        <div class="url-display ui-composite">
-          <label class="ui-input url-code ui-composite-field">{{ displayUrl }}</label>
-          <button @click="copyUrl" class="ui-icon-button ui-icon-button--adjacent ui-composite-action" :title="t('webview.copy_url')" :aria-label="t('webview.copy_url')">
-            <Copy :size="18" />
-          </button>
+    <section class="settings-section ui-section connection-section">
+      <h2 class="ui-section-title">{{ t('webview.connection') }}</h2>
+
+      <div class="connection-grid">
+        <div class="connection-row">
+          <label class="row-label ui-label ui-label--secondary">{{ t('webview.connection.local_label') }}</label>
+          <div class="url-display url-display-full ui-composite">
+            <label class="ui-input url-code url-code-wide ui-composite-field">{{ loopbackUrl }}</label>
+            <button @click="copyLoopbackUrl" class="ui-icon-button ui-icon-button--adjacent ui-composite-action" :title="t('webview.copy_url')" :aria-label="t('webview.copy_url')">
+              <Copy :size="18" />
+            </button>
+          </div>
+        </div>
+
+        <div class="connection-row">
+          <label class="row-label ui-label ui-label--secondary">{{ t('webview.connection.lan_label') }}</label>
+          <div class="url-display url-display-full ui-composite">
+            <label class="ui-input url-code url-code-wide ui-composite-field">
+              {{ lanUrl || t('webview.lan_url_unavailable') }}
+            </label>
+            <button v-if="lanUrl" @click="copyLanUrl" class="ui-icon-button ui-icon-button--adjacent ui-composite-action" :title="t('webview.copy_lan_url')" :aria-label="t('webview.copy_lan_url')">
+              <Copy :size="18" />
+            </button>
+            <button v-else @click="resolveLanIp" class="ui-icon-button ui-icon-button--adjacent ui-composite-action" :title="t('webview.lan_retry')" :aria-label="t('webview.lan_retry')">
+              <RefreshCw :size="18" />
+            </button>
+          </div>
         </div>
       </div>
     </section>
@@ -455,27 +475,10 @@ h2 {
   min-width: 0;
 }
 
-.address-inputs .address-bind {
-  flex: 2;
-  cursor: pointer;
-  min-width: 200px;
-}
-
 .address-inputs .address-port {
   flex: 0 0 84px;
   width: 84px;
   max-width: 84px;
-}
-
-/* Remove spinner from number input */
-.address-inputs .address-port::-webkit-inner-spin-button,
-.address-inputs .address-port::-webkit-outer-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-
-.address-inputs .address-port {
-  -moz-appearance: textfield;
 }
 
 /* URL display: one composite field — readonly value plus adjacent actions. */
@@ -510,6 +513,34 @@ h2 {
   flex: 1;
   width: auto;
   min-width: 0;
+}
+
+/* Connection rows share the label column (max-content) and the URL composite
+   (minmax(0, 1fr)) so each label stays beside its URL on one row. The label may
+   wrap inside its own column at enlarged text, but the field stays next to it
+   rather than dropping below. */
+.connection-grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: var(--ui-row-label-gap-side);
+  row-gap: var(--ui-row-gap);
+  align-items: center;
+}
+
+.connection-row {
+  display: contents;
+}
+
+.connection-row .url-display {
+  grid-column: 2;
+}
+
+/* The URL wraps within its own column instead of clipping the address. */
+.connection-row .url-code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 /* Token row: grid keeps the token field shrinkable next to regenerate. */

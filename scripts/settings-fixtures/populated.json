@@ -103,7 +103,6 @@
     "enabled": true,
     "start_on_boot": false,
     "port": 8080,
-    "bind_address": "127.0.0.1",
     "access_token": null,
     "upnp_enabled": false,
     "send_original_text": true

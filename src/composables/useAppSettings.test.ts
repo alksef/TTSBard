@@ -48,7 +48,7 @@ function mockSettings(): AppSettingsDto {
       telegram: { api_id: null, proxy_mode: 'none', voices: [], current_voice_id: '', synthesis_response_timeout_ms: 10000, download_retry_delay_ms: 1000 },
       network: { proxy: { proxy_url: null }, mtproxy: { host: null, port: 443, secret: null, dc_id: null } },
     },
-    webview: { enabled: false, start_on_boot: false, port: 8080, bind_address: '127.0.0.1', access_token: null, upnp_enabled: false, send_original_text: true },
+    webview: { enabled: false, start_on_boot: false, port: 8080, access_token: null, upnp_enabled: false, send_original_text: true },
     twitch: { enabled: false, username: '', token: '', channel: '', start_on_boot: false, send_original_text: true },
     windows: {
       global: { exclude_from_capture: false },

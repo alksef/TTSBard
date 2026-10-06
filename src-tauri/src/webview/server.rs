@@ -1,7 +1,7 @@
 use super::upnp::{UpnpFailure, UpnpManager};
 use super::{
     templates::{default_css, default_html},
-    WebViewSettings,
+    WebViewSettings, WEBVIEW_BIND_ADDRESS,
 };
 use crate::events::WebViewSseEvent;
 use crate::webview::security::{is_local_network, validate_token};
@@ -149,12 +149,7 @@ impl WebViewServer {
         upnp_error: Option<tokio::sync::mpsc::UnboundedSender<String>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let settings = self.settings.read().await;
-        let addr = if settings.bind_address.contains(':') && !settings.bind_address.starts_with('[')
-        {
-            format!("[{}]:{}", settings.bind_address, settings.port)
-        } else {
-            format!("{}:{}", settings.bind_address, settings.port)
-        };
+        let addr = format!("{}:{}", WEBVIEW_BIND_ADDRESS, settings.port);
 
         let access_token = settings.access_token.clone();
         let upnp_enabled = settings.upnp_enabled && access_token.is_some();
@@ -746,7 +741,6 @@ mod tests {
         WebViewServer {
             settings: Arc::new(RwLock::new(WebViewSettings {
                 port,
-                bind_address: "127.0.0.1".to_string(),
                 access_token: Some("secret-token".to_string()),
                 upnp_enabled: true,
                 ..WebViewSettings::default()

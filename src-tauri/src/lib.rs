@@ -588,7 +588,6 @@ pub fn run() {
             commands::webview::get_webview_enabled,
             commands::webview::get_webview_start_on_boot,
             commands::webview::get_webview_port,
-            commands::webview::get_webview_bind_address,
             commands::webview::open_template_folder,
             commands::webview::send_test_message,
             commands::webview::reload_templates,

@@ -2562,7 +2562,7 @@ impl SettingsManager {
         self.update_field("/webview/upnp_enabled", &enabled)
     }
 
-    /// Atomically replace five mutable fields of the WebView section.
+    /// Atomically replace four mutable fields of the WebView section.
     ///
     /// Preserves `access_token` and `enabled` from the current config.
     /// One load → mutate → save cycle; validated before call.
@@ -2570,14 +2570,12 @@ impl SettingsManager {
         &self,
         start_on_boot: bool,
         port: u16,
-        bind_address: String,
         upnp_enabled: bool,
         send_original_text: bool,
     ) -> Result<()> {
         self.update_settings_atomically(move |app_settings| {
             app_settings.webview.start_on_boot = start_on_boot;
             app_settings.webview.port = port;
-            app_settings.webview.bind_address = bind_address;
             app_settings.webview.upnp_enabled = upnp_enabled;
             app_settings.webview.send_original_text = send_original_text;
         })
@@ -4510,7 +4508,6 @@ mod tests {
         let settings_path = config_dir.join("settings.json");
         let mut settings = AppSettings::default();
         settings.webview.port = 8080;
-        settings.webview.bind_address = "0.0.0.0".to_string();
         settings.webview.start_on_boot = true;
         settings.webview.upnp_enabled = false;
         settings.webview.send_original_text = false;
@@ -4530,18 +4527,13 @@ mod tests {
             elevenlabs_catalog_cache: Arc::new(std::sync::RwLock::new(None)),
         };
 
-        let result =
-            bad_manager.set_webview_section(false, 9999, "127.0.0.1".to_string(), true, true);
+        let result = bad_manager.set_webview_section(false, 9999, true, true);
         assert!(result.is_err(), "persist to nonexistent dir must fail");
 
         let after_cache = bad_manager.load().unwrap();
         assert_eq!(
             after_cache.webview.port, 8080,
             "cache port must be unchanged"
-        );
-        assert_eq!(
-            after_cache.webview.bind_address, "0.0.0.0",
-            "cache bind_address must be unchanged"
         );
         assert!(
             after_cache.webview.start_on_boot,
@@ -4589,10 +4581,10 @@ mod tests {
     }
 
     #[test]
-    fn set_webview_section_saves_five_fields_and_keeps_cache_in_sync() {
+    fn set_webview_section_saves_four_fields_and_keeps_cache_in_sync() {
         let (manager, dir) = webview_section_tmp_manager("save-four");
 
-        let result = manager.set_webview_section(false, 9090, "127.0.0.1".to_string(), false, true);
+        let result = manager.set_webview_section(false, 9090, false, true);
         assert!(
             result.is_ok(),
             "set_webview_section failed: {:?}",
@@ -4602,7 +4594,6 @@ mod tests {
         let disk = read_disk_settings(&dir);
         assert!(!disk.webview.start_on_boot);
         assert_eq!(disk.webview.port, 9090);
-        assert_eq!(disk.webview.bind_address, "127.0.0.1");
         assert!(!disk.webview.upnp_enabled);
         assert!(disk.webview.send_original_text);
 
@@ -4628,7 +4619,7 @@ mod tests {
         );
 
         manager
-            .set_webview_section(false, 9090, "0.0.0.0".to_string(), true, true)
+            .set_webview_section(false, 9090, true, true)
             .unwrap();
 
         let after = manager.load().unwrap();
@@ -4667,7 +4658,7 @@ mod tests {
         .unwrap();
 
         manager
-            .set_webview_section(false, 9090, "127.0.0.1".to_string(), false, true)
+            .set_webview_section(false, 9090, false, true)
             .unwrap();
 
         let after = read_disk_settings(&dir);
@@ -4685,7 +4676,7 @@ mod tests {
         let (manager, dir) = webview_section_tmp_manager("atomic-write");
 
         manager
-            .set_webview_section(false, 2020, "127.0.0.1".to_string(), false, true)
+            .set_webview_section(false, 2020, false, true)
             .unwrap();
 
         let tmp_files: Vec<_> = std::fs::read_dir(&dir)
@@ -4710,14 +4701,14 @@ mod tests {
     fn set_webview_section_repeated_saves_keep_cache_and_disk_in_sync() {
         let (manager, dir) = webview_section_tmp_manager("consistency");
 
-        for (port, addr, upnp) in [
-            (8080u16, "0.0.0.0", false),
-            (9090, "127.0.0.1", false),
-            (7070, "192.168.1.100", true),
-            (1024, "0.0.0.0", true),
+        for (port, upnp) in [
+            (8080u16, false),
+            (9090, false),
+            (7070, true),
+            (1024, true),
         ] {
             manager
-                .set_webview_section(true, port, addr.to_string(), upnp, true)
+                .set_webview_section(true, port, upnp, true)
                 .unwrap();
             assert_eq!(
                 manager.load().unwrap(),
@@ -7573,7 +7564,7 @@ mod tests {
 
         manager.set_speaker_volume(42).unwrap();
         manager
-            .set_webview_section(false, 9090, "127.0.0.1".to_string(), false, true)
+            .set_webview_section(false, 9090, false, true)
             .unwrap();
 
         assert!(manager.load().unwrap().storage.legacy_audio_cache_migrated);

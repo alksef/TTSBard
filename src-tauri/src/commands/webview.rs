@@ -21,7 +21,6 @@ pub async fn get_webview_settings(state: State<'_, AppState>) -> Result<WebViewS
         enabled: settings.enabled,
         start_on_boot: settings.start_on_boot,
         port: settings.port,
-        bind_address: settings.bind_address.clone(),
         access_token: settings.access_token.clone(),
         upnp_enabled: settings.upnp_enabled,
         send_original_text: settings.send_original_text,
@@ -52,11 +51,6 @@ pub async fn get_webview_port(state: State<'_, AppState>) -> Result<u16, String>
     Ok(state.webview.settings.read().await.port)
 }
 
-#[tauri::command]
-pub async fn get_webview_bind_address(state: State<'_, AppState>) -> Result<String, String> {
-    Ok(state.webview.settings.read().await.bind_address.clone())
-}
-
 /// Save webview settings to AppState and persist to files
 #[tauri::command]
 pub async fn save_webview_settings(
@@ -68,20 +62,8 @@ pub async fn save_webview_settings(
         enabled = settings.enabled,
         start_on_boot = settings.start_on_boot,
         port = settings.port,
-        bind_address = %settings.bind_address,
         "Saving webview settings"
     );
-
-    // Force disable UPnP when bind_address is 127.0.0.1
-    let settings = if settings.bind_address == "127.0.0.1" && settings.upnp_enabled {
-        tracing::info!("Forcing UPnP to false because bind_address is 127.0.0.1");
-        WebViewSettings {
-            upnp_enabled: false,
-            ..settings
-        }
-    } else {
-        settings
-    };
 
     validate_upnp_token(settings.upnp_enabled, settings.access_token.as_deref())?;
     validate_port(settings.port).map_err(|e| e.to_string())?;
@@ -89,8 +71,7 @@ pub async fn save_webview_settings(
     // Check if enabled status or port changed (start_on_boot doesn't require restart)
     let old_settings = state.webview.settings.read().await;
     let enabled_changed = old_settings.enabled != settings.enabled;
-    let port_changed =
-        old_settings.port != settings.port || old_settings.bind_address != settings.bind_address;
+    let port_changed = old_settings.port != settings.port;
     let upnp_changed = old_settings.upnp_enabled != settings.upnp_enabled;
     drop(old_settings);
 
@@ -100,14 +81,12 @@ pub async fn save_webview_settings(
         .ok_or_else(|| "SettingsManager not available".to_string())?;
     let start_on_boot = settings.start_on_boot;
     let port = settings.port;
-    let bind_addr = settings.bind_address.clone();
     let upnp_enabled = settings.upnp_enabled;
     let send_original_text = settings.send_original_text;
     super::persist_blocking(settings_manager.inner(), move |mgr| {
         mgr.set_webview_section(
             start_on_boot,
             port,
-            bind_addr,
             upnp_enabled,
             send_original_text,
         )
@@ -119,7 +98,6 @@ pub async fn save_webview_settings(
     s.enabled = settings.enabled;
     s.start_on_boot = settings.start_on_boot;
     s.port = settings.port;
-    s.bind_address = settings.bind_address.clone();
     s.upnp_enabled = settings.upnp_enabled;
     s.send_original_text = settings.send_original_text;
     drop(s);

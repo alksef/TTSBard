@@ -17,7 +17,7 @@ use tracing::{debug, error, info, warn};
 /// Delay between WebView server respawn attempts after a startup error.
 ///
 /// Prevents a tight CPU-spinning respawn loop when the server cannot bind,
-/// e.g. an invalid `bind_address` (see `webview/server.rs`). Chosen within
+/// e.g. a busy port (see `webview/server.rs`). Chosen within
 /// 1–3s: short enough to recover quickly after a transient failure, long
 /// enough to avoid a busy loop.
 const SERVER_RESPAWN_BACKOFF: Duration = Duration::from_secs(2);
@@ -137,7 +137,6 @@ pub async fn run_webview_server(
         // Check current settings
         let settings = webview_settings.read().await;
         let enabled = settings.enabled;
-        let bind_address = settings.bind_address.clone();
         let port = settings.port;
         drop(settings);
 
@@ -154,7 +153,7 @@ pub async fn run_webview_server(
                 .set_status(&app_handle, WebViewServerStatus::Starting);
             info!("[WEBVIEW] ========================================");
             info!("[WEBVIEW] STARTING SERVER");
-            info!("[WEBVIEW]   Address: {}:{}", bind_address, port);
+            info!("[WEBVIEW]   Address: {}:{}", crate::webview::WEBVIEW_BIND_ADDRESS, port);
             info!("[WEBVIEW] ========================================");
 
             let server = match WebViewServer::new(Arc::clone(&webview_settings)).await {
@@ -183,7 +182,6 @@ pub async fn run_webview_server(
             state.webview.set_upnp_manager(server.upnp_manager.clone());
             let server_clone = server.clone();
             let app_handle_clone = app_handle.clone();
-            let bind_address_clone = bind_address.clone();
             let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
             let (upnp_error_tx, mut upnp_error_rx) =
                 tokio::sync::mpsc::unbounded_channel::<String>();
@@ -197,7 +195,7 @@ pub async fn run_webview_server(
                     // Extract error details for user-friendly message
                     let error_msg = format!("{}", e);
                     let (user_friendly_msg, log_context) =
-                        parse_webview_server_error(&error_msg, bind_address_clone, port);
+                        parse_webview_server_error(&error_msg, port);
 
                     // Log with full context
                     error!("[WEBVIEW] ❌ Server startup failed:");
@@ -254,8 +252,7 @@ pub async fn run_webview_server(
                 // Check if settings changed
                 let current_settings = webview_settings.read().await;
                 let still_enabled = current_settings.enabled;
-                let same_port =
-                    current_settings.port == port && current_settings.bind_address == bind_address;
+                let same_port = current_settings.port == port;
                 drop(current_settings);
 
                 if !still_enabled || !same_port {

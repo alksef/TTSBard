@@ -18,7 +18,7 @@
 | `tts` | Синтез речи | `TtsPanel.vue` | `tts/TtsOpenAICard.vue`, `TtsSileroCard.vue`, `TtsLocalCard.vue`, `TtsFishAudioCard.vue`, `TtsElevenLabsCard.vue`, `VoiceSelector.vue`, `FishAudioModelPicker.vue`, `TelegramConnectionStatus.vue`, `TelegramAuthModal.vue` |
 | `audio` | Аудио | `AudioPanel.vue` | `audio/AudioDevicesTab.vue`, `AudioEffectsTab.vue`, `AudioPreviewBar.vue`, `DspSettings.vue`, `EqSettings.vue`, `CompressorSettings.vue`, `LimiterSettings.vue`, `EffectsSettings.vue` |
 | `preprocessor` | Препроцессор | `PreprocessorPanel.vue` | Правила обработки и их условные настройки |
-| `webview` | WebView | `WebViewPanel.vue` | Сервер, адреса, отображение текста, UPnP |
+| `webview` | WebView | `WebViewPanel.vue` | Сервер с постоянным LAN bind, порт, локальный/LAN URL; шаблоны, тест, внешнее подключение и UPnP |
 | `twitch` | Twitch | `TwitchPanel.vue` | Подключение и настройки отправки |
 | `vtube-studio` | VTube Studio | `VTubeStudioPanel.vue` | Адрес/порт, параметры и действия при наборе, тестирование |
 | `ocr` | OCR | `OcrPanel.vue` | Настройки распознавания, выбор экрана захвата и выбор области |

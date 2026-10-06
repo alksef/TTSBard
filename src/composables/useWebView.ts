@@ -23,7 +23,6 @@ export interface WebViewSettings {
   enabled: boolean
   start_on_boot: boolean
   port: number
-  bind_address: string
   access_token: string | null
   upnp_enabled: boolean
   send_original_text: boolean
@@ -46,7 +45,6 @@ const WEBVIEW_SETTINGS_FIELDS: Array<keyof WebViewSettings> = [
   'start_on_boot',
   'send_original_text',
   'port',
-  'bind_address',
   'access_token',
   'upnp_enabled',
 ]
@@ -92,7 +90,6 @@ export function useWebView() {
     start_on_boot: false,
     send_original_text: true,
     port: 10100,
-    bind_address: '0.0.0.0',
     access_token: null,
     upnp_enabled: false,
   })
@@ -102,7 +99,9 @@ export function useWebView() {
   const errorMessage = ref<string | null>(null)
   const errorMessageType = ref<UiMessageKind>('info')
   const testMessage = ref('')
-  const displayUrl = ref('')
+  // LAN address resolved from the backend once on mount and again on retry.
+  // The loopback URL needs no lookup; both use the persisted port.
+  const lanIp = ref<string | null>(null)
   const serverStatus = ref<WebViewServerStatus>({ state: 'stopped' })
   // Операция запуска/перезапуска/остановки в фазе команды. Пока она не
   // завершена, повторные клики не создают вторую операцию.
@@ -135,7 +134,9 @@ export function useWebView() {
   const upnpPending = ref(false)
 
   let errorTimeout: number | null = null
-  let displayUrlRequest = 0
+  // Bumped by every LAN-IP lookup so a stale result (or one arriving after
+  // unmount) cannot overwrite a newer resolution.
+  let lanIpRequest = 0
   // Bumped by every UPnP status event so an in-flight snapshot never overwrites
   // a newer transition that arrived while it was pending.
   let upnpStatusLoadToken = 0
@@ -151,7 +152,6 @@ export function useWebView() {
       start_on_boot: current.start_on_boot,
       send_original_text: current.send_original_text,
       port: current.port,
-      bind_address: current.bind_address,
       access_token: current.access_token,
       upnp_enabled: current.upnp_enabled,
     }
@@ -169,6 +169,14 @@ export function useWebView() {
   // Baseline: последний snapshot, который backend подтвердил. Из него берётся
   // rollback, и по нему несохранённая правка отличается от persisted значения.
   let persistedSettings: WebViewSettings = settingsSnapshot()
+  // Реактивная копия сохранённого порта: адреса показывают persisted-значение,
+  // а не несохранённый черновик в `settings.port`.
+  const savedPort = ref(persistedSettings.port)
+
+  function commitPersisted(next: WebViewSettings): void {
+    persistedSettings = next
+    savedPort.value = next.port
+  }
 
   // Счётчик правок пользователя по полям. Инкрементируется только реальными
   // правками, а не внутренними rollback/echo/baseline-записями. При ошибке
@@ -179,7 +187,6 @@ export function useWebView() {
     start_on_boot: 0,
     send_original_text: 0,
     port: 0,
-    bind_address: 0,
     access_token: 0,
     upnp_enabled: 0,
   }
@@ -230,21 +237,31 @@ export function useWebView() {
   let persistTail: Promise<unknown> | null = null
   let persistDrain: Promise<PersistOutcome> | null = null
 
-  async function updateDisplayUrl() {
-    const request = ++displayUrlRequest
-    const { bind_address, port } = settings.value
-    const fallbackUrl = `http://127.0.0.1:${port}`
-    displayUrl.value = fallbackUrl
+  function isUsableLanIp(ip: string): boolean {
+    const value = ip.trim()
+    if (!value) return false
+    if (value === '0.0.0.0' || value === '::' || value === '::0' || value === '[::]') return false
+    if (value === '::1' || value === '[::1]') return false
+    if (value.startsWith('127.')) return false
+    return true
+  }
 
-    if (bind_address !== '0.0.0.0') return
+  const loopbackUrl = computed(() => `http://127.0.0.1:${savedPort.value}`)
 
+  // LAN показывает только реальный интерфейс; loopback/unspecified и ошибка
+  // lookup'а дают пустую строку, которую панель отображает как недоступность.
+  const lanUrl = computed(() => (lanIp.value ? `http://${lanIp.value}:${savedPort.value}` : ''))
+
+  async function resolveLanIp() {
+    const request = ++lanIpRequest
     try {
-      const localIp = await invoke<string>('get_local_ip')
-      if (request !== displayUrlRequest) return
-      displayUrl.value = `http://${localIp}:${port}`
+      const ip = await invoke<string>('get_local_ip')
+      if (request !== lanIpRequest || listenerScope.disposed) return
+      lanIp.value = isUsableLanIp(ip) ? ip : null
     } catch (e) {
-      if (request !== displayUrlRequest) return
-      showError(presentCommandError(e, t('webview.error.local_ip')))
+      if (request !== lanIpRequest || listenerScope.disposed) return
+      lanIp.value = null
+      debugError('[WebView] Failed to get local IP:', e)
     }
   }
 
@@ -266,11 +283,9 @@ export function useWebView() {
     return port >= 1024 && port <= 65535
   })
 
-  const savedBindAddress = ref('0.0.0.0')
-
-  const isUpnpAvailable = computed(() => {
-    return savedBindAddress.value === '0.0.0.0'
-  })
+  // WebView всегда слушает на всех интерфейсах, поэтому доступность UPnP больше
+  // не зависит от bind.
+  const isUpnpAvailable = computed(() => true)
 
   const upnpForwardOpen = computed(() => upnpForwardStatus.value.state === 'open')
 
@@ -396,7 +411,7 @@ export function useWebView() {
         return { ok: false, result: null }
       }
       if (listenerScope.disposed) return { ok: false, result: null }
-      persistedSettings = { ...payload }
+      commitPersisted({ ...payload })
       if (settingsEqual(settings.value, payload)) return { ok: true, result: lastResult }
       // Правка во время await уходит в следующую запись; невалидный
       // промежуточный порт не отправляется и остаётся в поле с подсказкой.
@@ -414,9 +429,6 @@ export function useWebView() {
    */
   function applyPersistedSettings(next: WebViewSettings): void {
     if (persistDrain !== null) return
-    // `savedBindAddress` описывает persisted-состояние, поэтому берётся из эха,
-    // а не из текущего draft.
-    savedBindAddress.value = next.bind_address
     const merged: WebViewSettings = { ...next }
     for (const field of WEBVIEW_SETTINGS_FIELDS) {
       if (settings.value[field] !== persistedSettings[field]) {
@@ -426,11 +438,11 @@ export function useWebView() {
     internalSettingsWrite = true
     settings.value = merged
     internalSettingsWrite = false
-    persistedSettings = { ...next }
+    commitPersisted({ ...next })
   }
 
   async function save(): Promise<boolean> {
-    debugLog('[WebView] Saving settings:', { enabled: settings.value.enabled, port: settings.value.port, bind_address: settings.value.bind_address, has_token: !!settings.value.access_token, upnp_enabled: settings.value.upnp_enabled, start_on_boot: settings.value.start_on_boot })
+    debugLog('[WebView] Saving settings:', { enabled: settings.value.enabled, port: settings.value.port, has_token: !!settings.value.access_token, upnp_enabled: settings.value.upnp_enabled, start_on_boot: settings.value.start_on_boot })
     const outcome = await requestPersist(PERSIST_CONTEXT.settings)
     if (!outcome.ok || listenerScope.disposed) return false
     debugLog('[WebView] Save result:', outcome.result)
@@ -514,7 +526,7 @@ export function useWebView() {
       try {
         await persistWebViewSettings(payload)
         if (listenerScope.disposed) return false
-        persistedSettings = payload
+        commitPersisted(payload)
         return true
       } catch (e) {
         if (!listenerScope.disposed) {
@@ -613,9 +625,27 @@ export function useWebView() {
     showActionResult(outcome.result ?? 'saved', 'success')
   }
 
-  function copyUrl() {
-    navigator.clipboard.writeText(displayUrl.value)
-    showError(t('webview.url_copied'), 'info')
+  async function copyLoopbackUrl(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(loopbackUrl.value)
+      if (listenerScope.disposed) return
+      showError(t('webview.url_copied'), 'info')
+    } catch (e) {
+      if (listenerScope.disposed) return
+      showError(presentCommandError(e, t('webview.error.copy_url')))
+    }
+  }
+
+  async function copyLanUrl(): Promise<void> {
+    if (!lanUrl.value) return
+    try {
+      await navigator.clipboard.writeText(lanUrl.value)
+      if (listenerScope.disposed) return
+      showError(t('webview.lan_url_copied'), 'info')
+    } catch (e) {
+      if (listenerScope.disposed) return
+      showError(presentCommandError(e, t('webview.error.copy_lan_url')))
+    }
   }
 
   async function loadToken() {
@@ -766,6 +796,7 @@ export function useWebView() {
 
   onMounted(async () => {
     await loadToken()
+    void resolveLanIp()
     await listenerScope.track(
       listen<unknown>(UPNP_STATUS_CHANGED_EVENT, (event) => {
         upnpStatusLoadToken += 1
@@ -835,29 +866,17 @@ export function useWebView() {
       start_on_boot: newSettings.start_on_boot,
       send_original_text: newSettings.send_original_text,
       port: newSettings.port,
-      bind_address: newSettings.bind_address,
       access_token: newSettings.access_token || null,
       upnp_enabled: newSettings.upnp_enabled || false,
     })
   }, { immediate: true, deep: true })
-
-  // Keep displayUrl synchronized with live bind_address/port edits and with
-  // asynchronously loaded settings, so the panel never shows a stale URL
-  // between save/restart cycles. Each change invalidates in-flight lookups.
-  watch(
-    [() => settings.value.bind_address, () => settings.value.port],
-    () => {
-      void updateDisplayUrl()
-    },
-    { immediate: true },
-  )
 
   onUnmounted(() => {
     if (errorTimeout !== null) {
       clearTimeout(errorTimeout)
     }
     // Invalidate any pending local-IP lookup so it cannot write after teardown.
-    displayUrlRequest++
+    lanIpRequest++
     listenerScope.dispose()
   })
 
@@ -868,7 +887,8 @@ export function useWebView() {
     errorMessage,
     errorMessageType,
     testMessage,
-    displayUrl,
+    loopbackUrl,
+    lanUrl,
     serverStatus,
     upnpForwardStatus,
     upnpForwardOpen,
@@ -892,7 +912,8 @@ export function useWebView() {
     saveStartOnBoot,
     saveSendOriginalText,
     saveServerSettings,
-    copyUrl,
+    copyLoopbackUrl,
+    copyLanUrl,
     loadToken,
     copyToken,
     saveUpnpEnabled,
@@ -903,6 +924,6 @@ export function useWebView() {
     openTemplateFolder,
     sendTest,
     reloadTemplates,
-    updateDisplayUrl,
+    resolveLanIp,
   }
 }

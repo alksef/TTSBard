@@ -87,7 +87,6 @@ pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std:
         enabled: settings.webview.enabled,
         start_on_boot: settings.webview.start_on_boot,
         port: settings.webview.port,
-        bind_address: settings.webview.bind_address.clone(),
         access_token: settings.webview.access_token.clone(),
         upnp_enabled: settings.webview.upnp_enabled,
         send_original_text: settings.webview.send_original_text,
@@ -1190,14 +1189,11 @@ fn init_vtube_studio(app_state: &AppState, app_handle: AppHandle) {
 }
 
 /// Parse WebView server startup errors and provide user-friendly messages
-pub(crate) fn parse_webview_server_error(
-    error_msg: &str,
-    bind_address: String,
-    port: u16,
-) -> (String, String) {
+pub(crate) fn parse_webview_server_error(error_msg: &str, port: u16) -> (String, String) {
     let log_context = format!(
         "Failed to start WebView server on {}:{}",
-        bind_address, port
+        crate::webview::WEBVIEW_BIND_ADDRESS,
+        port
     );
 
     let user_friendly_msg =
@@ -1214,7 +1210,8 @@ pub(crate) fn parse_webview_server_error(
         } else if error_msg.contains("invalid input") || error_msg.contains("invalid address") {
             format!(
                 "Некорректный адрес {}:{}. Пожалуйста, проверьте настройки WebView.",
-                bind_address, port
+                crate::webview::WEBVIEW_BIND_ADDRESS,
+                port
             )
         } else if error_msg.contains("access denied") {
             "Доступ запрещен. Возможно, брандмауэр блокирует соединение.".to_string()
