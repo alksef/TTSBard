@@ -4,12 +4,15 @@ import { invoke } from '@tauri-apps/api/core'
 import { Minimize2, Maximize2 } from 'lucide-vue-next'
 import { useWindowsSettings } from '../composables/useAppSettings'
 import { compactModeState, initCompactDims, getInitialCompactMode } from '../composables/compactModeState'
+import { useErrorHandler } from '../composables/useErrorHandler'
 import { debugError } from '../utils/debug'
 import { t } from '../i18n'
 
 const injectedMinimalMode = inject<Ref<boolean>>('isMinimalMode')
 const isMinimalMode = injectedMinimalMode ?? ref(getInitialCompactMode())
 const isAnimating = ref(false)
+
+const { showWarning } = useErrorHandler()
 
 const windowsSettings = useWindowsSettings()
 
@@ -39,7 +42,12 @@ async function toggleMinimalMode() {
       // Leaving compact mode: flush pending save before guard, remove bounds
       // then resize to the ordinary 800x630. The ordinary exit keeps the
       // compact flag omitted.
-      await compactModeState.flushPendingCompactSave?.()
+      try {
+        await compactModeState.flushPendingCompactSave?.()
+      } catch (flushError) {
+        debugError('Failed to flush compact window size before exit:', flushError)
+        showWarning(t('shell.minimal.exit_warning'))
+      }
       compactModeState.appDrivenResize++
       acquiredGuard = true
       await invoke('remove_main_bounds')

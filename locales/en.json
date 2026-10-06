@@ -75,6 +75,7 @@
     "shell.sidebar.expand": "Expand sidebar",
     "shell.minimal.enter": "Compact mode",
     "shell.minimal.exit": "Restore window",
+    "shell.minimal.exit_warning": "Could not save the compact window size.",
     "shell.settings_load_error": "Could not load settings: {detail}",
     "shell.retry": "Retry",
     "settings.tabs.general": "General",

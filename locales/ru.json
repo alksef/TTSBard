@@ -75,6 +75,7 @@
     "shell.sidebar.expand": "Развернуть",
     "shell.minimal.enter": "Компактный режим",
     "shell.minimal.exit": "Восстановить",
+    "shell.minimal.exit_warning": "Не удалось сохранить размер компактного окна.",
     "shell.settings_load_error": "Не удалось загрузить настройки: {detail}",
     "shell.retry": "Повторить",
     "settings.tabs.general": "Общие",
