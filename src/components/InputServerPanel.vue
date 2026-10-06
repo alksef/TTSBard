@@ -148,6 +148,8 @@ const statusText = computed(() => {
             v-model.number="settings.port"
             min="1024"
             max="65535"
+            step="1"
+            inputmode="numeric"
             class="ui-input address-port"
             :aria-invalid="!isPortValid ? 'true' : undefined"
             :disabled="fieldsLocked"
@@ -460,20 +462,10 @@ h2 {
 }
 
 .address-inputs .address-port {
-  flex: 0 0 100px;
-  width: 100px;
-  min-width: 100px;
-  max-width: 100px;
-}
-
-.address-inputs .address-port::-webkit-inner-spin-button,
-.address-inputs .address-port::-webkit-outer-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-
-.address-inputs .address-port {
-  -moz-appearance: textfield;
+  flex: 0 0 84px;
+  width: 84px;
+  min-width: 84px;
+  max-width: 84px;
 }
 
 .error-text {

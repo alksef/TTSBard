@@ -653,7 +653,7 @@
     "input_server.info_callout": "Используется активный TTS-провайдер/пайплайн; маршрут доставки настраивается на вкладке «Входящие».",
     "input_server.copy_endpoint": "Копировать адрес",
     "input_server.format_hint": "Формат: POST JSON",
-    "input_server.test.title": "Тест",
+    "input_server.test.title": "Тестовое сообщение",
     "input_server.test.placeholder": "Текст для отправки...",
     "input_server.test.sending": "Отправка...",
     "input_server.test.send": "Отправить",
