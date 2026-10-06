@@ -563,6 +563,9 @@ pub async fn set_hotkey_recording(app_handle: AppHandle, recording: bool) {
     if let Some(app_state) = app_handle.try_state::<AppState>() {
         app_state.set_hotkey_recording(recording);
     }
+    if let Some(state) = app_handle.try_state::<crate::soundpanel::SoundPanelState>() {
+        state.set_recording(recording);
+    }
 }
 
 /// Notify all windows that appearance settings changed so panels update on the fly

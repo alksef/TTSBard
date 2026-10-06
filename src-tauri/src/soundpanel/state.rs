@@ -217,6 +217,11 @@ pub struct SoundPanelState {
     /// SoundPanel handle F1-F12 itself.
     window_focused: Arc<AtomicBool>,
 
+    /// Transient recording flag: while key recording is active the low-level
+    /// hook passes every key through instead of intercepting bound actions.
+    /// Never persisted.
+    recording: Arc<AtomicBool>,
+
     /// Очередь воспроизведения SoundPanel (sender-сторона).
     queue: SoundQueue,
 
@@ -244,6 +249,7 @@ impl SoundPanelState {
             stay_visible: Arc::new(Mutex::new(false)),
             config_mode: Arc::new(Mutex::new(false)),
             window_focused: Arc::new(AtomicBool::new(false)),
+            recording: Arc::new(AtomicBool::new(false)),
             queue,
             queue_receiver: Arc::new(Mutex::new(Some(queue_receiver))),
         }
@@ -584,6 +590,14 @@ impl SoundPanelState {
 
     pub fn set_window_focused(&self, focused: bool) {
         self.window_focused.store(focused, Ordering::Release);
+    }
+
+    pub fn is_recording(&self) -> bool {
+        self.recording.load(Ordering::Acquire)
+    }
+
+    pub fn set_recording(&self, recording: bool) {
+        self.recording.store(recording, Ordering::Release);
     }
 
     /// Получить настройки перехвата (clone)

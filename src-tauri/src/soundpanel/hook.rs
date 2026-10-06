@@ -51,6 +51,10 @@ fn should_bypass_intercept_for_soundpanel(window_focused: bool, vk_code: u32) ->
     window_focused && (0x70..=0x7B).contains(&vk_code)
 }
 
+fn should_bypass_intercept(recording: bool, window_focused: bool, vk_code: u32) -> bool {
+    recording || should_bypass_intercept_for_soundpanel(window_focused, vk_code)
+}
+
 /// Resolve the intercept binding for `vk_code` when intercept mode is enabled.
 ///
 /// Returns `Some((key, action))` for a recognized, bound key and `None`
@@ -100,7 +104,11 @@ unsafe extern "system" fn soundpanel_keyboard_proc(
         match w_param.0 as u32 {
             WM_KEYDOWN | WM_SYSKEYDOWN => {
                 if let Some(state) = SP_HOOK_STATE.get() {
-                    if should_bypass_intercept_for_soundpanel(state.is_window_focused(), vk_code) {
+                    if should_bypass_intercept(
+                        state.is_recording(),
+                        state.is_window_focused(),
+                        vk_code,
+                    ) {
                         return CallNextHookEx(HHOOK::default(), n_code, w_param, l_param);
                     }
 
@@ -352,6 +360,32 @@ pub fn initialize_soundpanel_hook(state: SoundPanelState, app_handle: AppHandle)
 mod tests {
     use super::*;
     use crate::soundpanel::intercept::{InterceptBinding, InterceptSettings};
+
+    #[test]
+    fn recording_passes_bound_keys_through_before_dispatch() {
+        for vk in [0x61, 0x70, 0x41, 0x1B] {
+            assert!(should_bypass_intercept(true, false, vk));
+            assert!(!should_bypass_intercept(false, false, vk));
+        }
+        assert!(should_bypass_intercept(false, true, 0x70));
+        assert!(!should_bypass_intercept(false, true, 0x61));
+    }
+
+    #[test]
+    fn recording_state_is_shared_and_does_not_change_persisted_intercept() {
+        let state = SoundPanelState::new(String::new());
+        let settings_before = serde_json::to_value(state.get_intercept()).unwrap();
+        let clone = state.clone();
+        assert!(!clone.is_recording());
+        state.set_recording(true);
+        assert!(clone.is_recording());
+        clone.set_recording(false);
+        assert!(!state.is_recording());
+        assert_eq!(
+            serde_json::to_value(state.get_intercept()).unwrap(),
+            settings_before
+        );
+    }
 
     #[test]
     fn active_soundpanel_bypasses_intercept_only_for_f1_through_f12() {

@@ -24,6 +24,9 @@ interface InterceptSettingsDto {
 const isLoading = ref(false)
 const settings = ref<InterceptSettingsDto | null>(null)
 const recordingKey = ref(false)
+const recordingBusy = ref(false)
+let recordingGeneration = 0
+let recordingOperation: Promise<void> = Promise.resolve()
 const keyOccupied = ref(false)
 let occupiedTimeoutId: ReturnType<typeof setTimeout> | null = null
 
@@ -77,7 +80,7 @@ async function toggleEnabled() {
 
 async function toggleAllowAnyKey(event: Event) {
   const input = event.target as HTMLInputElement
-  if (!settings.value || !props.active || isLoading.value || savingAllowAnyKey.value || recordingKey.value || recordingKeyFor.value) {
+  if (!settings.value || !props.active || isLoading.value || savingAllowAnyKey.value || recordingBusy.value || recordingKey.value || recordingKeyFor.value) {
     input.checked = settings.value?.allow_any_key ?? false
     return
   }
@@ -95,29 +98,79 @@ async function toggleAllowAnyKey(event: Event) {
   }
 }
 
-function startRecordingKey() {
-  if (!settings.value || !props.active || isLoading.value || savingAllowAnyKey.value) return
-  recordingKey.value = true
+async function restoreRecording(unregistered: boolean) {
+  let failure: unknown
+  try {
+    await invoke('set_hotkey_recording', { recording: false })
+  } catch (e) {
+    failure = e
+  }
+  // A failed flag reset must not prevent restoring global registrations.
+  if (unregistered) {
+    try {
+      await invoke('reregister_hotkeys_cmd')
+    } catch (e) {
+      failure ??= e
+    }
+  }
+  if (failure && props.active && !listenerScope.disposed) {
+    showMessage(t('intercept.error.generic', { detail: normalizeCommandError(failure).message }), 'error')
+  }
+}
+
+function startRecordingKey(): Promise<void> {
+  if (!settings.value || !props.active || listenerScope.disposed || isLoading.value || savingAllowAnyKey.value || recordingBusy.value || recordingKey.value || recordingKeyFor.value) return Promise.resolve()
+  const generation = ++recordingGeneration
+  recordingBusy.value = true
   clearOccupied()
   recordingKeyFor.value = null
   errorMessage.value = null
-  document.addEventListener('keydown', handleKeyDown, true)
+  recordingOperation = (async () => {
+    let unregistered = false
+    let started = false
+    try {
+      await invoke('set_hotkey_recording', { recording: true })
+      if (!props.active || listenerScope.disposed || generation !== recordingGeneration) return
+      // Even a partial unregister failure needs registration restoration.
+      unregistered = true
+      await invoke('unregister_hotkeys')
+      if (!props.active || listenerScope.disposed || generation !== recordingGeneration) return
+      recordingKey.value = true
+      document.addEventListener('keydown', handleKeyDown, true)
+      started = true
+    } catch (e) {
+      if (props.active && !listenerScope.disposed && generation === recordingGeneration) {
+        showMessage(t('intercept.error.generic', { detail: normalizeCommandError(e).message }), 'error')
+      }
+    } finally {
+      if (!started) await restoreRecording(unregistered)
+      recordingBusy.value = false
+    }
+  })()
+  return recordingOperation
 }
 
-function cancelRecordingKey() {
+function cancelRecordingKey(clearSelection = true): Promise<void> {
+  recordingGeneration += 1
+  const wasRecording = recordingKey.value
   clearOccupied()
   recordingKey.value = false
-  recordingKeyFor.value = null
+  if (clearSelection) recordingKeyFor.value = null
   document.removeEventListener('keydown', handleKeyDown, true)
+  // An in-flight start owns its own rollback; wait before permitting a new one.
+  if (!wasRecording) return recordingOperation
+  recordingBusy.value = true
+  recordingOperation = restoreRecording(true).finally(() => { recordingBusy.value = false })
+  return recordingOperation
 }
 
 watch(() => props.active, (active) => {
   if (!active) {
-    cancelRecordingKey()
+    void cancelRecordingKey()
     recordingKeyFor.value = null
     newBindingAction.value = 'show_main_window'
   }
-})
+}, { flush: 'sync' })
 
 function handleKeyDown(e: KeyboardEvent) {
   if (!recordingKey.value || !props.active) return
@@ -129,7 +182,7 @@ function handleKeyDown(e: KeyboardEvent) {
   const allowAnyKey = settings.value?.allow_any_key ?? false
 
   if (e.key === 'Escape' && !allowAnyKey) {
-    cancelRecordingKey()
+    void cancelRecordingKey()
     return
   }
 
@@ -150,12 +203,11 @@ function handleKeyDown(e: KeyboardEvent) {
 
   clearOccupied()
   recordingKeyFor.value = canonicalName
-  recordingKey.value = false
-  document.removeEventListener('keydown', handleKeyDown, true)
+  void cancelRecordingKey(false)
 }
 
 async function saveBinding() {
-  if (!recordingKeyFor.value || !settings.value) return
+  if (!recordingKeyFor.value || !settings.value || recordingBusy.value) return
   const key = recordingKeyFor.value
   const action = newBindingAction.value
   try {
@@ -216,10 +268,11 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  listenerScope.dispose()
+  void cancelRecordingKey()
   clearOccupied()
   if (messageTimeoutId !== null) clearTimeout(messageTimeoutId)
   document.removeEventListener('keydown', handleKeyDown, true)
-  listenerScope.dispose()
 })
 </script>
 
@@ -260,7 +313,7 @@ onUnmounted(() => {
             type="checkbox"
             class="ui-choice-input"
             :checked="settings?.allow_any_key ?? false"
-      :disabled="!settings || isLoading || savingAllowAnyKey || recordingKey || !!recordingKeyFor"
+      :disabled="!settings || isLoading || savingAllowAnyKey || recordingBusy || recordingKey || !!recordingKeyFor"
             @change="toggleAllowAnyKey"
           />
           <span>{{ t('intercept.allow_any_key') }}</span>
@@ -278,7 +331,7 @@ onUnmounted(() => {
           <button
             v-if="!recordingKey && !recordingKeyFor"
             @click="startRecordingKey"
-      :disabled="!settings || isLoading || savingAllowAnyKey"
+            :disabled="!settings || !active || isLoading || savingAllowAnyKey || recordingBusy"
             class="record-btn ui-icon-button"
             :title="t('intercept.record')"
             :aria-label="t('intercept.record')"
@@ -296,8 +349,8 @@ onUnmounted(() => {
             <span>{{ keyOccupied ? t('intercept.key_occupied') : t('hotkeys.action.press') }}</span>
           </button>
           <button
-            v-if="recordingKey"
-            @click="cancelRecordingKey"
+            v-if="recordingKey || recordingBusy"
+            @click="cancelRecordingKey()"
             class="ui-icon-button"
             :title="t('common.cancel')"
             :aria-label="t('common.cancel')"
@@ -316,7 +369,7 @@ onUnmounted(() => {
               {{ a.label }}
             </option>
           </select>
-          <button @click="saveBinding" class="ui-icon-button" :title="t('common.add')" :aria-label="t('common.add')">
+          <button @click="saveBinding" :disabled="recordingBusy" class="ui-icon-button" :title="t('common.add')" :aria-label="t('common.add')">
             <Check :size="18" />
           </button>
           <button @click="(recordingKeyFor = null, newBindingAction = 'show_main_window')" class="ui-icon-button" :title="t('common.cancel')" :aria-label="t('common.cancel')">
