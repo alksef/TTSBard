@@ -277,6 +277,273 @@ describe('useInterfaceFontSettings', () => {
     expect(c.family.value).toBe('Georgia')
   })
 
+  it('adopts an authoritative external snapshot when the local echo was coalesced away', async () => {
+    mockInvoke.mockImplementation((command: unknown) =>
+      Promise.resolve(
+        command === 'get_system_font_families'
+          ? []
+          : command === 'set_ui_font_family'
+            ? 'Arial'
+            : 18,
+      ),
+    )
+    const source = ref(createSettings())
+    const c = useInterfaceFontSettings(source)
+    await c.onFamilyChange('Arial')
+    await c.onSizeChange(18)
+    expect(c.family.value).toBe('Arial')
+    expect(c.sizeInput.value).toBe(18)
+
+    // The transport jumps straight to the external import: no Arial/18 echo.
+    source.value = createSettings({ ui_font_family: 'Georgia', ui_font_size_px: 20 })
+    await nextTick()
+
+    expect(c.family.value).toBe('Georgia')
+    expect(c.sizeInput.value).toBe(20)
+    expect(c.saveError.value).toBeNull()
+  })
+
+  it('supersedes an awaiting size with a differing external value', async () => {
+    mockInvoke.mockResolvedValue(18)
+    const source = ref(createSettings())
+    const c = useInterfaceFontSettings(source)
+    await c.onSizeChange(18)
+    expect(c.sizeInput.value).toBe(18)
+
+    source.value = createSettings({ ui_font_size_px: 20 })
+    await nextTick()
+
+    expect(c.sizeInput.value).toBe(20)
+  })
+
+  it('subsequent external updates are adopted after a superseding snapshot', async () => {
+    mockInvoke.mockImplementation((command: unknown) =>
+      Promise.resolve(
+        command === 'get_system_font_families'
+          ? []
+          : command === 'set_ui_font_family'
+            ? 'Arial'
+            : 18,
+      ),
+    )
+    const source = ref(createSettings())
+    const c = useInterfaceFontSettings(source)
+    await c.onFamilyChange('Arial')
+    await c.onSizeChange(18)
+
+    source.value = createSettings({ ui_font_family: 'Georgia', ui_font_size_px: 20 })
+    await nextTick()
+    source.value = createSettings({ ui_font_family: 'PT Sans', ui_font_size_px: 14 })
+    await nextTick()
+
+    expect(c.family.value).toBe('PT Sans')
+    expect(c.sizeInput.value).toBe(14)
+  })
+
+  it('retires the guard when a matching echo arrives while the save was pending', async () => {
+    let resolveSave!: (value: string) => void
+    mockInvoke.mockImplementation(
+      () => new Promise<string>((resolve) => { resolveSave = resolve }),
+    )
+    const source = ref(createSettings())
+    const c = useInterfaceFontSettings(source)
+    const pending = c.onFamilyChange('Arial')
+    source.value = createSettings({ ui_font_family: 'Arial', ui_font_size_px: 16 })
+    await nextTick()
+
+    resolveSave('Arial')
+    await pending
+    expect(c.family.value).toBe('Arial')
+
+    source.value = createSettings({ ui_font_family: 'Georgia', ui_font_size_px: 16 })
+    await nextTick()
+    expect(c.family.value).toBe('Georgia')
+  })
+
+  it('adopts a differing external value that arrives while the save was pending', async () => {
+    let resolveSave!: (value: string) => void
+    mockInvoke.mockImplementation(
+      () => new Promise<string>((resolve) => { resolveSave = resolve }),
+    )
+    const source = ref(createSettings())
+    const c = useInterfaceFontSettings(source)
+    const pending = c.onFamilyChange('Arial')
+    source.value = createSettings({ ui_font_family: 'Georgia', ui_font_size_px: 16 })
+    await nextTick()
+
+    resolveSave('Arial')
+    await pending
+    expect(c.family.value).toBe('Georgia')
+  })
+
+  it('uses the pre-save source baseline for a second save before the first echo', async () => {
+    const responses = ['Arial', 'Georgia']
+    mockInvoke.mockImplementation((command: unknown) =>
+      Promise.resolve(
+        command === 'get_system_font_families'
+          ? []
+          : command === 'set_ui_font_family'
+            ? responses.shift()
+            : 16,
+      ),
+    )
+    const source = ref(createSettings())
+    const c = useInterfaceFontSettings(source)
+    await c.onFamilyChange('Arial')
+    expect(c.family.value).toBe('Arial')
+
+    // No Arial echo observed yet: the source still holds the original baseline.
+    await c.onFamilyChange('Georgia')
+    expect(c.family.value).toBe('Georgia')
+
+    // A late stale event carrying the original baseline must not roll back.
+    source.value = createSettings({ ui_font_family: 'default', ui_font_size_px: 16 })
+    await nextTick()
+    expect(c.family.value).toBe('Georgia')
+
+    // The second echo retires the guard, then a fresh external value is adopted.
+    source.value = createSettings({ ui_font_family: 'Georgia', ui_font_size_px: 16 })
+    await nextTick()
+    source.value = createSettings({ ui_font_family: 'PT Sans', ui_font_size_px: 16 })
+    await nextTick()
+    expect(c.family.value).toBe('PT Sans')
+  })
+
+  it('keeps the previous successful family when a later save fails before its echo', async () => {
+    let familySaves = 0
+    mockInvoke.mockImplementation((command: unknown) => {
+      if (command === 'get_system_font_families') return Promise.resolve([])
+      if (command === 'set_ui_font_family') {
+        familySaves += 1
+        if (familySaves === 1) return Promise.resolve('Arial')
+        if (familySaves === 2) return Promise.reject(new Error('disk failure'))
+        return Promise.resolve('Georgia')
+      }
+      return Promise.resolve(undefined)
+    })
+    const source = ref<GeneralSettingsDto | undefined>(
+      createSettings({ ui_font_family: 'default', ui_font_size_px: 16 }),
+    )
+    const c = useInterfaceFontSettings(source)
+
+    // First save succeeds while the source still holds the default baseline.
+    await c.onFamilyChange('Arial')
+    expect(c.family.value).toBe('Arial')
+
+    // Second save fails before any echo. The earlier success and its stale guard
+    // must survive the failing command and its finally reconciliation.
+    await c.onFamilyChange('Georgia')
+    expect(c.family.value).toBe('Arial')
+    expect(c.saveError.value).toContain('disk failure')
+    expect(c.saving.value).toBe(false)
+
+    // An unrelated later source event must not undo the protected value.
+    source.value = createSettings({ ui_font_family: 'default', ui_font_size_px: 20 })
+    await nextTick()
+    expect(c.family.value).toBe('Arial')
+    expect(c.sizeInput.value).toBe(20)
+
+    // Retry succeeds and its value is published.
+    await c.onFamilyChange('Georgia')
+    expect(c.family.value).toBe('Georgia')
+    expect(c.saveError.value).toBeNull()
+
+    // A late acknowledgement retires the guard, then external values are adopted.
+    source.value = createSettings({ ui_font_family: 'Georgia', ui_font_size_px: 20 })
+    await nextTick()
+    expect(c.family.value).toBe('Georgia')
+    source.value = createSettings({ ui_font_family: 'PT Sans', ui_font_size_px: 20 })
+    await nextTick()
+    expect(c.family.value).toBe('PT Sans')
+  })
+
+  it('keeps the previous successful size when a later save fails before its echo', async () => {
+    let sizeSaves = 0
+    mockInvoke.mockImplementation((command: unknown) => {
+      if (command === 'get_system_font_families') return Promise.resolve([])
+      if (command === 'set_ui_font_size') {
+        sizeSaves += 1
+        if (sizeSaves === 1) return Promise.resolve(18)
+        if (sizeSaves === 2) return Promise.reject(new Error('disk failure'))
+        return Promise.resolve(20)
+      }
+      return Promise.resolve(undefined)
+    })
+    const source = ref<GeneralSettingsDto | undefined>(
+      createSettings({ ui_font_family: 'default', ui_font_size_px: 16 }),
+    )
+    const c = useInterfaceFontSettings(source)
+
+    await c.onSizeChange(18)
+    expect(c.sizeInput.value).toBe(18)
+
+    // Second save fails before any echo: the earlier success and its stale guard
+    // must survive the failing command and its finally reconciliation.
+    await c.onSizeChange(20)
+    expect(c.sizeInput.value).toBe(18)
+    expect(c.saveError.value).toContain('disk failure')
+    expect(c.saving.value).toBe(false)
+
+    // An unrelated later source event must not undo the protected size.
+    source.value = createSettings({ ui_font_family: 'Arial', ui_font_size_px: 16 })
+    await nextTick()
+    expect(c.sizeInput.value).toBe(18)
+    expect(c.family.value).toBe('Arial')
+
+    // Retry succeeds and its value is published.
+    await c.onSizeChange(20)
+    expect(c.sizeInput.value).toBe(20)
+    expect(c.saveError.value).toBeNull()
+
+    // A late acknowledgement retires the guard, then external values are adopted.
+    source.value = createSettings({ ui_font_family: 'Arial', ui_font_size_px: 20 })
+    await nextTick()
+    expect(c.sizeInput.value).toBe(20)
+    source.value = createSettings({ ui_font_family: 'Arial', ui_font_size_px: 14 })
+    await nextTick()
+    expect(c.sizeInput.value).toBe(14)
+  })
+
+  it('normalizes an invalid size baseline to the default before guarding it', async () => {
+    mockInvoke.mockResolvedValue(18)
+    const source = ref<GeneralSettingsDto | undefined>(
+      createSettings({ ui_font_family: 'default', ui_font_size_px: undefined as unknown as number }),
+    )
+    const c = useInterfaceFontSettings(source)
+
+    await c.onSizeChange(18)
+    expect(c.sizeInput.value).toBe(18)
+
+    // The effective default (16) is the pre-save baseline, so a late event
+    // carrying it must not roll back the successful edit.
+    source.value = createSettings({ ui_font_family: 'default', ui_font_size_px: 16 })
+    await nextTick()
+    expect(c.sizeInput.value).toBe(18)
+  })
+
+  it('issues a setter when the former local value is selected after external supersession', async () => {
+    mockInvoke.mockImplementation((command: unknown) =>
+      Promise.resolve(
+        command === 'get_system_font_families'
+          ? []
+          : command === 'set_ui_font_family'
+            ? 'Arial'
+            : 16,
+      ),
+    )
+    const source = ref(createSettings())
+    const c = useInterfaceFontSettings(source)
+    await c.onFamilyChange('Arial')
+
+    source.value = createSettings({ ui_font_family: 'Georgia', ui_font_size_px: 16 })
+    await nextTick()
+    expect(c.family.value).toBe('Georgia')
+
+    await c.onFamilyChange('Arial')
+    expect(invokeCalls('set_ui_font_family')).toHaveLength(2)
+    expect(c.family.value).toBe('Arial')
+  })
+
   it('does not publish late failures after disposal', async () => {
     let rejectSave!: (error: Error) => void
     mockInvoke.mockImplementation(() => new Promise((_resolve, reject) => { rejectSave = reject }))

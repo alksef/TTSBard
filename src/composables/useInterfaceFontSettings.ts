@@ -61,6 +61,14 @@ export function useInterfaceFontSettings(
 
   let awaitingFamily: InterfaceFontFamily | null = null
   let awaitingSize: number | null = null
+  // Pre-save source baseline of the last successful field command. It is
+  // captured into a local at command start and only published together with the
+  // new awaiting value once the command succeeds, so a later failing command
+  // leaves the previous successful awaiting/stale pair intact. A late settings
+  // event carrying exactly this value is the stale pre-save snapshot, not a new
+  // choice, so it must not undo the optimistic value.
+  let staleFamily: InterfaceFontFamily | null = null
+  let staleSize: number | null = null
   let disposed = false
 
   // The Rust side has already enumerated DirectWrite during app startup. This
@@ -79,28 +87,49 @@ export function useInterfaceFontSettings(
     })
   }
 
+  /** Per-field guard resolution against one settings snapshot.
+   *
+   * A successful local command sets the awaiting value and remembers the
+   * pre-save source value. An incoming value retires the guard when it is the
+   * saved echo (exact acknowledgement) or any other value that differs from
+   * the protected baseline, letting an authoritative external snapshot
+   * supersede the local value even when the coalescing transport skipped the
+   * intermediate echo. Only the exact stale baseline is held back. Without
+   * source revisions a new value equal to the stale baseline cannot be told
+   * apart from a late stale event, so same-value ABA order is best effort and
+   * no global ordering is guaranteed. */
+  function reconcileField<T>(
+    awaiting: T | null,
+    stale: T | null,
+    next: T,
+  ): { awaiting: T | null; stale: T | null; adopt: boolean } {
+    if (awaiting === null) return { awaiting: null, stale: null, adopt: true }
+    if (next === awaiting || next !== stale) {
+      return { awaiting: null, stale: null, adopt: true }
+    }
+    return { awaiting, stale, adopt: false }
+  }
+
   function syncFromSettings(settings: GeneralSettingsDto | undefined): void {
     if (!settings || disposed || saving.value) return
     const nextFamily = toInterfaceFontFamily(settings.ui_font_family)
     const nextSize =
       parseInterfaceFontSize(settings.ui_font_size_px) ?? INTERFACE_FONT_SIZE_DEFAULT
-    // Protect a successful command until the settings stream acknowledges it.
-    // Once acknowledged, future external changes must be adopted normally.
-    if (awaitingFamily === nextFamily) awaitingFamily = null
-    if (awaitingSize === nextSize) awaitingSize = null
-    if (awaitingFamily === null) {
-      const next = nextFamily
-      if (next !== confirmedFamily.value) {
-        confirmedFamily.value = next
-        family.value = next
-      }
+
+    const familyState = reconcileField(awaitingFamily, staleFamily, nextFamily)
+    awaitingFamily = familyState.awaiting
+    staleFamily = familyState.stale
+    if (familyState.adopt && nextFamily !== confirmedFamily.value) {
+      confirmedFamily.value = nextFamily
+      family.value = nextFamily
     }
-    if (awaitingSize === null) {
-      const next = nextSize
-      if (next !== confirmedSize.value) {
-        confirmedSize.value = next
-        sizeInput.value = next
-      }
+
+    const sizeState = reconcileField(awaitingSize, staleSize, nextSize)
+    awaitingSize = sizeState.awaiting
+    staleSize = sizeState.stale
+    if (sizeState.adopt && nextSize !== confirmedSize.value) {
+      confirmedSize.value = nextSize
+      sizeInput.value = nextSize
     }
   }
 
@@ -116,6 +145,7 @@ export function useInterfaceFontSettings(
     saveError.value = null
     if (next === confirmedFamily.value) return
 
+    const baselineFamily = toInterfaceFontFamily(generalSettings.value?.ui_font_family)
     family.value = next
     saveError.value = null
     saving.value = true
@@ -124,6 +154,7 @@ export function useInterfaceFontSettings(
       if (disposed) return
       const applied = toInterfaceFontFamily(confirmed)
       awaitingFamily = applied
+      staleFamily = baselineFamily
       confirmedFamily.value = applied
       family.value = applied
     } catch (error) {
@@ -155,11 +186,15 @@ export function useInterfaceFontSettings(
     sizeInput.value = parsed
     saveError.value = null
     saving.value = true
+    const baselineSize =
+      parseInterfaceFontSize(generalSettings.value?.ui_font_size_px) ??
+      INTERFACE_FONT_SIZE_DEFAULT
     try {
       const confirmed = await invoke<number>('set_ui_font_size', { sizePx: parsed })
       if (disposed) return
       const applied = parseInterfaceFontSize(confirmed) ?? INTERFACE_FONT_SIZE_DEFAULT
       awaitingSize = applied
+      staleSize = baselineSize
       confirmedSize.value = applied
       sizeInput.value = applied
     } catch (error) {
