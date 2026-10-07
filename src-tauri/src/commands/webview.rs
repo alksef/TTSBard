@@ -84,12 +84,7 @@ pub async fn save_webview_settings(
     let upnp_enabled = settings.upnp_enabled;
     let send_original_text = settings.send_original_text;
     super::persist_blocking(settings_manager.inner(), move |mgr| {
-        mgr.set_webview_section(
-            start_on_boot,
-            port,
-            upnp_enabled,
-            send_original_text,
-        )
+        mgr.set_webview_section(start_on_boot, port, upnp_enabled, send_original_text)
     })
     .await?;
 

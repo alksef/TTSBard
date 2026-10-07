@@ -57,10 +57,9 @@ mod tests {
 
     #[test]
     fn webview_settings_missing_send_original_text_defaults_to_true() {
-        let parsed: WebViewSettings = serde_json::from_str(
-            r#"{"enabled": false, "start_on_boot": false, "port": 10100}"#,
-        )
-        .unwrap();
+        let parsed: WebViewSettings =
+            serde_json::from_str(r#"{"enabled": false, "start_on_boot": false, "port": 10100}"#)
+                .unwrap();
         assert!(parsed.send_original_text);
         assert!(WebViewSettings::default().send_original_text);
     }

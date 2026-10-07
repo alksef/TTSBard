@@ -53,7 +53,10 @@ pub struct MainWindowSettings {
     pub compact_width: u32,
     #[serde(default = "default_compact_height")]
     pub compact_height: u32,
-    #[serde(default = "default_compact_view", deserialize_with = "deserialize_compact_view")]
+    #[serde(
+        default = "default_compact_view",
+        deserialize_with = "deserialize_compact_view"
+    )]
     pub compact_view: CompactView,
     #[serde(default)]
     pub hide_extra_window_buttons: bool,
@@ -269,16 +272,11 @@ pub fn logical_to_physical(logical: u32, scale_factor: f64) -> u32 {
 /// allowed to fall below the physical minimum, so the returned range is always
 /// a valid `clamp` target.
 pub fn compact_physical_bounds(scale_factor: f64) -> (u32, u32, u32, u32) {
-    let max_w = logical_to_physical(COMPACT_MAX_LOGICAL_WIDTH, scale_factor)
-        .max(COMPACT_MIN_WIDTH_PX);
-    let max_h = logical_to_physical(COMPACT_MAX_LOGICAL_HEIGHT, scale_factor)
-        .max(COMPACT_MIN_HEIGHT_PX);
-    (
-        COMPACT_MIN_WIDTH_PX,
-        COMPACT_MIN_HEIGHT_PX,
-        max_w,
-        max_h,
-    )
+    let max_w =
+        logical_to_physical(COMPACT_MAX_LOGICAL_WIDTH, scale_factor).max(COMPACT_MIN_WIDTH_PX);
+    let max_h =
+        logical_to_physical(COMPACT_MAX_LOGICAL_HEIGHT, scale_factor).max(COMPACT_MIN_HEIGHT_PX);
+    (COMPACT_MIN_WIDTH_PX, COMPACT_MIN_HEIGHT_PX, max_w, max_h)
 }
 
 /// Clamp a physical inner `(width, height)` to the compact bounds at scale.

@@ -4701,15 +4701,8 @@ mod tests {
     fn set_webview_section_repeated_saves_keep_cache_and_disk_in_sync() {
         let (manager, dir) = webview_section_tmp_manager("consistency");
 
-        for (port, upnp) in [
-            (8080u16, false),
-            (9090, false),
-            (7070, true),
-            (1024, true),
-        ] {
-            manager
-                .set_webview_section(true, port, upnp, true)
-                .unwrap();
+        for (port, upnp) in [(8080u16, false), (9090, false), (7070, true), (1024, true)] {
+            manager.set_webview_section(true, port, upnp, true).unwrap();
             assert_eq!(
                 manager.load().unwrap(),
                 read_disk_settings(&dir),

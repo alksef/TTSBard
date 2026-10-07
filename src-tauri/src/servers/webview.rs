@@ -126,7 +126,11 @@ pub async fn run_webview_server(
                 .set_status(&app_handle, WebViewServerStatus::Starting);
             info!("[WEBVIEW] ========================================");
             info!("[WEBVIEW] STARTING SERVER");
-            info!("[WEBVIEW]   Address: {}:{}", crate::webview::WEBVIEW_BIND_ADDRESS, port);
+            info!(
+                "[WEBVIEW]   Address: {}:{}",
+                crate::webview::WEBVIEW_BIND_ADDRESS,
+                port
+            );
             info!("[WEBVIEW] ========================================");
 
             let server = match WebViewServer::new(Arc::clone(&webview_settings)).await {
@@ -181,12 +185,13 @@ pub async fn run_webview_server(
                         .set_status(&app_handle, WebViewServerStatus::Running);
                 }
                 Ok(Err(message)) => {
-                    state
-                        .webview
-                        .set_status(&app_handle, WebViewServerStatus::Error {
+                    state.webview.set_status(
+                        &app_handle,
+                        WebViewServerStatus::Error {
                             message,
                             attended: attempt_attended,
-                        });
+                        },
+                    );
                     let _ = server_handle.await;
                     server.stop().await;
                     state.webview.clear_upnp_runtime(&app_handle);
@@ -449,7 +454,8 @@ mod tests {
         let shutdown = CancellationToken::new();
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
         let mut rx = rx;
-        let mut task = tokio::spawn(async move { wait_for_explicit_restart(&shutdown, &mut rx).await });
+        let mut task =
+            tokio::spawn(async move { wait_for_explicit_restart(&shutdown, &mut rx).await });
 
         // Unrelated events must not wake a failed server.
         tx.send(AppEvent::TextSentToTts(RoutedText::broadcast("hi".into())))
@@ -464,7 +470,10 @@ mod tests {
         );
 
         tx.send(AppEvent::RestartWebViewServer).unwrap();
-        assert!(task.await.unwrap(), "an explicit restart must resume the supervisor");
+        assert!(
+            task.await.unwrap(),
+            "an explicit restart must resume the supervisor"
+        );
     }
 
     #[tokio::test]
@@ -473,7 +482,8 @@ mod tests {
         let (_tx, rx) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
         let mut rx = rx;
         let task_shutdown = shutdown.clone();
-        let task = tokio::spawn(async move { wait_for_explicit_restart(&task_shutdown, &mut rx).await });
+        let task =
+            tokio::spawn(async move { wait_for_explicit_restart(&task_shutdown, &mut rx).await });
         shutdown.cancel();
         assert!(!task.await.unwrap(), "shutdown must exit the supervisor");
     }

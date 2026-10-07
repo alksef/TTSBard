@@ -637,9 +637,10 @@ fn create_configured_windows(
         let mut builder = tauri::WebviewWindowBuilder::from_config(app.handle(), &config)
             .with_context(|| format!("failed to prepare window {label}"))?;
         if label == "main" {
-            builder = builder.initialization_script(
-                build_main_window_initialization_script(start_compact, compact_view),
-            );
+            builder = builder.initialization_script(build_main_window_initialization_script(
+                start_compact,
+                compact_view,
+            ));
         }
         builder
             .build()

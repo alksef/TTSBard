@@ -38,7 +38,7 @@ dev-артефакты.
 Перед тегом синхронизируйте версию штатным скриптом, проверьте diff и сборку:
 
 ```powershell
-node scripts/set-version.cjs 0.26.0
+node scripts/set-version.cjs 1.3.0
 npm run build
 ./scripts/cargo.ps1 check --manifest-path src-tauri/Cargo.toml --locked
 ```
@@ -59,8 +59,8 @@ SHA. Если `CI` завершится ошибкой, выпуск не буд
 текущего релиза):
 
 ```powershell
-git tag v0.26.0
-git push origin v0.26.0
+git tag v1.3.0
+git push origin v1.3.0
 ```
 
 В CI версия извлекается из имени тега и повторно применяется через

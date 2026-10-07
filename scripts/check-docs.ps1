@@ -436,7 +436,6 @@ function Test-DocsStructure {
         'faq.md',
         'ttsbard-overview.md',
         'ttsbard-overview.pdf',
-        'ttsbard-overview-1.0.0.pdf',
         'decisions',
         'development',
         'integrations',

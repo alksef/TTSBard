@@ -615,6 +615,7 @@ impl SoundPanelState {
     /// 2. Отпускает runtime lock на время сохранения на диск (`save`).
     /// 3. После успешного сохранения кратко захватывает runtime lock и публикует изменения.
     /// 4. Выполняет `post_commit` под writer gate (обеспечивая строгий порядок публикации и событий).
+    ///
     /// Readers (`get_intercept`) не берут writer gate и никогда не блокируются на disk I/O.
     fn mutate_intercept_with<M, S, P>(
         &self,
@@ -729,10 +730,12 @@ impl SoundPanelState {
         self.mutate_intercept_with(
             |settings| {
                 settings.bindings.retain(|b| b.key != key);
-                settings.bindings.push(crate::soundpanel::intercept::InterceptBinding {
-                    key: key.clone(),
-                    action: action.clone(),
-                });
+                settings
+                    .bindings
+                    .push(crate::soundpanel::intercept::InterceptBinding {
+                        key: key.clone(),
+                        action: action.clone(),
+                    });
             },
             save,
             |_| {
@@ -1048,14 +1051,20 @@ mod tests {
         // Reader accesses get_intercept() while save is stalled.
         // It must NOT block, and must observe the uncommitted previous state.
         let observed = state.get_intercept();
-        assert!(!observed.enabled, "reader must observe previous settings during disk I/O");
+        assert!(
+            !observed.enabled,
+            "reader must observe previous settings during disk I/O"
+        );
 
         // Unblock writer and verify completion
         let _ = save_unblock_tx.send(());
         let writer_result = writer_handle.join().expect("writer thread should join");
         assert!(writer_result.is_ok(), "writer should complete successfully");
 
-        assert!(state.get_intercept().enabled, "reader must observe updated settings after commit");
+        assert!(
+            state.get_intercept().enabled,
+            "reader must observe updated settings after commit"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1078,14 +1087,18 @@ mod tests {
 
         let state_w1 = state.clone();
         let writer1 = std::thread::spawn(move || {
-            state_w1.set_intercept_binding_with("NUMPAD1".into(), "action1".into(), |_path, settings| {
-                let _ = w1_started_tx.send(());
-                w1_unblock_rx
-                    .recv_timeout(Duration::from_secs(5))
-                    .map_err(|e| format!("Writer 1 timeout: {}", e))?;
-                assert!(settings.bindings.iter().any(|b| b.key == "NUMPAD1"));
-                Ok(())
-            })
+            state_w1.set_intercept_binding_with(
+                "NUMPAD1".into(),
+                "action1".into(),
+                |_path, settings| {
+                    let _ = w1_started_tx.send(());
+                    w1_unblock_rx
+                        .recv_timeout(Duration::from_secs(5))
+                        .map_err(|e| format!("Writer 1 timeout: {}", e))?;
+                    assert!(settings.bindings.iter().any(|b| b.key == "NUMPAD1"));
+                    Ok(())
+                },
+            )
         });
 
         // Wait until writer 1 is stalled inside save callback
@@ -1104,17 +1117,21 @@ mod tests {
                 Err(std::sync::TryLockError::WouldBlock)
             );
             let _ = w2_gate_tx.send(gate_is_held);
-            state_w2.set_intercept_binding_with("NUMPAD2".into(), "action2".into(), |_path, settings| {
-                assert!(
-                    settings.bindings.iter().any(|b| b.key == "NUMPAD1"),
-                    "writer 2 must see committed changes from writer 1"
-                );
-                assert!(
-                    settings.bindings.iter().any(|b| b.key == "NUMPAD2"),
-                    "writer 2 must include its own changes"
-                );
-                Ok(())
-            })
+            state_w2.set_intercept_binding_with(
+                "NUMPAD2".into(),
+                "action2".into(),
+                |_path, settings| {
+                    assert!(
+                        settings.bindings.iter().any(|b| b.key == "NUMPAD1"),
+                        "writer 2 must see committed changes from writer 1"
+                    );
+                    assert!(
+                        settings.bindings.iter().any(|b| b.key == "NUMPAD2"),
+                        "writer 2 must include its own changes"
+                    );
+                    Ok(())
+                },
+            )
         });
 
         // The handshake proves contention without relying on thread scheduling delays.
@@ -1133,8 +1150,14 @@ mod tests {
         // Final state must contain both bindings
         let final_settings = state.get_intercept();
         assert_eq!(final_settings.bindings.len(), 2);
-        assert!(final_settings.bindings.iter().any(|b| b.key == "NUMPAD1" && b.action == "action1"));
-        assert!(final_settings.bindings.iter().any(|b| b.key == "NUMPAD2" && b.action == "action2"));
+        assert!(final_settings
+            .bindings
+            .iter()
+            .any(|b| b.key == "NUMPAD1" && b.action == "action1"));
+        assert!(final_settings
+            .bindings
+            .iter()
+            .any(|b| b.key == "NUMPAD2" && b.action == "action2"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1153,15 +1176,22 @@ mod tests {
             Err("simulated save error".to_string())
         });
         assert!(err_result.is_err());
-        assert!(!state.get_intercept().enabled, "runtime must remain false after save failure");
-        assert!(event_rx.try_recv().is_err(), "no event emitted on save failure");
+        assert!(
+            !state.get_intercept().enabled,
+            "runtime must remain false after save failure"
+        );
+        assert!(
+            event_rx.try_recv().is_err(),
+            "no event emitted on save failure"
+        );
 
         // Attempt 2: retry succeeds
-        let ok_result = state.set_intercept_enabled_with(true, |_path, _settings| {
-            Ok(())
-        });
+        let ok_result = state.set_intercept_enabled_with(true, |_path, _settings| Ok(()));
         assert!(ok_result.is_ok());
-        assert!(state.get_intercept().enabled, "runtime must be true after retry succeeds");
+        assert!(
+            state.get_intercept().enabled,
+            "runtime must be true after retry succeeds"
+        );
         match event_rx.recv_timeout(Duration::from_secs(2)) {
             Ok(AppEvent::InterceptionChanged(true)) => {}
             other => panic!("expected InterceptionChanged(true), got {:?}", other),
