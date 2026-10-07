@@ -1,146 +1,235 @@
-import componentSource from './SettingsGeneral.vue?raw'
-import ts from 'typescript'
-import { describe, expect, it, vi } from 'vitest'
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createApp, h, nextTick, ref } from 'vue'
+import SettingsGeneral from './SettingsGeneral.vue'
+import { invoke } from '@tauri-apps/api/core'
+import { APP_SETTINGS_KEY, type AppSettingsDto } from '../../types/settings'
 
-// Execute the real script handlers, following the existing component harness:
-// raw <script setup> source, imports stripped, dependencies injected.
-const script = ts.transpile(componentSource.split('<script setup lang="ts">')[1]
-  .split('</script>')[0].replace(/^import .*$/gm, ''), { target: ts.ScriptTarget.ES2022 })
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: vi.fn(),
+}))
 
-interface WindowsValue {
-  global: { exclude_from_capture: boolean }
-  main: { hide_extra_window_buttons: boolean }
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn(async () => () => {}),
+}))
+
+vi.mock('@tauri-apps/plugin-dialog', () => ({
+  open: vi.fn(async () => null),
+}))
+
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
 }
 
-interface Harness {
-  toggleHideExtraWindowButtons: () => Promise<void>
-  hideExtraWindowButtons: { value: boolean }
-  hideExtraWindowButtonsSaving: { value: boolean }
-  invoke: ReturnType<typeof vi.fn>
-  emit: ReturnType<typeof vi.fn>
-  triggerWindowsWatch: (next: WindowsValue) => void
+async function flushAsync() {
+  for (let i = 0; i < 10; i++) {
+    await Promise.resolve()
+    await nextTick()
+  }
 }
 
-function setup(initialHidden = false): Harness {
-  const windowsRef: { value: WindowsValue } = {
-    value: {
+function createSettings(hideExtra = false): AppSettingsDto {
+  return {
+    windows: {
       global: { exclude_from_capture: false },
-      main: { hide_extra_window_buttons: initialHidden },
+      main: {
+        x: null,
+        y: null,
+        width: 800,
+        height: 600,
+        start_compact: false,
+        hide_on_minimize: false,
+        hide_extra_window_buttons: hideExtra,
+      },
+      playback: { x: null, y: null, width: 300, height: 200 },
+      soundpanel: { x: null, y: null, width: 400, height: 300 },
     },
-  }
-  const generalRef = { value: undefined }
-  const loggingRef = { value: undefined }
-  const locale = { value: 'ru' }
-  const invoke = vi.fn(async (_command: string, _args?: unknown): Promise<unknown> => undefined)
-  const emit = vi.fn()
-  const windowsWatch: Array<(v: unknown) => void> = []
+    general: {
+      show_playback_on_start: false,
+      start_compact: false,
+      hide_on_minimize: false,
+    },
+    logging: {
+      level: 'info',
+    },
+  } as unknown as AppSettingsDto
+}
 
-  const watch = (source: unknown, cb: (v: unknown) => void, opts?: { immediate?: boolean }) => {
-    if (source === windowsRef) windowsWatch.push(cb)
-    if (opts?.immediate) cb((source as { value: unknown }).value)
-  }
+let appInstance: ReturnType<typeof createApp> | null = null
+let container: HTMLDivElement | null = null
 
-  const run = new Function(
-    'ref', 'computed', 'watch', 'onMounted', 'invoke', 'openDirectoryDialog',
-    'useGeneralSettings', 'useWindowsSettings', 'useLoggingSettings',
-    'presentCommandError', 'locale', 'setLanguage', 't', 'saveStartCompactToStorage',
-    'defineEmits',
-    `${script}
-    return { toggleHideExtraWindowButtons, hideExtraWindowButtons, hideExtraWindowButtonsSaving };`,
+function getHideButtonsCheckbox(root: HTMLElement): HTMLInputElement {
+  const labels = Array.from(root.querySelectorAll<HTMLLabelElement>('label.setting-label'))
+  const label = labels.find((l) =>
+    l.textContent?.includes('buttons') ||
+    l.textContent?.includes('кнопки') ||
+    l.textContent?.includes('hide_extra_window_buttons'),
   )
+  const input = label?.querySelector('input[type="checkbox"]') as HTMLInputElement | null
+  if (!input) throw new Error('hide_extra_window_buttons checkbox not found')
+  return input
+}
 
-  const panel = run(
-    (value: unknown) => ({ value }),
-    (fn: () => unknown) => ({ get value() { return fn() } }),
-    watch,
-    () => {},
-    invoke,
-    async () => undefined,
-    () => generalRef,
-    () => windowsRef,
-    () => loggingRef,
-    (_e: unknown, fallback: string) => fallback,
-    locale,
-    async () => undefined,
-    (key: string) => key,
-    () => {},
-    () => emit,
-  )
+async function mountGeneralSettings(initialHideButtons = false) {
+  container = document.createElement('div')
+  document.body.appendChild(container)
+
+  const settingsRef = ref<AppSettingsDto | null>(createSettings(initialHideButtons))
+  const mockedInvoke = vi.mocked(invoke)
+  mockedInvoke.mockImplementation(async (cmd) => {
+    if (cmd === 'storage_get_data_info') {
+      return { path: 'C:\\data', is_default: true }
+    }
+    return undefined
+  })
+
+  const onShowMessage = vi.fn()
+
+  appInstance = createApp({
+    render() {
+      return h(SettingsGeneral, { onShowMessage })
+    },
+  })
+
+  appInstance.provide(APP_SETTINGS_KEY, {
+    settings: settingsRef,
+    isLoading: ref(false),
+    error: ref(null),
+    reload: vi.fn(async () => {}),
+  })
+
+  appInstance.mount(container)
+
+  await flushAsync()
+  mockedInvoke.mockClear()
 
   return {
-    toggleHideExtraWindowButtons: panel.toggleHideExtraWindowButtons,
-    hideExtraWindowButtons: panel.hideExtraWindowButtons,
-    hideExtraWindowButtonsSaving: panel.hideExtraWindowButtonsSaving,
-    invoke,
-    emit,
-    triggerWindowsWatch: (next: WindowsValue) => {
-      windowsRef.value = next
-      for (const cb of windowsWatch) cb(next)
+    container,
+    settingsRef,
+    mockedInvoke,
+    onShowMessage,
+    getCheckbox: () => getHideButtonsCheckbox(container!),
+    async unmount() {
+      if (appInstance) {
+        appInstance.unmount()
+        appInstance = null
+      }
+      if (container) {
+        container.remove()
+        container = null
+      }
+      await flushAsync()
     },
   }
 }
 
-describe('SettingsGeneral extra window buttons', () => {
-  it('starts a single command while a save is pending', async () => {
-    const h = setup(false)
-    let resolveFirst!: () => void
-    h.invoke.mockImplementationOnce(() => new Promise<void>(r => { resolveFirst = r }))
+afterEach(async () => {
+  if (appInstance) {
+    appInstance.unmount()
+    appInstance = null
+  }
+  if (container) {
+    container.remove()
+    container = null
+  }
+  vi.clearAllTimers()
+  vi.useRealTimers()
+  vi.clearAllMocks()
+  document.body.innerHTML = ''
+})
 
-    const first = h.toggleHideExtraWindowButtons()
-    expect(h.hideExtraWindowButtons.value).toBe(true)
+describe('SettingsGeneral hide_extra_window_buttons', () => {
+  it('starts a single save command during rapid repeated change events', async () => {
+    const { getCheckbox, mockedInvoke } = await mountGeneralSettings(false)
+    const checkbox = getCheckbox()
+    expect(checkbox.checked).toBe(false)
+    expect(checkbox.disabled).toBe(false)
 
-    const second = h.toggleHideExtraWindowButtons()
-    await Promise.resolve()
+    const gate = deferred()
+    mockedInvoke.mockImplementationOnce(() => gate.promise)
 
-    expect(h.invoke).toHaveBeenCalledTimes(1)
+    // First toggle
+    checkbox.dispatchEvent(new Event('change'))
+    await nextTick()
 
-    resolveFirst()
-    await first
-    await second
+    expect(checkbox.checked).toBe(true)
+    expect(checkbox.disabled).toBe(true)
 
-    expect(h.hideExtraWindowButtonsSaving.value).toBe(false)
-    expect(h.hideExtraWindowButtons.value).toBe(true)
+    // Repeated toggle while pending
+    checkbox.dispatchEvent(new Event('change'))
+    await flushAsync()
+
+    // Only one invoke call started
+    expect(mockedInvoke).toHaveBeenCalledTimes(1)
+    expect(mockedInvoke).toHaveBeenCalledWith('set_hide_extra_window_buttons', { value: true })
+
+    // Resolve in-flight save
+    gate.resolve()
+    await flushAsync()
+
+    expect(checkbox.disabled).toBe(false)
+    expect(checkbox.checked).toBe(true)
   })
 
-  it('rolls back and reports the localized error on failure, then allows retry', async () => {
-    const h = setup(false)
-    h.invoke.mockRejectedValueOnce(new Error('disk full'))
+  it('rolls back on save failure, displays error message, and permits retry', async () => {
+    const { getCheckbox, mockedInvoke, onShowMessage } = await mountGeneralSettings(false)
+    const checkbox = getCheckbox()
+    expect(checkbox.checked).toBe(false)
 
-    await h.toggleHideExtraWindowButtons()
+    mockedInvoke.mockRejectedValueOnce(new Error('disk full'))
 
-    expect(h.hideExtraWindowButtons.value).toBe(false)
-    expect(h.hideExtraWindowButtonsSaving.value).toBe(false)
-    expect(h.emit).toHaveBeenCalledWith('show-message', 'general.error.save', 'error')
-    expect(h.invoke).toHaveBeenCalledWith('set_hide_extra_window_buttons', { value: true })
+    // Attempt toggle -> fails
+    checkbox.dispatchEvent(new Event('change'))
+    await flushAsync()
 
-    h.invoke.mockResolvedValueOnce(undefined)
-    await h.toggleHideExtraWindowButtons()
+    // Rollback
+    expect(checkbox.checked).toBe(false)
+    expect(checkbox.disabled).toBe(false)
+    expect(onShowMessage).toHaveBeenCalledWith(expect.any(String), 'error')
+    expect(mockedInvoke).toHaveBeenCalledWith('set_hide_extra_window_buttons', { value: true })
 
-    expect(h.hideExtraWindowButtons.value).toBe(true)
-    expect(h.invoke).toHaveBeenLastCalledWith('set_hide_extra_window_buttons', { value: true })
+    // Retry succeeds
+    mockedInvoke.mockResolvedValueOnce(undefined)
+    checkbox.dispatchEvent(new Event('change'))
+    await flushAsync()
+
+    expect(checkbox.checked).toBe(true)
+    expect(mockedInvoke).toHaveBeenLastCalledWith('set_hide_extra_window_buttons', { value: true })
   })
 
-  it('does not let an unrelated reload overwrite a pending toggle', async () => {
-    const h = setup(false)
-    let resolveFirst!: () => void
-    h.invoke.mockImplementationOnce(() => new Promise<void>(r => { resolveFirst = r }))
+  it('does not let an external settings update overwrite a pending toggle', async () => {
+    const { getCheckbox, settingsRef, mockedInvoke } = await mountGeneralSettings(false)
+    const checkbox = getCheckbox()
+    expect(checkbox.checked).toBe(false)
 
-    const first = h.toggleHideExtraWindowButtons()
-    expect(h.hideExtraWindowButtons.value).toBe(true)
+    const gate = deferred()
+    mockedInvoke.mockImplementationOnce(() => gate.promise)
 
-    h.triggerWindowsWatch({
-      global: { exclude_from_capture: false },
-      main: { hide_extra_window_buttons: false },
-    })
-    expect(h.hideExtraWindowButtons.value).toBe(true)
+    checkbox.dispatchEvent(new Event('change'))
+    await nextTick()
+    expect(checkbox.checked).toBe(true)
 
-    resolveFirst()
-    await first
+    // External settings update arrives with old false value while toggle is pending
+    settingsRef.value = createSettings(false)
+    await flushAsync()
 
-    h.triggerWindowsWatch({
-      global: { exclude_from_capture: false },
-      main: { hide_extra_window_buttons: true },
-    })
-    expect(h.hideExtraWindowButtons.value).toBe(true)
+    // User's choice must NOT be overwritten
+    expect(checkbox.checked).toBe(true)
+
+    // In-flight save finishes
+    gate.resolve()
+    await flushAsync()
+
+    // External settings update arrives with true value
+    settingsRef.value = createSettings(true)
+    await flushAsync()
+
+    expect(checkbox.checked).toBe(true)
   })
 })
