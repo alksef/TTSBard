@@ -110,18 +110,32 @@ export function createIntegrationStatusProjection(sources: IntegrationStatusSour
     const allSlots = slots.value
     for (const slot of allSlots) {
       if (isIntegrationActionableError(slot.tone)) {
-        let runtime: any
-        if (slot.service === 'webview') runtime = sources.webviewRuntime.value
-        else if (slot.service === 'twitch') runtime = sources.twitchRuntime.value
-        else if (slot.service === 'vts') runtime = sources.vtsRuntime.value
-        else runtime = sources.inputServerRuntime.value
+        let errorReason: string
+        switch (slot.service) {
+          case 'webview':
+            errorReason = integrationErrorReason('webview', sources.webviewRuntime.value)
+            break
+          case 'twitch':
+            errorReason = integrationErrorReason('twitch', sources.twitchRuntime.value)
+            break
+          case 'vts':
+            errorReason = integrationErrorReason('vts', sources.vtsRuntime.value)
+            break
+          case 'inputServer':
+            errorReason = integrationErrorReason('inputServer', sources.inputServerRuntime.value)
+            break
+          default: {
+            const _exhaustiveCheck: never = slot.service
+            throw new Error(`Unhandled integration service: ${_exhaustiveCheck}`)
+          }
+        }
 
         result.push({
           service: slot.service,
           icon: slot.icon,
           tone: slot.tone,
           serviceName: integrationServiceName(slot.service),
-          errorReason: integrationErrorReason(slot.service, runtime),
+          errorReason,
           label: slot.label,
         })
       }

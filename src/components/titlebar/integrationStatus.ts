@@ -175,6 +175,17 @@ export function integrationServiceName(service: IntegrationService | 'inputServe
   return SERVICE_NAMES[service]
 }
 
+export type IntegrationRuntimeMap = {
+  webview: WebViewRuntime
+  twitch: TwitchRuntime
+  vts: VtsRuntime
+  inputServer: InputServerRuntime
+}
+
+export function integrationErrorReason(service: 'webview', runtime: WebViewRuntime): string
+export function integrationErrorReason(service: 'twitch', runtime: TwitchRuntime): string
+export function integrationErrorReason(service: 'vts', runtime: VtsRuntime): string
+export function integrationErrorReason(service: 'inputServer', runtime: InputServerRuntime): string
 export function integrationErrorReason(
   service: IntegrationService | 'inputServer',
   runtime: AnyRuntime | InputServerRuntime,

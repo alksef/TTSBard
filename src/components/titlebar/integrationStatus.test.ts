@@ -342,6 +342,20 @@ describe('integrationErrorReason', () => {
       integrationErrorReason('vts', { state: 'Error' }),
     ).toBe('VTube Studio — ошибка')
   })
+
+  it('enforces matching service and runtime types at compile-time', () => {
+    expect(integrationErrorReason('webview', { state: 'error', message: 'err' })).toBeDefined()
+    expect(integrationErrorReason('twitch', { state: 'Error', message: 'err' })).toBeDefined()
+    expect(integrationErrorReason('vts', { state: 'Error', message: 'err' })).toBeDefined()
+    expect(integrationErrorReason('inputServer', { state: 'error', message: 'err' })).toBeDefined()
+
+    // @ts-expect-error twitch runtime is incompatible with webview service
+    integrationErrorReason('webview', { state: 'Connecting' })
+    // @ts-expect-error webview runtime is incompatible with twitch service
+    integrationErrorReason('twitch', { state: 'running' })
+    // @ts-expect-error vts runtime is incompatible with inputServer service
+    integrationErrorReason('inputServer', { state: 'Connected', authenticated: true })
+  })
 })
 
 describe('isIntegrationActionableError', () => {

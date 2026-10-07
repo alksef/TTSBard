@@ -122,4 +122,34 @@ describe('useIntegrationStatusSlots - createIntegrationStatusProjection', () => 
     twitchRuntimeRef.value = { state: 'Connected' }
     expect(errorSlots.value).toHaveLength(0)
   })
+
+  it('reactively updates multiple independent errors and removing one only removes that error', () => {
+    const webviewRuntimeRef = ref<WebViewRuntime>({ state: 'error', message: 'port_in_use:8080', attended: false })
+    const twitchRuntimeRef = ref<TwitchRuntime>({ state: 'Error', message: 'token expired' })
+    const inputServerRuntimeRef = ref<InputServerRuntime>({ state: 'error', message: 'port_in_use:10101', attended: false })
+
+    const sources = createTestSources()
+    sources.webviewRuntime = webviewRuntimeRef
+    sources.twitchRuntime = twitchRuntimeRef
+    sources.inputServerRuntime = inputServerRuntimeRef
+
+    const { errorSlots } = createIntegrationStatusProjection(sources)
+    expect(errorSlots.value).toHaveLength(3)
+
+    // Resolve twitch
+    twitchRuntimeRef.value = { state: 'Connected' }
+    expect(errorSlots.value).toHaveLength(2)
+    expect(errorSlots.value.find((e) => e.service === 'twitch')).toBeUndefined()
+    expect(errorSlots.value.find((e) => e.service === 'webview')).toBeDefined()
+    expect(errorSlots.value.find((e) => e.service === 'inputServer')).toBeDefined()
+
+    // Resolve webview
+    webviewRuntimeRef.value = { state: 'running' }
+    expect(errorSlots.value).toHaveLength(1)
+    expect(errorSlots.value[0].service).toBe('inputServer')
+
+    // Resolve inputServer
+    inputServerRuntimeRef.value = { state: 'running' }
+    expect(errorSlots.value).toHaveLength(0)
+  })
 })
