@@ -77,6 +77,12 @@ describe('compactModeState — start_compact boot value and localStorage synchro
     expect(getInitialCompactMode()).toBe(false)
   })
 
+  it('boot true overrides a stale cached false', () => {
+    fakeStorage.setItem(START_COMPACT_STORAGE_KEY, 'false')
+    stubWindow(true, undefined, 800)
+    expect(getInitialCompactMode()).toBe(true)
+  })
+
   it('boot true wins over stale cached false even when storage throws', () => {
     fakeStorage.setItem(START_COMPACT_STORAGE_KEY, 'false')
     getItemThrows = true

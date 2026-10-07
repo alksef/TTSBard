@@ -637,13 +637,9 @@ fn create_configured_windows(
         let mut builder = tauri::WebviewWindowBuilder::from_config(app.handle(), &config)
             .with_context(|| format!("failed to prepare window {label}"))?;
         if label == "main" {
-            let view_str = match compact_view {
-                crate::config::CompactView::Mono => "mono",
-                crate::config::CompactView::Compact => "compact",
-            };
-            builder = builder.initialization_script(format!(
-                "window.__TTSBARD_START_COMPACT__ = {start_compact};\nwindow.__TTSBARD_COMPACT_VIEW__ = \"{view_str}\";"
-            ));
+            builder = builder.initialization_script(
+                build_main_window_initialization_script(start_compact, compact_view),
+            );
         }
         builder
             .build()
@@ -1532,25 +1528,21 @@ fn missing_piper_notification(model_name: &str) -> String {
     )
 }
 
-/// Resolved startup mode for main window
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
-pub enum StartupWindowMode {
-    Ordinary,
-    Compact(crate::config::CompactView),
-}
-
-/// Authoritative decision matrix for startup window mode (ROADMAP-129)
-#[allow(dead_code)]
-pub fn resolve_startup_window_mode(
+/// Builds the initialization script injected into the main window before any frontend script runs.
+///
+/// Injects `window.__TTSBARD_START_COMPACT__` and `window.__TTSBARD_COMPACT_VIEW__`
+/// to guarantee no-flash startup window mode and view resolution.
+pub fn build_main_window_initialization_script(
     start_compact: bool,
     compact_view: crate::config::CompactView,
-) -> StartupWindowMode {
-    if start_compact {
-        StartupWindowMode::Compact(compact_view)
-    } else {
-        StartupWindowMode::Ordinary
-    }
+) -> String {
+    let view_str = match compact_view {
+        crate::config::CompactView::Mono => "mono",
+        crate::config::CompactView::Compact => "compact",
+    };
+    format!(
+        "window.__TTSBARD_START_COMPACT__ = {start_compact};\nwindow.__TTSBARD_COMPACT_VIEW__ = \"{view_str}\";"
+    )
 }
 
 #[cfg(test)]
@@ -1808,28 +1800,25 @@ mod tests {
     }
 
     #[test]
-    fn resolve_startup_window_mode_matrix() {
-        use super::{resolve_startup_window_mode, StartupWindowMode};
+    fn build_main_window_initialization_script_matrix() {
+        use super::build_main_window_initialization_script;
         use crate::config::CompactView;
 
-        // start_compact = false boots ordinary window regardless of saved view
         assert_eq!(
-            resolve_startup_window_mode(false, CompactView::Compact),
-            StartupWindowMode::Ordinary
+            build_main_window_initialization_script(false, CompactView::Compact),
+            "window.__TTSBARD_START_COMPACT__ = false;\nwindow.__TTSBARD_COMPACT_VIEW__ = \"compact\";"
         );
         assert_eq!(
-            resolve_startup_window_mode(false, CompactView::Mono),
-            StartupWindowMode::Ordinary
-        );
-
-        // start_compact = true boots the remembered compact view
-        assert_eq!(
-            resolve_startup_window_mode(true, CompactView::Compact),
-            StartupWindowMode::Compact(CompactView::Compact)
+            build_main_window_initialization_script(false, CompactView::Mono),
+            "window.__TTSBARD_START_COMPACT__ = false;\nwindow.__TTSBARD_COMPACT_VIEW__ = \"mono\";"
         );
         assert_eq!(
-            resolve_startup_window_mode(true, CompactView::Mono),
-            StartupWindowMode::Compact(CompactView::Mono)
+            build_main_window_initialization_script(true, CompactView::Compact),
+            "window.__TTSBARD_START_COMPACT__ = true;\nwindow.__TTSBARD_COMPACT_VIEW__ = \"compact\";"
+        );
+        assert_eq!(
+            build_main_window_initialization_script(true, CompactView::Mono),
+            "window.__TTSBARD_START_COMPACT__ = true;\nwindow.__TTSBARD_COMPACT_VIEW__ = \"mono\";"
         );
     }
 }

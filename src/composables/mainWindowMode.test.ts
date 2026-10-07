@@ -115,6 +115,7 @@ const bootOrdinary: MainWindowModeBootInputs = {
 describe('mainWindowMode — startup matrix', () => {
   it.each([
     [false, 'compact', 'ordinary', false, false, false],
+    [false, 'mono', 'ordinary', false, false, false],
     [true, 'compact', 'compact', true, false, true],
     [true, 'mono', 'mono', true, true, false],
   ] as const)(
