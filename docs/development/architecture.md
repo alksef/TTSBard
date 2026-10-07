@@ -202,7 +202,12 @@ shutdown token. Каждый её элемент несёт snapshot `AudioSetti
 Изменение persisted state строит candidate, записывает его через общий
 Windows-safe atomic replace и публикует cache/runtime только после успешной
 записи. Составные изменения (SoundPanel binding и Fish Audio connection form)
-сохраняются одной owner-level transaction. Файловые операции, cache/decode/DSP
+сохраняются одной owner-level transaction. Настройки перехвата SoundPanel
+(`InterceptSettings`) разделяют readers и writers: `SoundPanelState::get_intercept`
+читает короткий runtime lock напрямую, поэтому low-level keyboard hook никогда
+не блокируется на диск; мутации сериализуются через общий writer gate,
+сохраняются на диск вне runtime lock и обновляют runtime со строгим порядком
+событий до освобождения gate. Файловые операции, cache/decode/DSP
 и другие синхронные тяжёлые этапы speech pipeline запускаются через явную
 blocking isolation, а не на общем async executor.
 

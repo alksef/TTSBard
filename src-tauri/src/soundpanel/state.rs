@@ -202,7 +202,10 @@ pub struct SoundPanelState {
     pub floating_clickthrough: Arc<Mutex<bool>>,
 
     /// Intercept-настройки (NumPad/F-keys → actions, persisted)
-    pub intercept: Arc<Mutex<InterceptSettings>>,
+    intercept: Arc<Mutex<InterceptSettings>>,
+
+    /// Writer gate для сериализации мутаций перехвата между clones
+    intercept_writer_gate: Arc<Mutex<()>>,
 
     /// When enabled, hide_on_blur is bypassed so the panel can persist and be
     /// dragged by its title bar.
@@ -246,6 +249,7 @@ impl SoundPanelState {
             floating_bg_color: Arc::new(Mutex::new(DEFAULT_FLOATING_BG_COLOR.to_string())),
             floating_clickthrough: Arc::new(Mutex::new(false)),
             intercept: Arc::new(Mutex::new(intercept)),
+            intercept_writer_gate: Arc::new(Mutex::new(())),
             stay_visible: Arc::new(Mutex::new(false)),
             config_mode: Arc::new(Mutex::new(false)),
             window_focused: Arc::new(AtomicBool::new(false)),
@@ -605,25 +609,78 @@ impl SoundPanelState {
         self.intercept.lock().map(|v| v.clone()).unwrap_or_default()
     }
 
-    /// Включить/выключить перехват (persist + emit)
-    pub fn set_intercept_enabled(&self, enabled: bool) -> Result<(), String> {
+    /// Общий transaction helper для всех мутаций перехвата.
+    ///
+    /// 1. Под writer gate кратко снимает копию текущего runtime.
+    /// 2. Отпускает runtime lock на время сохранения на диск (`save`).
+    /// 3. После успешного сохранения кратко захватывает runtime lock и публикует изменения.
+    /// 4. Выполняет `post_commit` под writer gate (обеспечивая строгий порядок публикации и событий).
+    /// Readers (`get_intercept`) не берут writer gate и никогда не блокируются на disk I/O.
+    fn mutate_intercept_with<M, S, P>(
+        &self,
+        mutate: M,
+        save: S,
+        post_commit: P,
+    ) -> Result<(), String>
+    where
+        M: FnOnce(&mut InterceptSettings),
+        S: FnOnce(&str, &InterceptSettings) -> Result<(), String>,
+        P: FnOnce(&InterceptSettings),
+    {
+        let _writer_guard = self
+            .intercept_writer_gate
+            .lock()
+            .map_err(|e| format!("Writer lock error: {}", e))?;
+
+        let mut next_settings = {
+            let runtime_guard = self
+                .intercept
+                .lock()
+                .map_err(|e| format!("Lock error: {}", e))?;
+            runtime_guard.clone()
+        };
+
+        mutate(&mut next_settings);
+
         let appdata_path = self
             .appdata_path
             .lock()
             .map_err(|e| format!("Lock error: {}", e))?
             .clone();
-        let mut val = self
-            .intercept
-            .lock()
-            .map_err(|e| format!("Lock error: {}", e))?;
-        let mut new_settings = val.clone();
-        new_settings.enabled = enabled;
-        crate::soundpanel::intercept::save(&appdata_path, &new_settings)?;
-        *val = new_settings;
-        let changed = val.enabled;
-        drop(val);
-        self.emit_event(AppEvent::InterceptionChanged(changed));
+
+        save(&appdata_path, &next_settings)?;
+
+        {
+            let mut runtime_guard = self
+                .intercept
+                .lock()
+                .map_err(|e| format!("Lock error: {}", e))?;
+            *runtime_guard = next_settings.clone();
+        }
+
+        post_commit(&next_settings);
+
         Ok(())
+    }
+
+    /// Включить/выключить перехват (persist + emit)
+    pub fn set_intercept_enabled(&self, enabled: bool) -> Result<(), String> {
+        self.set_intercept_enabled_with(enabled, crate::soundpanel::intercept::save)
+    }
+
+    pub(crate) fn set_intercept_enabled_with<S>(&self, enabled: bool, save: S) -> Result<(), String>
+    where
+        S: FnOnce(&str, &InterceptSettings) -> Result<(), String>,
+    {
+        self.mutate_intercept_with(
+            |settings| {
+                settings.enabled = enabled;
+            },
+            save,
+            |settings| {
+                self.emit_event(AppEvent::InterceptionChanged(settings.enabled));
+            },
+        )
     }
 
     /// Включить/выключить unrestricted-перехват (persist + publish).
@@ -633,68 +690,75 @@ impl SoundPanelState {
     /// runtime-состояние остаётся неизменным. Фронтенд после вызова сеттера
     /// дожидается результата и перечитывает настройки через `get_intercept_settings`.
     pub fn set_intercept_allow_any_key(&self, allow_any_key: bool) -> Result<(), String> {
-        let appdata_path = self
-            .appdata_path
-            .lock()
-            .map_err(|e| format!("Lock error: {}", e))?
-            .clone();
-        let mut val = self
-            .intercept
-            .lock()
-            .map_err(|e| format!("Lock error: {}", e))?;
-        let mut new_settings = val.clone();
-        new_settings.allow_any_key = allow_any_key;
-        crate::soundpanel::intercept::save(&appdata_path, &new_settings)?;
-        *val = new_settings;
-        drop(val);
-        info!(allow_any_key, "Intercept allow_any_key set");
-        Ok(())
+        self.set_intercept_allow_any_key_with(allow_any_key, crate::soundpanel::intercept::save)
+    }
+
+    pub(crate) fn set_intercept_allow_any_key_with<S>(
+        &self,
+        allow_any_key: bool,
+        save: S,
+    ) -> Result<(), String>
+    where
+        S: FnOnce(&str, &InterceptSettings) -> Result<(), String>,
+    {
+        self.mutate_intercept_with(
+            |settings| {
+                settings.allow_any_key = allow_any_key;
+            },
+            save,
+            |_| {
+                info!(allow_any_key, "Intercept allow_any_key set");
+            },
+        )
     }
 
     /// Установить биндинг перехвата (persist)
     pub fn set_intercept_binding(&self, key: String, action: String) -> Result<(), String> {
-        let appdata_path = self
-            .appdata_path
-            .lock()
-            .map_err(|e| format!("Lock error: {}", e))?
-            .clone();
-        let mut val = self
-            .intercept
-            .lock()
-            .map_err(|e| format!("Lock error: {}", e))?;
-        let mut new_settings = val.clone();
-        new_settings.bindings.retain(|b| b.key != key);
-        new_settings
-            .bindings
-            .push(crate::soundpanel::intercept::InterceptBinding {
-                key: key.clone(),
-                action: action.clone(),
-            });
-        crate::soundpanel::intercept::save(&appdata_path, &new_settings)?;
-        *val = new_settings;
-        drop(val);
-        info!(key = key, action = action, "Intercept binding set");
-        Ok(())
+        self.set_intercept_binding_with(key, action, crate::soundpanel::intercept::save)
+    }
+
+    pub(crate) fn set_intercept_binding_with<S>(
+        &self,
+        key: String,
+        action: String,
+        save: S,
+    ) -> Result<(), String>
+    where
+        S: FnOnce(&str, &InterceptSettings) -> Result<(), String>,
+    {
+        self.mutate_intercept_with(
+            |settings| {
+                settings.bindings.retain(|b| b.key != key);
+                settings.bindings.push(crate::soundpanel::intercept::InterceptBinding {
+                    key: key.clone(),
+                    action: action.clone(),
+                });
+            },
+            save,
+            |_| {
+                info!(key = key, action = action, "Intercept binding set");
+            },
+        )
     }
 
     /// Очистить биндинг перехвата (persist)
     pub fn clear_intercept_binding(&self, key: String) -> Result<(), String> {
-        let appdata_path = self
-            .appdata_path
-            .lock()
-            .map_err(|e| format!("Lock error: {}", e))?
-            .clone();
-        let mut val = self
-            .intercept
-            .lock()
-            .map_err(|e| format!("Lock error: {}", e))?;
-        let mut new_settings = val.clone();
-        new_settings.bindings.retain(|b| b.key != key);
-        crate::soundpanel::intercept::save(&appdata_path, &new_settings)?;
-        *val = new_settings;
-        drop(val);
-        info!(key = key, "Intercept binding cleared");
-        Ok(())
+        self.clear_intercept_binding_with(key, crate::soundpanel::intercept::save)
+    }
+
+    pub(crate) fn clear_intercept_binding_with<S>(&self, key: String, save: S) -> Result<(), String>
+    where
+        S: FnOnce(&str, &InterceptSettings) -> Result<(), String>,
+    {
+        self.mutate_intercept_with(
+            |settings| {
+                settings.bindings.retain(|b| b.key != key);
+            },
+            save,
+            |_| {
+                info!(key = key, "Intercept binding cleared");
+            },
+        )
     }
 }
 
@@ -946,6 +1010,162 @@ mod tests {
         assert_eq!(settings.bindings[0].action, "playback_stop");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reader_observes_old_runtime_while_writer_is_persisting() {
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard_test_reader_nonblocking_{}_{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.to_string_lossy().to_string();
+
+        let state = SoundPanelState::new(path);
+        assert!(!state.get_intercept().enabled);
+
+        let (save_started_tx, save_started_rx) = mpsc::channel::<()>();
+        let (save_unblock_tx, save_unblock_rx) = mpsc::channel::<()>();
+
+        let state_clone = state.clone();
+        let writer_handle = std::thread::spawn(move || {
+            state_clone.set_intercept_enabled_with(true, |_path, _settings| {
+                let _ = save_started_tx.send(());
+                save_unblock_rx
+                    .recv_timeout(Duration::from_secs(5))
+                    .map_err(|e| format!("Save timeout: {}", e))?;
+                Ok(())
+            })
+        });
+
+        // Writer enters save callback (holding writer gate, but runtime lock dropped)
+        save_started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("writer must enter save callback");
+
+        // Reader accesses get_intercept() while save is stalled.
+        // It must NOT block, and must observe the uncommitted previous state.
+        let observed = state.get_intercept();
+        assert!(!observed.enabled, "reader must observe previous settings during disk I/O");
+
+        // Unblock writer and verify completion
+        let _ = save_unblock_tx.send(());
+        let writer_result = writer_handle.join().expect("writer thread should join");
+        assert!(writer_result.is_ok(), "writer should complete successfully");
+
+        assert!(state.get_intercept().enabled, "reader must observe updated settings after commit");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn concurrent_writers_across_clones_preserve_both_mutations_without_lost_updates() {
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard_test_concurrent_writers_{}_{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.to_string_lossy().to_string();
+
+        let state = SoundPanelState::new(path);
+
+        let (w1_started_tx, w1_started_rx) = mpsc::channel::<()>();
+        let (w1_unblock_tx, w1_unblock_rx) = mpsc::channel::<()>();
+
+        let state_w1 = state.clone();
+        let writer1 = std::thread::spawn(move || {
+            state_w1.set_intercept_binding_with("NUMPAD1".into(), "action1".into(), |_path, settings| {
+                let _ = w1_started_tx.send(());
+                w1_unblock_rx
+                    .recv_timeout(Duration::from_secs(5))
+                    .map_err(|e| format!("Writer 1 timeout: {}", e))?;
+                assert!(settings.bindings.iter().any(|b| b.key == "NUMPAD1"));
+                Ok(())
+            })
+        });
+
+        // Wait until writer 1 is stalled inside save callback
+        w1_started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("writer 1 must enter save");
+
+        // Writer 2 starts mutation on its clone while writer 1 holds the writer gate
+        let state_w2 = state.clone();
+        let (w2_gate_tx, w2_gate_rx) = mpsc::channel();
+        let writer2 = std::thread::spawn(move || {
+            // Observe the actual shared transaction gate while writer 1 is in save.
+            // This fails if the transaction stops holding its gate during persistence.
+            let gate_is_held = matches!(
+                state_w2.intercept_writer_gate.try_lock(),
+                Err(std::sync::TryLockError::WouldBlock)
+            );
+            let _ = w2_gate_tx.send(gate_is_held);
+            state_w2.set_intercept_binding_with("NUMPAD2".into(), "action2".into(), |_path, settings| {
+                assert!(
+                    settings.bindings.iter().any(|b| b.key == "NUMPAD1"),
+                    "writer 2 must see committed changes from writer 1"
+                );
+                assert!(
+                    settings.bindings.iter().any(|b| b.key == "NUMPAD2"),
+                    "writer 2 must include its own changes"
+                );
+                Ok(())
+            })
+        });
+
+        // The handshake proves contention without relying on thread scheduling delays.
+        let gate_observation = w2_gate_rx.recv_timeout(Duration::from_secs(2));
+
+        // Always release and join before assertions, including timeout/failure paths.
+        let _ = w1_unblock_tx.send(());
+        let writer1_result = writer1.join();
+        let writer2_result = writer2.join();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(gate_observation.expect("writer 2 must observe the gate"));
+        writer1_result.expect("writer 1 join").expect("writer 1 ok");
+        writer2_result.expect("writer 2 join").expect("writer 2 ok");
+
+        // Final state must contain both bindings
+        let final_settings = state.get_intercept();
+        assert_eq!(final_settings.bindings.len(), 2);
+        assert!(final_settings.bindings.iter().any(|b| b.key == "NUMPAD1" && b.action == "action1"));
+        assert!(final_settings.bindings.iter().any(|b| b.key == "NUMPAD2" && b.action == "action2"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn save_error_leaves_runtime_unchanged_no_event_and_retry_succeeds() {
+        let path = bad_path("save_err_retry");
+        let state = SoundPanelState::new(path);
+        let (event_tx, event_rx) = mpsc::channel();
+        state.set_event_sender(event_tx);
+
+        assert!(!state.get_intercept().enabled);
+
+        // Attempt 1: save fails
+        let err_result = state.set_intercept_enabled_with(true, |_path, _settings| {
+            Err("simulated save error".to_string())
+        });
+        assert!(err_result.is_err());
+        assert!(!state.get_intercept().enabled, "runtime must remain false after save failure");
+        assert!(event_rx.try_recv().is_err(), "no event emitted on save failure");
+
+        // Attempt 2: retry succeeds
+        let ok_result = state.set_intercept_enabled_with(true, |_path, _settings| {
+            Ok(())
+        });
+        assert!(ok_result.is_ok());
+        assert!(state.get_intercept().enabled, "runtime must be true after retry succeeds");
+        match event_rx.recv_timeout(Duration::from_secs(2)) {
+            Ok(AppEvent::InterceptionChanged(true)) => {}
+            other => panic!("expected InterceptionChanged(true), got {:?}", other),
+        }
     }
 
     // ── SoundPanel playback queue ────────────────────────────────────────
