@@ -2,6 +2,7 @@
 //!
 //! Persisted config stored in %APPDATA%/ttsbard/intercept.json
 
+use crate::config::{config_write_lock, replace_file_atomically};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -47,7 +48,9 @@ pub fn save(appdata_path: &str, settings: &InterceptSettings) -> Result<(), Stri
     let file_path = PathBuf::from(appdata_path).join(INTERCEPT_FILE);
     let json = serde_json::to_string_pretty(settings)
         .map_err(|e| format!("Failed to serialize intercept settings: {}", e))?;
-    fs::write(&file_path, json).map_err(|e| format!("Failed to write intercept.json: {}", e))?;
+    let _guard = config_write_lock().lock();
+    replace_file_atomically(&file_path, json.as_bytes())
+        .map_err(|e| format!("Failed to write intercept.json: {}", e))?;
     info!(?file_path, "Intercept settings saved");
     Ok(())
 }
@@ -214,6 +217,52 @@ mod tests {
     }
 
     // ── load / save ─────────────────────────────────────────────────────
+
+    #[test]
+    fn save_creates_and_replaces_pretty_json() {
+        let dir = tempdir();
+        let path = dir.join(INTERCEPT_FILE);
+        let mut settings = InterceptSettings::default();
+        for enabled in [false, true] {
+            settings.enabled = enabled;
+            save(dir.to_str().unwrap(), &settings).unwrap();
+            assert_eq!(
+                fs::read_to_string(&path).unwrap(),
+                serde_json::to_string_pretty(&settings).unwrap()
+            );
+            assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+        }
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn save_failure_preserves_previous_file() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let dir = tempdir();
+        let path = dir.join(INTERCEPT_FILE);
+        let previous = b"{\"enabled\":false,\"bindings\":[]}";
+        fs::write(&path, previous).unwrap();
+        // Allow reads and writes, but deny deletion/replacement of the destination.
+        let handle = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0x00000001 | 0x00000002)
+            .open(&path)
+            .unwrap();
+        let settings = InterceptSettings {
+            enabled: true,
+            ..InterceptSettings::default()
+        };
+
+        let error = save(dir.to_str().unwrap(), &settings).unwrap_err();
+        assert!(error.starts_with("Failed to write intercept.json: "));
+        assert_eq!(fs::read(&path).unwrap(), previous);
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+
+        drop(handle);
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn load_missing_file_returns_defaults() {
