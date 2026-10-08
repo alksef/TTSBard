@@ -133,11 +133,15 @@ function collectRegisteredCommands(root) {
 function collectBackendEvents(files, root, constants) {
   const events = []
   const dynamic = []
+  // `emit_to(target, event, payload)` is the targeted counterpart of
+  // `emit(event, payload)`. Keep both forms in the inventory so scoped
+  // shutdown events are checked just like broadcast events.
   const emitPattern = /\.emit\s*\(\s*([^,\r\n)]+)/g
+  const emitToPattern = /\.emit_to\s*\(\s*[^,\r\n]+\s*,\s*([^,\r\n)]+)/g
 
   for (const path of files) {
     const source = readFileSync(path, 'utf8')
-    for (const match of source.matchAll(emitPattern)) {
+    for (const match of [...source.matchAll(emitPattern), ...source.matchAll(emitToPattern)]) {
       const parsed = parseArgument(match[1], constants)
       if (parsed.name) {
         events.push(location(root, path, source, match.index, parsed.name))

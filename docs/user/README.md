@@ -28,7 +28,8 @@
 ## Подключить источник или получателя
 
 - [Входящий HTTP-сервер](./input-server.md) — настройка listener и API отправки текста.
-- [Интеграции](../integrations/README.md) — OBS, Twitch, VTube Studio и LunaTranslator.
+- [VRChat](../integrations/vrchat.md) — реплики в чатбоксе и индикатор набора.
+- [Интеграции](../integrations/README.md) — OBS, Twitch, VTube Studio, VRChat и LunaTranslator.
 
 Каждая тема имеет одну подробную инструкцию; руководство первого запуска
 и индексы ссылаются на неё. Исторические планы не описывают текущий интерфейс.

@@ -169,8 +169,12 @@ async fn request_tab_flush(app_handle: &AppHandle) {
     match outcome {
         TabFlushAck::Success => info!("request_tab_flush: frontend acknowledged successful flush"),
         TabFlushAck::Failure => warn!("request_tab_flush: frontend reported a flush failure"),
-        TabFlushAck::Timeout => warn!("request_tab_flush: timeout waiting for flush acknowledgement"),
-        TabFlushAck::Closed => warn!("request_tab_flush: acknowledgement channel closed unexpectedly"),
+        TabFlushAck::Timeout => {
+            warn!("request_tab_flush: timeout waiting for flush acknowledgement")
+        }
+        TabFlushAck::Closed => {
+            warn!("request_tab_flush: acknowledgement channel closed unexpectedly")
+        }
     }
 }
 
@@ -1813,7 +1817,10 @@ mod tests {
     fn tabs_flush_ack_ignores_malformed_payload() {
         assert_eq!(match_tabs_flush_ack("not json", "abc"), None);
         assert_eq!(match_tabs_flush_ack(r#"{"ok":true}"#, "abc"), None);
-        assert_eq!(match_tabs_flush_ack(r#"{"request_id":123,"ok":true}"#, "abc"), None);
+        assert_eq!(
+            match_tabs_flush_ack(r#"{"request_id":123,"ok":true}"#, "abc"),
+            None
+        );
         assert_eq!(match_tabs_flush_ack(r#"{"request_id":"abc"}"#, "abc"), None);
     }
 
