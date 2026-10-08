@@ -12,7 +12,7 @@ use std::sync::OnceLock;
 
 use crate::config::replace_file_atomically;
 
-const PHRASE_HISTORY_SIZE: usize = 200;
+const PHRASE_HISTORY_SIZE: usize = 500;
 
 static HISTORY_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
@@ -549,6 +549,15 @@ impl HistoryManager {
         results
     }
 
+    /// Clone only the retained phrase with `id`, without sorting or cloning the
+    /// whole list. Returns `None` when no retained entry matches (unknown or
+    /// already evicted id). Used by replay so any of the 500 retained phrases
+    /// can be replayed, not just the newest UI window.
+    pub fn get_phrase_by_id(&self, id: &str) -> Option<PhraseEntry> {
+        let phrases = self.phrases.read();
+        phrases.iter().find(|e| e.id == id).cloned()
+    }
+
     pub fn delete_phrase(&self, id: &str) -> Result<()> {
         let mut phrases = self.phrases.write();
         let snapshot = phrases.clone();
@@ -974,6 +983,26 @@ mod tests {
         )
     }
 
+    /// Seed the in-memory phrase list directly with `count` deterministic
+    /// entries (ascending `last_used`), avoiding one fsync-heavy persist per
+    /// entry so retention/lookup tests stay fast and deterministic.
+    fn seed_phrases(mgr: &HistoryManager, count: usize) {
+        let mut phrases = mgr.phrases.write();
+        phrases.clear();
+        for i in 0..count {
+            phrases.push(PhraseEntry {
+                id: format!("seed-{}", i),
+                provider_text: format!("seed phrase {}", i),
+                insert_text: format!("seed phrase {}", i),
+                count: 1,
+                last_used: i as i64,
+                provider: "silero".to_string(),
+                voice: "ru_v3".to_string(),
+                cache_key: format!("seed-key-{}", i),
+            });
+        }
+    }
+
     #[test]
     fn test_concurrent_phrase_recording() {
         let (mgr, p1, p2, p3) = manager_in_tmp();
@@ -1167,6 +1196,78 @@ mod tests {
         assert_eq!(phrases[0].provider, "");
         assert_eq!(phrases[0].voice, "");
         assert_eq!(phrases[0].cache_key, "");
+
+        let _ = fs::remove_file(&p1);
+        let _ = fs::remove_file(&p2);
+        let _ = fs::remove_file(&p3);
+    }
+
+    #[test]
+    fn retention_evicts_oldest_phrase_after_500() {
+        let (mgr, p1, p2, p3) = manager_in_tmp();
+        seed_phrases(&mgr, PHRASE_HISTORY_SIZE);
+        assert_eq!(mgr.get_phrases(None, usize::MAX).len(), PHRASE_HISTORY_SIZE);
+
+        // One more distinct phrase pushes the list to 501 and triggers eviction
+        // of the entry with the smallest `last_used` (seed-0).
+        mgr.record_phrase("newest phrase").unwrap();
+
+        let all = mgr.get_phrases(None, usize::MAX);
+        assert_eq!(
+            all.len(),
+            PHRASE_HISTORY_SIZE,
+            "retention must cap the list at {PHRASE_HISTORY_SIZE}"
+        );
+        assert!(
+            all.iter().any(|e| e.provider_text == "newest phrase"),
+            "the just-recorded phrase must be retained"
+        );
+        assert!(
+            !all.iter().any(|e| e.id == "seed-0"),
+            "the oldest phrase must be evicted first"
+        );
+        assert!(
+            all.iter().any(|e| e.id == "seed-1"),
+            "only the single oldest phrase must be evicted"
+        );
+
+        let _ = fs::remove_file(&p1);
+        let _ = fs::remove_file(&p2);
+        let _ = fs::remove_file(&p3);
+    }
+
+    #[test]
+    fn get_phrase_by_id_finds_retained_entry_outside_newest_200() {
+        let (mgr, p1, p2, p3) = manager_in_tmp();
+        seed_phrases(&mgr, PHRASE_HISTORY_SIZE);
+
+        // seed-10 is an old retained entry: outside the newest 200 by
+        // `last_used`, so the former `get_phrases(None, 200)` replay lookup
+        // could never reach it.
+        let found = mgr
+            .get_phrase_by_id("seed-10")
+            .expect("a retained id outside the newest 200 must be found");
+        assert_eq!(found.provider_text, "seed phrase 10");
+        assert_eq!(found.cache_key, "seed-key-10");
+
+        let ui_window = mgr.get_phrases(None, 200);
+        assert!(
+            !ui_window.iter().any(|e| e.id == "seed-10"),
+            "the UI window must not include the old entry (fixture sanity)"
+        );
+
+        let _ = fs::remove_file(&p1);
+        let _ = fs::remove_file(&p2);
+        let _ = fs::remove_file(&p3);
+    }
+
+    #[test]
+    fn get_phrase_by_id_missing_returns_none() {
+        let (mgr, p1, p2, p3) = manager_in_tmp();
+        seed_phrases(&mgr, 3);
+
+        assert!(mgr.get_phrase_by_id("does-not-exist").is_none());
+        assert!(mgr.get_phrase_by_id("").is_none());
 
         let _ = fs::remove_file(&p1);
         let _ = fs::remove_file(&p2);

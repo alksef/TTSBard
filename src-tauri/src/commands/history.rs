@@ -83,14 +83,10 @@ pub fn replay_phrase_from_cache(
     history_state: State<'_, HistoryState>,
     state: State<'_, crate::state::AppState>,
 ) -> Result<(), String> {
-    let entry = {
-        let manager = &history_state.0;
-        let phrases = manager.get_phrases(None, 200);
-        phrases
-            .into_iter()
-            .find(|e| e.id == phrase_id)
-            .ok_or_else(|| "CacheMiss".to_string())?
-    };
+    let entry = history_state
+        .0
+        .get_phrase_by_id(&phrase_id)
+        .ok_or_else(|| "CacheMiss".to_string())?;
 
     if entry.cache_key.is_empty() {
         return Err("CacheMiss".to_string());
