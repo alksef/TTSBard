@@ -189,6 +189,13 @@ export function useEditorTabs() {
         }))
         const activeExists = data.tabs.some(t => t.id === data.active_id)
         activeId.value = activeExists ? data.active_id : data.tabs[0].id
+        // Seed dedup from the raw persisted DTO, not the sanitized in-memory
+        // capture. If hydration rewrote an invalid active_id/route/purpose, the
+        // two differ and the corrected state is flushed instead of being
+        // wrongly deduplicated against discarded data. A valid snapshot keeps
+        // both representations equal, preserving hydration dedup. Seeding an
+        // empty/failed load is avoided entirely.
+        lastPersisted = projectPersistedSnapshot(data)
       }
     } catch {
       // backend unavailable — work in-memory (graceful)
@@ -197,9 +204,14 @@ export function useEditorTabs() {
     }
   }
 
-  let saveTimer: ReturnType<typeof setTimeout> | null = null
+  const SAVE_DEBOUNCE_MS = 2000
+  const SAVE_MAX_WAIT_MS = 10000
+
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null
+  let maxWaitTimer: ReturnType<typeof setTimeout> | null = null
   let inFlight: Promise<void> | null = null
   let pendingSnapshot: TabsSnapshot | null = null
+  let lastPersisted: TabsSnapshot | null = null
   let idleWaiters: Array<() => void> = []
 
   function captureSnapshot(): TabsSnapshot {
@@ -215,16 +227,58 @@ export function useEditorTabs() {
     }
   }
 
+  function projectPersistedSnapshot(data: { active_id: string; tabs: EditorTab[] }): TabsSnapshot {
+    return {
+      active_id: data.active_id,
+      tabs: (data.tabs ?? []).map(t => ({
+        id: t.id,
+        title: t.title,
+        text: t.text,
+        // Backend Option fields serialize as JSON null, while the frontend
+        // capture represents an absent value as undefined (omitted by
+        // JSON.stringify). Normalize null to undefined so a fully valid
+        // snapshot keeps hydration dedup, but keep invalid non-null values so
+        // they still differ from the sanitized capture and get rewritten.
+        route: t.route ?? undefined,
+        purpose: t.purpose ?? undefined,
+      })),
+    }
+  }
+
+  function snapshotsEqual(a: TabsSnapshot, b: TabsSnapshot): boolean {
+    return JSON.stringify(a) === JSON.stringify(b)
+  }
+
+  function clearSaveTimers() {
+    if (debounceTimer !== null) {
+      clearTimeout(debounceTimer)
+      debounceTimer = null
+    }
+    if (maxWaitTimer !== null) {
+      clearTimeout(maxWaitTimer)
+      maxWaitTimer = null
+    }
+  }
+
+  function onSaveTimerFire() {
+    clearSaveTimers()
+    enqueueSnapshot(captureSnapshot())
+  }
+
   function scheduleSave() {
     if (!isHydrated.value) return
-    if (saveTimer) clearTimeout(saveTimer)
-    saveTimer = setTimeout(() => {
-      saveTimer = null
-      enqueueSnapshot(captureSnapshot())
-    }, 500)
+    if (debounceTimer !== null) clearTimeout(debounceTimer)
+    debounceTimer = setTimeout(onSaveTimerFire, SAVE_DEBOUNCE_MS)
+    // The burst cap is armed once per unsaved burst and never extended by
+    // later edits, so a continuous stream of changes still persists within
+    // a bounded time. It is cleared together with the debounce timer.
+    if (maxWaitTimer === null) {
+      maxWaitTimer = setTimeout(onSaveTimerFire, SAVE_MAX_WAIT_MS)
+    }
   }
 
   function enqueueSnapshot(snapshot: TabsSnapshot): Promise<void> {
+    clearSaveTimers()
     pendingSnapshot = snapshot
     pump()
     return waitForIdle()
@@ -232,30 +286,48 @@ export function useEditorTabs() {
 
   function pump() {
     if (inFlight) return
+    if (!pendingSnapshot) {
+      resolveIdle()
+      return
+    }
     const next = pendingSnapshot
-    if (!next) return
     pendingSnapshot = null
+    // Dedup only against the last successfully persisted snapshot and only
+    // while nothing is in flight: a pending duplicate of the already saved
+    // state is redundant, but pending A must still be written when an
+    // in-flight B will overwrite the persisted A.
+    if (lastPersisted !== null && snapshotsEqual(next, lastPersisted)) {
+      // The requested state already matches a confirmed persisted snapshot, so
+      // any error from an intervening failed save is stale.
+      lastSaveError.value = null
+      pump()
+      return
+    }
     inFlight = runSave(next)
   }
 
   async function runSave(snapshot: TabsSnapshot): Promise<void> {
     try {
       await invoke('save_tabs', { data: snapshot })
+      lastPersisted = snapshot
       lastSaveError.value = null
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
       lastSaveError.value = message
       showError(t('editor.tabs.save_error', { detail: message }))
+      // A failed snapshot is never marked persisted, so a later identical
+      // snapshot is allowed to retry; no automatic retry is scheduled.
     } finally {
       inFlight = null
-      if (pendingSnapshot) {
-        pump()
-      } else {
-        const waiters = idleWaiters
-        idleWaiters = []
-        waiters.forEach(resolve => resolve())
-      }
+      pump()
     }
+  }
+
+  function resolveIdle() {
+    if (idleWaiters.length === 0) return
+    const waiters = idleWaiters
+    idleWaiters = []
+    waiters.forEach(resolve => resolve())
   }
 
   function waitForIdle(): Promise<void> {
@@ -264,10 +336,7 @@ export function useEditorTabs() {
   }
 
   async function flushSave() {
-    if (saveTimer) {
-      clearTimeout(saveTimer)
-      saveTimer = null
-    }
+    clearSaveTimers()
     await enqueueSnapshot(captureSnapshot())
   }
 

@@ -15,6 +15,7 @@ import TtsEditor from './editor/TtsEditor.vue'
 import PhraseHistoryList from './PhraseHistoryList.vue'
 import EditorMenu from './editor/EditorMenu.vue'
 import { useEditorTabs } from '../composables/useEditorTabs'
+import { registerTabFlushListener } from '../composables/tabShutdown'
 import { createEditorStateCache, pruneEditorStates } from './editor/tabEditorSync'
 import EditorTabs from './editor/EditorTabs.vue'
 import IncomingTextsTab from './editor/IncomingTextsTab.vue'
@@ -41,7 +42,7 @@ import { useInputServerRuntimeStatus } from '../composables/useInputServerRuntim
 import { t } from '../i18n'
 
 const { showError } = useErrorHandler()
-const { tabs, activeId, active, create: createTab, close: closeTab, select: selectTab, next: nextTab, previous: previousTab, rename: renameTab, openIncomingEdit, init: initTabs, flushSave: flushTabsSave } = useEditorTabs()
+const { tabs, activeId, active, create: createTab, close: closeTab, select: selectTab, next: nextTab, previous: previousTab, rename: renameTab, openIncomingEdit, init: initTabs, flushSave: flushTabsSave, lastSaveError } = useEditorTabs()
 
 // Editor sessions (undo/redo history per tab) live only for the app run.
 const editorStateCache = createEditorStateCache()
@@ -439,6 +440,8 @@ function onPreprocessorChanged() {
 
 onMounted(async () => {
   await initTabs()
+
+  registerTabFlushListener(listenerScope, { flushSave: flushTabsSave, lastSaveError })
 
   await listenerScope.track(
     listen(SETTINGS_CHANGED_EVENT, async () => {

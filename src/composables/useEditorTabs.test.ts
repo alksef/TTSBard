@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest'
+import { nextTick } from 'vue'
 
 const { mockInvoke } = vi.hoisted(() => ({
   mockInvoke: vi.fn(),
@@ -32,6 +33,13 @@ function restoreCrypto() {
   vi.unstubAllGlobals()
 }
 
+function deferred() {
+  let resolve!: () => void
+  let reject!: (e: unknown) => void
+  const promise = new Promise<void>((res, rej) => { resolve = res; reject = rej })
+  return { promise, resolve, reject }
+}
+
 function defaultTab() {
   return { id: 'uuid-0', title: 'Текст 1', text: '' }
 }
@@ -41,6 +49,16 @@ const backendTabs = {
   tabs: [
     { id: 'uuid-0', title: 'Tab A', text: '' },
     { id: 'uuid-1', title: 'Tab B', text: '' },
+  ],
+}
+
+// The backend serializes the optional EditorTab fields as JSON null, so a
+// realistic get_tabs payload carries explicit nulls for absent route/purpose.
+const backendTabsWithNullOptions = {
+  active_id: 'uuid-1',
+  tabs: [
+    { id: 'uuid-0', title: 'Tab A', text: '', route: null, purpose: null },
+    { id: 'uuid-1', title: 'Tab B', text: '', route: null, purpose: null },
   ],
 }
 
@@ -100,6 +118,84 @@ describe('useEditorTabs', () => {
       await init()
       await init()
       expect(mockInvoke).toHaveBeenCalledTimes(1)
+    })
+
+    it('rewrites malformed active_id and route/purpose on the next flush', async () => {
+      mockInvoke.mockResolvedValueOnce({
+        active_id: 'ghost',
+        tabs: [
+          { id: 'uuid-0', title: 'Tab A', text: '', route: 'not_a_route', purpose: 'weird' },
+          { id: 'uuid-1', title: 'Tab B', text: '' },
+        ],
+      })
+      const { init, flushSave, activeId, tabs } = useEditorTabs()
+      await init()
+
+      // Sanitization corrects the in-memory state...
+      expect(activeId.value).toBe('uuid-0')
+      expect(tabs.value[0].route).toBeUndefined()
+      expect(tabs.value[0].purpose).toBeUndefined()
+
+      mockInvoke.mockClear()
+      await flushSave()
+
+      // ...and dedup seeded from the raw DTO must not suppress the rewrite.
+      expect(mockInvoke).toHaveBeenCalledTimes(1)
+      const call = mockInvoke.mock.calls.find(([cmd]) => cmd === 'save_tabs')
+      expect(call).toBeDefined()
+      const data = (call as unknown[])[1] as {
+        data: { active_id: string; tabs: Array<Record<string, unknown>> }
+      }
+      expect(data.data.active_id).toBe('uuid-0')
+      expect(data.data.tabs).toHaveLength(2)
+      expect(data.data.tabs[0].route).toBeUndefined()
+      expect(data.data.tabs[0].purpose).toBeUndefined()
+    })
+
+    it('keeps hydration dedup for a fully valid snapshot', async () => {
+      mockInvoke.mockResolvedValueOnce({
+        active_id: 'uuid-1',
+        tabs: [
+          { id: 'uuid-0', title: 'Tab A', text: '', route: 'everywhere' },
+          { id: 'uuid-1', title: 'Tab B', text: '', route: 'voice_only', purpose: 'incoming_edit' },
+        ],
+      })
+      const { init, flushSave } = useEditorTabs()
+      await init()
+      mockInvoke.mockClear()
+
+      await flushSave()
+      expect(mockInvoke).not.toHaveBeenCalled()
+    })
+
+    it('does not seed dedup after an empty load', async () => {
+      mockInvoke.mockResolvedValueOnce({ active_id: '', tabs: [] })
+      const { init, flushSave } = useEditorTabs()
+      await init()
+      mockInvoke.mockClear()
+
+      await flushSave()
+      expect(mockInvoke).toHaveBeenCalledWith('save_tabs', {
+        data: expect.objectContaining({
+          active_id: expect.any(String),
+          tabs: expect.any(Array),
+        }),
+      })
+    })
+
+    it('does not seed dedup after a failed load', async () => {
+      mockInvoke.mockRejectedValueOnce(new Error('backend down'))
+      const { init, flushSave } = useEditorTabs()
+      await init()
+      mockInvoke.mockClear()
+
+      await flushSave()
+      expect(mockInvoke).toHaveBeenCalledWith('save_tabs', {
+        data: expect.objectContaining({
+          active_id: expect.any(String),
+          tabs: expect.any(Array),
+        }),
+      })
     })
   })
 
@@ -300,7 +396,7 @@ describe('useEditorTabs', () => {
     })
   })
 
-  describe('debounced save', () => {
+  describe('autosave scheduling', () => {
     beforeEach(() => {
       vi.useFakeTimers()
     })
@@ -309,58 +405,167 @@ describe('useEditorTabs', () => {
       vi.useRealTimers()
     })
 
-    it('schedules save after debounce delay when hydrated', async () => {
+    async function hydrate() {
       mockInvoke.mockResolvedValueOnce(backendTabs)
-      const { init, create } = useEditorTabs()
-      await init()
+      const api = useEditorTabs()
+      await api.init()
+      await nextTick()
       mockInvoke.mockClear()
+      return api
+    }
+
+    it('schedules save 2000ms after the last change when hydrated', async () => {
+      const { create } = await hydrate()
 
       create()
+      await nextTick()
       expect(mockInvoke).not.toHaveBeenCalled()
 
-      vi.advanceTimersByTime(500)
+      await vi.advanceTimersByTimeAsync(1999)
+      expect(mockInvoke).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(1)
       expect(mockInvoke).toHaveBeenCalledWith('save_tabs', {
         data: expect.objectContaining({ active_id: expect.any(String), tabs: expect.any(Array) }),
       })
     })
 
-    it('does not save before hydration', () => {
+    it('does not save before hydration', async () => {
       const { create } = useEditorTabs()
       create()
-      vi.advanceTimersByTime(500)
+      await nextTick()
+      await vi.advanceTimersByTimeAsync(20000)
       expect(mockInvoke).not.toHaveBeenCalled()
     })
 
-    it('debounces multiple rapid changes into a single save', async () => {
-      mockInvoke.mockResolvedValueOnce(backendTabs)
-      const { init, create } = useEditorTabs()
-      await init()
-      mockInvoke.mockClear()
+    it('coalesces multiple rapid changes into a single debounced save', async () => {
+      const { create } = await hydrate()
 
       create()
       create()
       create()
+      await nextTick()
 
-      vi.advanceTimersByTime(300)
+      await vi.advanceTimersByTimeAsync(1000)
       expect(mockInvoke).not.toHaveBeenCalled()
 
-      vi.advanceTimersByTime(300)
+      await vi.advanceTimersByTimeAsync(1000)
       expect(mockInvoke).toHaveBeenCalledTimes(1)
     })
 
-    it('resets debounce timer on new changes', async () => {
-      mockInvoke.mockResolvedValueOnce(backendTabs)
-      const { init, create } = useEditorTabs()
+    it('resets the debounce timer on new changes', async () => {
+      const { create } = await hydrate()
+
+      create()
+      await nextTick()
+      await vi.advanceTimersByTimeAsync(1000)
+
+      create()
+      await nextTick()
+      await vi.advanceTimersByTimeAsync(1000)
+
+      create()
+      await nextTick()
+      await vi.advanceTimersByTimeAsync(1999)
+      expect(mockInvoke).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(1)
+      expect(mockInvoke).toHaveBeenCalledTimes(1)
+    })
+
+    it('forces a save at the 10s cap under continuous 1s edits', async () => {
+      const { create } = await hydrate()
+
+      create()
+      await nextTick()
+      for (let i = 0; i < 9; i++) {
+        await vi.advanceTimersByTimeAsync(1000)
+        create()
+        await nextTick()
+      }
+
+      // 9s of continuous edits: debounce keeps being pushed, cap has not fired.
+      expect(mockInvoke).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(mockInvoke).toHaveBeenCalledTimes(1)
+    })
+
+    it('starts a fresh burst for edits that follow a completed save', async () => {
+      const { create } = await hydrate()
+
+      create()
+      await nextTick()
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(mockInvoke).toHaveBeenCalledTimes(1)
+
+      create()
+      await nextTick()
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(mockInvoke).toHaveBeenCalledTimes(2)
+    })
+
+    it('performs no idle writes when nothing changes after hydration', async () => {
+      await hydrate()
+
+      await vi.advanceTimersByTimeAsync(2000)
+      await vi.advanceTimersByTimeAsync(20000)
+      expect(mockInvoke).not.toHaveBeenCalled()
+    })
+
+    it('does not rewrite a valid snapshot whose optional fields are JSON null', async () => {
+      mockInvoke.mockResolvedValueOnce(backendTabsWithNullOptions)
+      const { init, flushSave } = useEditorTabs()
       await init()
+      await nextTick()
       mockInvoke.mockClear()
 
-      create()
-      vi.advanceTimersByTime(100)
-      create()
-      vi.advanceTimersByTime(100)
-      create()
+      await vi.advanceTimersByTimeAsync(2000)
+      await vi.advanceTimersByTimeAsync(10000)
+      await flushSave()
 
-      vi.advanceTimersByTime(600)
+      expect(mockInvoke).not.toHaveBeenCalled()
+    })
+
+    it('allows a new burst while a save is in flight', async () => {
+      const d1 = deferred()
+      mockInvoke
+        .mockResolvedValueOnce(backendTabs)
+        .mockImplementationOnce(() => d1.promise)
+        .mockResolvedValueOnce(undefined)
+
+      const api = useEditorTabs()
+      await api.init()
+      await nextTick()
+      mockInvoke.mockClear()
+
+      api.create()
+      await nextTick()
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(mockInvoke).toHaveBeenCalledTimes(1)
+
+      api.create()
+      await nextTick()
+      await vi.advanceTimersByTimeAsync(2000)
+      // Still only the first save is in flight; the burst is queued.
+      expect(mockInvoke).toHaveBeenCalledTimes(1)
+
+      d1.resolve()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(mockInvoke).toHaveBeenCalledTimes(2)
+    })
+
+    it('does not write again for a watcher queued after an immediate flush', async () => {
+      const { create, flushSave } = await hydrate()
+
+      create()
+      await flushSave() // captures the new tab before the queued watcher runs
+      expect(mockInvoke).toHaveBeenCalledTimes(1)
+
+      await nextTick()
+      // The watcher queued by create() has armed a redundant burst.
+      expect(vi.getTimerCount()).toBeGreaterThan(0)
+      await vi.advanceTimersByTimeAsync(20000)
       expect(mockInvoke).toHaveBeenCalledTimes(1)
     })
   })
@@ -391,6 +596,37 @@ describe('useEditorTabs', () => {
       expect(mockInvoke).toHaveBeenCalledWith('save_tabs', {
         data: expect.objectContaining({ active_id: expect.any(String), tabs: expect.any(Array) }),
       })
+    })
+
+    it('cancels both the debounce and burst timers on flush', async () => {
+      vi.useFakeTimers()
+      try {
+        mockInvoke.mockResolvedValueOnce(backendTabs)
+        const { init, create, flushSave } = useEditorTabs()
+        await init()
+        await nextTick()
+        mockInvoke.mockClear()
+
+        create()
+        await nextTick()
+        await flushSave()
+        expect(mockInvoke).toHaveBeenCalledTimes(1)
+
+        await vi.advanceTimersByTimeAsync(20000)
+        expect(mockInvoke).toHaveBeenCalledTimes(1)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('skips a flush whose snapshot equals the last persisted state', async () => {
+      mockInvoke.mockResolvedValueOnce(backendTabs)
+      const { init, flushSave } = useEditorTabs()
+      await init()
+      mockInvoke.mockClear()
+
+      await flushSave()
+      expect(mockInvoke).not.toHaveBeenCalled()
     })
   })
 
@@ -448,16 +684,80 @@ describe('useEditorTabs', () => {
       await flushSave()
       expect(lastSaveError.value).toBeNull()
     })
+
+    it('permits retrying an identical snapshot after a failure', async () => {
+      mockInvoke
+        .mockResolvedValueOnce(backendTabs)
+        .mockRejectedValueOnce(new Error('save failed'))
+        .mockResolvedValueOnce(undefined)
+
+      const { init, create, flushSave, lastSaveError } = useEditorTabs()
+      await init()
+      mockInvoke.mockClear()
+
+      create()
+      await flushSave()
+      expect(mockInvoke).toHaveBeenCalledTimes(1)
+      expect(lastSaveError.value).toBe('save failed')
+
+      // Same in-memory state, no new mutation: the failed snapshot is not
+      // marked persisted, so an explicit flush retries it.
+      await flushSave()
+      expect(mockInvoke).toHaveBeenCalledTimes(2)
+      expect(lastSaveError.value).toBeNull()
+    })
+
+    it('clears a stale lastSaveError when the snapshot returns to the persisted state', async () => {
+      const persisted = {
+        active_id: 'tab-a',
+        tabs: [{ id: 'tab-a', title: 'A', text: '' }],
+      }
+      mockInvoke
+        .mockResolvedValueOnce(persisted)
+        .mockRejectedValueOnce(new Error('save failed'))
+
+      const { init, create, close, flushSave, lastSaveError } = useEditorTabs()
+      await init()
+      mockInvoke.mockClear()
+
+      const bId = create()
+      await flushSave() // B fails
+      expect(mockInvoke).toHaveBeenCalledTimes(1)
+      expect(lastSaveError.value).toBe('save failed')
+
+      close(bId) // user returns to persisted A
+      await flushSave()
+      expect(mockInvoke).toHaveBeenCalledTimes(1) // no redundant write
+      expect(lastSaveError.value).toBeNull()
+    })
+
+    it('does not automatically retry after a failure', async () => {
+      vi.useFakeTimers()
+      try {
+        mockInvoke
+          .mockResolvedValueOnce(backendTabs)
+          .mockRejectedValueOnce(new Error('save failed'))
+
+        const { init, create } = useEditorTabs()
+        await init()
+        await nextTick()
+        mockInvoke.mockClear()
+
+        create()
+        await nextTick()
+        await vi.advanceTimersByTimeAsync(2000)
+        expect(mockInvoke).toHaveBeenCalledTimes(1)
+
+        await vi.advanceTimersByTimeAsync(20000)
+        await nextTick()
+        expect(mockInvoke).toHaveBeenCalledTimes(1)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
   })
 
   describe('serialized save queue', () => {
-    function deferred() {
-      let resolve!: () => void
-      let reject!: (e: unknown) => void
-      const promise = new Promise<void>((res, rej) => { resolve = res; reject = rej })
-      return { promise, resolve, reject }
-    }
-
     it('never initiates a second save while one is in flight', async () => {
       const d1 = deferred()
       const d2 = deferred()
@@ -538,6 +838,65 @@ describe('useEditorTabs', () => {
       expect(secondResolved).toBe(true)
 
       await first
+      expect(mockInvoke).toHaveBeenCalledTimes(2)
+    })
+
+    it('drops a pending duplicate of the snapshot that just persisted', async () => {
+      const d1 = deferred()
+      mockInvoke
+        .mockResolvedValueOnce(backendTabs)
+        .mockImplementationOnce(() => d1.promise)
+
+      const { init, create, flushSave } = useEditorTabs()
+      await init()
+      mockInvoke.mockClear()
+
+      create()
+      const first = flushSave() // in-flight B
+      const second = flushSave() // pending duplicate of B
+      expect(mockInvoke).toHaveBeenCalledTimes(1)
+
+      d1.resolve()
+      await first
+      await second
+      expect(mockInvoke).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not skip pending A when an in-flight B will replace persisted A', async () => {
+      const persisted = {
+        active_id: 'tab-b',
+        tabs: [
+          { id: 'tab-a', title: 'A', text: '' },
+          { id: 'tab-b', title: 'B', text: '' },
+        ],
+      }
+      const d1 = deferred()
+      const d2 = deferred()
+      mockInvoke
+        .mockResolvedValueOnce(persisted)
+        .mockImplementationOnce(() => d1.promise)
+        .mockImplementationOnce(() => d2.promise)
+
+      const { init, create, close, flushSave } = useEditorTabs()
+      await init()
+      mockInvoke.mockClear()
+
+      const bId = create()
+      const first = flushSave() // save B (in-flight)
+      expect(mockInvoke).toHaveBeenCalledTimes(1)
+
+      close(bId) // revert to persisted A
+      const second = flushSave() // pending A
+      expect(mockInvoke).toHaveBeenCalledTimes(1)
+
+      d1.resolve()
+      await vi.waitFor(() => expect(mockInvoke).toHaveBeenCalledTimes(2))
+
+      expect(mockInvoke.mock.calls[1][1].data).toEqual(persisted)
+
+      d2.resolve()
+      await first
+      await second
       expect(mockInvoke).toHaveBeenCalledTimes(2)
     })
   })

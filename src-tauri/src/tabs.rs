@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -57,14 +57,23 @@ impl TabManager {
 
     pub fn save_all(&self, mut data: TabsData) -> Result<()> {
         let _write_lock = config_write_lock().lock();
+
         if data.tabs.len() > MAX_TABS {
-            data.tabs.truncate(MAX_TABS);
+            bail!(
+                "Refusing to save {} tabs: the limit is {} tabs",
+                data.tabs.len(),
+                MAX_TABS
+            );
         }
-        for t in &mut data.tabs {
-            if t.text.len() > MAX_TAB_TEXT_LEN {
-                t.text.truncate(MAX_TAB_TEXT_LEN);
-            }
+        if let Some(tab) = data.tabs.iter().find(|t| t.text.len() > MAX_TAB_TEXT_LEN) {
+            bail!(
+                "Refusing to save tab '{}': text is {} UTF-8 bytes, the limit is {} bytes",
+                tab.id,
+                tab.text.len(),
+                MAX_TAB_TEXT_LEN
+            );
         }
+
         if !data.active_id.is_empty() && !data.tabs.iter().any(|t| t.id == data.active_id) {
             data.active_id = data.tabs.first().map(|t| t.id.clone()).unwrap_or_default();
         }
@@ -146,10 +155,37 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    /// Seed the manager with a single valid snapshot and return the exact bytes
+    /// written to disk, so a later rejected save can be proven to leave both the
+    /// file and the published in-memory data untouched.
+    fn seed_and_snapshot_bytes(mgr: &TabManager, path: &std::path::Path) -> Vec<u8> {
+        mgr.save_all(TabsData {
+            active_id: "seed".into(),
+            tabs: vec![EditorTab {
+                id: "seed".into(),
+                title: "Seed".into(),
+                text: "seed text".into(),
+                route: None,
+                purpose: None,
+            }],
+        })
+        .unwrap();
+        fs::read(path).unwrap()
+    }
+
+    fn assert_published_seed(mgr: &TabManager) {
+        let published = mgr.load_all();
+        assert_eq!(published.active_id, "seed");
+        assert_eq!(published.tabs.len(), 1);
+        assert_eq!(published.tabs[0].id, "seed");
+        assert_eq!(published.tabs[0].title, "Seed");
+        assert_eq!(published.tabs[0].text, "seed text");
+    }
+
     #[test]
-    fn save_all_truncates_over_max_tabs() {
+    fn save_all_accepts_exact_max_tabs() {
         let (mgr, path) = manager_in_tmp();
-        let tabs: Vec<EditorTab> = (0..(MAX_TABS + 5))
+        let tabs: Vec<EditorTab> = (0..MAX_TABS)
             .map(|i| EditorTab {
                 id: format!("id-{i}"),
                 title: format!("T{i}"),
@@ -163,28 +199,119 @@ mod tests {
             tabs,
         })
         .unwrap();
-        let loaded = mgr.load_all();
-        assert_eq!(loaded.tabs.len(), MAX_TABS);
+        assert_eq!(mgr.load_all().tabs.len(), MAX_TABS);
         let _ = fs::remove_file(&path);
     }
 
     #[test]
-    fn save_all_truncates_oversized_text() {
+    fn save_all_accepts_exact_max_text_len() {
         let (mgr, path) = manager_in_tmp();
-        let huge = "x".repeat(MAX_TAB_TEXT_LEN + 1000);
+        let text = "x".repeat(MAX_TAB_TEXT_LEN);
+        assert_eq!(text.len(), MAX_TAB_TEXT_LEN);
         mgr.save_all(TabsData {
             active_id: "id-1".into(),
             tabs: vec![EditorTab {
                 id: "id-1".into(),
                 title: "T".into(),
-                text: huge,
+                text,
                 route: None,
                 purpose: None,
             }],
         })
         .unwrap();
-        let loaded = mgr.load_all();
-        assert_eq!(loaded.tabs[0].text.len(), MAX_TAB_TEXT_LEN);
+        assert_eq!(mgr.load_all().tabs[0].text.len(), MAX_TAB_TEXT_LEN);
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn save_all_rejects_over_max_tabs_without_mutation() {
+        let (mgr, path) = manager_in_tmp();
+        let before = seed_and_snapshot_bytes(&mgr, &path);
+
+        let tabs: Vec<EditorTab> = (0..(MAX_TABS + 1))
+            .map(|i| EditorTab {
+                id: format!("id-{i}"),
+                title: format!("T{i}"),
+                text: String::new(),
+                route: None,
+                purpose: None,
+            })
+            .collect();
+        let result = mgr.save_all(TabsData {
+            active_id: "id-0".into(),
+            tabs,
+        });
+        assert!(result.is_err(), "over-limit tab count must be rejected");
+
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            before,
+            "file bytes must be unchanged after rejection"
+        );
+        assert_published_seed(&mgr);
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn save_all_rejects_ascii_text_overflow_without_mutation() {
+        let (mgr, path) = manager_in_tmp();
+        let before = seed_and_snapshot_bytes(&mgr, &path);
+
+        let text = "x".repeat(MAX_TAB_TEXT_LEN + 1);
+        assert_eq!(text.len(), MAX_TAB_TEXT_LEN + 1);
+        let result = mgr.save_all(TabsData {
+            active_id: "id-1".into(),
+            tabs: vec![EditorTab {
+                id: "id-1".into(),
+                title: "T".into(),
+                text,
+                route: None,
+                purpose: None,
+            }],
+        });
+        assert!(result.is_err(), "ASCII text overflow must be rejected");
+
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            before,
+            "file bytes must be unchanged after rejection"
+        );
+        assert_published_seed(&mgr);
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn save_all_rejects_multibyte_text_overflow_without_mutation() {
+        let (mgr, path) = manager_in_tmp();
+        let before = seed_and_snapshot_bytes(&mgr, &path);
+
+        // 99999 ASCII bytes followed by a two-byte Cyrillic character: byte
+        // index MAX_TAB_TEXT_LEN lands inside the character, so byte-based
+        // truncation would split it.
+        let mut text = "x".repeat(MAX_TAB_TEXT_LEN - 1);
+        text.push('ю');
+        assert_eq!(text.len(), MAX_TAB_TEXT_LEN + 1);
+        assert!(text.is_char_boundary(MAX_TAB_TEXT_LEN - 1));
+        assert!(!text.is_char_boundary(MAX_TAB_TEXT_LEN));
+
+        let result = mgr.save_all(TabsData {
+            active_id: "id-1".into(),
+            tabs: vec![EditorTab {
+                id: "id-1".into(),
+                title: "T".into(),
+                text,
+                route: None,
+                purpose: None,
+            }],
+        });
+        assert!(result.is_err(), "multibyte text overflow must be rejected");
+
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            before,
+            "file bytes must be unchanged after rejection"
+        );
+        assert_published_seed(&mgr);
         let _ = fs::remove_file(&path);
     }
 
