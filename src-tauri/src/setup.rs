@@ -1488,6 +1488,7 @@ async fn speech_worker(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn route_external_text_from_handles(
     webview: &crate::webview::service::WebViewService,
     twitch: &crate::twitch::TwitchService,

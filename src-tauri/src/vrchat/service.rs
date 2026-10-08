@@ -196,6 +196,12 @@ impl VrchatService {
     }
 }
 
+impl Default for VrchatService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

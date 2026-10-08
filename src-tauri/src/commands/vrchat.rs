@@ -87,8 +87,8 @@ mod tests {
             port: 9000,
         };
         let model: VrchatSettings = dto.clone().into();
-        assert_eq!(model.enabled, true);
-        assert_eq!(model.start_on_boot, true);
+        assert!(model.enabled);
+        assert!(model.start_on_boot);
         assert_eq!(model.host, "127.0.0.1");
         assert_eq!(model.port, 9000);
 
