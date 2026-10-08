@@ -11,6 +11,7 @@ const props = defineProps<{
   compact: boolean
   twitchConnected: boolean
   webviewConnected: boolean
+  vrchatEnabled: boolean
 }>()
 
 const emit = defineEmits<{
@@ -25,11 +26,12 @@ const currentMeta = computed(() => INCOMING_ROUTE_META[props.route])
 function isDestinationConnected(dest: Destination): boolean {
   if (dest === 'twitch') return props.twitchConnected
   if (dest === 'webview') return props.webviewConnected
+  if (dest === 'vrchat') return props.vrchatEnabled
   return true
 }
 
 const disconnected = computed<Destination[]>(() =>
-  currentMeta.value.destinations.filter(dest => !isDestinationConnected(dest)),
+  currentMeta.value.destinations.filter(dest => dest !== 'vrchat' && !isDestinationConnected(dest)),
 )
 
 const disconnectedTitle = computed(() =>
@@ -176,7 +178,7 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
           />
         </span>
         <span class="option-label">{{ opt.meta.label }}</span>
-        <span class="option-desc">{{ opt.meta.description }}</span>
+        <span v-if="opt.meta.description !== opt.meta.label" class="option-desc">{{ opt.meta.description }}</span>
       </li>
     </ul>
   </div>

@@ -27,6 +27,7 @@ function createTestSources(overrides?: {
   inputServerRuntime?: InputServerRuntime
   webviewDesired?: WebViewDesired
   vtsDesired?: VtsDesired
+  vrchatEnabled?: boolean
 }): IntegrationStatusSources {
   return {
     webviewRuntime: ref(overrides?.webviewRuntime ?? { state: 'running' }),
@@ -35,6 +36,7 @@ function createTestSources(overrides?: {
     inputServerRuntime: ref(overrides?.inputServerRuntime ?? { state: 'running' }),
     webviewDesired: ref(overrides?.webviewDesired ?? { enabled: true }),
     vtsDesired: ref(overrides?.vtsDesired ?? { shouldRun: true }),
+    vrchatEnabled: ref(overrides?.vrchatEnabled ?? false),
   }
 }
 
@@ -46,6 +48,22 @@ describe('useIntegrationStatusSlots - createIntegrationStatusProjection', () => 
     expect(visibleSlots.value).toHaveLength(4)
     expect(visibleSlots.value.every((s) => s.tone === 'green')).toBe(true)
     expect(errorSlots.value).toHaveLength(0)
+  })
+
+  it('shows VRChat only while outbound output is enabled', () => {
+    const vrchatEnabled = ref(false)
+    const sources = createTestSources()
+    sources.vrchatEnabled = vrchatEnabled
+    const { visibleSlots, errorSlots } = createIntegrationStatusProjection(sources)
+
+    expect(visibleSlots.value.some((slot) => slot.service === 'vrchat')).toBe(false)
+    vrchatEnabled.value = true
+    const vrchat = visibleSlots.value.find((slot) => slot.service === 'vrchat')
+    expect(vrchat?.tone).toBe('green')
+    expect(vrchat?.label).toContain('отправка включена')
+    expect(errorSlots.value).toHaveLength(0)
+    vrchatEnabled.value = false
+    expect(visibleSlots.value.some((slot) => slot.service === 'vrchat')).toBe(false)
   })
 
   it('connecting and stopped states do not leak into mono error slots', () => {

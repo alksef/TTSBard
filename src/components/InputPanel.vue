@@ -166,6 +166,7 @@ const ttsSettings = useTtsSettings()
 const hotkeySettings = useHotkeysSettings()
 
 const appSettingsContext = useAppSettings()
+const vrchatEnabled = computed(() => appSettingsContext.settings.value?.vrchat?.enabled ?? false)
 
 const ocrDesiredEnabled = computed(() => appSettingsContext.settings.value?.ocr.enabled ?? false)
 
@@ -355,6 +356,13 @@ const typingBurst = useTypingBurst(
       setTyping(active: boolean) {
         return invoke('set_webview_typing', { typing: active }).then(() => {}).catch((e) => {
           debugError('[InputPanel] WebView typing failed:', e)
+        })
+      },
+    } satisfies TypingConsumer,
+    {
+      setTyping(active: boolean) {
+        return invoke('set_vrchat_typing', { typing: active }).then(() => {}).catch((e) => {
+          debugError('[InputPanel] VRChat typing failed:', e)
         })
       },
     } satisfies TypingConsumer,
@@ -947,6 +955,7 @@ defineExpose({ focusEditor })
           :route="incomingSettings.route"
           :twitch-connected="twitchConnected"
           :webview-connected="webviewConnected"
+          :vrchat-enabled="vrchatEnabled"
           :busy-ids="incomingBusyIds"
           :edit-disabled="incomingEditInFlight"
           :compact="isMinimalMode"

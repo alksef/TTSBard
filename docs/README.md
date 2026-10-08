@@ -9,7 +9,7 @@
 
 ## Подключить другие программы
 
-- [Интеграции](./integrations/README.md) — OBS, Twitch, VTube Studio, LunaTranslator.
+- [Интеграции](./integrations/README.md) — OBS, Twitch, VTube Studio, VRChat, LunaTranslator.
 - [Входящий HTTP-сервер](./user/input-server.md) — передача текста в TTSBard.
 - [Контракт SSE](./integrations/sse.md) — получение текста и состояния набора.
 

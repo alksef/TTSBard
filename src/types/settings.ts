@@ -633,6 +633,14 @@ export interface AppSettingsDto {
   ai: AiSettingsDto
   hotkeys: HotkeySettingsDto
   vtube_studio: VTubeStudioSettingsDto
+  vrchat: VrchatSettingsDto
+}
+
+export interface VrchatSettingsDto {
+  enabled: boolean
+  start_on_boot: boolean
+  host: string
+  port: number
 }
 
 // ============================================================================

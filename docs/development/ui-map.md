@@ -21,6 +21,7 @@
 | `webview` | WebView | `WebViewPanel.vue` | Сервер с постоянным LAN bind, порт, локальный/LAN URL; шаблоны, тест, внешнее подключение и UPnP |
 | `twitch` | Twitch | `TwitchPanel.vue` | Подключение и настройки отправки |
 | `vtube-studio` | VTube Studio | `VTubeStudioPanel.vue` | Адрес/порт, параметры и действия при наборе, тестирование |
+| `vrchat` | VRChat | `VRChatPanel.vue` | Адрес и порт OSC, запуск при старте, тестовое сообщение, помощь |
 | `ocr` | OCR | `OcrPanel.vue` | Настройки распознавания, выбор экрана захвата и выбор области |
 | `input-server` | Входящий сервер | `InputServerPanel.vue` | Подключение и маршрутизация входящего текста |
 | `hotkeys` | Горячие клавиши | `HotkeysPanel.vue` | Назначение сочетаний |
@@ -42,7 +43,7 @@
 | Поверхность | Источник |
 |---|---|
 | Titlebar и переключение дополнительных окон | `src/App.vue` |
-| Статусы интеграций | `src/components/titlebar/IntegrationStatusCluster.vue`, проекция статусов и ошибок — `src/composables/useIntegrationStatusSlots.ts` |
+| Статусы интеграций | `src/components/titlebar/IntegrationStatusCluster.vue`, проекция WebView, Twitch, VTube Studio, VRChat (включённый исходящий OSC) и входящего сервера — `src/composables/useIntegrationStatusSlots.ts` |
 | Уведомления | `src/components/ErrorToasts.vue`, `shared/StatusMessage.vue`, `shared/TestResult.vue` в `src/components/` |
 | Компактный режим | `src/composables/mainWindowMode.ts` (единый владелец), `src/composables/mainWindowModeAdapter.ts` (native IPC), `src/components/MinimalModeButton.vue` (кнопка), `src/composables/useCompactWindowResize.ts`, `src/components/InputPanel.vue` — изменение размера за края окна; внутренние захваты в компактном режиме отсутствуют, разделитель высоты редактора доступен в обычном режиме. Кнопка `ChevronUp` в `src/components/editor/EditorTabs.vue` переключает стиль в режим «Моно» |
 | Режим «Моно» | `src/components/MonoModeBar.vue`, `src/composables/mainWindowMode.ts`, `src/composables/useIntegrationStatusSlots.ts`, `src/App.vue`, `src/components/InputPanel.vue` — стиль компактного режима: скрыты titlebar, вкладки, action bar и история. Угловая `MinimalModeButton` остаётся для прямого возврата в обычное окно. Сверху отображается `MonoModeBar` (18 px) с центральной ручкой, кнопкой `ChevronDown` для возврата в компактный вид, кнопкой сворачивания окна и значками только активных ошибок интеграций с popover подробностей без смещения редактора или расширения окна. Геометрия окна сохраняется без ресайза |

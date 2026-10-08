@@ -1,4 +1,5 @@
 import { t } from '../../i18n'
+import type { Destination } from './destinationIcons'
 
 export type EditorRoute = 'everywhere' | 'no_twitch' | 'voice_only' | 'twitch_only'
 
@@ -35,10 +36,10 @@ export interface RouteMeta {
   readonly label: string
   /** Полная расшифровка для tooltip/aria: «Голос + WebView + Twitch» и т.д. */
   readonly description: string
-  /** Обучающий shortcut: 'без префикса' | '!' | '!!' | '!t'. */
+  /** Префикс маршрута; для everywhere он отсутствует. */
   readonly shortcut: string
-  /** Иконки destinations в порядке [голос, webview, twitch] для compact mode. */
-  readonly destinations: ReadonlyArray<'voice' | 'webview' | 'twitch'>
+  /** Иконки разрешённых направлений для compact mode. */
+  readonly destinations: ReadonlyArray<Destination>
 }
 
 export const ROUTE_ORDER: readonly EditorRoute[] = [
@@ -50,7 +51,7 @@ export const ROUTE_ORDER: readonly EditorRoute[] = [
 
 function defineRouteMeta(
   id: EditorRoute,
-  destinations: ReadonlyArray<'voice' | 'webview' | 'twitch'>,
+  destinations: ReadonlyArray<Destination>,
 ): RouteMeta {
   return {
     id,
@@ -61,15 +62,15 @@ function defineRouteMeta(
       return t(`editor.route.${id}.description`)
     },
     get shortcut() {
-      return t(`editor.route.${id}.shortcut`)
+      return id === 'everywhere' ? '' : t(`editor.route.${id}.shortcut`)
     },
     destinations,
   }
 }
 
 export const ROUTE_META: Record<EditorRoute, RouteMeta> = {
-  everywhere: defineRouteMeta('everywhere', ['voice', 'webview', 'twitch']),
-  no_twitch: defineRouteMeta('no_twitch', ['voice', 'webview']),
+  everywhere: defineRouteMeta('everywhere', ['voice', 'webview', 'twitch', 'vrchat']),
+  no_twitch: defineRouteMeta('no_twitch', ['voice', 'webview', 'vrchat']),
   voice_only: defineRouteMeta('voice_only', ['voice']),
   twitch_only: defineRouteMeta('twitch_only', ['twitch']),
 }

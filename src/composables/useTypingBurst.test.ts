@@ -613,3 +613,146 @@ describe('useTypingBurst — independent consumers', () => {
     expect(c1Events).toEqual([false, true, false])
   })
 })
+
+describe('useTypingBurst — three-consumer fan-out (VTS + WebView + VRChat)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('delivers true on first edit and false on idle timeout to all three consumers', async () => {
+    const vtsEvents: boolean[] = []
+    const webviewEvents: boolean[] = []
+    const vrchatEvents: boolean[] = []
+
+    const vts: TypingConsumer = {
+      setTyping(active: boolean) {
+        vtsEvents.push(active)
+      },
+    }
+    const webview: TypingConsumer = {
+      setTyping(active: boolean) {
+        webviewEvents.push(active)
+      },
+    }
+    const vrchat: TypingConsumer = {
+      setTyping(active: boolean) {
+        vrchatEvents.push(active)
+      },
+    }
+
+    const { edit } = useTypingBurst(() => 800, [vts, webview, vrchat])
+    edit()
+    await flushMicrotasks()
+    expect(vtsEvents).toEqual([true])
+    expect(webviewEvents).toEqual([true])
+    expect(vrchatEvents).toEqual([true])
+
+    // Subsequent edits in same burst don't repeat true
+    edit()
+    edit()
+    await flushMicrotasks()
+    expect(vtsEvents).toEqual([true])
+    expect(webviewEvents).toEqual([true])
+    expect(vrchatEvents).toEqual([true])
+
+    vi.advanceTimersByTime(800)
+    await flushMicrotasks()
+    expect(vtsEvents).toEqual([true, false])
+    expect(webviewEvents).toEqual([true, false])
+    expect(vrchatEvents).toEqual([true, false])
+  })
+
+  it('stop() sends false to all three consumers immediately', async () => {
+    const vtsEvents: boolean[] = []
+    const webviewEvents: boolean[] = []
+    const vrchatEvents: boolean[] = []
+
+    const burst = useTypingBurst(() => 800, [
+      { setTyping: (a) => { vtsEvents.push(a) } },
+      { setTyping: (a) => { webviewEvents.push(a) } },
+      { setTyping: (a) => { vrchatEvents.push(a) } },
+    ])
+
+    burst.edit()
+    await flushMicrotasks()
+    burst.stop()
+    await flushMicrotasks()
+
+    expect(vtsEvents).toEqual([true, false])
+    expect(webviewEvents).toEqual([true, false])
+    expect(vrchatEvents).toEqual([true, false])
+  })
+
+  it('dispose() sends false to all three consumers on unmount', async () => {
+    const vtsEvents: boolean[] = []
+    const webviewEvents: boolean[] = []
+    const vrchatEvents: boolean[] = []
+
+    const burst = useTypingBurst(() => 800, [
+      { setTyping: (a) => { vtsEvents.push(a) } },
+      { setTyping: (a) => { webviewEvents.push(a) } },
+      { setTyping: (a) => { vrchatEvents.push(a) } },
+    ])
+
+    burst.edit()
+    await flushMicrotasks()
+    burst.dispose()
+    await flushMicrotasks()
+
+    expect(vtsEvents).toEqual([true, false])
+    expect(webviewEvents).toEqual([true, false])
+    expect(vrchatEvents).toEqual([true, false])
+  })
+
+  it('VRChat rejection or failure does not block VTS and WebView consumers', async () => {
+    vi.useRealTimers()
+
+    const vtsEvents: boolean[] = []
+    const webviewEvents: boolean[] = []
+    const vrchatDef = deferred()
+
+    const vts: TypingConsumer = {
+      setTyping(active: boolean) {
+        vtsEvents.push(active)
+      },
+    }
+    const webview: TypingConsumer = {
+      setTyping(active: boolean) {
+        webviewEvents.push(active)
+      },
+    }
+    const vrchat: TypingConsumer = {
+      setTyping(active: boolean) {
+        if (active) return vrchatDef.promise
+      },
+    }
+
+    const { edit, stop } = useTypingBurst(() => 800, [vts, webview, vrchat])
+    edit()
+    await flushMicrotasks()
+    await flushMicrotasks()
+
+    // VTS and WebView already received true even while VRChat is in-flight
+    expect(vtsEvents).toEqual([true])
+    expect(webviewEvents).toEqual([true])
+
+    // VRChat fails
+    vrchatDef.reject(new Error('VRChat OSC port unreachable'))
+    await flushMicrotasks()
+    await flushMicrotasks()
+
+    stop()
+    await flushMicrotasks()
+    await flushMicrotasks()
+
+    // VTS and WebView successfully receive false
+    expect(vtsEvents).toEqual([true, false])
+    expect(webviewEvents).toEqual([true, false])
+
+    vi.useFakeTimers()
+  })
+})

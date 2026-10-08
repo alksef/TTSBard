@@ -988,6 +988,96 @@ impl Default for VTubeStudioSettings {
     }
 }
 
+// ==================== VRChat Settings ====================
+
+pub fn default_vrchat_host() -> String {
+    "127.0.0.1".to_string()
+}
+
+pub fn default_vrchat_port() -> u16 {
+    9000
+}
+
+/// VRChat OSC chatbox output settings (ROADMAP-130)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VrchatSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub start_on_boot: bool,
+    #[serde(default = "default_vrchat_host")]
+    pub host: String,
+    #[serde(default = "default_vrchat_port")]
+    pub port: u16,
+}
+
+impl Default for VrchatSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            start_on_boot: false,
+            host: default_vrchat_host(),
+            port: default_vrchat_port(),
+        }
+    }
+}
+
+impl VrchatSettings {
+    /// At launch, the explicit autostart preference controls runtime output.
+    pub fn runtime_at_startup(&self) -> Self {
+        let mut runtime = self.clone();
+        runtime.enabled = runtime.start_on_boot;
+        runtime
+    }
+}
+
+/// Validates destination host for VRChat OSC.
+pub fn validate_vrchat_host(host: &str) -> Result<(), String> {
+    let host = host.trim();
+    if host.is_empty() {
+        return Err("Host must not be empty".to_string());
+    }
+    if host.len() > 253 {
+        return Err("Host is too long (max 253 characters)".to_string());
+    }
+    if host.parse::<std::net::IpAddr>().is_ok() {
+        return Ok(());
+    }
+    if host.contains("://")
+        || host.contains('/')
+        || host.contains('\\')
+        || host.contains(':')
+        || host.contains(char::is_whitespace)
+    {
+        return Err(format!(
+            "Invalid host '{}': use an IP address or computer name without scheme, path, or port",
+            host
+        ));
+    }
+    let labels: Vec<_> = host.split('.').collect();
+    if labels.len() == 4
+        && labels.iter().all(|label| {
+            !label.is_empty() && label.len() <= 3 && label.bytes().all(|c| c.is_ascii_digit())
+        })
+    {
+        return Err("Invalid IPv4 address".to_string());
+    }
+    let invalid_label = |label: &str| {
+        label.is_empty()
+            || label.len() > 63
+            || !label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+            || label.starts_with('-')
+            || label.ends_with('-')
+    };
+    if host.split('.').any(invalid_label) {
+        return Err(format!(
+            "Invalid host '{}': use an IP address or computer name (letters, digits, hyphens, dots)",
+            host
+        ));
+    }
+    Ok(())
+}
+
 // ==================== WebView Settings ====================
 // WebView server settings are defined in webview module and re-exported here
 use crate::webview::WebViewSettings;
@@ -1636,6 +1726,8 @@ pub struct AppSettings {
     pub hotkeys: HotkeySettings,
     #[serde(default)]
     pub vtube_studio: VTubeStudioSettings,
+    #[serde(default)]
+    pub vrchat: VrchatSettings,
     /// Показывать окно управления воспроизведением при запуске
     #[serde(default)]
     pub show_playback_on_start: bool,
@@ -1670,6 +1762,7 @@ impl Default for AppSettings {
             ai: AiSettings::default(),
             hotkeys: HotkeySettings::default(),
             vtube_studio: VTubeStudioSettings::default(),
+            vrchat: VrchatSettings::default(),
             show_playback_on_start: false,
             start_compact: false,
             hide_on_minimize: false,
@@ -1694,6 +1787,16 @@ impl AppSettings {
         if let Err(e) = validate_port(self.input_server.port) {
             warn!(error = %e, "Invalid input server port, using default");
             self.input_server.port = 10101;
+        }
+
+        // Validate VRChat settings
+        if let Err(e) = validate_port(self.vrchat.port) {
+            warn!(error = %e, "Invalid VRChat port, using default");
+            self.vrchat.port = default_vrchat_port();
+        }
+        if let Err(e) = validate_vrchat_host(&self.vrchat.host) {
+            warn!(error = %e, "Invalid VRChat host, using default");
+            self.vrchat.host = default_vrchat_host();
         }
 
         // Validate and clamp Silero timing settings
@@ -3318,6 +3421,15 @@ impl SettingsManager {
 
     pub fn set_vtube_studio_token(&self, token: Option<String>) -> Result<()> {
         self.update_field("/vtube_studio/token", &token)
+    }
+
+    // ========== VRChat Settings ==========
+
+    pub fn set_vrchat_settings(&self, settings: &VrchatSettings) -> Result<()> {
+        let settings = settings.clone();
+        self.update_settings_atomically(move |app_settings| {
+            app_settings.vrchat = settings;
+        })
     }
 }
 
@@ -5993,6 +6105,103 @@ mod tests {
         assert!(json.contains("stop_hotkey_id"), "json: {}", json);
         assert!(json.contains("item_file_name"), "json: {}", json);
         assert!(json.contains("item_type"), "json: {}", json);
+    }
+
+    // ==================== VRChat Tests ====================
+
+    #[test]
+    fn old_settings_deserializes_without_vrchat() {
+        let mut value = serde_json::to_value(AppSettings::default()).unwrap();
+        value.as_object_mut().unwrap().remove("vrchat");
+        let json = serde_json::to_string(&value).unwrap();
+        assert!(!json.contains("\"vrchat\""));
+
+        let settings: AppSettings = serde_json::from_str(&json)
+            .expect("old AppSettings (without vrchat field) must deserialize");
+        assert!(!settings.vrchat.enabled);
+        assert_eq!(settings.vrchat.host, "127.0.0.1");
+        assert_eq!(settings.vrchat.port, 9000);
+    }
+
+    #[test]
+    fn vrchat_settings_defaults() {
+        let s = VrchatSettings::default();
+        assert!(!s.enabled);
+        assert!(!s.start_on_boot);
+        assert_eq!(s.host, "127.0.0.1");
+        assert_eq!(s.port, 9000);
+    }
+
+    #[test]
+    fn vrchat_settings_round_trip() {
+        let original = VrchatSettings {
+            enabled: true,
+            start_on_boot: true,
+            host: "192.168.1.100".to_string(),
+            port: 9005,
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: VrchatSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn vrchat_autostart_is_independent_of_last_runtime_state() {
+        let mut saved = VrchatSettings {
+            enabled: true,
+            ..VrchatSettings::default()
+        };
+        assert!(!saved.runtime_at_startup().enabled);
+
+        saved.enabled = false;
+        saved.start_on_boot = true;
+        assert!(saved.runtime_at_startup().enabled);
+    }
+
+    #[test]
+    fn legacy_vrchat_settings_do_not_autostart() {
+        let legacy = r#"{"enabled":true,"host":"127.0.0.1","port":9000}"#;
+        let saved: VrchatSettings = serde_json::from_str(legacy).unwrap();
+        assert!(saved.enabled);
+        assert!(!saved.start_on_boot);
+        assert!(!saved.runtime_at_startup().enabled);
+    }
+
+    #[test]
+    fn validate_vrchat_host_accepts_valid() {
+        for ok in [
+            "127.0.0.1",
+            "192.168.1.50",
+            "::1",
+            "localhost",
+            "DESKTOP-ABC123",
+            "my.pc.local",
+        ] {
+            assert!(
+                validate_vrchat_host(ok).is_ok(),
+                "expected '{ok}' to be a valid host"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_vrchat_host_rejects_invalid() {
+        for bad in [
+            "",
+            "   ",
+            "999.1.1.1",
+            "ws://127.0.0.1",
+            "127.0.0.1:9000",
+            "127.0.0.1/",
+            "two words",
+            "-leading",
+            "trailing-",
+        ] {
+            assert!(
+                validate_vrchat_host(bad).is_err(),
+                "expected '{bad}' to be rejected"
+            );
+        }
     }
 
     /// Old persisted typing action with no item fields deserializes to empty item metadata.

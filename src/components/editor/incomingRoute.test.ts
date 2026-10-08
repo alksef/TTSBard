@@ -13,7 +13,7 @@ beforeAll(() => {
   ;(i18n.global.locale as unknown as { value: string }).value = 'ru'
 })
 
-const ALL_ROUTES: IncomingRoute[] = ['audio_only', 'audio_webview', 'audio_twitch', 'everywhere']
+const ALL_ROUTES: IncomingRoute[] = ['audio_only', 'everywhere', 'audio_webview', 'audio_twitch']
 
 describe('sanitizeIncomingRoute', () => {
   it('accepts the four backend values verbatim', () => {
@@ -32,9 +32,9 @@ describe('sanitizeIncomingRoute', () => {
 describe('INCOMING_ROUTE_META', () => {
   it('maps every route to its destination icons', () => {
     expect(INCOMING_ROUTE_META.audio_only.destinations).toEqual(['voice'])
-    expect(INCOMING_ROUTE_META.audio_webview.destinations).toEqual(['voice', 'webview'])
+    expect(INCOMING_ROUTE_META.audio_webview.destinations).toEqual(['voice', 'webview', 'vrchat'])
     expect(INCOMING_ROUTE_META.audio_twitch.destinations).toEqual(['voice', 'twitch'])
-    expect(INCOMING_ROUTE_META.everywhere.destinations).toEqual(['voice', 'webview', 'twitch'])
+    expect(INCOMING_ROUTE_META.everywhere.destinations).toEqual(['voice', 'webview', 'twitch', 'vrchat'])
   })
 
   it('has non-empty localized label and description for every route', () => {

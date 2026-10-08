@@ -91,6 +91,10 @@ impl DeliveryPolicy {
             DeliveryPolicy::AudioOnly => true,
         }
     }
+
+    pub fn skip_vrchat(&self) -> bool {
+        self.skip_webview()
+    }
 }
 
 // ── WorkItem: returned by claim_next_generation ──
@@ -717,14 +721,17 @@ mod tests {
         let both = DeliveryPolicy::editor(true, true);
         assert!(both.skip_twitch());
         assert!(both.skip_webview());
+        assert!(both.skip_vrchat());
 
         let twitch_only = DeliveryPolicy::editor(true, false);
         assert!(twitch_only.skip_twitch());
         assert!(!twitch_only.skip_webview());
+        assert!(!twitch_only.skip_vrchat());
 
         let everywhere = DeliveryPolicy::editor(false, false);
         assert!(!everywhere.skip_twitch());
         assert!(!everywhere.skip_webview());
+        assert!(!everywhere.skip_vrchat());
     }
 
     #[test]
@@ -732,6 +739,26 @@ mod tests {
         let policy = DeliveryPolicy::AudioOnly;
         assert!(policy.skip_twitch());
         assert!(policy.skip_webview());
+        assert!(policy.skip_vrchat());
+    }
+
+    #[test]
+    fn incoming_delivery_skip_vrchat_matrix() {
+        // Everywhere: both Twitch & WebView enabled -> delivers to VRChat
+        let everywhere = DeliveryPolicy::incoming(false, false);
+        assert!(!everywhere.skip_vrchat());
+
+        // AudioWebview (no_twitch): Twitch skipped, WebView enabled -> delivers to VRChat
+        let no_twitch = DeliveryPolicy::incoming(true, false);
+        assert!(!no_twitch.skip_vrchat());
+
+        // AudioTwitch (twitch_only): Twitch enabled, WebView skipped -> skips VRChat
+        let twitch_only = DeliveryPolicy::incoming(false, true);
+        assert!(twitch_only.skip_vrchat());
+
+        // AudioOnly (voice_only): both Twitch & WebView skipped -> skips VRChat
+        let voice_only = DeliveryPolicy::incoming(true, true);
+        assert!(voice_only.skip_vrchat());
     }
 
     // ── submit ──

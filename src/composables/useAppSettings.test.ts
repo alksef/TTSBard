@@ -29,13 +29,13 @@ vi.mock('../utils/debug', () => ({
   debugInfo: vi.fn(),
 }))
 
-import { createAppSettings, provideAppSettings } from './useAppSettings'
+import { createAppSettings, provideAppSettings, useVrchatSettings, type VrchatSettingsDto } from './useAppSettings'
 import { useStartupNotifications } from './useStartupNotifications'
 import { useErrorHandler, ErrorLevel } from './useErrorHandler'
 import { createMainWindowModeController, type MainWindowModeController, type MainWindowModeSnapshot } from './mainWindowMode'
 import type { AppSettingsDto } from '../types/settings'
 
-function mockSettings(): AppSettingsDto {
+function mockSettings(): AppSettingsDto & { vrchat: VrchatSettingsDto } {
   return {
     storage: { data_dir: null, audio_cache_dir: null },
     tts: {
@@ -113,6 +113,12 @@ function mockSettings(): AppSettingsDto {
       port: 8001,
       start_on_boot: false,
       typingAction: { outputMode: 'Event', parameterName: 'TTSBardTyping', startHotkeyId: '', stopHotkeyId: '', startHotkeyName: '', stopHotkeyName: '', itemFileName: '', itemType: '' },
+    },
+    vrchat: {
+      enabled: false,
+      start_on_boot: false,
+      host: '127.0.0.1',
+      port: 9000,
     },
   }
 }
@@ -627,5 +633,51 @@ describe('createAppSettings compact_view snapshot hydration', () => {
 
     expect(controller.rememberedView.value).toBe('mono')
     ctx.cleanup?.()
+  })
+})
+
+describe('useVrchatSettings', () => {
+  it('returns vrchat settings when provided', async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'is_backend_ready') return true
+      if (cmd === 'get_all_app_settings') return mockSettings()
+    })
+
+    let vrchatSettings: ReturnType<typeof useVrchatSettings> | undefined
+    const renderer = createRenderer({
+      createElement: () => ({}),
+      createText: () => ({}),
+      createComment: () => ({}),
+      insert: () => {},
+      remove: () => {},
+      setText: () => {},
+      setElementText: () => {},
+      parentNode: () => null,
+      nextSibling: () => null,
+      patchProp: () => {},
+    })
+
+    const Child = {
+      setup() {
+        vrchatSettings = useVrchatSettings()
+        return () => h('span')
+      },
+    }
+
+    const Root = {
+      setup() {
+        provideAppSettings()
+        return () => h(Child)
+      },
+    }
+
+    renderer.render(h(Root), {} as any)
+    await vi.waitFor(() => expect(vrchatSettings?.value).toBeDefined())
+    expect(vrchatSettings?.value).toEqual({
+      enabled: false,
+      start_on_boot: false,
+      host: '127.0.0.1',
+      port: 9000,
+    })
   })
 })

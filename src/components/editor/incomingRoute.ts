@@ -4,15 +4,15 @@ import { t } from '../../i18n'
 /**
  * Persisted delivery route for source-neutral Incoming text. Mirrors the
  * backend `IncomingRoute` enum: audio is inherent to every route, only the
- * WebView/Twitch integrations vary.
+ * WebView/Twitch integrations vary; VRChat follows WebView routing.
  */
 export type IncomingRoute = 'audio_only' | 'audio_webview' | 'audio_twitch' | 'everywhere'
 
 export const INCOMING_ROUTE_ORDER: readonly IncomingRoute[] = [
   'audio_only',
+  'everywhere',
   'audio_webview',
   'audio_twitch',
-  'everywhere',
 ]
 
 const VALID_INCOMING_ROUTES: ReadonlySet<string> = new Set(INCOMING_ROUTE_ORDER)
@@ -56,7 +56,7 @@ function defineIncomingRouteMeta(
 
 export const INCOMING_ROUTE_META: Record<IncomingRoute, IncomingRouteMeta> = {
   audio_only: defineIncomingRouteMeta('audio_only', ['voice']),
-  audio_webview: defineIncomingRouteMeta('audio_webview', ['voice', 'webview']),
+  audio_webview: defineIncomingRouteMeta('audio_webview', ['voice', 'webview', 'vrchat']),
   audio_twitch: defineIncomingRouteMeta('audio_twitch', ['voice', 'twitch']),
-  everywhere: defineIncomingRouteMeta('everywhere', ['voice', 'webview', 'twitch']),
+  everywhere: defineIncomingRouteMeta('everywhere', ['voice', 'webview', 'twitch', 'vrchat']),
 }

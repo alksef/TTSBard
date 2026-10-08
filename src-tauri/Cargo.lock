@@ -6270,6 +6270,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rosc"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2e63d9e6b0d090be1485cf159b1e04c3973d2d3e1614963544ea2ff47a4a981"
+dependencies = [
+ "byteorder",
+ "nom 7.1.3",
+]
+
+[[package]]
 name = "ruaccent_rs"
 version = "0.2.0"
 source = "git+https://github.com/alksef/ruaccent-rs.git?tag=v0.2.0#a6b9156556cdf8daacaa7859ff600d85cfa84787"
@@ -7729,7 +7739,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.61.2",
@@ -8497,6 +8507,7 @@ dependencies = [
  "regex",
  "reqwest 0.12.28",
  "rodio",
+ "rosc",
  "ruaccent_rs",
  "russian_numbers",
  "serde",
@@ -8523,6 +8534,7 @@ dependencies = [
  "tract-onnx",
  "tract-pulse",
  "twitch-irc",
+ "unicode-segmentation",
  "urlencoding",
  "uuid",
  "windows 0.58.0",
@@ -9225,7 +9237,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

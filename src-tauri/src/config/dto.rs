@@ -1515,6 +1515,49 @@ impl From<crate::config::VTubeStudioSettings> for VTubeStudioSettingsDto {
     }
 }
 
+/// VRChat settings DTO
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VrchatSettingsDto {
+    pub enabled: bool,
+    #[serde(default)]
+    pub start_on_boot: bool,
+    pub host: String,
+    pub port: u16,
+}
+
+impl Default for VrchatSettingsDto {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            start_on_boot: false,
+            host: "127.0.0.1".to_string(),
+            port: 9000,
+        }
+    }
+}
+
+impl From<crate::config::VrchatSettings> for VrchatSettingsDto {
+    fn from(s: crate::config::VrchatSettings) -> Self {
+        Self {
+            enabled: s.enabled,
+            start_on_boot: s.start_on_boot,
+            host: s.host,
+            port: s.port,
+        }
+    }
+}
+
+impl From<VrchatSettingsDto> for crate::config::VrchatSettings {
+    fn from(dto: VrchatSettingsDto) -> Self {
+        Self {
+            enabled: dto.enabled,
+            start_on_boot: dto.start_on_boot,
+            host: dto.host,
+            port: dto.port,
+        }
+    }
+}
+
 /// Hotkey info from VTube Studio API (for UI selection)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VtsHotkeyInfoDto {
@@ -1603,6 +1646,8 @@ pub struct AppSettingsDto {
     pub hotkeys: HotkeySettingsDto,
     /// VTube Studio settings (safe — no token)
     pub vtube_studio: VTubeStudioSettingsDto,
+    /// VRChat settings
+    pub vrchat: VrchatSettingsDto,
 }
 
 impl AppSettingsDto {
@@ -1649,6 +1694,7 @@ impl AppSettingsDto {
             ai: params.config.ai.clone().into(),
             hotkeys: params.config.hotkeys.clone().into(),
             vtube_studio: params.config.vtube_studio.clone().into(),
+            vrchat: params.config.vrchat.clone().into(),
         }
     }
 }
@@ -2075,6 +2121,7 @@ mod tests {
             ai,
             hotkeys,
             vtube_studio,
+            vrchat: VrchatSettingsDto::default(),
         }
     }
 
@@ -2475,6 +2522,7 @@ mod tests {
             ai,
             hotkeys,
             vtube_studio,
+            vrchat: VrchatSettingsDto::default(),
         }
     }
 

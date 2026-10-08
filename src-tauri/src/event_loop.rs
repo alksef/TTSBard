@@ -9,7 +9,7 @@ use crate::soundpanel_window::update_soundpanel_appearance;
 use crate::speech_queue::JobStatus;
 use crate::state::AppState;
 use tauri::{AppHandle, Emitter, Manager};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 /// Update tray icon based on interception state
@@ -250,31 +250,7 @@ impl EventHandler {
 
     /// Process text sent to TTS event
     fn process_text_sent_to_tts(&self, routed: RoutedText) {
-        debug!(
-            text_len = routed.text.chars().count(),
-            "[EVENT] Text sent to TTS"
-        );
-
-        // === WebView broadcast (check flag) ===
-        if !routed.skip_webview {
-            self.state
-                .webview
-                .send_event(AppEvent::TextSentToTts(routed.clone()));
-        } else {
-            debug!("[EVENT] WebView skipped (prefix)");
-        }
-
-        // === Twitch send (check flag) ===
-        if !routed.skip_twitch {
-            let settings = self.state.twitch.settings.blocking_read();
-            if settings.enabled {
-                drop(settings);
-                self.state
-                    .send_twitch_event(TwitchEvent::SendMessage(routed.text));
-            }
-        } else {
-            debug!("[EVENT] Twitch skipped (prefix)");
-        }
+        process_text_sent_to_tts_core(&self.state, routed);
     }
 
     /// Process show main window event
@@ -298,5 +274,148 @@ impl EventHandler {
         if let Some(window) = self.app_handle.get_webview_window("floating") {
             let _ = window.set_ignore_cursor_events(enabled);
         }
+    }
+}
+
+pub(crate) fn process_text_sent_to_tts_core(state: &AppState, routed: RoutedText) {
+    debug!(
+        text_len = routed.text.chars().count(),
+        "[EVENT] Text sent to TTS"
+    );
+
+    // === WebView broadcast (check flag) ===
+    if !routed.skip_webview {
+        state
+            .webview
+            .send_event(AppEvent::TextSentToTts(routed.clone()));
+    } else {
+        debug!("[EVENT] WebView skipped (prefix)");
+    }
+
+    // === VRChat send (check flag) ===
+    if !routed.skip_vrchat() {
+        if state.vrchat.is_enabled() {
+            let vrchat = state.vrchat.clone();
+            let text = routed.text.clone();
+            state.runtime.spawn(async move {
+                if let Err(e) = vrchat.send_text(&text).await {
+                    warn!(error = %e, "[EVENT] Failed to deliver text to VRChat chatbox");
+                }
+            });
+        }
+    } else {
+        debug!("[EVENT] VRChat skipped (prefix)");
+    }
+
+    // === Twitch send (check flag) ===
+    if !routed.skip_twitch {
+        let settings = state.twitch.settings.blocking_read();
+        if settings.enabled {
+            drop(settings);
+            state.send_twitch_event(TwitchEvent::SendMessage(routed.text));
+        }
+    } else {
+        debug!("[EVENT] Twitch skipped (prefix)");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::VrchatSettings;
+    use crate::events::RoutedText;
+    use rosc::decoder::decode_udp;
+    use rosc::{OscPacket, OscType};
+    use std::net::UdpSocket;
+    use std::time::Duration;
+
+    #[test]
+    fn process_text_sent_to_tts_delivers_to_vrchat_when_enabled() {
+        let socket = UdpSocket::bind("127.0.0.1:0").expect("bind socket");
+        socket
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("set timeout");
+        let port = socket.local_addr().expect("addr").port();
+
+        let state = AppState::new();
+        state.vrchat.update_settings_internal(VrchatSettings {
+            enabled: true,
+            start_on_boot: false,
+            host: "127.0.0.1".into(),
+            port,
+        });
+
+        let routed = RoutedText::new("Hello VRChat".to_string(), true, false);
+        assert!(!routed.skip_vrchat());
+
+        process_text_sent_to_tts_core(&state, routed);
+
+        let mut buf = [0u8; 1024];
+        let (len, _) = socket.recv_from(&mut buf).expect("recv_from ok");
+
+        let (_, packet) = decode_udp(&buf[..len]).expect("valid osc packet");
+        match packet {
+            OscPacket::Message(msg) => {
+                assert_eq!(msg.addr, "/chatbox/input");
+                assert_eq!(msg.args.len(), 3);
+                assert_eq!(msg.args[0], OscType::String("Hello VRChat".into()));
+                assert_eq!(msg.args[1], OscType::Bool(true));
+                assert_eq!(msg.args[2], OscType::Bool(true));
+            }
+            _ => panic!("expected OscMessage"),
+        }
+    }
+
+    #[test]
+    fn process_text_sent_to_tts_skips_vrchat_when_flag_set() {
+        let socket = UdpSocket::bind("127.0.0.1:0").expect("bind socket");
+        socket
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .expect("set timeout");
+        let port = socket.local_addr().expect("addr").port();
+
+        let state = AppState::new();
+        state.vrchat.update_settings_internal(VrchatSettings {
+            enabled: true,
+            start_on_boot: false,
+            host: "127.0.0.1".into(),
+            port,
+        });
+
+        // voice_only / skip_webview = true -> skip_vrchat = true
+        let routed = RoutedText::new("Voice only".to_string(), true, true);
+        assert!(routed.skip_vrchat());
+
+        process_text_sent_to_tts_core(&state, routed);
+
+        let mut buf = [0u8; 1024];
+        let res = socket.recv_from(&mut buf);
+        assert!(res.is_err(), "must not receive when skip_vrchat is true");
+    }
+
+    #[test]
+    fn process_text_sent_to_tts_skips_vrchat_when_disabled() {
+        let socket = UdpSocket::bind("127.0.0.1:0").expect("bind socket");
+        socket
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .expect("set timeout");
+        let port = socket.local_addr().expect("addr").port();
+
+        let state = AppState::new();
+        state.vrchat.update_settings_internal(VrchatSettings {
+            enabled: false,
+            start_on_boot: false,
+            host: "127.0.0.1".into(),
+            port,
+        });
+
+        let routed = RoutedText::new("Everywhere".to_string(), false, false);
+        assert!(!routed.skip_vrchat());
+
+        process_text_sent_to_tts_core(&state, routed);
+
+        let mut buf = [0u8; 1024];
+        let res = socket.recv_from(&mut buf);
+        assert!(res.is_err(), "must not receive when vrchat is disabled");
     }
 }

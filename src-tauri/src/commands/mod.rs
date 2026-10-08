@@ -29,6 +29,7 @@ pub mod tabs;
 pub mod telegram;
 pub mod tts_pipeline;
 pub mod twitch;
+pub mod vrchat;
 pub mod vtube_studio;
 pub mod webview;
 pub mod window;
@@ -239,6 +240,9 @@ pub async fn get_all_app_settings(
         preprocessor: preprocessor.as_ref(),
         soundpanel_bindings,
     });
+    // Saved enabled records the last manual state. Runtime follows start_on_boot
+    // after launch, so return the actual output state to settings consumers.
+    settings.vrchat.enabled = app_state.vrchat.is_enabled();
     // Startup notifications are one-shot: only the owning settings context may
     // drain them. A non-consuming read (omitted argument or `false`) must leave
     // both queues intact and return the empty transient fields already set by

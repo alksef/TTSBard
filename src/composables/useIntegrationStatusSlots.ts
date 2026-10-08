@@ -1,10 +1,12 @@
 import { computed, type Ref } from 'vue'
-import { Globe, Twitch, Tv, Inbox } from 'lucide-vue-next'
+import { Globe, Twitch, Tv, Inbox, MessageSquareText } from 'lucide-vue-next'
+import { t } from '../i18n'
 import {
   webviewTone,
   twitchTone,
   vtsTone,
   inputServerTone,
+  vrchatTone,
   inputServerStatusLabel,
   integrationStatusLabel,
   integrationServiceName,
@@ -23,9 +25,9 @@ import { useWebViewRuntimeStatus } from './useWebViewRuntimeStatus'
 import { useVtsRuntimeStatus } from './useVtsRuntimeStatus'
 import { useTwitchRuntimeStatus } from './useTwitchRuntimeStatus'
 import { useInputServerRuntimeStatus } from './useInputServerRuntimeStatus'
-import { useWebViewSettings, useVTubeStudioSettings } from './useAppSettings'
+import { useWebViewSettings, useVTubeStudioSettings, useVrchatSettings } from './useAppSettings'
 
-export type StatusService = 'webview' | 'twitch' | 'vts' | 'inputServer'
+export type StatusService = 'webview' | 'twitch' | 'vts' | 'vrchat' | 'inputServer'
 
 export interface StatusSlot {
   service: StatusService
@@ -51,6 +53,7 @@ export interface IntegrationStatusSources {
   inputServerRuntime: Ref<InputServerRuntime>
   webviewDesired: Ref<WebViewDesired>
   vtsDesired: Ref<VtsDesired>
+  vrchatEnabled: Ref<boolean>
 }
 
 export function createIntegrationStatusProjection(sources: IntegrationStatusSources) {
@@ -61,11 +64,13 @@ export function createIntegrationStatusProjection(sources: IntegrationStatusSour
     const inputServerRuntimeVal = sources.inputServerRuntime.value
     const webviewDesiredVal = sources.webviewDesired.value
     const vtsDesiredVal = sources.vtsDesired.value
+    const vrchatEnabledVal = sources.vrchatEnabled.value
 
     const webviewToneVal = webviewTone(webviewDesiredVal, webviewRuntimeVal)
     const twitchToneVal = twitchTone(twitchRuntimeVal)
     const vtsToneVal = vtsTone(vtsDesiredVal, vtsRuntimeVal)
     const inputServerToneVal = inputServerTone(inputServerRuntimeVal)
+    const vrchatToneVal = vrchatTone(vrchatEnabledVal)
 
     return [
       {
@@ -90,6 +95,13 @@ export function createIntegrationStatusProjection(sources: IntegrationStatusSour
         connecting:
           vtsRuntimeVal.state === 'Connecting' ||
           (vtsRuntimeVal.state === 'Connected' && !vtsRuntimeVal.authenticated),
+      },
+      {
+        service: 'vrchat',
+        icon: MessageSquareText,
+        tone: vrchatToneVal,
+        label: t('integrations.status.vrchat_output'),
+        connecting: false,
       },
       {
         service: 'inputServer',
@@ -124,6 +136,9 @@ export function createIntegrationStatusProjection(sources: IntegrationStatusSour
           case 'inputServer':
             errorReason = integrationErrorReason('inputServer', sources.inputServerRuntime.value)
             break
+          case 'vrchat':
+            // Outbound UDP provides no receiver status or actionable error state.
+            continue
           default: {
             const _exhaustiveCheck: never = slot.service
             throw new Error(`Unhandled integration service: ${_exhaustiveCheck}`)
@@ -158,6 +173,7 @@ export function useIntegrationStatusSlots() {
 
   const webviewSettings = useWebViewSettings()
   const vtsSettings = useVTubeStudioSettings()
+  const vrchatSettings = useVrchatSettings()
 
   const webviewRuntime = computed<WebViewRuntime>(() =>
     webviewState.value === 'error'
@@ -184,6 +200,7 @@ export function useIntegrationStatusSlots() {
   const vtsDesired = computed<VtsDesired>(() => ({
     shouldRun: (vtsSettings.value?.enabled ?? false) || vtsDesiredRunning.value,
   }))
+  const vrchatEnabled = computed(() => vrchatSettings.value?.enabled ?? false)
 
   return createIntegrationStatusProjection({
     webviewRuntime,
@@ -192,5 +209,6 @@ export function useIntegrationStatusSlots() {
     inputServerRuntime,
     webviewDesired,
     vtsDesired,
+    vrchatEnabled,
   })
 }

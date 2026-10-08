@@ -68,6 +68,10 @@ export function inputServerTone(runtime: InputServerRuntime): IntegrationTone {
   return 'gray'
 }
 
+export function vrchatTone(enabled: boolean): IntegrationTone {
+  return enabled ? 'green' : 'gray'
+}
+
 export function isIntegrationVisible(tone: IntegrationTone, connecting = false): boolean {
   return tone !== 'gray' || connecting
 }

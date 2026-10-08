@@ -38,6 +38,7 @@ mod telegram;
 mod thread_manager;
 mod tts;
 mod twitch;
+pub mod vrchat;
 mod vtube_studio;
 mod webview;
 mod window;
@@ -628,6 +629,11 @@ pub fn run() {
             commands::vtube_studio::get_vtube_studio_status,
             commands::vtube_studio::get_vtube_studio_authenticated,
             commands::vtube_studio::get_vtube_studio_desired_running,
+            // VRChat commands
+            commands::vrchat::get_vrchat_settings,
+            commands::vrchat::save_vrchat_settings,
+            commands::vrchat::set_vrchat_typing,
+            commands::vrchat::send_vrchat_text,
             // Input server commands
             commands::input_server::get_input_server_settings,
             commands::input_server::save_input_server_settings,

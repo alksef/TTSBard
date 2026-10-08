@@ -93,6 +93,10 @@ impl RoutedText {
     pub fn broadcast(text: String) -> Self {
         Self::new(text, false, false)
     }
+
+    pub fn skip_vrchat(&self) -> bool {
+        self.skip_webview
+    }
 }
 
 impl Serialize for RoutedText {

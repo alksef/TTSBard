@@ -15,6 +15,7 @@ import SettingsPanel from './components/SettingsPanel.vue'
 import HotkeysPanel from './components/HotkeysPanel.vue'
 import InterceptPanel from './components/InterceptPanel.vue'
 import VTubeStudioPanel from './components/VTubeStudioPanel.vue'
+import VRChatPanel from './components/VRChatPanel.vue'
 import InputServerPanel from './components/InputServerPanel.vue'
 import OcrPanel from './components/OcrPanel.vue'
 import ErrorToasts from './components/ErrorToasts.vue'
@@ -47,7 +48,7 @@ import {
   GET_UPNP_STATUS_COMMAND,
 } from './ipc/webviewUpnp'
 
-type Panel = 'input' | 'tts' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'input-server' | 'vtube-studio' | 'ocr' | 'settings' | 'hotkeys' | 'intercept'
+type Panel = 'input' | 'tts' | 'audio' | 'preprocessor' | 'webview' | 'twitch' | 'input-server' | 'vtube-studio' | 'vrchat' | 'ocr' | 'settings' | 'hotkeys' | 'intercept'
 
 const currentPanel = ref<Panel>('input')
 
@@ -628,6 +629,7 @@ onUnmounted(() => {
           <TwitchPanel v-show="currentPanel === 'twitch'" />
           <InputServerPanel v-show="currentPanel === 'input-server'" />
           <VTubeStudioPanel v-show="currentPanel === 'vtube-studio'" />
+          <VRChatPanel v-show="currentPanel === 'vrchat'" />
           <OcrPanel v-show="currentPanel === 'ocr'" :active="currentPanel === 'ocr'" />
           <SettingsPanel v-show="currentPanel === 'settings'" />
           <HotkeysPanel v-show="currentPanel === 'hotkeys'" :active="currentPanel === 'hotkeys'" />

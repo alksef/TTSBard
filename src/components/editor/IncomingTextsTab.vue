@@ -22,6 +22,7 @@ const props = defineProps<{
   route: IncomingRoute
   twitchConnected: boolean
   webviewConnected: boolean
+  vrchatEnabled: boolean
   busyIds: ReadonlySet<string>
   editDisabled?: boolean
   compact: boolean
@@ -61,6 +62,7 @@ function onAutoPlayChange(event: Event) {
         :compact="compact"
         :twitch-connected="twitchConnected"
         :webview-connected="webviewConnected"
+        :vrchat-enabled="vrchatEnabled"
         @select="emit('route-change', $event)"
       />
     </div>

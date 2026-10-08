@@ -116,6 +116,7 @@ function mockSettings(): AppSettingsDto {
       start_on_boot: false,
       typingAction: { outputMode: 'Event', parameterName: 'TTSBardTyping', startHotkeyId: '', stopHotkeyId: '', startHotkeyName: '', stopHotkeyName: '', itemFileName: '', itemType: '' },
     },
+    vrchat: { enabled: false, start_on_boot: false, host: '127.0.0.1', port: 9000 },
   }
 }
 

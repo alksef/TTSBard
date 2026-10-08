@@ -105,6 +105,13 @@ pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std:
     info!("Loading OCR settings...");
     *app_state.inner().ocr.settings.blocking_write() = settings.ocr.clone();
 
+    // Load VRChat settings into AppState
+    info!("Loading VRChat settings...");
+    app_state
+        .inner()
+        .vrchat
+        .update_settings_internal(settings.vrchat.runtime_at_startup());
+
     // Load hotkey_enabled setting into AppState
     info!("Loading hotkey_enabled setting...");
     *app_state.inner().hotkey_enabled.lock() = settings.hotkey_enabled;
@@ -138,6 +145,7 @@ pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std:
         let worker_playback = app_state.inner().playback_manager.clone();
         let worker_webview = app_state.inner().webview.clone();
         let worker_twitch = app_state.inner().twitch.clone();
+        let worker_vrchat = app_state.inner().vrchat.clone();
         app_state.inner().runtime.spawn(async move {
             speech_worker(
                 worker_queue,
@@ -148,6 +156,7 @@ pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std:
                 worker_playback,
                 worker_webview,
                 worker_twitch,
+                worker_vrchat,
             )
             .await;
         });
@@ -1230,6 +1239,7 @@ async fn speech_worker(
     playback_manager: Arc<parking_lot::Mutex<Option<Arc<crate::playback::PlaybackManager>>>>,
     webview: Arc<crate::webview::service::WebViewService>,
     twitch: Arc<crate::twitch::TwitchService>,
+    vrchat: Arc<crate::vrchat::VrchatService>,
 ) {
     use crate::commands::tts_pipeline;
 
@@ -1379,16 +1389,20 @@ async fn speech_worker(
                     let delivery_text = prepared.delivery_text.clone();
                     let webview_svc = webview.clone();
                     let twitch_svc = twitch.clone();
+                    let vrchat_svc = vrchat.clone();
                     let skip_twitch = snapshot.delivery.skip_twitch();
                     let skip_webview = snapshot.delivery.skip_webview();
+                    let skip_vrchat = snapshot.delivery.skip_vrchat();
                     let join_handle = tokio::task::spawn_blocking(move || {
                         route_external_text_from_handles(
                             &webview_svc,
                             &twitch_svc,
+                            &vrchat_svc,
                             &delivery_text,
                             &text,
                             skip_twitch,
                             skip_webview,
+                            skip_vrchat,
                         );
                     });
                     if let Err(e) = join_handle.await {
@@ -1477,10 +1491,12 @@ async fn speech_worker(
 fn route_external_text_from_handles(
     webview: &crate::webview::service::WebViewService,
     twitch: &crate::twitch::TwitchService,
+    vrchat: &crate::vrchat::VrchatService,
     delivery_text: &str,
     insert_text: &str,
     skip_twitch: bool,
     skip_webview: bool,
+    skip_vrchat: bool,
 ) {
     if !skip_webview {
         // ROADMAP-107: per-server choice between the user's original text and
@@ -1506,6 +1522,17 @@ fn route_external_text_from_handles(
                 insert_text
             };
             twitch.send_event(crate::events::TwitchEvent::SendMessage(text.to_string()));
+        }
+    }
+    if !skip_vrchat && vrchat.is_enabled() {
+        let vrchat_svc = vrchat.clone();
+        let text = delivery_text.to_string();
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                if let Err(e) = vrchat_svc.send_text(&text).await {
+                    tracing::warn!(error = %e, "Failed to deliver text to VRChat chatbox");
+                }
+            });
         }
     }
 }
@@ -1641,7 +1668,10 @@ mod tests {
         twitch.settings.blocking_write().enabled = true;
 
         let clean_text = "Привет, мир";
-        route_external_text_from_handles(&webview, &twitch, clean_text, clean_text, false, false);
+        let vrchat = crate::vrchat::VrchatService::new();
+        route_external_text_from_handles(
+            &webview, &twitch, &vrchat, clean_text, clean_text, false, false, false,
+        );
 
         match webview_rx.try_recv() {
             Ok(AppEvent::TextSentToTts(routed)) => {
@@ -1676,7 +1706,10 @@ mod tests {
         let twitch = crate::twitch::TwitchService::new(twitch_tx);
         twitch.settings.blocking_write().enabled = true;
 
-        route_external_text_from_handles(&webview, &twitch, "hello", "hello", true, true);
+        let vrchat = crate::vrchat::VrchatService::new();
+        route_external_text_from_handles(
+            &webview, &twitch, &vrchat, "hello", "hello", true, true, true,
+        );
 
         assert!(
             webview_rx.try_recv().is_err(),
@@ -1700,12 +1733,15 @@ mod tests {
         let twitch = crate::twitch::TwitchService::new(twitch_tx);
         twitch.settings.blocking_write().enabled = true;
 
+        let vrchat = crate::vrchat::VrchatService::new();
         // Сервисы после Task B создаются с send_original_text = true.
         route_external_text_from_handles(
             &webview,
             &twitch,
+            &vrchat,
             "67 бананов.",
             "шестьдесят семь бананов.",
+            false,
             false,
             false,
         );
@@ -1738,11 +1774,14 @@ mod tests {
         let twitch = crate::twitch::TwitchService::new(twitch_tx);
         twitch.settings.blocking_write().enabled = true;
 
+        let vrchat = crate::vrchat::VrchatService::new();
         route_external_text_from_handles(
             &webview,
             &twitch,
+            &vrchat,
             "67 бананов.",
             "шестьдесят семь бананов.",
+            false,
             false,
             false,
         );
@@ -1776,11 +1815,14 @@ mod tests {
         twitch.settings.blocking_write().enabled = true;
         twitch.settings.blocking_write().send_original_text = false;
 
+        let vrchat = crate::vrchat::VrchatService::new();
         route_external_text_from_handles(
             &webview,
             &twitch,
+            &vrchat,
             "67 бананов.",
             "шестьдесят семь бананов.",
+            false,
             false,
             false,
         );
@@ -1798,6 +1840,179 @@ mod tests {
             }
             other => panic!("unexpected twitch event: {other:?}"),
         }
+    }
+
+    #[test]
+    fn routed_text_delivers_to_vrchat_when_enabled() {
+        use crate::config::VrchatSettings;
+        use rosc::decoder::decode_udp;
+        use rosc::{OscPacket, OscType};
+        use std::net::UdpSocket;
+        use std::time::Duration;
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _guard = rt.enter();
+
+        let socket = UdpSocket::bind("127.0.0.1:0").expect("bind socket");
+        socket
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("set timeout");
+        let port = socket.local_addr().expect("port").port();
+
+        let webview = crate::webview::service::WebViewService::new();
+        let (twitch_tx, _) = tokio::sync::broadcast::channel(16);
+        let twitch = crate::twitch::TwitchService::new(twitch_tx);
+        let vrchat = crate::vrchat::VrchatService::with_settings(VrchatSettings {
+            enabled: true,
+            start_on_boot: false,
+            host: "127.0.0.1".into(),
+            port,
+        });
+
+        route_external_text_from_handles(
+            &webview,
+            &twitch,
+            &vrchat,
+            "Clean delivery text",
+            "Markup text 123",
+            true,
+            true,
+            false,
+        );
+
+        let mut buf = [0u8; 1024];
+        let (len, _) = socket.recv_from(&mut buf).expect("recv ok");
+
+        let (_, packet) = decode_udp(&buf[..len]).expect("valid osc packet");
+        match packet {
+            OscPacket::Message(msg) => {
+                assert_eq!(msg.addr, "/chatbox/input");
+                assert_eq!(msg.args[0], OscType::String("Clean delivery text".into()));
+                assert_eq!(msg.args[1], OscType::Bool(true));
+                assert_eq!(msg.args[2], OscType::Bool(true));
+            }
+            _ => panic!("expected OscMessage"),
+        }
+    }
+
+    #[test]
+    fn routed_text_skips_vrchat_when_flag_set() {
+        use crate::config::VrchatSettings;
+        use std::net::UdpSocket;
+        use std::time::Duration;
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _guard = rt.enter();
+
+        let socket = UdpSocket::bind("127.0.0.1:0").expect("bind socket");
+        socket
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .expect("set timeout");
+        let port = socket.local_addr().expect("port").port();
+
+        let webview = crate::webview::service::WebViewService::new();
+        let (twitch_tx, _) = tokio::sync::broadcast::channel(16);
+        let twitch = crate::twitch::TwitchService::new(twitch_tx);
+        let vrchat = crate::vrchat::VrchatService::with_settings(VrchatSettings {
+            enabled: true,
+            start_on_boot: false,
+            host: "127.0.0.1".into(),
+            port,
+        });
+
+        route_external_text_from_handles(
+            &webview,
+            &twitch,
+            &vrchat,
+            "Clean delivery text",
+            "Markup text",
+            false,
+            false,
+            true,
+        );
+
+        let mut buf = [0u8; 1024];
+        let res = socket.recv_from(&mut buf);
+        assert!(res.is_err(), "must not receive when skip_vrchat is true");
+    }
+
+    #[test]
+    fn routed_text_skips_vrchat_when_disabled() {
+        use crate::config::VrchatSettings;
+        use std::net::UdpSocket;
+        use std::time::Duration;
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _guard = rt.enter();
+
+        let socket = UdpSocket::bind("127.0.0.1:0").expect("bind socket");
+        socket
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .expect("set timeout");
+        let port = socket.local_addr().expect("port").port();
+
+        let webview = crate::webview::service::WebViewService::new();
+        let (twitch_tx, _) = tokio::sync::broadcast::channel(16);
+        let twitch = crate::twitch::TwitchService::new(twitch_tx);
+        let vrchat = crate::vrchat::VrchatService::with_settings(VrchatSettings {
+            enabled: false,
+            start_on_boot: false,
+            host: "127.0.0.1".into(),
+            port,
+        });
+
+        route_external_text_from_handles(
+            &webview,
+            &twitch,
+            &vrchat,
+            "Clean delivery text",
+            "Markup text",
+            false,
+            false,
+            false,
+        );
+
+        let mut buf = [0u8; 1024];
+        let res = socket.recv_from(&mut buf);
+        assert!(res.is_err(), "must not receive when vrchat is disabled");
+    }
+
+    #[test]
+    fn routed_text_vrchat_invalid_destination_does_not_break_webview_or_twitch() {
+        use crate::config::VrchatSettings;
+        use crate::events::{AppEvent, TwitchEvent};
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _guard = rt.enter();
+
+        let webview = crate::webview::service::WebViewService::new();
+        let (webview_tx, mut webview_rx) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
+        webview.set_event_sender(webview_tx);
+
+        let (twitch_tx, mut twitch_rx) = tokio::sync::broadcast::channel::<TwitchEvent>(16);
+        let twitch = crate::twitch::TwitchService::new(twitch_tx);
+        twitch.settings.blocking_write().enabled = true;
+
+        let vrchat = crate::vrchat::VrchatService::with_settings(VrchatSettings {
+            enabled: true,
+            start_on_boot: false,
+            host: "127.0.0.1".into(),
+            port: 1,
+        });
+
+        route_external_text_from_handles(
+            &webview,
+            &twitch,
+            &vrchat,
+            "Delivery text",
+            "Insert text",
+            false,
+            false,
+            false,
+        );
+
+        assert!(webview_rx.try_recv().is_ok());
+        assert!(twitch_rx.try_recv().is_ok());
     }
 
     #[test]

@@ -116,7 +116,7 @@ describe('ROUTE_META', () => {
 
   it('keeps shortcut consistent with the route', () => {
     const expected: Record<EditorRoute, string> = {
-      everywhere: 'без префикса',
+      everywhere: '',
       no_twitch: '!',
       voice_only: '!!',
       twitch_only: '!t',
@@ -134,6 +134,7 @@ describe('ROUTE_META', () => {
       expect(meta.destinations.includes('voice')).toBe(described('голос'))
       expect(meta.destinations.includes('webview')).toBe(described('webview'))
       expect(meta.destinations.includes('twitch')).toBe(described('twitch'))
+      expect(meta.destinations.includes('vrchat')).toBe(described('vrchat'))
     }
   })
 

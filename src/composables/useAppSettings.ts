@@ -8,7 +8,7 @@
 import { ref, computed, provide, inject, getCurrentScope, onScopeDispose, type ComputedRef, type Ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import type { AppSettingsDto, AppSettingsContext } from '../types/settings'
+import type { AppSettingsDto, AppSettingsContext, VrchatSettingsDto } from '../types/settings'
 import { APP_SETTINGS_KEY, SETTINGS_CHANGED_EVENT } from '../types/settings'
 import { debugLog, debugError, debugWarn } from '../utils/debug'
 import { createAsyncCleanupScope } from '../utils/asyncCleanup'
@@ -329,4 +329,11 @@ export function useDspSettings(): ComputedRef<AppSettingsDto['dsp'] | undefined>
 export function useVTubeStudioSettings(): ComputedRef<AppSettingsDto['vtube_studio'] | undefined> {
   const { settings } = useAppSettings()
   return computed(() => settings.value?.vtube_studio)
+}
+
+export type { VrchatSettingsDto } from '../types/settings'
+
+export function useVrchatSettings(): ComputedRef<VrchatSettingsDto | undefined> {
+  const { settings } = useAppSettings()
+  return computed(() => settings.value?.vrchat)
 }

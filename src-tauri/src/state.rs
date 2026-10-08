@@ -144,6 +144,9 @@ pub struct AppState {
     /// VTube Studio service (settings, connection, typing state)
     pub vtube_studio: Arc<crate::vtube_studio::VTubeStudioService>,
 
+    /// VRChat OSC service (settings, typing state, output datagrams)
+    pub vrchat: Arc<crate::vrchat::VrchatService>,
+
     /// Backend ready flag - set to true when all initialization is complete
     pub backend_ready: Arc<AtomicBool>,
 
@@ -221,6 +224,8 @@ impl AppState {
 
         let vtube_studio = Arc::new(crate::vtube_studio::VTubeStudioService::new());
 
+        let vrchat = Arc::new(crate::vrchat::VrchatService::new());
+
         let editor = Arc::new(crate::editor::EditorService::new());
 
         let webview = Arc::new(crate::webview::service::WebViewService::new());
@@ -243,6 +248,7 @@ impl AppState {
             active_window: Arc::new(Mutex::new(ActiveWindow::None)),
             twitch,
             vtube_studio,
+            vrchat,
             backend_ready: Arc::new(AtomicBool::new(false)),
             playback_manager: Arc::new(Mutex::new(None)),
             hotkey_recording_in_progress: Arc::new(AtomicBool::new(false)),

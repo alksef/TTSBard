@@ -25,11 +25,12 @@ const currentMeta = computed(() => ROUTE_META[props.route])
 
 const buttonAriaLabel = computed(() => {
   const m = currentMeta.value
-  return t('editor.route.button_aria', {
+  const label = t('editor.route.button_aria', {
     label: m.label,
     description: m.description,
     shortcut: m.shortcut,
   })
+  return m.shortcut ? label : `${m.label} — ${m.description}`
 })
 
 const options = computed(() => ROUTE_ORDER.map((id, index) => {
@@ -187,7 +188,7 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
           <Star :size="12" :fill="opt.isDefault ? 'currentColor' : 'none'" />
         </button>
         <span class="option-label">{{ opt.meta.label }}</span>
-        <span class="option-shortcut">{{ opt.meta.shortcut }}</span>
+        <span v-if="opt.meta.shortcut" class="option-shortcut">{{ opt.meta.shortcut }}</span>
         <span class="option-desc">{{ opt.meta.description }}</span>
       </li>
     </ul>
