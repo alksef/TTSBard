@@ -12,7 +12,7 @@
 | Передавать игровой текст из LunaTranslator | [LunaTranslator → TTSBard](./lunatranslator/README.md) — установка selfbuild-скрипта и настройка отправки. |
 | Отправлять текст из другой программы | [Входящий сервер](../user/input-server.md) — HTTP API, очередь и ручной разбор реплик. |
 | Показывать набор текста на модели VTube Studio | [VTube Studio](./vtube-studio.md) — Plugin API, INPUT/OUTPUT, Hotkeys и предмет сцены. |
-| Дублировать реплики в Twitch Chat | [Настройка Twitch](./twitch.md) — подключение и восстановление соединения. |
+| Дублировать реплики в Twitch Chat | [Настройка Twitch](./twitch.md) — режимы Twitch API и классический IRC, подключение и восстановление соединения. |
 | Отправлять реплики и индикатор набора в VRChat | [VRChat: вывод в Chatbox](./vrchat.md) — включение OSC, параметры UDP, маршруты и форматирование. |
 
 WebView/SSE — исходящий текстовый поток. Входящий HTTP-сервер принимает реплики

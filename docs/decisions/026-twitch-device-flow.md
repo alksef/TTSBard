@@ -1,7 +1,7 @@
 # DECISION-026 — Авторизация Twitch через Device Code Flow
 
 **Статус:** `accepted` (утверждено пользователем 2026-10-10)
-**Связано:** [ROADMAP-132](../roadmap/active/132-twitch-api.md), [DECISION-025](./025-shared-secret-store.md)
+**Связано:** [ROADMAP-131](../roadmap/completed/131-twitch-api.md), [DECISION-025](./025-shared-secret-store.md)
 
 ## Контекст
 

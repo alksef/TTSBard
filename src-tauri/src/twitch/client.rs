@@ -1018,7 +1018,7 @@ mod tests {
             }
             if self
                 .transient_failures
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
                     if n > 0 {
                         Some(n - 1)
                     } else {
