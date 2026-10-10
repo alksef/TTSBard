@@ -49,7 +49,7 @@ function Test-DictionaryHashes {
         }
         $actual = (Get-FileHash -LiteralPath $case.Path -Algorithm SHA256).Hash
         if ($actual -ne $case.Expected) {
-            Add-Error "$($case.Label): SHA-256 mismatch — expected $($case.Expected), got $actual"
+            Add-Error "$($case.Label): SHA-256 mismatch - expected $($case.Expected), got $actual"
         }
     }
 }
