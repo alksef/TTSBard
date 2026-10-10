@@ -31,6 +31,10 @@ implementation details и журналы обсуждений сюда не по
 - [DECISION-023 — Ограниченное хранение terminal jobs очереди речи](./023-speech-queue-terminal-retention.md) — 50 последних `Completed`/`Cancelled`, вытеснение самого старого; active и `Failed` не вытесняются
 - [DECISION-024 — UPnP port forwarding вне async lifecycle WebView](./024-webview-upnp-ownership.md) — router I/O на blocking pool с bounded wait и epoch-поколениями; поздний mapping после stop/disable компенсируется; readiness listener не зависит от forwarding
 
+- [DECISION-025 — Общее защищённое хранилище](./025-shared-secret-store.md) — общий DPAPI-файл с разделами интеграций; первым подключён Twitch.
+
+- [DECISION-026 — Авторизация Twitch через Device Code Flow](./026-twitch-device-flow.md) — ссылка с кодом активации для бота и каналов; localhost callback не используется.
+
 ## Заменённые решения
 
 - [DECISION-015 — Отдельный F6-режим](./015-hardcoded-f6-mode.md)

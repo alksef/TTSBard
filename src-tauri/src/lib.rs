@@ -19,6 +19,7 @@ mod playback_window;
 mod preprocessor;
 mod rate_limiter;
 mod secret_log;
+pub mod secrets;
 mod servers;
 mod settings_recovery;
 mod setup;
