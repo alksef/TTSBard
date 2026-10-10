@@ -803,9 +803,20 @@ impl ElevenLabsCatalogCache {
 
 // ==================== Twitch Settings ====================
 
+/// Twitch connection transport mode (ROADMAP-132)
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TwitchMode {
+    #[default]
+    Irc,
+    Api,
+}
+
 /// Twitch chat integration settings
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TwitchSettings {
+    #[serde(default)]
+    pub mode: TwitchMode,
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
@@ -830,6 +841,7 @@ fn default_send_original_text() -> bool {
 impl Default for TwitchSettings {
     fn default() -> Self {
         Self {
+            mode: TwitchMode::default(),
             enabled: false,
             username: String::new(),
             token: String::new(),
@@ -843,16 +855,24 @@ impl Default for TwitchSettings {
 impl TwitchSettings {
     /// Check if settings are valid
     pub fn is_valid(&self) -> Result<(), String> {
-        if twitch_irc::validate::validate_login(&self.username.to_ascii_lowercase()).is_err() {
-            return Err("twitch.invalid_username".to_string());
+        match self.mode {
+            TwitchMode::Irc => {
+                if twitch_irc::validate::validate_login(&self.username.to_ascii_lowercase())
+                    .is_err()
+                {
+                    return Err("twitch.invalid_username".to_string());
+                }
+                if self.token.trim().is_empty() {
+                    return Err("twitch.missing_token".to_string());
+                }
+                if twitch_irc::validate::validate_login(&self.channel.to_ascii_lowercase()).is_err()
+                {
+                    return Err("twitch.invalid_channel".to_string());
+                }
+                Ok(())
+            }
+            TwitchMode::Api => Ok(()),
         }
-        if self.token.trim().is_empty() {
-            return Err("twitch.missing_token".to_string());
-        }
-        if twitch_irc::validate::validate_login(&self.channel.to_ascii_lowercase()).is_err() {
-            return Err("twitch.invalid_channel".to_string());
-        }
-        Ok(())
     }
 }
 
@@ -3536,6 +3556,19 @@ mod tests {
             settings.channel = channel.into();
             assert!(settings.is_valid().is_err(), "{channel}");
         }
+    }
+
+    #[test]
+    fn twitch_settings_mode_defaults_to_irc_and_validates_api_mode() {
+        let legacy_json = r#"{"enabled": true}"#;
+        let settings: TwitchSettings = serde_json::from_str(legacy_json).unwrap();
+        assert_eq!(settings.mode, TwitchMode::Irc);
+        assert!(settings.is_valid().is_err());
+
+        let api_json = r#"{"mode": "api", "enabled": true}"#;
+        let api_settings: TwitchSettings = serde_json::from_str(api_json).unwrap();
+        assert_eq!(api_settings.mode, TwitchMode::Api);
+        assert!(api_settings.is_valid().is_ok());
     }
 
     #[test]

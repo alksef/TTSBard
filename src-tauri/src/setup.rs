@@ -387,6 +387,10 @@ pub fn init_app(app: &App, mut settings: AppSettings) -> Result<(), Box<dyn std:
     // Initialize WebView server
     init_webview_server(&app_state, app.handle().clone());
 
+    // Initialize Twitch API authorization coordinator before Twitch client (ROADMAP-132)
+    // so any start_on_boot API client finds the coordinator published and does not fail.
+    init_twitch_api_auth(&app_state, settings_manager.inner());
+
     // Initialize Twitch client
     init_twitch_client(&app_state, app.handle().clone());
 
@@ -1088,6 +1092,30 @@ fn init_twitch_client(app_state: &AppState, app_handle: AppHandle) {
     app_state.runtime.spawn(async move {
         crate::servers::run_twitch_client(app_state_clone, app_handle, twitch_rx, shutdown).await;
     });
+}
+
+/// Initialize the Twitch API authorization coordinator (ROADMAP-132).
+///
+/// The credential path is derived from the settings config directory here and
+/// never supplied by the frontend. An active OAuth session is cancelled when the
+/// shared shutdown token fires.
+fn init_twitch_api_auth(app_state: &AppState, settings_manager: &SettingsManager) {
+    let path = settings_manager.config_dir().join("secrets.dat");
+    let store = crate::twitch::credentials::CredentialsStore::new(path);
+    let shutdown = app_state.shutdown.clone();
+    let coordinator = Arc::new(crate::twitch::auth::TwitchAuthCoordinator::new(
+        store,
+        crate::twitch::api::DEFAULT_TIMEOUT,
+        shutdown.clone(),
+    ));
+
+    *app_state.twitch.auth.blocking_write() = Some(coordinator.clone());
+
+    app_state.runtime.spawn(async move {
+        shutdown.cancelled().await;
+        coordinator.cancel_active().await;
+    });
+    info!("Twitch API auth coordinator initialized");
 }
 
 /// Initialize the input server loopback supervisor.
@@ -2037,5 +2065,19 @@ mod tests {
             build_main_window_initialization_script(true, CompactView::Mono),
             "window.__TTSBARD_START_COMPACT__ = true;\nwindow.__TTSBARD_COMPACT_VIEW__ = \"mono\";"
         );
+    }
+
+    #[test]
+    fn twitch_api_auth_initialized_publishes_coordinator_to_app_state() {
+        let app_state = crate::state::AppState::new();
+        let test_dir =
+            std::env::temp_dir().join(format!("ttsbard-test-setup-{}", uuid::Uuid::new_v4()));
+        let settings_manager = crate::SettingsManager::with_config_dir(test_dir.clone()).unwrap();
+
+        assert!(app_state.twitch.auth.blocking_read().is_none());
+        super::init_twitch_api_auth(&app_state, &settings_manager);
+        assert!(app_state.twitch.auth.blocking_read().is_some());
+
+        let _ = std::fs::remove_dir_all(&test_dir);
     }
 }

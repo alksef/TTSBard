@@ -8,6 +8,7 @@ export const TWITCH_ERROR_META = {
   'twitch.empty_text': { retryable: false },
   'twitch.unavailable': { retryable: true },
   'twitch.send_failed': { retryable: true },
+  'twitch.delivery_unknown': { retryable: false },
   'twitch.queue_full': { retryable: true },
   'twitch.too_long': { retryable: false },
   'twitch.partial_delivery': { retryable: false },

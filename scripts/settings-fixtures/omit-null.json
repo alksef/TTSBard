@@ -90,6 +90,7 @@
     "send_original_text": true
   },
   "twitch": {
+    "mode": "irc",
     "enabled": false,
     "username": "",
     "token": "",

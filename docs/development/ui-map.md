@@ -19,7 +19,7 @@
 | `audio` | Аудио | `AudioPanel.vue` | `audio/AudioDevicesTab.vue`, `AudioEffectsTab.vue`, `AudioPreviewBar.vue`, `DspSettings.vue`, `EqSettings.vue`, `CompressorSettings.vue`, `LimiterSettings.vue`, `EffectsSettings.vue` |
 | `preprocessor` | Препроцессор | `PreprocessorPanel.vue` | Правила обработки и их условные настройки |
 | `webview` | WebView | `WebViewPanel.vue` | Сервер с постоянным LAN bind, порт, локальный/LAN URL; шаблоны, тест, внешнее подключение и UPnP |
-| `twitch` | Twitch | `TwitchPanel.vue` | Подключение и настройки отправки |
+| `twitch` | Twitch | `TwitchPanel.vue` | Режимы подключения (IRC и Twitch API), реквизиты в блоке подключения; отдельный блок «Аккаунты» для режима API: авторизация бота через Device Code Flow, локальный сброс бота с сохранением реквизитов и каналов, список авторизованных каналов с выбором одного получателя и автоматическим обновлением активного API-подключения при смене канала и локальным удалением доступа, добавление канала через Device Code Flow с копированием/открытием ссылки активации, ошибки авторизации и хранилища, тест |
 | `vtube-studio` | VTube Studio | `VTubeStudioPanel.vue` | Адрес/порт, параметры и действия при наборе, тестирование |
 | `vrchat` | VRChat | `VRChatPanel.vue` | Адрес и порт OSC, запуск при старте, тестовое сообщение, помощь |
 | `ocr` | OCR | `OcrPanel.vue` | Настройки распознавания, выбор экрана захвата и выбор области |

@@ -1,3 +1,6 @@
+use super::api::ApiError;
+use super::auth::{AuthError, TwitchAuthCoordinator};
+use super::TwitchMode;
 use super::TwitchSettings;
 use std::future::Future;
 use std::sync::Arc;
@@ -21,6 +24,12 @@ pub(crate) const OUTGOING_QUEUE_CAPACITY: usize = 20;
 /// аккаунта; удовлетворяет и лимиту 1 сообщение/сек.
 const MIN_SEND_INTERVAL: Duration = Duration::from_millis(1500);
 
+/// Ограниченное число попыток для transient idle-validation (НЕ повтор отправки
+/// сообщения): после исчерпания сессия сохраняется до следующего периода.
+const VALIDATION_RETRY_ATTEMPTS: usize = 3;
+/// Короткий backoff между transient idle-validation попытками.
+const VALIDATION_RETRY_BACKOFF: Duration = Duration::from_secs(5);
+
 /// Интервал опроса здоровья канала: библиотека реконнектится молча и не эмитит
 /// событие потери соединения, поэтому тихий обрыв обнаруживается опросом
 /// `get_channel_status` (пара (wanted, joined)).
@@ -42,15 +51,23 @@ async fn wait_initial_join_deadline(deadline: Option<tokio::time::Instant>) {
 const CHANNEL_HEALTH_POLL_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Отказ отправки сообщения в Twitch.
+///
+/// Варианты, отличные от `NotConnected`/`QueueFull`, сохраняют типизированную
+/// неоднозначность результата фактической отправки: вызывающий слой никогда не
+/// выводит retryability из содержимого строк, а полагается на вариант.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SendFailure {
     /// Клиент не в состоянии Connected (в т.ч. до подтверждённого JOIN).
     NotConnected,
     /// Исходящая очередь заполнена — сообщение НЕ поставлено.
     QueueFull,
-    /// Локальная ошибка записи/таймаут. Сообщение могло дойти до Twitch,
-    /// поэтому автоматически НЕ повторяется (анти-дубликат политика).
-    Send(String),
+    /// Достоверный отказ: сообщение НЕ было доставлено (API 401/403/429,
+    /// `is_sent=false` или локальная валидация до POST). Повтор безопасен.
+    Rejected(String),
+    /// Неоднозначный итог: сообщение могло дойти до Twitch (transport/5xx/
+    /// malformed ответ после POST, таймаут записи IRC, остановка worker'а).
+    /// Повтор запрещён анти-дубликат политикой.
+    Ambiguous(String),
 }
 
 impl std::fmt::Display for SendFailure {
@@ -58,7 +75,7 @@ impl std::fmt::Display for SendFailure {
         match self {
             SendFailure::NotConnected => write!(f, "Twitch not connected"),
             SendFailure::QueueFull => write!(f, "Twitch outgoing queue is full"),
-            SendFailure::Send(e) => write!(f, "{}", e),
+            SendFailure::Rejected(e) | SendFailure::Ambiguous(e) => write!(f, "{}", e),
         }
     }
 }
@@ -183,9 +200,10 @@ fn channel_health_transition(
     }
 }
 /// Элемент исходящей очереди: подготовленный текст и канал ответа отправителю.
-struct OutgoingItem {
-    text: String,
-    response: tokio::sync::oneshot::Sender<Result<(), String>>,
+pub(crate) struct OutgoingItem {
+    pub(crate) text: String,
+    pub(crate) response: tokio::sync::oneshot::Sender<Result<(), SendFailure>>,
+    pub(crate) abort_token: Option<CancellationToken>,
 }
 
 /// Маппинг ошибки try_send в typed-отказ. Закрытая очередь (stop()/смерть
@@ -198,20 +216,46 @@ fn map_try_send_error(err: mpsc::error::TrySendError<OutgoingItem>) -> SendFailu
     }
 }
 
+/// Классифицирует ошибку `send_chat` API в типизированный отказ, сохраняя
+/// certainty: достоверный отказ (Twitch явно отклонил / валидация до POST) не
+/// смешивается с неоднозначным итогом (transport/5xx/malformed после POST).
+fn map_api_send_error(error: ApiError) -> SendFailure {
+    match error {
+        ApiError::Unauthorized
+        | ApiError::Forbidden
+        | ApiError::RateLimited { .. }
+        | ApiError::InvalidInput
+        | ApiError::Validation { .. }
+        | ApiError::Dropped { .. } => SendFailure::Rejected(error.to_string()),
+        ApiError::Http { status } if status < 500 => SendFailure::Rejected(error.to_string()),
+        ApiError::Http { .. } | ApiError::Transport | ApiError::Malformed => {
+            SendFailure::Ambiguous(error.to_string())
+        }
+    }
+}
+
 /// Awaitable handle на завершение фактической отправки сообщения worker'ом.
 /// Не раскрывает внутренний OutgoingItem наружу: публикуется только этот
 /// newtype и его `wait`, маппящий результат в `Result<(), SendFailure>`.
 pub(crate) struct SendCompletion {
-    response: tokio::sync::oneshot::Receiver<Result<(), String>>,
+    response: tokio::sync::oneshot::Receiver<Result<(), SendFailure>>,
 }
 
 impl SendCompletion {
-    /// Ожидает завершения отправки worker'ом. Ошибка записи/таймаут и dropped
-    /// worker (stop()/смерть runtime) отображаются в SendFailure::Send.
+    #[cfg(test)]
+    pub(crate) fn new(response: tokio::sync::oneshot::Receiver<Result<(), SendFailure>>) -> Self {
+        Self { response }
+    }
+
+    /// Ожидает завершения отправки worker'ом. Типизированный итог `SendFailure`
+    /// сохраняется как есть; dropped worker (stop()/смерть runtime) отображается
+    /// консервативно в `SendFailure::Ambiguous` — сообщение могло уйти.
     pub(crate) async fn wait(self) -> Result<(), SendFailure> {
         match self.response.await {
-            Ok(result) => result.map_err(SendFailure::Send),
-            Err(_) => Err(SendFailure::Send("Twitch send worker stopped".to_string())),
+            Ok(result) => result,
+            Err(_) => Err(SendFailure::Ambiguous(
+                "Twitch send worker stopped".to_string(),
+            )),
         }
     }
 }
@@ -247,14 +291,14 @@ impl Drop for TaskDeathGuard {
 
 /// Сливает исходящую очередь с фиксированным интервалом между отправками.
 /// Порядок FIFO сохраняется; ошибка отправки НЕ повторяет элемент.
-async fn run_outgoing_worker<F, Fut>(
+pub(crate) async fn run_outgoing_worker<F, Fut>(
     mut rx: mpsc::Receiver<OutgoingItem>,
     cancel: CancellationToken,
     min_interval: Duration,
     mut send: F,
 ) where
     F: FnMut(String) -> Fut,
-    Fut: Future<Output = Result<(), String>>,
+    Fut: Future<Output = Result<(), SendFailure>>,
 {
     let mut pacer = tokio::time::interval(min_interval);
     // Первый tick интервала tokio срабатывает немедленно — первое сообщение
@@ -272,9 +316,20 @@ async fn run_outgoing_worker<F, Fut>(
             _ = cancel.cancelled() => break,
             item = rx.recv() => {
                 let Some(item) = item else { break };
+                if let Some(ref abort) = item.abort_token {
+                    if abort.is_cancelled() {
+                        let _ = item.response.send(Err(SendFailure::Rejected(
+                            "Twitch message part skipped because prior part failed".to_string(),
+                        )));
+                        continue;
+                    }
+                }
                 pacer.tick().await;
                 let result = send(item.text).await;
                 if let Err(e) = &result {
+                    if let Some(ref abort) = item.abort_token {
+                        abort.cancel();
+                    }
                     // Анти-дубликат: сообщение могло дойти; не повторяем.
                     warn!(error = %e, queue_len = rx.len(), "Outgoing Twitch message failed; not retried");
                 } else {
@@ -286,12 +341,48 @@ async fn run_outgoing_worker<F, Fut>(
     }
 }
 
+/// Проверяет активную API-сессию, повторяя retryable (transient) отказы
+/// ограниченное число раз с коротким backoff. Это только idle-validation и
+/// никогда не повторяет POST сообщения. Терминальные отказы (отзыв, неверная
+/// идентичность/scopes) и смену generation возвращают сразу. Цикл retry
+/// чувствителен к отмене: cancel/shutdown во время backoff немедленно
+/// возвращает `AuthError::Cancelled` и не оставляет detached валидацию.
+async fn validate_active_session_with_retry(
+    auth: &TwitchAuthCoordinator,
+    cancel: &CancellationToken,
+    max_attempts: usize,
+    backoff: Duration,
+) -> Result<(), AuthError> {
+    let mut remaining = max_attempts.max(1);
+    loop {
+        match auth.validate_active_session().await {
+            Ok(()) => return Ok(()),
+            Err(e) if !e.retryable() => return Err(e),
+            Err(e) => {
+                remaining -= 1;
+                if remaining == 0 {
+                    return Err(e);
+                }
+                warn!(
+                    remaining_attempts = remaining,
+                    error = %e,
+                    "Transient periodic API validation failure; retrying shortly"
+                );
+                tokio::select! {
+                    _ = cancel.cancelled() => return Err(AuthError::Cancelled),
+                    _ = tokio::time::sleep(backoff) => {}
+                }
+            }
+        }
+    }
+}
+
 /// Живой runtime одной попытки подключения.
 struct TwitchRuntime {
     /// Единственный сильный handle библиотечного клиента: его drop завершает
     /// фоновый client loop (библиотека держит лишь Weak-ссылки).
-    irc: TwitchIRCClient<SecureTCPTransport, StaticLoginCredentials>,
-    consumer: tokio::task::JoinHandle<()>,
+    irc: Option<TwitchIRCClient<SecureTCPTransport, StaticLoginCredentials>>,
+    consumer: Option<tokio::task::JoinHandle<()>>,
     /// Клон sender'а исходящей очереди: не держит библиотечный runtime.
     outgoing_tx: mpsc::Sender<OutgoingItem>,
     worker: tokio::task::JoinHandle<()>,
@@ -308,6 +399,10 @@ pub struct TwitchClient {
     cancel: Arc<CancellationToken>,
     runtime: Arc<Mutex<Option<TwitchRuntime>>>,
     min_send_interval: Duration,
+    validation_interval: Duration,
+    validation_retry_attempts: usize,
+    validation_retry_backoff: Duration,
+    auth: Option<Arc<TwitchAuthCoordinator>>,
 }
 
 impl TwitchClient {
@@ -319,7 +414,41 @@ impl TwitchClient {
             cancel: Arc::new(CancellationToken::new()),
             runtime: Arc::new(Mutex::new(None)),
             min_send_interval: MIN_SEND_INTERVAL,
+            validation_interval: Duration::from_secs(3600),
+            validation_retry_attempts: VALIDATION_RETRY_ATTEMPTS,
+            validation_retry_backoff: VALIDATION_RETRY_BACKOFF,
+            auth: None,
         }
+    }
+
+    #[cfg(test)]
+    pub fn with_validation_interval(mut self, interval: Duration) -> Self {
+        self.validation_interval = interval;
+        self
+    }
+
+    #[cfg(test)]
+    pub fn with_validation_retry(mut self, attempts: usize, backoff: Duration) -> Self {
+        self.validation_retry_attempts = attempts;
+        self.validation_retry_backoff = backoff;
+        self
+    }
+
+    /// Привязывает координатор авторизации API (ROADMAP-132)
+    #[allow(dead_code)]
+    pub fn with_auth(mut self, auth: Arc<TwitchAuthCoordinator>) -> Self {
+        self.auth = Some(auth);
+        self
+    }
+
+    pub fn with_optional_auth(mut self, auth: Option<Arc<TwitchAuthCoordinator>>) -> Self {
+        self.auth = auth;
+        self
+    }
+
+    /// Режим подключения (IRC или API)
+    pub fn mode(&self) -> TwitchMode {
+        self.settings.mode
     }
 
     /// Переопределяет минимальный интервал отправки — только для тестов пейсинга.
@@ -343,6 +472,215 @@ impl TwitchClient {
             return Err(TwitchStartError::Permanent(
                 "Connection setup cancelled".to_string(),
             ));
+        }
+
+        if self.settings.mode == TwitchMode::Api {
+            let Some(auth) = self.auth.clone() else {
+                return Err(TwitchStartError::Permanent(
+                    "Twitch API authorization coordinator is not available".to_string(),
+                ));
+            };
+
+            *self.status.lock().await = TwitchStatus::Connecting;
+
+            let ready = match auth.prepare_delivery().await {
+                Ok(ready) => ready,
+                Err(err) if !err.retryable() => {
+                    let msg = err.message();
+                    *self.status.lock().await = TwitchStatus::Error(err.code().to_string());
+                    return Err(TwitchStartError::Permanent(msg));
+                }
+                Err(err) => {
+                    let msg = err.message();
+                    *self.status.lock().await = TwitchStatus::TransportFailure(msg.clone());
+                    return Err(TwitchStartError::Transient(msg));
+                }
+            };
+
+            let expected_sender = ready.sender_id.clone();
+            let expected_broadcaster = ready.broadcaster_id.clone();
+            let (outgoing_tx, outgoing_rx) = mpsc::channel::<OutgoingItem>(OUTGOING_QUEUE_CAPACITY);
+
+            let cancel = Arc::clone(&self.cancel);
+            let worker_cancel = cancel.child_token();
+            let worker_status = Arc::clone(&self.status);
+            let min_send_interval = self.min_send_interval;
+
+            let send = {
+                let auth = auth.clone();
+                let status = Arc::clone(&worker_status);
+                let cancel = worker_cancel.clone();
+                let expected_sender = expected_sender.clone();
+                let expected_broadcaster = expected_broadcaster.clone();
+                move |text: String| {
+                    let auth = auth.clone();
+                    let status = Arc::clone(&status);
+                    let cancel = cancel.clone();
+                    let expected_sender = expected_sender.clone();
+                    let expected_broadcaster = expected_broadcaster.clone();
+                    async move {
+                        let ready = match auth.prepare_delivery().await {
+                            Ok(r)
+                                if r.sender_id == expected_sender
+                                    && r.broadcaster_id == expected_broadcaster =>
+                            {
+                                r
+                            }
+                            Ok(_) => {
+                                warn!("Twitch identity changed during active session");
+                                *status.lock().await = TwitchStatus::Error(
+                                    "twitch.api_auth.identity_changed".to_string(),
+                                );
+                                cancel.cancel();
+                                return Err(SendFailure::Rejected(
+                                    "Twitch authorization changed".to_string(),
+                                ));
+                            }
+                            Err(e) if !e.retryable() => {
+                                *status.lock().await = TwitchStatus::Error(e.code().to_string());
+                                cancel.cancel();
+                                return Err(SendFailure::Rejected(e.message()));
+                            }
+                            Err(e) => {
+                                return Err(SendFailure::Rejected(format!(
+                                    "Twitch delivery preparation failed: {e}"
+                                )));
+                            }
+                        };
+                        match auth.send(&ready, &text).await {
+                            Ok(outcome) => {
+                                if outcome.is_sent {
+                                    Ok(())
+                                } else {
+                                    let reason = outcome
+                                        .drop_reason
+                                        .map(|r| r.to_string())
+                                        .unwrap_or_else(|| "unknown".to_string());
+                                    Err(SendFailure::Rejected(format!(
+                                        "Twitch dropped message: {reason}"
+                                    )))
+                                }
+                            }
+                            Err(error) => Err(map_api_send_error(error)),
+                        }
+                    }
+                }
+            };
+            let worker_task_cancel = worker_cancel.clone();
+            let worker = tokio::spawn(async move {
+                let _guard = TaskDeathGuard {
+                    status: worker_status,
+                    cancel: Arc::new(worker_task_cancel.clone()),
+                    reason: "Twitch outgoing worker died",
+                };
+                run_outgoing_worker(outgoing_rx, worker_task_cancel, min_send_interval, send).await;
+            });
+
+            let mut invalidation_rx = auth.subscribe_invalidation();
+            let monitor_status = Arc::clone(&self.status);
+            let monitor_runtime = Arc::clone(&self.runtime);
+            let monitor_cancel = cancel.clone();
+            let monitor_worker_cancel = worker_cancel;
+            let monitor_auth = auth.clone();
+            let expected_sender_monitor = expected_sender.clone();
+            let expected_broadcaster_monitor = expected_broadcaster.clone();
+
+            let validation_interval = self.validation_interval;
+            let validation_retry_attempts = self.validation_retry_attempts;
+            let validation_retry_backoff = self.validation_retry_backoff;
+            let mut validation_ticker = tokio::time::interval(validation_interval);
+            validation_ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            // Consume first tick because start() already validated during prepare_delivery()
+            validation_ticker.tick().await;
+
+            let mut runtime_slot_guard = self.runtime.lock().await;
+            let consumer = tokio::spawn(async move {
+                loop {
+                    tokio::select! {
+                        biased;
+                        _ = monitor_cancel.cancelled() => break,
+                        res = invalidation_rx.changed() => {
+                            if res.is_err() {
+                                break;
+                            }
+                            let still_valid = match monitor_auth.prepare_delivery().await {
+                                Ok(ready) => {
+                                    ready.sender_id == expected_sender_monitor
+                                        && ready.broadcaster_id == expected_broadcaster_monitor
+                                }
+                                Err(e) if !e.retryable() => {
+                                    *monitor_status.lock().await =
+                                        TwitchStatus::Error(e.code().to_string());
+                                    false
+                                }
+                                Err(e) => {
+                                    warn!(error = %e, "Transient error while re-validating API authorization; retaining active session");
+                                    true
+                                }
+                            };
+                            if !still_valid {
+                                warn!("Twitch API authorization cleared or identity changed; invalidating active runtime");
+                                {
+                                    let mut st = monitor_status.lock().await;
+                                    if matches!(*st, TwitchStatus::Connected | TwitchStatus::Connecting) {
+                                        *st = TwitchStatus::Error("twitch.api_auth.identity_changed".to_string());
+                                    }
+                                }
+                                monitor_worker_cancel.cancel();
+                                if let Some(runtime) = monitor_runtime.lock().await.take() {
+                                    runtime.worker.abort();
+                                    drop(runtime);
+                                }
+                                break;
+                            }
+                        }
+                        _ = validation_ticker.tick() => {
+                            match validate_active_session_with_retry(
+                                &monitor_auth,
+                                &monitor_cancel,
+                                validation_retry_attempts,
+                                validation_retry_backoff,
+                            )
+                            .await
+                            {
+                                Ok(()) => {
+                                    debug!("Periodic Twitch API session validation succeeded");
+                                }
+                                Err(AuthError::StaleSession) => {
+                                    // Generation changed; handled by invalidation_rx
+                                }
+                                Err(AuthError::Cancelled) => {
+                                    // Shutdown during retry backoff; stop() tears down the runtime.
+                                    break;
+                                }
+                                Err(e) if !e.retryable() => {
+                                    warn!(error = %e, "Periodic Twitch API session validation detected terminal error; terminating runtime");
+                                    *monitor_status.lock().await = TwitchStatus::Error(e.code().to_string());
+                                    monitor_worker_cancel.cancel();
+                                    if let Some(runtime) = monitor_runtime.lock().await.take() {
+                                        runtime.worker.abort();
+                                        drop(runtime);
+                                    }
+                                    break;
+                                }
+                                Err(e) => {
+                                    warn!(error = %e, "Transient error during periodic Twitch API validation; retaining active session");
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            *self.status.lock().await = TwitchStatus::Connected;
+            *runtime_slot_guard = Some(TwitchRuntime {
+                irc: None,
+                consumer: Some(consumer),
+                outgoing_tx,
+                worker,
+            });
+            drop(runtime_slot_guard);
+            return Ok(());
         }
 
         let login = self.settings.username.to_lowercase();
@@ -387,8 +725,10 @@ impl TwitchClient {
                 async move {
                     match tokio::time::timeout(SEND_TIMEOUT, irc.say(channel, text)).await {
                         Ok(Ok(())) => Ok(()),
-                        Ok(Err(e)) => Err(e.to_string()),
-                        Err(_) => Err("Timed out sending message".to_string()),
+                        Ok(Err(e)) => Err(SendFailure::Ambiguous(e.to_string())),
+                        Err(_) => Err(SendFailure::Ambiguous(
+                            "Timed out sending message".to_string(),
+                        )),
                     }
                 }
             }
@@ -515,19 +855,20 @@ impl TwitchClient {
         });
 
         *runtime_slot_guard = Some(TwitchRuntime {
-            irc,
-            consumer,
+            irc: Some(irc),
+            consumer: Some(consumer),
             outgoing_tx,
             worker,
         });
         Ok(())
     }
 
-    /// Ставит сообщение в исходящую очередь (безопасный say: текст не выполняется
-    /// как команда). Возвращает typed-отказ либо awaitable completion handle;
-    /// фактическая отправка worker'ом происходит позже. Внутри — только короткие
-    /// await mutex'ов: статус и клон sender'а; pacing/send completion не ждётся.
-    pub(crate) async fn enqueue(&self, text: &str) -> Result<SendCompletion, SendFailure> {
+    /// Ставит сообщение в исходящую очередь с опциональным токеном отмены фразы.
+    pub(crate) async fn enqueue_with_cancellation(
+        &self,
+        text: &str,
+        abort_token: Option<CancellationToken>,
+    ) -> Result<SendCompletion, SendFailure> {
         let status = self.status.lock().await.clone();
         if !matches!(status, TwitchStatus::Connected) {
             warn!(?status, "Cannot send message - not connected");
@@ -555,12 +896,21 @@ impl TwitchClient {
             .try_send(OutgoingItem {
                 text: clean_text,
                 response: response_tx,
+                abort_token,
             })
             .map_err(map_try_send_error)?;
 
         Ok(SendCompletion {
             response: response_rx,
         })
+    }
+
+    /// Ставит сообщение в исходящую очередь (безопасный say: текст не выполняется
+    /// как команда). Возвращает typed-отказ либо awaitable completion handle;
+    /// фактическая отправка worker'ом происходит позже. Внутри — только короткие
+    /// await mutex'ов: статус и клон sender'а; pacing/send completion не ждётся.
+    pub(crate) async fn enqueue(&self, text: &str) -> Result<SendCompletion, SendFailure> {
+        self.enqueue_with_cancellation(text, None).await
     }
 
     /// Ставит сообщение в исходящую очередь и ожидает фактической отправки
@@ -576,7 +926,9 @@ impl TwitchClient {
         if let Some(runtime) = self.runtime.lock().await.take() {
             // Порядок важен: abort воркеров ДО drop irc, ожидающие отправители
             // получают Err через закрытие oneshot-каналов.
-            runtime.consumer.abort();
+            if let Some(consumer) = runtime.consumer {
+                consumer.abort();
+            }
             runtime.worker.abort();
             drop(runtime.irc);
         }
@@ -592,8 +944,141 @@ impl TwitchClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::twitch::api::{ApiError, SendOutcome};
+    use crate::twitch::auth::{CredentialsBackend, TwitchAuthApi, TwitchAuthCoordinator};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    use crate::twitch::credentials::{
+        now_unix, AccountGrant, CredentialsError, SecretString, StoredCredentials,
+    };
     use crate::twitch::TwitchSettings;
+    use twitch_api::types::{UserId, UserName};
     use twitch_irc::message::IRCMessage;
+    use twitch_oauth2::{
+        AccessToken, AppAccessToken, ClientId, ClientSecret, RefreshToken, TwitchToken, UserToken,
+        ValidatedToken,
+    };
+
+    /// Общие креды для lifecycle-тестов периодической валидации.
+    fn lifecycle_creds() -> StoredCredentials {
+        StoredCredentials {
+            version: crate::twitch::credentials::FORMAT_VERSION,
+            client_id: "client".to_string(),
+            client_secret: SecretString::from("secret"),
+            bot: Some(AccountGrant {
+                user_id: "10".to_string(),
+                login: "bot".to_string(),
+                access_token: SecretString::from("bot-tok"),
+                refresh_token: SecretString::from("bot-ref"),
+                expires_at: now_unix() + 3600,
+                scopes: vec!["user:write:chat".to_string(), "user:bot".to_string()],
+            }),
+            channels: vec![AccountGrant {
+                user_id: "20".to_string(),
+                login: "owner".to_string(),
+                access_token: SecretString::from("bc-tok"),
+                refresh_token: SecretString::from("bc-ref"),
+                expires_at: now_unix() + 3600,
+                scopes: vec!["channel:bot".to_string()],
+            }],
+            selected_channel_id: Some("20".to_string()),
+            app_token: None,
+        }
+    }
+
+    struct LifecycleBackend {
+        creds: std::sync::Mutex<Option<StoredCredentials>>,
+    }
+    impl CredentialsBackend for LifecycleBackend {
+        fn load(&self) -> Result<Option<StoredCredentials>, CredentialsError> {
+            Ok(self.creds.lock().unwrap().clone())
+        }
+        fn save(&self, creds: &StoredCredentials) -> Result<(), CredentialsError> {
+            *self.creds.lock().unwrap() = Some(creds.clone());
+            Ok(())
+        }
+        fn clear(&self) -> Result<(), CredentialsError> {
+            *self.creds.lock().unwrap() = None;
+            Ok(())
+        }
+    }
+
+    struct LifecycleApi {
+        validate_calls: AtomicUsize,
+        transient_failures: AtomicUsize,
+        validate_latency: Duration,
+        send_calls: AtomicUsize,
+    }
+    #[async_trait::async_trait]
+    impl TwitchAuthApi for LifecycleApi {
+        async fn validate_user(&self, token: &UserToken) -> Result<ValidatedToken, ApiError> {
+            self.validate_calls.fetch_add(1, Ordering::SeqCst);
+            if !self.validate_latency.is_zero() {
+                tokio::time::sleep(self.validate_latency).await;
+            }
+            if self
+                .transient_failures
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                    if n > 0 {
+                        Some(n - 1)
+                    } else {
+                        None
+                    }
+                })
+                .is_ok()
+            {
+                return Err(ApiError::Transport);
+            }
+            Ok(ValidatedToken {
+                client_id: ClientId::from("client".to_string()),
+                login: token
+                    .login()
+                    .map(|r| UserName::from(r.as_str().to_string())),
+                user_id: token
+                    .user_id()
+                    .map(|r| UserId::from(r.as_str().to_string())),
+                scopes: Some(token.scopes().to_vec()),
+                expires_in: Some(Duration::from_secs(3600)),
+            })
+        }
+        async fn refresh_user(&self, _token: &mut UserToken) -> Result<(), ApiError> {
+            Ok(())
+        }
+        async fn app_access(&self) -> Result<AppAccessToken, ApiError> {
+            Ok(AppAccessToken::from_existing_unchecked(
+                AccessToken::from("app-tok".to_string()),
+                None::<RefreshToken>,
+                ClientId::from("client".to_string()),
+                ClientSecret::from("secret".to_string()),
+                None,
+                Some(Duration::from_secs(3600)),
+            ))
+        }
+        async fn send_chat(
+            &self,
+            _broadcaster_id: &str,
+            _sender_id: &str,
+            _message: &str,
+            _app_token: &AppAccessToken,
+        ) -> Result<SendOutcome, ApiError> {
+            self.send_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(SendOutcome {
+                message_id: Some("id".to_string()),
+                is_sent: true,
+                drop_reason: None,
+            })
+        }
+    }
+
+    fn lifecycle_coordinator(api: Arc<LifecycleApi>) -> TwitchAuthCoordinator {
+        let backend = Arc::new(LifecycleBackend {
+            creds: std::sync::Mutex::new(Some(lifecycle_creds())),
+        });
+        let api_clone = api.clone();
+        let factory: crate::twitch::auth::ApiFactory =
+            Arc::new(move |_c| Ok(api_clone.clone() as Arc<dyn TwitchAuthApi>));
+        TwitchAuthCoordinator::with_components(backend, factory, CancellationToken::new())
+    }
 
     #[tokio::test]
     async fn initial_join_deadline_fires_and_can_be_disabled() {
@@ -913,7 +1398,7 @@ mod tests {
     /// Мгновенный fake-send, записывающий порядок отправок (сеть в тестах запрещена).
     fn recording_send(
         sink: Arc<std::sync::Mutex<Vec<String>>>,
-    ) -> impl FnMut(String) -> std::future::Ready<Result<(), String>> {
+    ) -> impl FnMut(String) -> std::future::Ready<Result<(), SendFailure>> {
         move |text: String| {
             sink.lock().unwrap().push(text);
             std::future::ready(Ok(()))
@@ -940,7 +1425,7 @@ mod tests {
                         .lock()
                         .unwrap()
                         .push(text.parse::<usize>().expect("numeric payload"));
-                    Ok::<(), String>(())
+                    Ok::<(), SendFailure>(())
                 }
             }
         };
@@ -951,6 +1436,7 @@ mod tests {
             tx.send(OutgoingItem {
                 text: idx.to_string(),
                 response: response_tx,
+                abort_token: None,
             })
             .await
             .expect("burst fits the queue");
@@ -999,6 +1485,7 @@ mod tests {
         tx.try_send(OutgoingItem {
             text: "first".to_string(),
             response: first_tx,
+            abort_token: None,
         })
         .expect("first item fits capacity 1");
 
@@ -1007,6 +1494,7 @@ mod tests {
             .try_send(OutgoingItem {
                 text: "second".to_string(),
                 response: second_tx,
+                abort_token: None,
             })
             .map_err(map_try_send_error);
         assert_eq!(
@@ -1052,6 +1540,7 @@ mod tests {
         tx.send(OutgoingItem {
             text: "queued".to_string(),
             response: response_tx,
+            abort_token: None,
         })
         .await
         .expect("item queued");
@@ -1067,7 +1556,7 @@ mod tests {
             "cancelled worker must not send queued items"
         );
         // Sender удалён вместе с элементом: ожидающий отправитель получает Err
-        // (в send_message это маппится в SendFailure::Send("Twitch send worker stopped")).
+        // (в send_message это маппится в SendFailure::Ambiguous("Twitch send worker stopped")).
         assert!(
             response_rx.await.is_err(),
             "waiting sender must be released with an error"
@@ -1079,6 +1568,7 @@ mod tests {
             tx.try_send(OutgoingItem {
                 text: "late".to_string(),
                 response: late_tx,
+                abort_token: None,
             })
             .is_err(),
             "queue is closed after the worker stopped"
@@ -1099,7 +1589,7 @@ mod tests {
                 async move {
                     attempts.lock().unwrap().push(text.clone());
                     if text == "first" {
-                        Err("write failed".to_string())
+                        Err(SendFailure::Ambiguous("write failed".to_string()))
                     } else {
                         Ok(())
                     }
@@ -1119,6 +1609,7 @@ mod tests {
             tx.send(OutgoingItem {
                 text: text.to_string(),
                 response,
+                abort_token: None,
             })
             .await
             .expect("items fit the queue");
@@ -1126,7 +1617,7 @@ mod tests {
 
         assert_eq!(
             first_rx.await,
-            Ok(Err("write failed".to_string())),
+            Ok(Err(SendFailure::Ambiguous("write failed".to_string()))),
             "failed element reports its error"
         );
         assert_eq!(second_rx.await, Ok(Ok(())));
@@ -1152,7 +1643,7 @@ mod tests {
                 let moments = Arc::clone(&moments);
                 async move {
                     moments.lock().unwrap().push(std::time::Instant::now());
-                    Ok::<(), String>(())
+                    Ok::<(), SendFailure>(())
                 }
             }
         };
@@ -1163,6 +1654,7 @@ mod tests {
         tx.send(OutgoingItem {
             text: "only".to_string(),
             response: response_tx,
+            abort_token: None,
         })
         .await
         .expect("item queued");
@@ -1200,6 +1692,7 @@ mod tests {
             .try_send(OutgoingItem {
                 text: "late".to_string(),
                 response: response_tx,
+                abort_token: None,
             })
             .map_err(map_try_send_error);
 
@@ -1215,29 +1708,70 @@ mod tests {
     #[tokio::test]
     async fn send_completion_maps_ok_error_and_dropped_worker() {
         // Ok: успешная отправка отображается в Ok(()).
-        let (tx, rx) = tokio::sync::oneshot::channel();
+        let (tx, rx) = tokio::sync::oneshot::channel::<Result<(), SendFailure>>();
         let completion = SendCompletion { response: rx };
         tx.send(Ok(())).expect("oneshot send succeeds");
         assert_eq!(completion.wait().await, Ok(()));
 
-        // Send Err: ошибка записи отображается в SendFailure::Send.
-        let (tx, rx) = tokio::sync::oneshot::channel();
+        // Send Err: типизированный отказ сохраняется как есть.
+        let (tx, rx) = tokio::sync::oneshot::channel::<Result<(), SendFailure>>();
         let completion = SendCompletion { response: rx };
-        tx.send(Err("write failed".to_string()))
+        tx.send(Err(SendFailure::Rejected("write failed".to_string())))
             .expect("oneshot send succeeds");
         assert_eq!(
             completion.wait().await,
-            Err(SendFailure::Send("write failed".to_string()))
+            Err(SendFailure::Rejected("write failed".to_string()))
         );
 
-        // Dropped worker: закрытие oneshot-канала отображается в SendFailure::Send.
-        let (tx, rx) = tokio::sync::oneshot::channel();
+        // Dropped worker: закрытие oneshot-канала отображается консервативно
+        // в SendFailure::Ambiguous (сообщение могло уйти).
+        let (tx, rx) = tokio::sync::oneshot::channel::<Result<(), SendFailure>>();
         let completion = SendCompletion { response: rx };
         drop(tx);
         assert_eq!(
             completion.wait().await,
-            Err(SendFailure::Send("Twitch send worker stopped".to_string()))
+            Err(SendFailure::Ambiguous(
+                "Twitch send worker stopped".to_string()
+            ))
         );
+    }
+
+    #[test]
+    fn map_api_send_error_preserves_certainty() {
+        use crate::twitch::api::{ApiError, DropReason};
+
+        // Достоверный отказ (НЕ доставлено) -> Rejected (send_failed / retryable).
+        for error in [
+            ApiError::Unauthorized,
+            ApiError::Forbidden,
+            ApiError::RateLimited {
+                retry_after_seconds: None,
+            },
+            ApiError::Dropped {
+                reason: DropReason::Duplicate,
+            },
+            ApiError::Http { status: 400 },
+            ApiError::InvalidInput,
+            ApiError::Validation { code: "invalid" },
+        ] {
+            assert!(
+                matches!(map_api_send_error(error), SendFailure::Rejected(_)),
+                "definite rejection must stay Rejected"
+            );
+        }
+
+        // Неоднозначный итог (могло дойти) -> Ambiguous (delivery_unknown / nonretryable).
+        for error in [
+            ApiError::Transport,
+            ApiError::Http { status: 500 },
+            ApiError::Http { status: 503 },
+            ApiError::Malformed,
+        ] {
+            assert!(
+                matches!(map_api_send_error(error), SendFailure::Ambiguous(_)),
+                "transport/5xx/malformed must stay Ambiguous"
+            );
+        }
     }
 
     #[tokio::test]
@@ -1280,5 +1814,958 @@ mod tests {
         drop(guard);
         tokio::task::yield_now().await;
         assert_eq!(*status.lock().await, TwitchStatus::Connected);
+    }
+
+    #[tokio::test]
+    async fn api_client_without_auth_fails_permanently() {
+        let client = TwitchClient::new(TwitchSettings {
+            mode: TwitchMode::Api,
+            ..TwitchSettings::default()
+        });
+        let err = client.start().await.unwrap_err();
+        assert!(matches!(err, TwitchStartError::Permanent(_)));
+    }
+
+    #[tokio::test]
+    async fn api_client_send_401_allows_next_message_and_identity_change_errors() {
+        use crate::twitch::api::{ApiError, SendOutcome};
+        use crate::twitch::auth::{CredentialsBackend, TwitchAuthApi, TwitchAuthCoordinator};
+        use crate::twitch::credentials::{
+            now_unix, AccountGrant, CredentialsError, SecretString, StoredCredentials,
+        };
+
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Mutex as StdMutex;
+        use twitch_api::types::{UserId, UserName};
+        use twitch_oauth2::{
+            AccessToken, AppAccessToken, ClientId, ClientSecret, TwitchToken, UserToken,
+            ValidatedToken,
+        };
+
+        struct MemBackend {
+            creds: StdMutex<Option<StoredCredentials>>,
+        }
+        impl CredentialsBackend for MemBackend {
+            fn load(&self) -> Result<Option<StoredCredentials>, CredentialsError> {
+                Ok(self.creds.lock().unwrap().clone())
+            }
+            fn save(&self, creds: &StoredCredentials) -> Result<(), CredentialsError> {
+                *self.creds.lock().unwrap() = Some(creds.clone());
+                Ok(())
+            }
+            fn clear(&self) -> Result<(), CredentialsError> {
+                *self.creds.lock().unwrap() = None;
+                Ok(())
+            }
+        }
+
+        struct MockApi {
+            fail_401_first: AtomicBool,
+        }
+        #[async_trait::async_trait]
+        impl TwitchAuthApi for MockApi {
+            async fn validate_user(&self, token: &UserToken) -> Result<ValidatedToken, ApiError> {
+                Ok(ValidatedToken {
+                    client_id: ClientId::from("client".to_string()),
+                    login: token
+                        .login()
+                        .map(|r| UserName::from(r.as_str().to_string())),
+                    user_id: token
+                        .user_id()
+                        .map(|r| UserId::from(r.as_str().to_string())),
+                    scopes: Some(token.scopes().to_vec()),
+                    expires_in: Some(Duration::from_secs(3600)),
+                })
+            }
+            async fn refresh_user(&self, _token: &mut UserToken) -> Result<(), ApiError> {
+                Ok(())
+            }
+            async fn app_access(&self) -> Result<AppAccessToken, ApiError> {
+                Ok(AppAccessToken::from_existing_unchecked(
+                    AccessToken::from("app-token".to_string()),
+                    None,
+                    ClientId::from("client".to_string()),
+                    ClientSecret::from("secret".to_string()),
+                    None,
+                    Some(Duration::from_secs(3600)),
+                ))
+            }
+            async fn send_chat(
+                &self,
+                _broadcaster_id: &str,
+                _sender_id: &str,
+                _message: &str,
+                _app_token: &AppAccessToken,
+            ) -> Result<SendOutcome, ApiError> {
+                if self.fail_401_first.swap(false, Ordering::SeqCst) {
+                    return Err(ApiError::Unauthorized);
+                }
+                Ok(SendOutcome {
+                    message_id: Some("msg-id".to_string()),
+                    is_sent: true,
+                    drop_reason: None,
+                })
+            }
+        }
+
+        let creds = StoredCredentials {
+            version: crate::twitch::credentials::FORMAT_VERSION,
+            client_id: "client".to_string(),
+            client_secret: SecretString::from("secret"),
+            bot: Some(AccountGrant {
+                user_id: "10".to_string(),
+                login: "bot".to_string(),
+                access_token: SecretString::from("bot-tok"),
+                refresh_token: SecretString::from("bot-ref"),
+                expires_at: now_unix() + 3600,
+                scopes: vec!["user:write:chat".to_string(), "user:bot".to_string()],
+            }),
+            channels: vec![AccountGrant {
+                user_id: "20".to_string(),
+                login: "owner".to_string(),
+                access_token: SecretString::from("bc-tok"),
+                refresh_token: SecretString::from("bc-ref"),
+                expires_at: now_unix() + 3600,
+                scopes: vec!["channel:bot".to_string()],
+            }],
+            selected_channel_id: Some("20".to_string()),
+            app_token: None,
+        };
+
+        let backend = Arc::new(MemBackend {
+            creds: StdMutex::new(Some(creds)),
+        });
+        let mock_api = Arc::new(MockApi {
+            fail_401_first: AtomicBool::new(true),
+        });
+        let api_clone = mock_api.clone();
+        let factory =
+            Arc::new(move |_c: &StoredCredentials| Ok(api_clone.clone() as Arc<dyn TwitchAuthApi>));
+        let coord = Arc::new(TwitchAuthCoordinator::with_components(
+            backend.clone(),
+            factory,
+            CancellationToken::new(),
+        ));
+
+        let client = TwitchClient::new(TwitchSettings {
+            mode: TwitchMode::Api,
+            ..TwitchSettings::default()
+        })
+        .with_auth(coord.clone())
+        .with_send_interval(Duration::from_millis(1));
+
+        client.start().await.unwrap();
+        assert_eq!(client.status().await, TwitchStatus::Connected);
+
+        // First message gets 401 Unauthorized -> fails that individual message
+        let send1_err = client.send_message("first message").await.unwrap_err();
+        assert!(matches!(send1_err, SendFailure::Rejected(ref e) if e.contains("unauthorized")));
+        // Client runtime remains Connected!
+        assert_eq!(client.status().await, TwitchStatus::Connected);
+
+        // Second message acquires fresh app token and succeeds!
+        client.send_message("second message").await.unwrap();
+        assert_eq!(client.status().await, TwitchStatus::Connected);
+
+        // Now credentials are cleared (logout / identity changed)
+        coord.clear().await.unwrap();
+
+        // Worker transitions status to Error immediately without needing another send:
+        for _ in 0..10_000 {
+            if matches!(client.status().await, TwitchStatus::Error(_)) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(matches!(client.status().await, TwitchStatus::Error(_)));
+
+        // Send fails with NotConnected because runtime is invalidated and queue is dropped
+        let send3_err = client.send_message("third message").await.unwrap_err();
+        assert!(matches!(send3_err, SendFailure::NotConnected));
+    }
+
+    #[tokio::test]
+    async fn api_client_clear_cancels_pending_queue_without_replay() {
+        use crate::twitch::api::{ApiError, SendOutcome};
+        use crate::twitch::auth::{CredentialsBackend, TwitchAuthApi, TwitchAuthCoordinator};
+        use crate::twitch::credentials::{
+            now_unix, AccountGrant, CredentialsError, SecretString, StoredCredentials,
+        };
+
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Mutex as StdMutex;
+        use twitch_api::types::{UserId, UserName};
+        use twitch_oauth2::{
+            AccessToken, AppAccessToken, ClientId, ClientSecret, TwitchToken, UserToken,
+            ValidatedToken,
+        };
+
+        struct MemBackend {
+            creds: StdMutex<Option<StoredCredentials>>,
+        }
+        impl CredentialsBackend for MemBackend {
+            fn load(&self) -> Result<Option<StoredCredentials>, CredentialsError> {
+                Ok(self.creds.lock().unwrap().clone())
+            }
+            fn save(&self, creds: &StoredCredentials) -> Result<(), CredentialsError> {
+                *self.creds.lock().unwrap() = Some(creds.clone());
+                Ok(())
+            }
+            fn clear(&self) -> Result<(), CredentialsError> {
+                *self.creds.lock().unwrap() = None;
+                Ok(())
+            }
+        }
+
+        struct CountApi {
+            sends: AtomicUsize,
+        }
+        #[async_trait::async_trait]
+        impl TwitchAuthApi for CountApi {
+            async fn validate_user(&self, token: &UserToken) -> Result<ValidatedToken, ApiError> {
+                Ok(ValidatedToken {
+                    client_id: ClientId::from("client".to_string()),
+                    login: token
+                        .login()
+                        .map(|r| UserName::from(r.as_str().to_string())),
+                    user_id: token
+                        .user_id()
+                        .map(|r| UserId::from(r.as_str().to_string())),
+                    scopes: Some(token.scopes().to_vec()),
+                    expires_in: Some(Duration::from_secs(3600)),
+                })
+            }
+            async fn refresh_user(&self, _token: &mut UserToken) -> Result<(), ApiError> {
+                Ok(())
+            }
+            async fn app_access(&self) -> Result<AppAccessToken, ApiError> {
+                Ok(AppAccessToken::from_existing_unchecked(
+                    AccessToken::from("app-token".to_string()),
+                    None,
+                    ClientId::from("client".to_string()),
+                    ClientSecret::from("secret".to_string()),
+                    None,
+                    Some(Duration::from_secs(3600)),
+                ))
+            }
+            async fn send_chat(
+                &self,
+                _broadcaster_id: &str,
+                _sender_id: &str,
+                _message: &str,
+                _app_token: &AppAccessToken,
+            ) -> Result<SendOutcome, ApiError> {
+                self.sends.fetch_add(1, Ordering::SeqCst);
+                Ok(SendOutcome {
+                    message_id: Some("id".to_string()),
+                    is_sent: true,
+                    drop_reason: None,
+                })
+            }
+        }
+
+        let creds = StoredCredentials {
+            version: crate::twitch::credentials::FORMAT_VERSION,
+            client_id: "client".to_string(),
+            client_secret: SecretString::from("secret"),
+            bot: Some(AccountGrant {
+                user_id: "10".to_string(),
+                login: "bot".to_string(),
+                access_token: SecretString::from("bot-tok"),
+                refresh_token: SecretString::from("bot-ref"),
+                expires_at: now_unix() + 3600,
+                scopes: vec!["user:write:chat".to_string(), "user:bot".to_string()],
+            }),
+            channels: vec![AccountGrant {
+                user_id: "20".to_string(),
+                login: "owner".to_string(),
+                access_token: SecretString::from("bc-tok"),
+                refresh_token: SecretString::from("bc-ref"),
+                expires_at: now_unix() + 3600,
+                scopes: vec!["channel:bot".to_string()],
+            }],
+            selected_channel_id: Some("20".to_string()),
+            app_token: None,
+        };
+
+        let backend = Arc::new(MemBackend {
+            creds: StdMutex::new(Some(creds)),
+        });
+        let count_api = Arc::new(CountApi {
+            sends: AtomicUsize::new(0),
+        });
+        let api_clone = count_api.clone();
+        let factory =
+            Arc::new(move |_c: &StoredCredentials| Ok(api_clone.clone() as Arc<dyn TwitchAuthApi>));
+        let coord = Arc::new(TwitchAuthCoordinator::with_components(
+            backend.clone(),
+            factory,
+            CancellationToken::new(),
+        ));
+
+        let client = TwitchClient::new(TwitchSettings {
+            mode: TwitchMode::Api,
+            ..TwitchSettings::default()
+        })
+        .with_auth(coord.clone())
+        .with_send_interval(Duration::from_millis(50));
+
+        client.start().await.unwrap();
+        assert_eq!(client.status().await, TwitchStatus::Connected);
+
+        // Clear credentials while connected:
+        coord.clear().await.unwrap();
+
+        for _ in 0..10_000 {
+            if matches!(client.status().await, TwitchStatus::Error(_)) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(matches!(client.status().await, TwitchStatus::Error(_)));
+
+        // No messages were sent or replayed:
+        assert_eq!(count_api.sends.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn api_client_start_permanent_error_classifies_terminal_error() {
+        use std::sync::Mutex as StdMutex;
+        use twitch_oauth2::{
+            AccessToken, AppAccessToken, ClientId, ClientSecret, UserToken, ValidatedToken,
+        };
+
+        struct FailBackend {
+            creds: StdMutex<Option<StoredCredentials>>,
+        }
+        impl CredentialsBackend for FailBackend {
+            fn load(&self) -> Result<Option<StoredCredentials>, CredentialsError> {
+                Ok(self.creds.lock().unwrap().clone())
+            }
+            fn save(&self, creds: &StoredCredentials) -> Result<(), CredentialsError> {
+                *self.creds.lock().unwrap() = Some(creds.clone());
+                Ok(())
+            }
+            fn clear(&self) -> Result<(), CredentialsError> {
+                *self.creds.lock().unwrap() = None;
+                Ok(())
+            }
+        }
+
+        struct PermanentApi;
+        #[async_trait::async_trait]
+        impl TwitchAuthApi for PermanentApi {
+            async fn validate_user(&self, _token: &UserToken) -> Result<ValidatedToken, ApiError> {
+                Err(ApiError::Unauthorized)
+            }
+            async fn refresh_user(&self, _token: &mut UserToken) -> Result<(), ApiError> {
+                // HTTP 400 Bad Request on refresh indicates invalid/revoked refresh token
+                Err(ApiError::Http { status: 400 })
+            }
+            async fn app_access(&self) -> Result<AppAccessToken, ApiError> {
+                Ok(AppAccessToken::from_existing_unchecked(
+                    AccessToken::from("app-token".to_string()),
+                    None,
+                    ClientId::from("client".to_string()),
+                    ClientSecret::from("secret".to_string()),
+                    None,
+                    Some(Duration::from_secs(3600)),
+                ))
+            }
+            async fn send_chat(
+                &self,
+                _broadcaster_id: &str,
+                _sender_id: &str,
+                _message: &str,
+                _app_token: &AppAccessToken,
+            ) -> Result<SendOutcome, ApiError> {
+                unimplemented!()
+            }
+        }
+
+        let creds = StoredCredentials {
+            version: crate::twitch::credentials::FORMAT_VERSION,
+            client_id: "client".to_string(),
+            client_secret: SecretString::from("secret"),
+            bot: Some(AccountGrant {
+                user_id: "10".to_string(),
+                login: "bot".to_string(),
+                access_token: SecretString::from("bot-tok"),
+                refresh_token: SecretString::from("bot-ref"),
+                expires_at: 0,
+                scopes: vec!["user:write:chat".to_string(), "user:bot".to_string()],
+            }),
+            channels: vec![AccountGrant {
+                user_id: "20".to_string(),
+                login: "owner".to_string(),
+                access_token: SecretString::from("bc-tok"),
+                refresh_token: SecretString::from("bc-ref"),
+                expires_at: now_unix() + 3600,
+                scopes: vec!["channel:bot".to_string()],
+            }],
+            selected_channel_id: Some("20".to_string()),
+            app_token: None,
+        };
+
+        let backend = Arc::new(FailBackend {
+            creds: StdMutex::new(Some(creds)),
+        });
+        let factory = Arc::new(move |_c: &StoredCredentials| {
+            Ok(Arc::new(PermanentApi) as Arc<dyn TwitchAuthApi>)
+        });
+        let coord = Arc::new(TwitchAuthCoordinator::with_components(
+            backend,
+            factory,
+            CancellationToken::new(),
+        ));
+
+        let client = TwitchClient::new(TwitchSettings {
+            mode: TwitchMode::Api,
+            ..TwitchSettings::default()
+        })
+        .with_auth(coord);
+
+        let err = client.start().await.unwrap_err();
+        assert!(matches!(err, TwitchStartError::Permanent(_)));
+        assert_eq!(
+            client.status().await,
+            TwitchStatus::Error("twitch.api_auth.revoked".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn api_client_start_transient_error_classifies_transport_failure() {
+        use std::sync::Mutex as StdMutex;
+        use twitch_oauth2::{
+            AccessToken, AppAccessToken, ClientId, ClientSecret, UserToken, ValidatedToken,
+        };
+
+        struct TransientBackend {
+            creds: StdMutex<Option<StoredCredentials>>,
+        }
+        impl CredentialsBackend for TransientBackend {
+            fn load(&self) -> Result<Option<StoredCredentials>, CredentialsError> {
+                Ok(self.creds.lock().unwrap().clone())
+            }
+            fn save(&self, creds: &StoredCredentials) -> Result<(), CredentialsError> {
+                *self.creds.lock().unwrap() = Some(creds.clone());
+                Ok(())
+            }
+            fn clear(&self) -> Result<(), CredentialsError> {
+                *self.creds.lock().unwrap() = None;
+                Ok(())
+            }
+        }
+
+        struct TransientApi;
+        #[async_trait::async_trait]
+        impl TwitchAuthApi for TransientApi {
+            async fn validate_user(&self, _token: &UserToken) -> Result<ValidatedToken, ApiError> {
+                Err(ApiError::Transport)
+            }
+            async fn refresh_user(&self, _token: &mut UserToken) -> Result<(), ApiError> {
+                unimplemented!()
+            }
+            async fn app_access(&self) -> Result<AppAccessToken, ApiError> {
+                Ok(AppAccessToken::from_existing_unchecked(
+                    AccessToken::from("app-token".to_string()),
+                    None,
+                    ClientId::from("client".to_string()),
+                    ClientSecret::from("secret".to_string()),
+                    None,
+                    Some(Duration::from_secs(3600)),
+                ))
+            }
+            async fn send_chat(
+                &self,
+                _broadcaster_id: &str,
+                _sender_id: &str,
+                _message: &str,
+                _app_token: &AppAccessToken,
+            ) -> Result<SendOutcome, ApiError> {
+                unimplemented!()
+            }
+        }
+
+        let creds = StoredCredentials {
+            version: crate::twitch::credentials::FORMAT_VERSION,
+            client_id: "client".to_string(),
+            client_secret: SecretString::from("secret"),
+            bot: Some(AccountGrant {
+                user_id: "10".to_string(),
+                login: "bot".to_string(),
+                access_token: SecretString::from("bot-tok"),
+                refresh_token: SecretString::from("bot-ref"),
+                expires_at: 0,
+                scopes: vec!["user:write:chat".to_string(), "user:bot".to_string()],
+            }),
+            channels: vec![AccountGrant {
+                user_id: "20".to_string(),
+                login: "owner".to_string(),
+                access_token: SecretString::from("bc-tok"),
+                refresh_token: SecretString::from("bc-ref"),
+                expires_at: now_unix() + 3600,
+                scopes: vec!["channel:bot".to_string()],
+            }],
+            selected_channel_id: Some("20".to_string()),
+            app_token: None,
+        };
+
+        let backend = Arc::new(TransientBackend {
+            creds: StdMutex::new(Some(creds)),
+        });
+        let factory = Arc::new(move |_c: &StoredCredentials| {
+            Ok(Arc::new(TransientApi) as Arc<dyn TwitchAuthApi>)
+        });
+        let coord = Arc::new(TwitchAuthCoordinator::with_components(
+            backend,
+            factory,
+            CancellationToken::new(),
+        ));
+
+        let client = TwitchClient::new(TwitchSettings {
+            mode: TwitchMode::Api,
+            ..TwitchSettings::default()
+        })
+        .with_auth(coord);
+
+        let err = client.start().await.unwrap_err();
+        assert!(matches!(err, TwitchStartError::Transient(_)));
+        assert!(matches!(
+            client.status().await,
+            TwitchStatus::TransportFailure(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn api_client_idle_periodic_validation_detects_revocation() {
+        use std::sync::Mutex as StdMutex;
+        use twitch_api::types::{UserId, UserName};
+        use twitch_oauth2::{
+            AccessToken, AppAccessToken, ClientId, ClientSecret, TwitchToken, UserToken,
+            ValidatedToken,
+        };
+
+        struct DynamicBackend {
+            creds: StdMutex<Option<StoredCredentials>>,
+        }
+        impl CredentialsBackend for DynamicBackend {
+            fn load(&self) -> Result<Option<StoredCredentials>, CredentialsError> {
+                Ok(self.creds.lock().unwrap().clone())
+            }
+            fn save(&self, creds: &StoredCredentials) -> Result<(), CredentialsError> {
+                *self.creds.lock().unwrap() = Some(creds.clone());
+                Ok(())
+            }
+            fn clear(&self) -> Result<(), CredentialsError> {
+                *self.creds.lock().unwrap() = None;
+                Ok(())
+            }
+        }
+
+        struct DynamicApi {
+            revoked: AtomicBool,
+        }
+        #[async_trait::async_trait]
+        impl TwitchAuthApi for DynamicApi {
+            async fn validate_user(&self, token: &UserToken) -> Result<ValidatedToken, ApiError> {
+                if self.revoked.load(Ordering::SeqCst) {
+                    return Err(ApiError::Unauthorized);
+                }
+                Ok(ValidatedToken {
+                    client_id: ClientId::from("client".to_string()),
+                    login: token
+                        .login()
+                        .map(|r| UserName::from(r.as_str().to_string())),
+                    user_id: token
+                        .user_id()
+                        .map(|r| UserId::from(r.as_str().to_string())),
+                    scopes: Some(token.scopes().to_vec()),
+                    expires_in: Some(Duration::from_secs(3600)),
+                })
+            }
+            async fn refresh_user(&self, _token: &mut UserToken) -> Result<(), ApiError> {
+                Err(ApiError::Unauthorized)
+            }
+            async fn app_access(&self) -> Result<AppAccessToken, ApiError> {
+                Ok(AppAccessToken::from_existing_unchecked(
+                    AccessToken::from("app-token".to_string()),
+                    None,
+                    ClientId::from("client".to_string()),
+                    ClientSecret::from("secret".to_string()),
+                    None,
+                    Some(Duration::from_secs(3600)),
+                ))
+            }
+            async fn send_chat(
+                &self,
+                _broadcaster_id: &str,
+                _sender_id: &str,
+                _message: &str,
+                _app_token: &AppAccessToken,
+            ) -> Result<SendOutcome, ApiError> {
+                Ok(SendOutcome {
+                    message_id: Some("id".to_string()),
+                    is_sent: true,
+                    drop_reason: None,
+                })
+            }
+        }
+
+        let creds = StoredCredentials {
+            version: crate::twitch::credentials::FORMAT_VERSION,
+            client_id: "client".to_string(),
+            client_secret: SecretString::from("secret"),
+            bot: Some(AccountGrant {
+                user_id: "10".to_string(),
+                login: "bot".to_string(),
+                access_token: SecretString::from("bot-tok"),
+                refresh_token: SecretString::from("bot-ref"),
+                expires_at: now_unix() + 3600,
+                scopes: vec!["user:write:chat".to_string(), "user:bot".to_string()],
+            }),
+            channels: vec![AccountGrant {
+                user_id: "20".to_string(),
+                login: "owner".to_string(),
+                access_token: SecretString::from("bc-tok"),
+                refresh_token: SecretString::from("bc-ref"),
+                expires_at: now_unix() + 3600,
+                scopes: vec!["channel:bot".to_string()],
+            }],
+            selected_channel_id: Some("20".to_string()),
+            app_token: None,
+        };
+
+        let backend = Arc::new(DynamicBackend {
+            creds: StdMutex::new(Some(creds)),
+        });
+        let dynamic_api = Arc::new(DynamicApi {
+            revoked: AtomicBool::new(false),
+        });
+        let api_clone = dynamic_api.clone();
+        let factory =
+            Arc::new(move |_c: &StoredCredentials| Ok(api_clone.clone() as Arc<dyn TwitchAuthApi>));
+        let coord = Arc::new(
+            TwitchAuthCoordinator::with_components(backend, factory, CancellationToken::new())
+                .with_validation_interval(Duration::from_millis(10)),
+        );
+
+        let client = TwitchClient::new(TwitchSettings {
+            mode: TwitchMode::Api,
+            ..TwitchSettings::default()
+        })
+        .with_auth(coord)
+        .with_validation_interval(Duration::from_millis(20));
+
+        client.start().await.unwrap();
+        assert_eq!(client.status().await, TwitchStatus::Connected);
+
+        // Revoke tokens while idle:
+        dynamic_api.revoked.store(true, Ordering::SeqCst);
+
+        // Wait for periodic validation to fire and detect revocation:
+        for _ in 0..10_000 {
+            if matches!(client.status().await, TwitchStatus::Error(_)) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+
+        assert_eq!(
+            client.status().await,
+            TwitchStatus::Error("twitch.api_auth.revoked".to_string())
+        );
+        // Worker was aborted, so send fails with NotConnected:
+        assert_eq!(
+            client.send_message("test").await.unwrap_err(),
+            SendFailure::NotConnected
+        );
+    }
+
+    #[tokio::test]
+    async fn outgoing_worker_first_part_failure_skips_subsequent_parts_sharing_abort_token() {
+        let (tx, rx) = mpsc::channel::<OutgoingItem>(8);
+        let cancel = CancellationToken::new();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_clone = calls.clone();
+
+        let worker = tokio::spawn(run_outgoing_worker(
+            rx,
+            cancel.clone(),
+            Duration::from_millis(1),
+            move |_text: String| {
+                let count = calls_clone.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    if count == 0 {
+                        Err(SendFailure::Ambiguous("send failed".to_string()))
+                    } else {
+                        Ok(())
+                    }
+                }
+            },
+        ));
+
+        let phrase_abort = CancellationToken::new();
+
+        let (resp0_tx, resp0_rx) = tokio::sync::oneshot::channel();
+        let (resp1_tx, resp1_rx) = tokio::sync::oneshot::channel();
+        let (resp2_tx, resp2_rx) = tokio::sync::oneshot::channel();
+
+        tx.send(OutgoingItem {
+            text: "part 0".to_string(),
+            response: resp0_tx,
+            abort_token: Some(phrase_abort.clone()),
+        })
+        .await
+        .unwrap();
+
+        tx.send(OutgoingItem {
+            text: "part 1".to_string(),
+            response: resp1_tx,
+            abort_token: Some(phrase_abort.clone()),
+        })
+        .await
+        .unwrap();
+
+        tx.send(OutgoingItem {
+            text: "part 2".to_string(),
+            response: resp2_tx,
+            abort_token: Some(phrase_abort.clone()),
+        })
+        .await
+        .unwrap();
+
+        let res0 = resp0_rx.await.unwrap();
+        let res1 = resp1_rx.await.unwrap();
+        let res2 = resp2_rx.await.unwrap();
+
+        assert!(res0.is_err());
+        assert!(res1.is_err());
+        assert!(res2.is_err());
+
+        // Send was only called ONCE (part 0). Parts 1 and 2 were skipped by the worker!
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        cancel.cancel();
+        worker.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn outgoing_worker_independent_phrases_have_separate_abort_tokens() {
+        let (tx, rx) = mpsc::channel::<OutgoingItem>(8);
+        let cancel = CancellationToken::new();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_clone = calls.clone();
+
+        let worker = tokio::spawn(run_outgoing_worker(
+            rx,
+            cancel.clone(),
+            Duration::from_millis(1),
+            move |text: String| {
+                calls_clone.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    if text == "A0" {
+                        Err(SendFailure::Ambiguous("A0 failed".to_string()))
+                    } else {
+                        Ok(())
+                    }
+                }
+            },
+        ));
+
+        let abort_a = CancellationToken::new();
+        let abort_b = CancellationToken::new();
+
+        let (resp_a0_tx, resp_a0_rx) = tokio::sync::oneshot::channel();
+        let (resp_a1_tx, resp_a1_rx) = tokio::sync::oneshot::channel();
+        let (resp_b0_tx, resp_b0_rx) = tokio::sync::oneshot::channel();
+        let (resp_b1_tx, resp_b1_rx) = tokio::sync::oneshot::channel();
+
+        // Enqueue Phrase A
+        tx.send(OutgoingItem {
+            text: "A0".to_string(),
+            response: resp_a0_tx,
+            abort_token: Some(abort_a.clone()),
+        })
+        .await
+        .unwrap();
+        tx.send(OutgoingItem {
+            text: "A1".to_string(),
+            response: resp_a1_tx,
+            abort_token: Some(abort_a.clone()),
+        })
+        .await
+        .unwrap();
+
+        // Enqueue Phrase B
+        tx.send(OutgoingItem {
+            text: "B0".to_string(),
+            response: resp_b0_tx,
+            abort_token: Some(abort_b.clone()),
+        })
+        .await
+        .unwrap();
+        tx.send(OutgoingItem {
+            text: "B1".to_string(),
+            response: resp_b1_tx,
+            abort_token: Some(abort_b.clone()),
+        })
+        .await
+        .unwrap();
+
+        assert!(resp_a0_rx.await.unwrap().is_err());
+        assert!(resp_a1_rx.await.unwrap().is_err()); // A1 skipped
+
+        assert!(resp_b0_rx.await.unwrap().is_ok()); // B0 succeeded
+        assert!(resp_b1_rx.await.unwrap().is_ok()); // B1 succeeded
+
+        // A0 attempted (1), A1 skipped (0), B0 attempted (1), B1 attempted (1) = 3 total calls
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+
+        cancel.cancel();
+        worker.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn api_client_periodic_validation_validates_every_period_without_sending() {
+        let api = Arc::new(LifecycleApi {
+            validate_calls: AtomicUsize::new(0),
+            transient_failures: AtomicUsize::new(0),
+            validate_latency: Duration::from_millis(3),
+            send_calls: AtomicUsize::new(0),
+        });
+        let coord = Arc::new(
+            lifecycle_coordinator(api.clone()).with_validation_interval(Duration::from_millis(20)),
+        );
+        let client = TwitchClient::new(TwitchSettings {
+            mode: TwitchMode::Api,
+            ..TwitchSettings::default()
+        })
+        .with_auth(coord)
+        .with_validation_interval(Duration::from_millis(30));
+
+        client.start().await.unwrap();
+        assert_eq!(client.status().await, TwitchStatus::Connected);
+
+        // start() already validated both grants once (2 validate_user calls);
+        // each ticker period adds 2 more. Wait for 3 additional periods.
+        let target = 8usize;
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while api.validate_calls.load(Ordering::SeqCst) < target
+            && std::time::Instant::now() < deadline
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert!(
+            api.validate_calls.load(Ordering::SeqCst) >= target,
+            "expected at least {} validations across three periods, got {}",
+            target,
+            api.validate_calls.load(Ordering::SeqCst)
+        );
+
+        // Idle validation must never POST a message.
+        assert_eq!(api.send_calls.load(Ordering::SeqCst), 0);
+
+        client.stop().await;
+    }
+
+    #[tokio::test]
+    async fn api_client_periodic_validation_retries_transient_and_stays_connected() {
+        let api = Arc::new(LifecycleApi {
+            validate_calls: AtomicUsize::new(0),
+            transient_failures: AtomicUsize::new(0),
+            validate_latency: Duration::ZERO,
+            send_calls: AtomicUsize::new(0),
+        });
+        let coord = Arc::new(
+            lifecycle_coordinator(api.clone()).with_validation_interval(Duration::from_millis(20)),
+        );
+        let client = TwitchClient::new(TwitchSettings {
+            mode: TwitchMode::Api,
+            ..TwitchSettings::default()
+        })
+        .with_auth(coord)
+        .with_validation_interval(Duration::from_millis(30))
+        .with_validation_retry(4, Duration::from_millis(5));
+
+        client.start().await.unwrap();
+        assert_eq!(client.status().await, TwitchStatus::Connected);
+
+        // Inject transient failures only for the periodic validation (start's
+        // prepare_delivery already succeeded with 2 validate_user calls).
+        api.transient_failures.store(4, Ordering::SeqCst);
+
+        // Wait until the injected failures are exhausted and a subsequent
+        // validation recovered (validate_calls past start's 2 + the 4 failures).
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while api.validate_calls.load(Ordering::SeqCst) < 7 && std::time::Instant::now() < deadline
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert_eq!(api.transient_failures.load(Ordering::SeqCst), 0);
+        assert!(
+            matches!(client.status().await, TwitchStatus::Connected),
+            "transient validation must not terminate the runtime: {:?}",
+            client.status().await
+        );
+        assert_eq!(api.send_calls.load(Ordering::SeqCst), 0);
+
+        client.stop().await;
+    }
+
+    #[tokio::test]
+    async fn validate_with_limited_retry_recovers_is_bounded_and_cancellable() {
+        // (1) Recovery: transient failures recover to success within the budget.
+        let api = Arc::new(LifecycleApi {
+            validate_calls: AtomicUsize::new(0),
+            transient_failures: AtomicUsize::new(2),
+            validate_latency: Duration::ZERO,
+            send_calls: AtomicUsize::new(0),
+        });
+        let coord = lifecycle_coordinator(api.clone());
+        let cancel = CancellationToken::new();
+        let res =
+            validate_active_session_with_retry(&coord, &cancel, 3, Duration::from_millis(1)).await;
+        assert!(res.is_ok(), "transient failure should recover: {:?}", res);
+        // Attempt 1: bot fails; attempt 2: bot fails; attempt 3: bot + broadcaster succeed.
+        assert_eq!(api.validate_calls.load(Ordering::SeqCst), 4);
+
+        // (2) Bounded: persistent transient failure returns after max_attempts.
+        let api2 = Arc::new(LifecycleApi {
+            validate_calls: AtomicUsize::new(0),
+            transient_failures: AtomicUsize::new(usize::MAX),
+            validate_latency: Duration::ZERO,
+            send_calls: AtomicUsize::new(0),
+        });
+        let coord2 = lifecycle_coordinator(api2.clone());
+        let cancel2 = CancellationToken::new();
+        let res2 =
+            validate_active_session_with_retry(&coord2, &cancel2, 3, Duration::from_millis(1))
+                .await;
+        assert_eq!(res2.unwrap_err(), AuthError::Api(ApiError::Transport));
+        assert_eq!(api2.validate_calls.load(Ordering::SeqCst), 3);
+
+        // (3) Cancellable: cancel during backoff returns promptly.
+        let api3 = Arc::new(LifecycleApi {
+            validate_calls: AtomicUsize::new(0),
+            transient_failures: AtomicUsize::new(usize::MAX),
+            validate_latency: Duration::ZERO,
+            send_calls: AtomicUsize::new(0),
+        });
+        let coord3 = lifecycle_coordinator(api3.clone());
+        let cancel3 = CancellationToken::new();
+        let cancel3_child = cancel3.clone();
+        let task = tokio::spawn(async move {
+            validate_active_session_with_retry(&coord3, &cancel3, 1000, Duration::from_secs(60))
+                .await
+        });
+        // Let the first attempt run and fail, then cancel during backoff.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        cancel3_child.cancel();
+        let res3 = tokio::time::timeout(Duration::from_secs(2), task)
+            .await
+            .expect("retry must cancel promptly")
+            .expect("retry task must not panic");
+        assert_eq!(res3, Err(AuthError::Cancelled));
     }
 }

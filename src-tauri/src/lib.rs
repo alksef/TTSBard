@@ -613,6 +613,16 @@ pub fn run() {
             commands::twitch::disconnect_twitch,
             commands::twitch::restart_twitch,
             commands::twitch::get_twitch_status,
+            // Twitch API authorization commands
+            commands::twitch::get_twitch_api_auth_status,
+            commands::twitch::save_twitch_api_client,
+            commands::twitch::begin_twitch_api_auth,
+            commands::twitch::begin_twitch_api_channel_device_auth,
+            commands::twitch::finish_twitch_api_auth,
+            commands::twitch::cancel_twitch_api_auth,
+            commands::twitch::clear_twitch_api_auth,
+            commands::twitch::select_twitch_api_channel,
+            commands::twitch::forget_twitch_api_channel,
             // VTube Studio commands
             commands::vtube_studio::get_vtube_studio_settings,
             commands::vtube_studio::save_vtube_studio_settings,

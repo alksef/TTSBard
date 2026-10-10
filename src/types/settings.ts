@@ -229,7 +229,10 @@ export interface WebViewSettingsDto {
 // Twitch Settings Types
 // ============================================================================
 
+export type TwitchMode = 'irc' | 'api'
+
 export interface TwitchSettingsDto {
+  mode: TwitchMode
   enabled: boolean
   username: string
   token: string

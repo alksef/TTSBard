@@ -3,7 +3,7 @@
 // This module manages the Twitch client connection.
 // Refactored from lib.rs Twitch client thread (2026-03-11)
 
-use crate::config::TwitchSettings as ConfigTwitchSettings;
+use crate::config::{TwitchMode, TwitchSettings as ConfigTwitchSettings};
 use crate::events::{TwitchConnectionStatus, TwitchEvent};
 use crate::ipc::{twitch_delivery, TwitchDeliveryFailure};
 use crate::state::AppState;
@@ -97,7 +97,8 @@ fn send_failure_code(failure: &SendFailure) -> &'static str {
     match failure {
         SendFailure::NotConnected => twitch_delivery::error_code::UNAVAILABLE,
         SendFailure::QueueFull => twitch_delivery::error_code::QUEUE_FULL,
-        SendFailure::Send(_) => twitch_delivery::error_code::SEND_FAILED,
+        SendFailure::Rejected(_) => twitch_delivery::error_code::SEND_FAILED,
+        SendFailure::Ambiguous(_) => twitch_delivery::error_code::DELIVERY_UNKNOWN,
     }
 }
 
@@ -152,8 +153,11 @@ fn log_send_failure(failure: &SendFailure) {
         SendFailure::NotConnected => {
             debug!("Cannot send message - not connected");
         }
-        SendFailure::Send(e) => {
-            error!(error = %e, "Failed to send message");
+        SendFailure::Rejected(e) => {
+            error!(error = %e, "Twitch rejected message");
+        }
+        SendFailure::Ambiguous(e) => {
+            warn!(error = %e, "Twitch delivery outcome is unknown");
         }
     }
 }
@@ -171,9 +175,11 @@ fn connection_settings_match(
 ) -> bool {
     current.enabled
         && current.is_valid().is_ok()
-        && current.username == attempted.username
-        && current.token == attempted.token
-        && current.channel == attempted.channel
+        && current.mode == attempted.mode
+        && (current.mode == TwitchMode::Api
+            || (current.username == attempted.username
+                && current.token == attempted.token
+                && current.channel == attempted.channel))
 }
 
 /// Stops the client and discards the task of an attempt that was superseded
@@ -272,10 +278,31 @@ async fn run_twitch_client_core<F, Fut>(
 
     {
         let settings = app_state.twitch.settings.read().await;
-        if settings.start_on_boot && settings.enabled && settings.is_valid().is_ok() {
+        if settings.start_on_boot {
+            let can_autostart = match settings.mode {
+                TwitchMode::Irc => settings.is_valid().is_ok(),
+                TwitchMode::Api => {
+                    let auth = app_state.twitch.auth.read().await.clone();
+                    if let Some(auth) = auth {
+                        auth.is_delivery_configured().await
+                    } else {
+                        false
+                    }
+                }
+            };
+            let mode = settings.mode;
             drop(settings);
-            info!("[TWITCH] Auto-start on boot");
-            app_state.send_twitch_event(crate::events::TwitchEvent::Restart);
+
+            if can_autostart {
+                info!(?mode, "[TWITCH] Auto-start on boot");
+                app_state.twitch.settings.write().await.enabled = true;
+                app_state.send_twitch_event(crate::events::TwitchEvent::Restart);
+            } else {
+                info!(
+                    ?mode,
+                    "[TWITCH] Auto-start skipped: settings or authorization not ready"
+                );
+            }
         }
     }
 
@@ -341,7 +368,8 @@ async fn run_twitch_client_core<F, Fut>(
                         last_status = new_status.clone();
                         update_status(new_status.clone());
                     }
-                } else if retry_deadline.is_none()
+                } else if pending.is_none()
+                    && retry_deadline.is_none()
                     && !matches!(last_status, TwitchConnectionStatus::Disconnected | TwitchConnectionStatus::Error(_))
                 {
                     last_status = TwitchConnectionStatus::Disconnected;
@@ -371,7 +399,9 @@ async fn run_twitch_client_core<F, Fut>(
                     last_status = TwitchConnectionStatus::Connecting;
                     update_status(last_status.clone());
 
-                    let client = TwitchClient::new(settings_clone.clone().into());
+                    let auth = app_state.twitch.auth.read().await.clone();
+                    let client =
+                        TwitchClient::new(settings_clone.clone().into()).with_optional_auth(auth);
                     spawn_attempt(
                         &mut pending,
                         &mut attempt_generation,
@@ -415,7 +445,9 @@ async fn run_twitch_client_core<F, Fut>(
                                         last_status = TwitchConnectionStatus::Connecting;
                                         update_status(last_status.clone());
 
-                                        let client = TwitchClient::new(settings_clone.clone().into());
+                                        let auth = app_state.twitch.auth.read().await.clone();
+                                        let client = TwitchClient::new(settings_clone.clone().into())
+                                            .with_optional_auth(auth);
                                         spawn_attempt(
                                             &mut pending,
                                             &mut attempt_generation,
@@ -463,16 +495,30 @@ async fn run_twitch_client_core<F, Fut>(
                                     // блокируют supervisor.
                                     let clean =
                                         crate::twitch::clean_irc_text(&text);
-                                    let channel =
-                                        client.channel_name().to_string();
-                                    match crate::twitch::plan_message_parts(
-                                        &clean, &channel,
-                                    ) {
+                                    let plan_res = match client.mode() {
+                                        TwitchMode::Irc => {
+                                            let channel = client.channel_name().to_string();
+                                            crate::twitch::plan_message_parts(&clean, &channel)
+                                        }
+                                        TwitchMode::Api => {
+                                            crate::twitch::plan_api_message_parts(&clean)
+                                        }
+                                    };
+                                    match plan_res {
                                         Ok(parts) => {
                                             let total_parts = parts.len();
+                                            let abort_token = CancellationToken::new();
                                             let result = enqueue_parts(parts, |part| {
                                                 let client = client.clone();
-                                                async move { client.enqueue(&part).await }
+                                                let token = abort_token.clone();
+                                                async move {
+                                                    client
+                                                        .enqueue_with_cancellation(
+                                                            &part,
+                                                            Some(token),
+                                                        )
+                                                        .await
+                                                }
                                             })
                                             .await;
                                             match result {
@@ -499,6 +545,7 @@ async fn run_twitch_client_core<F, Fut>(
                                                     failed_index,
                                                     error,
                                                 } => {
+                                                    abort_token.cancel();
                                                     warn!(
                                                         failed_index = failed_index + 1,
                                                         total_parts,
@@ -635,6 +682,7 @@ mod tests {
         reconnect_base_delay_ms, run_twitch_client_core, send_failure_code, EnqueueOutcome,
         RecvErrorAction,
     };
+    use crate::config::TwitchMode;
     use crate::events::{TwitchConnectionStatus, TwitchEvent};
     use crate::ipc::TwitchDeliveryFailure;
     use crate::state::AppState;
@@ -657,6 +705,7 @@ mod tests {
 
     fn valid_settings() -> crate::config::TwitchSettings {
         crate::config::TwitchSettings {
+            mode: crate::config::TwitchMode::Irc,
             enabled: true,
             username: "user".to_string(),
             token: "token".to_string(),
@@ -890,6 +939,65 @@ mod tests {
 
         assert!(state.twitch.client.read().await.is_none());
 
+        drop_state(state).await;
+    }
+
+    #[tokio::test]
+    async fn pending_start_keeps_connecting_across_status_poll() {
+        let state = AppState::new();
+        set_settings(&state, valid_settings()).await;
+        let (event_tx, _) = broadcast::channel::<TwitchEvent>(16);
+        let (status_tx, mut status_rx) = mpsc::unbounded_channel();
+        let shutdown = CancellationToken::new();
+        let (finish_tx, finish_rx) = tokio::sync::oneshot::channel::<()>();
+        let mut finish_rx = Some(finish_rx);
+        let factory = move |_client: TwitchClient| {
+            let rx = finish_rx.take().expect("one startup attempt");
+            async move {
+                let _ = rx.await;
+                Err(TwitchStartError::Permanent("authorization failed".into()))
+            }
+        };
+        let core = tokio::spawn(run_twitch_client_core(
+            state.clone(),
+            event_tx.subscribe(),
+            shutdown.clone(),
+            move |status| {
+                let _ = status_tx.send(status);
+            },
+            factory,
+            no_delivery_failure,
+        ));
+        event_tx.send(TwitchEvent::Restart).unwrap();
+        assert_eq!(
+            status_rx.recv().await,
+            Some(TwitchConnectionStatus::Disconnected)
+        );
+        assert_eq!(
+            status_rx.recv().await,
+            Some(TwitchConnectionStatus::Connecting)
+        );
+        // Startup is held open across the supervisor's one-second status poll.
+        // Any erroneous Disconnected publication completes this receive early.
+        assert!(
+            tokio::time::timeout(Duration::from_millis(1200), status_rx.recv())
+                .await
+                .is_err()
+        );
+        finish_tx.send(()).unwrap();
+        let status = tokio::time::timeout(Duration::from_secs(2), status_rx.recv())
+            .await
+            .unwrap();
+        assert!(matches!(status, Some(TwitchConnectionStatus::Error(_))));
+        event_tx.send(TwitchEvent::Stop).unwrap();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), status_rx.recv())
+                .await
+                .unwrap(),
+            Some(TwitchConnectionStatus::Disconnected),
+        );
+        shutdown.cancel();
+        core.await.unwrap();
         drop_state(state).await;
     }
 
@@ -1416,8 +1524,12 @@ mod tests {
             "twitch.queue_full"
         );
         assert_eq!(
-            send_failure_code(&SendFailure::Send("write failed".to_string())),
+            send_failure_code(&SendFailure::Rejected("write failed".to_string())),
             "twitch.send_failed"
+        );
+        assert_eq!(
+            send_failure_code(&SendFailure::Ambiguous("write failed".to_string())),
+            "twitch.delivery_unknown"
         );
     }
 
@@ -1432,15 +1544,23 @@ mod tests {
             "twitch.unavailable"
         );
         assert_eq!(
-            classify_enqueue_failure(&SendFailure::Send("write failed".to_string()), 0),
+            classify_enqueue_failure(&SendFailure::Rejected("write failed".to_string()), 0),
             "twitch.send_failed"
+        );
+        assert_eq!(
+            classify_enqueue_failure(&SendFailure::Ambiguous("write failed".to_string()), 0),
+            "twitch.delivery_unknown"
         );
         assert_eq!(
             classify_enqueue_failure(&SendFailure::QueueFull, 1),
             "twitch.partial_delivery"
         );
         assert_eq!(
-            classify_enqueue_failure(&SendFailure::Send("write failed".to_string()), 2),
+            classify_enqueue_failure(&SendFailure::Rejected("write failed".to_string()), 2),
+            "twitch.partial_delivery"
+        );
+        assert_eq!(
+            classify_enqueue_failure(&SendFailure::Ambiguous("write failed".to_string()), 2),
             "twitch.partial_delivery"
         );
     }
@@ -1470,7 +1590,7 @@ mod tests {
     async fn aggregate_completions_first_part_failure_is_concrete_code() {
         let result = aggregate_completions(vec![0usize, 1, 2], |index| {
             std::future::ready(if index == 0 {
-                Err(SendFailure::Send("write failed".to_string()))
+                Err(SendFailure::Rejected("write failed".to_string()))
             } else {
                 Ok(())
             })
@@ -1480,10 +1600,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn aggregate_completions_first_part_ambiguous_is_unknown() {
+        let result = aggregate_completions(vec![0usize, 1, 2], |index| {
+            std::future::ready(if index == 0 {
+                Err(SendFailure::Ambiguous("transport".to_string()))
+            } else {
+                Ok(())
+            })
+        })
+        .await;
+        assert_eq!(result, Some("twitch.delivery_unknown"));
+    }
+
+    #[tokio::test]
     async fn aggregate_completions_later_part_failure_is_partial_delivery() {
         let result = aggregate_completions(vec![0usize, 1, 2], |index| {
             std::future::ready(if index == 1 {
-                Err(SendFailure::Send("write failed".to_string()))
+                Err(SendFailure::Ambiguous("write failed".to_string()))
             } else {
                 Ok(())
             })
@@ -1500,7 +1633,7 @@ mod tests {
             move |index| {
                 counter.fetch_add(1, Ordering::SeqCst);
                 std::future::ready(if index == 1 || index == 2 {
-                    Err(SendFailure::Send("write failed".to_string()))
+                    Err(SendFailure::Ambiguous("write failed".to_string()))
                 } else {
                     Ok(())
                 })
@@ -1514,5 +1647,597 @@ mod tests {
             2,
             "aggregation must stop observing after the first failure"
         );
+    }
+
+    #[test]
+    fn connection_settings_match_distinguishes_mode() {
+        use super::connection_settings_match;
+        use super::TwitchMode;
+
+        let irc = valid_settings();
+        let mut api = valid_settings();
+        api.mode = TwitchMode::Api;
+
+        assert!(!connection_settings_match(&irc, &api));
+        assert!(!connection_settings_match(&api, &irc));
+
+        let mut api2 = api.clone();
+        api2.username = "different_unused".to_string();
+        assert!(connection_settings_match(&api, &api2));
+    }
+
+    #[tokio::test]
+    async fn servers_twitch_multipart_event_first_part_failure_aborts_tail_and_reports_send_failed()
+    {
+        let (tx, rx) = tokio::sync::mpsc::channel::<crate::twitch::OutgoingItem>(8);
+        let cancel = CancellationToken::new();
+        let send_calls = Arc::new(AtomicUsize::new(0));
+        let send_calls_clone = send_calls.clone();
+
+        let worker = tokio::spawn(crate::twitch::run_outgoing_worker(
+            rx,
+            cancel.clone(),
+            Duration::from_millis(1),
+            move |_text: String| {
+                let count = send_calls_clone.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    if count == 0 {
+                        Err(SendFailure::Rejected("first part failed".to_string()))
+                    } else {
+                        Ok(())
+                    }
+                }
+            },
+        ));
+
+        let parts = vec![
+            "part 0".to_string(),
+            "part 1".to_string(),
+            "part 2".to_string(),
+        ];
+        let abort_token = CancellationToken::new();
+
+        let outcome = enqueue_parts(parts, |part| {
+            let tx = tx.clone();
+            let token = abort_token.clone();
+            async move {
+                let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+                tx.send(crate::twitch::OutgoingItem {
+                    text: part,
+                    response: resp_tx,
+                    abort_token: Some(token),
+                })
+                .await
+                .map_err(|_| SendFailure::NotConnected)?;
+                Ok::<_, SendFailure>(crate::twitch::SendCompletion::new(resp_rx))
+            }
+        })
+        .await;
+
+        let completions = match outcome {
+            EnqueueOutcome::Accepted { completions } => completions,
+            _ => panic!("enqueue must be accepted"),
+        };
+
+        let result = aggregate_completions(completions, |c| c.wait()).await;
+        assert_eq!(result, Some("twitch.send_failed"));
+
+        // Only first part was actually attempted; tail parts (1 and 2) were aborted!
+        assert_eq!(send_calls.load(Ordering::SeqCst), 1);
+
+        cancel.cancel();
+        worker.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn servers_twitch_multipart_event_middle_part_failure_reports_partial_delivery_and_aborts_tail(
+    ) {
+        let (tx, rx) = tokio::sync::mpsc::channel::<crate::twitch::OutgoingItem>(8);
+        let cancel = CancellationToken::new();
+        let send_calls = Arc::new(AtomicUsize::new(0));
+        let send_calls_clone = send_calls.clone();
+
+        let worker = tokio::spawn(crate::twitch::run_outgoing_worker(
+            rx,
+            cancel.clone(),
+            Duration::from_millis(1),
+            move |_text: String| {
+                let count = send_calls_clone.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    if count == 1 {
+                        Err(SendFailure::Ambiguous("second part failed".to_string()))
+                    } else {
+                        Ok(())
+                    }
+                }
+            },
+        ));
+
+        let parts = vec![
+            "part 0".to_string(),
+            "part 1".to_string(),
+            "part 2".to_string(),
+        ];
+        let abort_token = CancellationToken::new();
+
+        let outcome = enqueue_parts(parts, |part| {
+            let tx = tx.clone();
+            let token = abort_token.clone();
+            async move {
+                let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+                tx.send(crate::twitch::OutgoingItem {
+                    text: part,
+                    response: resp_tx,
+                    abort_token: Some(token),
+                })
+                .await
+                .map_err(|_| SendFailure::NotConnected)?;
+                Ok::<_, SendFailure>(crate::twitch::SendCompletion::new(resp_rx))
+            }
+        })
+        .await;
+
+        let completions = match outcome {
+            EnqueueOutcome::Accepted { completions } => completions,
+            _ => panic!("enqueue must be accepted"),
+        };
+
+        let result = aggregate_completions(completions, |c| c.wait()).await;
+        assert_eq!(result, Some("twitch.partial_delivery"));
+
+        // Part 0 (success) + Part 1 (failure) attempted. Part 2 skipped!
+        assert_eq!(send_calls.load(Ordering::SeqCst), 2);
+
+        cancel.cancel();
+        worker.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn servers_twitch_multipart_event_all_parts_succeed() {
+        let (tx, rx) = tokio::sync::mpsc::channel::<crate::twitch::OutgoingItem>(8);
+        let cancel = CancellationToken::new();
+        let send_calls = Arc::new(AtomicUsize::new(0));
+        let send_calls_clone = send_calls.clone();
+
+        let worker = tokio::spawn(crate::twitch::run_outgoing_worker(
+            rx,
+            cancel.clone(),
+            Duration::from_millis(1),
+            move |_text: String| {
+                send_calls_clone.fetch_add(1, Ordering::SeqCst);
+                async move { Ok(()) }
+            },
+        ));
+
+        let parts = vec![
+            "part 0".to_string(),
+            "part 1".to_string(),
+            "part 2".to_string(),
+        ];
+        let abort_token = CancellationToken::new();
+
+        let outcome = enqueue_parts(parts, |part| {
+            let tx = tx.clone();
+            let token = abort_token.clone();
+            async move {
+                let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+                tx.send(crate::twitch::OutgoingItem {
+                    text: part,
+                    response: resp_tx,
+                    abort_token: Some(token),
+                })
+                .await
+                .map_err(|_| SendFailure::NotConnected)?;
+                Ok::<_, SendFailure>(crate::twitch::SendCompletion::new(resp_rx))
+            }
+        })
+        .await;
+
+        let completions = match outcome {
+            EnqueueOutcome::Accepted { completions } => completions,
+            _ => panic!("enqueue must be accepted"),
+        };
+
+        let result = aggregate_completions(completions, |c| c.wait()).await;
+        assert_eq!(result, None);
+
+        // All 3 parts sent!
+        assert_eq!(send_calls.load(Ordering::SeqCst), 3);
+
+        cancel.cancel();
+        worker.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn servers_twitch_multipart_event_first_part_ambiguous_reports_unknown_nonretryable() {
+        let (tx, rx) = tokio::sync::mpsc::channel::<crate::twitch::OutgoingItem>(8);
+        let cancel = CancellationToken::new();
+        let send_calls = Arc::new(AtomicUsize::new(0));
+        let accepted = Arc::new(Mutex::new(Vec::<String>::new()));
+        let send_calls_clone = send_calls.clone();
+        let accepted_clone = accepted.clone();
+
+        // Мок фиксирует приём первой части (сервер её принял) и возвращает
+        // transport: ответ потерян, но сообщение могло дойти.
+        let worker = tokio::spawn(crate::twitch::run_outgoing_worker(
+            rx,
+            cancel.clone(),
+            Duration::from_millis(1),
+            move |text: String| {
+                let count = send_calls_clone.fetch_add(1, Ordering::SeqCst);
+                let accepted = accepted_clone.clone();
+                async move {
+                    accepted.lock().unwrap().push(text);
+                    if count == 0 {
+                        Err(SendFailure::Ambiguous("transport error".to_string()))
+                    } else {
+                        Ok(())
+                    }
+                }
+            },
+        ));
+
+        let parts = vec![
+            "part 0".to_string(),
+            "part 1".to_string(),
+            "part 2".to_string(),
+        ];
+        let abort_token = CancellationToken::new();
+
+        let outcome = enqueue_parts(parts, |part| {
+            let tx = tx.clone();
+            let token = abort_token.clone();
+            async move {
+                let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+                tx.send(crate::twitch::OutgoingItem {
+                    text: part,
+                    response: resp_tx,
+                    abort_token: Some(token),
+                })
+                .await
+                .map_err(|_| SendFailure::NotConnected)?;
+                Ok::<_, SendFailure>(crate::twitch::SendCompletion::new(resp_rx))
+            }
+        })
+        .await;
+
+        let completions = match outcome {
+            EnqueueOutcome::Accepted { completions } => completions,
+            _ => panic!("enqueue must be accepted"),
+        };
+
+        let result = aggregate_completions(completions, |c| c.wait()).await;
+        let code = result.expect("ambiguous first part must produce an outcome");
+        assert_eq!(code, "twitch.delivery_unknown");
+        let payload = crate::ipc::TwitchDeliveryFailure::new(code);
+        assert!(
+            !payload.retryable,
+            "ambiguous delivery must be nonretryable"
+        );
+
+        // До сервера дошла только первая часть; хвост отменён и не отправлен.
+        assert_eq!(send_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(*accepted.lock().unwrap(), vec!["part 0".to_string()]);
+
+        cancel.cancel();
+        worker.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn servers_twitch_multipart_event_worker_stopped_without_response_reports_unknown() {
+        // Очередь принимает части, но worker/completion теряется без ответа
+        // (rx удаляется до запуска): потерянный completion консервативно
+        // классифицируется как unknown (не retryable).
+        let (tx, rx) = tokio::sync::mpsc::channel::<crate::twitch::OutgoingItem>(8);
+        let parts = vec!["part 0".to_string(), "part 1".to_string()];
+        let abort_token = CancellationToken::new();
+
+        let outcome = enqueue_parts(parts, |part| {
+            let tx = tx.clone();
+            let token = abort_token.clone();
+            async move {
+                let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+                tx.send(crate::twitch::OutgoingItem {
+                    text: part,
+                    response: resp_tx,
+                    abort_token: Some(token),
+                })
+                .await
+                .map_err(|_| SendFailure::NotConnected)?;
+                Ok::<_, SendFailure>(crate::twitch::SendCompletion::new(resp_rx))
+            }
+        })
+        .await;
+
+        // Останавливаем очередь: buffered элементы и их oneshot-ответы удаляются.
+        drop(rx);
+
+        let completions = match outcome {
+            EnqueueOutcome::Accepted { completions } => completions,
+            _ => panic!("enqueue must be accepted"),
+        };
+
+        let result = aggregate_completions(completions, |c| c.wait()).await;
+        let code = result.expect("lost completion must produce an outcome");
+        assert_eq!(code, "twitch.delivery_unknown");
+        let payload = crate::ipc::TwitchDeliveryFailure::new(code);
+        assert!(!payload.retryable, "lost completion must be nonretryable");
+    }
+
+    fn tmp_creds_file(label: &str) -> std::path::PathBuf {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ttsbard-twitch-test-{}-{}-{}",
+            label,
+            std::process::id(),
+            stamp
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("secrets.dat")
+    }
+
+    fn configured_test_auth_coordinator(
+        path: &std::path::Path,
+    ) -> Arc<crate::twitch::auth::TwitchAuthCoordinator> {
+        let store = crate::twitch::credentials::CredentialsStore::new(path);
+        let creds = crate::twitch::credentials::StoredCredentials {
+            version: crate::twitch::credentials::FORMAT_VERSION,
+            client_id: "test-client-id".to_string(),
+            client_secret: crate::twitch::credentials::SecretString::new(
+                "test-client-secret".to_string(),
+            ),
+            bot: Some(crate::twitch::credentials::AccountGrant {
+                user_id: "111".to_string(),
+                login: "bot".to_string(),
+                access_token: crate::twitch::credentials::SecretString::new(
+                    "bot-access".to_string(),
+                ),
+                refresh_token: crate::twitch::credentials::SecretString::new(
+                    "bot-refresh".to_string(),
+                ),
+                expires_at: 9999999999,
+                scopes: vec!["user:write:chat".to_string()],
+            }),
+            channels: vec![crate::twitch::credentials::AccountGrant {
+                user_id: "222".to_string(),
+                login: "broadcaster".to_string(),
+                access_token: crate::twitch::credentials::SecretString::new(
+                    "bc-access".to_string(),
+                ),
+                refresh_token: crate::twitch::credentials::SecretString::new(
+                    "bc-refresh".to_string(),
+                ),
+                expires_at: 9999999999,
+                scopes: vec![],
+            }],
+            selected_channel_id: Some("222".to_string()),
+            app_token: None,
+        };
+        store.save(&creds).unwrap();
+        Arc::new(crate::twitch::auth::TwitchAuthCoordinator::new(
+            store,
+            Duration::from_secs(10),
+            CancellationToken::new(),
+        ))
+    }
+
+    fn unconfigured_test_auth_coordinator(
+        path: &std::path::Path,
+    ) -> Arc<crate::twitch::auth::TwitchAuthCoordinator> {
+        let store = crate::twitch::credentials::CredentialsStore::new(path);
+        Arc::new(crate::twitch::auth::TwitchAuthCoordinator::new(
+            store,
+            Duration::from_secs(10),
+            CancellationToken::new(),
+        ))
+    }
+
+    #[tokio::test]
+    async fn autostart_on_boot_irc_mode_triggers_restart_and_enables() {
+        let state = AppState::new();
+        let mut settings = valid_settings();
+        settings.start_on_boot = true;
+        settings.enabled = false;
+        set_settings(&state, settings).await;
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let shutdown = CancellationToken::new();
+        let factory = {
+            let calls = Arc::clone(&calls);
+            move |_client: TwitchClient| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                async { Ok(()) }
+            }
+        };
+
+        let event_rx = state.twitch.event_tx.subscribe();
+        let core = tokio::spawn(run_twitch_client_core(
+            state.clone(),
+            event_rx,
+            shutdown.clone(),
+            |_| {},
+            factory,
+            no_delivery_failure,
+        ));
+
+        wait_until(|| calls.load(Ordering::SeqCst) == 1).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(state.twitch.settings.read().await.enabled);
+
+        shutdown.cancel();
+        let _ = core.await;
+        drop_state(state).await;
+    }
+
+    #[tokio::test]
+    async fn autostart_on_boot_irc_mode_skips_when_invalid() {
+        let state = AppState::new();
+        let mut settings = valid_settings();
+        settings.start_on_boot = true;
+        settings.enabled = false;
+        settings.username = String::new();
+        set_settings(&state, settings).await;
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let shutdown = CancellationToken::new();
+        let factory = {
+            let calls = Arc::clone(&calls);
+            move |_client: TwitchClient| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                async { Ok(()) }
+            }
+        };
+
+        let event_rx = state.twitch.event_tx.subscribe();
+        let core = tokio::spawn(run_twitch_client_core(
+            state.clone(),
+            event_rx,
+            shutdown.clone(),
+            |_| {},
+            factory,
+            no_delivery_failure,
+        ));
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert!(!state.twitch.settings.read().await.enabled);
+
+        shutdown.cancel();
+        let _ = core.await;
+        drop_state(state).await;
+    }
+
+    #[tokio::test]
+    async fn autostart_on_boot_api_mode_triggers_restart_and_enables_when_configured() {
+        let creds_file = tmp_creds_file("autostart_api_configured");
+        let coord = configured_test_auth_coordinator(&creds_file);
+
+        let state = AppState::new();
+        *state.twitch.auth.write().await = Some(coord);
+
+        let settings = crate::config::TwitchSettings {
+            mode: TwitchMode::Api,
+            enabled: false,
+            start_on_boot: true,
+            send_original_text: true,
+            ..Default::default()
+        };
+        set_settings(&state, settings).await;
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let shutdown = CancellationToken::new();
+        let factory = {
+            let calls = Arc::clone(&calls);
+            move |_client: TwitchClient| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                async { Ok(()) }
+            }
+        };
+
+        let event_rx = state.twitch.event_tx.subscribe();
+        let core = tokio::spawn(run_twitch_client_core(
+            state.clone(),
+            event_rx,
+            shutdown.clone(),
+            |_| {},
+            factory,
+            no_delivery_failure,
+        ));
+
+        wait_until(|| calls.load(Ordering::SeqCst) == 1).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(state.twitch.settings.read().await.enabled);
+
+        shutdown.cancel();
+        let _ = core.await;
+        drop_state(state).await;
+        let _ = std::fs::remove_dir_all(creds_file.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn autostart_on_boot_api_mode_skips_when_unconfigured() {
+        let creds_file = tmp_creds_file("autostart_api_unconfigured");
+        let coord = unconfigured_test_auth_coordinator(&creds_file);
+
+        let state = AppState::new();
+        *state.twitch.auth.write().await = Some(coord);
+
+        let settings = crate::config::TwitchSettings {
+            mode: TwitchMode::Api,
+            enabled: false,
+            start_on_boot: true,
+            send_original_text: true,
+            ..Default::default()
+        };
+        set_settings(&state, settings).await;
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let shutdown = CancellationToken::new();
+        let factory = {
+            let calls = Arc::clone(&calls);
+            move |_client: TwitchClient| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                async { Ok(()) }
+            }
+        };
+
+        let event_rx = state.twitch.event_tx.subscribe();
+        let core = tokio::spawn(run_twitch_client_core(
+            state.clone(),
+            event_rx,
+            shutdown.clone(),
+            |_| {},
+            factory,
+            no_delivery_failure,
+        ));
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert!(!state.twitch.settings.read().await.enabled);
+
+        shutdown.cancel();
+        let _ = core.await;
+        drop_state(state).await;
+        let _ = std::fs::remove_dir_all(creds_file.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn autostart_skipped_when_start_on_boot_is_false() {
+        let state = AppState::new();
+        let mut settings = valid_settings();
+        settings.start_on_boot = false;
+        settings.enabled = false;
+        set_settings(&state, settings).await;
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let shutdown = CancellationToken::new();
+        let factory = {
+            let calls = Arc::clone(&calls);
+            move |_client: TwitchClient| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                async { Ok(()) }
+            }
+        };
+
+        let event_rx = state.twitch.event_tx.subscribe();
+        let core = tokio::spawn(run_twitch_client_core(
+            state.clone(),
+            event_rx,
+            shutdown.clone(),
+            |_| {},
+            factory,
+            no_delivery_failure,
+        ));
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert!(!state.twitch.settings.read().await.enabled);
+
+        shutdown.cancel();
+        let _ = core.await;
+        drop_state(state).await;
     }
 }

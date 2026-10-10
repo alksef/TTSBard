@@ -29,7 +29,7 @@ pub use settings::{
     AudioEffectsSettings, AudioOutputFormat, AudioSettings, DspCompressorSettings,
     DspEqBandSettings, DspEqSettings, DspLimiterSettings, DspSettings, EditorRoute,
     HomographAccentorSettings, LoggingSettings, MtProxySettings, NetworkSettings, ProxyMode,
-    ProxyType, QuickEditorMode, SettingsManager, SpellSource, Theme, TwitchSettings,
+    ProxyType, QuickEditorMode, SettingsManager, SpellSource, Theme, TwitchMode, TwitchSettings,
     VTubeStudioSettings, VTubeStudioTypingAction, VTubeStudioTypingMode, VrchatSettings,
 };
 pub use validation::{is_valid_hex_color, validate_port};

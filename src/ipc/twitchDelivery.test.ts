@@ -57,7 +57,18 @@ describe('deliverTwitchMessage IPC contract', () => {
   it('knows the too-long typed error code', () => {
     expect(isKnownTwitchErrorCode('twitch.too_long')).toBe(true)
     expect(isKnownTwitchErrorCode('twitch.partial_delivery')).toBe(true)
+    expect(isKnownTwitchErrorCode('twitch.delivery_unknown')).toBe(true)
     expect(isKnownTwitchErrorCode('twitch.nope')).toBe(false)
+  })
+
+  it('marks ambiguous delivery as nonretryable', () => {
+    expect(TWITCH_ERROR_META['twitch.delivery_unknown']).toEqual({ retryable: false })
+    expect(
+      isTwitchDeliveryFailureDto({ code: 'twitch.delivery_unknown', retryable: false }),
+    ).toBe(true)
+    expect(
+      isTwitchDeliveryFailureDto({ code: 'twitch.delivery_unknown', retryable: true }),
+    ).toBe(false)
   })
 })
 

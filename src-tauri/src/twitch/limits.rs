@@ -35,6 +35,50 @@ pub(crate) fn wire_frame_len(channel: &str, text_len: usize) -> usize {
     "PRIVMSG #".len() + channel.len() + " :".len() + SAY_PREFIX_LEN + text_len + "\r\n".len()
 }
 
+/// Общий жадный алгоритм планирования: проходит текст по словам в исходном
+/// порядке, нормализуя whitespace в один пробел, и копит часть до тех пор, пока
+/// `fits(текущая_часть, слово)` истинно. `validate(слово)` вызывается для
+/// каждого слова до раскладки и отвергает слово, которое не помещается в часть
+/// одно (разбиение невозможно без разрезания слова).
+///
+/// Помощник параметризован политикой длины, но не является транспортом: он
+/// ничего не знает ни об IRC, ни об HTTP API, а лишь применяет переданные
+/// проверки.
+fn plan_words<Validate, Fits>(
+    clean_text: &str,
+    validate: Validate,
+    fits: Fits,
+) -> Result<Vec<String>, PlanError>
+where
+    Validate: Fn(&str) -> Result<(), PlanError>,
+    Fits: Fn(usize, usize, usize, usize) -> bool,
+{
+    let mut parts: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut current_chars = 0;
+
+    for word in clean_text.split_whitespace() {
+        validate(word)?;
+        let word_chars = word.chars().count();
+        // Резерв только для уже начатой части: `fits` вызывается, когда
+        // добавление пойдёт через пробел-разделитель.
+        if !current.is_empty() && !fits(current_chars, current.len(), word_chars, word.len()) {
+            parts.push(std::mem::take(&mut current));
+            current_chars = 0;
+        }
+        if !current.is_empty() {
+            current.push(' ');
+            current_chars += 1;
+        }
+        current.push_str(word);
+        current_chars += word_chars;
+    }
+    if !current.is_empty() {
+        parts.push(current);
+    }
+    Ok(parts)
+}
+
 /// Раскладывает ОЧИЩЕННЫЙ текст на доставимые части.
 ///
 /// Инварианты (проверяются тестами):
@@ -58,47 +102,56 @@ pub(crate) fn plan_message_parts(
     // зависят от содержимого части.
     let overhead = wire_frame_len(channel, 0);
 
-    let mut parts: Vec<String> = Vec::new();
-    let mut current = String::new();
-    let mut current_chars = 0usize;
-    let mut current_bytes = 0usize;
+    plan_words(
+        clean_text,
+        |word| {
+            let word_chars = word.chars().count();
+            let word_bytes = word.len();
 
-    for word in clean_text.split_whitespace() {
-        let word_chars = word.chars().count();
-        let word_bytes = word.len();
+            // Слово обязано помещаться одно в пустую часть — иначе разбиение
+            // невозможно без разрезания слова. Символьный лимит проверяется
+            // раньше байтового (как и в исходной политике).
+            if word_chars + SAY_PREFIX_LEN > MAX_MESSAGE_CHARS {
+                return Err(PlanError::WordExceedsCharLimit);
+            }
+            if overhead + word_bytes > MAX_WIRE_BYTES {
+                return Err(PlanError::WordExceedsWireBudget);
+            }
+            Ok(())
+        },
+        |current_chars, current_bytes, word_chars, word_bytes| {
+            // +1 символ/байт на пробел-разделитель, обвязка — на всю строку.
+            current_chars + 1 + word_chars + SAY_PREFIX_LEN <= MAX_MESSAGE_CHARS
+                && overhead + current_bytes + 1 + word_bytes <= MAX_WIRE_BYTES
+        },
+    )
+}
 
-        // Слово обязано помещаться одно в пустую часть — иначе разбиение
-        // невозможно без разрезания слова.
-        if word_chars + SAY_PREFIX_LEN > MAX_MESSAGE_CHARS {
-            return Err(PlanError::WordExceedsCharLimit);
-        }
-        if overhead + word_bytes > MAX_WIRE_BYTES {
-            return Err(PlanError::WordExceedsWireBudget);
-        }
-
-        // +1 символ/байт на пробел-разделитель, если часть уже начата.
-        let sep_chars = if current_chars == 0 { 0 } else { 1 };
-        let fits_chars =
-            current_chars + sep_chars + word_chars + SAY_PREFIX_LEN <= MAX_MESSAGE_CHARS;
-        let fits_bytes = overhead + current_bytes + sep_chars + word_bytes <= MAX_WIRE_BYTES;
-        if !current.is_empty() && !(fits_chars && fits_bytes) {
-            parts.push(std::mem::take(&mut current));
-            current_chars = 0;
-            current_bytes = 0;
-        }
-        if !current.is_empty() {
-            current.push(' ');
-            current_chars += 1;
-            current_bytes += 1;
-        }
-        current.push_str(word);
-        current_chars += word_chars;
-        current_bytes += word_bytes;
-    }
-    if !current.is_empty() {
-        parts.push(current);
-    }
-    Ok(parts)
+/// Раскладывает ОЧИЩЕННЫЙ текст на части для Send Chat Message API.
+///
+/// Политика API отличается от IRC: лимит — ровно [`MAX_MESSAGE_CHARS`] Unicode
+/// scalar values на сообщение, без префикса `". "` от `say()` и без байтового
+/// wire-бюджета. Поэтому 500 кириллических символов (1000 байт) принимаются
+/// целиком, тогда как IRC-планировщик такой же текст отвергнет.
+///
+/// Инварианты совпадают с [`plan_message_parts`] за вычетом wire-счётчиков:
+/// части не превышают `MAX_MESSAGE_CHARS`, слова (`split_whitespace`) не
+/// разрезаются, порядок сохранён, хвост не теряется, разделители нормализованы
+/// в один пробел, пустой/пробельный ввод даёт пустой Vec. Слово длиннее
+/// `MAX_MESSAGE_CHARS` отвергается как [`PlanError::WordExceedsCharLimit`]
+/// ДО любой отправки.
+pub(crate) fn plan_api_message_parts(clean_text: &str) -> Result<Vec<String>, PlanError> {
+    plan_words(
+        clean_text,
+        |word| {
+            if word.chars().count() > MAX_MESSAGE_CHARS {
+                Err(PlanError::WordExceedsCharLimit)
+            } else {
+                Ok(())
+            }
+        },
+        |current_chars, _, word_chars, _| current_chars + 1 + word_chars <= MAX_MESSAGE_CHARS,
+    )
 }
 
 #[cfg(test)]
@@ -288,5 +341,129 @@ mod tests {
         assert_eq!(wire_frame_len("", 0), 15);
         assert_eq!(wire_frame_len("test", 0), 19);
         assert_eq!(wire_frame_len("test", 10), 29);
+    }
+
+    // --- API mode (Send Chat Message API): только символьный лимит. ---
+
+    /// Инварианты API-планировщика: 500 скалярных символов на часть и ничего
+    /// больше — ни префикса `say()`, ни байтового wire-бюджета.
+    fn assert_api_plan_invariants(text: &str, parts: &[String]) {
+        assert!(!parts.is_empty(), "non-empty text must yield parts");
+        for part in parts {
+            assert!(!part.is_empty(), "no empty parts");
+            assert!(!part.starts_with(' ') && !part.ends_with(' '));
+            assert!(part.chars().count() <= MAX_MESSAGE_CHARS);
+        }
+        let words: Vec<&str> = text.split_whitespace().collect();
+        let joined: Vec<&str> = parts.iter().flat_map(|p| p.split_whitespace()).collect();
+        assert_eq!(joined, words);
+    }
+
+    #[test]
+    fn api_short_text_is_one_part() {
+        let parts = plan_api_message_parts("hello world").unwrap();
+        assert_eq!(parts, vec!["hello world".to_string()]);
+    }
+
+    #[test]
+    fn api_empty_and_whitespace_text_yield_no_parts() {
+        assert!(plan_api_message_parts("").unwrap().is_empty());
+        assert!(plan_api_message_parts("   ").unwrap().is_empty());
+        assert!(plan_api_message_parts("\t\n  ").unwrap().is_empty());
+    }
+
+    #[test]
+    fn api_separators_are_normalized_to_single_space() {
+        let parts = plan_api_message_parts("a\tb  c   d").unwrap();
+        assert_eq!(parts, vec!["a b c d".to_string()]);
+    }
+
+    #[test]
+    fn api_500_cyrillic_chars_accepted_while_irc_wire_rejects() {
+        // 500 символов = 1000 байт: API не считает байты и принимает слово
+        // целиком, IRC-планировщик тот же текст отвергает по char/wire-бюджету.
+        let word = "я".repeat(MAX_MESSAGE_CHARS);
+        assert_eq!(word.chars().count(), 500);
+        assert!(word.len() > MAX_WIRE_BYTES, "cyrillic word is >512 bytes");
+        let parts = plan_api_message_parts(&word).unwrap();
+        assert_eq!(parts, vec![word.clone()]);
+        assert_eq!(
+            plan_message_parts(&word, CHANNEL),
+            Err(PlanError::WordExceedsCharLimit)
+        );
+    }
+
+    #[test]
+    fn api_single_word_over_500_chars_is_rejected() {
+        let ascii = "a".repeat(MAX_MESSAGE_CHARS + 1);
+        assert_eq!(
+            plan_api_message_parts(&ascii),
+            Err(PlanError::WordExceedsCharLimit)
+        );
+        let cyrillic = "я".repeat(MAX_MESSAGE_CHARS + 1);
+        assert_eq!(
+            plan_api_message_parts(&cyrillic),
+            Err(PlanError::WordExceedsCharLimit)
+        );
+    }
+
+    #[test]
+    fn api_budget_is_larger_than_irc_wire_budget() {
+        // 497 ASCII-символов: IRC отклоняет по wire-бюджету (19 + 497 > 512),
+        // API принимает одним сообщением (497 <= 500).
+        let word = "a".repeat(497);
+        assert_eq!(
+            plan_message_parts(&word, CHANNEL),
+            Err(PlanError::WordExceedsWireBudget)
+        );
+        assert_eq!(plan_api_message_parts(&word).unwrap(), vec![word]);
+    }
+
+    #[test]
+    fn api_multiword_over_500_chars_splits_in_order_without_truncation() {
+        // 501 символ: API обязан разбить строго по границам слов, сохранив
+        // порядок и хвост. IRC-бюджет меньше, поэтому тот же текст он режет
+        // мельче — политики действительно различаются.
+        let text = words_text(501, 4);
+        let api_parts = plan_api_message_parts(&text).unwrap();
+        assert!(api_parts.len() >= 2, "501 chars must split");
+        assert_api_plan_invariants(&text, &api_parts);
+
+        let irc_parts = plan_message_parts(&text, CHANNEL).unwrap();
+        assert!(
+            api_parts[0].chars().count() > irc_parts[0].chars().count(),
+            "API part must hold more scalar chars than IRC part"
+        );
+    }
+
+    #[test]
+    fn api_greedy_split_point_is_deterministic() {
+        // 100 слов по 5 символов = 599 символов. 83 слова дают 497 символов,
+        // 84-е (503) не помещается — переносится; остаток 17 слов в одной части.
+        let text = words_text(599, 5);
+        let parts = plan_api_message_parts(&text).unwrap();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0].chars().count(), 497);
+        assert_eq!(parts[0].split_whitespace().count(), 83);
+        assert_eq!(parts[1].split_whitespace().count(), 17);
+        assert_api_plan_invariants(&text, &parts);
+    }
+
+    #[test]
+    fn api_emoji_zwj_and_combining_word_is_never_cut() {
+        // ZWJ-семья и «e + combining acute» — отдельные слова без whitespace
+        // внутри; длинное слово из CJK переносится целиком в свою часть.
+        let family = "👨‍👩‍👧‍👦";
+        let combining = "e\u{0301}";
+        let text = format!("{} {} {}", family, combining, "字".repeat(495));
+        let parts = plan_api_message_parts(&text).unwrap();
+        assert_api_plan_invariants(&text, &parts);
+        assert_eq!(parts.len(), 2);
+        assert!(parts[0].contains(family), "ZWJ family must stay intact");
+        assert!(
+            parts[0].contains(combining),
+            "combining sequence must stay intact"
+        );
+        assert_eq!(parts[1].chars().count(), 495);
     }
 }

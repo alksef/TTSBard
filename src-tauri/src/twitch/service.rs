@@ -4,6 +4,7 @@ use parking_lot::Mutex;
 
 use crate::config::TwitchSettings;
 use crate::events::{TwitchConnectionStatus, TwitchEvent, TwitchEventSender};
+use crate::twitch::auth::TwitchAuthCoordinator;
 use crate::twitch::TwitchClient;
 
 pub struct TwitchService {
@@ -11,6 +12,7 @@ pub struct TwitchService {
     pub connection_status: Arc<Mutex<TwitchConnectionStatus>>,
     pub event_tx: TwitchEventSender,
     pub client: Arc<tokio::sync::RwLock<Option<TwitchClient>>>,
+    pub auth: Arc<tokio::sync::RwLock<Option<Arc<TwitchAuthCoordinator>>>>,
 }
 
 impl TwitchService {
@@ -20,6 +22,7 @@ impl TwitchService {
             connection_status: Arc::new(Mutex::new(TwitchConnectionStatus::Disconnected)),
             event_tx,
             client: Arc::new(tokio::sync::RwLock::new(None)),
+            auth: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 

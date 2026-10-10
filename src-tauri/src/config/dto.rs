@@ -1797,6 +1797,7 @@ mod tests {
         };
 
         let twitch = TwitchSettingsDto {
+            mode: crate::config::TwitchMode::Irc,
             enabled: false,
             username: String::new(),
             token: String::new(),
@@ -2209,6 +2210,7 @@ mod tests {
         };
 
         let twitch = TwitchSettingsDto {
+            mode: crate::config::TwitchMode::Irc,
             enabled: false,
             username: String::new(),
             token: String::new(),

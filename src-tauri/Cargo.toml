@@ -97,6 +97,19 @@ chrono = "0.4"
 # Twitch IRC client (ROADMAP-104): transport + protocol lifecycle owned by the library
 twitch-irc = { version = "=6.1.1", default-features = false, features = ["transport-tcp", "transport-tcp-native-tls"] }
 
+# Twitch Helix + OAuth (ROADMAP-132). These are third-party twitch-rs community
+# libraries, not an official Twitch SDK. The existing app networking stays on
+# reqwest 0.12; the SDK only gets a narrowly scoped reqwest 0.13 transport
+# (reqwest_twitch) with default SDK features disabled and no EventSub. We enable
+# `client` (generic HTTP transport trait) + `helix` (typed request/response) and
+# implement the transport ourselves so redirects/retries/timeouts stay under our
+# control and secret forwarding is impossible.
+twitch_api = { version = "=0.8.0", default-features = false, features = ["helix", "client"] }
+twitch_oauth2 = { version = "=0.17.1", default-features = false, features = ["client"] }
+reqwest_twitch = { package = "reqwest", version = "=0.13.4", default-features = false, features = ["native-tls"] }
+# `http` types are shared by twitch_api/twitch_oauth2 and our transport adapter.
+http = "1"
+
 # VRChat OSC (ROADMAP-130)
 rosc = "0.10"
 unicode-segmentation = "1.13"
@@ -142,7 +155,8 @@ windows = { version = "0.58", features = [
     "Win32_Devices_Display",
     "Win32_UI_TextServices",
     "Win32_UI_Shell",
-    "Win32_Storage_FileSystem"
+    "Win32_Storage_FileSystem",
+    "Win32_Security_Cryptography"
 ] }
 
 [features]

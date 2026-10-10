@@ -9,6 +9,7 @@ import { deliverTwitchMessage } from '../ipc/twitchDelivery'
 import { useErrorHandler } from './useErrorHandler'
 import { t } from '../i18n'
 import { TWITCH_CONNECTION_LOCALE_KEYS, twitchErrorField, validateTwitchSettings, type TwitchSettingsField } from '../ipc/twitchConnection'
+import type { TwitchMode } from '../types/settings'
 
 export type TwitchStatus = 'Disconnected' | 'Connecting' | 'Connected' | 'Error'
 
@@ -33,6 +34,7 @@ interface RustEnumError {
 type RustTwitchStatus = RustEnumDisconnected | RustEnumConnecting | RustEnumConnected | RustEnumError | string
 
 export interface TwitchSettings {
+  mode: TwitchMode
   enabled: boolean
   username: string
   token: string
@@ -42,6 +44,7 @@ export interface TwitchSettings {
 }
 
 const TWITCH_SETTINGS_FIELDS: Array<keyof TwitchSettings> = [
+  'mode',
   'enabled',
   'username',
   'token',
@@ -112,6 +115,7 @@ export function useTwitch() {
   const { showError: showGlobalError } = useErrorHandler()
 
   const settings = ref<TwitchSettings>({
+    mode: 'irc',
     enabled: false,
     username: '',
     token: '',
@@ -164,6 +168,8 @@ export function useTwitch() {
   // приём асинхронной команды успехом подключения не считается.
   let pendingConnect: { saved: boolean; ready: boolean; status?: TwitchStatus } | null = null
   const connectPending = ref(false)
+  const modePending = ref(false)
+  let modeRequest = 0
 
   function settingsSnapshot(): TwitchSettings {
     return { ...settings.value }
@@ -521,7 +527,32 @@ export function useTwitch() {
     await saveCheckboxFields()
   }
 
+  async function saveMode(mode: TwitchMode): Promise<void> {
+    if (settings.value.mode === mode) return
+    const request = ++modeRequest
+    settings.value.mode = mode
+    const snapshot = settingsSnapshot()
+    modePending.value = true
+    try {
+      await persistTwitchSettings(snapshot)
+      if (listenerScope.disposed) return
+      persistedSettings = snapshot
+      persistedCheckboxes = {
+        start_on_boot: snapshot.start_on_boot,
+        send_original_text: snapshot.send_original_text,
+      }
+    } catch (e) {
+      if (!listenerScope.disposed && request === modeRequest) {
+        settings.value.mode = persistedSettings.mode
+        handleSettingsFailure(e)
+      }
+    } finally {
+      if (!listenerScope.disposed && request === modeRequest) modePending.value = false
+    }
+  }
+
   async function sendTestMessage() {
+    if (modePending.value) return
     if (isSendingTest.value) return
     if (!testMessage.value.trim()) return
     if (!isConnected.value) return
@@ -531,12 +562,9 @@ export function useTwitch() {
     try {
       const result = await deliverTwitchMessage(testMessage.value)
       if (request !== testSendRequest) return
-      // Одночастная доставка молчалива; если текст ушёл несколькими
-      // сообщениями (ROADMAP-106), пользователь должен видеть реальный
-      // исход — тот же panel-local toast, что и у действий настроек.
-      if (result.parts > 1) {
-        showError(t('twitch.test.sent_parts', { count: result.parts }), 'success')
-      }
+      showError(result.parts > 1
+        ? t('twitch.test.sent_parts', { count: result.parts })
+        : t('twitch.test.sent'), 'success')
     } catch (e) {
       if (request !== testSendRequest) return
       showGlobalError(presentCommandError(e, t('twitch.test.error')))
@@ -564,6 +592,7 @@ export function useTwitch() {
     if (checkboxSavePending) return
     debugLog('[TwitchPanel] Settings updated from composable, has_token:', !!newSettings.token, 'channel:', newSettings.channel)
     const echo: TwitchSettings = {
+      mode: newSettings.mode ?? 'irc',
       enabled: newSettings.enabled,
       username: newSettings.username,
       token: newSettings.token,
@@ -609,12 +638,14 @@ export function useTwitch() {
     showToken,
     isConnected,
     connectPending,
+    modePending,
     restartTwitch,
     stopTwitch,
     startTwitch,
     save,
     saveStartOnBoot,
     saveSendOriginalText,
+    saveMode,
     testMessage,
     isSendingTest,
     sendTestMessage,

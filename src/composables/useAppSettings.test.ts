@@ -50,7 +50,7 @@ function mockSettings(): AppSettingsDto & { vrchat: VrchatSettingsDto } {
       network: { proxy: { proxy_url: null }, mtproxy: { host: null, port: 443, secret: null, dc_id: null } },
     },
     webview: { enabled: false, start_on_boot: false, port: 8080, access_token: null, upnp_enabled: false, send_original_text: true },
-    twitch: { enabled: false, username: '', token: '', channel: '', start_on_boot: false, send_original_text: true },
+    twitch: { mode: 'irc', enabled: false, username: '', token: '', channel: '', start_on_boot: false, send_original_text: true },
     windows: {
       global: { exclude_from_capture: false },
       main: { x: null, y: null, custom_background: false, opacity: 100, bg_color: '', custom_opacity: false, opacity_compact_only: false, compact_width: 400, compact_height: 300, compact_view: 'compact', hide_extra_window_buttons: false },

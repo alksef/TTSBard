@@ -93,7 +93,7 @@ describe('useTwitch action result localization', () => {
     vi.clearAllMocks()
     capturedOnMountedCbs = []
     capturedOnUnmountedCbs = []
-    mockTwitchSettingsRef.value = { enabled: true, username: 'user', token: 'token', channel: 'channel', start_on_boot: false, send_original_text: true }
+    mockTwitchSettingsRef.value = { mode: 'irc', enabled: true, username: 'user', token: 'token', channel: 'channel', start_on_boot: false, send_original_text: true }
     listenMock.mockImplementation(async () => vi.fn())
   })
 
@@ -270,7 +270,7 @@ describe('useTwitch test message delivery', () => {
     vi.clearAllMocks()
     capturedOnMountedCbs = []
     capturedOnUnmountedCbs = []
-    mockTwitchSettingsRef.value = { enabled: true, username: 'user', token: 'token', channel: 'channel', start_on_boot: false, send_original_text: true }
+    mockTwitchSettingsRef.value = { mode: 'irc', enabled: true, username: 'user', token: 'token', channel: 'channel', start_on_boot: false, send_original_text: true }
     listenMock.mockImplementation(async () => vi.fn())
   })
 
@@ -483,7 +483,7 @@ describe('useTwitch checkbox section saves', () => {
     vi.clearAllMocks()
     capturedOnMountedCbs = []
     capturedOnUnmountedCbs = []
-    mockTwitchSettingsRef.value = { enabled: true, username: 'user', token: 'token', channel: 'channel', start_on_boot: false, send_original_text: true }
+    mockTwitchSettingsRef.value = { mode: 'irc', enabled: true, username: 'user', token: 'token', channel: 'channel', start_on_boot: false, send_original_text: true }
     listenMock.mockImplementation(async () => vi.fn())
   })
 
@@ -507,6 +507,7 @@ describe('useTwitch checkbox section saves', () => {
   /** Payload попадает в persisted только в момент успешного resolve. */
   function queuePersistingSaveCalls() {
     const persisted: TwitchSettings = {
+      mode: 'irc',
       enabled: true,
       username: 'user',
       token: 'token',
@@ -730,6 +731,7 @@ describe('useTwitch checkbox section saves', () => {
 
     // settings-changed доносит ещё не обновлённый persisted-снимок.
     mockTwitchSettingsRef.value = {
+      mode: 'irc',
       enabled: true,
       username: 'user',
       token: 'token',
@@ -773,7 +775,7 @@ describe('useTwitch start with save', () => {
     vi.clearAllMocks()
     capturedOnMountedCbs = []
     capturedOnUnmountedCbs = []
-    mockTwitchSettingsRef.value = { enabled: true, username: 'user', token: 'token', channel: 'channel', start_on_boot: false, send_original_text: true }
+    mockTwitchSettingsRef.value = { mode: 'irc', enabled: true, username: 'user', token: 'token', channel: 'channel', start_on_boot: false, send_original_text: true }
     listenMock.mockImplementation(async () => vi.fn())
   })
 
@@ -993,5 +995,73 @@ describe('useTwitch start with save', () => {
     await twitch.restartTwitch()
     expect(twitch.errorMessage.value).toBe('Настройки сохранены. Подключено')
     expect(mockInvoke).not.toHaveBeenCalledWith('restart_twitch')
+  })
+
+  it('restores the confirmed mode after failure and permits retry', async () => {
+    const { twitch } = await setupWithStatusEvents()
+    mockInvoke.mockRejectedValueOnce({ code: 'twitch.settings_save_failed' })
+    await twitch.saveMode('api')
+    expect(twitch.settings.value.mode).toBe('irc')
+    expect(twitch.modePending.value).toBe(false)
+    mockInvoke.mockResolvedValue('saved')
+    await twitch.saveMode('api')
+    expect(twitch.settings.value.mode).toBe('api')
+  })
+
+  it('persists later edits before connecting after a mode write', async () => {
+    const { twitch } = await setupWithStatusEvents()
+    mockInvoke.mockResolvedValue('saved')
+    await twitch.saveMode('api')
+    let finish!: (value: string) => void
+    mockInvoke.mockImplementationOnce(() => new Promise<string>(resolve => { finish = resolve }))
+    const switching = twitch.saveMode('irc')
+    twitch.settings.value.channel = 'new_channel'
+    finish('saved')
+    await switching
+    mockInvoke.mockClear()
+    await twitch.startTwitch()
+    expect(mockInvoke).toHaveBeenCalledWith('save_twitch_settings', {
+      settings: expect.objectContaining({ mode: 'irc', channel: 'new_channel' }),
+    })
+  })
+
+  it('does not roll back a newer selection when an older mode write fails', async () => {
+    const { twitch } = await setupWithStatusEvents()
+    let fail!: (error: unknown) => void
+    mockInvoke.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject }))
+    mockInvoke.mockResolvedValue('saved')
+    const first = twitch.saveMode('api')
+    const second = twitch.saveMode('irc')
+    fail({ code: 'twitch.settings_save_failed' })
+    await Promise.all([first, second])
+    expect(twitch.settings.value.mode).toBe('irc')
+    expect(twitch.modePending.value).toBe(false)
+  })
+
+  it('saveMode persists switched mode', async () => {
+    const { twitch } = await setupWithStatusEvents()
+    mockInvoke.mockResolvedValue('saved')
+    await twitch.saveMode('api')
+    expect(twitch.settings.value.mode).toBe('api')
+    expect(mockInvoke).toHaveBeenCalledWith('save_twitch_settings', {
+      settings: expect.objectContaining({ mode: 'api' }),
+    })
+  })
+
+  it('in api mode, startTwitch does not require IRC username or channel', async () => {
+    mockTwitchSettingsRef.value = {
+      mode: 'api',
+      enabled: false,
+      username: '',
+      token: '',
+      channel: '',
+      start_on_boot: false,
+      send_original_text: true,
+    }
+    const { twitch } = await setupWithStatusEvents()
+    mockInvoke.mockResolvedValue('saved')
+    await twitch.startTwitch()
+    expect(twitch.fieldErrors.value).toEqual({})
+    expect(mockInvoke).toHaveBeenCalledWith('connect_twitch')
   })
 })
