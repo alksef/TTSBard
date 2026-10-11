@@ -142,10 +142,23 @@ if (!injectedModeController) {
 const modeController: MainWindowModeController = injectedModeController
 const isMinimalMode = modeController.isMinimalMode
 const isMono = modeController.isMono
+const tabsStorageKey = 'app-editor-tabs-visible'
+const tabsVisible = ref((() => {
+  try { return localStorage.getItem(tabsStorageKey) !== 'false' }
+  catch { return true }
+})())
+const showTabs = computed(() => !isMono.value && (tabsVisible.value || showIncomingTab.value))
+
+async function toggleTabs() {
+  tabsVisible.value = !tabsVisible.value
+  try { localStorage.setItem(tabsStorageKey, String(tabsVisible.value)) } catch { /* Storage may be unavailable. */ }
+  await nextTick()
+  focusEditor()
+}
 
 async function handleEnableMono() {
   const ok = await modeController.setCompactView('mono')
-  if (ok) {
+  if (ok && (isMinimalMode.value || await modeController.toggleMinimalMode())) {
     await nextTick()
     focusEditor()
   }
@@ -934,20 +947,18 @@ defineExpose({ focusEditor })
       @dismiss="saveStatusMessage = ''"
     />
     <div class="input-group">
-      <div class="textarea-wrapper" :class="{ 'minimal-wrapper': isMinimalMode, 'mono-wrapper': isMono, 'incoming-wrapper': showIncomingTab }" @keydown.capture="handleEditorScopeKeydown">
+      <div class="textarea-wrapper" :class="{ 'minimal-wrapper': isMinimalMode, 'mono-wrapper': isMono, 'incoming-wrapper': showIncomingTab, 'tabs-hidden': !showTabs }" @keydown.capture="handleEditorScopeKeydown">
         <EditorTabs
-          v-if="!isMono"
+          v-if="showTabs"
           :tabs="tabs"
           :active-id="activeId"
           :pinned-title="incomingAvailable ? incomingTabTitle : undefined"
           :pinned-active="incomingAvailable && showIncomingTab"
-          :compact="isMinimalMode"
           @create="onCreate"
           @close="onClose"
           @select="onSelect"
           @rename="renameTab"
           @select-pinned="onSelectPinned"
-          @enable-mono="handleEnableMono"
         />
         <IncomingTextsTab
           ref="incomingTabRef"
@@ -1008,6 +1019,10 @@ defineExpose({ focusEditor })
           :accenting="isAccenting"
           :accent-ready="accentorReady"
           :accent-homographs-binding="accentHomographsBinding"
+          :tabs-visible="tabsVisible"
+          :mode-busy="modeController.busy.value"
+          @toggle-tabs="toggleTabs"
+          @enable-mono="handleEnableMono"
           @correct="correctText"
           @complete="completeText"
           @grammar="checkGrammar"
@@ -1132,6 +1147,10 @@ defineExpose({ focusEditor })
   margin-bottom: 0;
 }
 
+.textarea-wrapper.tabs-hidden :deep(.cm-editor) {
+  border-radius: 6px;
+}
+
 .textarea-wrapper.incoming-wrapper {
   display: flex;
   flex-direction: column;
@@ -1204,7 +1223,7 @@ defineExpose({ focusEditor })
 .input-panel.minimal-panel.mono-panel .textarea-wrapper.minimal-wrapper :deep(.cm-editor) {
   min-height: 0 !important;
   height: 100%;
-  border-top: none;
+  border: 1px solid rgba(var(--rgb-border), 0.22);
   border-radius: 6px;
 }
 

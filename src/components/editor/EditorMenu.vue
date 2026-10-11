@@ -9,6 +9,8 @@ const emit = defineEmits<{
   grammar: []
   'accent-homographs': []
   'save-audio': []
+  'toggle-tabs': []
+  'enable-mono': []
 }>()
 
 const props = defineProps<{
@@ -18,6 +20,8 @@ const props = defineProps<{
   accenting?: boolean
   accentReady?: boolean
   accentHomographsBinding?: string
+  tabsVisible: boolean
+  modeBusy?: boolean
 }>()
 
 const accentHomographsTitle = computed(() =>
@@ -27,14 +31,15 @@ const accentHomographsTitle = computed(() =>
 )
 
 const open = ref(false)
-const firstItemRef = ref<HTMLButtonElement | null>(null)
+const menuRef = ref<HTMLDivElement | null>(null)
+const triggerRef = ref<HTMLButtonElement | null>(null)
 
 function close() { open.value = false }
 
 async function openMenu() {
   open.value = true
   await nextTick()
-  firstItemRef.value?.focus()
+  menuRef.value?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
 }
 
 function onTriggerClick() {
@@ -52,7 +57,10 @@ function onDocClick(e: MouseEvent) {
 }
 
 function onKey(e: KeyboardEvent) {
-  if (e.key === 'Escape') close()
+  if (e.key === 'Escape' && open.value) {
+    close()
+    triggerRef.value?.focus()
+  }
 }
 
 onMounted(() => {
@@ -71,6 +79,7 @@ function run(fn: () => void) { close(); fn() }
 <template>
   <div class="editor-menu" data-editor-menu>
     <button
+      ref="triggerRef"
       class="menu-trigger ui-icon-button ui-icon-button--round"
       :class="{ compact }"
       :aria-expanded="open"
@@ -81,9 +90,8 @@ function run(fn: () => void) { close(); fn() }
     >
       <Ellipsis :size="18" />
     </button>
-    <div v-if="open" class="menu-dropdown">
+    <div v-if="open" ref="menuRef" class="menu-dropdown">
       <button
-        ref="firstItemRef"
         class="menu-item"
         :disabled="!hasText || !isAiEnabled"
         @click="run(() => emit('correct'))"
@@ -121,6 +129,13 @@ function run(fn: () => void) { close(); fn() }
       >
         {{ t('editor.menu.save_audio') }}
       </button>
+      <div class="menu-separator" />
+      <button class="menu-item" @click="run(() => emit('toggle-tabs'))">
+        {{ t(tabsVisible ? 'editor.menu.hide_tabs' : 'editor.menu.show_tabs') }}
+      </button>
+      <button class="menu-item" :disabled="modeBusy" @click="run(() => emit('enable-mono'))">
+        {{ t('shell.mono.enable') }}
+      </button>
     </div>
   </div>
 </template>
@@ -152,27 +167,33 @@ function run(fn: () => void) { close(); fn() }
   position: absolute;
   bottom: calc(100% + 6px);
   left: 0;
-  min-width: 200px;
-  padding: 0.4rem;
+  z-index: 1000;
+  max-height: calc(100vh - 60px);
+  overflow-y: auto;
+  min-width: 190px;
+  padding: 0.25rem;
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border-strong);
-  border-radius: 12px;
+  border-radius: 8px;
   box-shadow: var(--shadow-soft, 0 4px 16px rgba(0, 0, 0, 0.12));
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
 }
 
 .menu-item {
   display: flex;
   align-items: center;
   width: 100%;
-  padding: 0.5rem 0.75rem;
+  min-height: 28px;
+  flex-shrink: 0;
+  padding: 0.25rem 0.5rem;
   background: transparent;
   color: var(--color-text-primary);
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   font-size: 0.875rem;
+  line-height: 1.35;
   cursor: pointer;
   transition: background 0.15s ease;
   text-align: left;
@@ -195,7 +216,8 @@ function run(fn: () => void) { close(); fn() }
 
 .menu-separator {
   height: 1px;
-  margin: 0.25rem 0;
+  flex-shrink: 0;
+  margin: 0.1875rem 0;
   background: var(--color-border-strong);
   opacity: 0.5;
 }

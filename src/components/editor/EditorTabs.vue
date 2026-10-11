@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, nextTick, computed } from 'vue'
-import { Inbox, ChevronUp } from 'lucide-vue-next'
+import { Inbox } from 'lucide-vue-next'
 import type { EditorTab } from '../../composables/useEditorTabs'
 import { t } from '../../i18n'
 
@@ -9,7 +9,6 @@ const props = defineProps<{
   activeId: string
   pinnedTitle?: string
   pinnedActive?: boolean
-  compact?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -18,7 +17,6 @@ const emit = defineEmits<{
   select: [id: string]
   rename: [id: string, title: string]
   'select-pinned': []
-  'enable-mono': []
 }>()
 
 const editingId = ref<string | null>(null)
@@ -102,16 +100,6 @@ const pinnedCountText = computed(() => {
       @click="emit('create')"
       :title="t('editor.tabs.add')"
     >+</button>
-    <button
-      v-if="compact"
-      type="button"
-      class="tab-mono-toggle"
-      @click="emit('enable-mono')"
-      :title="t('shell.mono.enable')"
-      :aria-label="t('shell.mono.enable')"
-    >
-      <ChevronUp :size="14" />
-    </button>
   </div>
 </template>
 
@@ -242,30 +230,4 @@ const pinnedCountText = computed(() => {
   border-color: var(--color-accent);
 }
 
-.tab-mono-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  background: var(--color-bg-elevated);
-  color: var(--color-text-muted);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-}
-
-.tab-mono-toggle:hover {
-  background: var(--color-accent);
-  color: var(--color-text-on-accent, #fff);
-  border-color: var(--color-accent);
-}
-
-.tab-mono-toggle:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 1px;
-}
 </style>
