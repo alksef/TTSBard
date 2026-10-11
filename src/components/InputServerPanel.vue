@@ -181,7 +181,7 @@ const statusText = computed(() => {
         <div class="connection-row">
           <label class="row-label ui-label ui-label--secondary">{{ t('input_server.local_url_label') }}</label>
           <div class="url-display url-display-full ui-composite">
-            <label class="ui-input url-code url-code-wide ui-composite-field">{{ overlayUrl }}</label>
+            <input class="ui-input url-code url-code-wide ui-composite-field" type="text" readonly :value="overlayUrl" :aria-label="t('input_server.local_url_label')" :title="overlayUrl" />
             <button
               class="ui-icon-button ui-icon-button--adjacent ui-composite-action"
               :title="t('input_server.copy_overlay')"
@@ -196,9 +196,7 @@ const statusText = computed(() => {
         <div class="connection-row">
           <label class="row-label ui-label ui-label--secondary">{{ t('input_server.lan_url_label') }}</label>
           <div class="url-display url-display-full ui-composite">
-            <label class="ui-input url-code url-code-wide ui-composite-field">
-              {{ lanUrl ?? t('input_server.lan_url_unavailable') }}
-            </label>
+            <input class="ui-input url-code url-code-wide ui-composite-field" type="text" readonly :value="lanUrl ?? t('input_server.lan_url_unavailable')" :aria-label="t('input_server.lan_url_label')" :title="lanUrl ?? t('input_server.lan_url_unavailable')" />
             <button
               class="ui-icon-button ui-icon-button--adjacent ui-composite-action"
               :title="t('input_server.copy_lan_url')"
@@ -508,18 +506,14 @@ h2 {
   width: 100%;
 }
 
-/* URL typography comes from ui-input; local sizing and ellipsis handle long
-   values. Joined borders and corners come from ui-composite. */
+/* Native readonly inputs keep selection and caret scrolling for long URLs.
+   Joined borders and corners come from ui-composite. */
 .url-code {
-  display: inline-flex;
-  align-items: center;
-  padding-right: var(--ui-control-padding-x);
   font-family: var(--font-mono);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: text;
-  user-select: text;
+}
+
+.url-code.ui-input:hover:not(:disabled) {
+  background: var(--color-bg-field);
 }
 
 .url-code-wide {
@@ -530,7 +524,7 @@ h2 {
 
 .subsection-divider {
   border-top: 1px solid var(--color-border);
-  margin: 1.25rem 0;
+  margin: var(--ui-row-gap) 0;
 }
 
 .subsection-heading {

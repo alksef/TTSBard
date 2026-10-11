@@ -641,6 +641,10 @@ h2 {
   margin: 0.5rem 0;
 }
 
+.help-section > :last-child {
+  margin-bottom: 0;
+}
+
 .help-text code {
   background: var(--info-bg-weak);
   padding: 0.2rem 0.4rem;

@@ -340,7 +340,7 @@ h2 {
 
 .server-header {
   padding-top: 0;
-  padding-bottom: 0.75rem;
+  padding-bottom: 8px;
   border-bottom: 1px solid var(--color-border);
   margin-bottom: 1rem;
   align-items: flex-start;
@@ -349,7 +349,7 @@ h2 {
 }
 
 .server-header h2 {
-  margin-top: 0;
+  margin: 0;
 }
 
 .status-indicator {
@@ -414,6 +414,10 @@ h2 {
   margin-bottom: 1rem;
 }
 
+.settings-section > :last-child {
+  margin-bottom: 0;
+}
+
 .model-label {
   flex: 0 0 5em;
   min-width: 0;
@@ -437,6 +441,7 @@ h2 {
   flex: 0 0 100%;
   min-width: 0;
   overflow-wrap: break-word;
+  margin-bottom: 0;
 }
 
 .refresh-button {

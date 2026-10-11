@@ -1218,6 +1218,11 @@ h2 {
   margin: 0.5rem 0;
 }
 
+.help-section > :last-child,
+.help-registration > :last-child {
+  margin-bottom: 0;
+}
+
 .help-link {
   color: var(--color-info);
   text-decoration: none;

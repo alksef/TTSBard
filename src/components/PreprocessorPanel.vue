@@ -132,17 +132,20 @@ onMounted(async () => {
         <h3 class="ui-section-title">{{ t('preprocessor.test.title') }}</h3>
         <div class="test-inputs">
           <div class="input-group">
-            <label class="ui-label">{{ t('preprocessor.test.input') }}</label>
-            <input
-              v-model="testInput"
-              type="text"
-              class="ui-input test-input"
-              :placeholder="t('preprocessor.test.placeholder')"
-            />
+            <label class="ui-label" for="preprocessor-test-input">{{ t('preprocessor.test.input') }}</label>
+            <div class="test-input-row ui-field-group">
+              <input
+                id="preprocessor-test-input"
+                v-model="testInput"
+                type="text"
+                class="ui-input test-input"
+                :placeholder="t('preprocessor.test.placeholder')"
+              />
+              <button @click="testPreprocessing" class="ui-button ui-button--primary test-button">
+                {{ t('preprocessor.test.run') }}
+              </button>
+            </div>
           </div>
-          <button @click="testPreprocessing" class="ui-button ui-button--primary test-button">
-            {{ t('preprocessor.test.run') }}
-          </button>
           <div class="output-group">
             <label class="ui-label">{{ t('preprocessor.test.output') }}</label>
             <div class="test-output">{{ testOutput || t('preprocessor.test.empty') }}</div>
@@ -216,11 +219,17 @@ label {
 }
 
 .test-input {
+  flex: 1 1 220px;
+  min-width: 0;
   font-family: var(--font-mono);
 }
 
+.test-input-row {
+  flex-wrap: wrap;
+}
+
 .test-button {
-  align-self: flex-start;
+  flex: 0 0 auto;
 }
 
 /* Result block styled like the input fields above (option 3): quiet theme

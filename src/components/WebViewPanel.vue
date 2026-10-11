@@ -157,7 +157,7 @@ const statusText = computed(() => {
         <div class="connection-row">
           <label class="row-label ui-label ui-label--secondary">{{ t('webview.connection.local_label') }}</label>
           <div class="url-display url-display-full ui-composite">
-            <label class="ui-input url-code url-code-wide ui-composite-field">{{ loopbackUrl }}</label>
+            <input class="ui-input url-code url-code-wide ui-composite-field" type="text" readonly :value="loopbackUrl" :aria-label="t('webview.connection.local_label')" :title="loopbackUrl" />
             <button @click="copyLoopbackUrl" class="ui-icon-button ui-icon-button--adjacent ui-composite-action" :title="t('webview.copy_url')" :aria-label="t('webview.copy_url')">
               <Copy :size="18" />
             </button>
@@ -167,9 +167,7 @@ const statusText = computed(() => {
         <div class="connection-row">
           <label class="row-label ui-label ui-label--secondary">{{ t('webview.connection.lan_label') }}</label>
           <div class="url-display url-display-full ui-composite">
-            <label class="ui-input url-code url-code-wide ui-composite-field">
-              {{ lanUrl || t('webview.lan_url_unavailable') }}
-            </label>
+            <input class="ui-input url-code url-code-wide ui-composite-field" type="text" readonly :value="lanUrl || t('webview.lan_url_unavailable')" :aria-label="t('webview.connection.lan_label')" :title="lanUrl || t('webview.lan_url_unavailable')" />
             <button v-if="lanUrl" @click="copyLanUrl" class="ui-icon-button ui-icon-button--adjacent ui-composite-action" :title="t('webview.copy_lan_url')" :aria-label="t('webview.copy_lan_url')">
               <Copy :size="18" />
             </button>
@@ -196,7 +194,7 @@ const statusText = computed(() => {
 
     <section class="settings-section ui-section">
       <h2 class="ui-section-title">{{ t('webview.test.title') }}</h2>
-      <div class="ui-row" style="margin-bottom: 8px;">
+      <div class="ui-row">
         <input
           type="text"
           v-model="testMessage"
@@ -222,7 +220,7 @@ const statusText = computed(() => {
       <!-- External URL display (shows full URL with token if available) -->
       <div class="ui-row" v-if="hasToken">
         <div class="url-display url-display-full ui-composite">
-          <label class="ui-input url-code url-code-wide ui-composite-field">{{ externalDisplay }}</label>
+          <input class="ui-input url-code url-code-wide ui-composite-field" type="text" readonly :value="externalDisplay" :aria-label="t('webview.external.title')" :title="externalDisplay" />
           <button @click="copyExternalUrl" class="ui-icon-button ui-icon-button--adjacent ui-composite-action" :title="t('webview.external.copy_url')" :aria-label="t('webview.external.copy_url')" :disabled="!isUpnpAvailable || !externalDisplay">
             <Copy :size="18" />
           </button>
@@ -256,7 +254,7 @@ const statusText = computed(() => {
       </div>
 
       <!-- UPnP status -->
-      <div class="ui-row" style="margin-bottom: 8px;">
+      <div class="ui-row">
         <label class="ui-choice-label" :class="{ disabled: !isUpnpAvailable }" :title="t('webview.upnp.tooltip')">
           <input type="checkbox" v-model="settings.upnp_enabled" @change="saveUpnpEnabled" :disabled="!isUpnpAvailable || upnpPending" class="ui-choice-input" />
           <span>{{ t('webview.upnp.enable') }}</span>
@@ -391,7 +389,7 @@ h2 {
   align-items: center;
   gap: 0.4rem;
   padding: 0.4rem 0.75rem;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0;
   border-radius: 8px;
   line-height: 1.35;
 }
@@ -530,17 +528,13 @@ h2 {
 /* URL typography comes from ui-input; sizing and monospace stay local.
    Joined borders and corners come from ui-composite. */
 .url-code {
-  display: inline-flex;
-  align-items: center;
   flex: 1;
   min-width: 0;
-  padding-right: var(--ui-control-padding-x);
   font-family: var(--font-mono);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: text;
-  user-select: text;
+}
+
+.url-code.ui-input:hover:not(:disabled) {
+  background: var(--color-bg-field);
 }
 
 .url-code-wide {
@@ -567,14 +561,6 @@ h2 {
 
 .connection-row .url-display {
   grid-column: 2;
-}
-
-/* The URL wraps within its own column instead of clipping the address. */
-.connection-row .url-code {
-  white-space: normal;
-  overflow-wrap: anywhere;
-  overflow: visible;
-  text-overflow: clip;
 }
 
 /* Token row: grid keeps the token field shrinkable next to regenerate. */

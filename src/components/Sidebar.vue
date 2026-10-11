@@ -91,11 +91,6 @@ const sidebarGroups = computed<SidebarGroup[]>(() => [
   },
   {
     buttons: [
-      { id: 'preprocessor', label: t('nav.preprocessor'), icon: ClipboardPenLine }
-    ]
-  },
-  {
-    buttons: [
       { id: 'webview', label: t('nav.webview'), icon: Globe },
       { id: 'twitch', label: t('nav.twitch'), icon: TwitchIcon },
       { id: 'vtube-studio', label: t('nav.vtube-studio'), icon: Tv },
@@ -106,6 +101,7 @@ const sidebarGroups = computed<SidebarGroup[]>(() => [
   },
   {
     buttons: [
+      { id: 'preprocessor', label: t('nav.preprocessor'), icon: ClipboardPenLine },
       { id: 'hotkeys', label: t('nav.hotkeys'), icon: Keyboard },
       { id: 'intercept', label: t('nav.intercept'), icon: Crosshair },
       { id: 'settings', label: t('nav.settings'), icon: Settings }
