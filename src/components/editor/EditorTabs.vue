@@ -121,19 +121,20 @@ const pinnedCountText = computed(() => {
   align-items: center;
   gap: 2px;
   margin-bottom: 0;
-  padding: 0 2px;
+  padding: 0 2px 0 0;
 }
 
 .tabs-scroll {
   display: flex;
-  align-items: center;
-  gap: 2px;
+  align-items: stretch;
+  gap: 0;
   overflow-x: auto;
   flex: 1;
   scrollbar-width: thin;
 }
 
 .tab-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -142,7 +143,7 @@ const pinnedCountText = computed(() => {
   border-radius: 6px 6px 0 0;
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
-  border-bottom: none;
+  border-bottom: 1px solid transparent;
   color: var(--color-text-muted);
   font-size: 0.85rem;
   font-weight: 500;
@@ -152,12 +153,17 @@ const pinnedCountText = computed(() => {
   max-width: 180px;
 }
 
+.tab-item + .tab-item {
+  margin-left: -1px;
+}
+
 .tab-item:hover {
   background: var(--color-bg-primary);
   color: var(--color-text-primary);
 }
 
 .tab-item.active {
+  z-index: 1;
   background: var(--color-bg-primary);
   color: var(--color-text-primary);
   border-color: var(--color-accent);
@@ -172,7 +178,7 @@ const pinnedCountText = computed(() => {
 
 .pinned-tab {
   gap: 3px;
-  padding: 2px 6px;
+  padding: 4px 6px;
 }
 
 .pinned-icon {

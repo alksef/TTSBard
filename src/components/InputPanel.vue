@@ -976,7 +976,6 @@ defineExpose({ focusEditor })
             v-model="text"
             :editor-key="active.id"
             :state-cache="editorStateCache"
-            :placeholder="t('editor.placeholder')"
             :replacements="replacementsRecord"
             :usernames="usernamesRecord"
             :editor-height-px="editorHeightPx"
@@ -1155,6 +1154,14 @@ defineExpose({ focusEditor })
 .textarea-wrapper.minimal-wrapper :deep(.cm-editor) {
   flex: 1;
   min-height: 140px;
+  box-shadow: none;
+}
+
+/* Compact and mono retain actual text focus without a surrounding focus ring. */
+.textarea-wrapper.minimal-wrapper :deep(.cm-editor.cm-focused) {
+  outline: none;
+  border-color: var(--color-border-strong);
+  box-shadow: none;
 }
 
 .textarea-wrapper.minimal-wrapper :deep(.cm-scroller) {
@@ -1197,6 +1204,8 @@ defineExpose({ focusEditor })
 .input-panel.minimal-panel.mono-panel .textarea-wrapper.minimal-wrapper :deep(.cm-editor) {
   min-height: 0 !important;
   height: 100%;
+  border-top: none;
+  border-radius: 6px;
 }
 
 /* Compact + open history: the editor keeps a floor and the history results

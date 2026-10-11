@@ -835,10 +835,11 @@ onUnmounted(() => {
 }
 
 .main-content.minimal-content.mono-content {
-  padding: 0 4px 2px !important;
+  padding: 0 4px 1px !important;
   border-left: none;
+  border-top: none;
   overflow: hidden;
-  height: calc(100% - 18px);
+  height: calc(100% - 9px);
 }
 
 .main-content.minimal-content::-webkit-scrollbar {

@@ -95,7 +95,7 @@ watch(() => props.usernames, (v) => { usr.value = v }, { immediate: true })
 const ttsTheme = EditorView.theme({
   '&': {
     border: '1px solid var(--color-border-strong)',
-    borderRadius: '0 0 18px 18px',
+    borderRadius: '0 0 6px 6px',
     background: 'var(--input-bg-strong)',
     boxShadow: '0 2px 16px rgba(var(--rgb-black), 0.03)',
     minHeight: 'var(--editor-height, 340px)',
@@ -103,9 +103,7 @@ const ttsTheme = EditorView.theme({
   },
   '&.cm-focused': {
     outline: 'none',
-    borderColor: 'var(--color-accent)',
-    boxShadow:
-      '0 8px 24px rgba(var(--rgb-black), 0.04), 0 0 0 3px var(--focus-glow)',
+    borderColor: 'color-mix(in srgb, var(--color-accent) 40%, var(--color-border-strong))',
   },
   '.cm-scroller': {
     fontFamily: 'var(--editor-font-family, var(--font-mono))',
