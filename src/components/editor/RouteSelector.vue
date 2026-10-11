@@ -251,10 +251,12 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
 
 .route-dropdown {
   position: absolute;
-  top: calc(100% + 4px);
+  bottom: calc(100% + 4px);
   left: 0;
   z-index: 1000;
   min-width: 100%;
+  max-height: calc(100vh - 60px);
+  overflow-y: auto;
   margin: 0;
   padding: 0.25rem;
   list-style: none;
