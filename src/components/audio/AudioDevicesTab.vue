@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
-import { RefreshCw, Loader, Loader2, Volume2, VolumeX, Mic, Info, Play } from 'lucide-vue-next';
+import { Loader, Volume2, VolumeX, Mic, Info, Play } from 'lucide-vue-next';
 import { useAudioSettings, useAppSettings } from '../../composables/useAppSettings';
 import { debugLog, debugError } from '../../utils/debug';
 import { t } from '../../i18n';
@@ -96,6 +96,7 @@ async function loadDevices(force = false) {
 }
 
 async function refreshData() {
+  if (isRefreshing.value) return;
   isRefreshing.value = true;
   errorMessage.value = '';
   try {
@@ -105,6 +106,8 @@ async function refreshData() {
     isRefreshing.value = false;
   }
 }
+
+defineExpose({ refreshData, isRefreshing });
 
 async function setSpeakerDevice(deviceId: string | null) {
   try {
@@ -267,20 +270,6 @@ watch(audioSettingsFromComposable, (newSettings) => {
       <button @click="errorMessage = ''" class="close-btn" :aria-label="t('audio.close')" :title="t('audio.close')">&times;</button>
     </div>
 
-    <div class="devices-toolbar">
-      <button
-        @click="refreshData"
-        :disabled="isRefreshing"
-        class="ui-icon-button refresh-btn"
-        :class="{ refreshing: isRefreshing }"
-        :title="t('audio.refresh_devices')"
-        :aria-label="t('audio.refresh_devices')"
-      >
-        <RefreshCw v-if="!isRefreshing" :size="18" />
-        <Loader2 v-else :size="18" class="spinner" />
-      </button>
-    </div>
-
     <div v-if="isLoading" class="loading">
       {{ t('audio.loading') }}
     </div>
@@ -429,12 +418,7 @@ watch(audioSettingsFromComposable, (newSettings) => {
       </div>
       <div class="devices-card ui-section output-format-section">
         <div class="devices-row output-format-row">
-          <div class="output-format-label">
-            <label class="ui-label" for="audio-output-format">{{ t('audio.output_format.label') }}</label>
-            <button type="button" class="format-help" :title="t('audio.output_format.help')" :aria-label="t('audio.output_format.help')">
-              <Info :size="16" />
-            </button>
-          </div>
+          <label class="ui-label" for="audio-output-format">{{ t('audio.output_format.label') }}</label>
           <div class="input-with-action">
             <select id="audio-output-format" class="ui-select" :value="outputFormat"
               :disabled="!audioSettingsFromComposable || isSettingFormat || isRefreshing || isTestingSpeaker || isTestingVirtualMic"
@@ -455,14 +439,6 @@ watch(audioSettingsFromComposable, (newSettings) => {
 </template>
 
 <style scoped>
-.devices-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 8px;
-}
-.output-format-label { display: flex; align-items: center; gap: 6px; }
-.format-help { display: inline-flex; padding: 2px; background: none; border: none; color: var(--color-text-secondary); cursor: help; }
-.format-help:focus-visible { outline: 2px solid var(--card-active-border); outline-offset: 2px; border-radius: 4px; }
 .format-hint { margin: var(--ui-hint-gap) 0 0; font-size: var(--ui-text-size-hint); font-weight: var(--ui-text-weight-hint); line-height: 1.5; color: var(--color-text-secondary); overflow-wrap: anywhere; }
 .output-format-section { min-width: 0; }
 .output-format-row { flex-wrap: wrap; gap: 8px; }
@@ -634,7 +610,4 @@ watch(audioSettingsFromComposable, (newSettings) => {
   margin-top: 1.5rem;
 }
 
-.refresh-btn.refreshing .spinner {
-  animation: spin 1s linear infinite;
-}
 </style>

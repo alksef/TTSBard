@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { Volume2, Sliders } from 'lucide-vue-next';
+import { Volume2, Sliders, RefreshCw, Loader2 } from 'lucide-vue-next';
 import { t } from '../i18n';
 import AudioDevicesTab from './audio/AudioDevicesTab.vue';
 import AudioEffectsTab from './audio/AudioEffectsTab.vue';
 
 const activeTab = ref<'devices' | 'effects_dsp'>('devices');
 const effectsDirty = ref(false);
+const devicesTab = ref<InstanceType<typeof AudioDevicesTab> | null>(null);
 
 function onEffectsDirty(dirty: boolean) {
   effectsDirty.value = dirty;
@@ -16,30 +17,44 @@ function onEffectsDirty(dirty: boolean) {
 <template>
   <div class="audio-panel" :class="{ 'audio-panel--effects': activeTab === 'effects_dsp' }">
     <div class="audio-panel-inner">
-      <div class="audio-tabs ui-tabs" role="tablist">
+      <div class="audio-header">
+        <div class="audio-tabs ui-tabs" role="tablist">
+          <button
+            class="ui-tab"
+            role="tab"
+            :aria-selected="activeTab === 'devices'"
+            @click="activeTab = 'devices'"
+          >
+            <Volume2 :size="18" />
+            <span>{{ t('audio.tabs.devices') }}</span>
+          </button>
+          <button
+            class="ui-tab"
+            role="tab"
+            :aria-selected="activeTab === 'effects_dsp'"
+            :aria-label="effectsDirty ? t('audio.tabs.effects_dsp.dirty') : t('audio.tabs.effects_dsp')"
+            @click="activeTab = 'effects_dsp'"
+          >
+            <Sliders :size="18" />
+            <span>{{ t('audio.tabs.effects_dsp') }}</span>
+            <span v-if="effectsDirty" class="dirty-dot" aria-hidden="true">*</span>
+          </button>
+        </div>
         <button
-          class="ui-tab"
-          role="tab"
-          :aria-selected="activeTab === 'devices'"
-          @click="activeTab = 'devices'"
+          v-if="activeTab === 'devices'"
+          type="button"
+          class="ui-icon-button refresh-btn"
+          :disabled="!devicesTab || devicesTab.isRefreshing"
+          :title="t('audio.refresh_devices')"
+          :aria-label="t('audio.refresh_devices')"
+          @click="devicesTab?.refreshData()"
         >
-          <Volume2 :size="18" />
-          <span>{{ t('audio.tabs.devices') }}</span>
-        </button>
-        <button
-          class="ui-tab"
-          role="tab"
-          :aria-selected="activeTab === 'effects_dsp'"
-          :aria-label="effectsDirty ? t('audio.tabs.effects_dsp.dirty') : t('audio.tabs.effects_dsp')"
-          @click="activeTab = 'effects_dsp'"
-        >
-          <Sliders :size="18" />
-          <span>{{ t('audio.tabs.effects_dsp') }}</span>
-          <span v-if="effectsDirty" class="dirty-dot" aria-hidden="true">*</span>
+          <Loader2 v-if="devicesTab?.isRefreshing" :size="18" class="ui-spin" />
+          <RefreshCw v-else :size="18" />
         </button>
       </div>
 
-      <AudioDevicesTab v-if="activeTab === 'devices'" />
+      <AudioDevicesTab v-if="activeTab === 'devices'" ref="devicesTab" />
 
       <AudioEffectsTab
         v-show="activeTab === 'effects_dsp'"
@@ -233,12 +248,30 @@ function onEffectsDirty(dirty: boolean) {
 }
 
 /* Keep tabs in normal flow: cards must not scroll beneath a transparent band. */
-.audio-tabs {
+.audio-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex-shrink: 0;
+  margin-bottom: var(--ui-section-gap);
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border);
 }
 
-.audio-panel:not(.audio-panel--effects) .audio-tabs {
+.audio-panel:not(.audio-panel--effects) .audio-header {
   margin-bottom: 8px;
+}
+
+.audio-tabs {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.refresh-btn {
+  flex-shrink: 0;
 }
 
 .dirty-dot {
