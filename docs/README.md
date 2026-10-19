@@ -1,26 +1,45 @@
-# Документация TTSBard
+# TTSBard documentation / Документация TTSBard
 
-## Начать пользоваться
+## User documentation / Пользовательская документация
 
-- [Обзор продукта](./ttsbard-overview.md) — возможности и сценарии.
-- [Первый запуск](./user/guide.md) — от установки до первой озвученной фразы.
-- [Руководства по функциям](./user/README.md) — редактор, голоса, аудио и модели.
-- [Частые вопросы](./faq.md) — диагностика типовых проблем.
+**[English](en/README.md) | [На русском](ru/README.md)**
 
-## Подключить другие программы
+<a id="начать-пользоваться"></a>
+<a id="подключить-другие-программы"></a>
 
-- [Интеграции](./integrations/README.md) — OBS, Twitch, VTube Studio, VRChat, LunaTranslator.
-- [Входящий HTTP-сервер](./user/input-server.md) — передача текста в TTSBard.
-- [Контракт SSE](./integrations/sse.md) — получение текста и состояния набора.
+| Section / Раздел | English | Русский |
+|---|---|---|
+| Start / Начало | [First launch](en/user/guide.md) | [Первый запуск](ru/user/guide.md) |
+| Guides / Руководства | [User guides](en/user/README.md) | [Пользовательские инструкции](ru/user/README.md) |
+| Connections / Подключения | [Integrations](en/integrations/README.md) | [Интеграции](ru/integrations/README.md) |
+| Help / Помощь | [FAQ](en/faq.md) | [Частые вопросы](ru/faq.md) |
+| Overview / Обзор | [Product overview](en/ttsbard-overview.md) · [PDF](en/ttsbard-overview.pdf) | [Обзор продукта](ru/ttsbard-overview.md) · [PDF](ru/ttsbard-overview.pdf) |
 
-## Разрабатывать
+User guides, FAQ and product overviews (Markdown/PDF) are maintained in `en/`
+and `ru/`. Old Markdown pages under `user/` and `integrations/` retain navigation
+for existing links; the shared LunaTranslator script stays at its original path.
+
+Актуальные пользовательские инструкции, FAQ и обзоры (Markdown/PDF) находятся
+в `en/` и `ru/`. Старые Markdown-страницы в `user/` и `integrations/` содержат
+переходы для прежних ссылок; общий скрипт LunaTranslator остаётся на прежнем месте.
+
+## Разработка и история на русском
+
+Документация разработки, исследования, roadmap и история изменений остаются
+на русском. Для обычного использования приложения они не требуются.
+
+Development documentation, research, roadmap and changelog remain in Russian.
+They are not required for ordinary use.
+
+### Разрабатывать
 
 - [Документация разработки](./development/README.md) — сборка, проверки и workflow.
 - [Архитектура](./development/architecture.md) — владельцы состояния и потоки данных.
 - [Решения](./decisions/README.md) — принятые варианты и их причины.
 
-## Планы и история
+### Планы и история
 
+- [История изменений](../CHANGELOG.md) — изменения по версиям, только на русском.
 - [Roadmap](./roadmap/README.md) — направления и их lifecycle-статусы.
 - [Задачи реализации](./tasks/README.md) — незавершённые долговечные задания.
 - [Исследования](./research/README.md) — результаты, открытые вопросы и исторические материалы.

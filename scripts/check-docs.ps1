@@ -433,14 +433,13 @@ function Test-TaskLifecycle([string]$TasksDirectory) {
 function Test-DocsStructure {
     $allowedEntries = @(
         'README.md',
-        'faq.md',
-        'ttsbard-overview.md',
-        'ttsbard-overview.pdf',
         'decisions',
         'development',
+        'en',
         'integrations',
         'research',
         'roadmap',
+        'ru',
         'tasks',
         'user'
     )
@@ -522,6 +521,11 @@ Test-StatusFiles 'docs/decisions' @('accepted', 'superseded', 'deprecated')
 Test-TaskLifecycle (Join-Path $repoRoot 'docs/tasks')
 Test-DocsStructure
 Test-TrackedArtifacts
+
+& (Join-Path $PSScriptRoot 'check-bilingual-docs.ps1') -Root $repoRoot
+if ($LASTEXITCODE -ne 0) {
+    Add-Error 'Bilingual documentation validation failed'
+}
 
 if ($errors.Count -gt 0) {
     Write-Host "Documentation validation failed ($($errors.Count)):" -ForegroundColor Red

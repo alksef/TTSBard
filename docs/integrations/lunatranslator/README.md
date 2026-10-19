@@ -1,83 +1,30 @@
-# LunaTranslator → TTSBard
+# Documentation / Документация
 
-Готовый скрипт самодельного TTS-движка для LunaTranslator, пересылающий
-игровой текст (HOOK/OCR + перевод делает Luna) в TTSBard через его
-[входящий сервер](../../user/input-server.md).
+This guide has moved. / Инструкция перенесена.
 
-Для захвата экрана непосредственно в TTSBard внешняя программа не нужна:
-см. [встроенный OCR и установку моделей](../../user/ocr.md).
+- [English](../../en/integrations/lunatranslator/README.md)
+- [Русский](../../ru/integrations/lunatranslator/README.md)
 
-Синтез и воспроизведение полностью выполняет TTSBard: активный провайдер и
-голос, препроцессор, ударения, эффекты, общая очередь и аудиовыходы
-(колонки / виртуальный микрофон). Плеер LunaTranslator молчит — двойного
-озвучивания нет, а громкость/скорость/тон Luna ни на что не влияют.
+<a id="lunatranslator--ttsbard"></a>
 
-```text
-LunaTranslator (HOOK/OCR, перевод) --POST {"text"}--> TTSBard (audio-only job)
-```
+[Русский: LunaTranslator → TTSBard](../../ru/integrations/lunatranslator/README.md#lunatranslator--ttsbard) · [English](../../en/integrations/lunatranslator/README.md)
 
-Аудио наружу не возвращается: входящий сервер принимает текст и подтверждает
-приём (`202`), озвучивает TTSBard сам. Это осознанная граница контракта
-(см. [исследование](../../research/15-lunatranslator-input-server-integration.md)).
+<a id="требования"></a>
 
-## Требования
+[Русский: Требования](../../ru/integrations/lunatranslator/README.md#требования) · [English](../../en/integrations/lunatranslator/README.md)
 
-- TTSBard 0.25.0 или новее.
-- LunaTranslator с движком selfbuild (`自定义`); проверено на v10.16.5.2.
-  В текущей русской локализации он называется **«Настройка»**, после
-  исправления перевода — **«Собственный»**.
+<a id="настройка-ttsbard"></a>
 
-## Настройка TTSBard
+[Русский: Настройка TTSBard](../../ru/integrations/lunatranslator/README.md#настройка-ttsbard) · [English](../../en/integrations/lunatranslator/README.md)
 
-1. Sidebar → «Интеграция» → **«Входящий сервер»**.
-2. Нажать **«Запустить»** (порт по умолчанию `10101`, только `127.0.0.1`).
-3. Включить **«Автовоспроизведение»** — реплики озвучиваются сразу.
-   С выключенным — текст копится во «Входящих» и ждёт подтверждения
-   (Ctrl+K — озвучить, Ctrl+I — отредактировать).
+<a id="установка-скрипта-в-lunatranslator"></a>
 
-## Установка скрипта в LunaTranslator
+[Русский: Установка скрипта в LunaTranslator](../../ru/integrations/lunatranslator/README.md#установка-скрипта-в-lunatranslator) · [English](../../en/integrations/lunatranslator/README.md)
 
-1. Скопировать [selfbuild_tts.py](./selfbuild_tts.py) в
-   `<папка LunaTranslator>\userconfig\selfbuild_tts.py`
-   (или: настройки TTS → движок **«Настройка» / «Собственный»** (`自定义`) →
-   карандаш → вставить содержимое → сохранить; файл хот-релоадится, перезапуск
-   не нужен).
-2. Включить движок **«Настройка» / «Собственный»** (`自定义`). Он находится во
-   вкладке **«Онлайн»** — это квирк классификации Luna, сам скрипт полностью
-   локальный.
-3. Убедиться, что `Поведение → Озвучивать автоматически` включено — именно
-   это дёргает движок на каждую реплику.
+<a id="проверка"></a>
 
-Адрес сервера берётся из переменной окружения `TTSBARD_URL`
-(по умолчанию `http://127.0.0.1:10101`), т.к. у selfbuild нет UI-настроек.
-Свой порт в TTSBard → задать переменную перед запуском Luna.
+[Русский: Проверка](../../ru/integrations/lunatranslator/README.md#проверка) · [English](../../en/integrations/lunatranslator/README.md)
 
-## Проверка
+<a id="нюансы"></a>
 
-```powershell
-Invoke-RestMethod http://127.0.0.1:10101/health
-$body = [Text.Encoding]::UTF8.GetBytes('{"text":"проверка связи"}')
-Invoke-RestMethod http://127.0.0.1:10101/v1/speech `
-    -Method Post -ContentType 'application/json; charset=utf-8' -Body $body
-```
-
-Первый запрос возвращает `status: ok`. При включённом автовоспроизведении
-второй принимается с HTTP `202`, полями `status: queued` и `job_id`;
-фраза должна прозвучать. При ручном разборе возвращаются
-`status: pending_review` и `incoming_id`.
-
-Затем в Luna — любую фразу с озвучкой: звук идёт из TTSBard, очередь задачи
-видна в окне управления воспроизведением, во вкладке «Входящие» раздела
-«Текст» — внешний поток.
-
-## Нюансы
-
-- Повторы фраз не кэшируются: скрипт возвращает «нет аудио», и Luna каждый
-  раз заново отправляет текст на сервер.
-- `429` — очередь TTSBard или «Входящие» переполнены (шторм реплик);
-  `422` — пустой или слишком длинный текст; `503` — провайдер не готов.
-  Ошибка показывается в Luna как ошибка движка.
-- Входящий сервер слушает только `127.0.0.1` — с другой машины подключиться
-  нельзя (это ограничение MVP, см. roadmap).
-- Прерывание/пауза/повтор — средствами окна воспроизведения TTSBard, Luna
-  ими не управляет.
+[Русский: Нюансы](../../ru/integrations/lunatranslator/README.md#нюансы) · [English](../../en/integrations/lunatranslator/README.md)

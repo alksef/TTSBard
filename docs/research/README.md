@@ -12,7 +12,7 @@
 | [LunaTranslator](./15-lunatranslator-input-server-integration.md) | Входящий HTTP-сервер реализован; [настройка интеграции](../integrations/lunatranslator/README.md). |
 | [Встроенный OCR](./16-built-in-screen-ocr-feasibility.md) | Однократный захват реализован в [ROADMAP-088](../roadmap/completed/088-one-shot-screen-ocr.md); [руководство](../user/ocr.md). |
 | [Benchmark eSlav](./18-ocr-ppocrv5-eslav-benchmark.md) | Основание выбора пакета на указанном корпусе; не гарантия точности на любом экране. [Установка](../user/ocr.md). |
-| [MP3 и OGG у Silero](./17-silero-mp3-vs-ogg-format.md) | Сравнение завершено; текущая настройка формата — в [FAQ](../faq.md). |
+| [MP3 и OGG у Silero](./17-silero-mp3-vs-ogg-format.md) | Сравнение завершено; текущая настройка формата — в [FAQ](../ru/faq.md). |
 
 ## Открытые вопросы и условия возвращения
 

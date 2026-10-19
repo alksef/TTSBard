@@ -1,0 +1,61 @@
+{
+  "title": "Short overview",
+  "blocks": [
+    {"kind":"paragraph","style":"DocTitle","text":"TTSBard"},
+    {"kind":"paragraph","style":"DocSubtitle","text":"Turn text into speech, quickly"},
+    {"kind":"paragraph","style":"Version","text":"Version {version}"},
+    {"kind":"paragraph","style":"Lead","text":"Open TTSBard with a hotkey, type a phrase and send it - the application speaks it. Keep typing or return to your previous application. TTSBard brings speech, on-screen text and sound reactions together for everyday communication and streaming."},
+    {"kind":"paragraph","style":"Section","text":"The basic workflow"},
+    {"kind":"paragraph","style":"SectionLead","text":"Type a phrase and hear it spoken"},
+    {"kind":"step","number":1,"text":"Press <font name='Consolas' color='#416B96'>Ctrl+Shift+F3</font> (customizable): the window opens above other applications, ready to type."},
+    {"kind":"step","number":2,"text":"Type a phrase and press <font name='Consolas' color='#416B96'>Enter</font> - TTSBard speaks the text."},
+    {"kind":"step","number":3,"text":"Depending on your Quick editor setting, sending hides the window or returns focus to the previous application."},
+    {"kind":"section","title":"Communication and content","lead":"One quick workflow for two everyday needs","bullets":[
+      "Communication: text-to-speech in games and voice chats for people who communicate by typing.",
+      "Streaming and content: speak your own phrases, display subtitles and trigger sound reactions."
+    ]},
+    {"kind":"section","title":"Voices and audio processing","lead":"Cloud and local options in one application","bullets":[
+      "Silero Bot works through your Telegram account, shows remaining speech quota and supports SOCKS5 and MTProxy connections.",
+      "Piper uses ready-made voice models installed on your computer. Each model is a separate voice.",
+      "OpenAI, ElevenLabs, Fish Audio and a local HTTP server compatible with TTS Voice Wizard are also supported.",
+      "Adjust pitch, tempo and volume; remove noise with DeepFilterNet and process speech with an equalizer, compressor and limiter.",
+      "Audio cache retains synthesized phrases: matching repeats need no synthesis wait and consume no additional TTS-service quota."
+    ]},
+    {"kind":"section","title":"Editor","lead":"Tools for quick, comfortable typing","bullets":[
+      "Tabs. Text survives restarts. Choose speech, OBS, Twitch and/or VRChat destinations separately for each tab.",
+      "History and autocomplete. Suggestions use earlier phrases. Reinsert text or replay speech from the last 500 phrases.",
+      "Spellchecking. Russian typos are underlined, with corrections available by right-click.",
+      "Compact and Mono. Keep a compact editor with tabs or a single text field in Mono. Resize the window; its view and size are remembered.",
+      "Fonts. Editor text font and size are independent of the interface.",
+      "Quick inserts. Short codes expand into saved phrases and names.",
+      "Text preparation. Russian numbers become words; RUAccent places Russian stress and resolves words whose spelling is identical."
+    ]},
+    {"kind":"pagebreak"},
+    {"kind":"section","title":"Audio outputs","lead":"You and your conversation partners hear the speech","bullets":[
+      "Send speech to speakers or headphones and simultaneously to a virtual audio cable, such as VB-CABLE or VoiceMeeter.",
+      "In games and Discord the virtual cable acts as a microphone, letting others hear TTSBard.",
+      "Speaker and virtual microphone volumes are independent. Default-device selection follows Windows output changes."
+    ]},
+    {"kind":"section","title":"Communication and streaming","lead":"Share phrases and typing state with other applications","bullets":[
+      "Display spoken phrases in OBS and style the overlay to match your stream.",
+      "Send phrases to Twitch Chat as your user or bot account.",
+      "VRChat shows completed phrases above your avatar and a typing indicator while you enter text.",
+      "Exclude TTSBard windows from OBS and Discord capture.",
+      "In VTube Studio, make the avatar react or show a scene item while you type."
+    ]},
+    {"kind":"section","title":"Playback and Sound panel","lead":"Use key actions without returning to the main window","bullets":[
+      "A separate playback window stops, pauses or repeats speech.",
+      "Assign sounds to Sound panel keys and organize reactions into sets.",
+      "Assign individual keys to opening TTSBard windows, controlling playback or capturing screen text. NumPad, F1-F24 and navigation keys are available by default; optionally allow any key."
+    ]},
+    {"kind":"section","title":"Text from other sources","lead":"Speak more than manually typed text","bullets":[
+      "Web input form. Open it in a browser, Steam Overlay during a game, or another device on the same local network.",
+      "Screen OCR recognizes a selected area for speech or editing.",
+      "LunaTranslator integration receives clipboard, screen or game-engine text to speak visual novels and other games."
+    ]},
+    {"kind":"paragraph","style":"Section","text":"Find out more"},
+    {"kind":"paragraph","style":"Link","text":"<link href='https://github.com/alksef/TTSBard/releases' color='#416B96'>Download TTSBard</link>"},
+    {"kind":"paragraph","style":"Link","text":"<link href='https://github.com/alksef/TTSBard/blob/master/docs/en/ttsbard-overview.md' color='#416B96'>Detailed feature overview</link>"},
+    {"kind":"paragraph","style":"Body","text":"TTSBard runs on Windows 10 and 11 and is distributed under GPL-3.0-only."}
+  ]
+}

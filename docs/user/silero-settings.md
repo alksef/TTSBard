@@ -1,50 +1,30 @@
-# Ручная настройка таймингов Silero
+# Documentation / Документация
 
-В `settings.json` можно задать таймауты и задержки для синтеза речи через
-Telegram/Silero. Эти параметры не имеют UI-элементов — они редактируются только
-вручную через текстовый редактор.
+This guide has moved. / Инструкция перенесена.
 
-## Где находится `settings.json`
+- [English](../en/user/silero-settings.md)
+- [Русский](../ru/user/silero-settings.md)
 
-Откройте **Настройки → Общие → Папки** и нажмите **«Открыть»** у
-**«Конфигурация»**. Файл настроек — `settings.json` в открывшейся папке.
+<a id="ручная-настройка-таймингов-silero"></a>
 
-Windows: `%APPDATA%\ttsbard\settings.json`
+[Русский: Ручная настройка таймингов Silero](../ru/user/silero-settings.md#ручная-настройка-таймингов-silero) · [English](../en/user/silero-settings.md)
 
-Например: `C:\Users\<Имя>\AppData\Roaming\ttsbard\settings.json`
+<a id="где-находится-settingsjson"></a>
 
-## Доступные параметры
+[Русский: Где находится `settings.json`](../ru/user/silero-settings.md#где-находится-settingsjson) · [English](../en/user/silero-settings.md)
 
-Все параметры находятся в разделе `tts.telegram`, значения указываются в
-миллисекундах.
+<a id="доступные-параметры"></a>
 
-| Ключ | По умолчанию | Диапазон | Назначение |
-|---|---|---|---|
-| `synthesis_response_timeout_ms` | `10000` | `1000`…`120000` | Ожидание ответа Silero после отправки текста |
-| `download_retry_delay_ms` | `1000` | `100`…`10000` | Пауза перед повторной попыткой скачивания |
+[Русский: Доступные параметры](../ru/user/silero-settings.md#доступные-параметры) · [English](../en/user/silero-settings.md)
 
-## Пример
+<a id="пример"></a>
 
-```json
-{
-  "tts": {
-    "telegram": {
-      "synthesis_response_timeout_ms": 15000,
-      "download_retry_delay_ms": 2000
-    }
-  }
-}
-```
+[Русский: Пример](../ru/user/silero-settings.md#пример) · [English](../en/user/silero-settings.md)
 
-Поля можно добавлять по одному — отсутствующие получат значения по умолчанию.
+<a id="нормализация-значений"></a>
 
-## Нормализация значений
+[Русский: Нормализация значений](../ru/user/silero-settings.md#нормализация-значений) · [English](../en/user/silero-settings.md)
 
-Значения за пределами допустимого диапазона автоматически обрезаются до
-ближайшей границы. Например, `synthesis_response_timeout_ms: 0` превратится в
-`1000`, а `download_retry_delay_ms: 99999` — в `10000`.
+<a id="применение-изменений"></a>
 
-## Применение изменений
-
-Изменения вступают в силу только после **перезапуска приложения**. Живое
-применение без перезапуска не поддерживается.
+[Русский: Применение изменений](../ru/user/silero-settings.md#применение-изменений) · [English](../en/user/silero-settings.md)

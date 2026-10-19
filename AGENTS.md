@@ -1,51 +1,48 @@
 # Codex Instructions
 
-## Роль
+## Role
 
-Codex исследует код, реализует изменения и проверяет результат. По выбору
-пользователя реализация может передаваться DeepSeek Flash через OpenCode по
-[AI-workflow](docs/development/ai-workflow.md). Этот workflow — личное
-предпочтение пользователя, а не обязательный процесс проекта. Перед его первым
-применением в новой сессии уточнить, использовать ли делегирование, если выбор
-ещё не задан пользователем. Далее придерживаться выбранного режима до новых
-указаний.
+Codex investigates code, implements changes and verifies the result. At the
+user's choice, implementation may be delegated to DeepSeek Flash through
+OpenCode following the [AI workflow](docs/development/ai-workflow.md). This
+workflow is the user's personal preference, not a mandatory project process.
+Before first using it in a new session, ask whether to delegate if the user
+has not already chosen. Keep the chosen mode until instructed otherwise.
 
-При делегировании создаётся task в `.work/ai/<work-id>/`, а не tracked prompt
-в `docs/`. Мелкие правки документации, конфигурации, опечаток и локальных ошибок
-сборки ведущий агент может выполнять напрямую и в этом режиме.
+Delegated tasks belong in `.work/ai/<work-id>/`, not tracked prompts in `docs/`.
+The lead agent may directly handle minor documentation, configuration, typo
+and local build-error fixes even in delegation mode.
 
-При использовании DeepSeek после двух неудачных попыток Codex завершает задачу самостоятельно
-по [правилу лимита попыток](docs/development/ai-workflow.md#лимит-попыток).
+After two unsuccessful DeepSeek attempts, Codex finishes the task directly
+under the [attempt-limit rule](docs/development/ai-workflow.md#лимит-попыток).
 
-## Работа с репозиторием
+## Repository work
 
-- Перед началом зафиксировать baseline и не смешивать с задачей существующие
-  пользовательские изменения.
-- Ограничить разрешённые пути и проверять task-scoped diff.
-- Не считать ответ или checklist агента подтверждением готовности.
-- На Windows не запускать Rust-проверки и сборку через bare `cargo`: целевые
-  команды выполнять через `scripts/cargo.ps1`, а полную debug/release-сборку —
-  через `scripts/build.ps1`, чтобы применялись локальные toolchain и native-зависимости.
-- Коммиты и значимые архитектурные решения требуют явного одобрения
-  пользователя.
-- Актуальные внешние сведения проверять доступными research-инструментами;
-  технические выводы основывать прежде всего на первичных источниках.
+- Record a baseline before starting; do not mix existing user changes into the task.
+- Restrict allowed paths and inspect the task-scoped diff.
+- Do not treat an agent's answer or checklist as proof of completion.
+- On Windows, do not run Rust checks/builds with bare `cargo`: use
+  `scripts/cargo.ps1` for targeted commands and `scripts/build.ps1` for full
+  debug/release builds so local toolchains and native dependencies apply.
+- Commits and significant architectural decisions require explicit user approval.
+- Verify current external information with available research tools; base technical
+  conclusions primarily on primary sources.
 
-## Источники правил
+## Sources of rules
 
-При изменениях UI сверяться с картой UI и правилами проверки ниже. При добавлении
-или переносе экранов обновлять карту. Соблюдать статус ориентиров: предложения
-не считать утверждённым общим стандартом. Проверять релевантные состояния и
-сценарии; путь к временному отчёту передавать в конкретном task-файле.
+For UI changes, consult the UI map and verification rules below. Update the
+map when adding/moving screens. Respect the status of visual references:
+proposals are not an approved general standard. Check relevant states and
+scenarios; put the temporary report path in the specific task file.
 
-- [Карта документации](docs/README.md)
-- [Карта UI](docs/development/ui-map.md)
-- [Проверка и согласование UI](docs/development/ui-guidelines.md)
+- [Documentation map](docs/README.md)
+- [UI map](docs/development/ui-map.md)
+- [UI verification and approval](docs/development/ui-guidelines.md)
 - [AI-assisted workflow](docs/development/ai-workflow.md)
-- [Сборка и проверки](docs/development/README.md)
-- [Архитектура](docs/development/architecture.md)
-- [Инженерные решения](docs/decisions/README.md)
+- [Builds and checks](docs/development/README.md)
+- [Architecture](docs/development/architecture.md)
+- [Engineering decisions](docs/decisions/README.md)
 
-Временные prompts, ревью, логи и скриншоты хранятся только в gitignored
-`.work/ai/`. Roadmap, задачи, решения и research добавляются в `docs/` лишь
-тогда, когда полезны после завершения конкретной сессии.
+Temporary prompts, reviews, logs and screenshots belong only in gitignored
+`.work/ai/`. Add roadmaps, tasks, decisions and research to `docs/` only when
+they remain useful after the current session.

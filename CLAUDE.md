@@ -1,43 +1,40 @@
 # Claude Instructions
 
-## Роль
+## Role
 
-Claude исследует код, реализует изменения и проверяет результат. По выбору
-пользователя реализация может передаваться DeepSeek Flash через OpenCode по
-[AI-workflow](docs/development/ai-workflow.md). Этот workflow — личное
-предпочтение пользователя, а не обязательный процесс проекта. Перед его первым
-применением в новой сессии уточнить, использовать ли делегирование, если выбор
-ещё не задан пользователем. Далее придерживаться выбранного режима до новых
-указаний.
+Claude investigates code, implements changes and verifies the result. At the
+user's choice, implementation may be delegated to DeepSeek Flash through
+OpenCode following the [AI workflow](docs/development/ai-workflow.md). This
+workflow is the user's personal preference, not a mandatory project process.
+Before first using it in a new session, ask whether to delegate if the user
+has not already chosen. Keep the chosen mode until instructed otherwise.
 
-При делегировании создаётся task в `.work/ai/<work-id>/`, а не tracked prompt
-в `docs/`. Мелкие правки документации, конфигурации, опечаток и локальных ошибок
-сборки ведущий агент может выполнять напрямую и в этом режиме.
+Delegated tasks belong in `.work/ai/<work-id>/`, not tracked prompts in `docs/`.
+The lead agent may directly handle minor documentation, configuration, typo
+and local build-error fixes even in delegation mode.
 
-При использовании DeepSeek после двух неудачных попыток Claude завершает задачу самостоятельно
-по [правилу лимита попыток](docs/development/ai-workflow.md#лимит-попыток).
+After two unsuccessful DeepSeek attempts, Claude finishes the task directly
+under the [attempt-limit rule](docs/development/ai-workflow.md#лимит-попыток).
 
-## Работа с репозиторием
+## Repository work
 
-- Перед началом зафиксировать baseline и не смешивать с задачей существующие
-  пользовательские изменения.
-- Ограничить разрешённые пути и проверять task-scoped diff.
-- Не считать ответ или checklist агента подтверждением готовности.
-- Коммиты и значимые архитектурные решения требуют явного одобрения
-  пользователя.
-- Актуальные внешние сведения проверять доступными research-инструментами;
-  технические выводы основывать прежде всего на первичных источниках.
+- Record a baseline before starting; do not mix existing user changes into the task.
+- Restrict allowed paths and inspect the task-scoped diff.
+- Do not treat an agent's answer or checklist as proof of completion.
+- Commits and significant architectural decisions require explicit user approval.
+- Verify current external information with available research tools; base technical
+  conclusions primarily on primary sources.
 
-## Источники правил
+## Sources of rules
 
-- [Карта документации](docs/README.md)
+- [Documentation map](docs/README.md)
 - [AI-assisted workflow](docs/development/ai-workflow.md)
-- [Сборка и проверки](docs/development/README.md)
-- [Архитектура](docs/development/architecture.md)
-- [Инженерные решения](docs/decisions/README.md)
-- Skills в `.claude/skills/` уточняют узкие практики и не заменяют эти
-  нормативные документы.
+- [Builds and checks](docs/development/README.md)
+- [Architecture](docs/development/architecture.md)
+- [Engineering decisions](docs/decisions/README.md)
+- Skills in `.claude/skills/` refine specific practices and do not replace
+  these normative documents.
 
-Временные prompts, ревью, логи и скриншоты хранятся только в gitignored
-`.work/ai/`. Roadmap, задачи, решения и research добавляются в `docs/` лишь
-тогда, когда полезны после завершения конкретной сессии.
+Temporary prompts, reviews, logs and screenshots belong only in gitignored
+`.work/ai/`. Add roadmaps, tasks, decisions and research to `docs/` only when
+they remain useful after the current session.

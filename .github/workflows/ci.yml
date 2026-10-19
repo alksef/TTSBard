@@ -21,6 +21,9 @@ jobs:
       - name: Check links, statuses and artifacts
         shell: pwsh
         run: ./scripts/check-docs.ps1
+      - name: Test bilingual documentation checks
+        shell: pwsh
+        run: ./scripts/tests/test-check-bilingual-docs.ps1
 
   check-third-party-notices:
     name: Check third-party notices

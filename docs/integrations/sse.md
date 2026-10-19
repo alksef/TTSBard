@@ -1,186 +1,42 @@
-# SSE: контракт для клиентов
+# Documentation / Документация
 
-WebView-сервер передаёт текст и состояние набора через Server-Sent Events.
-Настройка listener, OBS, шаблонов, сетевого доступа и UPnP описана в
-[руководстве WebView](./webview.md). Здесь приведён контракт для собственного клиента.
+This guide has moved. / Инструкция перенесена.
 
-## HTTP endpoints
+- [English](../en/integrations/sse.md)
+- [Русский](../ru/integrations/sse.md)
 
-| Запрос | Результат |
-|---|---|
-| `GET /` | HTML-шаблон с подставленным CSS. Для публичного клиента требуется cookie или query-параметр `token`; иначе `401`. Правильный query-токен также устанавливает cookie. |
-| `GET /auth?token=...` | При совпадении с настроенным токеном — `200` и cookie `webview_auth`; при отсутствующем или неверном токене — `401`. |
-| `GET /sse` | При разрешённом доступе — `200`, `Content-Type: text/event-stream`; иначе `401`. |
+<a id="sse-контракт-для-клиентов"></a>
 
-Cookie имеет `HttpOnly; Path=/; SameSite=Lax`. `/sse` проверяет cookie для
-публичного клиента; передача `?token=...` прямо в SSE URL не заменяет её.
-Локальные адреса освобождены от этой проверки по правилам WebView.
+[Русский: SSE: контракт для клиентов](../ru/integrations/sse.md#sse-контракт-для-клиентов) · [English](../en/integrations/sse.md)
 
-Браузерный клиент должен работать на том же origin: схема, хост и порт совпадают.
-Сервер не добавляет CORS-заголовков. Для другого origin нужен отдельно настроенный
-proxy; простого `withCredentials: true` недостаточно.
+<a id="http-endpoints"></a>
 
-## События
+[Русский: HTTP endpoints](../ru/integrations/sse.md#http-endpoints) · [English](../en/integrations/sse.md)
 
-Каждое событие завершается пустой строкой. JSON передаётся в `data:`.
+<a id="события"></a>
 
-### Подключение
+[Русский: События](../ru/integrations/sse.md#события) · [English](../en/integrations/sse.md)
 
-Сразу после открытия потока приходит именованное событие:
+<a id="подключение"></a>
 
-```text
-event: connected
-data: {}
+[Русский: Подключение](../ru/integrations/sse.md#подключение) · [English](../en/integrations/sse.md)
 
-```
+<a id="текст"></a>
 
-Это подтверждение подключения, а не текстовая реплика.
+[Русский: Текст](../ru/integrations/sse.md#текст) · [English](../en/integrations/sse.md)
 
-### Текст
+<a id="набор-текста"></a>
 
-Текст приходит без поля `event:` и обрабатывается через `onmessage`:
+[Русский: Набор текста](../ru/integrations/sse.md#набор-текста) · [English](../en/integrations/sse.md)
 
-```text
-data: {"text":"Привет!"}
+<a id="доставка-и-переподключение"></a>
 
-```
+[Русский: Доставка и переподключение](../ru/integrations/sse.md#доставка-и-переподключение) · [English](../en/integrations/sse.md)
 
-Поле `text` содержит строку для отображения. Событие относится к маршруту
-WebView и не подтверждает завершение синтеза или воспроизведения. Входящие
-HTTP/OCR не транслируются автоматически; Twitch не служит источником входящих
-реплик для этого потока.
+<a id="клиент-в-шаблоне"></a>
 
-### Набор текста
+[Русский: Клиент в шаблоне](../ru/integrations/sse.md#клиент-в-шаблоне) · [English](../en/integrations/sse.md)
 
-```text
-event: typing
-data: {"typing":true}
+<a id="проверка-из-powershell"></a>
 
-```
-
-`true` означает активный набор, `false` — его окончание. Событие зависит от
-настройки передачи набора в редакторе. Именованные события не вызывают
-`onmessage`, поэтому старый текстовый клиент продолжает работать.
-
-Пока набор активен, сервер повторяет `typing: true` не реже, чем раз в 5 секунд:
-редактор передаёт начало набора один раз, а окончание — по idle-таймауту, поэтому
-повтор позволяет клиенту отличить потерянное `typing: false` от продолжающегося
-набора. Повторное `true` идемпотентно и не требует отдельной обработки.
-
-## Доставка и переподключение
-
-- При простое сервер отправляет keep-alive комментарии с интервалом 10 секунд;
-  их не нужно разбирать как JSON.
-- История, номера `id` и восстановление по `Last-Event-ID` не реализованы.
-  Новый клиент получает `connected`, затем только новые события; текущий текст
-  и последнее состояние набора отдельным snapshot не отправляются.
-- Медленный клиент, отставший от внутреннего broadcast-буфера (ёмкость 100
-  событий), **не теряет соединение**: сервер пропускает недоставленные события,
-  пишет об этом warning с числом пропущенных и продолжает отдавать последующие
-  события в тот же поток. Пропущенные события не повторяются и не
-  восстанавливаются.
-- Пропуск не сигнализируется клиенту отдельным событием. Клиент, который держит
-  производное состояние (например индикатор набора), должен уметь сбрасывать его
-  самостоятельно: потерянное `typing: false` больше не приводит к разрыву
-  соединения, после которого состояние сбрасывалось. Для состояния набора это
-  делается таймаутом по отсутствию повторов `typing: true` (пример ниже);
-  таймаут должен быть заведомо больше периода повтора.
-- Разрыв потока означает закрытие сервера (или потерю сети), а не пропуск
-  событий. После переподключения новых пропусков не «догоняется»: клиент получает
-  `connected` и только последующие события.
-- Браузерный `EventSource` поддерживает переподключение. Не вызывайте `close()`
-  при каждой временной ошибке, если хотите сохранить эту возможность.
-- `401` требует исправить авторизацию; это не сигнал об отсутствии новых реплик.
-
-## Клиент в шаблоне
-
-Этот пример размещается внутри `index.html`, обслуживаемого самим WebView.
-Для внешнего доступа сначала откройте страницу с правильным `?token=...`,
-чтобы получить cookie. Элемент для текста:
-
-```html
-<div id="text-container"></div>
-```
-
-Клиентский код:
-
-```javascript
-const output = document.getElementById('text-container');
-const events = new EventSource('/sse');
-
-// Заведомо больше периода повтора `typing: true` (5 секунд).
-const TYPING_RESET_MS = 12000;
-let typingTimeout = null;
-
-function setTyping(typing) {
-    document.documentElement.classList.toggle('is-typing', typing);
-
-    if (typingTimeout) {
-        clearTimeout(typingTimeout);
-        typingTimeout = null;
-    }
-
-    if (typing) {
-        // Пропущенное `typing: false` не должно оставлять индикатор навсегда.
-        typingTimeout = setTimeout(() => {
-            typingTimeout = null;
-            document.documentElement.classList.remove('is-typing');
-        }, TYPING_RESET_MS);
-    }
-}
-
-events.addEventListener('connected', () => {
-    setTyping(false);
-});
-
-events.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    if (typeof data.text === 'string') output.textContent = data.text;
-};
-
-events.addEventListener('typing', (event) => {
-    const data = JSON.parse(event.data);
-    if (typeof data.typing === 'boolean') setTyping(data.typing);
-});
-
-events.onerror = () => {
-    setTyping(false);
-    console.warn('SSE: соединение потеряно или отклонено');
-};
-
-window.addEventListener('pagehide', () => events.close());
-```
-
-Используйте `textContent` для реплики, чтобы текст пользователя не исполнялся
-как HTML. Таймер скрытия, оформление и история отображения принадлежат клиенту.
-
-Если клиенту нужно явно получить cookie перед подключением:
-
-```javascript
-const token = new URLSearchParams(location.search).get('token');
-const response = await fetch(`/auth?token=${encodeURIComponent(token ?? '')}`, {
-    credentials: 'same-origin'
-});
-if (!response.ok) throw new Error(`Авторизация: HTTP ${response.status}`);
-const events = new EventSource('/sse');
-```
-
-Этот вариант также предполагает тот же origin и выполняется в async-функции
-или модульном скрипте. Не добавляйте его параллельно первому примеру: нужен
-один `EventSource` на клиент.
-
-## Проверка из PowerShell
-
-На компьютере с TTSBard:
-
-```powershell
-curl.exe -N http://127.0.0.1:10100/sse
-```
-
-Сначала должен появиться `connected`. Затем отправьте фразу с маршрутом WebView;
-набор текста при включённой передаче даст отдельное событие `typing`.
-Остановите команду через `Ctrl+C`.
-
-Небраузерный внешний клиент сначала вызывает `/auth`, сохраняет `Set-Cookie`,
-а затем отправляет эту cookie в `/sse`. Он должен разбирать имя события до
-обработки JSON: поле `text` отсутствует у `connected` и `typing`.
+[Русский: Проверка из PowerShell](../ru/integrations/sse.md#проверка-из-powershell) · [English](../en/integrations/sse.md)
